@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "git": { "command": "aa-git" },
+    "jira": { "command": "aa-jira" },
+    "gitlab": { "command": "aa-gitlab" },
+    "k8s": { "command": "aa-k8s" },
+    "prometheus": { "command": "aa-prometheus" },
+    "alertmanager": { "command": "aa-alertmanager" },
+    "kibana": { "command": "aa-kibana" },
+    "konflux": { "command": "aa-konflux" },
+    "bonfire": { "command": "aa-bonfire" },
+    "quay": { "command": "aa-quay" },
+    "appinterface": { "command": "aa-appinterface" },
+    "workflow": { "command": "aa-workflow" }
+  }
+}
+

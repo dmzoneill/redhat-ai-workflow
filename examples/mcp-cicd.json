@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "konflux": { "command": "aa-konflux" },
+    "bonfire": { "command": "aa-bonfire" },
+    "quay": { "command": "aa-quay" },
+    "appinterface": { "command": "aa-appinterface" }
+  }
+}
+

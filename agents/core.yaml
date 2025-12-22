@@ -1,0 +1,39 @@
+# Core Agent Configuration
+# Essential tools that support ALL agent personas
+# Stays under 128 tool limit - use agent_load() to switch personas
+
+name: core
+description: Shared tools for all 4 agents with persona switching
+
+# Essential tools covering all workflows
+tools:
+  # Version Control & Issues (developer, all agents)
+  - git           # 15 - Git operations
+  - jira          # 24 - Issue tracking
+  
+  # Kubernetes & Monitoring (devops, incident)
+  - k8s           # 26 - Kubernetes operations  
+  - prometheus    # 13 - Alerts and metrics
+  
+  # Orchestration (required - skills, agents, memory)
+  - workflow      # 26 - session_start, agent_load, skill_run, memory_*
+
+# Total: ~104 tools ✅ UNDER LIMIT
+
+# What's available with these tools:
+# ✅ Git operations (status, branch, commit, push)
+# ✅ Jira operations (view, create, update issues)
+# ✅ Kubernetes operations (pods, deployments, logs)
+# ✅ Prometheus (alerts, queries, metrics)
+# ✅ Skills (start_work, create_mr, investigate_alert)
+# ✅ Agents (devops, developer, incident, release personas)
+# ✅ Memory (persistent context)
+
+# What's missing (load full agent for these):
+# ❌ GitLab (MRs, pipelines) - use --agent developer
+# ❌ Konflux (builds, snapshots) - use --agent release
+# ❌ Kibana (logs) - use --agent incident
+# ❌ Bonfire (ephemeral) - use --agent devops
+# ❌ Alertmanager (silences) - use --agent incident
+# ❌ Quay (images) - use --agent release
+

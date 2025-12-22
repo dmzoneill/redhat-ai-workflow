@@ -1,0 +1,51 @@
+# Environment State
+# Tracks health and status of stage/prod environments
+# Configure your environments here or in config.json
+
+last_checked: null
+
+environments:
+  stage:
+    namespace: your-app-stage   # Configure in config.json
+    cluster: stage-cluster
+    status: unknown
+    last_check: null
+    alerts: []
+    deployments: []
+    notes: ""
+
+  production:
+    namespace: your-app-prod    # Configure in config.json
+    cluster: prod-cluster
+    status: unknown
+    last_check: null
+    alerts: []
+    deployments: []
+    notes: ""
+
+  konflux:
+    namespace: your-tenant      # Configure in config.json
+    cluster: konflux
+    status: unknown
+    last_check: null
+    active_pipelines: []
+    notes: ""
+
+# Recent deployments
+recent_deployments: []
+# Example:
+#   - environment: stage
+#     version: "v2.3.1"
+#     deployed_at: "2024-12-21T15:30:00Z"
+#     deployed_by: "username"
+#     mr_id: 1234
+#     status: success
+
+# Known issues
+known_issues: []
+# Example:
+#   - environment: stage
+#     issue: "High memory usage on app-api pod"
+#     since: "2024-12-20T10:00:00Z"
+#     jira: "PROJ-99999"
+#     workaround: "Restart pod every 24h"

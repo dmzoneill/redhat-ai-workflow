@@ -1,0 +1,21 @@
+# Incident Agent Configuration  
+# Specifies which MCP tool modules this agent needs
+
+name: incident
+description: Production incident response and recovery
+persona: agents/incident.md
+
+# Tool modules to load (from mcp-servers/aa-*)
+tools:
+  - k8s           # 26 tools - Kubernetes operations
+  - prometheus    # 13 tools - Metrics and alerts
+  - alertmanager  # 6 tools - Silence management
+  - kibana        # 9 tools - Log search
+  - jira          # 24 tools - Incident tracking
+  - workflow      # 26 tools - Skills, agents, memory
+
+# Total: ~104 tools (under 128 limit)
+
+skills:
+  - investigate_alert
+

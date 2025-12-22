@@ -1,0 +1,133 @@
+# Skill: Investigate Alert
+# Systematic investigation of a firing alert
+
+name: investigate_alert
+description: Investigate a firing alert with systematic checks
+version: "1.0"
+
+inputs:
+  - name: environment
+    type: string
+    required: true
+    enum: ["stage", "production"]
+    description: "Environment to investigate"
+  - name: namespace
+    type: string
+    required: false
+    description: "Specific namespace (optional, uses default AA namespace)"
+  - name: alert_name
+    type: string
+    required: false
+    description: "Specific alert to investigate (optional)"
+
+defaults:
+  # Configure your namespaces (these are loaded from config.json if available)
+  namespace_stage: "your-app-stage"
+  namespace_prod: "your-app-prod"
+
+steps:
+  # Step 1: Get current alerts
+  - name: get_alerts
+    tool: prometheus_alerts
+    args:
+      environment: "{{ inputs.environment }}"
+      namespace: "{{ inputs.namespace or defaults.namespace_stage if inputs.environment == 'stage' else defaults.namespace_prod }}"
+      state: "firing"
+    output: alerts
+
+  # Step 2: If no alerts, report healthy
+  - name: check_alerts
+    condition: "{{ len(alerts) == 0 }}"
+    then:
+      - return:
+          status: "healthy"
+          message: "✅ No alerts firing in {{ inputs.environment }}"
+    
+  # Step 3: Get namespace health
+  - name: get_namespace_health
+    tool: k8s_namespace_health
+    args:
+      namespace: "{{ inputs.namespace or defaults.namespace_stage if inputs.environment == 'stage' else defaults.namespace_prod }}"
+      environment: "{{ inputs.environment }}"
+    output: health
+
+  # Step 4: Get recent events
+  - name: get_events
+    tool: kubectl_get_events
+    args:
+      namespace: "{{ inputs.namespace or defaults.namespace_stage if inputs.environment == 'stage' else defaults.namespace_prod }}"
+      environment: "{{ inputs.environment }}"
+      field_selector: "type=Warning"
+    output: events
+
+  # Step 5: Get error logs
+  - name: get_errors
+    tool: kibana_get_errors
+    args:
+      environment: "{{ inputs.environment }}"
+      namespace: "{{ inputs.namespace }}"
+      time_range: "30m"
+    output: errors
+
+  # Step 6: Get pod status if there are issues
+  - name: get_pods
+    condition: "{{ not health.healthy }}"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ inputs.namespace or defaults.namespace_stage if inputs.environment == 'stage' else defaults.namespace_prod }}"
+      environment: "{{ inputs.environment }}"
+    output: pods
+
+outputs:
+  - name: report
+    value: |
+      ## 🔍 Investigation Report: {{ inputs.environment }}
+      
+      ### Alerts ({{ len(alerts) }})
+      {% for alert in alerts %}
+      - {{ "🔴" if alert.severity == "critical" else "🟠" }} **{{ alert.alertname }}** ({{ alert.severity }})
+        {{ alert.message or "" }}
+      {% endfor %}
+      
+      ### Namespace Health
+      {{ "✅ Healthy" if health.healthy else "⚠️ Issues Detected" }}
+      - Pods: {{ health.running_pods }}/{{ health.total_pods }} running
+      - Deployments: {{ health.ready_deployments }}/{{ health.total_deployments }} ready
+      {% if health.issues %}
+      Issues:
+      {% for issue in health.issues %}
+      - {{ issue }}
+      {% endfor %}
+      {% endif %}
+      
+      ### Recent Warning Events
+      {% for event in events[:5] %}
+      - {{ event.reason }}: {{ event.message[:100] }}
+      {% endfor %}
+      
+      ### Error Logs (last 30m)
+      Found {{ len(errors) }} error entries
+      {% for error in errors[:3] %}
+      - {{ error.message[:100] }}
+      {% endfor %}
+      
+      ### Recommended Actions
+      {% if not health.healthy %}
+      1. Check failing pods: `kubectl_describe_pod`
+      2. Review pod logs: `kubectl_logs`
+      3. Consider restart: `kubectl_rollout_restart`
+      {% else %}
+      1. Review alert thresholds
+      2. Check if alert is stale
+      3. Consider silencing if expected
+      {% endif %}
+  
+  - name: severity
+    compute: |
+      if any(a.severity == "critical" for a in alerts):
+        return "critical"
+      elif any(a.severity == "high" for a in alerts):
+        return "high"
+      else:
+        return "medium"
+

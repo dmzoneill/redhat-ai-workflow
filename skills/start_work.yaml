@@ -1,0 +1,90 @@
+# Skill: Start Work on Jira Issue
+# Combines issue lookup, branch creation, and status update
+
+name: start_work
+description: Begin working on a Jira issue - gets context, creates branch, updates status
+version: "1.0"
+
+inputs:
+  - name: issue_key
+    type: string
+    required: true
+    description: "Jira issue key (e.g., AAP-12345)"
+  - name: repo
+    type: string
+    required: true
+    description: "Repository to work in"
+  - name: branch_type
+    type: string
+    default: "feature"
+    description: "Branch prefix (feature, bugfix, hotfix)"
+
+steps:
+  # Step 1: Get issue details
+  - name: get_issue
+    tool: jira_view_issue
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: issue
+
+  # Step 2: Extract branch name from issue
+  - name: create_branch_name
+    compute: |
+      prefix = inputs.branch_type
+      key = inputs.issue_key.lower()
+      # Sanitize summary for branch name
+      summary = issue.summary[:40].lower()
+      summary = summary.replace(" ", "-").replace("/", "-")
+      branch_name = f"{key}-{summary}"
+    output: branch_name
+
+  # Step 3: Ensure we're on main and up to date
+  - name: switch_to_main
+    tool: git_checkout
+    args:
+      repo: "{{ inputs.repo }}"
+      target: "main"
+
+  - name: pull_latest
+    tool: git_pull
+    args:
+      repo: "{{ inputs.repo }}"
+      rebase: true
+
+  # Step 4: Create feature branch
+  - name: create_branch
+    tool: git_branch_create
+    args:
+      repo: "{{ inputs.repo }}"
+      branch_name: "{{ branch_name }}"
+      base: "main"
+    output: branch_result
+
+  # Step 5: Update Jira status
+  - name: update_status
+    tool: jira_set_status
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      status: "In Progress"
+    on_error: continue  # Don't fail if status transition fails
+
+outputs:
+  - name: summary
+    value: |
+      ## ✅ Ready to Work on {{ inputs.issue_key }}
+      
+      **Issue:** {{ issue.summary }}
+      **Branch:** `{{ branch_name }}`
+      **Status:** In Progress
+      
+      ### Next Steps
+      1. Make your changes
+      2. Run `git add` and `git commit -m "{{ inputs.issue_key }} - feat: description"`
+      3. Run skill: `create_mr` when ready
+  
+  - name: context
+    value:
+      issue: "{{ issue }}"
+      branch: "{{ branch_name }}"
+      repo: "{{ inputs.repo }}"
+

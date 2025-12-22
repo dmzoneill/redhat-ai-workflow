@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "aa-incident": {
+      "command": "python3",
+      "args": ["-m", "src.server", "--agent", "incident"],
+      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+    }
+  }
+}
+

@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Kubeconfig (never commit these)
+*.kube/
+# Don't commit kubeconfig files (but allow config.py, etc.)
+config.k
+config.s
+config.p
+config.e
+config.ap
+config.*-*
+
+# ===========================================
+# Project-specific sensitive files
+# ===========================================
+
+# Project configuration (contains local paths and internal URLs)
+# Copy config.json.example to config.json and customize
+config.json
+
+# Session logs (personal work history)
+memory/sessions/*.yaml
+!memory/sessions/.gitkeep
+
+# Generated files
+docs/*.pdf

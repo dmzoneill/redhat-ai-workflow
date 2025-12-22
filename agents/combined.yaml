@@ -1,0 +1,28 @@
+# Combined Agent Configuration
+# A balanced set of tools that supports ALL agent personas
+# Stays under 128 tool limit while enabling all workflows
+
+name: combined
+description: All agent personas with shared tools
+
+# Core tools that support all 4 agents
+tools:
+  # DevOps & Incident (shared)
+  - k8s           # 26 - Kubernetes operations
+  - prometheus    # 13 - Alerts and metrics
+  
+  # Developer
+  - git           # 15 - Git operations
+  - jira          # 24 - Issue tracking
+  
+  # Release
+  - konflux       # 40 - Builds and snapshots
+  
+  # Orchestration (skills, agents, memory)
+  - workflow      # 26 - Skills, agents, memory
+
+# Total: ~144 tools - STILL OVER!
+# Let's trim konflux to get under 128
+
+# Actually, let's be more selective...
+

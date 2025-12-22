@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "aa-release": {
+      "command": "python3",
+      "args": ["-m", "src.server", "--agent", "release"],
+      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+    }
+  }
+}
+

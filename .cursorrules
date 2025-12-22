@@ -1,0 +1,51 @@
+# AI Workflow Project Rules
+
+## On Session Start
+
+**ALWAYS call `session_start()` at the beginning of every session.**
+
+This loads your current work context, today's history, and shows available agents and skills.
+
+If you know the type of work:
+- DevOps/monitoring: `session_start(agent="devops")`
+- Coding/PRs: `session_start(agent="developer")`
+- Incidents: `session_start(agent="incident")`
+- Releases: `session_start(agent="release")`
+
+## Available Agents
+
+Load an agent when the task matches their expertise:
+
+- **DevOps tasks** (alerts, deployments, k8s): `agent_load("devops")`
+- **Development tasks** (coding, PRs): `agent_load("developer")`  
+- **Incidents** (production issues): `agent_load("incident")`
+- **Releases** (shipping): `agent_load("release")`
+
+## Available Skills
+
+Use skills for common workflows instead of figuring out steps manually:
+
+- **Starting work**: `skill_run("start_work", '{"issue_key": "AAP-XXXXX", "repo": "backend"}')`
+- **Creating MR**: `skill_run("create_mr", '{"issue_key": "AAP-XXXXX", "repo": "backend"}')`
+- **Investigating alerts**: `skill_run("investigate_alert", '{"environment": "stage"}')`
+
+## Memory Usage
+
+- **Log important actions**: `memory_session_log("action", "details")`
+- **Track active work**: `memory_append("state/current_work", "active_issues", '{...}')`
+- **Save learned patterns**: `memory_write("learned/patterns", content)` for reusable knowledge
+
+## Key Conventions
+
+- Commit messages: `AAP-XXXXX - type: description`
+- Branch names: `aap-xxxxx-short-description`
+- Always link Jira issues in MR descriptions
+- Check pipeline status after pushing
+
+## Project Context
+
+This is the Automation Analytics workflow assistant. Key namespaces:
+- Konflux: `aap-aa-tenant`
+- Stage: `tower-analytics-stage`
+- Production: `tower-analytics-prod`
+

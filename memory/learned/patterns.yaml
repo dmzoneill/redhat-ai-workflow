@@ -1,0 +1,57 @@
+# Learned Patterns
+# Error patterns, fixes, and solutions discovered during work
+
+last_updated: null
+
+# Error patterns and their fixes
+error_patterns:
+  # Example:
+  # - pattern: "OOMKilled"
+  #   meaning: "Container exceeded memory limits"
+  #   fix: "Increase memory limits in deployment or investigate memory leak"
+  #   commands:
+  #     - "kubectl describe pod <pod> -n <namespace>"
+  #     - "kubectl top pod -n <namespace>"
+  #   related_jiras: []
+
+  - pattern: "ImagePullBackOff"
+    meaning: "Cannot pull container image from registry"
+    fix: "Check image name, tag exists in Quay, and registry credentials"
+    commands:
+      - "quay_check_image_exists(image='...', tag='...')"
+      - "kubectl describe pod <pod> -n <namespace>"
+
+  - pattern: "CrashLoopBackOff"
+    meaning: "Container crashes repeatedly on startup"
+    fix: "Check logs for startup errors, config issues, or missing deps"
+    commands:
+      - "kubectl logs <pod> -n <namespace> --previous"
+      - "kubectl describe pod <pod>"
+
+  - pattern: "PodPending"
+    meaning: "Pod cannot be scheduled"
+    fix: "Check resource availability, node taints, or PVC issues"
+    commands:
+      - "kubectl describe pod <pod>"
+      - "kubectl get events -n <namespace>"
+
+# Pipeline patterns
+pipeline_patterns:
+  - pattern: "lint failed"
+    meaning: "Code style issues"
+    fix: "Run black, isort, flake8 locally"
+    commands:
+      - "lint_python(repo='.', fix=True)"
+
+  - pattern: "tests failed"
+    meaning: "Unit or integration tests failing"
+    fix: "Run tests locally to reproduce"
+    commands:
+      - "test_run(repo='.', verbose=True)"
+
+# Performance patterns
+performance_patterns: []
+# Example:
+#   - observation: "API latency spikes at 2PM daily"
+#     cause: "Batch job overlapping with peak traffic"
+#     fix: "Reschedule batch to off-peak hours"

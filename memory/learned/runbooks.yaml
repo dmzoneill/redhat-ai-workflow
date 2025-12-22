@@ -1,0 +1,81 @@
+# Learned Runbooks
+# Operational procedures that have worked
+
+last_updated: null
+
+# Runbooks for common operations
+runbooks:
+  restart_pod:
+    name: "Restart a problematic pod"
+    when: "Pod is stuck, OOMKilled, or needs fresh state"
+    steps:
+      - "kubectl delete pod <pod-name> -n <namespace>"
+      - "Wait for new pod to be Ready"
+      - "Verify with: kubectl get pods -n <namespace>"
+    tools:
+      - kubectl_delete_pod
+      - kubectl_get_pods
+
+  rollback_deployment:
+    name: "Rollback a failed deployment"
+    when: "New deployment causing issues"
+    steps:
+      - "Check deployment history: kubectl rollout history deployment/<name>"
+      - "Rollback: kubectl rollout undo deployment/<name>"
+      - "Verify pods are healthy"
+    tools:
+      - kubectl_rollout_history
+      - kubectl_rollout_restart
+
+  investigate_alert:
+    name: "Systematic alert investigation"
+    when: "Alert is firing"
+    steps:
+      - "Check alert details in Alertmanager"
+      - "Query Prometheus for related metrics"
+      - "Check pod status and events"
+      - "Search Kibana for recent errors"
+      - "Check recent deployments"
+    tools:
+      - alertmanager_alerts
+      - prometheus_query
+      - kubectl_get_pods
+      - kibana_search_logs
+
+  deploy_to_stage:
+    name: "Deploy to stage environment"
+    when: "MR merged, need to deploy"
+    steps:
+      - "Verify image exists in Quay"
+      - "Check current stage health"
+      - "Update App-Interface config"
+      - "Monitor rollout"
+      - "Verify health after deploy"
+    notes: |
+      App-Interface deployments are GitOps-based.
+      Changes to saas files trigger deployment pipelines.
+
+  hotfix_production:
+    name: "Emergency production fix"
+    when: "Critical production issue requiring immediate fix"
+    steps:
+      - "Create hotfix branch from production tag"
+      - "Apply minimal fix"
+      - "Fast-track MR with URGENT label"
+      - "Deploy to stage for quick validation"
+      - "Deploy to production"
+      - "Monitor closely for 30 minutes"
+    notes: |
+      Follow incident process. Get approval from on-call.
+      Log all actions with memory_session_log().
+
+# Team preferences
+preferences:
+  commit_format: "AAP-XXXXX - type: description"
+  branch_format: "aap-xxxxx-short-description"
+  mr_description: |
+    Include:
+    - Jira link
+    - Summary of changes
+    - Testing done
+    - Checklist

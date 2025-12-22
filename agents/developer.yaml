@@ -1,0 +1,20 @@
+# Developer Agent Configuration
+# Specifies which MCP tool modules this agent needs
+
+name: developer
+description: Coding, PRs, and code review
+persona: agents/developer.md
+
+# Tool modules to load (from mcp-servers/aa-*)
+tools:
+  - git           # 15 tools - Git operations
+  - gitlab        # 35 tools - MRs, CI/CD
+  - jira          # 24 tools - Issue tracking
+  - workflow      # 26 tools - Skills, agents, memory
+
+# Total: ~100 tools (under 128 limit)
+
+skills:
+  - start_work
+  - create_mr
+

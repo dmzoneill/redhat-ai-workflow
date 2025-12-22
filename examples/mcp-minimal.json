@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "git": { "command": "aa-git" },
+    "jira": { "command": "aa-jira" },
+    "gitlab": { "command": "aa-gitlab" }
+  }
+}
+

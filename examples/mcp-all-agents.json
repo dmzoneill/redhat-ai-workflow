@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "aa-devops": {
+      "command": "python3",
+      "args": ["-m", "src.server", "--agent", "devops-slim"],
+      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+    },
+    "aa-developer": {
+      "command": "python3",
+      "args": ["-m", "src.server", "--agent", "developer-slim"],
+      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+    },
+    "aa-incident": {
+      "command": "python3",
+      "args": ["-m", "src.server", "--agent", "incident-slim"],
+      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+    },
+    "aa-release": {
+      "command": "python3",
+      "args": ["-m", "src.server", "--agent", "release-slim"],
+      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+    },
+    "aa-workflow": {
+      "command": "python3",
+      "args": ["-m", "src.server", "--tools", "workflow"],
+      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+    }
+  }
+}
+

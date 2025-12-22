@@ -1,0 +1,14 @@
+# Release Agent - Slim Configuration
+# Only essential tools to stay under limit when combined with other agents
+
+name: release
+description: Releases and deployments (slim)
+persona: agents/release.md
+
+# Slim tool selection - only the essentials
+tools:
+  - konflux       # 40 tools - Builds and snapshots
+  - quay          # 8 tools - Container images
+
+# Total: ~48 tools
+

@@ -1,0 +1,148 @@
+{
+  "repositories": {
+    "my-backend": {
+      "path": "/home/YOUR_USER/src/my-backend",
+      "gitlab": "your-org/my-backend",
+      "jira_project": "PROJ",
+      "lint_command": "make lint",
+      "test_command": "make test",
+      "test_setup": "# Setup instructions for local testing",
+      "default_branch": "main",
+      "konflux_namespace": "your-tenant",
+      "scopes": ["api", "auth", "db"]
+    },
+    "my-frontend": {
+      "path": "/home/YOUR_USER/src/my-frontend",
+      "gitlab": "your-org/my-frontend",
+      "jira_project": "PROJ",
+      "lint_command": "npm run lint",
+      "test_command": "npm test",
+      "default_branch": "main",
+      "scopes": ["ui", "components"]
+    }
+  },
+  "commit_format": {
+    "pattern": "{issue_key} - {type}({scope}): {description}",
+    "types": ["feat", "fix", "refactor", "docs", "test", "chore", "style", "perf"],
+    "examples": [
+      "PROJ-12345 - feat(api): Add new endpoint",
+      "PROJ-12345 - fix(auth): Handle token expiry"
+    ]
+  },
+  "jira": {
+    "url": "https://your-jira-instance.atlassian.net",
+    "default_project": "PROJ",
+    "cli": "jira"
+  },
+  "gitlab": {
+    "host": "gitlab.com"
+  },
+  "quay": {
+    "api_url": "https://quay.io/api/v1",
+    "default_namespace": "your-namespace",
+    "repositories": {
+      "my-backend": "your-org/my-backend"
+    }
+  },
+  "konflux": {
+    "kubeconfig": "/home/YOUR_USER/.kube/config.konflux",
+    "cluster": "your-konflux-cluster.example.com"
+  },
+  "prometheus": {
+    "environments": {
+      "stage": {
+        "url": "https://prometheus.stage.example.com",
+        "kubeconfig": "/home/YOUR_USER/.kube/config.stage",
+        "namespace": "your-app-stage"
+      },
+      "production": {
+        "url": "https://prometheus.prod.example.com",
+        "kubeconfig": "/home/YOUR_USER/.kube/config.prod",
+        "namespace": "your-app-prod"
+      }
+    }
+  },
+  "alertmanager": {
+    "environments": {
+      "stage": {
+        "url": "https://alertmanager.stage.example.com",
+        "kubeconfig": "/home/YOUR_USER/.kube/config.stage"
+      },
+      "production": {
+        "url": "https://alertmanager.prod.example.com",
+        "kubeconfig": "/home/YOUR_USER/.kube/config.prod"
+      }
+    }
+  },
+  "kibana": {
+    "environments": {
+      "stage": {
+        "url": "https://kibana.stage.example.com",
+        "kubeconfig": "/home/YOUR_USER/.kube/config.stage",
+        "index_pattern": "your-app-logs-*",
+        "namespace": "your-app-stage"
+      },
+      "production": {
+        "url": "https://kibana.prod.example.com",
+        "kubeconfig": "/home/YOUR_USER/.kube/config.prod",
+        "index_pattern": "your-app-logs-*",
+        "namespace": "your-app-prod"
+      }
+    }
+  },
+  "clusters": {
+    "stage": {
+      "name": "stage-cluster",
+      "description": "Staging environment cluster",
+      "console_url": "https://console.stage.example.com",
+      "api_url": "https://api.stage.example.com:6443"
+    },
+    "production": {
+      "name": "prod-cluster",
+      "description": "Production environment cluster",
+      "console_url": "https://console.prod.example.com",
+      "api_url": "https://api.prod.example.com:6443"
+    }
+  },
+  "kubernetes": {
+    "auth_command": "oc login",
+    "environments": {
+      "production": {
+        "cluster": "prod",
+        "kubeconfig_pattern": "/home/YOUR_USER/.kube/config.prod-{namespace}",
+        "namespaces": ["your-app-prod"]
+      },
+      "stage": {
+        "cluster": "stage",
+        "kubeconfig_pattern": "/home/YOUR_USER/.kube/config.stage-{namespace}",
+        "namespaces": ["your-app-stage"]
+      },
+      "ephemeral": {
+        "cluster": "eph",
+        "kubeconfig_pattern": "/home/YOUR_USER/.kube/config.eph-{namespace}",
+        "namespace_pattern": "ephemeral-*"
+      }
+    }
+  },
+  "bonfire": {
+    "description": "Ephemeral namespace management",
+    "ephemeral_cluster": "eph",
+    "kubeconfig": "/home/YOUR_USER/.kube/config.eph",
+    "ref_env": "stage",
+    "default_timeout": 900,
+    "apps": {
+      "my-app": {
+        "description": "My application",
+        "components": {
+          "main": {
+            "name": "my-app-clowdapp",
+            "description": "Main component"
+          }
+        },
+        "image_base": "quay.io/your-org/my-app",
+        "namespace_prefix": "ephemeral-"
+      }
+    }
+  }
+}
+

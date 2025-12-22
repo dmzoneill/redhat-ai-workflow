@@ -1,0 +1,22 @@
+# Release Agent Configuration
+# Specifies which MCP tool modules this agent needs
+
+name: release
+description: Release coordination and deployment
+persona: agents/release.md
+
+# Tool modules to load (from mcp-servers/aa-*)
+tools:
+  - konflux       # 40 tools - Builds, pipelines, snapshots
+  - quay          # 8 tools - Container registry
+  - bonfire       # 21 tools - Ephemeral testing
+  - appinterface  # 6 tools - SaaS config
+  - gitlab        # 35 tools - MRs for releases
+  - workflow      # 26 tools - Skills, agents, memory
+
+# Total: ~136 tools (slightly over, but GitLab can be trimmed if needed)
+
+skills:
+  - deploy_to_stage
+  - full_release
+
