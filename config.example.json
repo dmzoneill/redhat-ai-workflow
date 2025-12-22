@@ -29,11 +29,25 @@
       "watched_keywords": ["help", "question", "urgent", "review"],
       "self_user_id": "U12345678"
     },
-    "response_channels": {
-      "description": "Channels where the agent is allowed to respond",
-      "allowed_channels": ["C12345678"],
-      "allow_dms": true,
-      "allow_threads": true,
+    "response_rules": {
+      "description": "Rules for when the agent should respond",
+      "direct_messages": {
+        "enabled": true,
+        "description": "Always respond to DMs (approval required for concerned users)"
+      },
+      "channel_mentions": {
+        "enabled": true,
+        "description": "Only respond in channels when mentioned",
+        "trigger_mentions": ["@bitwiseshift", "@aa-api-team"],
+        "trigger_user_ids": ["U12345678"],
+        "trigger_group_ids": ["S12345678"]
+      },
+      "channel_keywords": {
+        "enabled": false,
+        "description": "Respond to specific keywords even without mention",
+        "keywords": ["urgent", "help needed"]
+      },
+      "ignore_unmentioned": true,
       "blocked_channels": ["C00000000"]
     },
     "rate_limiting": {

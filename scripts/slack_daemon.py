@@ -294,63 +294,124 @@ class UserClassifier:
 # =============================================================================
 
 
-class ChannelPermissions:
-    """Controls which channels the agent can respond in."""
+class ResponseRules:
+    """
+    Controls when the agent should respond based on message context.
+
+    Rules:
+    1. DMs: Always respond (approval required for concerned users)
+    2. Channels: Only respond when mentioned (@username or @group)
+    3. Unmentioned channel messages: Ignore
+    """
 
     def __init__(self):
-        self.config = SLACK_CONFIG.get("response_channels", {})
+        self.config = SLACK_CONFIG.get("response_rules", {})
         self._load_config()
 
     def _load_config(self):
-        """Load channel permissions from config."""
-        self.allowed_channels = set(self.config.get("allowed_channels", []))
-        self.blocked_channels = set(self.config.get("blocked_channels", []))
-        self.allow_dms = self.config.get("allow_dms", True)
-        self.allow_threads = self.config.get("allow_threads", True)
+        """Load response rules from config."""
+        # DM settings
+        dm_config = self.config.get("direct_messages", {})
+        self.dm_enabled = dm_config.get("enabled", True)
 
-    def can_respond(
+        # Channel mention settings
+        mention_config = self.config.get("channel_mentions", {})
+        self.mention_enabled = mention_config.get("enabled", True)
+        self.trigger_mentions = set(mention_config.get("trigger_mentions", []))
+        self.trigger_user_ids = set(mention_config.get("trigger_user_ids", []))
+        self.trigger_group_ids = set(mention_config.get("trigger_group_ids", []))
+
+        # Keyword settings (optional)
+        keyword_config = self.config.get("channel_keywords", {})
+        self.keyword_enabled = keyword_config.get("enabled", False)
+        self.trigger_keywords = set(keyword_config.get("keywords", []))
+
+        # General settings
+        self.ignore_unmentioned = self.config.get("ignore_unmentioned", True)
+        self.blocked_channels = set(self.config.get("blocked_channels", []))
+
+    def should_respond(
         self,
         channel_id: str,
+        message_text: str,
         is_dm: bool = False,
-        is_thread: bool = False,
+        is_mention: bool = False,
+        mentioned_users: list[str] | None = None,
+        mentioned_groups: list[str] | None = None,
     ) -> tuple[bool, str]:
         """
-        Check if the agent can respond in this channel.
+        Determine if the agent should respond to this message.
+
+        Args:
+            channel_id: The channel ID
+            message_text: The message text
+            is_dm: Whether this is a direct message
+            is_mention: Whether the bot was mentioned (from Slack API)
+            mentioned_users: List of user IDs mentioned in the message
+            mentioned_groups: List of group IDs mentioned in the message
 
         Returns:
-            tuple of (allowed, reason)
+            tuple of (should_respond, reason)
         """
-        # Check blocked list first (takes priority)
+        mentioned_users = mentioned_users or []
+        mentioned_groups = mentioned_groups or []
+
+        # Check blocked list first
         if channel_id in self.blocked_channels:
-            return False, "Channel is in blocked list"
+            return False, "Channel is blocked"
 
-        # Check DMs
+        # Rule 1: DMs - always respond if enabled
         if is_dm:
-            if not self.allow_dms:
-                return False, "DMs are disabled"
-            return True, "DMs allowed"
+            if self.dm_enabled:
+                return True, "DM response enabled"
+            return False, "DM responses disabled"
 
-        # Check threads
-        if is_thread and not self.allow_threads:
-            return False, "Thread responses are disabled"
+        # Rule 2: Channel mentions - check if we're mentioned
+        if self.mention_enabled:
+            # Check if bot was directly mentioned (from Slack API)
+            if is_mention:
+                return True, "Bot was @mentioned"
 
-        # If allowed_channels is empty, allow all (except blocked)
-        if not self.allowed_channels:
-            return True, "No channel restrictions"
+            # Check trigger user IDs
+            for user_id in mentioned_users:
+                if user_id in self.trigger_user_ids:
+                    return True, f"Trigger user {user_id} mentioned"
 
-        # Check if channel is in allowed list
-        if channel_id in self.allowed_channels:
-            return True, "Channel is in allowed list"
+            # Check trigger group IDs
+            for group_id in mentioned_groups:
+                if group_id in self.trigger_group_ids:
+                    return True, f"Trigger group {group_id} mentioned"
 
-        return False, "Channel not in allowed list"
+            # Check trigger mentions in text (e.g., @bitwiseshift)
+            text_lower = message_text.lower()
+            for mention in self.trigger_mentions:
+                if mention.lower() in text_lower:
+                    return True, f"Trigger mention '{mention}' found"
+
+        # Rule 3: Keywords (if enabled)
+        if self.keyword_enabled:
+            text_lower = message_text.lower()
+            for keyword in self.trigger_keywords:
+                if keyword.lower() in text_lower:
+                    return True, f"Trigger keyword '{keyword}' found"
+
+        # Default: ignore unmentioned channel messages
+        if self.ignore_unmentioned:
+            return False, "Not mentioned in channel"
+
+        return True, "Default allow"
 
     def reload(self):
         """Reload config (for hot reload)."""
         global CONFIG, SLACK_CONFIG
         CONFIG = load_config()
         SLACK_CONFIG = CONFIG.get("slack", {})
-        self.config = SLACK_CONFIG.get("response_channels", {})
+        self.config = SLACK_CONFIG.get("response_rules", {})
         self._load_config()
+
+
+# Keep ChannelPermissions as alias for backwards compatibility
+ChannelPermissions = ResponseRules
 
 
 # =============================================================================
@@ -1266,13 +1327,23 @@ class SlackDaemon:
         )
         print(f"✅ User lists: {safe_count} safe, {concerned_count} concerned")
 
-        # Show channel permissions
-        allowed_count = len(self.channel_permissions.allowed_channels)
-        blocked_count = len(self.channel_permissions.blocked_channels)
-        if allowed_count > 0:
-            print(f"✅ Response channels: {allowed_count} allowed, {blocked_count} blocked")
+        # Show response rules
+        rules = self.channel_permissions
+        print(f"✅ Response rules:")
+        if rules.dm_enabled:
+            print(f"   • DMs: Always respond")
         else:
-            print(f"✅ Response channels: all allowed (except {blocked_count} blocked)")
+            print(f"   • DMs: Disabled")
+
+        if rules.mention_enabled:
+            triggers = list(rules.trigger_mentions)[:3]
+            trigger_str = ", ".join(triggers) if triggers else "(bot mention)"
+            print(f"   • Channels: Only when mentioned ({trigger_str})")
+        else:
+            print(f"   • Channels: All messages")
+
+        if rules.blocked_channels:
+            print(f"   • Blocked: {len(rules.blocked_channels)} channels")
 
         # Show notification status
         if self.notifier.enabled:
@@ -1336,12 +1407,14 @@ class SlackDaemon:
         # Classify user
         classification = self.user_classifier.classify(msg.user_id, msg.user_name)
 
-        # Check channel permissions early for display
-        is_thread = bool(msg.thread_ts)
-        can_respond, permission_reason = self.channel_permissions.can_respond(
-            msg.channel_id,
+        # Check response rules - should we respond to this message?
+        can_respond, permission_reason = self.channel_permissions.should_respond(
+            channel_id=msg.channel_id,
+            message_text=msg.text,
             is_dm=msg.is_dm,
-            is_thread=is_thread,
+            is_mention=msg.is_mention,
+            mentioned_users=getattr(msg, "mentioned_users", []),
+            mentioned_groups=getattr(msg, "mentioned_groups", []),
         )
 
         # Detect intent
