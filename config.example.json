@@ -3,10 +3,18 @@
     "description": "Claude-powered agent configuration",
     "provider": "anthropic",
     "model": "claude-sonnet-4-20250514",
-    "api_key_env": "ANTHROPIC_API_KEY",
     "max_tokens": 4096,
-    "temperature": 0.7,
-    "system_prompt": "You are an AI assistant helping with software development. You have access to tools for Jira, GitLab, Git, and Kubernetes. Be concise and helpful."
+    "system_prompt": "You are an AI assistant helping with software development. You have access to tools for Jira, GitLab, Git, and Kubernetes. Be concise and helpful.",
+    "_auth_options": {
+      "vertex_ai": {
+        "description": "Use Claude via Google Cloud Vertex AI (recommended for enterprise)",
+        "env_vars": ["CLAUDE_CODE_USE_VERTEX=1", "ANTHROPIC_VERTEX_PROJECT_ID", "ANTHROPIC_VERTEX_REGION"]
+      },
+      "direct_api": {
+        "description": "Use Claude via direct Anthropic API",
+        "env_vars": ["ANTHROPIC_API_KEY"]
+      }
+    }
   },
   "slack": {
     "description": "Slack integration for autonomous agent",

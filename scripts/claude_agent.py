@@ -23,10 +23,14 @@ from typing import Any
 
 try:
     import anthropic
+    from anthropic import AnthropicVertex
 
     ANTHROPIC_AVAILABLE = True
+    VERTEX_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
+    VERTEX_AVAILABLE = False
+    AnthropicVertex = None
 
 logger = logging.getLogger(__name__)
 
@@ -424,6 +428,10 @@ class ClaudeAgent:
     This is the "brain" of the Slack bot - it receives messages,
     uses Claude to understand them, decides which tools to call,
     executes them, and formulates responses.
+
+    Supports two modes:
+    1. Vertex AI: Set CLAUDE_CODE_USE_VERTEX=1 and ANTHROPIC_VERTEX_PROJECT_ID
+    2. Direct API: Set ANTHROPIC_API_KEY
     """
 
     def __init__(
@@ -434,17 +442,41 @@ class ClaudeAgent:
     ):
         if not ANTHROPIC_AVAILABLE:
             raise ImportError(
-                "anthropic package not installed. " "Install with: pip install anthropic"
+                "anthropic package not installed. Install with: pip install anthropic"
             )
 
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY environment variable not set")
-
-        self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
         self.max_tokens = max_tokens
         self.system_prompt = system_prompt or self._default_system_prompt()
+        self.use_vertex = False
+
+        # Check if using Vertex AI
+        use_vertex = os.getenv("CLAUDE_CODE_USE_VERTEX", "0") == "1"
+        vertex_project = os.getenv("ANTHROPIC_VERTEX_PROJECT_ID")
+        vertex_region = os.getenv("ANTHROPIC_VERTEX_REGION", "us-east5")
+
+        if use_vertex and vertex_project:
+            if not VERTEX_AVAILABLE:
+                raise ImportError(
+                    "AnthropicVertex not available. Update anthropic: pip install -U anthropic"
+                )
+            self.client = AnthropicVertex(
+                project_id=vertex_project,
+                region=vertex_region,
+            )
+            self.use_vertex = True
+            logger.info(f"Using Vertex AI: project={vertex_project}, region={vertex_region}")
+        else:
+            # Fall back to direct API
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise ValueError(
+                    "No Claude credentials found. Set either:\n"
+                    "  - CLAUDE_CODE_USE_VERTEX=1 + ANTHROPIC_VERTEX_PROJECT_ID (for Vertex)\n"
+                    "  - ANTHROPIC_API_KEY (for direct API)"
+                )
+            self.client = anthropic.Anthropic(api_key=api_key)
+            logger.info("Using direct Anthropic API")
 
         self.tool_registry = ToolRegistry()
         self.tool_executor = ToolExecutor(PROJECT_ROOT)

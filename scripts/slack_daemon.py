@@ -1283,8 +1283,12 @@ class SlackDaemon:
         # Show Claude agent status
         if self.use_llm:
             if self.response_generator.claude_agent:
-                model = self.response_generator.claude_agent.model
-                print(f"🧠 Claude Agent: enabled ({model})")
+                agent = self.response_generator.claude_agent
+                model = agent.model
+                if agent.use_vertex:
+                    print(f"🧠 Claude Agent: Vertex AI ({model})")
+                else:
+                    print(f"🧠 Claude Agent: Direct API ({model})")
             else:
                 print("⚠️  Claude Agent: failed to initialize")
         else:
