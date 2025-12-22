@@ -167,51 +167,62 @@ Create `.cursor/mcp.json` in your project:
 ```json
 {
   "mcpServers": {
-    "ai-workflow": {
-      "command": "python3",
-      "args": [
-        "/path/to/ai-workflow/mcp-servers/aa-common/src/server.py",
-        "--agent", "developer"
-      ]
+    "aa-developer": {
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent developer"]
     }
   }
 }
 ```
+
+> **Note:** Replace `/path/to/redhat-ai-workflow` with your actual installation path.
 
 <details>
 <summary><b>📁 Example configurations for different roles</b></summary>
 
-**Developer (Git, Jira, GitLab)**
+**Developer (Git, Jira, GitLab, Konflux, Bonfire)**
 ```json
 {
   "mcpServers": {
-    "ai-workflow": {
-      "command": "python3",
-      "args": ["/path/to/ai-workflow/mcp-servers/aa-common/src/server.py", "--agent", "developer"]
+    "aa-developer": {
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent developer"]
     }
   }
 }
 ```
 
-**DevOps (Kubernetes, Prometheus, Alertmanager)**
+**DevOps (Kubernetes, Prometheus, Alertmanager, Kibana)**
 ```json
 {
   "mcpServers": {
-    "ai-workflow": {
-      "command": "python3",
-      "args": ["/path/to/ai-workflow/mcp-servers/aa-common/src/server.py", "--agent", "devops"]
+    "aa-devops": {
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent devops"]
     }
   }
 }
 ```
 
-**Incident Response (All monitoring tools)**
+**Incident Response (All monitoring + Jira)**
 ```json
 {
   "mcpServers": {
-    "ai-workflow": {
-      "command": "python3",
-      "args": ["/path/to/ai-workflow/mcp-servers/aa-common/src/server.py", "--agent", "incident"]
+    "aa-incident": {
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent incident"]
+    }
+  }
+}
+```
+
+**Release (Konflux, Quay, AppInterface)**
+```json
+{
+  "mcpServers": {
+    "aa-release": {
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent release"]
     }
   }
 }
@@ -221,9 +232,9 @@ Create `.cursor/mcp.json` in your project:
 ```json
 {
   "mcpServers": {
-    "ai-workflow": {
-      "command": "python3",
-      "args": ["/path/to/ai-workflow/mcp-servers/aa-common/src/server.py", "--tools", "all"]
+    "aa-full": {
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --all"]
     }
   }
 }
@@ -1392,18 +1403,19 @@ ai-workflow/
 
 ### Adding to Your Project
 
-1. **Copy `.cursorrules`** to your project root:
+1. **Create `.cursor/rules/` directory** with a workflow rules file:
    ```bash
-   cp ~/src/ai-workflow/.cursorrules /path/to/your/project/
+   mkdir -p /path/to/your/project/.cursor/rules
+   # Create a .mdc file with project-specific context
    ```
 
 2. **Create `.cursor/mcp.json`**:
    ```json
    {
      "mcpServers": {
-       "ai-workflow": {
-         "command": "python3",
-         "args": ["/path/to/ai-workflow/mcp-servers/aa-common/src/server.py"]
+       "aa-developer": {
+         "command": "bash",
+         "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent developer"]
        }
      }
    }
@@ -1411,7 +1423,7 @@ ai-workflow/
 
 3. **Customize `config.json`** with your repositories
 
-4. **Restart Cursor**
+4. **Restart Cursor** (Ctrl+Shift+P → "Developer: Reload Window")
 
 ---
 
