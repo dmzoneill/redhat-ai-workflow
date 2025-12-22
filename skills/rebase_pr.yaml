@@ -1,0 +1,473 @@
+# Skill: Rebase PR Branch
+# Rebase a PR branch onto main, handling merge commits and conflicts
+
+name: rebase_pr
+description: |
+  Rebase a PR branch onto main to clean up merge commits.
+  
+  Steps:
+  1. Check for merge commits on the PR
+  2. Checkout the branch locally
+  3. Pull latest from remote
+  4. Rebase onto main
+  5. If conflicts: guide user through resolution
+  6. Force push rebased branch
+  
+  Handles merge conflicts by pausing and showing what needs to be fixed.
+
+version: "1.0"
+
+inputs:
+  - name: mr_id
+    type: integer
+    required: false
+    description: "GitLab MR ID - will find the branch"
+  
+  - name: issue_key
+    type: string
+    required: false
+    description: "Jira issue key - will find the branch"
+  
+  - name: branch
+    type: string
+    required: false
+    description: "Branch name directly (if known)"
+  
+  - name: repo_path
+    type: string
+    required: false
+    default: "."
+    description: "Path to repository (default: current directory)"
+  
+  - name: base_branch
+    type: string
+    required: false
+    default: "main"
+    description: "Branch to rebase onto (default: main)"
+  
+  - name: force_push
+    type: boolean
+    required: false
+    default: false
+    description: "Auto force-push after successful rebase (asks if false)"
+
+constants:
+  gitlab_project: automation-analytics/automation-analytics-backend
+
+steps:
+  # ==================== RESOLVE BRANCH NAME ====================
+  
+  - name: validate_input
+    description: "Ensure we have a way to identify the branch"
+    compute: |
+      if not inputs.get('mr_id') and not inputs.get('issue_key') and not inputs.get('branch'):
+        raise ValueError("Must provide one of: mr_id, issue_key, or branch")
+      result = "OK"
+    output: input_valid
+
+  - name: get_branch_from_mr
+    description: "Get branch name from MR"
+    condition: "inputs.get('mr_id') and not inputs.get('branch')"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ constants.gitlab_project }}"
+      mr_id: "{{ inputs.mr_id }}"
+    output: mr_details
+    on_error: continue
+
+  - name: extract_branch
+    description: "Extract branch name from MR or issue key"
+    compute: |
+      import re
+      import subprocess
+      
+      branch = inputs.get('branch')
+      
+      if not branch and mr_details:
+        # Extract from MR details
+        match = re.search(r'[Ss]ource[_ ]?[Bb]ranch[:\s]+(\S+)', mr_details)
+        if match:
+          branch = match.group(1)
+      
+      if not branch and inputs.get('issue_key'):
+        # Find branch by issue key
+        issue_key = inputs.issue_key.upper()
+        result = subprocess.run(
+          ['git', 'branch', '-a', '--list', f'*{issue_key}*'],
+          capture_output=True, text=True,
+          cwd=inputs.repo_path
+        )
+        branches = [b.strip().replace('* ', '').replace('remotes/origin/', '') 
+                   for b in result.stdout.strip().split('\n') if b.strip()]
+        if branches:
+          branch = branches[0]
+      
+      if not branch:
+        raise ValueError("Could not determine branch name. Please provide 'branch' input directly.")
+      
+      result = branch
+    output: target_branch
+
+  # ==================== CHECK FOR MERGE COMMITS ====================
+  
+  - name: fetch_all
+    description: "Fetch latest from all remotes"
+    compute: |
+      import subprocess
+      
+      result = subprocess.run(
+        ['git', 'fetch', '--all', '--prune'],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path
+      )
+      
+      if result.returncode != 0:
+        raise ValueError(f"Failed to fetch: {result.stderr}")
+      
+      result = "Fetched all remotes"
+    output: fetch_result
+
+  - name: check_merge_commits
+    description: "Check if branch has merge commits"
+    compute: |
+      import subprocess
+      
+      base = inputs.base_branch
+      branch = target_branch
+      
+      # Get merge commits on the branch
+      result = subprocess.run(
+        ['git', 'log', '--merges', '--oneline', f'origin/{base}..origin/{branch}'],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path
+      )
+      
+      merge_commits = [l for l in result.stdout.strip().split('\n') if l.strip()]
+      
+      # Get total commits
+      total_result = subprocess.run(
+        ['git', 'log', '--oneline', f'origin/{base}..origin/{branch}'],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path
+      )
+      total_commits = len([l for l in total_result.stdout.strip().split('\n') if l.strip()])
+      
+      result = {
+        'has_merge_commits': len(merge_commits) > 0,
+        'merge_count': len(merge_commits),
+        'total_commits': total_commits,
+        'merge_commits': merge_commits[:5]  # First 5
+      }
+    output: merge_check
+
+  # ==================== CHECKOUT AND PREPARE ====================
+  
+  - name: stash_changes
+    description: "Stash any local changes"
+    compute: |
+      import subprocess
+      
+      # Check for uncommitted changes
+      status = subprocess.run(
+        ['git', 'status', '--porcelain'],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path
+      )
+      
+      if status.stdout.strip():
+        # Stash changes
+        stash = subprocess.run(
+          ['git', 'stash', 'push', '-m', 'rebase_pr: auto-stash before rebase'],
+          capture_output=True, text=True,
+          cwd=inputs.repo_path
+        )
+        result = "Stashed local changes"
+      else:
+        result = "No changes to stash"
+    output: stash_result
+
+  - name: checkout_branch
+    description: "Checkout the target branch"
+    compute: |
+      import subprocess
+      
+      branch = target_branch
+      
+      # Try to checkout
+      result = subprocess.run(
+        ['git', 'checkout', branch],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path
+      )
+      
+      if result.returncode != 0:
+        # Try to checkout from remote
+        result = subprocess.run(
+          ['git', 'checkout', '-B', branch, f'origin/{branch}'],
+          capture_output=True, text=True,
+          cwd=inputs.repo_path
+        )
+        if result.returncode != 0:
+          raise ValueError(f"Failed to checkout {branch}: {result.stderr}")
+      
+      result = f"Checked out: {branch}"
+    output: checkout_result
+
+  - name: pull_latest
+    description: "Pull latest from remote"
+    compute: |
+      import subprocess
+      
+      result = subprocess.run(
+        ['git', 'pull', '--ff-only', 'origin', target_branch],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path
+      )
+      
+      # If fast-forward fails, reset to remote
+      if result.returncode != 0:
+        result = subprocess.run(
+          ['git', 'reset', '--hard', f'origin/{target_branch}'],
+          capture_output=True, text=True,
+          cwd=inputs.repo_path
+        )
+      
+      result = "Branch synced with remote"
+    output: pull_result
+
+  # ==================== PERFORM REBASE ====================
+  
+  - name: update_base
+    description: "Ensure base branch is up to date"
+    compute: |
+      import subprocess
+      
+      base = inputs.base_branch
+      
+      # Fetch and update local base branch
+      subprocess.run(['git', 'fetch', 'origin', base], 
+                    capture_output=True, cwd=inputs.repo_path)
+      
+      result = f"Updated origin/{base}"
+    output: base_updated
+
+  - name: start_rebase
+    description: "Start the rebase onto base branch"
+    compute: |
+      import subprocess
+      
+      base = inputs.base_branch
+      
+      # Start rebase
+      result = subprocess.run(
+        ['git', 'rebase', f'origin/{base}'],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path
+      )
+      
+      if result.returncode == 0:
+        rebase_status = {
+          'success': True,
+          'conflicts': False,
+          'message': 'Rebase completed successfully!'
+        }
+      else:
+        # Check if there are conflicts
+        status = subprocess.run(
+          ['git', 'status', '--porcelain'],
+          capture_output=True, text=True,
+          cwd=inputs.repo_path
+        )
+        
+        # UU = both modified (conflict)
+        conflict_files = [l[3:] for l in status.stdout.split('\n') 
+                         if l.startswith('UU') or l.startswith('AA') or l.startswith('DU')]
+        
+        if conflict_files:
+          rebase_status = {
+            'success': False,
+            'conflicts': True,
+            'conflict_files': conflict_files,
+            'message': f'Rebase paused - {len(conflict_files)} file(s) have conflicts'
+          }
+        else:
+          rebase_status = {
+            'success': False,
+            'conflicts': False,
+            'message': f'Rebase failed: {result.stderr[:200]}'
+          }
+      
+      result = rebase_status
+    output: rebase_result
+
+  # ==================== HANDLE CONFLICTS ====================
+  
+  - name: show_conflicts
+    description: "Show conflict details if any"
+    condition: "rebase_result.get('conflicts')"
+    compute: |
+      import subprocess
+      
+      conflict_files = rebase_result.get('conflict_files', [])
+      
+      details = []
+      for f in conflict_files[:5]:  # First 5 files
+        # Show conflict markers count
+        try:
+          with open(f'{inputs.repo_path}/{f}', 'r') as file:
+            content = file.read()
+            conflict_count = content.count('<<<<<<<')
+            details.append({
+              'file': f,
+              'conflicts': conflict_count
+            })
+        except:
+          details.append({'file': f, 'conflicts': '?'})
+      
+      result = details
+    output: conflict_details
+
+  # ==================== FORCE PUSH (if successful) ====================
+  
+  - name: force_push
+    description: "Force push rebased branch"
+    condition: "rebase_result.get('success') and inputs.force_push"
+    compute: |
+      import subprocess
+      
+      result = subprocess.run(
+        ['git', 'push', '--force-with-lease', 'origin', target_branch],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path
+      )
+      
+      if result.returncode != 0:
+        raise ValueError(f"Force push failed: {result.stderr}")
+      
+      result = f"Force pushed {target_branch} to origin"
+    output: push_result
+
+  # ==================== BUILD SUMMARY ====================
+  
+  - name: build_summary
+    description: "Build result summary"
+    compute: |
+      lines = ["## 🔄 Rebase PR Summary", ""]
+      lines.append(f"**Branch:** `{target_branch}`")
+      lines.append(f"**Base:** `{inputs.base_branch}`")
+      lines.append(f"**Repository:** `{inputs.repo_path}`")
+      lines.append("")
+      
+      # Merge commits info
+      if merge_check.get('has_merge_commits'):
+        lines.append(f"### ⚠️ Merge Commits Found: {merge_check['merge_count']}")
+        for mc in merge_check.get('merge_commits', [])[:3]:
+          lines.append(f"- `{mc}`")
+        lines.append("")
+      
+      # Rebase result
+      if rebase_result.get('success'):
+        lines.append("### ✅ Rebase Successful!")
+        lines.append("")
+        if push_result:
+          lines.append(f"✅ {push_result}")
+        else:
+          lines.append("Branch is rebased locally. Ready to force push.")
+      elif rebase_result.get('conflicts'):
+        lines.append("### ⚠️ Merge Conflicts Detected")
+        lines.append("")
+        lines.append("The following files have conflicts that need to be resolved:")
+        lines.append("")
+        for cf in conflict_details or []:
+          lines.append(f"- `{cf['file']}` ({cf['conflicts']} conflict(s))")
+        lines.append("")
+      else:
+        lines.append("### ❌ Rebase Failed")
+        lines.append(rebase_result.get('message', 'Unknown error'))
+      
+      result = '\n'.join(lines)
+    output: summary
+
+# ==================== OUTPUT ====================
+
+outputs:
+  - name: summary
+    value: |
+      {{ summary }}
+      
+      ---
+      
+      {% if rebase_result.get('conflicts') %}
+      ## 🛠️ Resolve Conflicts
+      
+      **Step 1:** Open each conflicted file and resolve the conflicts
+      Look for markers like:
+      ```
+      <<<<<<< HEAD
+      your changes
+      =======
+      incoming changes
+      >>>>>>> commit
+      ```
+      
+      **Step 2:** After resolving each file, stage it:
+      ```bash
+      git add <filename>
+      # Or add all resolved files:
+      git add -A
+      ```
+      
+      **Step 3:** Continue the rebase:
+      ```bash
+      git rebase --continue
+      ```
+      
+      **Step 4:** If more conflicts, repeat steps 1-3
+      
+      **Step 5:** When rebase completes, force push:
+      ```bash
+      git push --force-with-lease origin {{ target_branch }}
+      ```
+      
+      **To abort the rebase:**
+      ```bash
+      git rebase --abort
+      ```
+      
+      ---
+      
+      When you're done, tell me and I can verify the rebase was successful.
+      
+      {% elif rebase_result.get('success') and not push_result %}
+      ## 🚀 Ready to Push
+      
+      The rebase completed successfully! Would you like me to force push?
+      
+      Say **"yes, push it"** or run:
+      ```
+      skill_run("rebase_pr", '{"branch": "{{ target_branch }}", "force_push": true}')
+      ```
+      
+      Or manually:
+      ```bash
+      git push --force-with-lease origin {{ target_branch }}
+      ```
+      
+      {% elif push_result %}
+      ## ✅ Complete!
+      
+      The branch has been rebased and pushed. The MR should now show a clean history.
+      
+      {% else %}
+      ## ❌ Action Required
+      
+      Please check the error above and try again.
+      {% endif %}
+  
+  - name: context
+    value:
+      branch: "{{ target_branch }}"
+      rebase_success: "{{ rebase_result.get('success', False) }}"
+      has_conflicts: "{{ rebase_result.get('conflicts', False) }}"
+      pushed: "{{ push_result is defined }}"
+

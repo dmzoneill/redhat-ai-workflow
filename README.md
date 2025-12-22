@@ -326,6 +326,7 @@ flowchart LR
 | 👀 [`review_pr`](#review_pr) | Review PR with auto-approve/feedback | developer |
 | 📋 [`review_all_prs`](#review_all_prs) | Batch review open PRs (by others) | developer |
 | 📝 [`check_my_prs`](#check_my_prs) | Check your PRs for reviewer feedback | developer |
+| 🔄 [`rebase_pr`](#rebase_pr) | Rebase PR onto main, handle conflicts | developer |
 | 🧪 [`test_mr_ephemeral`](#test_mr_ephemeral) | Test in ephemeral namespace | developer |
 | 📋 [`jira_hygiene`](#jira_hygiene) | Validate/fix Jira quality | developer |
 | 🔍 [`investigate_alert`](#investigate_alert) | Systematic alert triage | devops, incident |
@@ -572,6 +573,64 @@ flowchart TD
 
 ### 🟢 Approved - Ready to Merge
 - !239: AAP-61208 - docs: Update README ✅
+```
+
+---
+
+### 🔄 rebase_pr
+
+Rebase a PR branch onto main, cleaning up merge commits and handling conflicts.
+
+```
+skill_run("rebase_pr", '{"mr_id": 123}')
+skill_run("rebase_pr", '{"issue_key": "AAP-61214"}')
+skill_run("rebase_pr", '{"branch": "AAP-61214-feature"}')
+```
+
+**Inputs:**
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `mr_id` | No* | - | GitLab MR ID |
+| `issue_key` | No* | - | Jira issue key |
+| `branch` | No* | - | Branch name directly |
+| `base_branch` | No | `main` | Branch to rebase onto |
+| `force_push` | No | `false` | Auto force-push when done |
+
+*One of `mr_id`, `issue_key`, or `branch` required
+
+**Flow:**
+```mermaid
+flowchart TD
+    A[Find Branch] --> B[Check for Merge Commits]
+    B --> C[Stash Local Changes]
+    C --> D[Checkout Branch]
+    D --> E[Pull Latest]
+    E --> F[Rebase onto main]
+    F --> G{Conflicts?}
+    G -->|No| H[Force Push]
+    G -->|Yes| I[Show Conflicts]
+    I --> J[User Resolves]
+    J --> K[git add files]
+    K --> L[git rebase --continue]
+    L --> G
+    H --> M[Done!]
+```
+
+**When Conflicts Occur:**
+```
+## ⚠️ Merge Conflicts Detected
+
+The following files have conflicts:
+- `src/api/views.py` (2 conflicts)
+- `src/models/user.py` (1 conflict)
+
+## 🛠️ Resolve Conflicts
+
+Step 1: Open each file, resolve conflicts (look for <<<<<<< markers)
+Step 2: git add <filename>
+Step 3: git rebase --continue
+Step 4: Repeat if more conflicts
+Step 5: git push --force-with-lease origin <branch>
 ```
 
 ---
