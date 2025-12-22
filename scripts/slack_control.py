@@ -208,15 +208,31 @@ async def cmd_history(client: SlackAgentClient, args):
 
 
 async def cmd_send(client: SlackAgentClient, args):
-    """Send a message to Slack."""
+    """Send a message to Slack channel or user."""
+    target = args.target
+
+    # Show what we're doing
+    if target.startswith("U"):
+        print(f"{COLORS['cyan']}Sending DM to user {target}...{COLORS['reset']}")
+    elif target.startswith("@"):
+        print(f"{COLORS['cyan']}Sending DM to {target}...{COLORS['reset']}")
+    elif target.startswith("D"):
+        print(f"{COLORS['cyan']}Sending to DM channel {target}...{COLORS['reset']}")
+    else:
+        print(f"{COLORS['cyan']}Sending to channel {target}...{COLORS['reset']}")
+
     result = await client.send_message(
-        channel_id=args.channel,
+        channel_id=target,  # The daemon will handle user IDs
         text=args.message,
         thread_ts=args.thread or "",
     )
 
     if result.get("success"):
-        print_success(f"Message sent (ts: {result.get('ts', 'N/A')})")
+        msg_type = result.get("type", "message")
+        if msg_type == "dm":
+            print_success(f"DM sent (ts: {result.get('ts', 'N/A')})")
+        else:
+            print_success(f"Message sent (ts: {result.get('ts', 'N/A')})")
     else:
         print_error(f"Failed to send: {result.get('error', 'Unknown error')}")
 
@@ -387,8 +403,15 @@ def main():
     history_parser.add_argument("-v", "--verbose", action="store_true")
 
     # send
-    send_parser = subparsers.add_parser("send", help="Send a message")
-    send_parser.add_argument("channel", help="Channel ID")
+    send_parser = subparsers.add_parser(
+        "send",
+        help="Send a message to channel or user",
+        description="Send to channel (C123), DM channel (D123), user (U123), or @username",
+    )
+    send_parser.add_argument(
+        "target",
+        help="Target: Channel (C123), User ID (U123), or @username",
+    )
     send_parser.add_argument("message", help="Message text")
     send_parser.add_argument("-t", "--thread", help="Thread timestamp")
 

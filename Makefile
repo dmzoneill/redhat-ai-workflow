@@ -63,7 +63,7 @@ help:
 	@echo "  $(GREEN)make slack-history$(RESET)      Show message history"
 	@echo "  $(GREEN)make slack-watch$(RESET)        Watch for new messages (live)"
 	@echo "  $(GREEN)make slack-reload$(RESET)       Reload daemon configuration"
-	@echo "  $(GREEN)make slack-send$(RESET)         Send a message (CHANNEL=... MSG=...)"
+	@echo "  $(GREEN)make slack-send$(RESET)         Send message (TARGET=C.../U.../@user MSG=...)"
 	@echo ""
 	@echo "$(BOLD)MCP Servers:$(RESET)"
 	@echo "  $(GREEN)make mcp-server$(RESET)         Run MCP server (default: developer)"
@@ -238,11 +238,15 @@ slack-reload:
 	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py reload
 
 slack-send:
-	@if [ -z "$(CHANNEL)" ] || [ -z "$(MSG)" ]; then \
-		echo "$(RED)❌ Usage: make slack-send CHANNEL=C12345678 MSG='Hello!'$(RESET)"; \
+	@TARGET_VAL=$${TARGET:-$$CHANNEL}; \
+	if [ -z "$$TARGET_VAL" ] || [ -z "$(MSG)" ]; then \
+		echo "$(RED)❌ Usage:$(RESET)"; \
+		echo "  make slack-send TARGET=C12345678 MSG='Hello!'  # Channel"; \
+		echo "  make slack-send TARGET=U12345678 MSG='Hello!'  # User (DM)"; \
+		echo "  make slack-send TARGET=@username MSG='Hello!'  # User by name"; \
 		exit 1; \
-	fi
-	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py send $(CHANNEL) "$(MSG)"
+	fi; \
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py send "$$TARGET_VAL" "$(MSG)"
 
 # =============================================================================
 # MCP SERVERS

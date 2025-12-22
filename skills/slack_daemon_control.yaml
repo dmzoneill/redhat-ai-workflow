@@ -8,7 +8,9 @@
 #   skill_run("slack_daemon_control", '{"action": "approve", "message_id": "xxx"}')
 #   skill_run("slack_daemon_control", '{"action": "approve_all"}')
 #   skill_run("slack_daemon_control", '{"action": "history", "limit": 50}')
-#   skill_run("slack_daemon_control", '{"action": "send", "channel": "C123", "message": "Hi!"}')
+#   skill_run("slack_daemon_control", '{"action": "send", "target": "C123", "message": "Hi!"}')
+#   skill_run("slack_daemon_control", '{"action": "send", "target": "U123", "message": "Hi!"}')  # DM to user
+#   skill_run("slack_daemon_control", '{"action": "send", "target": "@username", "message": "Hi!"}')  # DM by name
 #   skill_run("slack_daemon_control", '{"action": "stop"}')
 
 name: slack_daemon_control
@@ -37,8 +39,12 @@ inputs:
     description: "Message ID for approve/reject actions"
     type: string
     required: false
+  target:
+    description: "Target for send action: Channel (C123), User ID (U123), or @username"
+    type: string
+    required: false
   channel:
-    description: "Channel ID for send action"
+    description: "Alias for target (deprecated, use target instead)"
     type: string
     required: false
   message:
@@ -94,8 +100,10 @@ steps:
         raise ValueError("reject action requires message_id parameter")
       
       if action == "send":
-        if not inputs.get("channel"):
-          raise ValueError("send action requires channel parameter")
+        # Support both 'target' and 'channel' for backwards compatibility
+        target = inputs.get("target") or inputs.get("channel")
+        if not target:
+          raise ValueError("send action requires target parameter (channel C123, user U123, or @username)")
         if not inputs.get("message"):
           raise ValueError("send action requires message parameter")
       
@@ -210,9 +218,10 @@ steps:
         result = {"success": proc.returncode == 0, "output": proc.stdout}
       
       elif action == "send":
-        channel = inputs["channel"]
+        # Support both 'target' and 'channel' for backwards compatibility
+        target = inputs.get("target") or inputs.get("channel")
         message = inputs["message"]
-        cmd = [sys.executable, str(control_script), "send", channel, message]
+        cmd = [sys.executable, str(control_script), "send", target, message]
         if inputs.get("thread"):
           cmd.extend(["-t", inputs["thread"]])
         proc = subprocess.run(cmd, capture_output=True, text=True)
