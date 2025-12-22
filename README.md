@@ -317,7 +317,7 @@ Claude: ## 🔧 DevOps Agent Loaded
         
         **Available skills:**
         • investigate_alert - Systematic alert triage
-        • deploy_to_stage - Safe staging deployments
+        • debug_prod - Debug production issues
         
         What infrastructure task can I help with?
 ```
@@ -352,11 +352,17 @@ flowchart LR
 
 ### Available Skills
 
-| Skill | Description | Required Inputs |
-|-------|-------------|-----------------|
-| ⚡ **start_work** | Begin working on an issue | `issue_key`, `repo` |
-| 🚀 **create_mr** | Create MR with Jira link | `issue_key`, `repo` |
-| 🔍 **investigate_alert** | Systematic alert triage | `environment` |
+| Skill | Description | Agent |
+|-------|-------------|-------|
+| ⚡ **start_work** | Begin working on a Jira issue | developer |
+| 🚀 **create_mr** | Create MR with Jira link | developer |
+| ✅ **close_issue** | Close issue with commit summary | developer |
+| 👀 **review_pr** | Review colleague's PR | developer |
+| 🧪 **test_mr_ephemeral** | Test in ephemeral namespace | developer |
+| 📋 **jira_hygiene** | Validate/fix Jira quality | developer |
+| 🔍 **investigate_alert** | Systematic alert triage | devops, incident |
+| 🐛 **debug_prod** | Debug production issues | devops, incident |
+| 📦 **release_aa_backend_prod** | Release to production | release |
 
 ### Skill Anatomy
 
