@@ -855,21 +855,38 @@ graph TB
 </details>
 
 <details>
-<summary><b>📋 Jira Tools (18)</b></summary>
+<summary><b>📋 Jira Tools (23)</b></summary>
 
+**Read Operations:**
 | Tool | Description |
 |------|-------------|
-| `jira_view_issue` | Get issue details |
-| `jira_create_issue` | Create new issue |
-| `jira_update_issue` | Update issue fields |
-| `jira_set_status` | Transition status |
+| `jira_view_issue` | View issue details |
+| `jira_view_issue_json` | Get issue as JSON |
+| `jira_search` | Search with JQL |
+| `jira_list_issues` | List project issues |
+| `jira_my_issues` | List your assigned issues |
+| `jira_list_blocked` | List blocked issues |
+| `jira_lint` | Check issue quality |
+
+**Write Operations:**
+| Tool | Description |
+|------|-------------|
+| `jira_set_status` | Transition issue status |
+| `jira_assign` | Assign to user |
+| `jira_unassign` | Remove assignee |
 | `jira_add_comment` | Add comment |
-| `jira_search` | Search issues (JQL) |
-| `jira_assign` | Assign issue |
-| `jira_link_issues` | Link issues |
-| `jira_get_transitions` | List transitions |
-| `jira_sprint_issues` | Sprint issues |
-| ... | and more |
+| `jira_block` | Mark as blocked |
+| `jira_unblock` | Remove block |
+| `jira_add_to_sprint` | Add to sprint |
+| `jira_remove_sprint` | Remove from sprint |
+| `jira_create_issue` | Create new issue |
+| `jira_clone_issue` | Clone existing issue |
+| `jira_add_link` | Link issues |
+| `jira_add_flag` | Add impediment flag |
+| `jira_remove_flag` | Remove flag |
+| `jira_open_browser` | Open in browser |
+
+*Requires: `rh-issue` CLI and `JIRA_JPAT` environment variable*
 
 </details>
 
@@ -893,23 +910,89 @@ graph TB
 </details>
 
 <details>
-<summary><b>☸️ Kubernetes Tools (26)</b></summary>
+<summary><b>☸️ Kubernetes Tools (22)</b></summary>
 
+**Pods:**
 | Tool | Description |
 |------|-------------|
 | `kubectl_get_pods` | List pods |
-| `kubectl_describe_pod` | Pod details |
-| `kubectl_logs` | Pod logs |
-| `kubectl_exec` | Execute command |
+| `kubectl_describe_pod` | Describe pod |
+| `kubectl_logs` | Get pod logs |
+| `kubectl_delete_pod` | Delete pod |
+
+**Deployments:**
+| Tool | Description |
+|------|-------------|
 | `kubectl_get_deployments` | List deployments |
-| `kubectl_rollout_restart` | Restart deployment |
-| `kubectl_get_events` | Cluster events |
-| `k8s_namespace_health` | Namespace overview |
-| `k8s_pod_resources` | Resource usage |
-| `kubectl_apply` | Apply manifest |
-| ... | and more |
+| `kubectl_describe_deployment` | Describe deployment |
+| `kubectl_rollout_status` | Check rollout status |
+| `kubectl_rollout_restart` | Rolling restart |
+| `kubectl_scale` | Scale replicas |
+
+**Networking:**
+| Tool | Description |
+|------|-------------|
+| `kubectl_get_services` | List services |
+| `kubectl_get_ingress` | List ingress |
+
+**Config:**
+| Tool | Description |
+|------|-------------|
+| `kubectl_get_configmaps` | List configmaps |
+| `kubectl_get_secrets` | List secrets |
+
+**Debugging:**
+| Tool | Description |
+|------|-------------|
+| `kubectl_get_events` | Get events |
+| `kubectl_top_pods` | Resource usage |
+| `kubectl_get` | Get any resource |
+| `kubectl_exec` | Exec command |
+
+**SaaS/App-SRE:**
+| Tool | Description |
+|------|-------------|
+| `kubectl_saas_pipelines` | SaaS pipelines |
+| `kubectl_saas_deployments` | SaaS deployments |
+| `kubectl_saas_pods` | SaaS pods |
+| `kubectl_saas_logs` | SaaS logs |
+
+*Authentication via kubeconfig files: `~/.kube/config.s` (stage), `~/.kube/config.p` (prod), `~/.kube/config.e` (ephemeral)*
 
 </details>
+
+### Environment Variables
+
+| Variable | Server | Description |
+|----------|--------|-------------|
+| `JIRA_URL` | aa-jira | Jira instance URL |
+| `JIRA_JPAT` | aa-jira | Jira Personal Access Token |
+| `GITLAB_TOKEN` | aa-gitlab | GitLab API token |
+| `KUBECONFIG` | aa-k8s | Default kubeconfig path |
+| `KUBECONFIG_KONFLUX` | aa-konflux | Konflux cluster kubeconfig |
+| `QUAY_TOKEN` | aa-quay | Quay.io API token (or uses Docker auth) |
+
+### Server Architecture
+
+Each MCP server follows the same pattern:
+
+```
+mcp-servers/aa-{name}/
+├── pyproject.toml      # Package definition
+└── src/
+    ├── __init__.py
+    ├── server.py       # Entry point
+    └── tools.py        # @mcp.tool() decorated functions
+```
+
+**Installation:**
+```bash
+# Individual server
+cd mcp-servers/aa-git && pip install -e .
+
+# All servers
+for d in mcp-servers/aa-*/; do pip install -e "$d"; done
+```
 
 ### Dynamic Tool Loading
 
@@ -976,6 +1059,29 @@ graph TD
 ```
 
 ### Memory Operations
+
+| Operation | Description | Example |
+|-----------|-------------|---------|
+| `memory_read()` | List all memory files | `memory_read()` |
+| `memory_read(path)` | Read specific file | `memory_read("state/current_work")` |
+| `memory_write(path, content)` | Overwrite file | `memory_write("learned/patterns", "...")` |
+| `memory_update(path, field, value)` | Update specific field | `memory_update("state/current_work", "notes", "...")` |
+| `memory_append(path, field, item)` | Append to list | `memory_append("state/current_work", "active_issues", '{"key": "AAP-123"}')` |
+| `memory_session_log(action, details)` | Log to today's session | `memory_session_log("started_work", "AAP-12345")` |
+
+**Session Logging Examples:**
+```python
+memory_session_log("started_work", "AAP-12345 - Implement API")
+memory_session_log("created_mr", "MR !456 for AAP-12345")
+memory_session_log("deployed", "v2.3.1 to stage")
+memory_session_log("fixed", "OOMKilled issue by increasing limits")
+```
+
+**Best Practices:**
+1. **Log important actions** - Future you will thank you
+2. **Update current_work** when starting/finishing tasks
+3. **Record patterns** when you solve a tricky problem
+4. **Add runbooks** for procedures you might repeat
 
 ```
 # Check what you were working on
