@@ -1,4 +1,13 @@
 {
+  "agent": {
+    "description": "Claude-powered agent configuration",
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "max_tokens": 4096,
+    "temperature": 0.7,
+    "system_prompt": "You are an AI assistant helping with software development. You have access to tools for Jira, GitLab, Git, and Kubernetes. Be concise and helpful."
+  },
   "slack": {
     "description": "Slack integration for autonomous agent",
     "auth": {

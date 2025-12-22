@@ -24,6 +24,9 @@ dbus-next>=0.2.3
 # Requires system libnotify: dnf install libnotify gobject-introspection
 # PyGObject>=3.42.0
 
+# Claude Agent (optional, for intelligent Slack bot)
+anthropic>=0.18.0
+
 # Development (optional)
 # pytest>=8.0.0
 # pytest-asyncio>=0.23.0
