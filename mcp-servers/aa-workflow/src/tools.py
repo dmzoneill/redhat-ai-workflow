@@ -2265,6 +2265,185 @@ def register_tools(server: "FastMCP") -> int:
             return [TextContent(type="text", text=f"❌ Error executing {tool_name}: {e}")]
 
 
+    # ==================== PROMPTS ====================
+    # Pre-defined conversation templates
+    
+    @server.prompt()
+    async def session_init() -> str:
+        """
+        Initialize a new work session.
+        
+        Use this prompt to start a productive session with full context.
+        """
+        return """You are an AI assistant helping with software development.
+
+Start by calling session_start() to load your current work context.
+
+If you know the type of work:
+- DevOps tasks: session_start(agent="devops")
+- Development: session_start(agent="developer")
+- Incidents: session_start(agent="incident")
+- Releases: session_start(agent="release")
+
+After loading context, ask what the user wants to work on today."""
+
+    @server.prompt()
+    async def debug_guide() -> str:
+        """
+        Guide for debugging production issues.
+        
+        Provides a systematic approach to production debugging.
+        """
+        return """# Production Debugging Guide
+
+## 1. Gather Context
+- Which namespace? (tower-analytics-prod or tower-analytics-prod-billing)
+- Any specific alert that fired?
+- When did the issue start?
+
+## 2. Check Pod Health
+```
+kubectl_get_pods(namespace="tower-analytics-prod", environment="prod")
+```
+Look for: CrashLoopBackOff, OOMKilled, Pending, high restarts
+
+## 3. Check Events
+```
+kubectl_get_events(namespace="tower-analytics-prod", environment="prod")
+```
+Look for: Warning, Error, FailedScheduling
+
+## 4. Check Logs
+```
+kubectl_logs(pod="<pod-name>", namespace="tower-analytics-prod", environment="prod", tail=100)
+```
+Grep for: error, exception, fatal, timeout
+
+## 5. Check Alerts
+```
+prometheus_alerts(environment="prod")
+```
+
+## 6. Check Recent Deployments
+Was there a recent deployment? Check app-interface for recent changes.
+
+## 7. Match Against Known Patterns
+Use memory_read("learned/patterns") to check for known issues.
+
+## 8. Document Findings
+Use memory_session_log() to record what you find."""
+
+    @server.prompt()
+    async def review_guide() -> str:
+        """
+        Guide for reviewing merge requests.
+        
+        Provides a structured approach to code review.
+        """
+        return """# Code Review Guide
+
+## 1. Get MR Context
+```
+gitlab_mr_view(project="<project>", mr_id=<id>)
+```
+
+## 2. Check Linked Jira
+```
+jira_view_issue("<ISSUE-KEY>")
+```
+- Does the MR address the issue requirements?
+- Are acceptance criteria met?
+
+## 3. Review Changes
+```
+gitlab_mr_diff(project="<project>", mr_id=<id>)
+```
+
+### What to Look For:
+- **Security**: SQL injection, secrets in code, unsafe deserialization
+- **Performance**: N+1 queries, missing indexes, large memory allocations
+- **Correctness**: Edge cases, error handling, race conditions
+- **Style**: Consistent with codebase, clear naming, appropriate comments
+
+## 4. Check Pipeline
+```
+gitlab_ci_status(project="<project>")
+```
+- All tests passing?
+- No linter failures?
+
+## 5. Provide Feedback
+Be constructive, specific, and kind. Suggest alternatives, don't just criticize."""
+
+
+    # ==================== RESOURCES ====================
+    # Data sources the AI can read
+    
+    @server.resource("memory://state/current_work")
+    async def resource_current_work() -> str:
+        """Current work state - active issues, branches, MRs."""
+        import yaml
+        work_file = MEMORY_DIR / "state" / "current_work.yaml"
+        if work_file.exists():
+            return work_file.read_text()
+        return "# No current work tracked\nactive_issues: []\nopen_mrs: []\nfollow_ups: []"
+    
+    @server.resource("memory://learned/patterns")
+    async def resource_patterns() -> str:
+        """Known error patterns and solutions."""
+        patterns_file = MEMORY_DIR / "learned" / "patterns.yaml"
+        if patterns_file.exists():
+            return patterns_file.read_text()
+        return "# No patterns recorded yet\npatterns: []"
+    
+    @server.resource("config://agents")
+    async def resource_agents() -> str:
+        """Available agent configurations."""
+        import yaml
+        agents = []
+        if AGENTS_DIR.exists():
+            for f in AGENTS_DIR.glob("*.yaml"):
+                try:
+                    with open(f) as fp:
+                        data = yaml.safe_load(fp)
+                    agents.append({
+                        "name": data.get("name", f.stem),
+                        "description": data.get("description", ""),
+                        "tools": data.get("tools", []),
+                        "skills": data.get("skills", []),
+                    })
+                except Exception:
+                    pass
+        return yaml.dump({"agents": agents}, default_flow_style=False)
+    
+    @server.resource("config://skills")
+    async def resource_skills() -> str:
+        """Available skill definitions."""
+        import yaml
+        skills = []
+        if SKILLS_DIR.exists():
+            for f in SKILLS_DIR.glob("*.yaml"):
+                try:
+                    with open(f) as fp:
+                        data = yaml.safe_load(fp)
+                    skills.append({
+                        "name": data.get("name", f.stem),
+                        "description": data.get("description", ""),
+                        "inputs": [i.get("name") for i in data.get("inputs", [])],
+                    })
+                except Exception:
+                    pass
+        return yaml.dump({"skills": skills}, default_flow_style=False)
+    
+    @server.resource("config://repositories")
+    async def resource_repositories() -> str:
+        """Configured repositories from config.json."""
+        import yaml
+        config = load_repos_config()
+        repos = config.get("repositories", {})
+        return yaml.dump({"repositories": repos}, default_flow_style=False)
+
+
     # ==================== ENTRY POINT ====================
     
     # Count registered tools
