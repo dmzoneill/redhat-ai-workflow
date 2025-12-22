@@ -806,8 +806,22 @@ class ToolExecutor:
 # =============================================================================
 
 
+# Try to import Claude agent
+try:
+    from claude_agent import ClaudeAgent, ANTHROPIC_AVAILABLE
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    ClaudeAgent = None
+
+
 class ResponseGenerator:
-    """Generates responses for different intents with user-aware modulation."""
+    """
+    Generates responses for messages.
+
+    Two modes:
+    1. Claude Agent Mode (--llm): Uses Claude to understand requests and call tools
+    2. Pattern Mode (default): Uses simple pattern matching for known intents
+    """
 
     def __init__(
         self,
@@ -818,11 +832,12 @@ class ResponseGenerator:
         self.executor = executor
         self.use_llm = use_llm
         self.llm_client = None
+        self.claude_agent = None
         self.templates = SLACK_CONFIG.get("response_templates", {})
         self.notifier = notifier or DesktopNotifier(enabled=False)
 
         if use_llm:
-            self._init_llm()
+            self._init_claude()
 
     def _get_greeting(self, user_name: str, classification: UserClassification) -> str:
         """Get appropriate greeting based on user classification."""
@@ -866,26 +881,34 @@ class ResponseGenerator:
 
         return response
 
-    def _init_llm(self):
-        """Initialize LLM client if available."""
+    def _init_claude(self):
+        """Initialize Claude agent if available."""
+        if not ANTHROPIC_AVAILABLE:
+            logger.warning("anthropic package not installed. Install with: pip install anthropic")
+            self.use_llm = False
+            return
+
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            logger.warning("No ANTHROPIC_API_KEY found, Claude agent disabled")
+            self.use_llm = False
+            return
+
         try:
-            import httpx
+            # Get model from config
+            agent_config = CONFIG.get("agent", {})
+            model = agent_config.get("model", "claude-sonnet-4-20250514")
+            max_tokens = agent_config.get("max_tokens", 4096)
+            system_prompt = agent_config.get("system_prompt")
 
-            api_key = os.getenv("OPENAI_API_KEY")
-            base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-
-            if api_key:
-                self.llm_client = httpx.AsyncClient(
-                    base_url=base_url,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=60.0,
-                )
-                logger.info("LLM client initialized")
-            else:
-                logger.warning("No OPENAI_API_KEY found, LLM disabled")
-                self.use_llm = False
+            self.claude_agent = ClaudeAgent(
+                model=model,
+                max_tokens=max_tokens,
+                system_prompt=system_prompt,
+            )
+            logger.info(f"Claude agent initialized with model: {model}")
         except Exception as e:
-            logger.warning(f"Could not initialize LLM: {e}")
+            logger.error(f"Failed to initialize Claude agent: {e}")
             self.use_llm = False
 
     async def generate(
@@ -897,23 +920,45 @@ class ResponseGenerator:
         """
         Generate a response for the given message and intent.
 
+        Two modes:
+        1. Claude Agent Mode (use_llm=True): Claude understands the request and calls tools
+        2. Pattern Mode (default): Simple pattern matching for known intents
+
         Returns:
             tuple of (response_text, should_send)
             should_send is False if user classification requires review
         """
-        handlers = {
-            "jira_query": self._handle_jira_query,
-            "mr_status": self._handle_mr_status,
-            "check_my_prs": self._handle_check_my_prs,
-            "prod_debug": self._handle_prod_debug,
-            "start_work": self._handle_start_work,
-            "standup": self._handle_standup,
-            "help": self._handle_help,
-            "general": self._handle_general,
-        }
+        # Use Claude agent if available
+        if self.use_llm and self.claude_agent:
+            self.notifier.skill_activated("claude_agent", "Processing with Claude...")
+            try:
+                context = {
+                    "user_name": message.user_name,
+                    "channel_name": message.channel_name,
+                    "is_dm": message.is_dm,
+                    "is_mention": message.is_mention,
+                }
+                response = await self.claude_agent.process_message(message.text, context)
+                self.notifier.skill_completed("claude_agent", success=True)
+            except Exception as e:
+                logger.error(f"Claude agent error: {e}")
+                self.notifier.skill_completed("claude_agent", success=False)
+                response = f"I encountered an error processing your request: {e}"
+        else:
+            # Fallback to pattern-based handlers
+            handlers = {
+                "jira_query": self._handle_jira_query,
+                "mr_status": self._handle_mr_status,
+                "check_my_prs": self._handle_check_my_prs,
+                "prod_debug": self._handle_prod_debug,
+                "start_work": self._handle_start_work,
+                "standup": self._handle_standup,
+                "help": self._handle_help,
+                "general": self._handle_general,
+            }
 
-        handler = handlers.get(intent.type, self._handle_general)
-        response = await handler(message, intent)
+            handler = handlers.get(intent.type, self._handle_general)
+            response = await handler(message, intent)
 
         # Modulate response based on user classification
         response = self._modulate_response(response, message.user_name, classification)
@@ -1234,6 +1279,16 @@ class SlackDaemon:
             print("✅ Desktop notifications: enabled (libnotify)")
         else:
             print("⚠️  Desktop notifications: disabled (install PyGObject)")
+
+        # Show Claude agent status
+        if self.use_llm:
+            if self.response_generator.claude_agent:
+                model = self.response_generator.claude_agent.model
+                print(f"🧠 Claude Agent: enabled ({model})")
+            else:
+                print("⚠️  Claude Agent: failed to initialize")
+        else:
+            print("📋 Mode: Pattern matching (use --llm for Claude)")
 
         if self.dry_run:
             print("⚠️  DRY RUN MODE - no responses will be sent")
