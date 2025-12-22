@@ -4,15 +4,27 @@
 name: review_pr
 description: |
   Review a colleague's PR in automation-analytics-backend.
+  
+  Accepts EITHER:
+  - mr_id: GitLab MR number (e.g., 123)
+  - issue_key: Jira issue key (e.g., AAP-61214) - will find the MR
+  
   Checks MR description, commit format, pipelines, Jira context,
   runs local tests, and provides brief focused feedback.
-version: "1.0"
+  
+  Automatically approves or posts feedback based on findings.
+version: "1.1"
 
 inputs:
   - name: mr_id
     type: integer
-    required: true
+    required: false
     description: "GitLab MR ID (e.g., 1234)"
+  
+  - name: issue_key
+    type: string
+    required: false
+    description: "Jira issue key (e.g., AAP-61214) - will search for associated MR"
   
   - name: skip_tests
     type: boolean
@@ -28,6 +40,75 @@ constants:
   fastapi_container: automation-analytics-backend-api-fastapi-1
 
 steps:
+  # ==================== RESOLVE MR ID ====================
+  
+  # Step 0a: Validate we have either mr_id or issue_key
+  - name: validate_input
+    description: "Ensure we have either mr_id or issue_key"
+    compute: |
+      if not inputs.get('mr_id') and not inputs.get('issue_key'):
+        raise ValueError("Must provide either 'mr_id' or 'issue_key'")
+      result = "OK"
+    output: input_valid
+
+  # Step 0b: Search for MR by Jira key if no mr_id provided
+  - name: find_mr_by_jira
+    description: "Find MR associated with Jira issue"
+    condition: "not inputs.get('mr_id') and inputs.get('issue_key')"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ constants.gitlab_project }}"
+      state: opened
+      search: "{{ inputs.issue_key }}"
+    output: mr_search_results
+    on_error: continue
+
+  # Step 0c: Extract MR ID from search results
+  - name: extract_mr_id
+    description: "Extract MR ID from search results"
+    condition: "not inputs.get('mr_id') and inputs.get('issue_key')"
+    compute: |
+      import re
+      
+      if inputs.get('mr_id'):
+        resolved_mr_id = inputs.mr_id
+      else:
+        # Parse search results to find MR ID
+        search_text = mr_search_results or ""
+        
+        # Look for MR ID patterns: !123, IID: 123, mr_id: 123
+        matches = re.findall(r'!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)', search_text, re.IGNORECASE)
+        
+        if matches:
+          # Get first match
+          for match in matches:
+            for group in match:
+              if group:
+                resolved_mr_id = int(group)
+                break
+            if resolved_mr_id:
+              break
+        else:
+          # Try to find any number that looks like an MR ID (3-5 digits)
+          nums = re.findall(r'\b(\d{2,5})\b', search_text)
+          if nums:
+            resolved_mr_id = int(nums[0])
+          else:
+            raise ValueError(f"No MR found for issue {inputs.issue_key}. Please provide mr_id directly.")
+      
+      result = resolved_mr_id
+    output: resolved_mr_id
+
+  # Step 0d: Set mr_id for rest of workflow
+  - name: set_mr_id
+    description: "Set the MR ID for remaining steps"
+    compute: |
+      if inputs.get('mr_id'):
+        result = inputs.mr_id
+      else:
+        result = resolved_mr_id
+    output: mr_id
+
   # ==================== GATHER CONTEXT ====================
 
   # Step 1: Get MR details
@@ -36,7 +117,7 @@ steps:
     tool: gitlab_mr_view
     args:
       project: "{{ constants.gitlab_project }}"
-      mr_id: "{{ inputs.mr_id }}"
+      mr_id: "{{ mr_id }}"
     output: mr_details
 
   # Step 2: Extract Jira issue key from title
@@ -75,7 +156,7 @@ steps:
     tool: gitlab_mr_diff
     args:
       project: "{{ constants.gitlab_project }}"
-      mr_id: "{{ inputs.mr_id }}"
+      mr_id: "{{ mr_id }}"
     output: mr_diff
 
   # Step 5: Check GitLab pipeline status
@@ -168,7 +249,7 @@ steps:
       if branch_match:
         branch = branch_match.group(1)
       else:
-        branch = f"mr-{inputs.mr_id}"
+        branch = f"mr-{mr_id}"
       
       # Fetch and checkout
       subprocess.run(["git", "fetch", "origin"], cwd=constants.repo_path, capture_output=True)
@@ -182,7 +263,7 @@ steps:
       if result.returncode != 0:
         # Try fetching the MR directly
         subprocess.run(
-          ["git", "fetch", "origin", f"merge-requests/{inputs.mr_id}/head:{branch}"],
+          ["git", "fetch", "origin", f"merge-requests/{mr_id}/head:{branch}"],
           cwd=constants.repo_path,
           capture_output=True
         )
@@ -378,7 +459,7 @@ pytest -vv --tb=short -q 2>&1 | tail -50
     compute: |
       lines = []
       lines.append("## PR Review Summary")
-      lines.append(f"**MR:** !{inputs.mr_id}")
+      lines.append(f"**MR:** !{mr_id}")
       lines.append(f"**Jira:** {jira_key}")
       lines.append("")
       
@@ -510,7 +591,7 @@ pytest -vv --tb=short -q 2>&1 | tail -50
     tool: gitlab_mr_comment
     args:
       project: "{{ constants.gitlab_project }}"
-      mr_id: "{{ inputs.mr_id }}"
+      mr_id: "{{ mr_id }}"
       comment: "{{ feedback_message }}"
     output: feedback_posted
     on_error: continue
@@ -522,7 +603,7 @@ pytest -vv --tb=short -q 2>&1 | tail -50
     tool: gitlab_mr_approve
     args:
       project: "{{ constants.gitlab_project }}"
-      mr_id: "{{ inputs.mr_id }}"
+      mr_id: "{{ mr_id }}"
     output: approval_result
     on_error: continue
 
@@ -534,7 +615,7 @@ pytest -vv --tb=short -q 2>&1 | tail -50
     args:
       issue_key: "{{ jira_key }}"
       comment: |
-        MR !{{ inputs.mr_id }} reviewed.
+        MR !{{ mr_id }} reviewed.
         Action: {{ review_action.get('action', 'unknown') }}
         Reason: {{ review_action.get('reason', '') }}
     output: jira_updated
@@ -566,7 +647,7 @@ outputs:
   
   - name: context
     value:
-      mr_id: "{{ inputs.mr_id }}"
+      mr_id: "{{ mr_id }}"
       jira_key: "{{ jira_key }}"
       action: "{{ review_action.get('action') }}"
       has_issues: "{{ code_issues | length > 0 }}"

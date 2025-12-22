@@ -435,14 +435,18 @@ Review a colleague's PR with static analysis and local testing. **Automatically 
 
 ```
 skill_run("review_pr", '{"mr_id": 123}')
+skill_run("review_pr", '{"issue_key": "AAP-61214"}')
 skill_run("review_pr", '{"mr_id": 123, "skip_tests": true}')
 ```
 
 **Inputs:**
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `mr_id` | Yes | - | GitLab MR ID |
+| `mr_id` | No* | - | GitLab MR ID (e.g., 123) |
+| `issue_key` | No* | - | Jira issue key (e.g., AAP-61214) - finds associated MR |
 | `skip_tests` | No | `false` | Skip local tests |
+
+*One of `mr_id` or `issue_key` required. If issue_key provided, searches for the MR.
 
 **Auto-Actions:**
 - ✅ **Approve** if no blocking issues found
