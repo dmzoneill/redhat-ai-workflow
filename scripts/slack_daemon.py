@@ -8,6 +8,7 @@ tools and skills. Runs outside of Cursor with full access to all capabilities.
 Features:
 - Continuous Slack monitoring with configurable poll interval
 - Intent detection and routing to appropriate tools
+- User classification (safe/concerned/unknown) for response modulation
 - Optional LLM integration for intelligent responses
 - Rich terminal UI with status display
 - Graceful shutdown handling
@@ -18,13 +19,9 @@ Usage:
     python scripts/slack_daemon.py --dry-run          # Process but don't respond
     python scripts/slack_daemon.py --verbose          # Detailed logging
 
-Environment Variables:
-    SLACK_XOXC_TOKEN      - Slack web client token (required)
-    SLACK_D_COOKIE        - Slack session cookie (required)
-    SLACK_WATCHED_CHANNELS - Channels to monitor
-    SLACK_WATCHED_KEYWORDS - Keywords to trigger on
-    OPENAI_API_KEY        - For LLM integration (optional)
-    OPENAI_BASE_URL       - Custom API endpoint (optional)
+Configuration:
+    All settings are read from config.json under the "slack" key.
+    Environment variables can override config.json values.
 """
 
 import argparse
@@ -39,8 +36,9 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 # Add project paths
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -60,6 +58,140 @@ from src.persistence import SlackStateDB, PendingMessage
 from src.listener import SlackListener, ListenerConfig
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+
+def load_config() -> dict:
+    """Load configuration from config.json."""
+    config_path = PROJECT_ROOT / "config.json"
+    if config_path.exists():
+        with open(config_path) as f:
+            return json.load(f)
+    return {}
+
+
+CONFIG = load_config()
+SLACK_CONFIG = CONFIG.get("slack", {})
+
+
+def get_slack_config(key: str, default: Any = None, env_var: str = None) -> Any:
+    """
+    Get a Slack config value with environment variable override.
+
+    Priority: Environment variable > config.json > default
+    """
+    if env_var and os.getenv(env_var):
+        return os.getenv(env_var)
+
+    # Navigate nested keys like "auth.xoxc_token"
+    keys = key.split(".")
+    value = SLACK_CONFIG
+    for k in keys:
+        if isinstance(value, dict):
+            value = value.get(k)
+        else:
+            value = None
+            break
+
+    return value if value is not None else default
+
+
+# =============================================================================
+# USER CLASSIFICATION
+# =============================================================================
+
+
+class UserCategory(Enum):
+    """User classification categories."""
+
+    SAFE = "safe"  # Teammates - respond freely
+    CONCERNED = "concerned"  # Managers - respond carefully
+    UNKNOWN = "unknown"  # Everyone else - professional default
+
+
+@dataclass
+class UserClassification:
+    """Classification result for a user."""
+
+    category: UserCategory
+    response_style: str  # casual, formal, professional
+    auto_respond: bool
+    require_review: bool
+    include_emojis: bool
+    cc_notification: bool
+    max_response_length: int | None
+
+
+class UserClassifier:
+    """Classifies users based on config.json lists."""
+
+    def __init__(self):
+        self.user_config = SLACK_CONFIG.get("user_classification", {})
+        self._load_lists()
+
+    def _load_lists(self):
+        """Load user lists from config."""
+        safe = self.user_config.get("safe_list", {})
+        self.safe_user_ids = set(safe.get("user_ids", []))
+        self.safe_user_names = set(u.lower() for u in safe.get("user_names", []))
+
+        concerned = self.user_config.get("concerned_list", {})
+        self.concerned_user_ids = set(concerned.get("user_ids", []))
+        self.concerned_user_names = set(u.lower() for u in concerned.get("user_names", []))
+
+    def classify(self, user_id: str, user_name: str) -> UserClassification:
+        """Classify a user and return response settings."""
+        user_name_lower = user_name.lower()
+
+        # Check concerned list first (takes priority)
+        if user_id in self.concerned_user_ids or user_name_lower in self.concerned_user_names:
+            concerned = self.user_config.get("concerned_list", {})
+            return UserClassification(
+                category=UserCategory.CONCERNED,
+                response_style=concerned.get("response_style", "formal"),
+                auto_respond=concerned.get("auto_respond", False),
+                require_review=concerned.get("require_review", True),
+                include_emojis=concerned.get("include_emojis", False),
+                cc_notification=concerned.get("cc_notification", True),
+                max_response_length=None,
+            )
+
+        # Check safe list
+        if user_id in self.safe_user_ids or user_name_lower in self.safe_user_names:
+            safe = self.user_config.get("safe_list", {})
+            return UserClassification(
+                category=UserCategory.SAFE,
+                response_style=safe.get("response_style", "casual"),
+                auto_respond=safe.get("auto_respond", True),
+                require_review=False,
+                include_emojis=safe.get("include_emojis", True),
+                cc_notification=False,
+                max_response_length=None,
+            )
+
+        # Default: unknown
+        unknown = self.user_config.get("unknown_list", {})
+        return UserClassification(
+            category=UserCategory.UNKNOWN,
+            response_style=unknown.get("response_style", "professional"),
+            auto_respond=unknown.get("auto_respond", True),
+            require_review=False,
+            include_emojis=unknown.get("include_emojis", True),
+            cc_notification=False,
+            max_response_length=unknown.get("max_response_length", 500),
+        )
+
+    def reload(self):
+        """Reload lists from config (for hot reload)."""
+        global CONFIG, SLACK_CONFIG
+        CONFIG = load_config()
+        SLACK_CONFIG = CONFIG.get("slack", {})
+        self.user_config = SLACK_CONFIG.get("user_classification", {})
+        self._load_lists()
 
 
 # =============================================================================
@@ -95,14 +227,16 @@ class TerminalUI:
 
     def print_header(self):
         """Print startup header."""
-        print(f"""
+        print(
+            f"""
 {self.COLORS['cyan']}╔══════════════════════════════════════════════════════════════════╗
 ║  {self.COLORS['bold']}🤖 AI Workflow - Autonomous Slack Agent{self.COLORS['reset']}{self.COLORS['cyan']}                          ║
 ║                                                                    ║
 ║  Monitoring Slack channels for messages...                         ║
 ║  Press Ctrl+C to stop                                              ║
 ╚══════════════════════════════════════════════════════════════════╝{self.COLORS['reset']}
-""")
+"""
+        )
 
     def print_status(self, listener_stats: dict):
         """Print current status."""
@@ -110,7 +244,9 @@ class TerminalUI:
         hours, remainder = divmod(int(uptime), 3600)
         minutes, seconds = divmod(remainder, 60)
 
-        status = f"{self.COLORS['dim']}[{hours:02d}:{minutes:02d}:{seconds:02d}]{self.COLORS['reset']} "
+        status = (
+            f"{self.COLORS['dim']}[{hours:02d}:{minutes:02d}:{seconds:02d}]{self.COLORS['reset']} "
+        )
         status += f"📊 Polls: {listener_stats.get('polls', 0)} | "
         status += f"📬 Seen: {listener_stats.get('messages_seen', 0)} | "
         status += f"✅ Processed: {self.messages_processed} | "
@@ -122,22 +258,47 @@ class TerminalUI:
         self.clear_line()
         print(status, end="", flush=True)
 
-    def print_message(self, msg: PendingMessage, intent: str):
+    def print_message(
+        self,
+        msg: PendingMessage,
+        intent: str,
+        classification: "UserClassification | None" = None,
+    ):
         """Print incoming message."""
-        print(f"\n{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}")
+        print(
+            f"\n{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}"
+        )
         print(f"{self.COLORS['bold']}📩 New Message{self.COLORS['reset']}")
         print(f"   Channel: #{msg.channel_name}")
         print(f"   From: {msg.user_name}")
+
+        # Show user classification
+        if classification:
+            cat = classification.category.value
+            if cat == "safe":
+                cat_display = f"{self.COLORS['green']}✅ SAFE{self.COLORS['reset']}"
+            elif cat == "concerned":
+                cat_display = f"{self.COLORS['red']}⚠️  CONCERNED{self.COLORS['reset']}"
+            else:
+                cat_display = f"{self.COLORS['blue']}❓ UNKNOWN{self.COLORS['reset']}"
+            print(f"   User: {cat_display} ({classification.response_style})")
+
         print(f"   Intent: {self.COLORS['cyan']}{intent}{self.COLORS['reset']}")
         print(f"   Text: {msg.text[:100]}{'...' if len(msg.text) > 100 else ''}")
 
     def print_response(self, response: str, success: bool):
         """Print outgoing response."""
-        status = f"{self.COLORS['green']}✅{self.COLORS['reset']}" if success else f"{self.COLORS['red']}❌{self.COLORS['reset']}"
+        status = (
+            f"{self.COLORS['green']}✅{self.COLORS['reset']}"
+            if success
+            else f"{self.COLORS['red']}❌{self.COLORS['reset']}"
+        )
         print(f"   Response: {status}")
         if self.verbose:
             print(f"   {self.COLORS['dim']}{response[:200]}...{self.COLORS['reset']}")
-        print(f"{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}")
+        print(
+            f"{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}"
+        )
 
     def print_error(self, error: str):
         """Print error message."""
@@ -341,15 +502,58 @@ class ToolExecutor:
 
 
 class ResponseGenerator:
-    """Generates responses for different intents."""
+    """Generates responses for different intents with user-aware modulation."""
 
     def __init__(self, executor: ToolExecutor, use_llm: bool = False):
         self.executor = executor
         self.use_llm = use_llm
         self.llm_client = None
+        self.templates = SLACK_CONFIG.get("response_templates", {})
 
         if use_llm:
             self._init_llm()
+
+    def _get_greeting(self, user_name: str, classification: UserClassification) -> str:
+        """Get appropriate greeting based on user classification."""
+        style = classification.response_style
+        template_key = f"{style}_greeting"
+        template = self.templates.get(template_key, "Hi {user_name},")
+        return template.format(user_name=user_name)
+
+    def _get_closing(self, classification: UserClassification) -> str:
+        """Get appropriate closing based on user classification."""
+        style = classification.response_style
+        template_key = f"{style}_closing"
+        return self.templates.get(template_key, "")
+
+    def _modulate_response(
+        self,
+        response: str,
+        user_name: str,
+        classification: UserClassification,
+    ) -> str:
+        """Modulate response based on user classification."""
+        # Remove emojis if not allowed
+        if not classification.include_emojis:
+            # Remove common emoji patterns
+            response = re.sub(r"[📋🦊✅❌🚀🔍📊🎉👋📬📩💬🤖⚡🚨📝🔄]", "", response)
+            response = re.sub(r":\w+:", "", response)  # Remove :emoji: style
+
+        # Truncate if max length specified
+        if classification.max_response_length:
+            if len(response) > classification.max_response_length:
+                response = response[: classification.max_response_length - 50]
+                response += "\n\n_...response truncated_"
+
+        # Add formal structure for concerned users
+        if classification.response_style == "formal":
+            greeting = self._get_greeting(user_name, classification)
+            closing = self._get_closing(classification)
+            response = f"{greeting}\n\n{response}"
+            if closing:
+                response = f"{response}\n\n{closing}"
+
+        return response
 
     def _init_llm(self):
         """Initialize LLM client if available."""
@@ -373,8 +577,19 @@ class ResponseGenerator:
             logger.warning(f"Could not initialize LLM: {e}")
             self.use_llm = False
 
-    async def generate(self, message: PendingMessage, intent: Intent) -> str:
-        """Generate a response for the given message and intent."""
+    async def generate(
+        self,
+        message: PendingMessage,
+        intent: Intent,
+        classification: UserClassification,
+    ) -> tuple[str, bool]:
+        """
+        Generate a response for the given message and intent.
+
+        Returns:
+            tuple of (response_text, should_send)
+            should_send is False if user classification requires review
+        """
         handlers = {
             "jira_query": self._handle_jira_query,
             "mr_status": self._handle_mr_status,
@@ -387,7 +602,15 @@ class ResponseGenerator:
         }
 
         handler = handlers.get(intent.type, self._handle_general)
-        return await handler(message, intent)
+        response = await handler(message, intent)
+
+        # Modulate response based on user classification
+        response = self._modulate_response(response, message.user_name, classification)
+
+        # Determine if we should auto-send
+        should_send = classification.auto_respond and not classification.require_review
+
+        return response, should_send
 
     async def _handle_jira_query(self, msg: PendingMessage, intent: Intent) -> str:
         """Handle Jira issue query."""
@@ -536,7 +759,9 @@ Try:
                 return data["choices"][0]["message"]["content"]
             else:
                 logger.warning(f"LLM error: {response.status_code}")
-                return await self._handle_general.__wrapped__(self, msg, Intent(type="general", confidence=0.5))
+                return await self._handle_general.__wrapped__(
+                    self, msg, Intent(type="general", confidence=0.5)
+                )
         except Exception as e:
             logger.error(f"LLM error: {e}")
             return f"I encountered an error. Please try a specific command like `help`."
@@ -566,6 +791,7 @@ class SlackDaemon:
         self.intent_detector = IntentDetector()
         self.executor = ToolExecutor(PROJECT_ROOT)
         self.response_generator = ResponseGenerator(self.executor, use_llm=use_llm)
+        self.user_classifier = UserClassifier()
 
         self.session: SlackSession | None = None
         self.state_db: SlackStateDB | None = None
@@ -573,14 +799,30 @@ class SlackDaemon:
 
         self._running = False
         self._shutdown_event = asyncio.Event()
+        self._pending_reviews: list[dict] = []  # Messages awaiting review
 
     async def start(self):
         """Initialize and start the daemon."""
         self.ui.print_header()
 
-        # Initialize Slack session
+        # Initialize Slack session (config.json with env override)
         try:
-            self.session = SlackSession.from_env()
+            xoxc_token = get_slack_config("auth.xoxc_token", "", "SLACK_XOXC_TOKEN")
+            d_cookie = get_slack_config("auth.d_cookie", "", "SLACK_D_COOKIE")
+            workspace_id = get_slack_config("auth.workspace_id", "", "SLACK_WORKSPACE_ID")
+
+            if not xoxc_token or not d_cookie:
+                self.ui.print_error(
+                    "Missing Slack credentials. Set in config.json or environment:\n"
+                    "  SLACK_XOXC_TOKEN and SLACK_D_COOKIE"
+                )
+                return
+
+            self.session = SlackSession(
+                xoxc_token=xoxc_token,
+                d_cookie=d_cookie,
+                workspace_id=workspace_id,
+            )
             auth = await self.session.validate_session()
             print(f"✅ Authenticated as: {auth.get('user', 'unknown')}")
         except Exception as e:
@@ -588,20 +830,50 @@ class SlackDaemon:
             return
 
         # Initialize state database
-        self.state_db = SlackStateDB()
+        db_path = get_slack_config("state_db_path", "./slack_state.db")
+        self.state_db = SlackStateDB(db_path)
         await self.state_db.connect()
         print("✅ State database connected")
 
-        # Initialize listener
-        config = ListenerConfig.from_env()
-        config.poll_interval = self.poll_interval
+        # Initialize listener with config.json settings
+        watched_channels = get_slack_config("listener.watched_channels", [])
+        if isinstance(watched_channels, str):
+            watched_channels = [c.strip() for c in watched_channels.split(",") if c.strip()]
+
+        watched_keywords = get_slack_config("listener.watched_keywords", [])
+        if isinstance(watched_keywords, str):
+            watched_keywords = [k.strip().lower() for k in watched_keywords.split(",") if k.strip()]
+
+        self_user_id = get_slack_config("listener.self_user_id", "", "SLACK_SELF_USER_ID")
+        poll_interval = get_slack_config("listener.poll_interval", 5.0)
+
+        # Allow command line to override
+        if self.poll_interval != 5.0:
+            poll_interval = self.poll_interval
+
+        config = ListenerConfig(
+            poll_interval=poll_interval,
+            watched_channels=watched_channels,
+            watched_keywords=watched_keywords,
+            self_user_id=self_user_id,
+        )
+
         self.listener = SlackListener(self.session, self.state_db, config)
 
         print(f"✅ Watching {len(config.watched_channels)} channels")
         print(f"✅ Keywords: {', '.join(config.watched_keywords) or 'none'}")
 
+        # Show user classification summary
+        safe_count = len(self.user_classifier.safe_user_ids) + len(
+            self.user_classifier.safe_user_names
+        )
+        concerned_count = len(self.user_classifier.concerned_user_ids) + len(
+            self.user_classifier.concerned_user_names
+        )
+        print(f"✅ User lists: {safe_count} safe, {concerned_count} concerned")
+
         if self.dry_run:
-            print(f"⚠️  DRY RUN MODE - no responses will be sent")
+            print("⚠️  DRY RUN MODE - no responses will be sent")
 
         print()
 
@@ -636,18 +908,43 @@ class SlackDaemon:
 
     async def _process_message(self, msg: PendingMessage):
         """Process a single pending message."""
+        # Classify user
+        classification = self.user_classifier.classify(msg.user_id, msg.user_name)
+
         # Detect intent
         intent = self.intent_detector.detect(msg.text, msg.is_mention)
 
-        self.ui.print_message(msg, intent.type)
+        self.ui.print_message(msg, intent.type, classification)
         self.ui.messages_processed += 1
 
-        # Generate response
-        response = await self.response_generator.generate(msg, intent)
+        # Generate response (with classification-aware modulation)
+        response, should_send = await self.response_generator.generate(msg, intent, classification)
 
-        # Send response (unless dry run)
+        # Handle concerned users - queue for review instead of auto-sending
+        if classification.require_review and not self.dry_run:
+            self._pending_reviews.append(
+                {
+                    "message": msg,
+                    "response": response,
+                    "classification": classification,
+                    "intent": intent.type,
+                }
+            )
+            print(
+                f"   {self.ui.COLORS['yellow']}⏸️  QUEUED FOR REVIEW (concerned user){self.ui.COLORS['reset']}"
+            )
+            print(f"   Pending reviews: {len(self._pending_reviews)}")
+
+            # Optionally notify about concerned user message
+            await self._notify_concerned_message(msg, response)
+
+            # Still mark as processed (we've handled it, just not sent yet)
+            await self.state_db.mark_message_processed(msg.id)
+            return
+
+        # Send response (unless dry run or auto_respond is False)
         success = True
-        if not self.dry_run:
+        if not self.dry_run and should_send:
             try:
                 thread_ts = msg.thread_ts or msg.timestamp
                 await self.session.send_message(
@@ -660,11 +957,49 @@ class SlackDaemon:
             except Exception as e:
                 success = False
                 self.ui.print_error(f"Failed to send: {e}")
+        elif not should_send:
+            print(f"   {self.ui.COLORS['dim']}(auto_respond disabled){self.ui.COLORS['reset']}")
 
         self.ui.print_response(response, success)
 
         # Mark as processed
         await self.state_db.mark_message_processed(msg.id)
+
+    async def _notify_concerned_message(self, msg: PendingMessage, response: str):
+        """Notify when a concerned user sends a message."""
+        notifications = SLACK_CONFIG.get("notifications", {})
+        if not notifications.get("notify_on_concerned_message", False):
+            return
+
+        notify_channel = notifications.get("notification_channel")
+        notify_user = notifications.get("notify_user_id")
+
+        if not notify_channel and not notify_user:
+            return
+
+        notification = (
+            f"⚠️ *Concerned User Message*\n\n"
+            f"From: {msg.user_name} in #{msg.channel_name}\n"
+            f"Message: {msg.text[:200]}{'...' if len(msg.text) > 200 else ''}\n\n"
+            f"Proposed response queued for review."
+        )
+
+        try:
+            if notify_channel:
+                await self.session.send_message(
+                    channel_id=notify_channel,
+                    text=notification,
+                    typing_delay=False,
+                )
+            elif notify_user:
+                # DM the user
+                await self.session.send_message(
+                    channel_id=notify_user,
+                    text=notification,
+                    typing_delay=False,
+                )
+        except Exception as e:
+            logger.warning(f"Failed to send notification: {e}")
 
     async def stop(self):
         """Stop the daemon gracefully."""
@@ -710,7 +1045,8 @@ async def main():
         help="Enable LLM for intelligent responses",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Verbose output",
     )
@@ -754,4 +1090,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

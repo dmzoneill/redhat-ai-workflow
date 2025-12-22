@@ -2127,6 +2127,40 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
+### User Classification
+
+The Slack agent classifies users to modulate responses appropriately:
+
+| Category | Response Style | Auto-Respond | Example |
+|----------|----------------|--------------|---------|
+| **Safe** (teammates) | Casual, emojis ✅ | Yes | "Hey! 📋 Here's the info..." |
+| **Concerned** (managers) | Formal, no emojis | No (queued for review) | "Hello, Please find below..." |
+| **Unknown** (everyone else) | Professional | Yes | "Hi, Here's what I found..." |
+
+Configure in `config.json`:
+```json
+{
+  "slack": {
+    "user_classification": {
+      "safe_list": {
+        "user_ids": ["U11111111"],
+        "user_names": ["alice", "bob"]
+      },
+      "concerned_list": {
+        "user_ids": ["U99999999"],
+        "user_names": ["manager_name"]
+      }
+    }
+  }
+}
+```
+
+When a **concerned user** sends a message:
+1. Response is generated but NOT sent
+2. Message is queued for your review
+3. Optional notification sent to you via DM or channel
+4. You can review and approve/modify before sending
+
 ### Autonomous Daemon Mode
 
 For truly autonomous Slack response (outside Cursor), use the standalone daemon:

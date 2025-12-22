@@ -1,0 +1,79 @@
+{
+  "slack": {
+    "description": "Slack integration for autonomous agent",
+    "auth": {
+      "xoxc_token": "xoxc-your-token-here",
+      "d_cookie": "your-d-cookie-here",
+      "workspace_id": "T12345678"
+    },
+    "listener": {
+      "poll_interval": 5,
+      "watched_channels": ["C12345678", "C87654321"],
+      "watched_keywords": ["help", "question", "urgent", "review"],
+      "self_user_id": "U12345678"
+    },
+    "rate_limiting": {
+      "max_retries": 5,
+      "base_backoff": 1.0
+    },
+    "user_classification": {
+      "safe_list": {
+        "description": "Teammates - respond freely and casually",
+        "user_ids": ["U11111111", "U22222222"],
+        "user_names": ["alice", "bob", "charlie"],
+        "response_style": "casual",
+        "auto_respond": true,
+        "include_emojis": true
+      },
+      "concerned_list": {
+        "description": "Managers/stakeholders - respond formally and carefully",
+        "user_ids": ["U99999999"],
+        "user_names": ["manager_name", "stakeholder_name"],
+        "response_style": "formal",
+        "auto_respond": false,
+        "require_review": true,
+        "include_emojis": false,
+        "cc_notification": true
+      },
+      "unknown_list": {
+        "description": "Everyone else - default professional behavior",
+        "response_style": "professional",
+        "auto_respond": true,
+        "include_emojis": true,
+        "max_response_length": 500
+      }
+    },
+    "response_templates": {
+      "formal_greeting": "Hello {user_name},",
+      "casual_greeting": "Hey {user_name}!",
+      "professional_greeting": "Hi {user_name},",
+      "formal_closing": "Best regards",
+      "casual_closing": "",
+      "professional_closing": "Let me know if you need anything else!"
+    },
+    "notifications": {
+      "notify_on_concerned_message": true,
+      "notification_channel": "C12345678",
+      "notify_user_id": "U12345678"
+    },
+    "state_db_path": "./slack_state.db",
+    "debug": false
+  },
+  "repositories": {
+    "example-repo": {
+      "path": "/path/to/repo",
+      "gitlab": "namespace/project",
+      "jira_project": "PROJ",
+      "default_branch": "main"
+    }
+  },
+  "jira": {
+    "url": "https://jira.example.com",
+    "default_project": "PROJ",
+    "cli": "rh-issue"
+  },
+  "gitlab": {
+    "host": "gitlab.example.com"
+  }
+}
+
