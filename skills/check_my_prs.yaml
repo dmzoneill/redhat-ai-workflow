@@ -1,0 +1,288 @@
+# Skill: Check My PRs for Feedback
+# Review feedback on your own MRs and help respond
+
+name: check_my_prs
+description: |
+  Check your open MRs for feedback from reviewers.
+  
+  Shows:
+  - MRs with unaddressed feedback (need your response)
+  - MRs awaiting review (no feedback yet)
+  - MRs ready to merge (approved)
+  
+  Helps you respond to reviewer comments.
+
+version: "1.0"
+
+inputs:
+  - name: project
+    type: string
+    required: false
+    default: automation-analytics/automation-analytics-backend
+    description: "GitLab project path"
+  
+  - name: show_approved
+    type: boolean
+    required: false
+    default: true
+    description: "Include approved MRs in output"
+
+constants:
+  gitlab_project: automation-analytics/automation-analytics-backend
+
+steps:
+  # ==================== GET CURRENT USER ====================
+  
+  - name: get_username
+    description: "Get current system username"
+    compute: |
+      import getpass
+      import os
+      
+      username = os.getenv('USER') or os.getenv('USERNAME') or getpass.getuser()
+      result = username
+    output: my_username
+
+  # ==================== GET MY MRs ====================
+  
+  - name: list_my_mrs
+    description: "Fetch my open MRs from GitLab"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ inputs.project }}"
+      state: opened
+      author: "{{ my_username }}"
+    output: my_mrs_raw
+
+  - name: parse_my_mrs
+    description: "Parse MR list"
+    compute: |
+      import re
+      
+      mrs = []
+      lines = my_mrs_raw.split('\n') if my_mrs_raw else []
+      
+      current_mr = {}
+      for line in lines:
+        iid_match = re.search(r'!(\d+)|IID[:\s]+(\d+)', line, re.IGNORECASE)
+        if iid_match:
+          if current_mr.get('iid'):
+            mrs.append(current_mr)
+          current_mr = {'iid': int(iid_match.group(1) or iid_match.group(2))}
+        
+        title_match = re.search(r'Title[:\s]+(.+)', line, re.IGNORECASE)
+        if title_match and current_mr.get('iid'):
+          current_mr['title'] = title_match.group(1).strip()[:60]
+      
+      if current_mr.get('iid'):
+        mrs.append(current_mr)
+      
+      # Deduplicate
+      seen = set()
+      unique = []
+      for mr in mrs:
+        if mr['iid'] not in seen:
+          seen.add(mr['iid'])
+          unique.append(mr)
+      
+      result = unique
+    output: my_mrs
+
+  # ==================== CHECK EACH MR FOR FEEDBACK ====================
+  
+  - name: check_first_mr
+    description: "Get details of first MR"
+    condition: "len(my_mrs) > 0"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ my_mrs[0]['iid'] }}"
+    output: first_mr_details
+    on_error: continue
+
+  - name: analyze_first_mr
+    description: "Analyze feedback status of first MR"
+    condition: "len(my_mrs) > 0 and first_mr_details"
+    compute: |
+      import re
+      
+      mr = my_mrs[0]
+      details = first_mr_details or ""
+      
+      # Check approval status
+      is_approved = bool(re.search(r'approved|LGTM|:white_check_mark:|✅', details, re.IGNORECASE))
+      
+      # Check for reviewer comments (not from me)
+      my_user = my_username.lower()
+      
+      # Look for comments from others
+      comment_patterns = [
+        r'(\w+)\s+commented',
+        r'Review by\s+(\w+)',
+        r'@(\w+)\s+:',
+        r'Feedback from\s+(\w+)',
+      ]
+      
+      reviewers = set()
+      for pattern in comment_patterns:
+        matches = re.findall(pattern, details, re.IGNORECASE)
+        for match in matches:
+          if match.lower() != my_user:
+            reviewers.add(match)
+      
+      has_feedback = len(reviewers) > 0
+      
+      # Check for unresolved discussions
+      unresolved = bool(re.search(r'unresolved|open discussion|needs work|request.*change', details, re.IGNORECASE))
+      
+      # Check pipeline status
+      pipeline_failed = bool(re.search(r'pipeline.*failed|CI.*failed|build.*failed', details, re.IGNORECASE))
+      
+      # Determine status
+      if is_approved and not unresolved:
+        status = "approved"
+        action = "Ready to merge!"
+      elif unresolved or (has_feedback and not is_approved):
+        status = "needs_response"
+        action = "Reviewer feedback needs your response"
+      elif pipeline_failed:
+        status = "pipeline_failed"
+        action = "Fix pipeline before review"
+      else:
+        status = "awaiting_review"
+        action = "Waiting for reviewers"
+      
+      result = {
+        'iid': mr.get('iid'),
+        'title': mr.get('title', ''),
+        'status': status,
+        'action': action,
+        'is_approved': is_approved,
+        'has_feedback': has_feedback,
+        'reviewers': list(reviewers),
+        'unresolved': unresolved,
+        'pipeline_failed': pipeline_failed
+      }
+    output: first_mr_status
+
+  # ==================== GET COMMENTS IF NEEDS RESPONSE ====================
+  
+  - name: get_feedback_details
+    description: "Get detailed comments if MR needs response"
+    condition: "first_mr_status and first_mr_status.get('status') == 'needs_response'"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ first_mr_status.get('iid') }}"
+    output: feedback_details
+    on_error: continue
+
+  # ==================== BUILD SUMMARY ====================
+  
+  - name: build_summary
+    description: "Compile status of all my MRs"
+    compute: |
+      lines = ["## 📋 Your Open MRs", ""]
+      lines.append(f"**User:** {my_username}")
+      lines.append(f"**Project:** {inputs.project}")
+      lines.append(f"**Open MRs:** {len(my_mrs)}")
+      lines.append("")
+      
+      if not my_mrs:
+        lines.append("*No open MRs found.*")
+        result = '\n'.join(lines)
+      else:
+        # Categorize
+        needs_response = []
+        awaiting = []
+        approved = []
+        failed = []
+        
+        if first_mr_status:
+          status = first_mr_status.get('status', 'unknown')
+          if status == 'needs_response':
+            needs_response.append(first_mr_status)
+          elif status == 'approved':
+            approved.append(first_mr_status)
+          elif status == 'pipeline_failed':
+            failed.append(first_mr_status)
+          else:
+            awaiting.append(first_mr_status)
+        
+        # Add remaining MRs as "awaiting" (not analyzed in detail)
+        for mr in my_mrs[1:]:
+          awaiting.append({'iid': mr.get('iid'), 'title': mr.get('title', ''), 'status': 'not_checked'})
+        
+        # Show MRs needing response first (most important)
+        if needs_response:
+          lines.append("### 🔴 Needs Your Response")
+          lines.append("*Reviewers have left feedback - please address*")
+          lines.append("")
+          for mr in needs_response:
+            lines.append(f"**!{mr['iid']}**: {mr.get('title', '')}")
+            if mr.get('reviewers'):
+              lines.append(f"  - Feedback from: {', '.join(mr['reviewers'])}")
+            if mr.get('unresolved'):
+              lines.append(f"  - ⚠️ Has unresolved discussions")
+            lines.append("")
+        
+        if failed:
+          lines.append("### 🔴 Pipeline Failed")
+          for mr in failed:
+            lines.append(f"- !{mr['iid']}: {mr.get('title', '')} - Fix CI before review")
+          lines.append("")
+        
+        if awaiting:
+          lines.append("### 🟡 Awaiting Review")
+          for mr in awaiting:
+            lines.append(f"- !{mr['iid']}: {mr.get('title', '')}")
+          lines.append("")
+        
+        if approved and inputs.show_approved:
+          lines.append("### 🟢 Approved - Ready to Merge")
+          for mr in approved:
+            lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ✅")
+          lines.append("")
+        
+        result = '\n'.join(lines)
+    output: summary
+
+# ==================== OUTPUT ====================
+
+outputs:
+  - name: summary
+    value: |
+      {{ summary }}
+      
+      ---
+      
+      ## Quick Actions
+      
+      {% if first_mr_status and first_mr_status.get('status') == 'needs_response' %}
+      **To respond to feedback on !{{ first_mr_status.get('iid') }}:**
+      
+      1. View the comments:
+         ```
+         gitlab_mr_view(project="{{ inputs.project }}", mr_id={{ first_mr_status.get('iid') }})
+         ```
+      
+      2. After making changes, push and comment:
+         ```
+         gitlab_mr_comment(project="{{ inputs.project }}", mr_id={{ first_mr_status.get('iid') }}, comment="Addressed feedback: ...")
+         ```
+      {% elif first_mr_status and first_mr_status.get('status') == 'approved' %}
+      **!{{ first_mr_status.get('iid') }} is approved!** Ready to merge:
+      ```
+      gitlab_mr_merge(project="{{ inputs.project }}", mr_id={{ first_mr_status.get('iid') }})
+      ```
+      {% else %}
+      - View MR details: `gitlab_mr_view(project="...", mr_id=<id>)`
+      - Check all MRs again: `skill_run("check_my_prs", '{}')`
+      {% endif %}
+  
+  - name: context
+    value:
+      username: "{{ my_username }}"
+      total_mrs: "{{ len(my_mrs) }}"
+      first_mr_status: "{{ first_mr_status.get('status') if first_mr_status else 'none' }}"
+

@@ -324,7 +324,8 @@ flowchart LR
 | 🚀 [`create_mr`](#create_mr) | Create MR with Jira link | developer |
 | ✅ [`close_issue`](#close_issue) | Close issue with commit summary | developer |
 | 👀 [`review_pr`](#review_pr) | Review PR with auto-approve/feedback | developer |
-| 📋 [`review_all_prs`](#review_all_prs) | Batch review open PRs | developer |
+| 📋 [`review_all_prs`](#review_all_prs) | Batch review open PRs (by others) | developer |
+| 📝 [`check_my_prs`](#check_my_prs) | Check your PRs for reviewer feedback | developer |
 | 🧪 [`test_mr_ephemeral`](#test_mr_ephemeral) | Test in ephemeral namespace | developer |
 | 📋 [`jira_hygiene`](#jira_hygiene) | Validate/fix Jira quality | developer |
 | 🔍 [`investigate_alert`](#investigate_alert) | Systematic alert triage | devops, incident |
@@ -516,6 +517,61 @@ flowchart TD
     F --> J
     H --> J
     I --> J
+```
+
+---
+
+### 📝 check_my_prs
+
+Check your own open PRs for feedback from reviewers.
+
+```
+skill_run("check_my_prs", '{}')
+```
+
+**Inputs:**
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `project` | No | automation-analytics/... | GitLab project |
+| `show_approved` | No | `true` | Include approved MRs |
+
+**Output Categories:**
+| Status | Meaning |
+|--------|---------|
+| 🔴 Needs Your Response | Reviewers left feedback - address it |
+| 🔴 Pipeline Failed | Fix CI before review |
+| 🟡 Awaiting Review | No feedback yet |
+| 🟢 Approved | Ready to merge! |
+
+```mermaid
+flowchart TD
+    A[Get My Username] --> B[List My Open MRs]
+    B --> C[For Each MR]
+    C --> D{Has Feedback?}
+    D -->|Yes| E{Approved?}
+    D -->|No| F[Awaiting Review]
+    E -->|Yes| G[Ready to Merge]
+    E -->|No| H[Needs Response]
+    H --> I[Show Reviewers & Comments]
+```
+
+**Example Output:**
+```
+## 📋 Your Open MRs
+
+**User:** daoneill
+**Open MRs:** 3
+
+### 🔴 Needs Your Response
+**!240**: AAP-61210 - feat: Caching
+  - Feedback from: jsmith, mwilson
+  - ⚠️ Has unresolved discussions
+
+### 🟡 Awaiting Review
+- !241: AAP-61212 - fix: Memory leak
+
+### 🟢 Approved - Ready to Merge
+- !239: AAP-61208 - docs: Update README ✅
 ```
 
 ---
