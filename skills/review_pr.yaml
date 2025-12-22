@@ -437,6 +437,109 @@ pytest -vv --tb=short -q 2>&1 | tail -50
       result = '\n'.join(lines)
     output: review_summary
 
+# ==================== AUTO ACTIONS ====================
+
+  # Step 15: Determine action based on review
+  - name: determine_action
+    description: "Decide whether to approve or request changes"
+    compute: |
+      # Check for blockers
+      has_security_issues = code_issues and any('Security' in str(i) for i in code_issues)
+      has_format_issues = format_issues and format_issues != ["Format OK"]
+      has_test_failures = not inputs.skip_tests and test_result and '❌' in str(test_result)
+      has_pipeline_failures = 'Failed' in str(gitlab_pipeline) or 'failed' in str(konflux_pipelines).lower()
+      
+      # Determine action
+      if has_security_issues:
+        action = "request_changes"
+        reason = "Security issues detected"
+      elif has_test_failures:
+        action = "request_changes"
+        reason = "Tests are failing"
+      elif has_pipeline_failures:
+        action = "request_changes"
+        reason = "CI/CD pipelines failing"
+      elif has_format_issues:
+        action = "request_changes"
+        reason = "Commit format issues"
+      elif code_issues and len(code_issues) > 3:
+        action = "request_changes"
+        reason = f"{len(code_issues)} code issues found"
+      else:
+        action = "approve"
+        reason = "No blocking issues found"
+      
+      result = {"action": action, "reason": reason}
+    output: review_action
+
+  # Step 16: Build feedback message (for request_changes)
+  - name: build_feedback
+    description: "Build feedback message for GitLab"
+    condition: "review_action.get('action') == 'request_changes'"
+    compute: |
+      lines = [f"## Code Review Feedback for {jira_key}"]
+      lines.append("")
+      
+      if format_issues and format_issues != ["Format OK"]:
+        lines.append("### Commit Format")
+        for issue in format_issues[:3]:
+          lines.append(f"- {issue}")
+        lines.append("")
+      
+      if code_issues:
+        lines.append("### Code Issues")
+        for issue in code_issues[:5]:
+          lines.append(f"- {issue}")
+        lines.append("")
+      
+      if not inputs.skip_tests and test_result and '❌' in str(test_result):
+        lines.append("### Tests")
+        lines.append("- Local tests are failing. Please investigate.")
+        lines.append("")
+      
+      lines.append("---")
+      lines.append("*Automated review by AI Workflow*")
+      
+      result = '\n'.join(lines)
+    output: feedback_message
+
+  # Step 17: Post feedback comment (if requesting changes)
+  - name: post_feedback
+    description: "Post review feedback to MR"
+    condition: "review_action.get('action') == 'request_changes'"
+    tool: gitlab_mr_comment
+    args:
+      project: "{{ constants.gitlab_project }}"
+      mr_id: "{{ inputs.mr_id }}"
+      comment: "{{ feedback_message }}"
+    output: feedback_posted
+    on_error: continue
+
+  # Step 18: Approve MR (if no issues)
+  - name: approve_mr
+    description: "Approve the MR on GitLab"
+    condition: "review_action.get('action') == 'approve'"
+    tool: gitlab_mr_approve
+    args:
+      project: "{{ constants.gitlab_project }}"
+      mr_id: "{{ inputs.mr_id }}"
+    output: approval_result
+    on_error: continue
+
+  # Step 19: Add Jira comment about review
+  - name: jira_comment
+    description: "Add review note to Jira issue"
+    condition: "{{ jira_key != 'NOT_FOUND' }}"
+    tool: jira_add_comment
+    args:
+      issue_key: "{{ jira_key }}"
+      comment: |
+        MR !{{ inputs.mr_id }} reviewed.
+        Action: {{ review_action.get('action', 'unknown') }}
+        Reason: {{ review_action.get('reason', '') }}
+    output: jira_updated
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
@@ -446,28 +549,26 @@ outputs:
       
       ---
       
-      ## What's Next?
+      ## Action Taken
       
-      Review the findings above. When ready, tell me:
+      **Decision:** {{ review_action.get('action', 'unknown') | upper }}
+      **Reason:** {{ review_action.get('reason', '') }}
       
-      - **"approve"** - I'll approve via glab and note on Jira
-      - **"request changes"** - I'll post feedback (you can edit first)
-      - **"skip"** - Take no action
+      {% if review_action.get('action') == 'approve' %}
+      ✅ MR has been approved on GitLab.
+      {% else %}
+      📝 Feedback has been posted to the MR.
+      {% endif %}
       
-      ### Draft Feedback (if needed)
-      {% if code_issues %}
-      ```
-      Code review feedback for {{ jira_key }}:
-      {% for issue in code_issues[:5] %}
-      - {{ issue }}
-      {% endfor %}
-      ```
+      {% if jira_key != 'NOT_FOUND' %}
+      📋 Jira issue {{ jira_key }} updated with review note.
       {% endif %}
   
   - name: context
     value:
       mr_id: "{{ inputs.mr_id }}"
       jira_key: "{{ jira_key }}"
+      action: "{{ review_action.get('action') }}"
       has_issues: "{{ code_issues | length > 0 }}"
       format_ok: "{{ format_issues == ['Format OK'] }}"
       tests_passed: "{{ '✅' in str(test_result) if test_result else 'unknown' }}"

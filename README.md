@@ -323,7 +323,8 @@ flowchart LR
 | ⚡ [`start_work`](#start_work) | Begin working on a Jira issue | developer |
 | 🚀 [`create_mr`](#create_mr) | Create MR with Jira link | developer |
 | ✅ [`close_issue`](#close_issue) | Close issue with commit summary | developer |
-| 👀 [`review_pr`](#review_pr) | Review colleague's PR | developer |
+| 👀 [`review_pr`](#review_pr) | Review PR with auto-approve/feedback | developer |
+| 📋 [`review_all_prs`](#review_all_prs) | Batch review open PRs | developer |
 | 🧪 [`test_mr_ephemeral`](#test_mr_ephemeral) | Test in ephemeral namespace | developer |
 | 📋 [`jira_hygiene`](#jira_hygiene) | Validate/fix Jira quality | developer |
 | 🔍 [`investigate_alert`](#investigate_alert) | Systematic alert triage | devops, incident |
@@ -430,10 +431,11 @@ flowchart TD
 
 ### 👀 review_pr
 
-Review a colleague's PR with static analysis and local testing.
+Review a colleague's PR with static analysis and local testing. **Automatically approves or posts feedback.**
 
 ```
 skill_run("review_pr", '{"mr_id": 123}')
+skill_run("review_pr", '{"mr_id": 123, "skip_tests": true}')
 ```
 
 **Inputs:**
@@ -442,25 +444,72 @@ skill_run("review_pr", '{"mr_id": 123}')
 | `mr_id` | Yes | - | GitLab MR ID |
 | `skip_tests` | No | `false` | Skip local tests |
 
+**Auto-Actions:**
+- ✅ **Approve** if no blocking issues found
+- 📝 **Post feedback** if security issues, test failures, or format problems
+- 📋 **Update Jira** with review status
+
 ```mermaid
 flowchart TD
     A[Start] --> B[Get MR Details]
     B --> C[Extract Jira Key]
     C --> D[Get Jira Context]
-    D --> E[Check Konflux Pipeline]
-    E --> F[Validate Commit Titles]
+    D --> E[Check Pipelines]
+    E --> F[Validate Commit Format]
     F --> G[Static Analysis]
     G --> H["Security, Memory, Race Conditions"]
     H --> I{Skip Tests?}
-    I -->|No| J[Checkout Branch]
-    J --> K[Run Migrations]
-    K --> L[Run Pytest]
-    L --> M[Collect Results]
-    I -->|Yes| M
-    M --> N[Build Feedback]
-    N --> O{User Approves?}
-    O -->|Yes| P[Post to GitLab]
-    O -->|No| Q[Revise Feedback]
+    I -->|No| J[Checkout & Run Tests]
+    I -->|Yes| K
+    J --> K[Determine Action]
+    K --> L{Issues Found?}
+    L -->|Yes| M[Post Feedback to MR]
+    L -->|No| N[Approve MR]
+    M --> O[Update Jira]
+    N --> O
+```
+
+---
+
+### 📋 review_all_prs
+
+Batch review all open PRs with intelligent follow-up.
+
+```
+skill_run("review_all_prs", '{}')
+skill_run("review_all_prs", '{"dry_run": true}')
+```
+
+**Inputs:**
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `project` | No | automation-analytics/automation-analytics-backend | GitLab project |
+| `reviewer` | No | - | Filter by reviewer |
+| `limit` | No | `10` | Max MRs to process |
+| `dry_run` | No | `false` | Preview without taking action |
+
+**Decision Logic:**
+| Scenario | Action |
+|----------|--------|
+| No previous review from me | Run full review |
+| I gave feedback, author didn't respond | Skip (waiting) |
+| I gave feedback, author addressed it | Approve |
+| I gave feedback, unresolved issues remain | Post follow-up |
+
+```mermaid
+flowchart TD
+    A[List Open MRs] --> B[For Each MR]
+    B --> C{My Previous Review?}
+    C -->|No| D[Run Full Review]
+    C -->|Yes| E{Author Responded?}
+    E -->|No| F[Skip - Waiting]
+    E -->|Yes| G{Issues Resolved?}
+    G -->|Yes| H[Approve MR]
+    G -->|No| I[Post Follow-up]
+    D --> J[Next MR]
+    F --> J
+    H --> J
+    I --> J
 ```
 
 ---

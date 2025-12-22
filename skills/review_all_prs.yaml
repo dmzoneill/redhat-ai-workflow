@@ -1,0 +1,334 @@
+# Skill: Review All Open PRs
+# Batch review of open MRs with intelligent follow-up
+
+name: review_all_prs
+description: |
+  Review all open MRs in automation-analytics-backend.
+  
+  For each MR:
+  - If I gave feedback and author addressed it → approve
+  - If I gave feedback and author didn't respond → skip
+  - If I gave feedback and author responded but issues remain → more feedback
+  - If no previous review from me → run full review
+  
+version: "1.0"
+
+inputs:
+  - name: project
+    type: string
+    required: false
+    default: automation-analytics/automation-analytics-backend
+    description: "GitLab project path"
+  
+  - name: reviewer
+    type: string
+    required: false
+    default: ""
+    description: "Filter by reviewer username (leave empty for all open MRs)"
+  
+  - name: limit
+    type: integer
+    required: false
+    default: 10
+    description: "Maximum number of MRs to process"
+  
+  - name: dry_run
+    type: boolean
+    required: false
+    default: false
+    description: "If true, show what would happen without taking action"
+
+constants:
+  gitlab_project: automation-analytics/automation-analytics-backend
+
+steps:
+  # ==================== GATHER MRs ====================
+
+  # Step 1: Get list of open MRs
+  - name: list_open_mrs
+    description: "Fetch all open MRs from GitLab"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ inputs.project }}"
+      state: opened
+      per_page: "{{ inputs.limit }}"
+    output: open_mrs
+
+  # Step 2: Parse MR list
+  - name: parse_mrs
+    description: "Extract MR IDs and basic info"
+    compute: |
+      import re
+      
+      mrs = []
+      # Parse the MR list output - format varies but usually contains IID, title, author
+      lines = open_mrs.split('\n') if open_mrs else []
+      
+      current_mr = {}
+      for line in lines:
+        # Look for MR ID patterns like "!123" or "IID: 123"
+        iid_match = re.search(r'!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)', line, re.IGNORECASE)
+        if iid_match:
+          if current_mr.get('iid'):
+            mrs.append(current_mr)
+          current_mr = {'iid': int(iid_match.group(1) or iid_match.group(2) or iid_match.group(3))}
+        
+        # Extract title
+        title_match = re.search(r'Title[:\s]+(.+)|^\s*(.+)\s*$', line)
+        if title_match and current_mr.get('iid') and not current_mr.get('title'):
+          current_mr['title'] = (title_match.group(1) or title_match.group(2) or '').strip()[:60]
+        
+        # Extract author
+        author_match = re.search(r'Author[:\s]+(\w+)|@(\w+)', line)
+        if author_match and current_mr.get('iid'):
+          current_mr['author'] = author_match.group(1) or author_match.group(2)
+      
+      # Don't forget the last one
+      if current_mr.get('iid'):
+        mrs.append(current_mr)
+      
+      # Deduplicate by IID
+      seen = set()
+      unique_mrs = []
+      for mr in mrs:
+        if mr['iid'] not in seen:
+          seen.add(mr['iid'])
+          unique_mrs.append(mr)
+      
+      result = unique_mrs[:inputs.limit]
+    output: mr_list
+
+  # Step 3: Process each MR
+  - name: process_mrs
+    description: "Analyze each MR for review status"
+    compute: |
+      import subprocess
+      import re
+      
+      results = []
+      
+      for mr in mr_list:
+        mr_id = mr.get('iid')
+        if not mr_id:
+          continue
+        
+        mr_result = {
+          'iid': mr_id,
+          'title': mr.get('title', ''),
+          'author': mr.get('author', 'unknown'),
+          'action': 'pending',
+          'reason': '',
+          'my_last_feedback': None,
+          'author_replied': False,
+          'concerns_addressed': False
+        }
+        
+        results.append(mr_result)
+      
+      result = results
+    output: mr_analysis
+
+  # Step 4: For each MR, get comments and determine status
+  # Note: This is a simplified version - in practice you'd call gitlab_mr_comments for each
+  - name: analyze_review_status
+    description: "Determine review status for each MR"
+    compute: |
+      # This would ideally call gitlab_mr_comments for each MR
+      # For now, we'll set up the structure and the actual tool calls happen below
+      
+      result = {
+        'needs_review': [],
+        'can_approve': [],
+        'needs_followup': [],
+        'skip': []
+      }
+    output: review_status
+
+# ==================== INDIVIDUAL MR PROCESSING ====================
+
+  # Step 5: Get comments for first pending MR
+  # Note: This is a simplified approach - a full implementation would loop
+  - name: get_mr_comments
+    description: "Get comments for MRs to check review status"
+    condition: "len(mr_analysis) > 0"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ mr_analysis[0]['iid'] }}"
+    output: first_mr_details
+    on_error: continue
+
+  # Step 6: Analyze first MR's review status
+  - name: analyze_first_mr
+    description: "Check if first MR needs action"
+    condition: "len(mr_analysis) > 0 and first_mr_details"
+    compute: |
+      import re
+      
+      mr = mr_analysis[0]
+      details = first_mr_details or ""
+      
+      # Look for my previous comments/feedback
+      # This looks for patterns like "daoneill commented" or review feedback markers
+      my_comments = re.findall(r'(daoneill|Dave O\'Neill).*?commented|reviewed by.*?(daoneill)', details, re.IGNORECASE)
+      my_feedback_exists = len(my_comments) > 0
+      
+      # Look for author's replies after my feedback
+      # Check for "Author replied" or author's username after my comment
+      author = mr.get('author', '')
+      author_replied = author and re.search(rf'{author}.*?commented|replied', details, re.IGNORECASE)
+      
+      # Look for approval status
+      already_approved = re.search(r'approved by.*?daoneill|LGTM|Looks good', details, re.IGNORECASE)
+      
+      # Check for unresolved discussions
+      unresolved = re.search(r'unresolved.*?discussion|open thread', details, re.IGNORECASE)
+      
+      # Determine action
+      if already_approved:
+        action = "skip"
+        reason = "Already approved"
+      elif not my_feedback_exists:
+        action = "needs_full_review"
+        reason = "No previous review from me"
+      elif my_feedback_exists and not author_replied:
+        action = "skip"
+        reason = "Waiting for author response"
+      elif my_feedback_exists and author_replied and unresolved:
+        action = "needs_followup"
+        reason = "Author replied but unresolved issues"
+      elif my_feedback_exists and author_replied and not unresolved:
+        action = "can_approve"
+        reason = "Author addressed feedback"
+      else:
+        action = "needs_full_review"
+        reason = "Unclear status"
+      
+      mr['action'] = action
+      mr['reason'] = reason
+      
+      result = mr
+    output: first_mr_action
+
+  # Step 7: Run full review if needed
+  - name: run_full_review
+    description: "Run full review for MR that needs it"
+    condition: "first_mr_action and first_mr_action.get('action') == 'needs_full_review' and not inputs.dry_run"
+    tool: skill_run
+    args:
+      skill_name: review_pr
+      inputs: '{"mr_id": {{ first_mr_action.get("iid", 0) }}, "skip_tests": true}'
+    output: full_review_result
+    on_error: continue
+
+  # Step 8: Approve MR if author addressed feedback
+  - name: auto_approve
+    description: "Approve MR where author addressed feedback"
+    condition: "first_mr_action and first_mr_action.get('action') == 'can_approve' and not inputs.dry_run"
+    tool: gitlab_mr_approve
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ first_mr_action.get('iid') }}"
+    output: approve_result
+    on_error: continue
+
+  # Step 9: Post follow-up if needed
+  - name: post_followup
+    description: "Post follow-up comment for unresolved issues"
+    condition: "first_mr_action and first_mr_action.get('action') == 'needs_followup' and not inputs.dry_run"
+    tool: gitlab_mr_comment
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ first_mr_action.get('iid') }}"
+      comment: |
+        ## Follow-up Review
+        
+        I see you've responded to my feedback. However, there appear to be unresolved discussions.
+        
+        Could you please address the outstanding items so we can move forward?
+        
+        ---
+        *Automated follow-up by AI Workflow*
+    output: followup_result
+    on_error: continue
+
+  # Step 10: Build summary
+  - name: build_summary
+    description: "Compile batch review results"
+    compute: |
+      lines = ["## Batch PR Review Summary", ""]
+      lines.append(f"**Project:** {inputs.project}")
+      lines.append(f"**MRs Found:** {len(mr_analysis)}")
+      lines.append(f"**Dry Run:** {'Yes' if inputs.dry_run else 'No'}")
+      lines.append("")
+      
+      # Categorize actions
+      actions = {
+        'can_approve': [],
+        'needs_full_review': [],
+        'needs_followup': [],
+        'skip': []
+      }
+      
+      if first_mr_action:
+        action = first_mr_action.get('action', 'skip')
+        actions.get(action, actions['skip']).append(first_mr_action)
+      
+      # Summary by category
+      if actions['can_approve']:
+        lines.append("### ✅ Approved")
+        for mr in actions['can_approve']:
+          status = "Would approve" if inputs.dry_run else "Approved"
+          lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ({status})")
+        lines.append("")
+      
+      if actions['needs_full_review']:
+        lines.append("### 🔍 Full Review Performed")
+        for mr in actions['needs_full_review']:
+          lines.append(f"- !{mr['iid']}: {mr.get('title', '')}")
+        lines.append("")
+      
+      if actions['needs_followup']:
+        lines.append("### 💬 Follow-up Posted")
+        for mr in actions['needs_followup']:
+          status = "Would post follow-up" if inputs.dry_run else "Follow-up posted"
+          lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ({status})")
+        lines.append("")
+      
+      if actions['skip']:
+        lines.append("### ⏭️ Skipped")
+        for mr in actions['skip']:
+          lines.append(f"- !{mr['iid']}: {mr.get('title', '')} - {mr.get('reason', 'No action needed')}")
+        lines.append("")
+      
+      # Remaining MRs
+      remaining = len(mr_analysis) - 1
+      if remaining > 0:
+        lines.append(f"---")
+        lines.append(f"*{remaining} more MRs not processed in this batch.*")
+        lines.append(f"*Run again to continue processing.*")
+      
+      result = '\n'.join(lines)
+    output: batch_summary
+
+# ==================== OUTPUT ====================
+
+outputs:
+  - name: summary
+    value: |
+      {{ batch_summary }}
+      
+      ---
+      
+      ## Quick Actions
+      
+      - **Review next batch:** `skill_run("review_all_prs", '{}')`
+      - **Review specific MR:** `skill_run("review_pr", '{"mr_id": 123}')`
+      - **Approve specific MR:** `gitlab_mr_approve(project="...", mr_id=123)`
+  
+  - name: stats
+    value:
+      total_mrs: "{{ len(mr_analysis) }}"
+      processed: 1
+      dry_run: "{{ inputs.dry_run }}"
+

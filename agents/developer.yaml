@@ -19,6 +19,7 @@ skills:
   - start_work
   - create_mr
   - close_issue         # Close issue with commit summary
-  - review_pr           # PR review workflow
+  - review_pr           # PR review workflow (auto-approves or posts feedback)
+  - review_all_prs      # Batch review open PRs
   - test_mr_ephemeral   # Test in ephemeral
   - jira_hygiene        # Issue quality checks
