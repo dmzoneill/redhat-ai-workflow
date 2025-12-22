@@ -5,13 +5,17 @@ name: review_all_prs
 description: |
   Review all open MRs in automation-analytics-backend.
   
-  For each MR:
+  Automatically excludes your own MRs (detected from system username).
+  
+  For each MR (authored by others):
   - If I gave feedback and author addressed it → approve
   - If I gave feedback and author didn't respond → skip
   - If I gave feedback and author responded but issues remain → more feedback
   - If no previous review from me → run full review
   
-version: "1.0"
+  Also shows your own MRs that have feedback from others.
+  
+version: "1.1"
 
 inputs:
   - name: project
@@ -37,11 +41,39 @@ inputs:
     required: false
     default: false
     description: "If true, show what would happen without taking action"
+  
+  - name: include_my_mrs
+    type: boolean
+    required: false
+    default: true
+    description: "Show my own MRs that have feedback to respond to"
 
 constants:
   gitlab_project: automation-analytics/automation-analytics-backend
 
 steps:
+  # ==================== GET CURRENT USER ====================
+  
+  # Step 0: Get current system username
+  - name: get_username
+    description: "Get current system username to exclude own MRs"
+    compute: |
+      import getpass
+      import os
+      
+      # Try multiple methods to get username
+      username = os.getenv('USER') or os.getenv('USERNAME') or getpass.getuser()
+      
+      # Common username mappings (system username -> GitLab username)
+      # Add your mapping here if they differ
+      username_map = {
+        'daoneill': 'daoneill',  # Add GitLab username if different
+      }
+      
+      gitlab_username = username_map.get(username, username)
+      result = gitlab_username
+    output: my_username
+
   # ==================== GATHER MRs ====================
 
   # Step 1: Get list of open MRs
@@ -54,13 +86,15 @@ steps:
       per_page: "{{ inputs.limit }}"
     output: open_mrs
 
-  # Step 2: Parse MR list
+  # Step 2: Parse MR list and separate own vs others
   - name: parse_mrs
-    description: "Extract MR IDs and basic info"
+    description: "Extract MR IDs, separate own MRs from others to review"
     compute: |
       import re
       
-      mrs = []
+      mrs_to_review = []  # MRs by others that I should review
+      my_mrs = []         # My own MRs (to check for feedback)
+      
       # Parse the MR list output - format varies but usually contains IID, title, author
       lines = open_mrs.split('\n') if open_mrs else []
       
@@ -70,7 +104,12 @@ steps:
         iid_match = re.search(r'!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)', line, re.IGNORECASE)
         if iid_match:
           if current_mr.get('iid'):
-            mrs.append(current_mr)
+            # Determine if this is my MR or someone else's
+            author = current_mr.get('author', '').lower()
+            if my_username.lower() in author:
+              my_mrs.append(current_mr)
+            else:
+              mrs_to_review.append(current_mr)
           current_mr = {'iid': int(iid_match.group(1) or iid_match.group(2) or iid_match.group(3))}
         
         # Extract title
@@ -85,20 +124,34 @@ steps:
       
       # Don't forget the last one
       if current_mr.get('iid'):
-        mrs.append(current_mr)
+        author = current_mr.get('author', '').lower()
+        if my_username.lower() in author:
+          my_mrs.append(current_mr)
+        else:
+          mrs_to_review.append(current_mr)
       
       # Deduplicate by IID
       seen = set()
-      unique_mrs = []
-      for mr in mrs:
+      unique_to_review = []
+      for mr in mrs_to_review:
         if mr['iid'] not in seen:
           seen.add(mr['iid'])
-          unique_mrs.append(mr)
+          unique_to_review.append(mr)
       
-      result = unique_mrs[:inputs.limit]
-    output: mr_list
+      unique_my_mrs = []
+      for mr in my_mrs:
+        if mr['iid'] not in seen:
+          seen.add(mr['iid'])
+          unique_my_mrs.append(mr)
+      
+      result = {
+        'to_review': unique_to_review[:inputs.limit],
+        'my_mrs': unique_my_mrs,
+        'my_username': my_username
+      }
+    output: parsed_mrs
 
-  # Step 3: Process each MR
+  # Step 3: Process each MR (excluding my own)
   - name: process_mrs
     description: "Analyze each MR for review status"
     compute: |
@@ -106,8 +159,9 @@ steps:
       import re
       
       results = []
+      mrs_to_review = parsed_mrs.get('to_review', [])
       
-      for mr in mr_list:
+      for mr in mrs_to_review:
         mr_id = mr.get('iid')
         if not mr_id:
           continue
@@ -256,9 +310,15 @@ steps:
   - name: build_summary
     description: "Compile batch review results"
     compute: |
+      my_username = parsed_mrs.get('my_username', 'unknown')
+      my_mrs = parsed_mrs.get('my_mrs', [])
+      mrs_to_review = parsed_mrs.get('to_review', [])
+      
       lines = ["## Batch PR Review Summary", ""]
       lines.append(f"**Project:** {inputs.project}")
-      lines.append(f"**MRs Found:** {len(mr_analysis)}")
+      lines.append(f"**Current User:** {my_username}")
+      lines.append(f"**MRs to Review (by others):** {len(mrs_to_review)}")
+      lines.append(f"**My Open MRs:** {len(my_mrs)}")
       lines.append(f"**Dry Run:** {'Yes' if inputs.dry_run else 'No'}")
       lines.append("")
       
@@ -296,9 +356,21 @@ steps:
         lines.append("")
       
       if actions['skip']:
-        lines.append("### ⏭️ Skipped")
+        lines.append("### ⏭️ Skipped (Waiting for Author)")
         for mr in actions['skip']:
           lines.append(f"- !{mr['iid']}: {mr.get('title', '')} - {mr.get('reason', 'No action needed')}")
+        lines.append("")
+      
+      # Show my own MRs that might need attention
+      if my_mrs and inputs.include_my_mrs:
+        lines.append("---")
+        lines.append("")
+        lines.append("### 📝 Your Open MRs (not reviewed - you're the author)")
+        for mr in my_mrs[:5]:
+          lines.append(f"- !{mr.get('iid', '?')}: {mr.get('title', '')}")
+        lines.append("")
+        lines.append("*Check these for feedback from reviewers. Use:*")
+        lines.append(f"*`gitlab_mr_view(project=\"{inputs.project}\", mr_id=<id>)` to see comments*")
         lines.append("")
       
       # Remaining MRs
