@@ -26,6 +26,12 @@ inputs:
     required: false
     default: true
     description: "Include approved MRs in output"
+  
+  - name: auto_merge
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically merge approved MRs (asks first if false)"
 
 constants:
   gitlab_project: automation-analytics/automation-analytics-backend
@@ -247,18 +253,41 @@ steps:
         result = '\n'.join(lines)
     output: summary
 
+  # ==================== MERGE APPROVED MRs ====================
+  
+  - name: merge_approved
+    description: "Merge the first approved MR if auto_merge is enabled"
+    condition: "inputs.auto_merge and first_mr_status and first_mr_status.get('status') == 'approved'"
+    tool: gitlab_mr_merge
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ first_mr_status.get('iid') }}"
+    output: merge_result
+    on_error: continue
+
+  - name: update_summary_with_merge
+    description: "Update summary if MR was merged"
+    condition: "merge_result"
+    compute: |
+      merged_mr = first_mr_status.get('iid', '?')
+      result = summary + f"\n\n### ✅ Merged\n- !{merged_mr} has been merged!"
+    output: final_summary
+
 # ==================== OUTPUT ====================
 
 outputs:
   - name: summary
     value: |
-      {{ summary }}
+      {{ final_summary if final_summary else summary }}
       
       ---
       
       ## Quick Actions
       
-      {% if first_mr_status and first_mr_status.get('status') == 'needs_response' %}
+      {% if merge_result %}
+      ✅ **MR !{{ first_mr_status.get('iid') }} has been merged!**
+      
+      {% elif first_mr_status and first_mr_status.get('status') == 'needs_response' %}
       **To respond to feedback on !{{ first_mr_status.get('iid') }}:**
       
       1. View the comments:
@@ -271,9 +300,14 @@ outputs:
          gitlab_mr_comment(project="{{ inputs.project }}", mr_id={{ first_mr_status.get('iid') }}, comment="Addressed feedback: ...")
          ```
       {% elif first_mr_status and first_mr_status.get('status') == 'approved' %}
-      **!{{ first_mr_status.get('iid') }} is approved!** Ready to merge:
+      🎉 **!{{ first_mr_status.get('iid') }} is approved!**
+      
+      Would you like me to merge it? Just say:
+      - **"Yes, merge it"** or **"merge !{{ first_mr_status.get('iid') }}"**
+      
+      Or run:
       ```
-      gitlab_mr_merge(project="{{ inputs.project }}", mr_id={{ first_mr_status.get('iid') }})
+      skill_run("check_my_prs", '{"auto_merge": true}')
       ```
       {% else %}
       - View MR details: `gitlab_mr_view(project="...", mr_id=<id>)`
