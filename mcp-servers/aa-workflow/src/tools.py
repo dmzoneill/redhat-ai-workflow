@@ -48,6 +48,37 @@ if isinstance(repos_data, dict):
 else:
     REPO_PATHS = {}
 
+# GitHub issues URL for error reporting
+GITHUB_ISSUES_URL = "https://github.com/dmzoneill/redhat-ai-workflow/issues/new"
+
+def format_github_issue_url(tool: str, error: str, context: str = "") -> str:
+    """Generate a pre-filled GitHub issue URL for tool errors."""
+    import urllib.parse
+    title = f"Tool Error: {tool}"
+    body = f"""## Error Report
+
+**Tool:** `{tool}`
+**Error:** 
+```
+{error[:500]}
+```
+
+**Context:**
+{context[:200] if context else "No additional context"}
+
+**Environment:**
+- AI Workflow version: (please fill in)
+- Python version: (please fill in)
+
+**Steps to reproduce:**
+1. (describe what you were doing)
+
+**Expected behavior:**
+(what should have happened)
+"""
+    params = urllib.parse.urlencode({"title": title, "body": body, "labels": "bug,tool-error"})
+    return f"{GITHUB_ISSUES_URL}?{params}"
+
 
 # ==================== Helper Functions ====================
 
@@ -1430,6 +1461,23 @@ def register_tools(server: "FastMCP") -> int:
                     else:
                         output_lines.append(f"   ❌ Error: {result['error']}")
                         
+                        # Check if this is a Jira/rh-issue related error
+                        is_jira_error = (
+                            tool.startswith("jira_") or 
+                            "rh-issue" in result["error"].lower() or
+                            "jira" in result["error"].lower()
+                        )
+                        
+                        if is_jira_error:
+                            issue_url = format_github_issue_url(
+                                tool, 
+                                result["error"],
+                                f"Skill: {self.skill.get('name', 'unknown')}, Step: {step_name}"
+                            )
+                            output_lines.append(f"\n   💡 **Jira tool error detected!**")
+                            output_lines.append(f"   If this is a bug in `rh-issue`, please report it:")
+                            output_lines.append(f"   📝 [Open GitHub Issue]({issue_url})")
+                        
                         # Check on_error behavior
                         on_error = step.get("on_error", "fail")
                         if on_error == "continue":
@@ -2262,7 +2310,24 @@ def register_tools(server: "FastMCP") -> int:
             return [TextContent(type="text", text=str(result))]
             
         except Exception as e:
-            return [TextContent(type="text", text=f"❌ Error executing {tool_name}: {e}")]
+            error_msg = str(e)
+            lines = [f"❌ Error executing {tool_name}: {error_msg}"]
+            
+            # Check if this is a Jira-related error
+            is_jira_error = (
+                tool_name.startswith("jira_") or 
+                "rh-issue" in error_msg.lower() or
+                "jira" in error_msg.lower()
+            )
+            
+            if is_jira_error:
+                issue_url = format_github_issue_url(tool_name, error_msg)
+                lines.append("")
+                lines.append("💡 **Jira tool error detected!**")
+                lines.append("If this is a bug in `rh-issue`, please report it:")
+                lines.append(f"📝 [Open GitHub Issue]({issue_url})")
+            
+            return [TextContent(type="text", text="\n".join(lines))]
 
 
     # ==================== PROMPTS ====================
