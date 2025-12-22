@@ -71,6 +71,61 @@ Claude: 🚀 Executing Skill: start_work
 
 ---
 
+## 🚀 Quick Start
+
+Get up and running in 3 minutes:
+
+### 1️⃣ Clone & Install
+
+```bash
+git clone https://github.com/yourusername/ai-workflow.git ~/src/ai-workflow
+cd ~/src/ai-workflow
+pip install fastmcp pyyaml httpx jinja2
+```
+
+### 2️⃣ Add to Your Project
+
+Create `.cursor/mcp.json` in your project:
+
+```json
+{
+  "mcpServers": {
+    "aa-developer": {
+      "command": "bash",
+      "args": ["-c", "cd ~/src/ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent developer"]
+    }
+  }
+}
+```
+
+### 3️⃣ Restart Cursor & Go!
+
+```
+You: Start working on AAP-12345
+
+Claude: 🚀 Executing Skill: start_work
+        ✅ Fetched issue details
+        ✅ Created branch: AAP-12345-implement-feature
+        ✅ Updated Jira status → In Progress
+        
+        Ready to code!
+```
+
+<details>
+<summary><b>📁 More agent configurations</b></summary>
+
+| Agent | Command | Tools |
+|-------|---------|-------|
+| developer | `--agent developer` | git, gitlab, jira (74 tools) |
+| devops | `--agent devops` | k8s, prometheus, alertmanager (75 tools) |
+| incident | `--agent incident` | k8s, prometheus, jira (78 tools) |
+| release | `--agent release` | konflux, quay, appinterface (69 tools) |
+| all | `--all` | All 150+ tools |
+
+</details>
+
+---
+
 ## 🏗️ Architecture
 
 ```mermaid
@@ -143,120 +198,6 @@ graph LR
     style P2 fill:#f59e0b,stroke:#d97706,color:#fff
     style P3 fill:#ec4899,stroke:#db2777,color:#fff
     style P4 fill:#8b5cf6,stroke:#7c3aed,color:#fff
-```
-
----
-
-## 🚀 Quick Start
-
-### 1️⃣ Clone & Install
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/ai-workflow.git ~/src/ai-workflow
-cd ~/src/ai-workflow
-
-# Install dependencies
-pip install fastmcp pyyaml httpx jinja2
-```
-
-### 2️⃣ Configure Your Project
-
-Create `.cursor/mcp.json` in your project:
-
-```json
-{
-  "mcpServers": {
-    "aa-developer": {
-      "command": "bash",
-      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent developer"]
-    }
-  }
-}
-```
-
-> **Note:** Replace `/path/to/redhat-ai-workflow` with your actual installation path.
-
-<details>
-<summary><b>📁 Example configurations for different roles</b></summary>
-
-**Developer (Git, Jira, GitLab, Konflux, Bonfire)**
-```json
-{
-  "mcpServers": {
-    "aa-developer": {
-      "command": "bash",
-      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent developer"]
-    }
-  }
-}
-```
-
-**DevOps (Kubernetes, Prometheus, Alertmanager, Kibana)**
-```json
-{
-  "mcpServers": {
-    "aa-devops": {
-      "command": "bash",
-      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent devops"]
-    }
-  }
-}
-```
-
-**Incident Response (All monitoring + Jira)**
-```json
-{
-  "mcpServers": {
-    "aa-incident": {
-      "command": "bash",
-      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent incident"]
-    }
-  }
-}
-```
-
-**Release (Konflux, Quay, AppInterface)**
-```json
-{
-  "mcpServers": {
-    "aa-release": {
-      "command": "bash",
-      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent release"]
-    }
-  }
-}
-```
-
-**Full Access (All 150+ tools)**
-```json
-{
-  "mcpServers": {
-    "aa-full": {
-      "command": "bash",
-      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --all"]
-    }
-  }
-}
-```
-
-</details>
-
-### 3️⃣ Restart Cursor & Go!
-
-```
-You: Hello! What can you help me with?
-
-Claude: 🚀 AI Workflow Active!
-        
-        I can help you with:
-        • Git operations (branches, commits, merges)
-        • Jira issue management
-        • GitLab MRs and pipelines
-        • Kubernetes cluster operations
-        • And 150+ more tools...
-        
-        Try: "Start working on AAP-12345"
 ```
 
 ---
