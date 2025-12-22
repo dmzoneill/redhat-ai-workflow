@@ -1,10 +1,11 @@
 {
   "mcpServers": {
     "aa-devops": {
-      "command": "python3",
-      "args": ["-m", "src.server", "--agent", "devops"],
-      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent devops"
+      ]
     }
   }
 }
-

@@ -1,30 +1,24 @@
 {
   "mcpServers": {
     "aa-devops": {
-      "command": "python3",
-      "args": ["-m", "src.server", "--agent", "devops-slim"],
-      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent devops-slim"]
     },
     "aa-developer": {
-      "command": "python3",
-      "args": ["-m", "src.server", "--agent", "developer-slim"],
-      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent developer-slim"]
     },
     "aa-incident": {
-      "command": "python3",
-      "args": ["-m", "src.server", "--agent", "incident-slim"],
-      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent incident-slim"]
     },
     "aa-release": {
-      "command": "python3",
-      "args": ["-m", "src.server", "--agent", "release-slim"],
-      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent release-slim"]
     },
     "aa-workflow": {
-      "command": "python3",
-      "args": ["-m", "src.server", "--tools", "workflow"],
-      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+      "command": "bash",
+      "args": ["-c", "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --tools workflow"]
     }
   }
 }
-

@@ -1,10 +1,11 @@
 {
   "mcpServers": {
     "aa-incident": {
-      "command": "python3",
-      "args": ["-m", "src.server", "--agent", "incident"],
-      "cwd": "/path/to/ai-workflow/mcp-servers/aa-common"
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd /path/to/redhat-ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent incident"
+      ]
     }
   }
 }
-
