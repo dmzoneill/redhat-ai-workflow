@@ -272,26 +272,26 @@ graph TD
         
         subgraph DEV["<b>👨‍💻 Developer</b>"]
             DEV_DESC[Write code & ship features]
-            DEV_TOOLS[git, jira, gitlab]
-            DEV_SKILLS[start_work, create_mr]
+            DEV_TOOLS[git, gitlab, jira]
+            DEV_SKILLS[start_work, create_mr, close_issue]
         end
         
         subgraph OPS["<b>🔧 DevOps</b>"]
             OPS_DESC[Monitor & maintain]
-            OPS_TOOLS[k8s, prometheus, alertmanager]
-            OPS_SKILLS[investigate_alert, deploy]
+            OPS_TOOLS[k8s, prometheus, alertmanager, kibana, bonfire]
+            OPS_SKILLS[investigate_alert, debug_prod]
         end
         
         subgraph INC["<b>🚨 Incident</b>"]
             INC_DESC[Respond to production issues]
-            INC_TOOLS[all monitoring + jira]
-            INC_SKILLS[investigate, escalate]
+            INC_TOOLS[k8s, prometheus, alertmanager, kibana, jira]
+            INC_SKILLS[investigate_alert, debug_prod]
         end
         
         subgraph REL["<b>📦 Release</b>"]
             REL_DESC[Ship software safely]
-            REL_TOOLS[gitlab, konflux, quay]
-            REL_SKILLS[promote, rollback]
+            REL_TOOLS[konflux, quay, appinterface, git]
+            REL_SKILLS[release_aa_backend_prod]
         end
     end
     
@@ -305,10 +305,24 @@ graph TD
 
 | Agent | Focus | Tools Loaded | Best For |
 |-------|-------|--------------|----------|
-| 👨‍💻 **developer** | Code & MRs | ~85 tools | Daily development work |
-| 🔧 **devops** | Infrastructure | ~101 tools | Monitoring, deployments |
-| 🚨 **incident** | Production issues | ~95 tools | Alert triage, debugging |
-| 📦 **release** | Shipping | ~75 tools | Releases, promotions |
+| 👨‍💻 **developer** | Code & MRs | 74 tools | Daily development work |
+| 🔧 **devops** | Infrastructure | 75 tools | Monitoring, deployments |
+| 🚨 **incident** | Production issues | 78 tools | Alert triage, debugging |
+| 📦 **release** | Shipping | 69 tools | Releases, promotions |
+
+> **Note:** Each agent is limited to <80 tools to stay within Cursor's limits. For tools not in your agent, use `tool_exec()`:
+> ```python
+> tool_exec("konflux_list_builds", '{"namespace": "aap-aa-tenant"}')
+> ```
+
+### Agent Tool Modules
+
+| Agent | Modules Loaded |
+|-------|----------------|
+| developer | git, gitlab, jira |
+| devops | k8s, prometheus, alertmanager, kibana, bonfire |
+| incident | k8s, prometheus, alertmanager, kibana, jira |
+| release | konflux, quay, appinterface, git |
 
 ### Loading an Agent
 
