@@ -48,8 +48,151 @@ if isinstance(repos_data, dict):
 else:
     REPO_PATHS = {}
 
-# GitHub issues URL for error reporting
-GITHUB_ISSUES_URL = "https://github.com/dmzoneill/redhat-ai-workflow/issues/new"
+# GitHub configuration for error reporting
+GITHUB_REPO = "dmzoneill/redhat-ai-workflow"
+GITHUB_ISSUES_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/issues"
+
+# Track recently created issues to avoid duplicates (in-memory cache)
+_recent_issues: dict[str, float] = {}
+_ISSUE_DEDUP_SECONDS = 3600  # Don't create duplicate issues within 1 hour
+
+
+def _get_github_token() -> str | None:
+    """Get GitHub token from environment."""
+    return os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+
+
+def _issue_fingerprint(tool: str, error: str) -> str:
+    """Create a fingerprint for deduplication."""
+    import hashlib
+    # Use first 100 chars of error to group similar errors
+    content = f"{tool}:{error[:100]}"
+    return hashlib.md5(content.encode()).hexdigest()[:12]
+
+
+async def create_github_issue(
+    tool: str,
+    error: str,
+    context: str = "",
+    skill: str = "",
+    labels: list[str] | None = None
+) -> dict:
+    """
+    Create a GitHub issue for a tool/skill failure.
+    
+    Returns:
+        dict with 'success', 'issue_url', and 'message'
+    """
+    import time
+    import httpx
+    
+    # Check for duplicate
+    fingerprint = _issue_fingerprint(tool, error)
+    now = time.time()
+    
+    if fingerprint in _recent_issues:
+        last_created = _recent_issues[fingerprint]
+        if now - last_created < _ISSUE_DEDUP_SECONDS:
+            return {
+                "success": False,
+                "issue_url": None,
+                "message": f"Similar issue recently created (dedup: {fingerprint})"
+            }
+    
+    # Check for GitHub token
+    token = _get_github_token()
+    if not token:
+        # Fall back to URL generation
+        url = format_github_issue_url(tool, error, context)
+        return {
+            "success": False,
+            "issue_url": url,
+            "message": "No GITHUB_TOKEN - use this link to create manually"
+        }
+    
+    # Build issue body
+    import platform
+    import sys
+    
+    body = f"""## 🐛 Automated Error Report
+
+**Tool/Skill:** `{tool}`
+{f"**Skill:** `{skill}`" if skill else ""}
+
+### Error
+```
+{error[:1000]}
+```
+
+### Context
+{context[:500] if context else "No additional context provided"}
+
+### Environment
+- **Python:** {sys.version.split()[0]}
+- **Platform:** {platform.system()} {platform.release()}
+- **Fingerprint:** `{fingerprint}`
+
+---
+*This issue was automatically created by AI Workflow error tracking.*
+"""
+
+    # Determine labels
+    issue_labels = labels or ["bug", "automated"]
+    if "jira" in tool.lower() or "rh-issue" in error.lower():
+        issue_labels.append("jira")
+    if "gitlab" in tool.lower():
+        issue_labels.append("gitlab")
+    if "k8s" in tool.lower() or "kubectl" in tool.lower():
+        issue_labels.append("kubernetes")
+    
+    # Create the issue
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                GITHUB_API_URL,
+                headers={
+                    "Authorization": f"token {token}",
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": "AI-Workflow-Error-Reporter"
+                },
+                json={
+                    "title": f"[Auto] Tool Error: {tool}",
+                    "body": body,
+                    "labels": issue_labels
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 201:
+                data = response.json()
+                issue_url = data.get("html_url", "")
+                _recent_issues[fingerprint] = now
+                
+                logger.info(f"Created GitHub issue: {issue_url}")
+                return {
+                    "success": True,
+                    "issue_url": issue_url,
+                    "message": f"Issue created: {issue_url}"
+                }
+            else:
+                logger.warning(f"Failed to create issue: {response.status_code} - {response.text[:200]}")
+                url = format_github_issue_url(tool, error, context)
+                return {
+                    "success": False,
+                    "issue_url": url,
+                    "message": f"API error {response.status_code} - use link to create manually"
+                }
+                
+    except Exception as e:
+        logger.error(f"Error creating GitHub issue: {e}")
+        url = format_github_issue_url(tool, error, context)
+        return {
+            "success": False,
+            "issue_url": url,
+            "message": f"Failed: {e} - use link to create manually"
+        }
+
 
 def format_github_issue_url(tool: str, error: str, context: str = "") -> str:
     """Generate a pre-filled GitHub issue URL for tool errors."""
@@ -1461,22 +1604,27 @@ def register_tools(server: "FastMCP") -> int:
                     else:
                         output_lines.append(f"   ❌ Error: {result['error']}")
                         
-                        # Check if this is a Jira/rh-issue related error
-                        is_jira_error = (
-                            tool.startswith("jira_") or 
-                            "rh-issue" in result["error"].lower() or
-                            "jira" in result["error"].lower()
-                        )
+                        # Auto-create GitHub issue for tool failures
+                        skill_name = self.skill.get('name', 'unknown')
+                        context = f"Skill: {skill_name}, Step: {step_name}"
                         
-                        if is_jira_error:
-                            issue_url = format_github_issue_url(
-                                tool, 
-                                result["error"],
-                                f"Skill: {self.skill.get('name', 'unknown')}, Step: {step_name}"
+                        try:
+                            issue_result = await create_github_issue(
+                                tool=tool,
+                                error=result["error"],
+                                context=context,
+                                skill=skill_name
                             )
-                            output_lines.append(f"\n   💡 **Jira tool error detected!**")
-                            output_lines.append(f"   If this is a bug in `rh-issue`, please report it:")
-                            output_lines.append(f"   📝 [Open GitHub Issue]({issue_url})")
+                            
+                            if issue_result["success"]:
+                                output_lines.append(f"\n   🐛 **Issue created:** {issue_result['issue_url']}")
+                            elif issue_result["issue_url"]:
+                                output_lines.append(f"\n   💡 **Report this error:**")
+                                output_lines.append(f"   📝 [Create GitHub Issue]({issue_result['issue_url']})")
+                                if "dedup" in issue_result.get("message", ""):
+                                    output_lines.append(f"   *(Similar issue recently reported)*")
+                        except Exception as e:
+                            self._debug(f"Failed to create issue: {e}")
                         
                         # Check on_error behavior
                         on_error = step.get("on_error", "fail")
@@ -2313,19 +2461,25 @@ def register_tools(server: "FastMCP") -> int:
             error_msg = str(e)
             lines = [f"❌ Error executing {tool_name}: {error_msg}"]
             
-            # Check if this is a Jira-related error
-            is_jira_error = (
-                tool_name.startswith("jira_") or 
-                "rh-issue" in error_msg.lower() or
-                "jira" in error_msg.lower()
-            )
-            
-            if is_jira_error:
-                issue_url = format_github_issue_url(tool_name, error_msg)
-                lines.append("")
-                lines.append("💡 **Jira tool error detected!**")
-                lines.append("If this is a bug in `rh-issue`, please report it:")
-                lines.append(f"📝 [Open GitHub Issue]({issue_url})")
+            # Auto-create GitHub issue for all tool failures
+            try:
+                issue_result = await create_github_issue(
+                    tool=tool_name,
+                    error=error_msg,
+                    context=f"Args: {args}"
+                )
+                
+                if issue_result["success"]:
+                    lines.append("")
+                    lines.append(f"🐛 **Issue created:** {issue_result['issue_url']}")
+                elif issue_result["issue_url"]:
+                    lines.append("")
+                    lines.append("💡 **Report this error:**")
+                    lines.append(f"📝 [Create GitHub Issue]({issue_result['issue_url']})")
+                    if "dedup" in issue_result.get("message", ""):
+                        lines.append("*(Similar issue recently reported)*")
+            except Exception as issue_err:
+                logger.debug(f"Failed to create GitHub issue: {issue_err}")
             
             return [TextContent(type="text", text="\n".join(lines))]
 

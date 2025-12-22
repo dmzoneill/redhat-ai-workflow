@@ -1088,6 +1088,56 @@ I see there are 12 known error patterns including:
 
 ---
 
+## 🐛 Automatic Error Tracking
+
+All tool and skill failures are **automatically reported** to GitHub Issues.
+
+### How It Works
+
+```mermaid
+flowchart LR
+    A[Tool Fails] --> B{GITHUB_TOKEN set?}
+    B -->|Yes| C[Create Issue via API]
+    B -->|No| D[Generate Issue Link]
+    C --> E[Include: Tool, Error, Context]
+    D --> E
+    E --> F[Dedup Check]
+    F -->|New| G[Create/Show Issue]
+    F -->|Duplicate| H[Skip - recent similar issue]
+```
+
+### Features
+
+- **Automatic creation**: If `GITHUB_TOKEN` is set, issues are created automatically
+- **Deduplication**: Won't create duplicate issues within 1 hour
+- **Rich context**: Includes tool name, error message, skill context, environment info
+- **Smart labels**: Auto-labels issues based on tool type (jira, gitlab, kubernetes, etc.)
+
+### Setup
+
+```bash
+# Optional: Set token for auto-creation (otherwise shows link to create manually)
+export GITHUB_TOKEN=ghp_your_token_here
+```
+
+### Example Output
+
+```
+❌ Error: gitlab_mr_list failed: 401 Unauthorized
+
+🐛 **Issue created:** https://github.com/dmzoneill/redhat-ai-workflow/issues/42
+```
+
+Or without token:
+```
+❌ Error: jira_view_issue failed: Connection refused
+
+💡 **Report this error:**
+📝 [Create GitHub Issue](https://github.com/dmzoneill/redhat-ai-workflow/issues/new?...)
+```
+
+---
+
 ## 💾 Memory System
 
 Memory provides **persistent context** across Claude sessions.
