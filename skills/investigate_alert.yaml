@@ -1,133 +1,366 @@
 # Skill: Investigate Alert
-# Systematic investigation of a firing alert
+# Quick triage of a firing alert, escalates to debug_prod for deeper investigation
 
 name: investigate_alert
-description: Investigate a firing alert with systematic checks
-version: "1.0"
+description: |
+  Quick investigation of a firing Prometheus alert.
+  
+  Steps:
+  1. Get current firing alerts
+  2. Quick health check (pods, deployments)
+  3. Check recent events
+  4. Look for known patterns
+  5. Escalate to debug_prod if serious
+  
+  Use this for quick triage. For deep investigation, use debug_prod directly.
+version: "2.0"
 
 inputs:
   - name: environment
     type: string
     required: true
-    enum: ["stage", "production"]
+    enum: ["stage", "production", "prod"]
     description: "Environment to investigate"
+
   - name: namespace
     type: string
     required: false
-    description: "Specific namespace (optional, uses default AA namespace)"
+    description: "Namespace: 'main' or 'billing' (defaults to main)"
+
   - name: alert_name
     type: string
     required: false
-    description: "Specific alert to investigate (optional)"
+    description: "Specific alert to investigate"
 
-defaults:
-  # Configure your namespaces (these are loaded from config.json if available)
-  namespace_stage: "your-app-stage"
-  namespace_prod: "your-app-prod"
+  - name: auto_escalate
+    type: boolean
+    required: false
+    default: true
+    description: "Auto-run debug_prod if critical issues found"
+
+constants:
+  # Automation Analytics namespaces
+  namespace_stage: tower-analytics-stage
+  namespace_prod_main: tower-analytics-prod
+  namespace_prod_billing: tower-analytics-prod-billing
+
+  # Alert definition paths in app-interface
+  alerts_prod_main: /home/daoneill/src/app-interface/resources/insights-prod/tower-analytics-prod
+  alerts_prod_billing: /home/daoneill/src/app-interface/resources/insights-prod/tower-analytics-prod-billing
+  alerts_stage: /home/daoneill/src/app-interface/resources/insights-stage/tower-analytics-stage
 
 steps:
-  # Step 1: Get current alerts
-  - name: get_alerts
+  # ==================== RESOLVE NAMESPACE ====================
+
+  - name: resolve_namespace
+    description: "Determine the target namespace"
+    compute: |
+      env = inputs.environment.lower()
+      ns_input = (inputs.namespace or "main").lower()
+
+      if env == "stage":
+          namespace = constants.namespace_stage
+          env_label = "stage"
+      elif "billing" in ns_input:
+          namespace = constants.namespace_prod_billing
+          env_label = "production"
+      else:
+          namespace = constants.namespace_prod_main
+          env_label = "production"
+
+      result = {
+          "namespace": namespace,
+          "environment": env_label,
+          "is_prod": env_label == "production",
+      }
+    output: target
+
+  # ==================== GET ALERTS ====================
+
+  - name: get_firing_alerts
+    description: "Get currently firing alerts"
     tool: prometheus_alerts
     args:
-      environment: "{{ inputs.environment }}"
-      namespace: "{{ inputs.namespace or defaults.namespace_stage if inputs.environment == 'stage' else defaults.namespace_prod }}"
-      state: "firing"
-    output: alerts
+      environment: "{{ target.environment }}"
+      namespace: "{{ target.namespace }}"
+      state: firing
+    output: alerts_raw
+    on_error: continue
 
-  # Step 2: If no alerts, report healthy
-  - name: check_alerts
-    condition: "{{ len(alerts) == 0 }}"
-    then:
-      - return:
-          status: "healthy"
-          message: "✅ No alerts firing in {{ inputs.environment }}"
-    
-  # Step 3: Get namespace health
-  - name: get_namespace_health
-    tool: k8s_namespace_health
-    args:
-      namespace: "{{ inputs.namespace or defaults.namespace_stage if inputs.environment == 'stage' else defaults.namespace_prod }}"
-      environment: "{{ inputs.environment }}"
-    output: health
+  - name: parse_alerts
+    description: "Parse alert data"
+    compute: |
+      alerts = []
+      if alerts_raw:
+          # Parse alert data - format varies by tool
+          import re
 
-  # Step 4: Get recent events
-  - name: get_events
-    tool: kubectl_get_events
-    args:
-      namespace: "{{ inputs.namespace or defaults.namespace_stage if inputs.environment == 'stage' else defaults.namespace_prod }}"
-      environment: "{{ inputs.environment }}"
-      field_selector: "type=Warning"
-    output: events
+          lines = str(alerts_raw).split("\n")
+          current_alert = {}
 
-  # Step 5: Get error logs
-  - name: get_errors
-    tool: kibana_get_errors
-    args:
-      environment: "{{ inputs.environment }}"
-      namespace: "{{ inputs.namespace }}"
-      time_range: "30m"
-    output: errors
+          for line in lines:
+              if "alertname" in line.lower():
+                  match = re.search(r"alertname[=:\s]+(\S+)", line, re.IGNORECASE)
+                  if match:
+                      if current_alert:
+                          alerts.append(current_alert)
+                      current_alert = {"name": match.group(1), "severity": "warning"}
+              if "severity" in line.lower():
+                  match = re.search(r"severity[=:\s]+(\S+)", line, re.IGNORECASE)
+                  if match:
+                      current_alert["severity"] = match.group(1)
+              if "message" in line.lower() or "description" in line.lower():
+                  current_alert["message"] = line.strip()[:100]
 
-  # Step 6: Get pod status if there are issues
-  - name: get_pods
-    condition: "{{ not health.healthy }}"
+          if current_alert:
+              alerts.append(current_alert)
+
+      # Check if specific alert is in the list
+      if inputs.alert_name:
+          filtered = [a for a in alerts if inputs.alert_name.lower() in a.get("name", "").lower()]
+          alerts = filtered if filtered else alerts
+
+      has_critical = any(a.get("severity") == "critical" for a in alerts)
+      has_high = any(a.get("severity") in ["high", "warning"] for a in alerts)
+
+      result = {
+          "alerts": alerts[:10],
+          "count": len(alerts),
+          "has_critical": has_critical,
+          "has_high": has_high,
+          "max_severity": "critical" if has_critical else ("high" if has_high else "low"),
+      }
+    output: alert_info
+
+  # ==================== QUICK HEALTH CHECK ====================
+
+  - name: get_pod_status
+    description: "Get pod status"
     tool: kubectl_get_pods
     args:
-      namespace: "{{ inputs.namespace or defaults.namespace_stage if inputs.environment == 'stage' else defaults.namespace_prod }}"
-      environment: "{{ inputs.environment }}"
-    output: pods
+      namespace: "{{ target.namespace }}"
+      environment: "{{ target.environment }}"
+    output: pods_raw
+    on_error: continue
+
+  - name: parse_pod_health
+    description: "Parse pod health"
+    compute: |
+      import re
+
+      pods_text = str(pods_raw) if pods_raw else ""
+
+      # Count pod states
+      running = len(re.findall(r"Running", pods_text, re.IGNORECASE))
+      not_running = len(re.findall(r"CrashLoopBackOff|Error|Pending|ImagePullBackOff", pods_text, re.IGNORECASE))
+      restarts = re.findall(r"(\d+)\s+\d+[smhd]", pods_text)
+      high_restarts = sum(1 for r in restarts if int(r) > 5)
+
+      healthy = not_running == 0 and high_restarts == 0
+
+      issues = []
+      if not_running > 0:
+          issues.append(f"{not_running} pod(s) not running")
+      if high_restarts > 0:
+          issues.append(f"{high_restarts} pod(s) with high restarts")
+
+      result = {
+          "running": running,
+          "not_running": not_running,
+          "high_restarts": high_restarts,
+          "healthy": healthy,
+          "issues": issues,
+      }
+    output: pod_health
+
+  # ==================== GET RECENT EVENTS ====================
+
+  - name: get_events
+    description: "Get recent warning events"
+    tool: kubectl_get_events
+    args:
+      namespace: "{{ target.namespace }}"
+      environment: "{{ target.environment }}"
+      field_selector: "type=Warning"
+    output: events_raw
+    on_error: continue
+
+  - name: parse_events
+    description: "Parse events"
+    compute: |
+      events = []
+      if events_raw:
+          lines = str(events_raw).split("\n")
+          for line in lines[:10]:
+              if line.strip():
+                  events.append(line.strip()[:100])
+
+      result = events[:5]
+    output: recent_events
+
+  # ==================== CHECK KNOWN PATTERNS ====================
+
+  - name: check_patterns
+    description: "Match against known error patterns"
+    compute: |
+      import yaml
+      from pathlib import Path
+
+      patterns_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
+      matches = []
+
+      if patterns_file.exists():
+          try:
+              with open(patterns_file) as f:
+                  data = yaml.safe_load(f)
+
+              known_patterns = data.get("error_patterns", [])
+
+              # Check alerts against patterns
+              for alert in alert_info.get("alerts", []):
+                  alert_name = alert.get("name", "").lower()
+                  for pattern in known_patterns:
+                      if pattern.get("pattern", "").lower() in alert_name:
+                          matches.append({
+                              "pattern": pattern.get("pattern"),
+                              "cause": pattern.get("cause"),
+                              "fix": pattern.get("fix"),
+                          })
+
+              # Check pod issues against patterns
+              for issue in pod_health.get("issues", []):
+                  issue_lower = issue.lower()
+                  for pattern in known_patterns:
+                      if pattern.get("pattern", "").lower() in issue_lower:
+                          matches.append({
+                              "pattern": pattern.get("pattern"),
+                              "cause": pattern.get("cause"),
+                              "fix": pattern.get("fix"),
+                          })
+          except Exception:
+              pass
+
+      result = matches[:5]
+    output: pattern_matches
+
+  # ==================== DETERMINE SEVERITY ====================
+
+  - name: assess_severity
+    description: "Determine overall severity"
+    compute: |
+      severity = "low"
+      needs_escalation = False
+
+      if alert_info.get("has_critical"):
+          severity = "critical"
+          needs_escalation = True
+      elif not pod_health.get("healthy"):
+          severity = "high"
+          needs_escalation = True
+      elif alert_info.get("has_high"):
+          severity = "medium"
+      elif len(recent_events) > 3:
+          severity = "medium"
+
+      result = {
+          "severity": severity,
+          "needs_escalation": needs_escalation and inputs.auto_escalate,
+          "reason": "Critical alerts or unhealthy pods" if needs_escalation else "Routine check",
+      }
+    output: assessment
+
+  # ==================== ESCALATE TO DEBUG_PROD ====================
+
+  - name: escalate_to_debug_prod
+    description: "Run full debug_prod for serious issues"
+    condition: "assessment.needs_escalation and target.is_prod"
+    tool: skill_run
+    args:
+      skill_name: debug_prod
+      inputs: |
+        {
+          "namespace": "{{ 'billing' if 'billing' in target.namespace else 'main' }}",
+          "alert_name": "{{ inputs.alert_name or '' }}",
+          "time_range": "1h"
+        }
+    output: debug_result
+    on_error: continue
+
+# ==================== OUTPUT ====================
 
 outputs:
   - name: report
     value: |
-      ## 🔍 Investigation Report: {{ inputs.environment }}
+      ## 🔍 Alert Investigation: {{ target.namespace }}
       
-      ### Alerts ({{ len(alerts) }})
-      {% for alert in alerts %}
-      - {{ "🔴" if alert.severity == "critical" else "🟠" }} **{{ alert.alertname }}** ({{ alert.severity }})
-        {{ alert.message or "" }}
-      {% endfor %}
+      **Environment:** {{ target.environment }}
+      **Severity:** {{ "🔴 CRITICAL" if assessment.severity == "critical" else ("🟠 HIGH" if assessment.severity == "high" else ("🟡 MEDIUM" if assessment.severity == "medium" else "🟢 LOW")) }}
       
-      ### Namespace Health
-      {{ "✅ Healthy" if health.healthy else "⚠️ Issues Detected" }}
-      - Pods: {{ health.running_pods }}/{{ health.total_pods }} running
-      - Deployments: {{ health.ready_deployments }}/{{ health.total_deployments }} ready
-      {% if health.issues %}
-      Issues:
-      {% for issue in health.issues %}
-      - {{ issue }}
-      {% endfor %}
-      {% endif %}
+      ---
       
-      ### Recent Warning Events
-      {% for event in events[:5] %}
-      - {{ event.reason }}: {{ event.message[:100] }}
-      {% endfor %}
-      
-      ### Error Logs (last 30m)
-      Found {{ len(errors) }} error entries
-      {% for error in errors[:3] %}
-      - {{ error.message[:100] }}
-      {% endfor %}
-      
-      ### Recommended Actions
-      {% if not health.healthy %}
-      1. Check failing pods: `kubectl_describe_pod`
-      2. Review pod logs: `kubectl_logs`
-      3. Consider restart: `kubectl_rollout_restart`
+      ### 🚨 Alerts ({{ alert_info.count }})
+      {% if alert_info.count == 0 %}
+      ✅ No alerts currently firing
       {% else %}
-      1. Review alert thresholds
-      2. Check if alert is stale
-      3. Consider silencing if expected
+      {% for alert in alert_info.alerts[:5] %}
+      - {{ "🔴" if alert.severity == "critical" else "🟠" }} **{{ alert.name }}** ({{ alert.severity }})
+        {{ alert.message if alert.message else "" }}
+      {% endfor %}
       {% endif %}
-  
-  - name: severity
-    compute: |
-      if any(a.severity == "critical" for a in alerts):
-        return "critical"
-      elif any(a.severity == "high" for a in alerts):
-        return "high"
-      else:
-        return "medium"
+      
+      ### 🏥 Pod Health
+      {{ "✅ Healthy" if pod_health.healthy else "⚠️ Issues Detected" }}
+      - Running: {{ pod_health.running }} pods
+      {% if pod_health.issues %}
+      - Issues:
+      {% for issue in pod_health.issues %}
+        - {{ issue }}
+      {% endfor %}
+      {% endif %}
+      
+      ### ⚠️ Recent Events
+      {% if recent_events %}
+      {% for event in recent_events[:3] %}
+      - {{ event }}
+      {% endfor %}
+      {% else %}
+      No warning events
+      {% endif %}
+      
+      {% if pattern_matches %}
+      ### 💡 Known Patterns Matched
+      {% for match in pattern_matches %}
+      - **{{ match.pattern }}**
+        - Cause: {{ match.cause }}
+        - Fix: {{ match.fix }}
+      {% endfor %}
+      {% endif %}
+      
+      ---
+      
+      {% if debug_result %}
+      ### 🔬 Deep Investigation Results
+      
+      Escalated to `debug_prod`. See detailed results above.
+      {% elif assessment.needs_escalation %}
+      ### 🔬 Recommended: Deep Investigation
+      
+      Run: `skill_run("debug_prod", '{"namespace": "{{ 'billing' if 'billing' in target.namespace else 'main' }}"}')`
+      {% else %}
+      ### ✅ Quick Actions
+      
+      - View pod logs: `kubectl_logs(namespace="{{ target.namespace }}", pod="<pod-name>")`
+      - Get more details: `skill_run("debug_prod", '{"namespace": "{{ 'billing' if 'billing' in target.namespace else 'main' }}"}')`
+      - Check Grafana dashboards
+      {% endif %}
 
+  - name: severity
+    value: "{{ assessment.severity }}"
+
+  - name: context
+    value:
+      namespace: "{{ target.namespace }}"
+      environment: "{{ target.environment }}"
+      alert_count: "{{ alert_info.count }}"
+      healthy: "{{ pod_health.healthy }}"
+      escalated: "{{ debug_result is defined }}"

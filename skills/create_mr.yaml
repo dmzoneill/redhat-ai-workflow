@@ -1,135 +1,514 @@
 # Skill: Create Merge Request
-# Creates a properly formatted MR with Jira link
+# Creates a properly formatted MR with Jira link, validation, and quality checks
 
 name: create_mr
-description: Create a merge request with Jira integration
-version: "1.0"
+description: |
+  Create a merge request with full validation:
+  - Checks for uncommitted changes
+  - Validates commit message format (AAP-XXXXX)
+  - Runs black/flake8 linting
+  - Checks if branch can merge cleanly
+  - Optionally runs jira_hygiene first
+  - Creates MR with proper description
+  - Links to Jira and updates status
+version: "2.0"
 
 inputs:
   - name: issue_key
     type: string
     required: true
-    description: "Jira issue key for linking"
+    description: "Jira issue key for linking (e.g., AAP-12345)"
+
   - name: repo
     type: string
     required: false
     default: "."
     description: "Repository path (defaults to current directory)"
+
   - name: draft
     type: boolean
+    required: false
     default: true
     description: "Create as draft MR"
+
   - name: target_branch
     type: string
+    required: false
     default: "main"
     description: "Target branch for MR"
 
+  - name: run_linting
+    type: boolean
+    required: false
+    default: true
+    description: "Run black/flake8 before creating MR"
+
+  - name: check_jira
+    type: boolean
+    required: false
+    default: true
+    description: "Run jira_hygiene check before creating MR"
+
+  - name: auto_fix_lint
+    type: boolean
+    required: false
+    default: false
+    description: "Auto-fix linting issues with black"
+
+constants:
+  gitlab_project: automation-analytics/automation-analytics-backend
+  jira_url: https://issues.redhat.com
+
 steps:
-  # Step 1: Get issue details for MR description
+  # ==================== PRE-FLIGHT CHECKS ====================
+
+  # Step 1: Get current branch and validate
+  - name: get_current_branch
+    description: "Get current branch name"
+    compute: |
+      import subprocess
+      import os
+      import re
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      result = subprocess.run(
+          ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0:
+          raise ValueError(f"Not a git repository: {repo}")
+
+      branch = result.stdout.strip()
+
+      # Validate not on main/master
+      if branch in ["main", "master"]:
+          raise ValueError(
+              "Cannot create MR from main/master. "
+              "Create a feature branch first."
+          )
+
+      # Check if branch contains issue key
+      issue_key = inputs.issue_key.upper()
+      branch_has_key = issue_key in branch.upper()
+
+      result = {
+          "name": branch,
+          "has_issue_key": branch_has_key,
+          "issue_key": issue_key,
+      }
+    output: current_branch
+
+  # Step 2: Check for uncommitted changes
+  - name: check_uncommitted
+    description: "Check for uncommitted changes"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      result = subprocess.run(
+          ["git", "status", "--porcelain"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      uncommitted = result.stdout.strip()
+      if uncommitted:
+          files = uncommitted.split("\n")
+          raise ValueError(
+              f"Uncommitted changes detected ({len(files)} files). "
+              "Please commit or stash before creating MR:\n"
+              + "\n".join(files[:5])
+          )
+
+      result = "Clean working tree"
+    output: uncommitted_check
+
+  # Step 3: Validate commit messages
+  - name: validate_commits
+    description: "Check commit messages follow AAP-XXXXX convention"
+    compute: |
+      import subprocess
+      import os
+      import re
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      target = inputs.target_branch
+      issue_key = inputs.issue_key.upper()
+
+      # Get commits not in target branch
+      result = subprocess.run(
+          ["git", "log", f"origin/{target}..HEAD", "--oneline"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0:
+          # Fetch and retry
+          subprocess.run(["git", "fetch", "origin"], cwd=repo, capture_output=True)
+          result = subprocess.run(
+              ["git", "log", f"origin/{target}..HEAD", "--oneline"],
+              cwd=repo,
+              capture_output=True,
+              text=True,
+          )
+
+      commits = result.stdout.strip().split("\n") if result.stdout.strip() else []
+
+      if not commits:
+          raise ValueError(
+              f"No commits found ahead of origin/{target}. "
+              "Make some commits first."
+          )
+
+      # Check each commit for issue key pattern
+      bad_commits = []
+      for commit in commits:
+          if not re.search(r"AAP-\d+", commit, re.IGNORECASE):
+              bad_commits.append(commit)
+
+      warnings = []
+      if bad_commits:
+          warnings.append(
+              f"⚠️ {len(bad_commits)} commit(s) missing AAP-XXXXX prefix"
+          )
+
+      result = {
+          "count": len(commits),
+          "commits": commits[:10],
+          "bad_commits": bad_commits[:5],
+          "warnings": warnings,
+      }
+    output: commit_validation
+
+  # Step 4: Check for merge conflicts with target
+  - name: check_mergeable
+    description: "Check if branch can merge cleanly"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      target = inputs.target_branch
+
+      # Fetch latest
+      subprocess.run(["git", "fetch", "origin", target], cwd=repo, capture_output=True)
+
+      # Try merge --no-commit --no-ff to check for conflicts
+      result = subprocess.run(
+          ["git", "merge", "--no-commit", "--no-ff", f"origin/{target}"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      has_conflicts = result.returncode != 0
+      conflict_info = result.stderr if has_conflicts else ""
+
+      # Abort the merge attempt
+      subprocess.run(["git", "merge", "--abort"], cwd=repo, capture_output=True)
+
+      if has_conflicts:
+          result = {
+              "mergeable": False,
+              "message": (
+                  f"Branch has conflicts with {target}. "
+                  "Run: skill_run(\"rebase_pr\", '{\"branch\": \""
+                  + current_branch["name"]
+                  + "\"}')"
+              ),
+          }
+      else:
+          result = {"mergeable": True, "message": "Branch can merge cleanly"}
+    output: merge_check
+
+  # ==================== LINTING ====================
+
+  # Step 5: Run black check
+  - name: run_black
+    description: "Run black formatter check"
+    condition: "inputs.run_linting"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      if inputs.auto_fix_lint:
+          # Run black to fix
+          result = subprocess.run(
+              ["black", "."],
+              cwd=repo,
+              capture_output=True,
+              text=True,
+          )
+          if result.returncode == 0:
+              black_result = {"passed": True, "fixed": True, "message": "Black applied"}
+          else:
+              black_result = {
+                  "passed": False,
+                  "fixed": False,
+                  "message": result.stderr[:200],
+              }
+      else:
+          # Just check
+          result = subprocess.run(
+              ["black", "--check", "."],
+              cwd=repo,
+              capture_output=True,
+              text=True,
+          )
+          if result.returncode == 0:
+              black_result = {"passed": True, "message": "Black check passed"}
+          else:
+              # Count files that need formatting
+              lines = result.stdout.strip().split("\n")
+              files = [
+                  ln
+                  for ln in lines
+                  if ln.startswith("would reformat") or ln.startswith("Oh no!")
+              ]
+              black_result = {
+                  "passed": False,
+                  "message": f"{len(files)} file(s) need formatting. "
+                  "Run with auto_fix_lint=true or `black .`",
+              }
+
+      result = black_result
+    output: black_result
+    on_error: continue
+
+  # Step 6: Run flake8 check
+  - name: run_flake8
+    description: "Run flake8 linting"
+    condition: "inputs.run_linting"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      result = subprocess.run(
+          [
+              "flake8",
+              "--max-line-length=100",
+              "--ignore=E501,W503,E203",
+              "--exclude=.git,__pycache__,migrations,venv,.venv",
+              ".",
+          ],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode == 0:
+          flake8_result = {"passed": True, "message": "Flake8 passed", "issues": []}
+      else:
+          issues = result.stdout.strip().split("\n")[:10]
+          flake8_result = {
+              "passed": False,
+              "message": f"{len(issues)} flake8 issue(s)",
+              "issues": issues,
+          }
+
+      result = flake8_result
+    output: flake8_result
+    on_error: continue
+
+  # ==================== JIRA INTEGRATION ====================
+
+  # Step 7: Get Jira issue details
   - name: get_issue
+    description: "Fetch Jira issue details"
     tool: jira_view_issue
     args:
       issue_key: "{{ inputs.issue_key }}"
     output: issue
+    on_error: continue
 
-  # Step 2: Check git status
-  - name: check_status
-    tool: git_status
+  # Step 8: Run Jira hygiene check
+  - name: jira_hygiene_check
+    description: "Check Jira issue quality"
+    condition: "inputs.check_jira and issue"
+    tool: skill_run
     args:
-      repo: "{{ inputs.repo }}"
-    output: status
+      skill_name: jira_hygiene
+      inputs: '{"issue_key": "{{ inputs.issue_key }}", "auto_fix": true}'
+    output: jira_check
+    on_error: continue
 
-  # Step 3: Get current branch
-  - name: get_branch
-    tool: git_branch_list
-    args:
-      repo: "{{ inputs.repo }}"
-    output: branches
-    # Current branch is marked with *
+  # ==================== CREATE MR ====================
 
-  # Step 4: Push if needed
+  # Step 9: Push branch
   - name: push_branch
-    tool: git_push
-    args:
-      repo: "{{ inputs.repo }}"
-      set_upstream: true
+    description: "Push branch to origin"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      branch = current_branch["name"]
+
+      result = subprocess.run(
+          ["git", "push", "-u", "origin", branch],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0 and "already exists" not in result.stderr:
+          # Try force push if rejected
+          result = subprocess.run(
+              ["git", "push", "-u", "origin", branch, "--force-with-lease"],
+              cwd=repo,
+              capture_output=True,
+              text=True,
+          )
+
+      result = "Pushed to origin"
     output: push_result
 
-  # Step 5: Build MR description
-  # Note: jira_url comes from config.json via config
+  # Step 10: Build MR description
   - name: build_description
+    description: "Build MR description with Jira link"
     compute: |
-      # Get Jira URL from config (loaded by skill engine)
-      jira_url = config.get('jira', {}).get('url', 'https://jira.example.com')
-      description = f"""## Summary
-      {issue.summary}
+      import textwrap
 
-      ## Jira
-      {jira_url}/browse/{inputs.issue_key}
+      jira_url = constants.get("jira_url", "https://issues.redhat.com")
+      issue_key = inputs.issue_key.upper()
 
-      ## Changes
-      <!-- Describe your changes -->
+      # Extract issue summary
+      issue_text = str(issue) if issue else ""
+      summary_match = issue_text[:100] if issue_text else "No description"
 
-      ## Testing
-      - [ ] Unit tests pass
-      - [ ] Integration tests pass
-      - [ ] Manual testing completed
+      # Build description
+      description = textwrap.dedent(f"""
+          ## Summary
+          {summary_match}
 
-      ## Checklist
-      - [ ] Code follows project conventions
-      - [ ] Documentation updated if needed
-      - [ ] No secrets or sensitive data
-      """
-      return description
-    output: description
+          ## Jira
+          [{issue_key}]({jira_url}/browse/{issue_key})
 
-  # Step 6: Create the MR
+          ## Changes
+          - Commits: {commit_validation.get("count", 0)}
+
+          ## Testing
+          - [ ] Unit tests pass
+          - [ ] Integration tests pass
+          - [ ] Manual testing completed
+
+          ## Checklist
+          - [ ] Code follows project conventions
+          - [ ] Documentation updated if needed
+          - [ ] No secrets or sensitive data
+      """).strip()
+
+      result = description
+    output: mr_description
+
+  # Step 11: Create the MR
   - name: create_mr
+    description: "Create GitLab merge request"
     tool: gitlab_mr_create
     args:
-      project: "{{ inputs.repo }}"
-      title: "{{ inputs.issue_key }} - {{ issue.summary[:50] }}"
-      description: "{{ description }}"
+      project: "{{ constants.gitlab_project }}"
+      title: "{{ inputs.issue_key }} - {{ issue.summary[:50] if issue else 'Update' }}"
+      description: "{{ mr_description }}"
       target_branch: "{{ inputs.target_branch }}"
+      source_branch: "{{ current_branch.name }}"
       draft: "{{ inputs.draft }}"
     output: mr
 
-  # Step 7: Update Jira with MR link
+  # Step 12: Update Jira with MR link
   - name: update_jira
+    description: "Add MR link to Jira issue"
+    condition: "mr"
     tool: jira_add_comment
     args:
       issue_key: "{{ inputs.issue_key }}"
-      comment: "MR created: {{ mr.web_url }}"
+      comment: |
+        MR created: {{ mr.web_url }}
+        
+        Branch: {{ current_branch.name }}
+        Status: {{ "Draft" if inputs.draft else "Ready for Review" }}
     on_error: continue
 
-  # Step 8: Update Jira status to In Review
+  # Step 13: Update Jira status if not draft
   - name: update_status
-    condition: "{{ not inputs.draft }}"
+    description: "Move Jira to In Review (if not draft)"
+    condition: "not inputs.draft and mr"
     tool: jira_set_status
     args:
       issue_key: "{{ inputs.issue_key }}"
       status: "In Review"
     on_error: continue
 
+# ==================== OUTPUT ====================
+
 outputs:
   - name: summary
     value: |
-      ## ✅ Merge Request Created
+      ## {{ "✅" if mr else "❌" }} Merge Request {{ "Created" if mr else "Failed" }}
       
+      {% if mr %}
       **MR:** {{ mr.title }}
       **URL:** {{ mr.web_url }}
       **Status:** {{ "Draft" if inputs.draft else "Ready for Review" }}
+      **Branch:** `{{ current_branch.name }}` → `{{ inputs.target_branch }}`
+      {% endif %}
+      
+      ---
+      
+      ### Pre-flight Checks
+      
+      | Check | Status |
+      |-------|--------|
+      | Uncommitted changes | ✅ Clean |
+      | Commits | {{ commit_validation.count }} commit(s) |
+      | Commit format | {{ "⚠️ " + commit_validation.warnings[0] if commit_validation.warnings else "✅ OK" }} |
+      | Merge conflicts | {{ "❌ Has conflicts" if not merge_check.mergeable else "✅ Mergeable" }} |
+      {% if inputs.run_linting %}
+      | Black | {{ "✅ Passed" if black_result and black_result.passed else "⚠️ " + (black_result.message if black_result else "Skipped") }} |
+      | Flake8 | {{ "✅ Passed" if flake8_result and flake8_result.passed else "⚠️ " + (flake8_result.message if flake8_result else "Skipped") }} |
+      {% endif %}
+      {% if inputs.check_jira %}
+      | Jira hygiene | {{ "✅ Checked" if jira_check else "⚠️ Skipped" }} |
+      {% endif %}
+      
+      {% if not merge_check.mergeable %}
+      ---
+      
+      ### ⚠️ Action Required
+      
+      {{ merge_check.message }}
+      {% endif %}
+      
+      {% if mr %}
+      ---
       
       ### Next Steps
       {% if inputs.draft %}
       1. Complete your changes
-      2. Mark as ready: `gitlab_mr_update mr_id={{ mr.iid }} draft=false`
+      2. Push updates: `git push`
+      3. Mark as ready: `gitlab_mr_update(project="...", mr_id={{ mr.iid }}, draft=false)`
       {% else %}
       1. Wait for pipeline to complete
       2. Request review from teammates
-      3. Address feedback
+      3. Address feedback: `skill_run("check_my_prs", '{}')`
       {% endif %}
-  
-  - name: mr_url
-    value: "{{ mr.web_url }}"
+      {% endif %}
 
+  - name: context
+    value:
+      mr_url: "{{ mr.web_url if mr else none }}"
+      mr_id: "{{ mr.iid if mr else none }}"
+      branch: "{{ current_branch.name }}"
+      mergeable: "{{ merge_check.mergeable }}"
+      lint_passed: "{{ (black_result.passed if black_result else true) and (flake8_result.passed if flake8_result else true) }}"

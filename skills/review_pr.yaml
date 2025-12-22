@@ -346,16 +346,17 @@ steps:
       import os
       
       # Create test script
-      test_script = '''#!/bin/bash
-set -e
-pipenv sync --dev
-export POSTGRESQL_USER="debug"
-export POSTGRESQL_PASSWORD="debug"
-export SECRET_KEY="1234"
-export DB_SSLMODE=disable
-export DATABASE_PREFIX="postgresql://${POSTGRESQL_USER}:${POSTGRESQL_PASSWORD}@localhost"
-pytest -vv --tb=short -q 2>&1 | tail -50
-'''
+      test_script = (
+          "#!/bin/bash\n"
+          "set -e\n"
+          "pipenv sync --dev\n"
+          "export POSTGRESQL_USER=\"debug\"\n"
+          "export POSTGRESQL_PASSWORD=\"debug\"\n"
+          "export SECRET_KEY=\"1234\"\n"
+          "export DB_SSLMODE=disable\n"
+          "export DATABASE_PREFIX=\"postgresql://${POSTGRESQL_USER}:${POSTGRESQL_PASSWORD}@localhost\"\n"
+          "pytest -vv --tb=short -q 2>&1 | tail -50\n"
+      )
       
       # Write to temp file
       script_path = "/tmp/pr_review_test.sh"

@@ -1,0 +1,344 @@
+# Skill: Standup Summary
+# Generate standup summary from recent activity
+
+name: standup_summary
+description: |
+  Generate a standup summary from recent activity:
+  - Git commits from yesterday/today
+  - Jira issues worked on (In Progress, In Review)
+  - MRs created/reviewed
+  - Issues closed
+  
+  Perfect for daily standups or status updates.
+version: "1.0"
+
+inputs:
+  - name: repo
+    type: string
+    required: false
+    default: "."
+    description: "Repository path (defaults to current directory)"
+
+  - name: days
+    type: integer
+    required: false
+    default: 1
+    description: "How many days back to look (default: 1 for yesterday)"
+
+  - name: include_jira
+    type: boolean
+    required: false
+    default: true
+    description: "Include Jira issues"
+
+  - name: include_gitlab
+    type: boolean
+    required: false
+    default: true
+    description: "Include GitLab MR activity"
+
+  - name: author
+    type: string
+    required: false
+    description: "Git author email (defaults to git config)"
+
+constants:
+  gitlab_project: automation-analytics/automation-analytics-backend
+  jira_project: AAP
+
+steps:
+  # ==================== GET AUTHOR ====================
+
+  - name: get_author
+    description: "Get git author email"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      if inputs.author:
+          author = inputs.author
+      else:
+          result = subprocess.run(
+              ["git", "config", "user.email"],
+              cwd=repo,
+              capture_output=True,
+              text=True,
+          )
+          author = result.stdout.strip() if result.returncode == 0 else ""
+
+      # Also get username
+      result = subprocess.run(
+          ["git", "config", "user.name"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+      name = result.stdout.strip() if result.returncode == 0 else ""
+
+      result = {"email": author, "name": name}
+    output: author_info
+
+  # ==================== GET COMMITS ====================
+
+  - name: get_recent_commits
+    description: "Get commits from recent days"
+    compute: |
+      import subprocess
+      import os
+      from datetime import datetime, timedelta
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      days = inputs.days
+
+      # Calculate since date
+      since_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+      # Get commits by author
+      author = author_info.get("email", "")
+      cmd = [
+          "git", "log",
+          f"--since={since_date}",
+          "--oneline",
+          "--format=%h %s",
+      ]
+      if author:
+          cmd.append(f"--author={author}")
+
+      result = subprocess.run(
+          cmd,
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      commits = []
+      if result.returncode == 0 and result.stdout.strip():
+          lines = result.stdout.strip().split("\n")
+          for line in lines:
+              if line.strip():
+                  parts = line.split(" ", 1)
+                  commits.append({
+                      "sha": parts[0],
+                      "message": parts[1] if len(parts) > 1 else "",
+                  })
+
+      # Extract issue keys from commit messages
+      import re
+      issue_keys = set()
+      for commit in commits:
+          keys = re.findall(r"AAP-\d+", commit["message"], re.IGNORECASE)
+          issue_keys.update(k.upper() for k in keys)
+
+      result = {
+          "commits": commits[:20],
+          "count": len(commits),
+          "issue_keys": list(issue_keys),
+      }
+    output: commit_info
+
+  # ==================== GET JIRA ACTIVITY ====================
+
+  - name: get_jira_in_progress
+    description: "Get my issues in progress"
+    condition: "inputs.include_jira"
+    tool: jira_search
+    args:
+      jql: 'project = AAP AND assignee = currentUser() AND status in ("In Progress", "In Review") ORDER BY updated DESC'
+    output: jira_in_progress
+    on_error: continue
+
+  - name: get_jira_done_recently
+    description: "Get recently closed issues"
+    condition: "inputs.include_jira"
+    tool: jira_search
+    args:
+      jql: 'project = AAP AND assignee = currentUser() AND status = Done AND updated >= -{{ inputs.days }}d ORDER BY updated DESC'
+    output: jira_done
+    on_error: continue
+
+  - name: parse_jira_issues
+    description: "Parse Jira issues"
+    condition: "inputs.include_jira"
+    compute: |
+      import re
+
+      in_progress = []
+      done = []
+
+      # Parse in-progress issues
+      if jira_in_progress:
+          lines = str(jira_in_progress).split("\n")
+          for line in lines:
+              match = re.search(r"(AAP-\d+)[:\s]+(.+)", line)
+              if match:
+                  in_progress.append({
+                      "key": match.group(1),
+                      "summary": match.group(2)[:60],
+                  })
+
+      # Parse done issues
+      if jira_done:
+          lines = str(jira_done).split("\n")
+          for line in lines:
+              match = re.search(r"(AAP-\d+)[:\s]+(.+)", line)
+              if match:
+                  done.append({
+                      "key": match.group(1),
+                      "summary": match.group(2)[:60],
+                  })
+
+      result = {
+          "in_progress": in_progress[:10],
+          "done": done[:10],
+      }
+    output: jira_issues
+    on_error: continue
+
+  # ==================== GET GITLAB ACTIVITY ====================
+
+  - name: get_my_mrs
+    description: "Get MRs I created"
+    condition: "inputs.include_gitlab"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ constants.gitlab_project }}"
+      state: all
+      author: "{{ author_info.name }}"
+    output: my_mrs_raw
+    on_error: continue
+
+  - name: get_mr_reviews
+    description: "Get MRs I reviewed"
+    condition: "inputs.include_gitlab"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ constants.gitlab_project }}"
+      state: all
+      reviewer: "{{ author_info.name }}"
+    output: reviewed_mrs_raw
+    on_error: continue
+
+  - name: parse_gitlab_activity
+    description: "Parse GitLab MR activity"
+    condition: "inputs.include_gitlab"
+    compute: |
+      import re
+      from datetime import datetime, timedelta
+
+      cutoff = datetime.now() - timedelta(days=inputs.days)
+
+      my_mrs = []
+      reviewed = []
+
+      # Parse my MRs
+      if my_mrs_raw:
+          lines = str(my_mrs_raw).split("\n")
+          for line in lines[:10]:
+              match = re.search(r"!(\d+)[:\s]+(.+)", line)
+              if match:
+                  my_mrs.append({
+                      "iid": match.group(1),
+                      "title": match.group(2)[:60],
+                  })
+
+      # Parse reviewed MRs
+      if reviewed_mrs_raw:
+          lines = str(reviewed_mrs_raw).split("\n")
+          for line in lines[:10]:
+              match = re.search(r"!(\d+)[:\s]+(.+)", line)
+              if match:
+                  reviewed.append({
+                      "iid": match.group(1),
+                      "title": match.group(2)[:60],
+                  })
+
+      result = {
+          "my_mrs": my_mrs[:5],
+          "reviewed": reviewed[:5],
+      }
+    output: gitlab_activity
+    on_error: continue
+
+  # ==================== BUILD SUMMARY ====================
+
+  - name: build_summary
+    description: "Build standup summary"
+    compute: |
+      from datetime import datetime
+
+      lines = []
+      lines.append(f"## 📋 Standup Summary")
+      lines.append(f"**Date:** {datetime.now().strftime('%Y-%m-%d')}")
+      lines.append(f"**Author:** {author_info.get('name', 'Unknown')}")
+      lines.append("")
+
+      # Yesterday / Done
+      lines.append("### ✅ What I Did")
+      if commit_info.get("commits"):
+          lines.append(f"**Commits:** {commit_info['count']}")
+          for c in commit_info["commits"][:5]:
+              lines.append(f"- `{c['sha']}` {c['message'][:50]}")
+          if commit_info["count"] > 5:
+              lines.append(f"- ... and {commit_info['count'] - 5} more")
+      else:
+          lines.append("- No commits in the last day")
+
+      if jira_issues and jira_issues.get("done"):
+          lines.append("")
+          lines.append("**Issues Closed:**")
+          for issue in jira_issues["done"][:5]:
+              lines.append(f"- [{issue['key']}] {issue['summary']}")
+
+      if gitlab_activity and gitlab_activity.get("reviewed"):
+          lines.append("")
+          lines.append("**PRs Reviewed:**")
+          for mr in gitlab_activity["reviewed"][:3]:
+              lines.append(f"- !{mr['iid']}: {mr['title']}")
+
+      lines.append("")
+
+      # Today / In Progress
+      lines.append("### 🔄 What I'm Working On")
+      if jira_issues and jira_issues.get("in_progress"):
+          for issue in jira_issues["in_progress"][:5]:
+              lines.append(f"- [{issue['key']}] {issue['summary']}")
+      elif commit_info.get("issue_keys"):
+          for key in commit_info["issue_keys"][:5]:
+              lines.append(f"- {key}")
+      else:
+          lines.append("- (Add your current work here)")
+
+      if gitlab_activity and gitlab_activity.get("my_mrs"):
+          lines.append("")
+          lines.append("**Open MRs:**")
+          for mr in gitlab_activity["my_mrs"][:3]:
+              lines.append(f"- !{mr['iid']}: {mr['title']}")
+
+      lines.append("")
+
+      # Blockers
+      lines.append("### 🚧 Blockers")
+      lines.append("- None")
+      lines.append("")
+
+      lines.append("---")
+      lines.append("*Generated by standup_summary skill*")
+
+      result = "\n".join(lines)
+    output: standup
+
+# ==================== OUTPUT ====================
+
+outputs:
+  - name: summary
+    value: |
+      {{ standup }}
+
+  - name: context
+    value:
+      author: "{{ author_info.name }}"
+      commits: "{{ commit_info.count }}"
+      issue_keys: "{{ commit_info.issue_keys }}"
+

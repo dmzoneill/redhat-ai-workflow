@@ -321,15 +321,17 @@ flowchart LR
 | Skill | Description | Agent |
 |-------|-------------|-------|
 | ⚡ [`start_work`](#start_work) | Begin working on a Jira issue | developer |
-| 🚀 [`create_mr`](#create_mr) | Create MR with Jira link | developer |
+| 🚀 [`create_mr`](#create_mr) | Create MR with validation, linting, conflict detection | developer |
 | ✅ [`close_issue`](#close_issue) | Close issue with commit summary | developer |
 | 👀 [`review_pr`](#review_pr) | Review PR with auto-approve/feedback | developer |
 | 📋 [`review_all_prs`](#review_all_prs) | Batch review open PRs (by others) | developer |
 | 📝 [`check_my_prs`](#check_my_prs) | Check your PRs for feedback, auto-rebase conflicts | developer |
 | 🔄 [`rebase_pr`](#rebase_pr) | Rebase PR onto main, auto-resolve obvious conflicts | developer |
+| 🔁 [`sync_branch`](#sync_branch) | Quick sync with main (daily rebase) | developer |
 | 🧪 [`test_mr_ephemeral`](#test_mr_ephemeral) | Test in ephemeral namespace | developer |
 | 📋 [`jira_hygiene`](#jira_hygiene) | Validate/fix Jira quality | developer |
-| 🔍 [`investigate_alert`](#investigate_alert) | Systematic alert triage | devops, incident |
+| 📊 [`standup_summary`](#standup_summary) | Generate standup from recent activity | developer |
+| 🔍 [`investigate_alert`](#investigate_alert) | Quick alert triage (escalates to debug_prod) | devops, incident |
 | 🐛 [`debug_prod`](#debug_prod) | Debug production issues | devops, incident |
 | 📦 [`release_aa_backend_prod`](#release_aa_backend_prod) | Release to production | release |
 
@@ -370,10 +372,11 @@ flowchart TD
 
 ### 🚀 create_mr
 
-Create a Merge Request with proper formatting, linked to Jira.
+Create a Merge Request with full validation, linting, and conflict detection.
 
 ```
 skill_run("create_mr", '{"issue_key": "AAP-12345"}')
+skill_run("create_mr", '{"issue_key": "AAP-12345", "run_linting": true, "auto_fix_lint": true}')
 ```
 
 **Inputs:**
@@ -381,21 +384,37 @@ skill_run("create_mr", '{"issue_key": "AAP-12345"}')
 |-------|----------|---------|-------------|
 | `issue_key` | Yes | - | Jira issue key |
 | `repo` | No | `.` | Repository path |
-| `draft` | No | `false` | Create as draft MR |
+| `draft` | No | `true` | Create as draft MR |
+| `target_branch` | No | `main` | Target branch |
+| `run_linting` | No | `true` | Run black/flake8 checks |
+| `auto_fix_lint` | No | `false` | Auto-fix with black |
+| `check_jira` | No | `true` | Run jira_hygiene first |
+
+**Pre-flight Checks:**
+| Check | Action |
+|-------|--------|
+| Uncommitted changes | ❌ Error if dirty |
+| Commit format | ⚠️ Warn if missing AAP-XXXXX |
+| Merge conflicts | ❌ Error + suggest `rebase_pr` |
+| Black | ⚠️ Warn or auto-fix |
+| Flake8 | ⚠️ Warn with issues |
+| Jira hygiene | Auto-fix via `jira_hygiene` skill |
 
 ```mermaid
 flowchart TD
-    A[Start] --> B[Get Jira Issue]
-    B --> C[Get Current Branch]
-    C --> D[Get Commits]
-    D --> E[Build MR Title]
-    E --> F["AAP-12345 - type: summary"]
-    F --> G[Build MR Description]
-    G --> H[Link to Jira]
-    H --> I[Push Branch]
-    I --> J[Create GitLab MR]
-    J --> K[Add MR Link to Jira]
-    K --> L[Done]
+    A[Start] --> B{On feature branch?}
+    B -->|No| X[❌ Error]
+    B -->|Yes| C{Clean working tree?}
+    C -->|No| X
+    C -->|Yes| D[Validate commits]
+    D --> E{Can merge cleanly?}
+    E -->|No| Y[⚠️ Suggest rebase_pr]
+    E -->|Yes| F[Run linting]
+    F --> G[Run jira_hygiene]
+    G --> H[Push branch]
+    H --> I[Create GitLab MR]
+    I --> J[Update Jira]
+    J --> K[✅ Done]
 ```
 
 ---
@@ -671,6 +690,93 @@ Step 1: Edit `src/api/views.py` (look for <<<<<<< markers)
 Step 2: git add src/api/views.py
 Step 3: git rebase --continue
 Step 4: git push --force-with-lease origin AAP-61214-feature
+```
+
+---
+
+### 🔁 sync_branch
+
+Quick daily sync of current branch with main using rebase.
+
+```
+skill_run("sync_branch", '{}')
+skill_run("sync_branch", '{"force_push": true}')
+```
+
+**Inputs:**
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `repo` | No | `.` | Repository path |
+| `base_branch` | No | `main` | Branch to sync with |
+| `stash_changes` | No | `true` | Stash uncommitted changes |
+| `force_push` | No | `false` | Force push after rebase |
+
+**Flow:**
+```mermaid
+flowchart TD
+    A[Get Current Branch] --> B{On main?}
+    B -->|Yes| X[❌ Error]
+    B -->|No| C{Uncommitted changes?}
+    C -->|Yes| D[Stash]
+    C -->|No| E[Fetch origin/main]
+    D --> E
+    E --> F{Behind main?}
+    F -->|No| G[✅ Up to date]
+    F -->|Yes| H[Rebase onto main]
+    H --> I{Conflicts?}
+    I -->|No| J[Pop stash]
+    I -->|Yes| K[Show conflicts]
+    J --> L{force_push?}
+    L -->|Yes| M[Push]
+    L -->|No| N[Ready to push]
+```
+
+---
+
+### 📊 standup_summary
+
+Generate standup summary from recent activity.
+
+```
+skill_run("standup_summary", '{}')
+skill_run("standup_summary", '{"days": 1}')
+```
+
+**Inputs:**
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `repo` | No | `.` | Repository path |
+| `days` | No | `1` | Days to look back |
+| `include_jira` | No | `true` | Include Jira issues |
+| `include_gitlab` | No | `true` | Include MR activity |
+
+**Output Example:**
+```markdown
+## 📋 Standup Summary
+**Date:** 2025-01-15
+**Author:** Dave O'Neill
+
+### ✅ What I Did
+**Commits:** 5
+- `a1b2c3d` AAP-61214 - feat: Add user validation
+- `e4f5g6h` AAP-61214 - fix: Handle edge case
+- ... and 3 more
+
+**Issues Closed:**
+- [AAP-61200] Fix memory leak in processor
+
+**PRs Reviewed:**
+- !245: AAP-61210 - docs: Update API guide
+
+### 🔄 What I'm Working On
+- [AAP-61214] Implement user validation
+- [AAP-61220] Refactor auth module
+
+**Open MRs:**
+- !248: AAP-61214 - feat: Add user validation
+
+### 🚧 Blockers
+- None
 ```
 
 ---

@@ -1,0 +1,348 @@
+# Skill: Sync Branch with Main
+# Quick rebase of current branch onto main
+
+name: sync_branch
+description: |
+  Quickly sync current branch with main using rebase.
+  
+  Less aggressive than rebase_pr - good for ongoing work:
+  - Fetches latest main
+  - Rebases current branch onto main
+  - Auto-resolves simple conflicts
+  - Reports status
+  
+  Use rebase_pr for MRs with merge commits that need cleanup.
+version: "1.0"
+
+inputs:
+  - name: repo
+    type: string
+    required: false
+    default: "."
+    description: "Repository path (defaults to current directory)"
+
+  - name: base_branch
+    type: string
+    required: false
+    default: "main"
+    description: "Branch to sync with (default: main)"
+
+  - name: stash_changes
+    type: boolean
+    required: false
+    default: true
+    description: "Stash uncommitted changes before rebase"
+
+  - name: force_push
+    type: boolean
+    required: false
+    default: false
+    description: "Force push after successful rebase"
+
+steps:
+  # ==================== PRE-FLIGHT ====================
+
+  - name: get_current_branch
+    description: "Get current branch name"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      result = subprocess.run(
+          ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0:
+          raise ValueError(f"Not a git repository: {repo}")
+
+      branch = result.stdout.strip()
+
+      if branch in ["main", "master"]:
+          raise ValueError(
+              f"Already on {branch}. "
+              "Switch to a feature branch first."
+          )
+
+      result = branch
+    output: current_branch
+
+  - name: check_uncommitted
+    description: "Check for uncommitted changes"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      result = subprocess.run(
+          ["git", "status", "--porcelain"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      has_changes = bool(result.stdout.strip())
+      change_count = len(result.stdout.strip().split("\n")) if has_changes else 0
+
+      result = {"has_changes": has_changes, "count": change_count}
+    output: uncommitted
+
+  # ==================== STASH IF NEEDED ====================
+
+  - name: stash_changes
+    description: "Stash uncommitted changes"
+    condition: "uncommitted.has_changes and inputs.stash_changes"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      result = subprocess.run(
+          ["git", "stash", "push", "-m", f"sync_branch: auto-stash before rebase"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0:
+          raise ValueError(f"Failed to stash: {result.stderr}")
+
+      result = "Stashed changes"
+    output: stash_result
+
+  # ==================== FETCH AND REBASE ====================
+
+  - name: fetch_base
+    description: "Fetch latest from remote"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      base = inputs.base_branch
+
+      result = subprocess.run(
+          ["git", "fetch", "origin", base],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0:
+          raise ValueError(f"Failed to fetch: {result.stderr}")
+
+      result = f"Fetched origin/{base}"
+    output: fetch_result
+
+  - name: get_commits_behind
+    description: "Check how many commits behind"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      base = inputs.base_branch
+
+      result = subprocess.run(
+          ["git", "rev-list", "--count", f"HEAD..origin/{base}"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      behind = int(result.stdout.strip()) if result.returncode == 0 else 0
+
+      result = subprocess.run(
+          ["git", "rev-list", "--count", f"origin/{base}..HEAD"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      ahead = int(result.stdout.strip()) if result.returncode == 0 else 0
+
+      result = {"behind": behind, "ahead": ahead}
+    output: commit_status
+
+  - name: rebase
+    description: "Rebase onto base branch"
+    condition: "commit_status.behind > 0"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      base = inputs.base_branch
+
+      result = subprocess.run(
+          ["git", "rebase", f"origin/{base}"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode == 0:
+          rebase_result = {
+              "success": True,
+              "conflicts": False,
+              "message": f"Rebased onto origin/{base}",
+          }
+      else:
+          # Check for conflicts
+          status = subprocess.run(
+              ["git", "status", "--porcelain"],
+              cwd=repo,
+              capture_output=True,
+              text=True,
+          )
+
+          conflict_files = [
+              ln[3:] for ln in status.stdout.split("\n")
+              if ln.startswith("UU") or ln.startswith("AA")
+          ]
+
+          if conflict_files:
+              rebase_result = {
+                  "success": False,
+                  "conflicts": True,
+                  "conflict_files": conflict_files[:5],
+                  "message": f"{len(conflict_files)} file(s) have conflicts",
+              }
+          else:
+              rebase_result = {
+                  "success": False,
+                  "conflicts": False,
+                  "message": result.stderr[:200],
+              }
+
+      result = rebase_result
+    output: rebase_result
+
+  - name: skip_rebase_up_to_date
+    description: "Branch is already up to date"
+    condition: "commit_status.behind == 0"
+    compute: |
+      result = {
+          "success": True,
+          "conflicts": False,
+          "message": "Already up to date with main",
+      }
+    output: rebase_result
+
+  # ==================== POP STASH ====================
+
+  - name: pop_stash
+    description: "Restore stashed changes"
+    condition: "stash_result and rebase_result.success"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      result = subprocess.run(
+          ["git", "stash", "pop"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0:
+          result = f"⚠️ Could not pop stash: {result.stderr[:100]}"
+      else:
+          result = "Restored stashed changes"
+    output: pop_result
+    on_error: continue
+
+  # ==================== FORCE PUSH ====================
+
+  - name: force_push
+    description: "Force push rebased branch"
+    condition: "rebase_result.success and inputs.force_push and commit_status.behind > 0"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      branch = current_branch
+
+      result = subprocess.run(
+          ["git", "push", "--force-with-lease", "origin", branch],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0:
+          result = f"⚠️ Push failed: {result.stderr[:100]}"
+      else:
+          result = f"Force pushed {branch}"
+    output: push_result
+    on_error: continue
+
+# ==================== OUTPUT ====================
+
+outputs:
+  - name: summary
+    value: |
+      ## 🔄 Sync Branch: `{{ current_branch }}`
+      
+      **Base:** `{{ inputs.base_branch }}`
+      **Status:** {{ commit_status.behind }} behind, {{ commit_status.ahead }} ahead
+      
+      {% if commit_status.behind == 0 %}
+      ✅ Already up to date with `{{ inputs.base_branch }}`
+      {% elif rebase_result.success %}
+      ✅ Successfully rebased onto `{{ inputs.base_branch }}`
+      {% if stash_result %}
+      - {{ stash_result }}
+      - {{ pop_result if pop_result else "Changes restored" }}
+      {% endif %}
+      {% if push_result %}
+      - {{ push_result }}
+      {% else %}
+      
+      Ready to push:
+      ```bash
+      git push --force-with-lease origin {{ current_branch }}
+      ```
+      Or: `skill_run("sync_branch", '{"force_push": true}')`
+      {% endif %}
+      {% else %}
+      
+      {% if rebase_result.conflicts %}
+      ⚠️ **Merge Conflicts Detected**
+      
+      Files with conflicts:
+      {% for f in rebase_result.conflict_files %}
+      - `{{ f }}`
+      {% endfor %}
+      
+      **To resolve:**
+      1. Edit each file (look for `<<<<<<<` markers)
+      2. `git add <file>`
+      3. `git rebase --continue`
+      4. `git push --force-with-lease`
+      
+      **To abort:** `git rebase --abort`
+      
+      For auto-resolution, try: `skill_run("rebase_pr", '{"branch": "{{ current_branch }}"}')`
+      {% else %}
+      ❌ Rebase failed: {{ rebase_result.message }}
+      {% endif %}
+      {% endif %}
+
+  - name: context
+    value:
+      branch: "{{ current_branch }}"
+      success: "{{ rebase_result.success }}"
+      behind: "{{ commit_status.behind }}"
+      ahead: "{{ commit_status.ahead }}"
+      pushed: "{{ push_result is defined }}"
+
