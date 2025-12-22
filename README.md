@@ -325,8 +325,8 @@ flowchart LR
 | ✅ [`close_issue`](#close_issue) | Close issue with commit summary | developer |
 | 👀 [`review_pr`](#review_pr) | Review PR with auto-approve/feedback | developer |
 | 📋 [`review_all_prs`](#review_all_prs) | Batch review open PRs (by others) | developer |
-| 📝 [`check_my_prs`](#check_my_prs) | Check your PRs for reviewer feedback | developer |
-| 🔄 [`rebase_pr`](#rebase_pr) | Rebase PR onto main, handle conflicts | developer |
+| 📝 [`check_my_prs`](#check_my_prs) | Check your PRs for feedback, auto-rebase conflicts | developer |
+| 🔄 [`rebase_pr`](#rebase_pr) | Rebase PR onto main, auto-resolve obvious conflicts | developer |
 | 🧪 [`test_mr_ephemeral`](#test_mr_ephemeral) | Test in ephemeral namespace | developer |
 | 📋 [`jira_hygiene`](#jira_hygiene) | Validate/fix Jira quality | developer |
 | 🔍 [`investigate_alert`](#investigate_alert) | Systematic alert triage | devops, incident |
@@ -481,11 +481,12 @@ flowchart TD
 
 ### 📋 review_all_prs
 
-Batch review all open PRs with intelligent follow-up.
+Batch review all open PRs with intelligent follow-up. **Also checks your own PRs for merge conflicts and auto-rebases.**
 
 ```
 skill_run("review_all_prs", '{}')
 skill_run("review_all_prs", '{"dry_run": true}')
+skill_run("review_all_prs", '{"auto_rebase": true}')  # Also rebase your PRs with conflicts
 ```
 
 **Inputs:**
@@ -495,14 +496,23 @@ skill_run("review_all_prs", '{"dry_run": true}')
 | `reviewer` | No | - | Filter by reviewer |
 | `limit` | No | `10` | Max MRs to process |
 | `dry_run` | No | `false` | Preview without taking action |
+| `include_my_mrs` | No | `true` | Show your own MRs |
+| `auto_rebase` | No | `true` | Auto-rebase your MRs with conflicts |
 
-**Decision Logic:**
+**Decision Logic (for PRs by others):**
 | Scenario | Action |
 |----------|--------|
 | No previous review from me | Run full review |
 | I gave feedback, author didn't respond | Skip (waiting) |
 | I gave feedback, author addressed it | Approve |
 | I gave feedback, unresolved issues remain | Post follow-up |
+
+**For Your Own PRs:**
+| Scenario | Action |
+|----------|--------|
+| Has merge conflicts | Call `rebase_pr` skill |
+| Has merge commits | Suggest rebase |
+| Other | Show feedback status |
 
 ```mermaid
 flowchart TD
@@ -524,10 +534,12 @@ flowchart TD
 
 ### 📝 check_my_prs
 
-Check your own open PRs for feedback from reviewers.
+Check your own open PRs for feedback from reviewers. **Auto-detects and offers to rebase MRs with conflicts.**
 
 ```
 skill_run("check_my_prs", '{}')
+skill_run("check_my_prs", '{"auto_rebase": true}')  # Auto-rebase conflicts
+skill_run("check_my_prs", '{"auto_merge": true}')   # Auto-merge approved
 ```
 
 **Inputs:**
@@ -535,10 +547,13 @@ skill_run("check_my_prs", '{}')
 |-------|----------|---------|-------------|
 | `project` | No | automation-analytics/... | GitLab project |
 | `show_approved` | No | `true` | Include approved MRs |
+| `auto_merge` | No | `false` | Auto-merge approved MRs |
+| `auto_rebase` | No | `false` | Auto-rebase MRs with conflicts |
 
 **Output Categories:**
 | Status | Meaning |
 |--------|---------|
+| 🔄 Needs Rebase | Has merge conflicts - offers `rebase_pr` |
 | 🔴 Needs Your Response | Reviewers left feedback - address it |
 | 🔴 Pipeline Failed | Fix CI before review |
 | 🟡 Awaiting Review | No feedback yet |
@@ -548,11 +563,15 @@ skill_run("check_my_prs", '{}')
 flowchart TD
     A[Get My Username] --> B[List My Open MRs]
     B --> C[For Each MR]
-    C --> D{Has Feedback?}
-    D -->|Yes| E{Approved?}
-    D -->|No| F[Awaiting Review]
-    E -->|Yes| G[Ready to Merge]
-    E -->|No| H[Needs Response]
+    C --> D{Has Conflicts?}
+    D -->|Yes| R{auto_rebase?}
+    R -->|Yes| S[Call rebase_pr]
+    R -->|No| T[Show Rebase Prompt]
+    D -->|No| E{Has Feedback?}
+    E -->|Yes| F{Approved?}
+    E -->|No| G[Awaiting Review]
+    F -->|Yes| H[Ready to Merge]
+    F -->|No| I[Needs Response]
     H --> I[Show Reviewers & Comments]
 ```
 

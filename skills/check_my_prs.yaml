@@ -32,6 +32,12 @@ inputs:
     required: false
     default: false
     description: "Automatically merge approved MRs (asks first if false)"
+  
+  - name: auto_rebase
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically rebase MRs with merge conflicts"
 
 constants:
   gitlab_project: automation-analytics/automation-analytics-backend
@@ -144,8 +150,21 @@ steps:
       # Check pipeline status
       pipeline_failed = bool(re.search(r'pipeline.*failed|CI.*failed|build.*failed', details, re.IGNORECASE))
       
+      # Check for merge conflicts
+      has_conflicts = bool(re.search(
+        r'cannot be merged|has conflicts|merge conflicts?|needs rebase|unable to merge',
+        details, re.IGNORECASE
+      ))
+      
+      # Check for merge commits (should rebase)
+      has_merge_commits = bool(re.search(r'merge branch|merge.*into|merge commit', details, re.IGNORECASE))
+      needs_rebase = has_conflicts or has_merge_commits
+      
       # Determine status
-      if is_approved and not unresolved:
+      if has_conflicts:
+        status = "needs_rebase"
+        action = "Has merge conflicts - needs rebase"
+      elif is_approved and not unresolved:
         status = "approved"
         action = "Ready to merge!"
       elif unresolved or (has_feedback and not is_approved):
@@ -154,6 +173,9 @@ steps:
       elif pipeline_failed:
         status = "pipeline_failed"
         action = "Fix pipeline before review"
+      elif has_merge_commits:
+        status = "needs_rebase"
+        action = "Has merge commits - consider rebasing"
       else:
         status = "awaiting_review"
         action = "Waiting for reviewers"
@@ -167,7 +189,9 @@ steps:
         'has_feedback': has_feedback,
         'reviewers': list(reviewers),
         'unresolved': unresolved,
-        'pipeline_failed': pipeline_failed
+        'pipeline_failed': pipeline_failed,
+        'has_conflicts': has_conflicts,
+        'needs_rebase': needs_rebase
       }
     output: first_mr_status
 
@@ -181,6 +205,18 @@ steps:
       project: "{{ inputs.project }}"
       mr_id: "{{ first_mr_status.get('iid') }}"
     output: feedback_details
+    on_error: continue
+
+  # ==================== AUTO-REBASE IF NEEDED ====================
+  
+  - name: auto_rebase_mr
+    description: "Automatically rebase MR with conflicts"
+    condition: "inputs.auto_rebase and first_mr_status and first_mr_status.get('needs_rebase')"
+    tool: skill_run
+    args:
+      skill_name: rebase_pr
+      inputs: '{"mr_id": {{ first_mr_status.get("iid", 0) }}, "force_push": false}'
+    output: rebase_result
     on_error: continue
 
   # ==================== BUILD SUMMARY ====================
@@ -203,6 +239,7 @@ steps:
         awaiting = []
         approved = []
         failed = []
+        needs_rebase = []
         
         if first_mr_status:
           status = first_mr_status.get('status', 'unknown')
@@ -212,6 +249,8 @@ steps:
             approved.append(first_mr_status)
           elif status == 'pipeline_failed':
             failed.append(first_mr_status)
+          elif status == 'needs_rebase':
+            needs_rebase.append(first_mr_status)
           else:
             awaiting.append(first_mr_status)
         
@@ -231,6 +270,17 @@ steps:
             if mr.get('unresolved'):
               lines.append(f"  - ⚠️ Has unresolved discussions")
             lines.append("")
+        
+        if needs_rebase:
+          lines.append("### 🔄 Needs Rebase")
+          for mr in needs_rebase:
+            if rebase_result:
+              lines.append(f"- !{mr['iid']}: {mr.get('title', '')} 🔄 **Rebased!**")
+              lines.append(f"  - *See rebase results below*")
+            else:
+              lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ⚠️ Has merge conflicts")
+              lines.append(f"  - Run: `skill_run(\"rebase_pr\", '{{\"mr_id\": {mr[\"iid\"]}}}')`")
+          lines.append("")
         
         if failed:
           lines.append("### 🔴 Pipeline Failed")
@@ -309,6 +359,25 @@ outputs:
       ```
       skill_run("check_my_prs", '{"auto_merge": true}')
       ```
+      {% elif first_mr_status and first_mr_status.get('status') == 'needs_rebase' %}
+      🔄 **!{{ first_mr_status.get('iid') }} has merge conflicts!**
+      
+      {% if rebase_result %}
+      ✅ Rebase completed! Check the results above.
+      {% else %}
+      Would you like me to rebase it? Just say:
+      - **"Yes, rebase it"** or **"rebase !{{ first_mr_status.get('iid') }}"**
+      
+      Or run:
+      ```
+      skill_run("rebase_pr", '{"mr_id": {{ first_mr_status.get('iid') }}}')
+      ```
+      
+      Or auto-rebase when checking PRs:
+      ```
+      skill_run("check_my_prs", '{"auto_rebase": true}')
+      ```
+      {% endif %}
       {% else %}
       - View MR details: `gitlab_mr_view(project="...", mr_id=<id>)`
       - Check all MRs again: `skill_run("check_my_prs", '{}')`
