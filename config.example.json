@@ -12,6 +12,13 @@
       "watched_keywords": ["help", "question", "urgent", "review"],
       "self_user_id": "U12345678"
     },
+    "response_channels": {
+      "description": "Channels where the agent is allowed to respond",
+      "allowed_channels": ["C12345678"],
+      "allow_dms": true,
+      "allow_threads": true,
+      "blocked_channels": ["C00000000"]
+    },
     "rate_limiting": {
       "max_retries": 5,
       "base_backoff": 1.0

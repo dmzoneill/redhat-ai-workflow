@@ -195,6 +195,70 @@ class UserClassifier:
 
 
 # =============================================================================
+# CHANNEL PERMISSIONS
+# =============================================================================
+
+
+class ChannelPermissions:
+    """Controls which channels the agent can respond in."""
+
+    def __init__(self):
+        self.config = SLACK_CONFIG.get("response_channels", {})
+        self._load_config()
+
+    def _load_config(self):
+        """Load channel permissions from config."""
+        self.allowed_channels = set(self.config.get("allowed_channels", []))
+        self.blocked_channels = set(self.config.get("blocked_channels", []))
+        self.allow_dms = self.config.get("allow_dms", True)
+        self.allow_threads = self.config.get("allow_threads", True)
+
+    def can_respond(
+        self,
+        channel_id: str,
+        is_dm: bool = False,
+        is_thread: bool = False,
+    ) -> tuple[bool, str]:
+        """
+        Check if the agent can respond in this channel.
+
+        Returns:
+            tuple of (allowed, reason)
+        """
+        # Check blocked list first (takes priority)
+        if channel_id in self.blocked_channels:
+            return False, "Channel is in blocked list"
+
+        # Check DMs
+        if is_dm:
+            if not self.allow_dms:
+                return False, "DMs are disabled"
+            return True, "DMs allowed"
+
+        # Check threads
+        if is_thread and not self.allow_threads:
+            return False, "Thread responses are disabled"
+
+        # If allowed_channels is empty, allow all (except blocked)
+        if not self.allowed_channels:
+            return True, "No channel restrictions"
+
+        # Check if channel is in allowed list
+        if channel_id in self.allowed_channels:
+            return True, "Channel is in allowed list"
+
+        return False, "Channel not in allowed list"
+
+    def reload(self):
+        """Reload config (for hot reload)."""
+        global CONFIG, SLACK_CONFIG
+        CONFIG = load_config()
+        SLACK_CONFIG = CONFIG.get("slack", {})
+        self.config = SLACK_CONFIG.get("response_channels", {})
+        self._load_config()
+
+
+# =============================================================================
 # TERMINAL UI
 # =============================================================================
 
@@ -263,13 +327,17 @@ class TerminalUI:
         msg: PendingMessage,
         intent: str,
         classification: "UserClassification | None" = None,
+        channel_allowed: bool = True,
     ):
         """Print incoming message."""
         print(
             f"\n{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}"
         )
         print(f"{self.COLORS['bold']}📩 New Message{self.COLORS['reset']}")
-        print(f"   Channel: #{msg.channel_name}")
+
+        # Show channel with permission indicator
+        channel_indicator = "✅" if channel_allowed else "🚫"
+        print(f"   Channel: #{msg.channel_name} {channel_indicator}")
         print(f"   From: {msg.user_name}")
 
         # Show user classification
@@ -792,6 +860,7 @@ class SlackDaemon:
         self.executor = ToolExecutor(PROJECT_ROOT)
         self.response_generator = ResponseGenerator(self.executor, use_llm=use_llm)
         self.user_classifier = UserClassifier()
+        self.channel_permissions = ChannelPermissions()
 
         self.session: SlackSession | None = None
         self.state_db: SlackStateDB | None = None
@@ -872,6 +941,14 @@ class SlackDaemon:
         )
         print(f"✅ User lists: {safe_count} safe, {concerned_count} concerned")
 
+        # Show channel permissions
+        allowed_count = len(self.channel_permissions.allowed_channels)
+        blocked_count = len(self.channel_permissions.blocked_channels)
+        if allowed_count > 0:
+            print(f"✅ Response channels: {allowed_count} allowed, {blocked_count} blocked")
+        else:
+            print(f"✅ Response channels: all allowed (except {blocked_count} blocked)")
+
         if self.dry_run:
             print("⚠️  DRY RUN MODE - no responses will be sent")
 
@@ -911,10 +988,18 @@ class SlackDaemon:
         # Classify user
         classification = self.user_classifier.classify(msg.user_id, msg.user_name)
 
+        # Check channel permissions early for display
+        is_thread = bool(msg.thread_ts)
+        can_respond, permission_reason = self.channel_permissions.can_respond(
+            msg.channel_id,
+            is_dm=msg.is_dm,
+            is_thread=is_thread,
+        )
+
         # Detect intent
         intent = self.intent_detector.detect(msg.text, msg.is_mention)
 
-        self.ui.print_message(msg, intent.type, classification)
+        self.ui.print_message(msg, intent.type, classification, channel_allowed=can_respond)
         self.ui.messages_processed += 1
 
         # Generate response (with classification-aware modulation)
@@ -939,6 +1024,15 @@ class SlackDaemon:
             await self._notify_concerned_message(msg, response)
 
             # Still mark as processed (we've handled it, just not sent yet)
+            await self.state_db.mark_message_processed(msg.id)
+            return
+
+        # Check channel permissions before sending (already computed above)
+        if not can_respond:
+            print(
+                f"   {self.ui.COLORS['yellow']}🚫 NOT RESPONDING: {permission_reason}{self.ui.COLORS['reset']}"
+            )
+            # Still mark as processed
             await self.state_db.mark_message_processed(msg.id)
             return
 
