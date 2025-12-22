@@ -383,6 +383,22 @@ class DesktopNotifier:
         title = "❌ Slack Agent Error"
         self._send(title, message, self._icons["error"], self.URGENCY_CRITICAL)
 
+    def skill_activated(self, skill_name: str, description: str = ""):
+        """Notify when a skill/tool is activated."""
+        title = f"⚡ Activating: {skill_name}"
+        body = description or f"Running {skill_name}..."
+        self._send(title, body, "system-run", self.URGENCY_LOW, timeout=3000)
+
+    def skill_completed(self, skill_name: str, success: bool = True):
+        """Notify when a skill/tool completes."""
+        if success:
+            title = f"✅ Completed: {skill_name}"
+            icon = "emblem-ok-symbolic"
+        else:
+            title = f"❌ Failed: {skill_name}"
+            icon = "emblem-important-symbolic"
+        self._send(title, "", icon, self.URGENCY_LOW, timeout=2000)
+
     def started(self):
         """Notify when daemon starts."""
         title = "🤖 Slack Agent Started"
@@ -710,11 +726,17 @@ class ToolExecutor:
 class ResponseGenerator:
     """Generates responses for different intents with user-aware modulation."""
 
-    def __init__(self, executor: ToolExecutor, use_llm: bool = False):
+    def __init__(
+        self,
+        executor: ToolExecutor,
+        use_llm: bool = False,
+        notifier: DesktopNotifier | None = None,
+    ):
         self.executor = executor
         self.use_llm = use_llm
         self.llm_client = None
         self.templates = SLACK_CONFIG.get("response_templates", {})
+        self.notifier = notifier or DesktopNotifier(enabled=False)
 
         if use_llm:
             self._init_llm()
@@ -825,7 +847,9 @@ class ResponseGenerator:
             return "I couldn't find a Jira issue key in your message. Try: `AAP-12345`"
 
         key = issue_keys[0]
+        self.notifier.skill_activated("jira_view", f"Fetching {key}")
         result = await self.executor.execute_jira_view(key)
+        self.notifier.skill_completed("jira_view", "Error" not in result)
 
         # Format for Slack
         if "Error" in result:
@@ -844,7 +868,9 @@ class ResponseGenerator:
             return "I couldn't find an MR ID. Try: `!123`"
 
         mr_id = mr_ids[0]
+        self.notifier.skill_activated("gitlab_mr_view", f"Fetching MR !{mr_id}")
         result = await self.executor.execute_gitlab_mr_view(mr_id)
+        self.notifier.skill_completed("gitlab_mr_view", bool(result))
 
         if len(result) > 1500:
             result = result[:1500] + "\n\n_...truncated_"
@@ -853,7 +879,9 @@ class ResponseGenerator:
 
     async def _handle_check_my_prs(self, msg: PendingMessage, intent: Intent) -> str:
         """Handle 'my PRs' query."""
+        self.notifier.skill_activated("check_my_prs", f"Listing MRs for {msg.user_name}")
         result = await self.executor.execute_gitlab_mr_list(msg.user_name)
+        self.notifier.skill_completed("check_my_prs")
 
         if not result.strip():
             return f"🎉 No open MRs found for {msg.user_name}!"
@@ -940,6 +968,7 @@ Try:
 
     async def _llm_response(self, msg: PendingMessage) -> str:
         """Generate response using LLM."""
+        self.notifier.skill_activated("llm_response", "Generating AI response...")
         try:
             response = await self.llm_client.post(
                 "/chat/completions",
@@ -962,9 +991,11 @@ Try:
 
             if response.status_code == 200:
                 data = response.json()
+                self.notifier.skill_completed("llm_response", success=True)
                 return data["choices"][0]["message"]["content"]
             else:
                 logger.warning(f"LLM error: {response.status_code}")
+                self.notifier.skill_completed("llm_response", success=False)
                 return await self._handle_general.__wrapped__(
                     self, msg, Intent(type="general", confidence=0.5)
                 )
@@ -1001,7 +1032,9 @@ class SlackDaemon:
         self.notifier = DesktopNotifier(enabled=enable_notify)
         self.intent_detector = IntentDetector()
         self.executor = ToolExecutor(PROJECT_ROOT)
-        self.response_generator = ResponseGenerator(self.executor, use_llm=use_llm)
+        self.response_generator = ResponseGenerator(
+            self.executor, use_llm=use_llm, notifier=self.notifier
+        )
         self.user_classifier = UserClassifier()
         self.channel_permissions = ChannelPermissions()
 
