@@ -157,6 +157,52 @@ steps:
     args:
       project: "{{ constants.gitlab_project }}"
       mr_id: "{{ mr_id }}"
+    output: mr_diff_raw
+
+  # Step 4b: Check diff size and truncate if needed
+  - name: check_diff_size
+    description: "Validate diff size to avoid context overflow"
+    compute: |
+      diff_text = str(mr_diff_raw) if mr_diff_raw else ""
+      lines = diff_text.split("\n")
+      
+      MAX_LINES = 3000
+      MAX_CHARS = 100000
+      
+      is_large = len(lines) > MAX_LINES or len(diff_text) > MAX_CHARS
+      
+      if is_large:
+          # Truncate and add warning
+          if len(lines) > MAX_LINES:
+              truncated = "\n".join(lines[:MAX_LINES])
+              truncated += f"\n\n... [TRUNCATED: {len(lines) - MAX_LINES} more lines] ..."
+          else:
+              truncated = diff_text[:MAX_CHARS]
+              truncated += f"\n\n... [TRUNCATED: {len(diff_text) - MAX_CHARS} more chars] ..."
+          
+          diff_info = {
+              "text": truncated,
+              "is_large": True,
+              "total_lines": len(lines),
+              "total_chars": len(diff_text),
+              "warning": f"⚠️ Large diff ({len(lines)} lines, {len(diff_text)} chars) - truncated for analysis",
+          }
+      else:
+          diff_info = {
+              "text": diff_text,
+              "is_large": False,
+              "total_lines": len(lines),
+              "total_chars": len(diff_text),
+              "warning": None,
+          }
+      
+      result = diff_info
+    output: diff_size_check
+
+  # Use truncated diff for analysis
+  - name: set_mr_diff
+    compute: |
+      result = diff_size_check.get("text", "")
     output: mr_diff
 
   # Step 5: Check GitLab pipeline status

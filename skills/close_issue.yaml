@@ -246,25 +246,66 @@ steps:
     output: comment_result
     on_error: continue
 
-  # Step 9: Transition to Done (or Pending Release if MR merged but not deployed)
-  - name: transition_issue
-    description: "Transition issue to Done"
+  # Step 9: Check available transitions
+  - name: get_available_transitions
+    description: "Check what transitions are available from current status"
+    condition: "{{ not status_check.already_done }}"
+    tool: jira_get_transitions
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: available_transitions
+    on_error: continue
+
+  # Step 10: Validate and select transition
+  - name: select_transition
+    description: "Select the transition to Done"
     condition: "{{ not status_check.already_done }}"
     compute: |
-      # Determine target status
-      if mr_info and mr_info.get('merged'):
-        # If MR is merged, could go to Pending Release or Done
-        # For now, go to Done
-        target = constants.done_status
-      else:
-        target = constants.done_status
+      import re
       
-      result = {"target_status": target}
+      target_status = constants.done_status
+      transitions_text = str(available_transitions) if available_transitions else ""
+      
+      # Look for Done transition in available transitions
+      done_available = False
+      transition_name = target_status
+      
+      # Parse available transitions
+      # Format varies but usually contains "Done" or the target status
+      if target_status.lower() in transitions_text.lower():
+          done_available = True
+      
+      # Also check for common variations
+      for variation in ["Done", "Close", "Resolve", "Complete"]:
+          if variation.lower() in transitions_text.lower():
+              done_available = True
+              # Try to extract exact transition name
+              match = re.search(rf"({variation}[^,\n]*)", transitions_text, re.IGNORECASE)
+              if match:
+                  transition_name = match.group(1).strip()
+              break
+      
+      if not done_available and available_transitions:
+          # List what's available
+          result = {
+              "target_status": target_status,
+              "transition_available": False,
+              "error": (
+                  f"'{target_status}' transition not available from current status. "
+                  f"Available: {transitions_text[:200]}"
+              ),
+          }
+      else:
+          result = {
+              "target_status": transition_name,
+              "transition_available": True,
+              "error": None,
+          }
     output: transition_target
 
   - name: do_transition
     description: "Execute the transition"
-    condition: "{{ not status_check.already_done }}"
+    condition: "{{ not status_check.already_done and transition_target.transition_available }}"
     tool: jira_transition_issue
     args:
       issue_key: "{{ inputs.issue_key }}"

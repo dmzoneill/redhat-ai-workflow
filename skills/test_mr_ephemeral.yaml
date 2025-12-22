@@ -36,6 +36,18 @@ inputs:
     default: false
     description: "Test billing component instead of main"
 
+  - name: cleanup_on_failure
+    type: boolean
+    required: false
+    default: true
+    description: "Release namespace if deployment/tests fail"
+
+  - name: cleanup_on_success
+    type: boolean
+    required: false
+    default: false
+    description: "Release namespace after successful tests (default: keep for manual testing)"
+
 constants:
   gitlab_project: automation-analytics/automation-analytics-backend
   konflux_namespace: aap-aa-tenant
@@ -47,6 +59,38 @@ constants:
   quay_release_namespace: redhat-services-prod
 
 steps:
+  # ==================== PRE-FLIGHT CHECKS ====================
+
+  # Step 0: Check required tools
+  - name: check_tools
+    description: "Verify bonfire and kubectl are available"
+    compute: |
+      import shutil
+
+      required = ["bonfire", "kubectl", "oc"]
+      missing = []
+      available = []
+
+      for tool in required:
+          if shutil.which(tool):
+              available.append(tool)
+          else:
+              missing.append(tool)
+
+      # bonfire is required, kubectl/oc need at least one
+      if "bonfire" in missing:
+          raise ValueError(
+              "bonfire not installed. Install with: pip install crc-bonfire"
+          )
+
+      if "kubectl" in missing and "oc" in missing:
+          raise ValueError(
+              "kubectl or oc not installed. Install OpenShift CLI."
+          )
+
+      result = {"available": available, "missing": missing}
+    output: tools_check
+
   # ==================== GET COMMIT SHA ====================
 
   # Step 1: Get commit SHA from MR (if mr_id provided)
@@ -369,6 +413,40 @@ pytest -vv --tb=short -q -x 2>&1 | tail -100
         result = {"passed": False, "output": output}
     output: test_result
     on_error: continue
+
+  # ==================== CLEANUP ====================
+
+  # Step 14: Cleanup on failure
+  - name: cleanup_on_failure
+    description: "Release namespace if deployment or tests failed"
+    condition: "namespace_name and inputs.cleanup_on_failure and ((deploy_result and 'fail' in str(deploy_result).lower()) or (test_result and not test_result.get('passed')))"
+    tool: bonfire_namespace_release
+    args:
+      namespace: "{{ namespace_name }}"
+    output: cleanup_failure_result
+    on_error: continue
+
+  # Step 15: Cleanup on success (if requested)
+  - name: cleanup_on_success
+    description: "Release namespace after successful tests"
+    condition: "namespace_name and inputs.cleanup_on_success and test_result and test_result.get('passed')"
+    tool: bonfire_namespace_release
+    args:
+      namespace: "{{ namespace_name }}"
+    output: cleanup_success_result
+    on_error: continue
+
+  # Step 16: Determine final cleanup status
+  - name: cleanup_status
+    description: "Report cleanup status"
+    compute: |
+      if cleanup_failure_result:
+        result = {"cleaned_up": True, "reason": "failure"}
+      elif cleanup_success_result:
+        result = {"cleaned_up": True, "reason": "success"}
+      else:
+        result = {"cleaned_up": False, "reason": "kept"}
+    output: cleanup_info
 
 outputs:
   - name: summary

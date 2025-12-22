@@ -489,9 +489,45 @@ steps:
 
   # ==================== FORCE PUSH (if successful) ====================
   
+  - name: check_branch_protection
+    description: "Check if force push is allowed"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push"
+    compute: |
+      import subprocess
+      
+      # Dry-run to check if push would be allowed
+      result = subprocess.run(
+        ['git', 'push', '--dry-run', '--force-with-lease', 'origin', target_branch],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path
+      )
+      
+      stderr = result.stderr.lower()
+      
+      if 'protected branch' in stderr:
+        protection_check = {
+          'allowed': False,
+          'reason': f"Branch '{target_branch}' is protected. Cannot force push."
+        }
+      elif 'permission denied' in stderr or '403' in stderr:
+        protection_check = {
+          'allowed': False,
+          'reason': "Permission denied - you may not have push access."
+        }
+      elif 'remote rejected' in stderr:
+        protection_check = {
+          'allowed': False,
+          'reason': "Remote rejected push - check branch rules."
+        }
+      else:
+        protection_check = {'allowed': True, 'reason': 'OK'}
+      
+      result = protection_check
+    output: protection_check
+  
   - name: force_push
     description: "Force push rebased branch"
-    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push and (not protection_check or protection_check.get('allowed', True))"
     compute: |
       import subprocess
       
@@ -502,7 +538,10 @@ steps:
       )
       
       if result.returncode != 0:
-        raise ValueError(f"Force push failed: {result.stderr}")
+        stderr = result.stderr
+        if 'protected' in stderr.lower():
+          raise ValueError(f"Branch is protected: {target_branch}")
+        raise ValueError(f"Force push failed: {stderr[:200]}")
       
       result = f"Force pushed {target_branch} to origin"
     output: push_result

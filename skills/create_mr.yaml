@@ -62,6 +62,43 @@ constants:
 steps:
   # ==================== PRE-FLIGHT CHECKS ====================
 
+  # Step 0: Validate git repository state
+  - name: validate_git_state
+    description: "Check for rebase/merge in progress"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      # Get git dir
+      result = subprocess.run(
+          ["git", "rev-parse", "--git-dir"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0:
+          raise ValueError(f"Not a git repository: {repo}")
+
+      git_dir = result.stdout.strip()
+      if not git_dir.startswith("/"):
+          git_dir = os.path.join(repo, git_dir)
+
+      # Check for operations in progress
+      if os.path.exists(os.path.join(git_dir, "rebase-merge")):
+          raise ValueError(
+              "Rebase in progress. Run 'git rebase --continue' or '--abort'"
+          )
+      if os.path.exists(os.path.join(git_dir, "MERGE_HEAD")):
+          raise ValueError(
+              "Merge in progress. Run 'git merge --continue' or '--abort'"
+          )
+
+      result = "Git state OK"
+    output: git_state_check
+
   # Step 1: Get current branch and validate
   - name: get_current_branch
     description: "Get current branch name"
@@ -83,6 +120,13 @@ steps:
           raise ValueError(f"Not a git repository: {repo}")
 
       branch = result.stdout.strip()
+
+      # Check for detached HEAD
+      if branch == "HEAD":
+          raise ValueError(
+              "Detached HEAD state. Checkout a branch first: "
+              "'git checkout -b <branch-name>'"
+          )
 
       # Validate not on main/master
       if branch in ["main", "master"]:
@@ -229,12 +273,80 @@ steps:
           result = {"mergeable": True, "message": "Branch can merge cleanly"}
     output: merge_check
 
+  # Step 4b: Check for existing MR for this branch
+  - name: check_existing_mr
+    description: "Check if MR already exists for this branch"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ constants.gitlab_project }}"
+      state: opened
+    output: existing_mrs_raw
+    on_error: continue
+
+  - name: detect_duplicate_mr
+    description: "Parse MRs to find duplicate"
+    compute: |
+      import re
+
+      branch = current_branch["name"]
+      existing_mrs_text = str(existing_mrs_raw) if existing_mrs_raw else ""
+
+      # Look for this branch in existing MRs
+      duplicate = None
+      for line in existing_mrs_text.split("\n"):
+          if branch.lower() in line.lower():
+              # Extract MR ID
+              match = re.search(r"!(\d+)", line)
+              if match:
+                  duplicate = {
+                      "iid": match.group(1),
+                      "line": line.strip()[:80],
+                  }
+                  break
+
+      if duplicate:
+          result = {
+              "exists": True,
+              "mr_iid": duplicate["iid"],
+              "message": (
+                  f"MR !{duplicate['iid']} already exists for branch '{branch}'. "
+                  f"View it: gitlab_mr_view(project=\"{constants.gitlab_project}\", "
+                  f"mr_id={duplicate['iid']})"
+              ),
+          }
+      else:
+          result = {"exists": False, "message": "No existing MR found"}
+    output: duplicate_check
+
   # ==================== LINTING ====================
+
+  # Step 5a: Check if linting tools are available
+  - name: check_lint_tools
+    description: "Check if black and flake8 are installed"
+    condition: "inputs.run_linting"
+    compute: |
+      import shutil
+
+      missing = []
+      if not shutil.which("black"):
+          missing.append("black")
+      if not shutil.which("flake8"):
+          missing.append("flake8")
+
+      if missing:
+          result = {
+              "available": False,
+              "missing": missing,
+              "message": f"Linting tools not installed: {missing}. Install with: pip install {' '.join(missing)}",
+          }
+      else:
+          result = {"available": True, "missing": [], "message": "OK"}
+    output: lint_tools_check
 
   # Step 5: Run black check
   - name: run_black
     description: "Run black formatter check"
-    condition: "inputs.run_linting"
+    condition: "inputs.run_linting and (not lint_tools_check or lint_tools_check.get('available', True))"
     compute: |
       import subprocess
       import os

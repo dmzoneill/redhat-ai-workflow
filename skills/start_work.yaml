@@ -17,12 +17,80 @@ inputs:
     description: "Repository path (defaults to current directory)"
 
 steps:
+  # ==================== PRE-FLIGHT VALIDATION ====================
+
+  # Step 0a: Validate git repository
+  - name: validate_git_repo
+    description: "Ensure we're in a valid git repository"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+
+      # Check if git repo
+      result = subprocess.run(
+          ["git", "rev-parse", "--git-dir"],
+          cwd=repo,
+          capture_output=True,
+          text=True,
+      )
+
+      if result.returncode != 0:
+          raise ValueError(f"Not a git repository: {repo}")
+
+      git_dir = result.stdout.strip()
+      if not git_dir.startswith("/"):
+          git_dir = os.path.join(repo, git_dir)
+
+      # Check for rebase/merge in progress
+      issues = []
+      if os.path.exists(os.path.join(git_dir, "rebase-merge")):
+          issues.append("rebase in progress - run 'git rebase --continue' or '--abort'")
+      if os.path.exists(os.path.join(git_dir, "MERGE_HEAD")):
+          issues.append("merge in progress - run 'git merge --continue' or '--abort'")
+
+      if issues:
+          raise ValueError(f"Git operation in progress: {issues[0]}")
+
+      result = {"valid": True, "repo": repo}
+    output: git_validation
+
+  # Step 0b: Validate Jira issue key format
+  - name: validate_issue_key
+    description: "Validate issue key format"
+    compute: |
+      import re
+
+      key = inputs.issue_key.upper().strip()
+
+      if not re.match(r"^[A-Z]+-\d+$", key):
+          raise ValueError(
+              f"Invalid issue key format: {inputs.issue_key}. "
+              "Expected format: AAP-12345"
+          )
+
+      result = key
+    output: validated_issue_key
+
   # Step 1: Get issue details
   - name: get_issue
     tool: jira_view_issue
     args:
-      issue_key: "{{ inputs.issue_key }}"
+      issue_key: "{{ validated_issue_key }}"
     output: issue
+    on_error: continue
+
+  - name: check_issue_exists
+    description: "Verify issue was found"
+    compute: |
+      if not issue or "not found" in str(issue).lower():
+          raise ValueError(
+              f"Jira issue {validated_issue_key} not found. "
+              "Check the issue key and try again."
+          )
+      result = "Issue found"
+    output: issue_check
 
   # Step 2: Fetch latest and check for existing branch
   - name: check_existing_branch
