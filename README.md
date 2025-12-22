@@ -1051,6 +1051,45 @@ Claude: No problem! I can use tool_exec to access Prometheus tools:
         🟢 SlowQueries - resolved 5m ago
 ```
 
+### 📋 Prompts
+
+Pre-defined conversation templates that structure common workflows:
+
+| Prompt | Purpose |
+|--------|---------|
+| `session_init` | Initialize a new work session with context loading |
+| `debug_guide` | Systematic production debugging walkthrough |
+| `review_guide` | Structured code review checklist |
+
+**Usage:**
+```
+Claude: [Uses session_init prompt]
+
+# Session initialized
+Let me start by loading your work context...
+```
+
+### 📁 Resources
+
+Data sources the AI can read directly (without tool calls):
+
+| Resource URI | Content |
+|--------------|---------|
+| `memory://state/current_work` | Active issues, branches, MRs |
+| `memory://learned/patterns` | Known error patterns and solutions |
+| `config://agents` | Available agent configurations |
+| `config://skills` | Available skill definitions |
+| `config://repositories` | Configured repositories |
+
+**Usage:**
+```
+Claude: [Reads memory://learned/patterns resource]
+
+I see there are 12 known error patterns including:
+- OOMKilled: Increase memory limits or fix memory leaks
+- CrashLoopBackOff: Check logs, verify config/secrets
+```
+
 ---
 
 ## 💾 Memory System
