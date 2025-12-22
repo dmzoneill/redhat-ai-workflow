@@ -49,6 +49,18 @@ sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-git"))
 
 from dotenv import load_dotenv
 
+# Desktop notifications (optional)
+try:
+    import gi
+
+    gi.require_version("Notify", "0.7")
+    from gi.repository import Notify
+
+    NOTIFY_AVAILABLE = True
+    Notify.init("AI Workflow Slack Agent")
+except (ImportError, ValueError):
+    NOTIFY_AVAILABLE = False
+
 load_dotenv(PROJECT_ROOT / "mcp-servers" / "aa-slack" / ".env")
 load_dotenv()
 
@@ -256,6 +268,132 @@ class ChannelPermissions:
         SLACK_CONFIG = CONFIG.get("slack", {})
         self.config = SLACK_CONFIG.get("response_channels", {})
         self._load_config()
+
+
+# =============================================================================
+# DESKTOP NOTIFICATIONS
+# =============================================================================
+
+
+class DesktopNotifier:
+    """
+    Desktop notifications using libnotify.
+
+    Shows visual alerts for:
+    - 📩 Message received
+    - ✅ Response sent
+    - 🚫 Message ignored (channel not allowed)
+    - ⏸️ Awaiting approval (concerned user)
+    """
+
+    # Notification urgency levels
+    URGENCY_LOW = 0
+    URGENCY_NORMAL = 1
+    URGENCY_CRITICAL = 2
+
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled and NOTIFY_AVAILABLE
+        self._icons = {
+            "received": "mail-unread",
+            "responding": "mail-send",
+            "sent": "mail-replied",
+            "ignored": "dialog-warning",
+            "approval": "dialog-question",
+            "error": "dialog-error",
+        }
+
+    def _send(
+        self,
+        title: str,
+        body: str,
+        icon: str = "dialog-information",
+        urgency: int = 1,
+        timeout: int = 5000,
+    ):
+        """Send a desktop notification."""
+        if not self.enabled:
+            return
+
+        try:
+            notification = Notify.Notification.new(title, body, icon)
+            notification.set_urgency(urgency)
+            notification.set_timeout(timeout)
+            notification.show()
+        except Exception as e:
+            logger.debug(f"Notification failed: {e}")
+
+    def message_received(
+        self,
+        user_name: str,
+        channel_name: str,
+        text: str,
+        classification: str = "unknown",
+    ):
+        """Notify when a message is received."""
+        # Truncate text for notification
+        preview = text[:100] + "..." if len(text) > 100 else text
+
+        title = f"📩 Message from {user_name}"
+        body = f"#{channel_name}\n{preview}\n\n[{classification}]"
+
+        urgency = self.URGENCY_CRITICAL if classification == "concerned" else self.URGENCY_NORMAL
+        self._send(title, body, self._icons["received"], urgency)
+
+    def responding(self, user_name: str, channel_name: str, intent: str):
+        """Notify when responding to a message."""
+        title = "✅ Responding"
+        body = f"To {user_name} in #{channel_name}\nIntent: {intent}"
+        self._send(title, body, self._icons["responding"], self.URGENCY_LOW, timeout=3000)
+
+    def response_sent(self, user_name: str, channel_name: str):
+        """Notify when response was sent successfully."""
+        title = "📤 Response Sent"
+        body = f"To {user_name} in #{channel_name}"
+        self._send(title, body, self._icons["sent"], self.URGENCY_LOW, timeout=2000)
+
+    def message_ignored(self, user_name: str, channel_name: str, reason: str):
+        """Notify when a message is ignored."""
+        title = "🚫 Message Ignored"
+        body = f"From {user_name} in #{channel_name}\nReason: {reason}"
+        self._send(title, body, self._icons["ignored"], self.URGENCY_LOW, timeout=3000)
+
+    def awaiting_approval(
+        self,
+        user_name: str,
+        channel_name: str,
+        text: str,
+        pending_count: int,
+    ):
+        """Notify when a message needs approval."""
+        preview = text[:80] + "..." if len(text) > 80 else text
+
+        title = f"⏸️ Approval Required ({pending_count} pending)"
+        body = f"From {user_name} (concerned user) in #{channel_name}\n\n{preview}\n\nRun: make slack-pending"
+
+        self._send(
+            title,
+            body,
+            self._icons["approval"],
+            self.URGENCY_CRITICAL,
+            timeout=10000,
+        )
+
+    def error(self, message: str):
+        """Notify on error."""
+        title = "❌ Slack Agent Error"
+        self._send(title, message, self._icons["error"], self.URGENCY_CRITICAL)
+
+    def started(self):
+        """Notify when daemon starts."""
+        title = "🤖 Slack Agent Started"
+        body = "Monitoring channels for messages..."
+        self._send(title, body, "emblem-default", self.URGENCY_LOW, timeout=3000)
+
+    def stopped(self):
+        """Notify when daemon stops."""
+        title = "🛑 Slack Agent Stopped"
+        body = "No longer monitoring Slack"
+        self._send(title, body, "emblem-important", self.URGENCY_LOW, timeout=3000)
 
 
 # =============================================================================
@@ -850,14 +988,17 @@ class SlackDaemon:
         verbose: bool = False,
         poll_interval: float = 5.0,
         enable_dbus: bool = False,
+        enable_notify: bool = True,
     ):
         self.dry_run = dry_run
         self.use_llm = use_llm
         self.verbose = verbose
         self.poll_interval = poll_interval
         self.enable_dbus = enable_dbus
+        self.enable_notify = enable_notify
 
         self.ui = TerminalUI(verbose=verbose)
+        self.notifier = DesktopNotifier(enabled=enable_notify)
         self.intent_detector = IntentDetector()
         self.executor = ToolExecutor(PROJECT_ROOT)
         self.response_generator = ResponseGenerator(self.executor, use_llm=use_llm)
@@ -972,6 +1113,12 @@ class SlackDaemon:
         else:
             print(f"✅ Response channels: all allowed (except {blocked_count} blocked)")
 
+        # Show notification status
+        if self.notifier.enabled:
+            print("✅ Desktop notifications: enabled (libnotify)")
+        else:
+            print("⚠️  Desktop notifications: disabled (install PyGObject)")
+
         if self.dry_run:
             print("⚠️  DRY RUN MODE - no responses will be sent")
 
@@ -980,6 +1127,9 @@ class SlackDaemon:
         # Start listener
         await self.listener.start()
         self._running = True
+
+        # Desktop notification
+        self.notifier.started()
 
         # Main processing loop
         await self._main_loop()
@@ -1025,6 +1175,14 @@ class SlackDaemon:
         self.ui.print_message(msg, intent.type, classification, channel_allowed=can_respond)
         self.ui.messages_processed += 1
 
+        # Desktop notification - message received
+        self.notifier.message_received(
+            user_name=msg.user_name,
+            channel_name=msg.channel_name,
+            text=msg.text,
+            classification=classification.category.value,
+        )
+
         # Generate response (with classification-aware modulation)
         response, should_send = await self.response_generator.generate(msg, intent, classification)
 
@@ -1047,6 +1205,14 @@ class SlackDaemon:
                 f"   {self.ui.COLORS['yellow']}⏸️  QUEUED FOR REVIEW (concerned user){self.ui.COLORS['reset']}"
             )
             print(f"   Pending reviews: {len(self._pending_reviews)}")
+
+            # Desktop notification - awaiting approval
+            self.notifier.awaiting_approval(
+                user_name=msg.user_name,
+                channel_name=msg.channel_name,
+                text=msg.text,
+                pending_count=len(self._pending_reviews),
+            )
 
             # Record pending message in D-Bus history
             if self._dbus_handler:
@@ -1081,6 +1247,12 @@ class SlackDaemon:
             print(
                 f"   {self.ui.COLORS['yellow']}🚫 NOT RESPONDING: {permission_reason}{self.ui.COLORS['reset']}"
             )
+            # Desktop notification - ignored
+            self.notifier.message_ignored(
+                user_name=msg.user_name,
+                channel_name=msg.channel_name,
+                reason=permission_reason,
+            )
             # Record skipped message
             if self._dbus_handler:
                 from slack_dbus import MessageRecord
@@ -1110,6 +1282,12 @@ class SlackDaemon:
         success = True
         status = "sent"
         if not self.dry_run and should_send:
+            # Desktop notification - responding
+            self.notifier.responding(
+                user_name=msg.user_name,
+                channel_name=msg.channel_name,
+                intent=intent.type,
+            )
             try:
                 thread_ts = msg.thread_ts or msg.timestamp
                 await self.session.send_message(
@@ -1121,10 +1299,16 @@ class SlackDaemon:
                 self.ui.messages_responded += 1
                 if self._dbus_handler:
                     self._dbus_handler.messages_responded = self.ui.messages_responded
+                # Desktop notification - response sent
+                self.notifier.response_sent(
+                    user_name=msg.user_name,
+                    channel_name=msg.channel_name,
+                )
             except Exception as e:
                 success = False
                 status = "failed"
                 self.ui.print_error(f"Failed to send: {e}")
+                self.notifier.error(f"Failed to send: {e}")
         elif not should_send:
             status = "skipped"
             print(f"   {self.ui.COLORS['dim']}(auto_respond disabled){self.ui.COLORS['reset']}")
@@ -1196,6 +1380,9 @@ class SlackDaemon:
         """Stop the daemon gracefully."""
         self._running = False
 
+        # Desktop notification
+        self.notifier.stopped()
+
         if self._dbus_handler:
             self._dbus_handler.is_running = False
             await self._dbus_handler.stop_dbus()
@@ -1256,6 +1443,11 @@ async def main():
         action="store_true",
         help="Enable D-Bus IPC interface",
     )
+    parser.add_argument(
+        "--no-notify",
+        action="store_true",
+        help="Disable desktop notifications",
+    )
 
     args = parser.parse_args()
 
@@ -1277,6 +1469,7 @@ async def main():
         verbose=args.verbose,
         poll_interval=args.poll_interval,
         enable_dbus=args.dbus,
+        enable_notify=not args.no_notify,
     )
 
     daemon.setup_signal_handlers()
