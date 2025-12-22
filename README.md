@@ -350,7 +350,7 @@ flowchart LR
     style S5 fill:#3b82f6,stroke:#2563eb,color:#fff
 ```
 
-### Available Skills
+### 🎯 Available Skills
 
 | Skill | Description | Agent |
 |-------|-------------|-------|
@@ -366,7 +366,7 @@ flowchart LR
 
 ---
 
-### start_work
+### ⚡ start_work
 
 Begin work on a Jira issue - creates branch, sets up context, or resumes existing work.
 
@@ -399,7 +399,7 @@ flowchart TD
 
 ---
 
-### create_mr
+### 🚀 create_mr
 
 Create a Merge Request with proper formatting, linked to Jira.
 
@@ -431,7 +431,7 @@ flowchart TD
 
 ---
 
-### close_issue
+### ✅ close_issue
 
 Close a Jira issue with a summary of completed work from commits.
 
@@ -462,7 +462,7 @@ flowchart TD
 
 ---
 
-### review_pr
+### 👀 review_pr
 
 Review a colleague's PR with static analysis and local testing.
 
@@ -499,7 +499,7 @@ flowchart TD
 
 ---
 
-### test_mr_ephemeral
+### 🧪 test_mr_ephemeral
 
 Test an MR image in an ephemeral Kubernetes namespace.
 
@@ -541,7 +541,7 @@ flowchart TD
 
 ---
 
-### jira_hygiene
+### 📋 jira_hygiene
 
 Validate and fix Jira issue quality - descriptions, acceptance criteria, links.
 
@@ -597,7 +597,7 @@ flowchart TD
 
 ---
 
-### investigate_alert
+### 🔍 investigate_alert
 
 Investigate a firing Prometheus alert.
 
@@ -626,7 +626,7 @@ flowchart TD
 
 ---
 
-### debug_prod
+### 🐛 debug_prod
 
 Comprehensive production debugging with memory-backed pattern matching.
 
@@ -677,7 +677,7 @@ flowchart TD
 
 ---
 
-### release_aa_backend_prod
+### 📦 release_aa_backend_prod
 
 Release Automation Analytics backend to production via app-interface.
 
@@ -725,7 +725,7 @@ app-interface/data/services/insights/tower-analytics/cicd/deploy-clowder.yml
 
 ---
 
-### Skill Format
+### 📝 Skill Format
 
 ```yaml
 name: skill_name
@@ -767,7 +767,7 @@ outputs:
       {{ step2_result | json }}
 ```
 
-### Running Skills
+### ▶️ Running Skills
 
 **In chat:**
 ```
