@@ -18,5 +18,5 @@ tools:
 
 skills:
   - investigate_alert
-  - deploy_to_stage
+  - debug_prod
 

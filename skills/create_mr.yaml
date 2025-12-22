@@ -12,8 +12,9 @@ inputs:
     description: "Jira issue key for linking"
   - name: repo
     type: string
-    required: true
-    description: "Repository name"
+    required: false
+    default: "."
+    description: "Repository path (defaults to current directory)"
   - name: draft
     type: boolean
     default: true

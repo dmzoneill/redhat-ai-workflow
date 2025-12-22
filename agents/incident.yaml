@@ -18,4 +18,5 @@ tools:
 
 skills:
   - investigate_alert
+  - debug_prod
 

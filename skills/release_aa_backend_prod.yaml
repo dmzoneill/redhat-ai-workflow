@@ -1,0 +1,391 @@
+# Skill: Release AA Backend to Production
+# Promotes automation-analytics-backend from stage to production via app-interface
+
+name: release_aa_backend_prod
+description: |
+  Release Automation Analytics backend to production.
+  This skill guides you through the promotion process from stage to production
+  by updating the commit SHA in app-interface and creating a PR for approval.
+version: "1.0"
+
+inputs:
+  - name: commit_sha
+    type: string
+    required: true
+    description: "Full SHA1 commit to release (must exist in automation-analytics-backend repo and have image in Quay)"
+  
+  - name: release_date
+    type: string
+    required: false
+    default: "{{ today }}"
+    description: "Release date for Jira title (YYYY-MM-DD format, defaults to today)"
+  
+  - name: include_billing
+    type: boolean
+    required: false
+    default: false
+    description: "Also promote the billing component to production"
+
+# Paths used by this skill
+constants:
+  backend_repo: /home/daoneill/src/automation-analytics-backend
+  appinterface_repo: /home/daoneill/src/app-interface
+  deploy_file: data/services/insights/tower-analytics/cicd/deploy-clowder.yml
+  quay_image: quay.io/redhat-services-prod/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main
+  prod_namespace_pattern: "tower-analytics-prod.yml"
+  billing_namespace_pattern: "tower-analytics-prod-billing.yml"
+
+steps:
+  # ==================== VERIFICATION ====================
+  
+  # Step 1: Verify commit exists in backend repo
+  - name: verify_commit_exists
+    description: "Verify the commit SHA exists in automation-analytics-backend"
+    tool: git_log
+    args:
+      repo: "{{ constants.backend_repo }}"
+      limit: 1
+    validate:
+      - command: "git cat-file -t {{ inputs.commit_sha }}"
+        cwd: "{{ constants.backend_repo }}"
+        expect_success: true
+        error_message: "Commit {{ inputs.commit_sha }} not found in automation-analytics-backend. Did you fetch latest?"
+    output: commit_info
+
+  # Step 2: Verify image exists in Quay
+  - name: verify_quay_image
+    description: "Verify the container image exists in Quay.io"
+    tool: quay_get_tag
+    args:
+      repository: "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
+      tag: "{{ inputs.commit_sha }}"
+      namespace: "redhat-services-prod"
+    validate:
+      expect_success: true
+      error_message: "Image not found in Quay for SHA {{ inputs.commit_sha }}. Build may not have completed."
+    output: quay_image
+
+  # ==================== GET CURRENT STATE ====================
+
+  # Step 3: Get current production SHA from deploy file
+  - name: get_current_prod_sha
+    description: "Read current production SHA from app-interface"
+    compute: |
+      import re
+      deploy_path = f"{constants.appinterface_repo}/{constants.deploy_file}"
+      with open(deploy_path, 'r') as f:
+        content = f.read()
+      
+      # Find the production namespace section and extract ref
+      # Pattern: tower-analytics-prod.yml followed by ref: <sha>
+      pattern = r'\$ref:.*tower-analytics-prod\.yml\s*\n\s*ref:\s*([a-f0-9]+)'
+      match = re.search(pattern, content)
+      
+      if not match:
+        raise Exception("Could not find production ref in deploy-clowder.yml")
+      
+      current_sha = match.group(1)
+      return current_sha
+    output: current_prod_sha
+
+  # Step 4: Generate changelog (commits between current and new SHA)
+  - name: generate_changelog
+    description: "Get list of commits being released"
+    compute: |
+      import subprocess
+      result = subprocess.run(
+        ["git", "log", "--oneline", f"{current_prod_sha}..{inputs.commit_sha}"],
+        cwd=constants.backend_repo,
+        capture_output=True,
+        text=True
+      )
+      if result.returncode != 0:
+        # Try the reverse in case current is ahead
+        result = subprocess.run(
+          ["git", "log", "--oneline", f"{inputs.commit_sha}..{current_prod_sha}"],
+          cwd=constants.backend_repo,
+          capture_output=True,
+          text=True
+        )
+        if result.returncode == 0 and result.stdout.strip():
+          return f"⚠️ ROLLBACK: Going back {len(result.stdout.strip().split(chr(10)))} commits\n\n{result.stdout}"
+      
+      commits = result.stdout.strip()
+      if not commits:
+        return "No new commits (same SHA as current production)"
+      
+      commit_count = len(commits.split('\n'))
+      return f"📦 {commit_count} commits to release:\n\n{commits}"
+    output: changelog
+
+  # ==================== CREATE JIRA ISSUE ====================
+
+  # Step 5: Create release Jira issue
+  - name: create_jira_issue
+    description: "Create Jira story for tracking this release"
+    tool: jira_create_issue
+    args:
+      issue_type: "story"
+      summary: "{{ inputs.release_date }} Analytics HCC Service Release"
+    output: jira_issue
+    on_error: continue  # Don't fail if Jira is unavailable
+
+  # ==================== PREPARE APP-INTERFACE ====================
+
+  # Step 6: Ensure app-interface is clean and up to date
+  - name: check_appinterface_status
+    description: "Check app-interface repo status"
+    tool: git_status
+    args:
+      repo: "{{ constants.appinterface_repo }}"
+    output: appinterface_status
+
+  - name: validate_clean_repo
+    description: "Ensure no uncommitted changes"
+    validate:
+      condition: "'Working tree clean' in appinterface_status or not appinterface_status"
+      error_message: "app-interface has uncommitted changes. Please commit or stash them first."
+
+  # Step 7: Checkout master and pull latest
+  - name: checkout_master
+    description: "Switch to master branch"
+    tool: git_checkout
+    args:
+      repo: "{{ constants.appinterface_repo }}"
+      target: "master"
+
+  - name: pull_upstream
+    description: "Pull latest from upstream master"
+    compute: |
+      import subprocess
+      result = subprocess.run(
+        ["git", "pull", "--rebase", "upstream", "master"],
+        cwd=constants.appinterface_repo,
+        capture_output=True,
+        text=True
+      )
+      if result.returncode != 0:
+        raise Exception(f"Failed to pull upstream: {result.stderr}")
+      return result.stdout
+    output: pull_result
+
+  # Step 8: Create release branch
+  - name: create_branch_name
+    compute: |
+      # Format: aa-release-YYYY-MM-DD or aa-release-YYYY-MM-DD-v2 if exists
+      base_name = f"aa-release-{inputs.release_date}"
+      return base_name
+    output: branch_name
+
+  - name: create_release_branch
+    description: "Create branch for this release"
+    tool: git_branch_create
+    args:
+      repo: "{{ constants.appinterface_repo }}"
+      branch_name: "{{ branch_name }}"
+      base: "master"
+      checkout: true
+    output: branch_result
+
+  # ==================== UPDATE DEPLOY FILE ====================
+
+  # Step 9: Update production ref in deploy-clowder.yml
+  - name: update_prod_ref
+    description: "Update production namespace ref to new SHA"
+    compute: |
+      import re
+      deploy_path = f"{constants.appinterface_repo}/{constants.deploy_file}"
+      
+      with open(deploy_path, 'r') as f:
+        content = f.read()
+      
+      # Pattern to match the production namespace section
+      # We need to be careful to only update tower-analytics-prod.yml, not billing
+      pattern = r'(\$ref:\s*/services/insights/tower-analytics/namespaces/tower-analytics-prod\.yml\s*\n\s*ref:\s*)([a-f0-9]+)'
+      
+      def replace_ref(match):
+        return f"{match.group(1)}{inputs.commit_sha}"
+      
+      new_content, count = re.subn(pattern, replace_ref, content)
+      
+      if count == 0:
+        raise Exception("Could not find production ref pattern in deploy-clowder.yml")
+      
+      with open(deploy_path, 'w') as f:
+        f.write(new_content)
+      
+      return f"Updated tower-analytics-prod ref: {current_prod_sha[:12]} → {inputs.commit_sha[:12]}"
+    output: prod_update_result
+
+  # Step 10: Optionally update billing ref
+  - name: update_billing_ref
+    description: "Update billing production namespace ref (if requested)"
+    condition: "{{ inputs.include_billing }}"
+    compute: |
+      import re
+      deploy_path = f"{constants.appinterface_repo}/{constants.deploy_file}"
+      
+      with open(deploy_path, 'r') as f:
+        content = f.read()
+      
+      # Pattern for billing namespace
+      pattern = r'(\$ref:\s*/services/insights/tower-analytics/namespaces/tower-analytics-prod-billing\.yml\s*\n\s*ref:\s*)([a-f0-9]+)'
+      
+      def replace_ref(match):
+        return f"{match.group(1)}{inputs.commit_sha}"
+      
+      new_content, count = re.subn(pattern, replace_ref, content)
+      
+      if count == 0:
+        raise Exception("Could not find billing production ref pattern")
+      
+      with open(deploy_path, 'w') as f:
+        f.write(new_content)
+      
+      return f"Updated tower-analytics-prod-billing ref to {inputs.commit_sha[:12]}"
+    output: billing_update_result
+
+  # ==================== COMMIT AND PUSH ====================
+
+  # Step 11: Stage and commit changes
+  - name: stage_changes
+    description: "Stage the deploy file changes"
+    tool: git_add
+    args:
+      repo: "{{ constants.appinterface_repo }}"
+      files: "{{ constants.deploy_file }}"
+
+  - name: commit_changes
+    description: "Commit the release changes"
+    compute: |
+      import subprocess
+      
+      commit_msg = f"tower-analytics: release {inputs.commit_sha[:12]} to production"
+      if inputs.include_billing:
+        commit_msg += " (including billing)"
+      
+      result = subprocess.run(
+        ["git", "commit", "-m", commit_msg],
+        cwd=constants.appinterface_repo,
+        capture_output=True,
+        text=True
+      )
+      
+      if result.returncode != 0:
+        raise Exception(f"Commit failed: {result.stderr}")
+      
+      return commit_msg
+    output: commit_message
+
+  # Step 12: Push branch to origin
+  - name: push_branch
+    description: "Push release branch to origin"
+    tool: git_push
+    args:
+      repo: "{{ constants.appinterface_repo }}"
+      branch: "{{ branch_name }}"
+      set_upstream: true
+    output: push_result
+
+  # Step 13: Create merge request
+  - name: create_mr
+    description: "Create merge request for team approval"
+    tool: gitlab_mr_create
+    args:
+      project: "app-interface"  # Adjust if different
+      title: "tower-analytics: release {{ inputs.commit_sha[:12] }} to production"
+      description: |
+        ## Release: {{ inputs.release_date }} Analytics HCC Service
+        
+        **Commit SHA:** `{{ inputs.commit_sha }}`
+        **Jira:** {{ jira_issue.key if jira_issue else 'N/A' }}
+        
+        ### Changes Included
+        {{ changelog }}
+        
+        ### Components Updated
+        - [x] tower-analytics-prod (main)
+        {% if inputs.include_billing %}- [x] tower-analytics-prod-billing{% endif %}
+        
+        ### Quay Image
+        `{{ constants.quay_image }}:{{ inputs.commit_sha }}`
+        
+        ### Checklist
+        - [ ] Verified image exists in Quay
+        - [ ] Reviewed changelog
+        - [ ] Stage has been validated
+        - [ ] Ready for production deployment
+      target_branch: "master"
+      source_branch: "{{ branch_name }}"
+      draft: false
+    output: mr_result
+
+  # ==================== UPDATE JIRA ====================
+
+  # Step 14: Add MR link to Jira issue
+  - name: update_jira_with_mr
+    description: "Add MR link to Jira issue"
+    condition: "{{ jira_issue }}"
+    tool: jira_add_comment
+    args:
+      issue_key: "{{ jira_issue.key }}"
+      comment: |
+        App-Interface MR created: {{ mr_result.web_url }}
+        
+        Releasing commit: {{ inputs.commit_sha }}
+        {{ changelog }}
+    on_error: continue
+
+# ==================== OUTPUT ====================
+
+outputs:
+  - name: summary
+    value: |
+      ## ✅ Production Release Prepared
+      
+      **Release Date:** {{ inputs.release_date }}
+      **Commit SHA:** `{{ inputs.commit_sha }}`
+      
+      ### Jira Issue
+      {{ jira_issue.key if jira_issue else '⚠️ Jira issue not created' }}
+      
+      ### Merge Request
+      {{ mr_result.web_url if mr_result else '⚠️ MR not created' }}
+      
+      ### Changes Included
+      {{ changelog }}
+      
+      ### Components
+      - ✅ tower-analytics-prod (main)
+      {% if inputs.include_billing %}- ✅ tower-analytics-prod-billing{% else %}- ⏭️ tower-analytics-prod-billing (skipped){% endif %}
+      
+      ---
+      
+      ### Next Steps
+      1. 👀 Review the MR: {{ mr_result.web_url if mr_result else 'N/A' }}
+      2. ✅ Get team approval
+      3. 🚀 Merge to trigger deployment
+      4. 📊 Monitor deployment in ArgoCD/App-Interface
+      5. ✅ Verify pods are healthy in `tower-analytics-prod`
+      
+      ### Monitoring Commands
+      ```
+      kubectl_get_pods(namespace='tower-analytics-prod', environment='production')
+      prometheus_query(query='up{namespace="tower-analytics-prod"}', environment='production')
+      ```
+      
+      ### Rollback (if needed)
+      If issues arise, create a new release with the previous SHA:
+      ```
+      skill_run("release_aa_backend_prod", '{"commit_sha": "{{ current_prod_sha }}"}')
+      ```
+  
+  - name: context
+    value:
+      jira_key: "{{ jira_issue.key if jira_issue else null }}"
+      mr_url: "{{ mr_result.web_url if mr_result else null }}"
+      branch: "{{ branch_name }}"
+      old_sha: "{{ current_prod_sha }}"
+      new_sha: "{{ inputs.commit_sha }}"
+      include_billing: "{{ inputs.include_billing }}"
+

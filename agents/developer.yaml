@@ -7,14 +7,22 @@ persona: agents/developer.md
 
 # Tool modules to load (from mcp-servers/aa-*)
 tools:
-  - git           # 15 tools - Git operations
+  - git           # 16 tools - Git operations
   - gitlab        # 35 tools - MRs, CI/CD
-  - jira          # 24 tools - Issue tracking
+  - jira          # 22 tools - Issue tracking
+  - konflux       # 40 tools - Pipelines, builds
+  - bonfire       # 21 tools - Ephemeral testing
+  - quay          # 8 tools - Container images
+  - k8s           # 14 tools - Pod status
   - workflow      # 26 tools - Skills, agents, memory
 
-# Total: ~100 tools (under 128 limit)
+# Total: ~182 tools
 
 skills:
   - start_work
   - create_mr
+  - close_issue         # Close issue with commit summary
+  - review_pr           # PR review workflow
+  - test_mr_ephemeral   # Test in ephemeral
+  - jira_hygiene        # Issue quality checks
 

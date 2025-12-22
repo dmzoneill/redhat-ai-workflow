@@ -1,0 +1,326 @@
+# Skill: Close Issue
+# Marks a Jira issue as Done with a summary of work completed
+
+name: close_issue
+description: |
+  Close a Jira issue by transitioning it to Done.
+  Adds a comment summarizing the work from branch commits.
+version: "1.0"
+
+inputs:
+  - name: issue_key
+    type: string
+    required: true
+    description: "Jira issue key (e.g., AAP-12345)"
+  
+  - name: repo
+    type: string
+    required: false
+    default: "."
+    description: "Repository path to look for branch/commits"
+  
+  - name: add_comment
+    type: boolean
+    required: false
+    default: true
+    description: "Whether to add a closing comment with commit summary"
+
+constants:
+  done_status: "Done"
+  pending_release_status: "Pending Release"
+
+steps:
+  # ==================== GET ISSUE DETAILS ====================
+
+  # Step 1: Get current issue status
+  - name: get_issue
+    description: "Fetch current issue details"
+    tool: jira_get_issue
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: issue
+
+  # Step 2: Check current status
+  - name: check_status
+    compute: |
+      status = issue.get('status', '').lower()
+      
+      # Already done?
+      if status == 'done':
+        result = {"already_done": True, "message": f"Issue {inputs.issue_key} is already Done."}
+      else:
+        result = {"already_done": False, "current_status": status}
+    output: status_check
+
+  # ==================== GET BRANCH AND COMMITS ====================
+
+  # Step 3: Find branch for this issue
+  - name: find_branch
+    description: "Find git branch for this issue"
+    condition: "{{ not status_check.already_done }}"
+    compute: |
+      import subprocess
+      import os
+      import re
+      
+      repo = inputs.repo
+      issue_key = inputs.issue_key.upper()
+      
+      # Get all branches (local and remote)
+      result = subprocess.run(
+        ["git", "branch", "-a", "--list", f"*{issue_key}*"],
+        capture_output=True,
+        text=True,
+        cwd=repo
+      )
+      
+      branches = []
+      for line in result.stdout.split('\n'):
+        branch = line.strip().replace('* ', '').replace('remotes/origin/', '')
+        if branch and issue_key in branch.upper():
+          branches.append(branch)
+      
+      # Deduplicate
+      branches = list(set(branches))
+      
+      result = {
+        "found": len(branches) > 0,
+        "branches": branches,
+        "primary": branches[0] if branches else None
+      }
+    output: branch_info
+
+  # Step 4: Get commits from the branch
+  - name: get_commits
+    description: "Get commits from the issue branch"
+    condition: "{{ not status_check.already_done and branch_info.found }}"
+    compute: |
+      import subprocess
+      
+      repo = inputs.repo
+      branch = branch_info['primary']
+      
+      # Get commits unique to this branch (not in main/master)
+      # First, determine the base branch
+      base_result = subprocess.run(
+        ["git", "rev-parse", "--verify", "main"],
+        capture_output=True,
+        text=True,
+        cwd=repo
+      )
+      
+      base_branch = "main" if base_result.returncode == 0 else "master"
+      
+      # Get commits on this branch not in base
+      result = subprocess.run(
+        ["git", "log", f"{base_branch}..{branch}", "--oneline", "--no-merges", "-n", "20"],
+        capture_output=True,
+        text=True,
+        cwd=repo
+      )
+      
+      commits = []
+      for line in result.stdout.strip().split('\n'):
+        if line.strip():
+          parts = line.split(' ', 1)
+          if len(parts) == 2:
+            commits.append({
+              "sha": parts[0],
+              "message": parts[1]
+            })
+      
+      # If no commits found on branch vs base, try getting recent commits on branch
+      if not commits:
+        result = subprocess.run(
+          ["git", "log", branch, "--oneline", "-n", "10"],
+          capture_output=True,
+          text=True,
+          cwd=repo
+        )
+        for line in result.stdout.strip().split('\n')[:5]:
+          if line.strip():
+            parts = line.split(' ', 1)
+            if len(parts) == 2:
+              commits.append({
+                "sha": parts[0],
+                "message": parts[1]
+              })
+      
+      result = {
+        "branch": branch,
+        "base": base_branch,
+        "commits": commits,
+        "count": len(commits)
+      }
+    output: commit_info
+    on_error: continue
+
+  # Step 5: Get MR info if exists
+  - name: get_mr
+    description: "Check for associated Merge Request"
+    condition: "{{ not status_check.already_done }}"
+    tool: gitlab_list_mrs
+    args:
+      search: "{{ inputs.issue_key }}"
+      state: "all"
+    output: mr_list
+    on_error: continue
+
+  # Step 6: Extract MR details
+  - name: parse_mr
+    condition: "{{ not status_check.already_done and mr_list }}"
+    compute: |
+      mrs = mr_list if isinstance(mr_list, list) else []
+      
+      relevant_mr = None
+      for mr in mrs:
+        if isinstance(mr, dict):
+          title = mr.get('title', '')
+          if inputs.issue_key.upper() in title.upper():
+            relevant_mr = {
+              "id": mr.get('iid'),
+              "title": mr.get('title'),
+              "state": mr.get('state'),
+              "merged": mr.get('state') == 'merged',
+              "url": mr.get('web_url')
+            }
+            break
+      
+      result = relevant_mr
+    output: mr_info
+    on_error: continue
+
+  # ==================== BUILD CLOSING COMMENT ====================
+
+  # Step 7: Build the closing comment
+  - name: build_comment
+    condition: "{{ not status_check.already_done and inputs.add_comment }}"
+    compute: |
+      lines = []
+      lines.append("h3. ✅ Issue Completed")
+      lines.append("")
+      
+      # Branch info
+      if branch_info.get('found'):
+        lines.append(f"*Branch:* {{code}}{branch_info['primary']}{{code}}")
+      
+      # MR info
+      if mr_info:
+        status_emoji = "✅" if mr_info.get('merged') else "🔄"
+        lines.append(f"*Merge Request:* [{mr_info['title']}|{mr_info['url']}] {status_emoji}")
+        lines.append("")
+      
+      # Commits
+      if commit_info and commit_info.get('commits'):
+        lines.append("h4. Commits")
+        lines.append("||SHA||Message||")
+        for c in commit_info['commits'][:10]:
+          sha_short = c['sha'][:7]
+          msg = c['message'][:60].replace('|', '\\|')
+          lines.append(f"|{{monospace}}{sha_short}{{monospace}}|{msg}|")
+        
+        if commit_info['count'] > 10:
+          lines.append(f"_... and {commit_info['count'] - 10} more commits_")
+      elif not branch_info.get('found'):
+        lines.append("_No branch found for this issue._")
+      else:
+        lines.append("_No commits found on branch._")
+      
+      lines.append("")
+      lines.append("----")
+      lines.append("_Closed via workflow automation_")
+      
+      result = '\n'.join(lines)
+    output: closing_comment
+
+  # ==================== UPDATE JIRA ====================
+
+  # Step 8: Add the closing comment
+  - name: add_closing_comment
+    description: "Add closing comment to Jira"
+    condition: "{{ not status_check.already_done and inputs.add_comment and closing_comment }}"
+    tool: jira_add_comment
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      comment: "{{ closing_comment }}"
+    output: comment_result
+    on_error: continue
+
+  # Step 9: Transition to Done (or Pending Release if MR merged but not deployed)
+  - name: transition_issue
+    description: "Transition issue to Done"
+    condition: "{{ not status_check.already_done }}"
+    compute: |
+      # Determine target status
+      if mr_info and mr_info.get('merged'):
+        # If MR is merged, could go to Pending Release or Done
+        # For now, go to Done
+        target = constants.done_status
+      else:
+        target = constants.done_status
+      
+      result = {"target_status": target}
+    output: transition_target
+
+  - name: do_transition
+    description: "Execute the transition"
+    condition: "{{ not status_check.already_done }}"
+    tool: jira_transition_issue
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      transition: "{{ transition_target.target_status }}"
+    output: transition_result
+    on_error: continue
+
+  # ==================== VERIFY ====================
+
+  # Step 10: Verify the issue is now Done
+  - name: verify_status
+    description: "Verify issue status after transition"
+    condition: "{{ not status_check.already_done }}"
+    tool: jira_get_issue
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: final_issue
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {% if status_check.already_done %}
+      {{ status_check.message }}
+      {% else %}
+      ## ✅ Issue Closed: {{ inputs.issue_key }}
+      
+      **Status:** {{ final_issue.status if final_issue else 'Done' }}
+      
+      {% if branch_info.found %}
+      **Branch:** `{{ branch_info.primary }}`
+      {% endif %}
+      
+      {% if commit_info and commit_info.count > 0 %}
+      **Commits:** {{ commit_info.count }}
+      {% for c in commit_info.commits[:5] %}
+      - `{{ c.sha[:7] }}` {{ c.message[:50] }}
+      {% endfor %}
+      {% endif %}
+      
+      {% if mr_info %}
+      **MR:** [{{ mr_info.title }}]({{ mr_info.url }}) - {{ 'Merged ✅' if mr_info.merged else mr_info.state }}
+      {% endif %}
+      
+      {% if inputs.add_comment %}
+      📝 Closing comment added to Jira
+      {% endif %}
+      
+      🔗 [View Issue](https://issues.redhat.com/browse/{{ inputs.issue_key }})
+      {% endif %}
+  
+  - name: context
+    value:
+      issue_key: "{{ inputs.issue_key }}"
+      closed: "{{ not status_check.already_done }}"
+      branch: "{{ branch_info.primary if branch_info else None }}"
+      commits: "{{ commit_info.count if commit_info else 0 }}"
+      mr_merged: "{{ mr_info.merged if mr_info else False }}"
+

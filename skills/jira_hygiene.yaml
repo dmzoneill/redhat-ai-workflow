@@ -1,0 +1,371 @@
+# Skill: Jira Issue Hygiene
+# Validates and fixes Jira issues for quality and completeness
+
+name: jira_hygiene
+description: |
+  Check and fix Jira issue hygiene - ensures issues have proper details,
+  acceptance criteria, priority, labels, epic links, and formatting.
+  Transitions New issues to Refinement when complete.
+version: "1.0"
+
+inputs:
+  - name: issue_key
+    type: string
+    required: true
+    description: "Jira issue key to check (e.g., AAP-12345)"
+  
+  - name: auto_fix
+    type: boolean
+    required: false
+    default: true
+    description: "Automatically fix issues where possible"
+  
+  - name: auto_transition
+    type: boolean
+    required: false
+    default: true
+    description: "Auto-transition New → Refinement when ready"
+
+constants:
+  project: AAP
+  component: "Automation Analytics"
+  # Statuses
+  status_new: "New"
+  status_refinement: "Refinement"
+  status_in_progress: "In Progress"
+  # Required fields by status
+  always_required:
+    - description
+    - acceptance_criteria
+    - priority
+    - labels
+    - epic_link
+    - fix_version
+  in_progress_required:
+    - story_points
+
+steps:
+  # ==================== GET ISSUE DETAILS ====================
+
+  # Step 1: Get full issue details
+  - name: get_issue
+    description: "Fetch issue details from Jira"
+    tool: jira_view_issue_json
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: issue_raw
+
+  # Step 2: Parse issue data
+  - name: parse_issue
+    description: "Parse issue fields for validation"
+    compute: |
+      import json
+      import re
+      
+      try:
+        if isinstance(issue_raw, str):
+          # Try to extract JSON from the output
+          json_match = re.search(r'\{.*\}', issue_raw, re.DOTALL)
+          if json_match:
+            issue = json.loads(json_match.group())
+          else:
+            # Parse text output
+            issue = {"raw": issue_raw}
+        else:
+          issue = issue_raw
+      except:
+        issue = {"raw": str(issue_raw)}
+      
+      # Extract key fields
+      parsed = {
+        "key": inputs.issue_key,
+        "summary": issue.get("summary", ""),
+        "status": issue.get("status", "Unknown"),
+        "issue_type": issue.get("issuetype", issue.get("type", "Story")),
+        "description": issue.get("description", ""),
+        "acceptance_criteria": issue.get("acceptance_criteria", issue.get("customfield_12313440", "")),
+        "priority": issue.get("priority", ""),
+        "labels": issue.get("labels", []),
+        "components": issue.get("components", []),
+        "epic_link": issue.get("epic_link", issue.get("customfield_12311140", issue.get("parent", ""))),
+        "fix_version": issue.get("fixVersions", issue.get("fix_version", [])),
+        "story_points": issue.get("story_points", issue.get("customfield_12310243", None)),
+        "assignee": issue.get("assignee", ""),
+        "reporter": issue.get("reporter", ""),
+      }
+      
+      result = parsed
+    output: issue
+
+  # ==================== VALIDATE ISSUE ====================
+
+  # Step 3: Run validation checks
+  - name: validate_issue
+    description: "Check issue against hygiene rules"
+    compute: |
+      issues_found = []
+      can_fix = []
+      needs_input = []
+      
+      status = issue.get("status", "").lower()
+      issue_type = issue.get("issue_type", "").lower()
+      
+      # === DESCRIPTION ===
+      desc = issue.get("description", "")
+      if not desc or len(str(desc).strip()) < 20:
+        issues_found.append("❌ Missing or too short description")
+        needs_input.append({
+          "field": "description",
+          "issue": "Description is missing or too short (< 20 chars)",
+          "action": "Please provide a description for this issue"
+        })
+      else:
+        # Check formatting
+        desc_str = str(desc)
+        if not any(marker in desc_str for marker in ['h1.', 'h2.', 'h3.', '*', '-', '#']):
+          issues_found.append("⚠️ Description lacks proper formatting (headers, bullets)")
+          can_fix.append({
+            "field": "description_format",
+            "issue": "Description could use better Jira markup",
+            "suggestion": "Add headers (h2.), bullets (*), code blocks ({code})"
+          })
+      
+      # === ACCEPTANCE CRITERIA ===
+      ac = issue.get("acceptance_criteria", "")
+      if not ac or len(str(ac).strip()) < 10:
+        issues_found.append("❌ Missing acceptance criteria")
+        needs_input.append({
+          "field": "acceptance_criteria",
+          "issue": "Acceptance criteria not defined",
+          "action": "Please provide acceptance criteria"
+        })
+      
+      # === PRIORITY ===
+      priority = issue.get("priority", "")
+      if not priority:
+        issues_found.append("❌ Priority not set")
+        can_fix.append({
+          "field": "priority",
+          "issue": "Priority is not set",
+          "suggestion": "Set to 'Normal' as default",
+          "value": "Normal"
+        })
+      
+      # === LABELS/COMPONENTS ===
+      labels = issue.get("labels", [])
+      components = issue.get("components", [])
+      if not labels and not components:
+        issues_found.append("❌ No labels or components set")
+        can_fix.append({
+          "field": "component",
+          "issue": "No component assigned",
+          "suggestion": "Add 'Automation Analytics' component",
+          "value": "Automation Analytics"
+        })
+      
+      # === EPIC LINK (for stories) ===
+      if 'story' in issue_type or 'task' in issue_type:
+        epic = issue.get("epic_link", "")
+        if not epic:
+          issues_found.append("❌ Story not linked to an Epic")
+          needs_input.append({
+            "field": "epic_link",
+            "issue": "Story should be linked to an Epic",
+            "action": "Please specify which Epic this belongs to"
+          })
+      
+      # === FIX VERSION ===
+      fix_ver = issue.get("fix_version", [])
+      if not fix_ver:
+        issues_found.append("⚠️ No fix version set")
+        can_fix.append({
+          "field": "fix_version",
+          "issue": "Fix version not specified",
+          "suggestion": "Set fix version when known"
+        })
+      
+      # === STORY POINTS (only if In Progress) ===
+      if 'in progress' in status or 'review' in status:
+        sp = issue.get("story_points")
+        if sp is None or sp == "":
+          issues_found.append("❌ In Progress without story points")
+          needs_input.append({
+            "field": "story_points",
+            "issue": "Story points required for In Progress issues",
+            "action": "Please estimate story points"
+          })
+      
+      # === STATUS TRANSITION CHECK ===
+      transition_ready = False
+      if status == "new":
+        # Check if ready for Refinement
+        has_desc = bool(issue.get("description", "")) and len(str(issue.get("description", ""))) >= 20
+        has_ac = bool(issue.get("acceptance_criteria", ""))
+        has_priority = bool(issue.get("priority", ""))
+        
+        if has_desc and has_ac and has_priority:
+          transition_ready = True
+          can_fix.append({
+            "field": "status",
+            "issue": "Issue is ready for Refinement",
+            "suggestion": "Transition from New → Refinement",
+            "value": "Refinement"
+          })
+      
+      # Calculate health score
+      total_checks = 7  # desc, ac, priority, labels, epic, fix_ver, formatting
+      passed = total_checks - len([i for i in issues_found if '❌' in i])
+      health_score = int((passed / total_checks) * 100)
+      
+      result = {
+        "issues": issues_found,
+        "can_fix": can_fix,
+        "needs_input": needs_input,
+        "health_score": health_score,
+        "transition_ready": transition_ready,
+        "current_status": issue.get("status", "Unknown"),
+        "is_healthy": len(issues_found) == 0
+      }
+    output: validation
+
+  # ==================== AUTO-FIX WHERE POSSIBLE ====================
+
+  # Step 4: Apply auto-fixes
+  - name: apply_fixes
+    description: "Apply automatic fixes where possible"
+    condition: "{{ inputs.auto_fix and validation.can_fix }}"
+    compute: |
+      import subprocess
+      
+      fixed = []
+      failed = []
+      
+      for fix in validation['can_fix']:
+        field = fix['field']
+        value = fix.get('value')
+        
+        if field == 'status' and inputs.auto_transition:
+          # Transition status
+          result = subprocess.run(
+            ["rh-issue", "set-status", inputs.issue_key, "Refinement"],
+            capture_output=True,
+            text=True
+          )
+          if result.returncode == 0:
+            fixed.append(f"✅ Status: New → Refinement")
+          else:
+            failed.append(f"❌ Could not transition status: {result.stderr[:100]}")
+        
+        elif field == 'priority' and value:
+          # Note: rh-issue may not support setting priority directly
+          # This would need the actual Jira API or a different approach
+          fixed.append(f"⚠️ Priority should be set to: {value} (manual)")
+        
+        elif field == 'component' and value:
+          # Note: would need actual API call
+          fixed.append(f"⚠️ Component should be: {value} (manual)")
+      
+      result = {"fixed": fixed, "failed": failed}
+    output: fix_results
+    on_error: continue
+
+  # ==================== GENERATE REPORT ====================
+
+  # Step 5: Build summary
+  - name: build_report
+    compute: |
+      lines = []
+      
+      # Health score emoji
+      score = validation['health_score']
+      if score >= 90:
+        health_emoji = "🟢"
+      elif score >= 70:
+        health_emoji = "🟡"
+      elif score >= 50:
+        health_emoji = "🟠"
+      else:
+        health_emoji = "🔴"
+      
+      lines.append(f"## {health_emoji} Issue Health: {score}%")
+      lines.append(f"**Issue:** {inputs.issue_key}")
+      lines.append(f"**Summary:** {issue.get('summary', 'N/A')}")
+      lines.append(f"**Status:** {validation['current_status']}")
+      lines.append(f"**Type:** {issue.get('issue_type', 'N/A')}")
+      lines.append("")
+      
+      # Issues found
+      if validation['issues']:
+        lines.append("### Issues Found")
+        for iss in validation['issues']:
+          lines.append(f"- {iss}")
+        lines.append("")
+      
+      # Fixed items
+      if fix_results and fix_results.get('fixed'):
+        lines.append("### ✅ Fixed")
+        for fix in fix_results['fixed']:
+          lines.append(f"- {fix}")
+        lines.append("")
+      
+      # Needs input
+      if validation['needs_input']:
+        lines.append("### ❓ Needs Your Input")
+        for item in validation['needs_input']:
+          lines.append(f"**{item['field']}:** {item['issue']}")
+          lines.append(f"  → {item['action']}")
+        lines.append("")
+      
+      # Status transition
+      if validation['transition_ready'] and not inputs.auto_transition:
+        lines.append("### 📋 Ready for Transition")
+        lines.append("This issue has all required fields. Ready to move: **New → Refinement**")
+        lines.append("")
+        lines.append("Run with `auto_transition=true` to transition automatically.")
+        lines.append("")
+      
+      # All good
+      if validation['is_healthy']:
+        lines.append("### ✅ All Checks Passed!")
+        lines.append("This issue meets all hygiene requirements.")
+      
+      result = '\n'.join(lines)
+    output: report
+
+outputs:
+  - name: summary
+    value: |
+      {{ report }}
+      
+      ---
+      
+      {% if validation.needs_input %}
+      ### What would you like to do?
+      
+      I need some information to complete the fixes:
+      
+      {% for item in validation.needs_input %}
+      **{{ item.field }}:** {{ item.action }}
+      {% endfor %}
+      
+      Provide the missing info and I'll update the issue.
+      {% elif not validation.is_healthy %}
+      
+      ### Quick Fixes
+      
+      To update this issue manually:
+      ```
+      jira_add_comment(issue_key='{{ inputs.issue_key }}', comment='...')
+      jira_set_status(issue_key='{{ inputs.issue_key }}', status='Refinement')
+      ```
+      {% endif %}
+  
+  - name: context
+    value:
+      issue_key: "{{ inputs.issue_key }}"
+      health_score: "{{ validation.health_score }}"
+      is_healthy: "{{ validation.is_healthy }}"
+      issues_count: "{{ validation.issues | length }}"
+      needs_input: "{{ validation.needs_input }}"
+      transition_ready: "{{ validation.transition_ready }}"
+

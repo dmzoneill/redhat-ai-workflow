@@ -1,0 +1,463 @@
+# Skill: Test MR in Ephemeral Environment
+# Deploy PR/MR image to ephemeral namespace and run pytest validation
+
+name: test_mr_ephemeral
+description: |
+  Deploy an MR's image to an ephemeral namespace for testing.
+  Finds the Konflux build, reserves a namespace, deploys, and runs pytest against the ephemeral DB.
+version: "1.1"
+
+inputs:
+  - name: mr_id
+    type: integer
+    required: false
+    description: "GitLab MR ID (will find the image from Konflux)"
+  
+  - name: commit_sha
+    type: string
+    required: false
+    description: "Specific commit SHA to test (alternative to mr_id)"
+  
+  - name: duration
+    type: string
+    required: false
+    default: "2h"
+    description: "How long to reserve namespace (e.g., 1h, 2h, 4h)"
+  
+  - name: run_tests
+    type: boolean
+    required: false
+    default: true
+    description: "Run pytest against ephemeral environment"
+  
+  - name: billing
+    type: boolean
+    required: false
+    default: false
+    description: "Test billing component instead of main"
+
+constants:
+  gitlab_project: automation-analytics/automation-analytics-backend
+  konflux_namespace: aap-aa-tenant
+  # PR images are in user-workloads repo
+  quay_pr_repo: aap-aa-tenant/aap-aa-main/automation-analytics-backend-main
+  quay_pr_namespace: redhat-user-workloads
+  # Release images are in services-prod repo
+  quay_release_repo: aap-aa-tenant/aap-aa-main/automation-analytics-backend-main
+  quay_release_namespace: redhat-services-prod
+
+steps:
+  # ==================== GET COMMIT SHA ====================
+
+  # Step 1: Get commit SHA from MR (if mr_id provided)
+  - name: get_mr_commit
+    description: "Get the latest commit SHA from the MR"
+    condition: "{{ inputs.mr_id and not inputs.commit_sha }}"
+    compute: |
+      import subprocess
+      import re
+      
+      result = subprocess.run(
+        ["glab", "mr", "view", str(inputs.mr_id)],
+        capture_output=True,
+        text=True
+      )
+      
+      commit_sha = None
+      source_branch = None
+      
+      if result.returncode == 0:
+        output = result.stdout
+        
+        sha_match = re.search(r'[Ss]ha:?\s*([a-f0-9]{40})', output)
+        if sha_match:
+          commit_sha = sha_match.group(1)
+        
+        branch_match = re.search(r'[Ss]ource [Bb]ranch:?\s*(\S+)', output)
+        if branch_match:
+          source_branch = branch_match.group(1)
+        
+        if not commit_sha and source_branch:
+          sha_result = subprocess.run(
+            ["git", "ls-remote", "origin", source_branch],
+            capture_output=True,
+            text=True
+          )
+          if sha_result.returncode == 0 and sha_result.stdout:
+            commit_sha = sha_result.stdout.split()[0]
+      
+      result = {"sha": commit_sha, "branch": source_branch}
+    output: mr_info
+
+  # Step 2: Determine final commit SHA
+  - name: resolve_commit
+    compute: |
+      if inputs.commit_sha:
+        sha = inputs.commit_sha
+      elif mr_info and mr_info.get('sha'):
+        sha = mr_info['sha']
+      else:
+        sha = None
+      result = sha
+    output: commit_sha
+
+  # Step 3: Validate we have a commit
+  - name: validate_commit
+    compute: |
+      if not commit_sha:
+        raise Exception("Could not determine commit SHA. Provide either mr_id or commit_sha.")
+      result = f"Using commit: {commit_sha[:12]}"
+    output: commit_status
+
+  # ==================== CHECK IMAGE EXISTS ====================
+
+  # Step 4: Check if image exists in PR repo (redhat-user-workloads)
+  - name: check_quay_image
+    description: "Verify the image was built and pushed to Quay (PR repo)"
+    tool: quay_get_tag
+    args:
+      repository: "{{ constants.quay_pr_repo }}"
+      tag: "{{ commit_sha }}"
+      namespace: "{{ constants.quay_pr_namespace }}"
+    output: quay_result
+    on_error: continue
+
+  # Step 5: If image not found, check Konflux build status
+  - name: check_konflux_build
+    description: "Check Konflux build status for this commit"
+    condition: "{{ not quay_result or 'not found' in str(quay_result).lower() }}"
+    tool: konflux_list_builds
+    args:
+      namespace: "{{ constants.konflux_namespace }}"
+      limit: 10
+    output: konflux_builds
+
+  # Step 6: Validate image availability
+  - name: validate_image
+    compute: |
+      if quay_result and 'not found' not in str(quay_result).lower():
+        result = {"available": True, "status": "Image ready in Quay"}
+      else:
+        result = {"available": False, "status": "Image not found - build may be in progress"}
+    output: image_status
+
+  # ==================== RESERVE NAMESPACE ====================
+
+  # Step 7: Reserve ephemeral namespace
+  - name: reserve_namespace
+    description: "Reserve an ephemeral namespace"
+    condition: "{{ image_status.get('available', False) }}"
+    tool: bonfire_namespace_reserve
+    args:
+      duration: "{{ inputs.duration }}"
+      pool: "default"
+      timeout: 600
+      force: true
+    output: namespace_result
+
+  # Step 8: Extract namespace name
+  - name: get_namespace_name
+    condition: "{{ image_status.get('available', False) }}"
+    compute: |
+      import re
+      
+      ns_output = str(namespace_result)
+      match = re.search(r'(ephemeral-[a-z0-9]+)', ns_output.lower())
+      if match:
+        result = match.group(1)
+      else:
+        result = None
+    output: namespace_name
+
+  # ==================== DEPLOY ====================
+
+  # Step 9: Deploy to ephemeral
+  - name: deploy_app
+    description: "Deploy AA to ephemeral namespace"
+    condition: "{{ namespace_name }}"
+    tool: bonfire_deploy_aa
+    args:
+      namespace: "{{ namespace_name }}"
+      template_ref: "{{ commit_sha }}"
+      image_tag: "{{ commit_sha }}"
+      billing: "{{ inputs.billing }}"
+      timeout: 900
+    output: deploy_result
+
+  # Step 10: Wait for pods to be ready
+  - name: wait_for_ready
+    description: "Wait for deployment to be ready"
+    condition: "{{ namespace_name and deploy_result }}"
+    tool: bonfire_namespace_wait
+    args:
+      namespace: "{{ namespace_name }}"
+      timeout: 300
+    output: wait_result
+    on_error: continue
+
+  # ==================== GET DB CREDENTIALS ====================
+
+  # Step 11: Get postgres connection info from pods/secrets
+  - name: get_db_credentials
+    description: "Get PostgreSQL connection details from ephemeral environment"
+    condition: "{{ namespace_name and inputs.run_tests }}"
+    compute: |
+      import subprocess
+      import re
+      import base64
+      
+      ns = namespace_name
+      
+      # Get the database service/pod info
+      svc_result = subprocess.run(
+        ["kubectl", "get", "svc", "-n", ns, "-o", "wide"],
+        capture_output=True,
+        text=True,
+        env={**__import__('os').environ, "KUBECONFIG": __import__('os').path.expanduser("~/.kube/config")}
+      )
+      
+      # Find postgres service
+      db_host = None
+      db_port = "5432"
+      for line in svc_result.stdout.split('\n'):
+        if 'postgres' in line.lower() or 'db' in line.lower():
+          parts = line.split()
+          if len(parts) > 0:
+            db_host = f"{parts[0]}.{ns}.svc.cluster.local"
+            # Try to get port
+            port_match = re.search(r'(\d+)/TCP', line)
+            if port_match:
+              db_port = port_match.group(1)
+          break
+      
+      # Get secrets
+      secret_result = subprocess.run(
+        ["kubectl", "get", "secret", "-n", ns, "-o", "name"],
+        capture_output=True,
+        text=True,
+        env={**__import__('os').environ, "KUBECONFIG": __import__('os').path.expanduser("~/.kube/config")}
+      )
+      
+      db_user = None
+      db_password = None
+      
+      # Look for database secret
+      for secret_name in secret_result.stdout.split('\n'):
+        if 'db' in secret_name.lower() or 'postgres' in secret_name.lower():
+          # Get the secret data
+          secret_data = subprocess.run(
+            ["kubectl", "get", secret_name.strip(), "-n", ns, "-o", "jsonpath={.data}"],
+            capture_output=True,
+            text=True,
+            env={**__import__('os').environ, "KUBECONFIG": __import__('os').path.expanduser("~/.kube/config")}
+          )
+          
+          if secret_data.returncode == 0:
+            import json
+            try:
+              data = json.loads(secret_data.stdout)
+              for key, val in data.items():
+                decoded = base64.b64decode(val).decode('utf-8')
+                if 'user' in key.lower():
+                  db_user = decoded
+                elif 'password' in key.lower() or 'pass' in key.lower():
+                  db_password = decoded
+            except:
+              pass
+          break
+      
+      result = {
+        "host": db_host or f"postgres.{ns}.svc.cluster.local",
+        "port": db_port,
+        "user": db_user or "postgres",
+        "password": db_password or "",
+        "found": bool(db_host and db_user)
+      }
+    output: db_creds
+    on_error: continue
+
+  # Step 12: Check pod status
+  - name: check_pods
+    description: "Get pod status in namespace"
+    condition: "{{ namespace_name }}"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ namespace_name }}"
+      environment: "ephemeral"
+    output: pod_status
+    on_error: continue
+
+  # Step 13: Get FastAPI pod name
+  - name: get_fastapi_pod
+    description: "Find the FastAPI pod for running tests"
+    condition: "{{ namespace_name and inputs.run_tests }}"
+    compute: |
+      import re
+      
+      pods_output = str(pod_status)
+      
+      # Find fastapi pod
+      fastapi_pod = None
+      for line in pods_output.split('\n'):
+        if 'fastapi' in line.lower() and 'Running' in line:
+          parts = line.split()
+          if parts:
+            fastapi_pod = parts[0]
+            break
+      
+      result = fastapi_pod
+    output: fastapi_pod
+
+  # ==================== RUN TESTS ====================
+
+  # Step 14: Create and run test script
+  - name: run_pytest
+    description: "Run pytest in FastAPI pod against ephemeral DB"
+    condition: "{{ fastapi_pod and db_creds }}"
+    compute: |
+      import subprocess
+      import os
+      
+      pod = fastapi_pod
+      ns = namespace_name
+      db = db_creds
+      
+      # Create test script with ephemeral DB connection
+      test_script = f'''#!/bin/bash
+set -e
+pipenv sync --dev 2>/dev/null || pip install pytest pytest-cov 2>/dev/null
+export POSTGRESQL_USER="{db.get('user', 'postgres')}"
+export POSTGRESQL_PASSWORD="{db.get('password', '')}"
+export POSTGRESQL_HOST="{db.get('host', 'localhost')}"
+export POSTGRESQL_PORT="{db.get('port', '5432')}"
+export SECRET_KEY="test-secret-key-12345"
+export DB_SSLMODE=disable
+export DATABASE_PREFIX="postgresql://$POSTGRESQL_USER:$POSTGRESQL_PASSWORD@$POSTGRESQL_HOST:$POSTGRESQL_PORT"
+echo "Testing connection to: $POSTGRESQL_HOST:$POSTGRESQL_PORT"
+pytest -vv --tb=short -q -x 2>&1 | tail -100
+'''
+      
+      # Write script to temp file
+      script_path = "/tmp/ephemeral_test.sh"
+      with open(script_path, 'w') as f:
+        f.write(test_script)
+      os.chmod(script_path, 0o755)
+      
+      # Copy to pod
+      subprocess.run(
+        ["kubectl", "cp", script_path, f"{ns}/{pod}:/tmp/test.sh"],
+        capture_output=True,
+        env={**os.environ, "KUBECONFIG": os.path.expanduser("~/.kube/config")}
+      )
+      
+      # Execute
+      test_result = subprocess.run(
+        ["kubectl", "exec", "-n", ns, pod, "--", "bash", "/tmp/test.sh"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env={**os.environ, "KUBECONFIG": os.path.expanduser("~/.kube/config")}
+      )
+      
+      output = test_result.stdout + test_result.stderr
+      if len(output) > 2000:
+        output = output[-2000:]
+      
+      if test_result.returncode == 0:
+        result = {"passed": True, "output": output}
+      else:
+        result = {"passed": False, "output": output}
+    output: test_result
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## 🧪 Ephemeral Test Environment
+      
+      {% if not image_status.available %}
+      ### ❌ Image Not Available
+      
+      **Commit:** `{{ commit_sha[:12] if commit_sha else 'unknown' }}`
+      **Status:** {{ image_status.status }}
+      
+      The image hasn't been built yet. Check Konflux:
+      ```
+      konflux_list_builds(namespace='{{ constants.konflux_namespace }}')
+      ```
+      
+      **Quay (PR images):** `quay.io/{{ constants.quay_pr_namespace }}/{{ constants.quay_pr_repo }}`
+      
+      {% else %}
+      **Commit:** `{{ commit_sha[:12] }}`
+      **Namespace:** `{{ namespace_name }}`
+      **Duration:** {{ inputs.duration }}
+      **Component:** {{ "billing" if inputs.billing else "main" }}
+      
+      ### Deployment Status
+      {% if deploy_result and '✅' in str(deploy_result) %}
+      ✅ Deployed successfully
+      {% else %}
+      ⚠️ Check deployment status below
+      {% endif %}
+      
+      ### Pod Status
+      ```
+      {{ pod_status[:600] if pod_status else 'Checking...' }}
+      ```
+      
+      {% if db_creds %}
+      ### Database Connection
+      - **Host:** `{{ db_creds.host }}`
+      - **Port:** `{{ db_creds.port }}`
+      - **User:** `{{ db_creds.user }}`
+      - **Credentials found:** {{ '✅' if db_creds.found else '⚠️ Using defaults' }}
+      {% endif %}
+      
+      {% if inputs.run_tests and test_result %}
+      ### 🧪 Test Results
+      {% if test_result.passed %}
+      ✅ **Tests passed**
+      {% else %}
+      ❌ **Tests failed**
+      {% endif %}
+      
+      ```
+      {{ test_result.output[:1000] }}
+      ```
+      {% endif %}
+      
+      ---
+      
+      ### Useful Commands
+      
+      **Check pods:**
+      ```
+      kubectl_get_pods(namespace='{{ namespace_name }}', environment='ephemeral')
+      ```
+      
+      **Get logs:**
+      ```
+      kubectl_logs(pod_name='{{ fastapi_pod }}', namespace='{{ namespace_name }}', environment='ephemeral')
+      ```
+      
+      **Extend time:**
+      ```
+      bonfire_namespace_extend(namespace='{{ namespace_name }}', duration='1h')
+      ```
+      
+      **Release when done:**
+      ```
+      bonfire_namespace_release(namespace='{{ namespace_name }}')
+      ```
+      {% endif %}
+  
+  - name: context
+    value:
+      commit_sha: "{{ commit_sha }}"
+      namespace: "{{ namespace_name }}"
+      image_available: "{{ image_status.available }}"
+      deployed: "{{ deploy_result is not none }}"
+      tests_passed: "{{ test_result.passed if test_result else 'not run' }}"
+      fastapi_pod: "{{ fastapi_pod }}"
+      db_host: "{{ db_creds.host if db_creds else none }}"

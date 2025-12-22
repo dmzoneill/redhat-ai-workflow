@@ -1,0 +1,474 @@
+# Skill: Review PR/MR for automation-analytics-backend
+# Structured code review with local testing
+
+name: review_pr
+description: |
+  Review a colleague's PR in automation-analytics-backend.
+  Checks MR description, commit format, pipelines, Jira context,
+  runs local tests, and provides brief focused feedback.
+version: "1.0"
+
+inputs:
+  - name: mr_id
+    type: integer
+    required: true
+    description: "GitLab MR ID (e.g., 1234)"
+  
+  - name: skip_tests
+    type: boolean
+    required: false
+    default: false
+    description: "Skip local test execution (static analysis only)"
+
+# Paths and config
+constants:
+  repo_path: /home/daoneill/src/automation-analytics-backend
+  gitlab_project: automation-analytics/automation-analytics-backend
+  konflux_namespace: aap-aa-tenant
+  fastapi_container: automation-analytics-backend-api-fastapi-1
+
+steps:
+  # ==================== GATHER CONTEXT ====================
+
+  # Step 1: Get MR details
+  - name: get_mr
+    description: "Fetch MR details from GitLab"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ constants.gitlab_project }}"
+      mr_id: "{{ inputs.mr_id }}"
+    output: mr_details
+
+  # Step 2: Extract Jira issue key from title
+  - name: extract_jira_key
+    description: "Extract AAP-XXXXX from MR title"
+    compute: |
+      import re
+      # MR title should be: AAP-12345 - type(scope): description
+      match = re.match(r'^(AAP-\d+)', mr_details)
+      if match:
+        jira_key = match.group(1)
+      else:
+        # Try to find it anywhere in the title
+        match = re.search(r'(AAP-\d+)', mr_details)
+        jira_key = match.group(1) if match else None
+      
+      if not jira_key:
+        jira_key = "NOT_FOUND"
+      
+      result = jira_key
+    output: jira_key
+
+  # Step 3: Get Jira issue details (if found)
+  - name: get_jira_issue
+    description: "Get Jira issue context"
+    condition: "{{ jira_key != 'NOT_FOUND' }}"
+    tool: jira_view_issue
+    args:
+      issue_key: "{{ jira_key }}"
+    output: jira_details
+    on_error: continue
+
+  # Step 4: Get MR diff
+  - name: get_diff
+    description: "Get code changes"
+    tool: gitlab_mr_diff
+    args:
+      project: "{{ constants.gitlab_project }}"
+      mr_id: "{{ inputs.mr_id }}"
+    output: mr_diff
+
+  # Step 5: Check GitLab pipeline status
+  - name: check_gitlab_pipeline
+    description: "Check GitLab CI status"
+    tool: gitlab_ci_status
+    args:
+      project: "{{ constants.gitlab_project }}"
+    output: gitlab_pipeline
+    on_error: continue
+
+  # Step 6: Check Konflux pipelines
+  - name: check_konflux
+    description: "Check Konflux integration tests"
+    tool: konflux_list_pipelines
+    args:
+      namespace: "{{ constants.konflux_namespace }}"
+      limit: 5
+    output: konflux_pipelines
+    on_error: continue
+
+  # ==================== VALIDATE FORMAT ====================
+
+  # Step 7: Validate commit title format
+  - name: validate_commit_format
+    description: "Check commit title matches commitlint config"
+    compute: |
+      import re
+      
+      issues = []
+      
+      # Expected format: AAP-XXXXX - type(scope): description
+      # Types from commitlint: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
+      valid_types = ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build', 'revert']
+      
+      # Extract title from MR details (first line usually)
+      title_line = mr_details.split('\n')[0] if mr_details else ""
+      
+      # Check for Jira key at start
+      if not re.match(r'^AAP-\d+', title_line):
+        issues.append("Missing Jira key at start of title")
+      
+      # Check for type(scope): format
+      type_match = re.search(r'- (\w+)(?:\([^)]+\))?\s*:', title_line)
+      if type_match:
+        commit_type = type_match.group(1).lower()
+        if commit_type not in valid_types:
+          issues.append(f"Invalid commit type '{commit_type}' - expected one of: {', '.join(valid_types)}")
+      else:
+        issues.append("Missing conventional commit format: type(scope): description")
+      
+      result = issues if issues else ["Format OK"]
+    output: format_issues
+
+  # Step 8: Check MR description
+  - name: check_description
+    description: "Verify MR has adequate description"
+    compute: |
+      issues = []
+      
+      # Look for empty or minimal descriptions
+      desc_lines = [l for l in mr_details.split('\n') if l.strip() and not l.startswith('#')]
+      
+      if len(desc_lines) < 3:
+        issues.append("MR description is minimal - consider adding context")
+      
+      # Check for Jira link
+      if 'issues.redhat.com' not in mr_details and 'jira' not in mr_details.lower():
+        if jira_key != 'NOT_FOUND':
+          issues.append(f"Missing Jira link - add: https://issues.redhat.com/browse/{jira_key}")
+      
+      result = issues if issues else ["Description OK"]
+    output: description_issues
+
+  # ==================== LOCAL TESTING (optional) ====================
+
+  # Step 9: Checkout branch locally
+  - name: checkout_branch
+    description: "Checkout MR branch locally"
+    condition: "{{ not inputs.skip_tests }}"
+    compute: |
+      import subprocess
+      import re
+      
+      # Extract branch name from MR details
+      branch_match = re.search(r'Source branch:\s*(\S+)', mr_details)
+      if not branch_match:
+        branch_match = re.search(r'source_branch.*?[:\s]+(\S+)', mr_details, re.IGNORECASE)
+      
+      if branch_match:
+        branch = branch_match.group(1)
+      else:
+        branch = f"mr-{inputs.mr_id}"
+      
+      # Fetch and checkout
+      subprocess.run(["git", "fetch", "origin"], cwd=constants.repo_path, capture_output=True)
+      result = subprocess.run(
+        ["git", "checkout", "-B", branch, f"origin/{branch}"],
+        cwd=constants.repo_path,
+        capture_output=True,
+        text=True
+      )
+      
+      if result.returncode != 0:
+        # Try fetching the MR directly
+        subprocess.run(
+          ["git", "fetch", "origin", f"merge-requests/{inputs.mr_id}/head:{branch}"],
+          cwd=constants.repo_path,
+          capture_output=True
+        )
+        subprocess.run(["git", "checkout", branch], cwd=constants.repo_path, capture_output=True)
+      
+      result = f"Checked out branch: {branch}"
+    output: checkout_result
+    on_error: continue
+
+  # Step 10: Check if docker-compose is running
+  - name: check_docker
+    description: "Verify docker-compose is running"
+    condition: "{{ not inputs.skip_tests }}"
+    compute: |
+      import subprocess
+      
+      result = subprocess.run(
+        ["docker", "ps", "--filter", "name=automation-analytics-backend", "--format", "{{.Names}}"],
+        capture_output=True,
+        text=True
+      )
+      
+      containers = result.stdout.strip().split('\n') if result.stdout.strip() else []
+      
+      if not containers or containers == ['']:
+        # Try to start
+        start_result = subprocess.run(
+          ["docker-compose", "up", "-d"],
+          cwd=constants.repo_path,
+          capture_output=True,
+          text=True,
+          timeout=120
+        )
+        result = f"Started docker-compose: {start_result.returncode == 0}"
+      else:
+        result = f"Running containers: {', '.join(containers)}"
+    output: docker_status
+    on_error: continue
+
+  # Step 11: Run migrations and data setup
+  - name: run_setup
+    description: "Run make migrations and make data"
+    condition: "{{ not inputs.skip_tests }}"
+    compute: |
+      import subprocess
+      
+      results = []
+      
+      # Run migrations
+      mig_result = subprocess.run(
+        ["make", "migrations"],
+        cwd=constants.repo_path,
+        capture_output=True,
+        text=True,
+        timeout=60
+      )
+      results.append(f"migrations: {'OK' if mig_result.returncode == 0 else 'FAILED'}")
+      
+      # Run data
+      data_result = subprocess.run(
+        ["make", "data"],
+        cwd=constants.repo_path,
+        capture_output=True,
+        text=True,
+        timeout=60
+      )
+      results.append(f"data: {'OK' if data_result.returncode == 0 else 'FAILED'}")
+      
+      result = ', '.join(results)
+    output: setup_result
+    on_error: continue
+
+  # Step 12: Run pytest in container
+  - name: run_tests
+    description: "Run pytest in FastAPI container"
+    condition: "{{ not inputs.skip_tests }}"
+    compute: |
+      import subprocess
+      import tempfile
+      import os
+      
+      # Create test script
+      test_script = '''#!/bin/bash
+set -e
+pipenv sync --dev
+export POSTGRESQL_USER="debug"
+export POSTGRESQL_PASSWORD="debug"
+export SECRET_KEY="1234"
+export DB_SSLMODE=disable
+export DATABASE_PREFIX="postgresql://${POSTGRESQL_USER}:${POSTGRESQL_PASSWORD}@localhost"
+pytest -vv --tb=short -q 2>&1 | tail -50
+'''
+      
+      # Write to temp file
+      script_path = "/tmp/pr_review_test.sh"
+      with open(script_path, 'w') as f:
+        f.write(test_script)
+      os.chmod(script_path, 0o755)
+      
+      # Copy to container and run
+      container = constants.fastapi_container
+      
+      # Copy script
+      subprocess.run(
+        ["docker", "cp", script_path, f"{container}:/tmp/test.sh"],
+        capture_output=True
+      )
+      
+      # Execute
+      result = subprocess.run(
+        ["docker", "exec", container, "bash", "/tmp/test.sh"],
+        capture_output=True,
+        text=True,
+        timeout=300
+      )
+      
+      output = result.stdout + result.stderr
+      if len(output) > 2000:
+        output = output[-2000:]
+      
+      if result.returncode == 0:
+        test_result = f"✅ Tests passed\n{output}"
+      else:
+        test_result = f"❌ Tests failed\n{output}"
+      
+      result = test_result
+    output: test_result
+    on_error: continue
+
+  # ==================== CODE ANALYSIS ====================
+
+  # Step 13: Analyze code for issues
+  - name: analyze_code
+    description: "Static analysis for security, memory, race conditions"
+    compute: |
+      import re
+      
+      diff_text = mr_diff if mr_diff else ""
+      issues = []
+      
+      # Security checks
+      security_patterns = [
+        (r'eval\s*\(', "Potential code injection via eval()"),
+        (r'exec\s*\(', "Potential code injection via exec()"),
+        (r'password\s*=\s*["\'][^"\']+["\']', "Hardcoded password detected"),
+        (r'secret\s*=\s*["\'][^"\']+["\']', "Hardcoded secret detected"),
+        (r'\.format\s*\(.*user', "Potential SQL injection via string format"),
+        (r'%s.*user|%s.*query', "Potential SQL injection via % formatting"),
+        (r'shell\s*=\s*True', "Shell injection risk with shell=True"),
+        (r'pickle\.loads?\s*\(', "Unsafe deserialization with pickle"),
+      ]
+      
+      for pattern, msg in security_patterns:
+        if re.search(pattern, diff_text, re.IGNORECASE):
+          issues.append(f"🔐 Security: {msg}")
+      
+      # Memory leak patterns
+      memory_patterns = [
+        (r'global\s+\w+\s*=\s*\[\]', "Global mutable default - potential memory leak"),
+        (r'\.append\([^)]+\)\s*$(?!.*\.clear\(\))', "List append without clear - check for leak"),
+        (r'cache\s*=\s*\{\}', "Unbounded cache dict - consider LRU"),
+      ]
+      
+      for pattern, msg in memory_patterns:
+        if re.search(pattern, diff_text):
+          issues.append(f"💾 Memory: {msg}")
+      
+      # Race condition patterns
+      race_patterns = [
+        (r'threading\.Thread\(', "Threading used - verify thread safety"),
+        (r'asyncio\.create_task\((?!.*await)', "Task created without await - potential race"),
+        (r'shared_state|global_state', "Shared state - verify synchronization"),
+      ]
+      
+      for pattern, msg in race_patterns:
+        if re.search(pattern, diff_text):
+          issues.append(f"🏃 Race: {msg}")
+      
+      # Check for test coverage
+      new_files = re.findall(r'\+\+\+ b/(\S+\.py)', diff_text)
+      new_files = [f for f in new_files if not f.startswith('tests/') and not f.endswith('test.py')]
+      test_files = re.findall(r'\+\+\+ b/(tests/\S+\.py)', diff_text)
+      
+      if new_files and not test_files:
+        issues.append(f"📝 Tests: New code in {len(new_files)} files but no test updates")
+      
+      result = issues if issues else []
+    output: code_issues
+
+  # Step 14: Prepare review summary
+  - name: prepare_summary
+    description: "Compile review findings"
+    compute: |
+      lines = []
+      lines.append("## PR Review Summary")
+      lines.append(f"**MR:** !{inputs.mr_id}")
+      lines.append(f"**Jira:** {jira_key}")
+      lines.append("")
+      
+      # Format validation
+      if format_issues and format_issues != ["Format OK"]:
+        lines.append("### ❌ Commit Format")
+        for issue in format_issues[:3]:
+          lines.append(f"- {issue}")
+        lines.append("")
+      
+      # Description validation
+      if description_issues and description_issues != ["Description OK"]:
+        lines.append("### ⚠️ Description")
+        for issue in description_issues[:2]:
+          lines.append(f"- {issue}")
+        lines.append("")
+      
+      # Pipeline status
+      if 'Failed' in str(gitlab_pipeline) or 'failed' in str(konflux_pipelines):
+        lines.append("### ❌ Pipelines")
+        lines.append("- CI/CD pipelines have failures - check before approving")
+        lines.append("")
+      
+      # Code issues
+      if code_issues:
+        lines.append("### 🔍 Code Review")
+        for issue in code_issues[:5]:
+          lines.append(f"- {issue}")
+        lines.append("")
+      
+      # Test results
+      if not inputs.skip_tests:
+        lines.append("### 🧪 Tests")
+        if test_result:
+          if '✅' in str(test_result):
+            lines.append("- Tests passed")
+          else:
+            lines.append("- Tests failed - see details above")
+        else:
+          lines.append("- Could not run tests")
+        lines.append("")
+      
+      # Determine overall status
+      has_blockers = (
+        (format_issues and format_issues != ["Format OK"]) or
+        ('Failed' in str(gitlab_pipeline)) or
+        (code_issues and any('Security' in str(i) for i in code_issues)) or
+        (not inputs.skip_tests and test_result and '❌' in str(test_result))
+      )
+      
+      if has_blockers:
+        lines.append("### 🚫 Recommendation: Request Changes")
+      else:
+        lines.append("### ✅ Recommendation: Approve")
+      
+      result = '\n'.join(lines)
+    output: review_summary
+
+# ==================== OUTPUT ====================
+
+outputs:
+  - name: summary
+    value: |
+      {{ review_summary }}
+      
+      ---
+      
+      ## What's Next?
+      
+      Review the findings above. When ready, tell me:
+      
+      - **"approve"** - I'll approve via glab and note on Jira
+      - **"request changes"** - I'll post feedback (you can edit first)
+      - **"skip"** - Take no action
+      
+      ### Draft Feedback (if needed)
+      {% if code_issues %}
+      ```
+      Code review feedback for {{ jira_key }}:
+      {% for issue in code_issues[:5] %}
+      - {{ issue }}
+      {% endfor %}
+      ```
+      {% endif %}
+  
+  - name: context
+    value:
+      mr_id: "{{ inputs.mr_id }}"
+      jira_key: "{{ jira_key }}"
+      has_issues: "{{ code_issues | length > 0 }}"
+      format_ok: "{{ format_issues == ['Format OK'] }}"
+      tests_passed: "{{ '✅' in str(test_result) if test_result else 'unknown' }}"
+

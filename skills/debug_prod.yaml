@@ -1,0 +1,625 @@
+# Skill: Debug Production Issues
+# Systematic investigation of production problems
+
+name: debug_prod
+description: |
+  Investigate production issues in Automation Analytics.
+  Gathers pod status, logs, metrics, alerts, and recent deployments.
+  Suggests likely causes based on patterns and learned knowledge.
+version: "1.0"
+
+inputs:
+  - name: namespace
+    type: string
+    required: false
+    description: "Namespace to investigate: 'main' or 'billing' (will ask if not provided)"
+  
+  - name: alert_name
+    type: string
+    required: false
+    description: "Prometheus alert name if triggered by an alert"
+  
+  - name: pod_filter
+    type: string
+    required: false
+    description: "Filter pods by name (e.g., 'fastapi', 'processor')"
+  
+  - name: time_range
+    type: string
+    required: false
+    default: "1h"
+    description: "How far back to search (15m, 1h, 6h, 24h)"
+
+constants:
+  # Namespaces
+  namespace_main: tower-analytics-prod
+  namespace_billing: tower-analytics-prod-billing
+  
+  # Alert definition paths
+  alerts_main: /home/daoneill/src/app-interface/resources/insights-prod/tower-analytics-prod
+  alerts_billing: /home/daoneill/src/app-interface/resources/insights-prod/tower-analytics-prod-billing
+  
+  # SaaS configuration paths (app-interface)
+  saas_namespaces: /home/daoneill/src/app-interface/data/services/insights/tower-analytics/namespaces
+  saas_cicd: /home/daoneill/src/app-interface/data/services/insights/tower-analytics/cicd
+  
+  # Known error patterns (from memory/learned/patterns.yaml)
+  memory_patterns: learned/patterns
+
+steps:
+  # ==================== RESOLVE NAMESPACE ====================
+
+  # Step 1: Determine namespace
+  - name: resolve_namespace
+    description: "Resolve which namespace to investigate"
+    compute: |
+      if inputs.namespace:
+        ns_input = inputs.namespace.lower()
+        if 'billing' in ns_input:
+          ns = constants.namespace_billing
+          ns_short = "billing"
+        else:
+          ns = constants.namespace_main
+          ns_short = "main"
+      else:
+        # Default to main, but note we should ask
+        ns = None
+        ns_short = None
+      
+      result = {"namespace": ns, "short": ns_short}
+    output: ns_info
+
+  # Step 2: If no namespace, return early asking for it
+  - name: check_namespace
+    condition: "{{ not ns_info.namespace }}"
+    compute: |
+      result = {
+        "ask_namespace": True,
+        "message": "Which namespace to investigate?\n\n1. **main** - tower-analytics-prod\n2. **billing** - tower-analytics-prod-billing\n\nRun again with: `skill_run(\"debug_prod\", '{\"namespace\": \"main\"}')`"
+      }
+    output: namespace_prompt
+
+  # ==================== LOAD LEARNED PATTERNS ====================
+
+  # Step 3: Load known patterns from memory
+  - name: load_patterns
+    description: "Load known error patterns from memory"
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      import yaml
+      from pathlib import Path
+      
+      patterns = {}
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
+      
+      if memory_file.exists():
+        try:
+          with open(memory_file) as f:
+            data = yaml.safe_load(f)
+          patterns = data.get('error_patterns', [])
+        except:
+          patterns = []
+      
+      result = patterns
+    output: known_patterns
+    on_error: continue
+
+  # ==================== CHECK PODS ====================
+
+  # Step 4: Get pod status
+  - name: get_pods
+    description: "Check pod status in namespace"
+    condition: "{{ ns_info.namespace }}"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: pod_status
+
+  # Step 5: Analyze pod issues
+  - name: analyze_pods
+    description: "Identify unhealthy pods"
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      import re
+      
+      pods_output = str(pod_status)
+      issues = []
+      healthy = []
+      
+      for line in pods_output.split('\n'):
+        if not line.strip() or 'NAME' in line:
+          continue
+        
+        parts = line.split()
+        if len(parts) >= 3:
+          pod_name = parts[0]
+          ready = parts[1] if len(parts) > 1 else ""
+          status = parts[2] if len(parts) > 2 else ""
+          restarts = parts[3] if len(parts) > 3 else "0"
+          
+          # Check for issues
+          if 'CrashLoopBackOff' in status:
+            issues.append({"pod": pod_name, "issue": "CrashLoopBackOff", "severity": "critical"})
+          elif 'OOMKilled' in line:
+            issues.append({"pod": pod_name, "issue": "OOMKilled", "severity": "critical"})
+          elif 'Error' in status:
+            issues.append({"pod": pod_name, "issue": status, "severity": "high"})
+          elif 'Pending' in status:
+            issues.append({"pod": pod_name, "issue": "Pending", "severity": "medium"})
+          elif 'ImagePullBackOff' in status:
+            issues.append({"pod": pod_name, "issue": "ImagePullBackOff", "severity": "high"})
+          elif int(restarts.split()[0] if restarts else 0) > 5:
+            issues.append({"pod": pod_name, "issue": f"High restarts: {restarts}", "severity": "medium"})
+          elif 'Running' in status:
+            healthy.append(pod_name)
+      
+      result = {
+        "issues": issues,
+        "healthy_count": len(healthy),
+        "unhealthy_count": len(issues)
+      }
+    output: pod_analysis
+
+  # ==================== GET EVENTS ====================
+
+  # Step 6: Get recent events
+  - name: get_events
+    description: "Get recent Kubernetes events"
+    condition: "{{ ns_info.namespace }}"
+    tool: kubectl_get_events
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: k8s_events
+    on_error: continue
+
+  # Step 7: Filter important events
+  - name: filter_events
+    condition: "{{ ns_info.namespace and k8s_events }}"
+    compute: |
+      events_str = str(k8s_events)
+      important = []
+      
+      # Look for warning/error events
+      for line in events_str.split('\n')[-30:]:  # Last 30 events
+        line_lower = line.lower()
+        if any(kw in line_lower for kw in ['warning', 'error', 'failed', 'killed', 'backoff', 'unhealthy']):
+          important.append(line.strip()[:150])  # Truncate long lines
+      
+      result = important[:10]  # Top 10 important events
+    output: important_events
+    on_error: continue
+
+  # ==================== CHECK LOGS ====================
+
+  # Step 8: Get logs from unhealthy pods (or filtered pods)
+  - name: get_pod_logs
+    description: "Get recent error logs from pods"
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      import subprocess
+      import os
+      
+      ns = ns_info['namespace']
+      logs = []
+      
+      # Determine which pods to check
+      pods_to_check = []
+      if pod_analysis['issues']:
+        pods_to_check = [p['pod'] for p in pod_analysis['issues'][:3]]  # Max 3 problem pods
+      elif inputs.pod_filter:
+        # Get matching pods
+        result = subprocess.run(
+          ["kubectl", "get", "pods", "-n", ns, "-o", "name"],
+          capture_output=True,
+          text=True,
+          env={**os.environ, "KUBECONFIG": os.path.expanduser("~/.kube/config.prod")}
+        )
+        for pod in result.stdout.split('\n'):
+          if inputs.pod_filter.lower() in pod.lower():
+            pods_to_check.append(pod.replace('pod/', ''))
+        pods_to_check = pods_to_check[:3]
+      
+      # Get logs from each pod (grep for errors, limit output)
+      for pod in pods_to_check:
+        try:
+          result = subprocess.run(
+            ["kubectl", "logs", pod, "-n", ns, "--tail=500", "--since=" + inputs.time_range],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={**os.environ, "KUBECONFIG": os.path.expanduser("~/.kube/config.prod")}
+          )
+          
+          if result.returncode == 0:
+            # Filter for errors/warnings only
+            error_lines = []
+            for line in result.stdout.split('\n'):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ['error', 'exception', 'traceback', 'warning', 'critical', 'fatal']):
+                error_lines.append(line[:200])  # Truncate long lines
+            
+            if error_lines:
+              logs.append({
+                "pod": pod,
+                "errors": error_lines[-20:]  # Last 20 error lines
+              })
+        except:
+          pass
+      
+      result = logs
+    output: pod_logs
+    on_error: continue
+
+  # ==================== CHECK ALERTS ====================
+
+  # Step 9: Get firing alerts
+  - name: get_alerts
+    description: "Get currently firing alerts"
+    condition: "{{ ns_info.namespace }}"
+    tool: alertmanager_alerts
+    args:
+      environment: "production"
+    output: firing_alerts
+    on_error: continue
+
+  # Step 10: Get alert definition if alert_name provided
+  - name: get_alert_definition
+    description: "Look up alert definition"
+    condition: "{{ inputs.alert_name }}"
+    compute: |
+      import os
+      from pathlib import Path
+      
+      alert_name = inputs.alert_name
+      alert_def = None
+      
+      # Determine which path based on namespace
+      if 'billing' in ns_info.get('short', ''):
+        alert_path = Path(constants.alerts_billing)
+      else:
+        alert_path = Path(constants.alerts_main)
+      
+      # Search for alert in yaml files
+      if alert_path.exists():
+        for f in alert_path.glob('*.yaml'):
+          try:
+            content = f.read_text()
+            if alert_name in content:
+              # Extract the alert block
+              lines = content.split('\n')
+              in_alert = False
+              alert_lines = []
+              for line in lines:
+                if alert_name in line:
+                  in_alert = True
+                if in_alert:
+                  alert_lines.append(line)
+                  if line.strip() and not line.startswith(' ') and len(alert_lines) > 1:
+                    break
+              alert_def = '\n'.join(alert_lines[:20])
+              break
+          except:
+            pass
+      
+      result = alert_def
+    output: alert_definition
+    on_error: continue
+
+  # ==================== CHECK METRICS ====================
+
+  # Step 11: Check key metrics
+  - name: check_metrics
+    description: "Query key Prometheus metrics"
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      import subprocess
+      
+      # Note: This would use the prometheus tool, but we'll prepare the queries
+      ns = ns_info['namespace']
+      
+      queries = [
+        f'sum(rate(http_requests_total{{namespace="{ns}",code=~"5.."}}[5m]))',
+        f'sum(container_memory_working_set_bytes{{namespace="{ns}"}}) by (pod)',
+        f'sum(rate(container_cpu_usage_seconds_total{{namespace="{ns}"}}[5m])) by (pod)',
+      ]
+      
+      result = {"queries_to_run": queries, "namespace": ns}
+    output: metric_queries
+    on_error: continue
+
+  # ==================== CHECK RECENT DEPLOYMENTS ====================
+
+  # Step 12: Check recent deployments
+  - name: check_deployments
+    description: "Check for recent deployments"
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      import subprocess
+      import os
+      
+      ns = ns_info['namespace']
+      
+      # Get deployment info
+      result = subprocess.run(
+        ["kubectl", "get", "deployments", "-n", ns, "-o", "wide"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "KUBECONFIG": os.path.expanduser("~/.kube/config.prod")}
+      )
+      
+      deployments = result.stdout if result.returncode == 0 else "Could not fetch deployments"
+      
+      # Get replica sets to see recent rollouts
+      rs_result = subprocess.run(
+        ["kubectl", "get", "rs", "-n", ns, "--sort-by=.metadata.creationTimestamp", "-o", "wide"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "KUBECONFIG": os.path.expanduser("~/.kube/config.prod")}
+      )
+      
+      # Get last 5 replica sets
+      rs_lines = rs_result.stdout.split('\n') if rs_result.returncode == 0 else []
+      recent_rs = rs_lines[:1] + rs_lines[-5:] if len(rs_lines) > 5 else rs_lines
+      
+      result = {
+        "deployments": deployments[:1000],
+        "recent_rollouts": '\n'.join(recent_rs)[:500]
+      }
+    output: deployment_info
+    on_error: continue
+
+  # Step 13: Check deployed SHA from app-interface CICD config
+  - name: check_deployed_sha
+    description: "Get currently deployed SHA from app-interface config"
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      import yaml
+      from pathlib import Path
+      
+      cicd_file = Path(constants.saas_cicd) / "deploy-clowder.yml"
+      deployed_info = {"sha": None, "namespace_config": None}
+      
+      if cicd_file.exists():
+        try:
+          with open(cicd_file) as f:
+            content = f.read()
+          
+          # Parse to find the ref for this namespace
+          data = yaml.safe_load(content)
+          
+          # Target namespace file based on which we're debugging
+          if 'billing' in ns_info.get('short', ''):
+            target_ns = "tower-analytics-prod-billing.yml"
+          else:
+            target_ns = "tower-analytics-prod.yml"
+          
+          # Find the ref for this namespace in resourceTemplates
+          for template in data.get('resourceTemplates', []):
+            for target in template.get('targets', []):
+              ns_ref = target.get('namespace', {}).get('$ref', '')
+              if target_ns in ns_ref:
+                deployed_info['sha'] = target.get('ref', 'unknown')
+                deployed_info['namespace_config'] = ns_ref
+                break
+        except Exception as e:
+          deployed_info['error'] = str(e)
+      
+      result = deployed_info
+    output: deployed_sha
+    on_error: continue
+
+  # Step 14: Check namespace config
+  - name: check_namespace_config
+    description: "Get namespace configuration from app-interface"
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      import yaml
+      from pathlib import Path
+      
+      ns_path = Path(constants.saas_namespaces)
+      config_info = {}
+      
+      if 'billing' in ns_info.get('short', ''):
+        ns_file = ns_path / "tower-analytics-prod-billing.yml"
+      else:
+        ns_file = ns_path / "tower-analytics-prod.yml"
+      
+      if ns_file.exists():
+        try:
+          with open(ns_file) as f:
+            data = yaml.safe_load(f)
+          
+          # Extract key config info
+          config_info = {
+            "name": data.get('name', ''),
+            "cluster": data.get('cluster', {}).get('$ref', '').split('/')[-1] if data.get('cluster') else '',
+            "description": data.get('description', '')[:100] if data.get('description') else ''
+          }
+        except Exception as e:
+          config_info['error'] = str(e)
+      
+      result = config_info
+    output: namespace_config
+    on_error: continue
+
+  # ==================== ANALYZE & SUGGEST ====================
+
+  # Step 13: Match against known patterns
+  - name: match_patterns
+    description: "Match issues against known patterns"
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      matches = []
+      
+      # Check pod issues against known patterns
+      for pod_issue in pod_analysis.get('issues', []):
+        issue_type = pod_issue.get('issue', '')
+        
+        for pattern in (known_patterns or []):
+          if isinstance(pattern, dict):
+            pattern_text = pattern.get('pattern', '')
+            if pattern_text.lower() in issue_type.lower():
+              matches.append({
+                "issue": issue_type,
+                "pattern": pattern_text,
+                "meaning": pattern.get('meaning', ''),
+                "fix": pattern.get('fix', ''),
+                "commands": pattern.get('commands', [])
+              })
+      
+      # Add generic suggestions for unmatched issues
+      for pod_issue in pod_analysis.get('issues', []):
+        issue_type = pod_issue.get('issue', '')
+        matched = any(m['issue'] == issue_type for m in matches)
+        
+        if not matched:
+          if 'OOMKilled' in issue_type:
+            matches.append({
+              "issue": issue_type,
+              "pattern": "OOMKilled",
+              "meaning": "Container exceeded memory limits",
+              "fix": "Increase memory limits or investigate memory leak",
+              "commands": ["kubectl describe pod <pod>", "kubectl top pod -n <ns>"]
+            })
+          elif 'CrashLoopBackOff' in issue_type:
+            matches.append({
+              "issue": issue_type,
+              "pattern": "CrashLoopBackOff",
+              "meaning": "Container crashes repeatedly on startup",
+              "fix": "Check logs for startup errors, config issues, or missing deps",
+              "commands": ["kubectl logs <pod> --previous", "kubectl describe pod <pod>"]
+            })
+          elif 'ImagePullBackOff' in issue_type:
+            matches.append({
+              "issue": issue_type,
+              "pattern": "ImagePullBackOff",
+              "meaning": "Cannot pull container image",
+              "fix": "Check image name, tag exists in Quay, registry credentials",
+              "commands": ["kubectl describe pod <pod>"]
+            })
+      
+      result = matches
+    output: pattern_matches
+
+  # ==================== BUILD REPORT ====================
+
+  # Step 16: Compile investigation report
+  - name: build_report
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      lines = []
+      
+      # Header
+      lines.append(f"## 🔍 Production Debug: {ns_info['namespace']}")
+      lines.append(f"**Time range:** {inputs.time_range}")
+      if inputs.alert_name:
+        lines.append(f"**Alert:** {inputs.alert_name}")
+      
+      # Deployed SHA
+      if deployed_sha and deployed_sha.get('sha'):
+        lines.append(f"**Deployed SHA:** `{deployed_sha['sha'][:12]}`")
+      lines.append("")
+      
+      # === POD STATUS ===
+      lines.append("### 📦 Pod Status")
+      if pod_analysis['unhealthy_count'] > 0:
+        lines.append(f"**⚠️ {pod_analysis['unhealthy_count']} unhealthy pods**")
+        for issue in pod_analysis['issues'][:5]:
+          severity_icon = "🔴" if issue['severity'] == 'critical' else "🟠" if issue['severity'] == 'high' else "🟡"
+          lines.append(f"- {severity_icon} `{issue['pod']}`: {issue['issue']}")
+      else:
+        lines.append(f"✅ All {pod_analysis['healthy_count']} pods healthy")
+      lines.append("")
+      
+      # === EVENTS ===
+      if important_events:
+        lines.append("### ⚡ Recent Events")
+        for event in important_events[:5]:
+          lines.append(f"- {event[:120]}")
+        lines.append("")
+      
+      # === LOGS ===
+      if pod_logs:
+        lines.append("### 📋 Error Logs")
+        for log in pod_logs[:2]:  # Max 2 pods to avoid context overflow
+          lines.append(f"**{log['pod']}:**")
+          lines.append("```")
+          for err in log['errors'][-5:]:  # Last 5 errors per pod
+            lines.append(err[:150])
+          lines.append("```")
+        lines.append("")
+      
+      # === ALERTS ===
+      if firing_alerts and 'No alerts' not in str(firing_alerts):
+        lines.append("### 🚨 Firing Alerts")
+        alerts_str = str(firing_alerts)[:500]
+        lines.append(f"```\n{alerts_str}\n```")
+        lines.append("")
+      
+      # === ALERT DEFINITION ===
+      if alert_definition:
+        lines.append("### 📖 Alert Definition")
+        lines.append(f"```yaml\n{alert_definition[:300]}\n```")
+        lines.append("")
+      
+      # === DEPLOYMENTS ===
+      if deployment_info:
+        lines.append("### 🚀 Recent Deployments")
+        lines.append(f"```\n{deployment_info.get('recent_rollouts', 'N/A')[:400]}\n```")
+        lines.append("")
+      
+      # === PATTERN MATCHES ===
+      if pattern_matches:
+        lines.append("### 💡 Likely Causes")
+        for match in pattern_matches[:3]:
+          lines.append(f"**{match['pattern']}**")
+          lines.append(f"- *Meaning:* {match['meaning']}")
+          lines.append(f"- *Fix:* {match['fix']}")
+          if match.get('commands'):
+            lines.append(f"- *Commands:* `{match['commands'][0]}`")
+        lines.append("")
+      
+      # === SUGGESTED QUERIES ===
+      lines.append("### 📊 Prometheus Queries")
+      lines.append("Run these for more details:")
+      for q in metric_queries.get('queries_to_run', [])[:3]:
+        lines.append(f"```\n{q}\n```")
+      
+      result = '\n'.join(lines)
+    output: report
+
+outputs:
+  - name: summary
+    value: |
+      {% if namespace_prompt %}
+      {{ namespace_prompt.message }}
+      {% else %}
+      {{ report }}
+      
+      ---
+      
+      ### What's Next?
+      
+      1. **Get more logs:** `kubectl_logs(pod_name='<pod>', namespace='{{ ns_info.namespace }}', environment='production')`
+      2. **Describe pod:** `kubectl_describe_pod(pod_name='<pod>', namespace='{{ ns_info.namespace }}', environment='production')`
+      3. **Query metrics:** `prometheus_query(query='...', environment='production')`
+      4. **Check Kibana:** `kibana_search_logs(namespace='{{ ns_info.namespace }}', query='error')`
+      5. **View git history since deployment:** `git_log(repo='/home/daoneill/src/automation-analytics-backend', since='<deployed_sha>')`
+      
+      {% if pattern_matches %}
+      ### 📝 Remember This?
+      
+      If the suggested fix worked (or didn't), let me know and I'll update the learned patterns.
+      {% endif %}
+      {% endif %}
+  
+  - name: context
+    value:
+      namespace: "{{ ns_info.namespace }}"
+      deployed_sha: "{{ deployed_sha.sha if deployed_sha else None }}"
+      unhealthy_pods: "{{ pod_analysis.unhealthy_count if pod_analysis else 0 }}"
+      has_alerts: "{{ firing_alerts is not none }}"
+      pattern_matches: "{{ pattern_matches | length if pattern_matches else 0 }}"
+

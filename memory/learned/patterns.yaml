@@ -35,6 +35,42 @@ error_patterns:
       - "kubectl describe pod <pod>"
       - "kubectl get events -n <namespace>"
 
+  - pattern: "OOMKilled"
+    meaning: "Container exceeded memory limits"
+    fix: "Increase memory limits in deployment or investigate memory leak"
+    commands:
+      - "kubectl describe pod <pod> -n <namespace>"
+      - "kubectl top pod -n <namespace>"
+    related_jiras: []
+
+  - pattern: "Unhealthy"
+    meaning: "Readiness or liveness probe failed"
+    fix: "Check probe endpoints, increase timeout, or fix health endpoint"
+    commands:
+      - "kubectl describe pod <pod>"
+      - "kubectl logs <pod> --tail=100"
+
+  - pattern: "FailedScheduling"
+    meaning: "Scheduler cannot place pod on any node"
+    fix: "Check node resources, affinity rules, or PVC availability"
+    commands:
+      - "kubectl get nodes"
+      - "kubectl describe pod <pod>"
+
+  - pattern: "connection refused"
+    meaning: "Service endpoint not reachable"
+    fix: "Check if target pod is running, service selector matches, network policies"
+    commands:
+      - "kubectl get endpoints <service> -n <namespace>"
+      - "kubectl get pods -l <selector>"
+
+  - pattern: "deadline exceeded"
+    meaning: "Request timeout to upstream service"
+    fix: "Check upstream service health, increase timeout, or investigate slowness"
+    commands:
+      - "kubectl logs <pod> --tail=200"
+      - "prometheus_query for latency"
+
 # Pipeline patterns
 pipeline_patterns:
   - pattern: "lint failed"

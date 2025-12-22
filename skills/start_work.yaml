@@ -1,9 +1,9 @@
 # Skill: Start Work on Jira Issue
-# Combines issue lookup, branch creation, and status update
+# Combines issue lookup, branch creation/checkout, MR feedback, and status update
 
 name: start_work
-description: Begin working on a Jira issue - gets context, creates branch, updates status
-version: "1.0"
+description: Begin or resume working on a Jira issue - gets context, handles existing branches and MR feedback
+version: "1.2"
 
 inputs:
   - name: issue_key
@@ -12,12 +12,9 @@ inputs:
     description: "Jira issue key (e.g., AAP-12345)"
   - name: repo
     type: string
-    required: true
-    description: "Repository to work in"
-  - name: branch_type
-    type: string
-    default: "feature"
-    description: "Branch prefix (feature, bugfix, hotfix)"
+    required: false
+    default: "."
+    description: "Repository path (defaults to current directory)"
 
 steps:
   # Step 1: Get issue details
@@ -27,64 +24,330 @@ steps:
       issue_key: "{{ inputs.issue_key }}"
     output: issue
 
-  # Step 2: Extract branch name from issue
-  - name: create_branch_name
+  # Step 2: Fetch latest and check for existing branch
+  - name: check_existing_branch
+    description: "Check if branch for this issue already exists"
     compute: |
-      prefix = inputs.branch_type
-      key = inputs.issue_key.lower()
-      # Sanitize summary for branch name
-      summary = issue.summary[:40].lower()
-      summary = summary.replace(" ", "-").replace("/", "-")
+      import subprocess
+      import re
+      import os
+      
+      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      issue_key = inputs.issue_key.upper()
+      
+      # Fetch all remotes
+      subprocess.run(["git", "fetch", "--all", "--prune"], cwd=repo_path, capture_output=True)
+      
+      # List all branches (local and remote)
+      result = subprocess.run(
+        ["git", "branch", "-a"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True
+      )
+      
+      branches = result.stdout.strip().split('\n')
+      
+      # Look for branches containing this issue key
+      matching = []
+      for branch in branches:
+        branch = branch.strip().replace('* ', '')
+        if issue_key in branch.upper():
+          clean_name = branch.replace('remotes/origin/', '')
+          if clean_name not in matching:
+            matching.append(clean_name)
+      
+      if matching:
+        existing_branch = matching[0]
+        result = {"exists": True, "branch": existing_branch, "all_matches": matching}
+      else:
+        result = {"exists": False, "branch": None, "all_matches": []}
+    output: branch_check
+
+  # Step 3: If branch exists, check for MR
+  - name: check_existing_mr
+    description: "Check if there's an open MR for this branch"
+    condition: "{{ branch_check.get('exists', False) }}"
+    compute: |
+      import subprocess
+      import os
+      import re
+      
+      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      branch = branch_check['branch']
+      issue_key = inputs.issue_key.upper()
+      
+      # Use glab to list MRs
+      result = subprocess.run(
+        ["glab", "mr", "list", "--state=opened"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True
+      )
+      
+      mr_info = None
+      if result.returncode == 0:
+        for line in result.stdout.split('\n'):
+          # Check if this MR matches our issue key or branch
+          if issue_key in line.upper() or branch in line:
+            # Extract MR ID (usually first number in the line)
+            match = re.search(r'!(\d+)', line)
+            if match:
+              mr_id = match.group(1)
+              mr_info = {"id": mr_id, "line": line.strip()}
+              break
+      
+      result = mr_info
+    output: existing_mr
+    on_error: continue
+
+  # Step 4: If MR exists, get comments/feedback
+  - name: get_mr_feedback
+    description: "Get review comments from MR"
+    condition: "{{ existing_mr and existing_mr.get('id') }}"
+    compute: |
+      import subprocess
+      import os
+      
+      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      mr_id = existing_mr['id']
+      
+      # Get MR details
+      result = subprocess.run(
+        ["glab", "mr", "view", mr_id],
+        cwd=repo_path,
+        capture_output=True,
+        text=True
+      )
+      
+      mr_details = result.stdout if result.returncode == 0 else ""
+      
+      # Get MR notes/comments
+      notes_result = subprocess.run(
+        ["glab", "mr", "note", "list", mr_id],
+        cwd=repo_path,
+        capture_output=True,
+        text=True
+      )
+      
+      comments = notes_result.stdout if notes_result.returncode == 0 else ""
+      
+      # Check pipeline status
+      pipeline_result = subprocess.run(
+        ["glab", "ci", "status"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True
+      )
+      
+      pipeline_status = pipeline_result.stdout.strip() if pipeline_result.returncode == 0 else "unknown"
+      
+      # Determine if there's actionable feedback
+      has_feedback = bool(comments.strip()) and "No notes found" not in comments
+      
+      result = {
+        "mr_id": mr_id,
+        "details": mr_details[:1000] if mr_details else "",
+        "comments": comments[:1500] if comments else "",
+        "has_feedback": has_feedback,
+        "pipeline": pipeline_status[:200]
+      }
+    output: mr_feedback
+    on_error: continue
+
+  # Step 5: Check Jira for recent updates/comments
+  - name: check_jira_updates
+    description: "Check for recent Jira comments or status changes"
+    condition: "{{ branch_check.get('exists', False) }}"
+    compute: |
+      import subprocess
+      
+      # Get full issue details with comments
+      result = subprocess.run(
+        ["rh-issue", "view-issue", inputs.issue_key, "--output", "json"],
+        capture_output=True,
+        text=True
+      )
+      
+      jira_updates = None
+      if result.returncode == 0:
+        try:
+          import json
+          data = json.loads(result.stdout)
+          comments = data.get('comments', [])
+          # Get last 3 comments
+          recent_comments = comments[-3:] if comments else []
+          jira_updates = {
+            "status": data.get('status', 'Unknown'),
+            "recent_comments": recent_comments,
+            "has_updates": len(recent_comments) > 0
+          }
+        except:
+          jira_updates = {"status": "Unknown", "recent_comments": [], "has_updates": False}
+      else:
+        jira_updates = {"status": "Unknown", "recent_comments": [], "has_updates": False}
+      
+      result = jira_updates
+    output: jira_updates
+    on_error: continue
+
+  # Step 6: Generate branch name (only used if creating new)
+  - name: create_branch_name
+    condition: "{{ not branch_check.get('exists', False) }}"
+    compute: |
+      import re
+      key = inputs.issue_key.upper()
+      # Extract summary from issue output
+      issue_text = str(issue)
+      summary = issue_text[:40].lower()
+      summary = re.sub(r'[^a-z0-9]+', '-', summary).strip('-')
       branch_name = f"{key}-{summary}"
-    output: branch_name
+    output: new_branch_name
 
-  # Step 3: Ensure we're on main and up to date
-  - name: switch_to_main
-    tool: git_checkout
-    args:
-      repo: "{{ inputs.repo }}"
-      target: "main"
+  # Step 7a: Checkout existing branch
+  - name: checkout_existing
+    description: "Checkout existing branch for this issue"
+    condition: "{{ branch_check.get('exists', False) }}"
+    compute: |
+      import subprocess
+      import os
+      
+      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      branch = branch_check['branch']
+      
+      result = subprocess.run(
+        ["git", "checkout", branch],
+        cwd=repo_path,
+        capture_output=True,
+        text=True
+      )
+      
+      if result.returncode != 0:
+        subprocess.run(
+          ["git", "checkout", "-b", branch, f"origin/{branch}"],
+          cwd=repo_path,
+          capture_output=True
+        )
+      
+      subprocess.run(["git", "pull", "--rebase"], cwd=repo_path, capture_output=True)
+      
+      result = f"Checked out: {branch}"
+    output: checkout_result
 
-  - name: pull_latest
-    tool: git_pull
-    args:
-      repo: "{{ inputs.repo }}"
-      rebase: true
+  # Step 7b: Create new branch
+  - name: setup_new_branch
+    description: "Switch to main, pull, create new branch"
+    condition: "{{ not branch_check.get('exists', False) }}"
+    compute: |
+      import subprocess
+      import os
+      
+      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      branch_name = new_branch_name
+      
+      subprocess.run(["git", "checkout", "main"], cwd=repo_path, capture_output=True)
+      subprocess.run(["git", "pull", "--rebase"], cwd=repo_path, capture_output=True)
+      
+      result = subprocess.run(
+        ["git", "checkout", "-b", branch_name],
+        cwd=repo_path,
+        capture_output=True,
+        text=True
+      )
+      
+      if result.returncode == 0:
+        result = f"Created: {branch_name}"
+      else:
+        result = f"Failed: {result.stderr}"
+    output: create_result
 
-  # Step 4: Create feature branch
-  - name: create_branch
-    tool: git_branch_create
-    args:
-      repo: "{{ inputs.repo }}"
-      branch_name: "{{ branch_name }}"
-      base: "main"
-    output: branch_result
-
-  # Step 5: Update Jira status
+  # Step 8: Update Jira status (only for new work)
   - name: update_status
+    condition: "{{ not branch_check.get('exists', False) }}"
     tool: jira_set_status
     args:
       issue_key: "{{ inputs.issue_key }}"
       status: "In Progress"
-    on_error: continue  # Don't fail if status transition fails
+    on_error: continue
+
+  # Step 9: Determine final branch name
+  - name: get_final_branch
+    compute: |
+      if branch_check.get('exists', False):
+        result = branch_check['branch']
+      else:
+        result = new_branch_name
+    output: final_branch
 
 outputs:
   - name: summary
     value: |
-      ## ✅ Ready to Work on {{ inputs.issue_key }}
+      ## {{ "📂 Resuming" if branch_check.exists else "✨ Starting" }} Work on {{ inputs.issue_key }}
       
-      **Issue:** {{ issue.summary }}
-      **Branch:** `{{ branch_name }}`
-      **Status:** In Progress
+      **Issue:** {{ issue }}
+      **Branch:** `{{ final_branch }}`
+      {% if branch_check.exists %}
+      
+      ---
+      {% if mr_feedback and mr_feedback.has_feedback %}
+      
+      ### 💬 MR Feedback ({{ mr_feedback.mr_id }})
+      
+      There are review comments on your MR:
+      
+      ```
+      {{ mr_feedback.comments[:800] }}
+      ```
+      
+      **Pipeline:** {{ mr_feedback.pipeline }}
+      
+      {% endif %}
+      {% if jira_updates and jira_updates.has_updates %}
+      
+      ### 📋 Recent Jira Updates
+      
+      **Status:** {{ jira_updates.status }}
+      
+      {% for comment in jira_updates.recent_comments[-2:] %}
+      - {{ comment.author if comment.author else 'Someone' }}: {{ comment.body[:100] if comment.body else comment }}...
+      {% endfor %}
+      
+      {% endif %}
+      {% if (mr_feedback and mr_feedback.has_feedback) or (jira_updates and jira_updates.has_updates) %}
+      
+      ---
+      
+      ### 🤔 What would you like to do?
+      
+      1. **Address MR feedback** - I can help review the comments and suggest fixes
+      2. **Check full MR details** - `gitlab_mr_view`
+      3. **View full Jira context** - `jira_view_issue`
+      4. **Continue coding** - Just start working
+      
+      {% else %}
+      
+      ✅ No pending feedback - you're good to continue!
+      
+      **What would you like to do next?**
+      
+      {% endif %}
+      {% else %}
+      
+      ✨ *Created new branch*
       
       ### Next Steps
       1. Make your changes
-      2. Run `git add` and `git commit -m "{{ inputs.issue_key }} - feat: description"`
-      3. Run skill: `create_mr` when ready
+      2. Commit: `git commit -m "{{ inputs.issue_key }} - feat: description"`
+      3. When ready: `skill_run("create_mr", '{"issue_key": "{{ inputs.issue_key }}"}')`
+      
+      {% endif %}
   
   - name: context
     value:
       issue: "{{ issue }}"
-      branch: "{{ branch_name }}"
+      branch: "{{ final_branch }}"
       repo: "{{ inputs.repo }}"
-
+      was_existing: "{{ branch_check.exists }}"
+      has_mr: "{{ existing_mr is not none }}"
+      has_feedback: "{{ mr_feedback.has_feedback if mr_feedback else false }}"
+      mr_id: "{{ mr_feedback.mr_id if mr_feedback else none }}"
