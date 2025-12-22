@@ -580,6 +580,7 @@ flowchart TD
 ### 🔄 rebase_pr
 
 Rebase a PR branch onto main, cleaning up merge commits and handling conflicts.
+**Automatically resolves obvious conflicts** (additions, deletions, whitespace-only changes).
 
 ```
 skill_run("rebase_pr", '{"mr_id": 123}')
@@ -608,29 +609,49 @@ flowchart TD
     E --> F[Rebase onto main]
     F --> G{Conflicts?}
     G -->|No| H[Force Push]
-    G -->|Yes| I[Show Conflicts]
-    I --> J[User Resolves]
-    J --> K[git add files]
+    G -->|Yes| I[Analyze Conflicts]
+    I --> J{Obvious?}
+    J -->|Yes| K[Auto-Resolve]
     K --> L[git rebase --continue]
     L --> G
-    H --> M[Done!]
+    J -->|No| M[Show to User]
+    M --> N[User Resolves]
+    N --> O[git add + continue]
+    O --> G
+    H --> P[Done!]
 ```
 
-**When Conflicts Occur:**
+**Auto-Resolution Strategies:**
+| Conflict Type | Action |
+|--------------|--------|
+| Ours empty, theirs has content | Accept theirs (new addition) |
+| Theirs empty, ours has content | Keep ours (they deleted) |
+| Identical content | Remove markers |
+| Whitespace-only difference | Accept theirs |
+| One side subset of other | Merge (keep superset) |
+| Both sides changed differently | **Ask user** |
+
+**Example Output:**
 ```
-## ⚠️ Merge Conflicts Detected
+## 🔄 Rebase PR Summary
 
-The following files have conflicts:
-- `src/api/views.py` (2 conflicts)
-- `src/models/user.py` (1 conflict)
+**Branch:** `AAP-61214-feature`
+**Base:** `main`
 
-## 🛠️ Resolve Conflicts
+### 🤖 Auto-Resolved: 2 file(s)
+- ✅ `src/config.py` (accept_theirs)
+- ✅ `tests/test_api.py` (whitespace_only)
 
-Step 1: Open each file, resolve conflicts (look for <<<<<<< markers)
-Step 2: git add <filename>
+### 🙋 Needs Your Help: 1 file(s)
+- ⚠️ `src/api/views.py` (3 conflicts) - Complex changes on both sides
+
+### ⚠️ Manual Resolution Required
+
+## 🛠️ Resolve Remaining Conflicts
+Step 1: Edit `src/api/views.py` (look for <<<<<<< markers)
+Step 2: git add src/api/views.py
 Step 3: git rebase --continue
-Step 4: Repeat if more conflicts
-Step 5: git push --force-with-lease origin <branch>
+Step 4: git push --force-with-lease origin AAP-61214-feature
 ```
 
 ---

@@ -300,38 +300,198 @@ steps:
       result = rebase_status
     output: rebase_result
 
-  # ==================== HANDLE CONFLICTS ====================
+  # ==================== HANDLE CONFLICTS (AUTO-RESOLVE IF POSSIBLE) ====================
   
-  - name: show_conflicts
-    description: "Show conflict details if any"
+  - name: analyze_and_resolve_conflicts
+    description: "Analyze conflicts and auto-resolve obvious ones"
     condition: "rebase_result.get('conflicts')"
     compute: |
       import subprocess
+      import re
+      import os
       
       conflict_files = rebase_result.get('conflict_files', [])
+      repo = inputs.repo_path
       
-      details = []
-      for f in conflict_files[:5]:  # First 5 files
-        # Show conflict markers count
+      auto_resolved = []
+      needs_human = []
+      
+      for filepath in conflict_files:
+        full_path = os.path.join(repo, filepath)
+        
         try:
-          with open(f'{inputs.repo_path}/{f}', 'r') as file:
-            content = file.read()
-            conflict_count = content.count('<<<<<<<')
-            details.append({
-              'file': f,
-              'conflicts': conflict_count
+          with open(full_path, 'r') as f:
+            content = f.read()
+          
+          # Find all conflict blocks
+          # Pattern: <<<<<<< ... ======= ... >>>>>>> 
+          conflict_pattern = r'<<<<<<<[^\n]*\n(.*?)=======\n(.*?)>>>>>>>[^\n]*\n'
+          conflicts = re.findall(conflict_pattern, content, re.DOTALL)
+          
+          if not conflicts:
+            # No conflicts found, might be resolved already
+            auto_resolved.append({'file': filepath, 'action': 'no_conflicts_found'})
+            continue
+          
+          can_auto_resolve = True
+          resolution_strategy = None
+          
+          for ours, theirs in conflicts:
+            ours_stripped = ours.strip()
+            theirs_stripped = theirs.strip()
+            
+            # Case 1: Identical (shouldn't happen but handle it)
+            if ours_stripped == theirs_stripped:
+              resolution_strategy = 'identical'
+              continue
+            
+            # Case 2: Ours is empty - accept theirs (new addition)
+            if not ours_stripped and theirs_stripped:
+              resolution_strategy = 'accept_theirs'
+              continue
+            
+            # Case 3: Theirs is empty - keep ours (they deleted, we modified)
+            if ours_stripped and not theirs_stripped:
+              resolution_strategy = 'accept_ours'
+              continue
+            
+            # Case 4: Simple whitespace/formatting difference
+            if ours_stripped.replace(' ', '').replace('\t', '') == theirs_stripped.replace(' ', '').replace('\t', ''):
+              resolution_strategy = 'whitespace_only'
+              continue
+            
+            # Case 5: One side just adds lines (non-overlapping)
+            ours_lines = set(ours_stripped.split('\n'))
+            theirs_lines = set(theirs_stripped.split('\n'))
+            if ours_lines.issubset(theirs_lines) or theirs_lines.issubset(ours_lines):
+              resolution_strategy = 'subset_merge'
+              continue
+            
+            # Complex conflict - needs human
+            can_auto_resolve = False
+            break
+          
+          if can_auto_resolve and resolution_strategy:
+            # Apply auto-resolution
+            new_content = content
+            
+            for ours, theirs in conflicts:
+              full_conflict = f'<<<<<<< HEAD\n{ours}=======\n{theirs}>>>>>>> '
+              # Find and get the full marker including commit ref
+              match = re.search(r'(<<<<<<<[^\n]*\n' + re.escape(ours) + r'=======\n' + re.escape(theirs) + r'>>>>>>>[^\n]*\n?)', content, re.DOTALL)
+              
+              if match:
+                full_marker = match.group(1)
+                
+                if resolution_strategy in ['accept_theirs', 'subset_merge']:
+                  # Keep theirs
+                  new_content = new_content.replace(full_marker, theirs)
+                elif resolution_strategy == 'accept_ours':
+                  # Keep ours
+                  new_content = new_content.replace(full_marker, ours)
+                elif resolution_strategy in ['identical', 'whitespace_only']:
+                  # Keep theirs (more recent)
+                  new_content = new_content.replace(full_marker, theirs)
+            
+            # Write resolved file
+            with open(full_path, 'w') as f:
+              f.write(new_content)
+            
+            # Stage the file
+            subprocess.run(['git', 'add', filepath], cwd=repo, capture_output=True)
+            
+            auto_resolved.append({
+              'file': filepath,
+              'action': f'auto_resolved ({resolution_strategy})',
+              'strategy': resolution_strategy
             })
-        except:
-          details.append({'file': f, 'conflicts': '?'})
+          else:
+            # Count conflicts for human
+            conflict_count = len(conflicts)
+            needs_human.append({
+              'file': filepath,
+              'conflicts': conflict_count,
+              'reason': 'Complex changes on both sides'
+            })
+            
+        except Exception as e:
+          needs_human.append({
+            'file': filepath,
+            'conflicts': '?',
+            'reason': f'Error reading file: {str(e)[:50]}'
+          })
       
-      result = details
-    output: conflict_details
+      result = {
+        'auto_resolved': auto_resolved,
+        'needs_human': needs_human,
+        'all_resolved': len(needs_human) == 0
+      }
+    output: conflict_resolution
+
+  - name: continue_rebase_if_resolved
+    description: "Continue rebase if all conflicts auto-resolved"
+    condition: "conflict_resolution and conflict_resolution.get('all_resolved')"
+    compute: |
+      import subprocess
+      
+      # Try to continue the rebase
+      result = subprocess.run(
+        ['git', 'rebase', '--continue'],
+        capture_output=True, text=True,
+        cwd=inputs.repo_path,
+        env={**dict(subprocess.os.environ), 'GIT_EDITOR': 'true'}  # Skip commit message editor
+      )
+      
+      if result.returncode == 0:
+        continue_status = {
+          'success': True,
+          'message': 'Rebase continued successfully after auto-resolving conflicts'
+        }
+      else:
+        # Check if more conflicts
+        status = subprocess.run(
+          ['git', 'status', '--porcelain'],
+          capture_output=True, text=True,
+          cwd=inputs.repo_path
+        )
+        new_conflicts = [l[3:] for l in status.stdout.split('\n') if l.startswith('UU')]
+        
+        if new_conflicts:
+          continue_status = {
+            'success': False,
+            'message': f'More conflicts emerged: {len(new_conflicts)} files',
+            'new_conflicts': new_conflicts
+          }
+        else:
+          continue_status = {
+            'success': False,
+            'message': f'Rebase continue failed: {result.stderr[:100]}'
+          }
+      
+      result = continue_status
+    output: continue_result
+
+  - name: update_rebase_result
+    description: "Update rebase result after auto-resolution"
+    condition: "continue_result"
+    compute: |
+      if continue_result.get('success'):
+        # Rebase is now complete
+        result = {
+          'success': True,
+          'conflicts': False,
+          'auto_resolved': True,
+          'message': 'Rebase completed (conflicts auto-resolved)'
+        }
+      else:
+        result = rebase_result  # Keep original status
+    output: final_rebase_result
 
   # ==================== FORCE PUSH (if successful) ====================
   
   - name: force_push
     description: "Force push rebased branch"
-    condition: "rebase_result.get('success') and inputs.force_push"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push"
     compute: |
       import subprocess
       
@@ -365,25 +525,47 @@ steps:
           lines.append(f"- `{mc}`")
         lines.append("")
       
-      # Rebase result
-      if rebase_result.get('success'):
+      # Use final_rebase_result if available (after auto-resolution)
+      effective_result = final_rebase_result if final_rebase_result else rebase_result
+      
+      # Show auto-resolution results
+      if conflict_resolution:
+        auto_resolved = conflict_resolution.get('auto_resolved', [])
+        needs_human = conflict_resolution.get('needs_human', [])
+        
+        if auto_resolved:
+          lines.append(f"### 🤖 Auto-Resolved: {len(auto_resolved)} file(s)")
+          for ar in auto_resolved:
+            lines.append(f"- ✅ `{ar['file']}` ({ar.get('strategy', 'resolved')})")
+          lines.append("")
+        
+        if needs_human:
+          lines.append(f"### 🙋 Needs Your Help: {len(needs_human)} file(s)")
+          for nh in needs_human:
+            lines.append(f"- ⚠️ `{nh['file']}` ({nh['conflicts']} conflict(s)) - {nh.get('reason', '')}")
+          lines.append("")
+      
+      # Final rebase result
+      if effective_result.get('success'):
         lines.append("### ✅ Rebase Successful!")
+        if effective_result.get('auto_resolved'):
+          lines.append("*Conflicts were automatically resolved*")
         lines.append("")
         if push_result:
           lines.append(f"✅ {push_result}")
         else:
           lines.append("Branch is rebased locally. Ready to force push.")
-      elif rebase_result.get('conflicts'):
+      elif effective_result.get('conflicts') and conflict_resolution and conflict_resolution.get('needs_human'):
+        lines.append("### ⚠️ Manual Resolution Required")
+        lines.append("")
+        lines.append("Some conflicts couldn't be auto-resolved. Please fix the files above.")
+      elif effective_result.get('conflicts'):
         lines.append("### ⚠️ Merge Conflicts Detected")
         lines.append("")
-        lines.append("The following files have conflicts that need to be resolved:")
-        lines.append("")
-        for cf in conflict_details or []:
-          lines.append(f"- `{cf['file']}` ({cf['conflicts']} conflict(s))")
-        lines.append("")
+        lines.append("Conflicts need manual resolution.")
       else:
         lines.append("### ❌ Rebase Failed")
-        lines.append(rebase_result.get('message', 'Unknown error'))
+        lines.append(effective_result.get('message', 'Unknown error'))
       
       result = '\n'.join(lines)
     output: summary
@@ -397,10 +579,12 @@ outputs:
       
       ---
       
-      {% if rebase_result.get('conflicts') %}
-      ## 🛠️ Resolve Conflicts
+      {% if conflict_resolution and conflict_resolution.get('needs_human') %}
+      ## 🛠️ Resolve Remaining Conflicts
       
-      **Step 1:** Open each conflicted file and resolve the conflicts
+      I auto-resolved what I could, but some conflicts need your judgment:
+      
+      **Step 1:** Open each file marked with ⚠️ above and resolve the conflicts
       Look for markers like:
       ```
       <<<<<<< HEAD
@@ -413,8 +597,6 @@ outputs:
       **Step 2:** After resolving each file, stage it:
       ```bash
       git add <filename>
-      # Or add all resolved files:
-      git add -A
       ```
       
       **Step 3:** Continue the rebase:
@@ -424,22 +606,23 @@ outputs:
       
       **Step 4:** If more conflicts, repeat steps 1-3
       
-      **Step 5:** When rebase completes, force push:
+      **Step 5:** When complete, force push:
       ```bash
       git push --force-with-lease origin {{ target_branch }}
       ```
       
-      **To abort the rebase:**
-      ```bash
-      git rebase --abort
-      ```
+      **To abort:** `git rebase --abort`
       
       ---
       
-      When you're done, tell me and I can verify the rebase was successful.
+      When you're done, tell me and I can verify and push.
       
-      {% elif rebase_result.get('success') and not push_result %}
+      {% elif (final_rebase_result and final_rebase_result.get('success') and not push_result) or (rebase_result.get('success') and not push_result) %}
       ## 🚀 Ready to Push
+      
+      {% if conflict_resolution and conflict_resolution.get('auto_resolved') %}
+      All conflicts were auto-resolved! 🤖
+      {% endif %}
       
       The rebase completed successfully! Would you like me to force push?
       
@@ -456,7 +639,22 @@ outputs:
       {% elif push_result %}
       ## ✅ Complete!
       
-      The branch has been rebased and pushed. The MR should now show a clean history.
+      {% if conflict_resolution and conflict_resolution.get('auto_resolved') %}
+      Conflicts were auto-resolved and the branch has been pushed! 🤖
+      {% else %}
+      The branch has been rebased and pushed.
+      {% endif %}
+      
+      The MR should now show a clean history.
+      
+      {% elif rebase_result.get('conflicts') and not conflict_resolution %}
+      ## 🛠️ Resolve Conflicts
+      
+      **Step 1:** Open each conflicted file and resolve the conflicts
+      **Step 2:** `git add <filename>`
+      **Step 3:** `git rebase --continue`
+      **Step 4:** Repeat if more conflicts
+      **Step 5:** `git push --force-with-lease origin {{ target_branch }}`
       
       {% else %}
       ## ❌ Action Required
