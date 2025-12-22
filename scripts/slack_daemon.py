@@ -61,6 +61,89 @@ try:
 except (ImportError, ValueError):
     NOTIFY_AVAILABLE = False
 
+# Single instance lock
+import fcntl
+
+LOCK_FILE = Path("/tmp/slack-daemon.lock")
+PID_FILE = Path("/tmp/slack-daemon.pid")
+
+
+class SingleInstance:
+    """
+    Ensures only one instance of the daemon runs at a time.
+
+    Uses a lock file with fcntl for atomic locking.
+    If another instance is running, provides methods to communicate with it.
+    """
+
+    def __init__(self):
+        self._lock_file = None
+        self._acquired = False
+
+    def acquire(self) -> bool:
+        """
+        Try to acquire the lock.
+
+        Returns True if we got the lock (we're the only instance).
+        Returns False if another instance is running.
+        """
+        try:
+            self._lock_file = open(LOCK_FILE, "w")
+            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            # Write our PID
+            PID_FILE.write_text(str(os.getpid()))
+            self._acquired = True
+            return True
+        except (IOError, OSError):
+            # Lock is held by another process
+            if self._lock_file:
+                self._lock_file.close()
+                self._lock_file = None
+            return False
+
+    def release(self):
+        """Release the lock."""
+        if self._lock_file:
+            try:
+                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+                self._lock_file.close()
+            except Exception:
+                pass
+            self._lock_file = None
+
+        # Clean up files
+        try:
+            LOCK_FILE.unlink(missing_ok=True)
+            PID_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        self._acquired = False
+
+    def get_running_pid(self) -> int | None:
+        """Get the PID of the running instance, if any."""
+        try:
+            if PID_FILE.exists():
+                pid = int(PID_FILE.read_text().strip())
+                # Check if process is actually running
+                os.kill(pid, 0)
+                return pid
+        except (ValueError, OSError, ProcessLookupError):
+            pass
+        return None
+
+    def is_running(self) -> bool:
+        """Check if another instance is running."""
+        return self.get_running_pid() is not None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+
+
 load_dotenv(PROJECT_ROOT / "mcp-servers" / "aa-slack" / ".env")
 load_dotenv()
 
@@ -1447,6 +1530,17 @@ async def main():
     parser = argparse.ArgumentParser(
         description="Autonomous Slack Agent Daemon",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Interaction Methods:
+  1. Direct CLI:     python slack_daemon.py [options]
+  2. Makefile:       make slack-daemon | make slack-daemon-bg
+  3. D-Bus Control:  make slack-status | make slack-pending | make slack-approve ID=xxx
+  4. MCP Skill:      skill_run("slack_daemon_control", '{"action": "status"}')
+
+Single Instance:
+  Only one daemon can run at a time (uses lock file).
+  If already running, commands are redirected to the existing instance via D-Bus.
+""",
     )
 
     parser.add_argument(
@@ -1481,8 +1575,62 @@ async def main():
         action="store_true",
         help="Disable desktop notifications",
     )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Show status of running daemon and exit",
+    )
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help="Stop running daemon and exit",
+    )
 
     args = parser.parse_args()
+
+    # Check for single-instance commands first
+    instance = SingleInstance()
+
+    # Handle --status: just check if running
+    if args.status:
+        pid = instance.get_running_pid()
+        if pid:
+            print(f"✅ Daemon is running (PID: {pid})")
+            print(f"   Lock file: {LOCK_FILE}")
+            print(f"   PID file: {PID_FILE}")
+            print("\nUse 'make slack-status' for detailed stats via D-Bus")
+        else:
+            print("❌ Daemon is not running")
+        return
+
+    # Handle --stop: signal the running daemon
+    if args.stop:
+        pid = instance.get_running_pid()
+        if pid:
+            print(f"Stopping daemon (PID: {pid})...")
+            try:
+                os.kill(pid, signal.SIGTERM)
+                print("✅ Stop signal sent")
+            except OSError as e:
+                print(f"❌ Failed to stop: {e}")
+        else:
+            print("❌ Daemon is not running")
+        return
+
+    # Try to acquire the lock
+    if not instance.acquire():
+        existing_pid = instance.get_running_pid()
+        print(f"⚠️  Another instance is already running (PID: {existing_pid})")
+        print()
+        print("To interact with the running daemon:")
+        print("  make slack-status        # Get status")
+        print("  make slack-pending       # List pending messages")
+        print("  make slack-approve-all   # Approve all pending")
+        print("  make slack-daemon-stop   # Stop the daemon")
+        print()
+        print("Or use D-Bus directly:")
+        print("  python scripts/slack_control.py status")
+        return
 
     # Setup logging
     log_level = logging.DEBUG if args.verbose else logging.WARNING
@@ -1513,6 +1661,8 @@ async def main():
         pass
     finally:
         await daemon.stop()
+        instance.release()
+        print("🔓 Lock released")
 
 
 if __name__ == "__main__":
