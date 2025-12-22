@@ -1070,7 +1070,7 @@ Use the investigate_alert skill to check what's happening in production
 
 ## 🔧 Tool Modules
 
-The system provides **150+ tools** organized into 13 modules:
+The system provides **165+ tools** organized into 14 modules:
 
 ```mermaid
 graph TB
@@ -1095,6 +1095,10 @@ graph TB
             KIBANA[📜 kibana<br/>9 tools]
         end
         
+        subgraph COMM_TOOLS["<b>Communication</b>"]
+            SLACK[💬 slack<br/>15 tools]
+        end
+        
         subgraph OTHER["<b>Other</b>"]
             QUAY[📦 quay<br/>8 tools]
             APPINT[🔗 appinterface<br/>6 tools]
@@ -1108,6 +1112,7 @@ graph TB
     style K8S fill:#326ce5,stroke:#2563eb,color:#fff
     style PROM fill:#e6522c,stroke:#d14020,color:#fff
     style WORKFLOW fill:#10b981,stroke:#059669,color:#fff
+    style SLACK fill:#4a154b,stroke:#611f69,color:#fff
 ```
 
 ### Tool Categories
@@ -1188,6 +1193,43 @@ graph TB
 | `gitlab_job_logs` | Job logs |
 | `gitlab_project_info` | Project info |
 | ... | and more |
+
+</details>
+
+<details>
+<summary><b>💬 Slack Tools (15)</b> - Event-Driven Slack Integration</summary>
+
+**Message Operations:**
+| Tool | Description |
+|------|-------------|
+| `slack_list_messages` | Get recent messages from a channel |
+| `slack_send_message` | Send message (with threading) |
+| `slack_search_messages` | Search Slack messages |
+| `slack_add_reaction` | Add emoji reaction to message |
+
+**Pending Message Queue:**
+| Tool | Description |
+|------|-------------|
+| `slack_get_pending` | Get messages waiting for agent |
+| `slack_mark_processed` | Mark message as handled |
+| `slack_respond_and_mark` | Respond and mark in one step |
+
+**User & Channel Info:**
+| Tool | Description |
+|------|-------------|
+| `slack_get_user` | Resolve user ID to profile |
+| `slack_list_channels` | List available channels |
+| `slack_validate_session` | Check session credentials |
+
+**Listener Control:**
+| Tool | Description |
+|------|-------------|
+| `slack_listener_start` | Start background listener |
+| `slack_listener_stop` | Stop background listener |
+| `slack_listener_status` | Get listener status/stats |
+
+> ⚠️ **Note:** This uses Slack's internal web API (not official Bot API).
+> See [Slack Integration](#-slack-integration) for setup.
 
 </details>
 
@@ -1868,6 +1910,134 @@ You are a specialized agent for [domain].
 - Always [best practice]
 - Never [anti-pattern]
 ```
+
+---
+
+## 💬 Slack Integration
+
+The `aa-slack` module provides **proactive Slack integration** using an event-driven architecture. Unlike traditional Slack bots, this uses the internal web API for full feature access.
+
+### How It Works
+
+```mermaid
+sequenceDiagram
+    participant S as Slack
+    participant L as Background Listener
+    participant DB as SQLite State
+    participant MCP as MCP Server
+    participant LLM as Claude/AI
+    
+    loop Every 5 seconds
+        L->>S: Poll watched channels
+        S-->>L: New messages
+        L->>L: Filter by @mentions/keywords
+        L->>DB: Queue relevant messages
+    end
+    
+    LLM->>MCP: slack_get_pending()
+    MCP->>DB: Fetch pending queue
+    DB-->>MCP: Pending messages
+    MCP-->>LLM: Messages to process
+    
+    LLM->>MCP: slack_respond_and_mark(id, text)
+    MCP->>S: Send response
+    MCP->>DB: Mark processed
+    MCP-->>LLM: Confirmation
+```
+
+### Quick Setup
+
+1. **Get Credentials** (from browser dev tools):
+   - Open Slack in browser → F12 → Network tab
+   - Find any API call to `slack.com/api/*`
+   - Extract `xoxc-...` token from request body
+   - Extract `d` cookie value from Cookie header
+
+2. **Configure Environment**:
+   ```bash
+   export SLACK_XOXC_TOKEN="xoxc-your-token"
+   export SLACK_D_COOKIE="your-d-cookie"
+   export SLACK_WATCHED_CHANNELS="C12345678,C87654321"
+   export SLACK_WATCHED_KEYWORDS="help,question,urgent"
+   export SLACK_SELF_USER_ID="U12345678"  # Your user ID
+   ```
+
+3. **Add to Cursor**:
+   ```json
+   {
+     "mcpServers": {
+       "aa-slack": {
+         "command": "bash",
+         "args": ["-c", "cd ~/src/ai-workflow/mcp-servers/aa-slack && python3 -m src.server --auto-start"]
+       }
+     }
+   }
+   ```
+
+### Usage Examples
+
+**Check for pending messages:**
+```
+slack_get_pending()
+```
+
+**Respond to a message:**
+```
+slack_respond_and_mark("C123_1234567890.123456", "Here's your answer: ...")
+```
+
+**Send to a specific channel:**
+```
+slack_send_message("C12345678", "Hello team!", thread_ts="1234567890.123456")
+```
+
+**Start/stop the listener:**
+```
+slack_listener_start()
+slack_listener_status()
+slack_listener_stop()
+```
+
+### Running as a Durable Process
+
+For continuous listening (e.g., via systemd or pm2):
+
+```bash
+# Durable mode - keeps running in background
+python -m src.server --durable --auto-start
+```
+
+**systemd example** (`/etc/systemd/system/aa-slack.service`):
+```ini
+[Unit]
+Description=AI Workflow Slack Listener
+After=network.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/home/youruser/src/ai-workflow/mcp-servers/aa-slack
+EnvironmentFile=/home/youruser/.slack-env
+ExecStart=/usr/bin/python3 -m src.server --durable --auto-start
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Security Considerations
+
+> ⚠️ **Warning:** This uses Slack's internal web API, not the official Bot API.
+> - May violate Slack's Terms of Service
+> - Credentials expire and need re-obtaining periodically
+> - Use at your own risk
+
+**Best practices:**
+- Store credentials in environment variables, not code
+- Use a dedicated Slack account for the agent
+- Monitor for authentication failures
+- Implement rate limit backoff (included by default)
 
 ---
 

@@ -141,6 +141,41 @@ python -m aa_common.server --all
 python -m aa_common.server --tools git,jira --web --port 8765
 ```
 
+## Special Modules
+
+### aa-slack: Event-Driven Architecture
+
+The `aa-slack` module is different from other modules - it implements a **long-running listener** pattern:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  aa-slack MCP Server                                            │
+│                                                                 │
+│  ┌──────────────────┐     ┌──────────────────┐                 │
+│  │  Background      │     │  SQLite State    │                 │
+│  │  Polling Loop    │────▶│  - Last TS       │                 │
+│  │  (asyncio task)  │     │  - Pending Queue │                 │
+│  └────────┬─────────┘     │  - User Cache    │                 │
+│           │               └────────┬─────────┘                 │
+│           ▼                        │                           │
+│  ┌──────────────────┐              │                           │
+│  │  Slack Web API   │              │                           │
+│  │  (httpx client)  │              ▼                           │
+│  │  - Auth spoof    │     ┌──────────────────┐                 │
+│  │  - Rate limiting │     │  MCP Tools       │                 │
+│  └──────────────────┘     │  - get_pending   │◀─── LLM Calls   │
+│                           │  - send_message  │                 │
+│                           │  - respond_mark  │                 │
+│                           └──────────────────┘                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key differences from other modules:**
+- Background asyncio task polls Slack continuously
+- State persisted to SQLite for restart survival
+- Uses internal web API (xoxc tokens) not Bot API
+- Proactive message queuing for LLM processing
+
 ## Adding a New Tool Module
 
 1. Create directory: `aa-{name}/src/`

@@ -46,6 +46,7 @@ TOOL_MODULES = {
     "quay": 8,
     "appinterface": 6,
     "workflow": 26,
+    "slack": 15,  # Proactive Slack listener (event-based)
 }
 
 def load_agent_config(agent_name: str) -> list[str] | None:
