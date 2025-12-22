@@ -849,11 +849,13 @@ class SlackDaemon:
         use_llm: bool = False,
         verbose: bool = False,
         poll_interval: float = 5.0,
+        enable_dbus: bool = False,
     ):
         self.dry_run = dry_run
         self.use_llm = use_llm
         self.verbose = verbose
         self.poll_interval = poll_interval
+        self.enable_dbus = enable_dbus
 
         self.ui = TerminalUI(verbose=verbose)
         self.intent_detector = IntentDetector()
@@ -869,10 +871,31 @@ class SlackDaemon:
         self._running = False
         self._shutdown_event = asyncio.Event()
         self._pending_reviews: list[dict] = []  # Messages awaiting review
+        self._start_time: float | None = None
+
+        # D-Bus support
+        self._dbus_handler = None
+        if enable_dbus:
+            try:
+                from slack_dbus import SlackDaemonWithDBus, MessageHistory, MessageRecord
+
+                self._dbus_handler = SlackDaemonWithDBus()
+                self._dbus_handler.history = MessageHistory()
+                logger.info("D-Bus support enabled")
+            except ImportError as e:
+                logger.warning(f"D-Bus not available: {e}")
 
     async def start(self):
         """Initialize and start the daemon."""
         self.ui.print_header()
+        self._start_time = time.time()
+
+        # Initialize D-Bus if enabled
+        if self._dbus_handler:
+            await self._dbus_handler.start_dbus()
+            self._dbus_handler.is_running = True
+            self._dbus_handler.start_time = self._start_time
+            print("✅ D-Bus IPC enabled (com.aiworkflow.SlackAgent)")
 
         # Initialize Slack session (config.json with env override)
         try:
@@ -1005,6 +1028,11 @@ class SlackDaemon:
         # Generate response (with classification-aware modulation)
         response, should_send = await self.response_generator.generate(msg, intent, classification)
 
+        # Update D-Bus handler stats
+        if self._dbus_handler:
+            self._dbus_handler.messages_processed = self.ui.messages_processed
+            self._dbus_handler.session = self.session
+
         # Handle concerned users - queue for review instead of auto-sending
         if classification.require_review and not self.dry_run:
             self._pending_reviews.append(
@@ -1020,6 +1048,27 @@ class SlackDaemon:
             )
             print(f"   Pending reviews: {len(self._pending_reviews)}")
 
+            # Record pending message in D-Bus history
+            if self._dbus_handler:
+                from slack_dbus import MessageRecord
+
+                record = MessageRecord(
+                    id=msg.id,
+                    timestamp=msg.timestamp,
+                    channel_id=msg.channel_id,
+                    channel_name=msg.channel_name,
+                    user_id=msg.user_id,
+                    user_name=msg.user_name,
+                    text=msg.text,
+                    intent=intent.type,
+                    classification=classification.category.value,
+                    response=response,
+                    status="pending",
+                    created_at=time.time(),
+                )
+                self._dbus_handler.history.add(record)
+                self._dbus_handler.emit_pending_approval(record)
+
             # Optionally notify about concerned user message
             await self._notify_concerned_message(msg, response)
 
@@ -1032,12 +1081,34 @@ class SlackDaemon:
             print(
                 f"   {self.ui.COLORS['yellow']}🚫 NOT RESPONDING: {permission_reason}{self.ui.COLORS['reset']}"
             )
+            # Record skipped message
+            if self._dbus_handler:
+                from slack_dbus import MessageRecord
+
+                record = MessageRecord(
+                    id=msg.id,
+                    timestamp=msg.timestamp,
+                    channel_id=msg.channel_id,
+                    channel_name=msg.channel_name,
+                    user_id=msg.user_id,
+                    user_name=msg.user_name,
+                    text=msg.text,
+                    intent=intent.type,
+                    classification=classification.category.value,
+                    response="",
+                    status="skipped",
+                    created_at=time.time(),
+                    processed_at=time.time(),
+                )
+                self._dbus_handler.history.add(record)
+
             # Still mark as processed
             await self.state_db.mark_message_processed(msg.id)
             return
 
         # Send response (unless dry run or auto_respond is False)
         success = True
+        status = "sent"
         if not self.dry_run and should_send:
             try:
                 thread_ts = msg.thread_ts or msg.timestamp
@@ -1048,13 +1119,39 @@ class SlackDaemon:
                     typing_delay=True,
                 )
                 self.ui.messages_responded += 1
+                if self._dbus_handler:
+                    self._dbus_handler.messages_responded = self.ui.messages_responded
             except Exception as e:
                 success = False
+                status = "failed"
                 self.ui.print_error(f"Failed to send: {e}")
         elif not should_send:
+            status = "skipped"
             print(f"   {self.ui.COLORS['dim']}(auto_respond disabled){self.ui.COLORS['reset']}")
 
         self.ui.print_response(response, success)
+
+        # Record sent message in D-Bus history
+        if self._dbus_handler:
+            from slack_dbus import MessageRecord
+
+            record = MessageRecord(
+                id=msg.id,
+                timestamp=msg.timestamp,
+                channel_id=msg.channel_id,
+                channel_name=msg.channel_name,
+                user_id=msg.user_id,
+                user_name=msg.user_name,
+                text=msg.text,
+                intent=intent.type,
+                classification=classification.category.value,
+                response=response,
+                status=status,
+                created_at=time.time(),
+                processed_at=time.time(),
+            )
+            self._dbus_handler.history.add(record)
+            self._dbus_handler.emit_message_processed(msg.id, status)
 
         # Mark as processed
         await self.state_db.mark_message_processed(msg.id)
@@ -1098,6 +1195,10 @@ class SlackDaemon:
     async def stop(self):
         """Stop the daemon gracefully."""
         self._running = False
+
+        if self._dbus_handler:
+            self._dbus_handler.is_running = False
+            await self._dbus_handler.stop_dbus()
 
         if self.listener:
             await self.listener.stop()
@@ -1150,6 +1251,11 @@ async def main():
         default=5.0,
         help="Polling interval in seconds (default: 5)",
     )
+    parser.add_argument(
+        "--dbus",
+        action="store_true",
+        help="Enable D-Bus IPC interface",
+    )
 
     args = parser.parse_args()
 
@@ -1170,6 +1276,7 @@ async def main():
         use_llm=args.llm,
         verbose=args.verbose,
         poll_interval=args.poll_interval,
+        enable_dbus=args.dbus,
     )
 
     daemon.setup_signal_handlers()

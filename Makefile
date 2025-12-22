@@ -13,6 +13,8 @@
 
 .PHONY: help install test lint format clean \
         slack-daemon slack-daemon-bg slack-daemon-stop slack-daemon-logs \
+        slack-status slack-pending slack-approve slack-approve-all slack-history \
+        slack-send slack-watch slack-reload \
         mcp-server mcp-devops mcp-developer mcp-incident mcp-release \
         check-env
 
@@ -47,11 +49,21 @@ help:
 	@echo ""
 	@echo "$(BOLD)Slack Daemon:$(RESET)"
 	@echo "  $(GREEN)make slack-daemon$(RESET)       Run Slack daemon (foreground, Ctrl+C to stop)"
-	@echo "  $(GREEN)make slack-daemon-bg$(RESET)    Run Slack daemon (background)"
+	@echo "  $(GREEN)make slack-daemon-bg$(RESET)    Run Slack daemon (background with D-Bus)"
 	@echo "  $(GREEN)make slack-daemon-stop$(RESET)  Stop background Slack daemon"
 	@echo "  $(GREEN)make slack-daemon-logs$(RESET)  Tail Slack daemon logs"
 	@echo "  $(GREEN)make slack-daemon-dry$(RESET)   Run in dry-run mode (no responses sent)"
 	@echo "  $(GREEN)make slack-daemon-llm$(RESET)   Run with LLM integration enabled"
+	@echo ""
+	@echo "$(BOLD)Slack Control (D-Bus IPC):$(RESET)"
+	@echo "  $(GREEN)make slack-status$(RESET)       Get daemon status and stats"
+	@echo "  $(GREEN)make slack-pending$(RESET)      List messages awaiting approval"
+	@echo "  $(GREEN)make slack-approve ID=xxx$(RESET)  Approve a specific message"
+	@echo "  $(GREEN)make slack-approve-all$(RESET)  Approve all pending messages"
+	@echo "  $(GREEN)make slack-history$(RESET)      Show message history"
+	@echo "  $(GREEN)make slack-watch$(RESET)        Watch for new messages (live)"
+	@echo "  $(GREEN)make slack-reload$(RESET)       Reload daemon configuration"
+	@echo "  $(GREEN)make slack-send$(RESET)         Send a message (CHANNEL=... MSG=...)"
 	@echo ""
 	@echo "$(BOLD)MCP Servers:$(RESET)"
 	@echo "  $(GREEN)make mcp-server$(RESET)         Run MCP server (default: developer)"
@@ -137,19 +149,6 @@ slack-daemon-llm: check-env
 	fi
 	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --llm
 
-slack-daemon-bg: check-env
-	@echo "$(CYAN)Starting Slack daemon (background)...$(RESET)"
-	@if [ -f $(SLACK_PID) ] && kill -0 $$(cat $(SLACK_PID)) 2>/dev/null; then \
-		echo "$(YELLOW)⚠️  Daemon already running (PID: $$(cat $(SLACK_PID)))$(RESET)"; \
-		exit 1; \
-	fi
-	@cd $(PROJECT_ROOT) && \
-		nohup $(PYTHON) scripts/slack_daemon.py > $(SLACK_LOG) 2>&1 & \
-		echo $$! > $(SLACK_PID)
-	@echo "$(GREEN)✅ Daemon started (PID: $$(cat $(SLACK_PID)))$(RESET)"
-	@echo "   Logs: $(SLACK_LOG)"
-	@echo "   Stop: make slack-daemon-stop"
-
 slack-daemon-stop:
 	@if [ -f $(SLACK_PID) ]; then \
 		PID=$$(cat $(SLACK_PID)); \
@@ -180,6 +179,70 @@ slack-daemon-status:
 	else \
 		echo "$(YELLOW)⚠️  Daemon not running$(RESET)"; \
 	fi
+
+# D-Bus daemon with IPC enabled
+slack-daemon-dbus: check-env
+	@echo "$(CYAN)Starting Slack daemon with D-Bus IPC...$(RESET)"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --dbus
+
+slack-daemon-bg: check-env
+	@echo "$(CYAN)Starting Slack daemon (background with D-Bus)...$(RESET)"
+	@if [ -f $(SLACK_PID) ] && kill -0 $$(cat $(SLACK_PID)) 2>/dev/null; then \
+		echo "$(YELLOW)⚠️  Daemon already running (PID: $$(cat $(SLACK_PID)))$(RESET)"; \
+		exit 1; \
+	fi
+	@cd $(PROJECT_ROOT) && \
+		nohup $(PYTHON) scripts/slack_daemon.py --dbus > $(SLACK_LOG) 2>&1 & \
+		echo $$! > $(SLACK_PID)
+	@sleep 2
+	@echo "$(GREEN)✅ Daemon started (PID: $$(cat $(SLACK_PID)))$(RESET)"
+	@echo "   D-Bus: com.aiworkflow.SlackAgent"
+	@echo "   Logs: $(SLACK_LOG)"
+	@echo "   Stop: make slack-daemon-stop"
+
+# =============================================================================
+# SLACK CONTROL (D-Bus IPC)
+# =============================================================================
+
+slack-status:
+	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py status
+
+slack-pending:
+	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py pending -v
+
+slack-approve:
+	@if [ -z "$(ID)" ]; then \
+		echo "$(RED)❌ Usage: make slack-approve ID=<message_id>$(RESET)"; \
+		exit 1; \
+	fi
+	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py approve $(ID)
+
+slack-approve-all:
+	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py approve-all
+
+slack-reject:
+	@if [ -z "$(ID)" ]; then \
+		echo "$(RED)❌ Usage: make slack-reject ID=<message_id>$(RESET)"; \
+		exit 1; \
+	fi
+	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py reject $(ID)
+
+slack-history:
+	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py history -n 50 -v
+
+slack-watch:
+	@echo "$(CYAN)Watching for new messages (Ctrl+C to stop)...$(RESET)"
+	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py watch
+
+slack-reload:
+	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py reload
+
+slack-send:
+	@if [ -z "$(CHANNEL)" ] || [ -z "$(MSG)" ]; then \
+		echo "$(RED)❌ Usage: make slack-send CHANNEL=C12345678 MSG='Hello!'$(RESET)"; \
+		exit 1; \
+	fi
+	@cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_control.py send $(CHANNEL) "$(MSG)"
 
 # =============================================================================
 # MCP SERVERS

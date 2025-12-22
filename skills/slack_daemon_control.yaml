@@ -1,0 +1,242 @@
+# Slack Daemon Control Skill
+# Controls the autonomous Slack daemon via D-Bus IPC
+#
+# Usage:
+#   skill_run("slack_daemon_control", '{"action": "start"}')
+#   skill_run("slack_daemon_control", '{"action": "status"}')
+#   skill_run("slack_daemon_control", '{"action": "pending"}')
+#   skill_run("slack_daemon_control", '{"action": "approve", "message_id": "xxx"}')
+#   skill_run("slack_daemon_control", '{"action": "approve_all"}')
+#   skill_run("slack_daemon_control", '{"action": "history", "limit": 50}')
+#   skill_run("slack_daemon_control", '{"action": "send", "channel": "C123", "message": "Hi!"}')
+#   skill_run("slack_daemon_control", '{"action": "stop"}')
+
+name: slack_daemon_control
+version: "1.0"
+description: |
+  Control the autonomous Slack daemon via D-Bus IPC.
+  
+  Actions:
+  - start: Launch daemon in background with nohup
+  - stop: Gracefully shutdown the daemon
+  - status: Get daemon status and stats
+  - pending: List messages awaiting approval
+  - approve <id>: Approve and send a pending message
+  - approve_all: Approve all pending messages
+  - reject <id>: Reject a pending message
+  - history: Get message history with filters
+  - send: Send a direct message to Slack
+  - reload: Reload configuration
+
+inputs:
+  action:
+    description: "Action to perform: start, stop, status, pending, approve, approve_all, reject, history, send, reload"
+    type: string
+    required: true
+  message_id:
+    description: "Message ID for approve/reject actions"
+    type: string
+    required: false
+  channel:
+    description: "Channel ID for send action"
+    type: string
+    required: false
+  message:
+    description: "Message text for send action"
+    type: string
+    required: false
+  thread:
+    description: "Thread timestamp for send action"
+    type: string
+    required: false
+  limit:
+    description: "Limit for history query (default: 50)"
+    type: integer
+    required: false
+    default: 50
+  filter_channel:
+    description: "Channel ID filter for history"
+    type: string
+    required: false
+  filter_user:
+    description: "User ID filter for history"
+    type: string
+    required: false
+  filter_status:
+    description: "Status filter for history (pending, sent, skipped, etc.)"
+    type: string
+    required: false
+  enable_llm:
+    description: "Enable LLM for start action"
+    type: boolean
+    required: false
+    default: false
+  verbose:
+    description: "Enable verbose output for start action"
+    type: boolean
+    required: false
+    default: false
+
+steps:
+  - id: validate_action
+    compute: |
+      valid_actions = ["start", "stop", "status", "pending", "approve", "approve_all", "reject", "history", "send", "reload"]
+      action = inputs.get("action", "").lower()
+      
+      if action not in valid_actions:
+        raise ValueError(f"Invalid action: {action}. Valid actions: {', '.join(valid_actions)}")
+      
+      # Validate required params for specific actions
+      if action == "approve" and not inputs.get("message_id"):
+        raise ValueError("approve action requires message_id parameter")
+      
+      if action == "reject" and not inputs.get("message_id"):
+        raise ValueError("reject action requires message_id parameter")
+      
+      if action == "send":
+        if not inputs.get("channel"):
+          raise ValueError("send action requires channel parameter")
+        if not inputs.get("message"):
+          raise ValueError("send action requires message parameter")
+      
+      result = {"action": action, "valid": True}
+
+  - id: run_action
+    compute: |
+      import subprocess
+      import sys
+      import os
+      import json
+      from pathlib import Path
+      
+      action = inputs["action"].lower()
+      project_root = Path(os.getenv("PROJECT_ROOT", os.getcwd()))
+      control_script = project_root / "scripts" / "slack_control.py"
+      daemon_script = project_root / "scripts" / "slack_daemon.py"
+      
+      # Build command based on action
+      if action == "start":
+        # Use nohup to start in background
+        log_file = Path("/tmp/slack-daemon.log")
+        pid_file = Path("/tmp/slack-daemon.pid")
+        
+        # Check if already running
+        if pid_file.exists():
+          try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)  # Check if process exists
+            result = {"success": False, "error": f"Daemon already running (PID: {pid})"}
+            raise SystemExit  # Skip to output
+          except (OSError, ValueError):
+            pid_file.unlink(missing_ok=True)
+        
+        cmd = [
+          "nohup",
+          sys.executable,
+          str(daemon_script),
+          "--dbus",
+        ]
+        if inputs.get("enable_llm"):
+          cmd.append("--llm")
+        if inputs.get("verbose"):
+          cmd.append("--verbose")
+        
+        with open(log_file, "w") as log:
+          process = subprocess.Popen(
+            cmd,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+          )
+        
+        pid_file.write_text(str(process.pid))
+        
+        import time
+        time.sleep(2)
+        
+        try:
+          os.kill(process.pid, 0)
+          result = {
+            "success": True,
+            "pid": process.pid,
+            "log_file": str(log_file),
+            "message": f"Daemon started (PID: {process.pid})"
+          }
+        except OSError:
+          result = {"success": False, "error": "Daemon failed to start. Check logs."}
+      
+      elif action == "stop":
+        cmd = [sys.executable, str(control_script), "stop"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        result = {"success": proc.returncode == 0, "output": proc.stdout}
+      
+      elif action == "status":
+        cmd = [sys.executable, str(control_script), "status"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        result = {"success": proc.returncode == 0, "output": proc.stdout}
+      
+      elif action == "pending":
+        cmd = [sys.executable, str(control_script), "pending", "-v"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        result = {"success": proc.returncode == 0, "output": proc.stdout}
+      
+      elif action == "approve":
+        msg_id = inputs["message_id"]
+        cmd = [sys.executable, str(control_script), "approve", msg_id]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        result = {"success": proc.returncode == 0, "output": proc.stdout}
+      
+      elif action == "approve_all":
+        cmd = [sys.executable, str(control_script), "approve-all"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        result = {"success": proc.returncode == 0, "output": proc.stdout}
+      
+      elif action == "reject":
+        msg_id = inputs["message_id"]
+        cmd = [sys.executable, str(control_script), "reject", msg_id]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        result = {"success": proc.returncode == 0, "output": proc.stdout}
+      
+      elif action == "history":
+        cmd = [sys.executable, str(control_script), "history", "-n", str(inputs.get("limit", 50))]
+        if inputs.get("filter_channel"):
+          cmd.extend(["-c", inputs["filter_channel"]])
+        if inputs.get("filter_user"):
+          cmd.extend(["-u", inputs["filter_user"]])
+        if inputs.get("filter_status"):
+          cmd.extend(["-s", inputs["filter_status"]])
+        cmd.append("-v")
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        result = {"success": proc.returncode == 0, "output": proc.stdout}
+      
+      elif action == "send":
+        channel = inputs["channel"]
+        message = inputs["message"]
+        cmd = [sys.executable, str(control_script), "send", channel, message]
+        if inputs.get("thread"):
+          cmd.extend(["-t", inputs["thread"]])
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        result = {"success": proc.returncode == 0, "output": proc.stdout}
+      
+      elif action == "reload":
+        cmd = [sys.executable, str(control_script), "reload"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        result = {"success": proc.returncode == 0, "output": proc.stdout}
+      
+      else:
+        result = {"success": False, "error": f"Unknown action: {action}"}
+
+outputs:
+  success:
+    description: Whether the action succeeded
+    value: "{{ steps.run_action.result.success }}"
+  output:
+    description: Command output
+    value: "{{ steps.run_action.result.output | default('') }}"
+  error:
+    description: Error message if failed
+    value: "{{ steps.run_action.result.error | default('') }}"
+  pid:
+    description: Daemon PID (for start action)
+    value: "{{ steps.run_action.result.pid | default('') }}"
+
