@@ -1,0 +1,25 @@
+# AI Workflow Dependencies
+# ========================
+
+# MCP Server
+mcp>=1.0.0
+fastmcp>=0.1.0
+
+# Configuration & Templating
+pyyaml>=6.0
+jinja2>=3.0.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# HTTP Client
+httpx>=0.25.0
+
+# Async Database
+aiosqlite>=0.19.0
+
+# Development (optional)
+# pytest>=8.0.0
+# pytest-asyncio>=0.23.0
+# black>=24.0.0
+# flake8>=7.0.0
+

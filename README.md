@@ -2127,6 +2127,52 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
+### Autonomous Daemon Mode
+
+For truly autonomous Slack response (outside Cursor), use the standalone daemon:
+
+```bash
+# Quick start (foreground)
+make slack-daemon
+
+# Dry-run mode (process but don't respond)
+make slack-daemon-dry
+
+# Background mode
+make slack-daemon-bg
+make slack-daemon-logs   # Watch logs
+make slack-daemon-stop   # Stop daemon
+
+# With LLM for intelligent responses
+make slack-daemon-llm
+```
+
+**Terminal Output:**
+```
+╔══════════════════════════════════════════════════════════════════╗
+║  🤖 AI Workflow - Autonomous Slack Agent                        ║
+║                                                                  ║
+║  Monitoring Slack channels for messages...                       ║
+║  Press Ctrl+C to stop                                            ║
+╚══════════════════════════════════════════════════════════════════╝
+
+✅ Authenticated as: david
+✅ State database connected
+✅ Watching 2 channels
+✅ Keywords: help, question, urgent
+
+[00:05:23] 📊 Polls: 63 | 📬 Seen: 5 | ✅ Processed: 3 | 💬 Responded: 3
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📩 New Message
+   Channel: #dev-help
+   From: sarah
+   Intent: jira_query
+   Text: Can someone check AAP-12345?
+   Response: ✅
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
 ### Security Considerations
 
 > ⚠️ **Warning:** This uses Slack's internal web API, not the official Bot API.
