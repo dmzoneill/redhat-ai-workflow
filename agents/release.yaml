@@ -2,22 +2,19 @@
 # Specifies which MCP tool modules this agent needs
 
 name: release
-description: Release coordination and deployment
+description: Release management and deployments
 persona: agents/release.md
 
 # Tool modules to load (from mcp-servers/aa-*)
+# Reduced to stay under 80 tool limit
 tools:
-  - konflux       # 40 tools - Builds, pipelines, snapshots
-  - quay          # 8 tools - Container registry
-  - bonfire       # 21 tools - Ephemeral testing
-  - appinterface  # 6 tools - SaaS config
-  - gitlab        # 35 tools - MRs for releases
-  - git           # 16 tools - Git operations
-  - jira          # 22 tools - Issue tracking
-  - workflow      # 26 tools - Skills, agents, memory
+  - konflux       # 40 tools - Builds, pipelines
+  - quay          # 8 tools - Container images
+  - appinterface  # 6 tools - GitOps config
+  - git           # 15 tools - App-interface changes
 
-# Total: ~169 tools
+# Total: ~69 tools (under 80 limit)
+# Note: Use tool_exec() for jira, gitlab when needed
 
 skills:
   - release_aa_backend_prod  # Production release workflow
-

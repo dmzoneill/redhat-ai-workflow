@@ -6,17 +6,14 @@ description: Coding, PRs, and code review
 persona: agents/developer.md
 
 # Tool modules to load (from mcp-servers/aa-*)
+# Reduced to stay under 80 tool limit
 tools:
-  - git           # 16 tools - Git operations
+  - git           # 15 tools - Git operations
   - gitlab        # 35 tools - MRs, CI/CD
-  - jira          # 22 tools - Issue tracking
-  - konflux       # 40 tools - Pipelines, builds
-  - bonfire       # 21 tools - Ephemeral testing
-  - quay          # 8 tools - Container images
-  - k8s           # 14 tools - Pod status
-  - workflow      # 26 tools - Skills, agents, memory
+  - jira          # 24 tools - Issue tracking
 
-# Total: ~182 tools
+# Total: ~74 tools (under 80 limit)
+# Note: Use tool_exec() for konflux, bonfire, quay, k8s when needed
 
 skills:
   - start_work
@@ -25,4 +22,3 @@ skills:
   - review_pr           # PR review workflow
   - test_mr_ephemeral   # Test in ephemeral
   - jira_hygiene        # Issue quality checks
-
