@@ -26,11 +26,11 @@ inputs:
     required: false
     description: "Jira issue key (e.g., AAP-61214) - will search for associated MR"
   
-  - name: skip_tests
+  - name: run_tests
     type: boolean
     required: false
     default: false
-    description: "Skip local test execution (static analysis only)"
+    description: "Checkout branch and run local tests (default: false, static analysis only)"
 
 # Paths and config
 constants:
@@ -236,7 +236,7 @@ steps:
   # Step 9: Checkout branch locally
   - name: checkout_branch
     description: "Checkout MR branch locally"
-    condition: "{{ not inputs.skip_tests }}"
+    condition: "{{ inputs.run_tests }}"
     compute: |
       import subprocess
       import re
@@ -276,7 +276,7 @@ steps:
   # Step 10: Check if docker-compose is running
   - name: check_docker
     description: "Verify docker-compose is running"
-    condition: "{{ not inputs.skip_tests }}"
+    condition: "{{ inputs.run_tests }}"
     compute: |
       import subprocess
       
@@ -306,7 +306,7 @@ steps:
   # Step 11: Run migrations and data setup
   - name: run_setup
     description: "Run make migrations and make data"
-    condition: "{{ not inputs.skip_tests }}"
+    condition: "{{ inputs.run_tests }}"
     compute: |
       import subprocess
       
@@ -339,7 +339,7 @@ steps:
   # Step 12: Run pytest in container
   - name: run_tests
     description: "Run pytest in FastAPI container"
-    condition: "{{ not inputs.skip_tests }}"
+    condition: "{{ inputs.run_tests }}"
     compute: |
       import subprocess
       import tempfile
@@ -491,7 +491,7 @@ pytest -vv --tb=short -q 2>&1 | tail -50
         lines.append("")
       
       # Test results
-      if not inputs.skip_tests:
+      if inputs.run_tests:
         lines.append("### 🧪 Tests")
         if test_result:
           if '✅' in str(test_result):
@@ -507,7 +507,7 @@ pytest -vv --tb=short -q 2>&1 | tail -50
         (format_issues and format_issues != ["Format OK"]) or
         ('Failed' in str(gitlab_pipeline)) or
         (code_issues and any('Security' in str(i) for i in code_issues)) or
-        (not inputs.skip_tests and test_result and '❌' in str(test_result))
+        (inputs.run_tests and test_result and '❌' in str(test_result))
       )
       
       if has_blockers:
@@ -527,7 +527,7 @@ pytest -vv --tb=short -q 2>&1 | tail -50
       # Check for blockers
       has_security_issues = code_issues and any('Security' in str(i) for i in code_issues)
       has_format_issues = format_issues and format_issues != ["Format OK"]
-      has_test_failures = not inputs.skip_tests and test_result and '❌' in str(test_result)
+      has_test_failures = inputs.run_tests and test_result and '❌' in str(test_result)
       has_pipeline_failures = 'Failed' in str(gitlab_pipeline) or 'failed' in str(konflux_pipelines).lower()
       
       # Determine action
@@ -573,7 +573,7 @@ pytest -vv --tb=short -q 2>&1 | tail -50
           lines.append(f"- {issue}")
         lines.append("")
       
-      if not inputs.skip_tests and test_result and '❌' in str(test_result):
+      if inputs.run_tests and test_result and '❌' in str(test_result):
         lines.append("### Tests")
         lines.append("- Local tests are failing. Please investigate.")
         lines.append("")
@@ -644,6 +644,20 @@ outputs:
       {% if jira_key != 'NOT_FOUND' %}
       📋 Jira issue {{ jira_key }} updated with review note.
       {% endif %}
+      
+      {% if not inputs.run_tests %}
+      ---
+      
+      ## 🧪 Want to Run Local Tests?
+      
+      This review was **static analysis only**. To also checkout the branch and run tests:
+      
+      ```
+      skill_run("review_pr", '{"mr_id": {{ mr_id }}, "run_tests": true}')
+      ```
+      
+      Or just say: "Also run the tests for this MR"
+      {% endif %}
   
   - name: context
     value:
@@ -652,5 +666,6 @@ outputs:
       action: "{{ review_action.get('action') }}"
       has_issues: "{{ code_issues | length > 0 }}"
       format_ok: "{{ format_issues == ['Format OK'] }}"
-      tests_passed: "{{ '✅' in str(test_result) if test_result else 'unknown' }}"
+      tests_ran: "{{ inputs.run_tests }}"
+      tests_passed: "{{ '✅' in str(test_result) if test_result else 'not_run' }}"
 

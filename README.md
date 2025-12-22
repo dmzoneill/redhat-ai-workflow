@@ -444,9 +444,11 @@ skill_run("review_pr", '{"mr_id": 123, "skip_tests": true}')
 |-------|----------|---------|-------------|
 | `mr_id` | No* | - | GitLab MR ID (e.g., 123) |
 | `issue_key` | No* | - | Jira issue key (e.g., AAP-61214) - finds associated MR |
-| `skip_tests` | No | `false` | Skip local tests |
+| `run_tests` | No | `false` | Checkout branch and run local tests |
 
 *One of `mr_id` or `issue_key` required. If issue_key provided, searches for the MR.
+
+**Default behavior:** Static analysis only (no checkout). Say "also run tests" to checkout and test locally.
 
 **Auto-Actions:**
 - ✅ **Approve** if no blocking issues found
