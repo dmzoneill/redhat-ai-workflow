@@ -10,3 +10,4 @@ This server provides event-based Slack monitoring with:
 from .tools import register_tools
 
 __all__ = ["register_tools"]
+

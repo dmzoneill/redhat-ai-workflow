@@ -234,12 +234,19 @@ graph TD
             REL_TOOLS[konflux, quay, appinterface, git]
             REL_SKILLS[release_aa_backend_prod]
         end
+        
+        subgraph SLACK["<b>💬 Slack</b>"]
+            SLACK_DESC[Autonomous responder]
+            SLACK_TOOLS[slack, jira, gitlab]
+            SLACK_SKILLS[slack_agent, start_work, review_pr]
+        end
     end
     
     style DEV fill:#3b82f6,stroke:#2563eb,color:#fff
     style OPS fill:#10b981,stroke:#059669,color:#fff
     style INC fill:#ef4444,stroke:#dc2626,color:#fff
     style REL fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style SLACK fill:#4a154b,stroke:#611f69,color:#fff
 ```
 
 ### Agent Comparison
@@ -250,6 +257,7 @@ graph TD
 | 🔧 **devops** | Infrastructure | 75 tools | Monitoring, deployments |
 | 🚨 **incident** | Production issues | 78 tools | Alert triage, debugging |
 | 📦 **release** | Shipping | 69 tools | Releases, promotions |
+| 💬 **slack** | Autonomous chat | 74 tools | Slack-based workflows |
 
 > **Note:** Each agent is limited to <80 tools to stay within Cursor's limits. For tools not in your agent, use `tool_exec()`:
 > ```python
@@ -264,6 +272,7 @@ graph TD
 | devops | k8s, prometheus, alertmanager, kibana, bonfire |
 | incident | k8s, prometheus, alertmanager, kibana, jira |
 | release | konflux, quay, appinterface, git |
+| slack | slack, jira, gitlab |
 
 ### Loading an Agent
 
@@ -334,6 +343,8 @@ flowchart LR
 | 🔍 [`investigate_alert`](#investigate_alert) | Quick alert triage (escalates to debug_prod) | devops, incident |
 | 🐛 [`debug_prod`](#debug_prod) | Debug production issues | devops, incident |
 | 📦 [`release_aa_backend_prod`](#release_aa_backend_prod) | Release to production | release |
+| 🤖 [`slack_agent`](#slack_agent) | Autonomous Slack responder with intent routing | slack |
+| 🔐 [`slack_agent_confirm`](#slack_agent_confirm) | Execute confirmed actions from Slack | slack |
 
 ---
 
@@ -1004,6 +1015,96 @@ flowchart TD
 ```
 app-interface/data/services/insights/tower-analytics/cicd/deploy-clowder.yml
 ```
+
+---
+
+### 🤖 slack_agent
+
+Autonomous Slack responder that processes incoming messages, detects intent, and routes to appropriate skills.
+
+```
+skill_run("slack_agent", '{}')                     # Process all pending
+skill_run("slack_agent", '{"channel": "C123"}')    # Process specific channel
+skill_run("slack_agent", '{"dry_run": true}')      # Analyze without responding
+```
+
+**Inputs:**
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `channel` | No | - | Filter to specific channel ID |
+| `limit` | No | `10` | Max messages to process |
+| `dry_run` | No | `false` | Analyze but don't respond |
+| `auto_mark` | No | `true` | Mark messages as processed |
+
+```mermaid
+flowchart TD
+    A[Get Pending Messages] --> B{Any Messages?}
+    B -->|No| C[Return: Idle]
+    B -->|Yes| D[For Each Message]
+    D --> E[Detect Intent]
+    E --> F{Intent Type}
+    F -->|Jira Query| G[jira_view_issue]
+    F -->|PR Status| H[gitlab_mr_view]
+    F -->|My PRs| I[check_my_prs]
+    F -->|Production| J[Offer debug_prod]
+    F -->|Start Work| K[Offer start_work]
+    F -->|Help| L[Show Commands]
+    F -->|General| M[Request Clarification]
+    G --> N[Format Response]
+    H --> N
+    I --> N
+    J --> N
+    K --> N
+    L --> N
+    M --> N
+    N --> O[Send to Slack]
+    O --> P[Mark Processed]
+    P --> Q[Next Message]
+    Q --> D
+```
+
+**Detected Intents:**
+| Intent | Trigger Examples | Action |
+|--------|------------------|--------|
+| `jira_query` | "AAP-12345", "issue 12345" | Show issue details |
+| `pr_status` | "!123", "MR 123" | Show MR status |
+| `check_my_prs` | "my MRs", "my PRs" | Run check_my_prs |
+| `prod_debug` | "prod down", "alert firing" | Offer debug_prod |
+| `start_work` | "start AAP-12345" | Offer start_work |
+| `standup` | "standup", "status update" | Run standup_summary |
+| `help` | "help", "how do I" | Show available commands |
+
+---
+
+### 🔐 slack_agent_confirm
+
+Executes confirmed actions from the slack_agent when user approves.
+
+```
+skill_run("slack_agent_confirm", '{"action": "start_work", "issue_key": "AAP-12345"}')
+skill_run("slack_agent_confirm", '{"action": "debug_prod", "namespace": "tower-analytics-prod"}')
+```
+
+**Inputs:**
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `action` | Yes | - | Action to execute |
+| `issue_key` | No | - | Jira issue key (for Jira actions) |
+| `mr_id` | No | - | MR ID (for MR actions) |
+| `namespace` | No | - | K8s namespace (for debug_prod) |
+| `channel_id` | No | - | Channel to respond in |
+| `thread_ts` | No | - | Thread for responses |
+
+**Supported Actions:**
+- `start_work` - Start working on issue
+- `close_issue` - Close completed issue
+- `review_pr` - Review an MR
+- `rebase_pr` - Rebase an MR
+- `sync_branch` - Sync branch with main
+- `create_mr` - Create new MR
+- `debug_prod` - Debug production namespace
+- `jira_hygiene` - Check issue quality
+- `standup_summary` - Generate standup
 
 ---
 
