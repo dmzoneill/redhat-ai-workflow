@@ -49,8 +49,8 @@ help:
 	@printf "  \033[32mmake slack-daemon-stop\033[0m  Stop background Slack daemon\n"
 	@printf "  \033[32mmake slack-daemon-logs\033[0m  Tail Slack daemon logs\n"
 	@printf "  \033[32mmake slack-daemon-dry\033[0m   Run in dry-run mode (no responses sent)\n"
-	@printf "  \033[32mmake slack-daemon-llm\033[0m   Run with LLM (Claude) integration\n"
-	@printf "  \033[32mmake slack-daemon-llm-verbose\033[0m  Run with LLM + verbose logging\n"
+	@printf "  \033[32mmake slack-daemon-llm\033[0m   Run daemon (Claude is always enabled)\n"
+	@printf "  \033[32mmake slack-daemon-llm-verbose\033[0m  Run daemon with verbose logging\n"
 	@printf "\n"
 	@printf "\033[1mSlack Control (D-Bus IPC):\033[0m\n"
 	@printf "  \033[32mmake slack-status\033[0m       Get daemon status and stats\n"
@@ -135,13 +135,15 @@ slack-daemon-dry: check-env
 	@printf "\033[36mStarting Slack daemon (dry-run mode)...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --dry-run --verbose
 
+# NOTE: --llm flag removed - Claude is now REQUIRED for operation
+# These targets now just run the daemon (which always uses Claude)
 slack-daemon-llm: check-env
-	@printf "\033[36mStarting Slack daemon with LLM...\033[0m\n"
-	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --llm
+	@printf "\033[36mStarting Slack daemon (Claude-powered)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py
 
 slack-daemon-llm-verbose: check-env
-	@printf "\033[36mStarting Slack daemon with LLM (verbose)...\033[0m\n"
-	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --llm --verbose
+	@printf "\033[36mStarting Slack daemon (Claude-powered, verbose)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --verbose
 
 slack-daemon-stop:
 	@# Try to kill by PID file first
