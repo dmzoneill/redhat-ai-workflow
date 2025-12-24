@@ -12,7 +12,10 @@ description: |
   - Optionally runs jira_hygiene first
   - Creates MR with proper description
   - Links to Jira and updates status
-version: "2.1"
+  
+  Uses MCP tools: git_status, git_fetch, git_log, git_push, gitlab_mr_list,
+                  gitlab_mr_create, jira_view_issue, jira_add_comment, jira_set_status
+version: "2.2"
 
 inputs:
   - name: issue_key
@@ -61,7 +64,6 @@ inputs:
     default: false
     description: "Auto-fix linting issues with black"
 
-# Note: constants are now resolved dynamically from config
 constants:
   jira_url: https://issues.redhat.com
 
@@ -97,7 +99,6 @@ steps:
       # Explicit repo path takes priority
       if inputs.repo and inputs.repo != "" and inputs.repo != ".":
           repo_path = inputs.repo
-          # Try to find matching config for GitLab project
           for name, cfg in repos.items():
               if cfg.get("path") == repo_path:
                   gitlab_project = cfg.get("gitlab")
@@ -122,11 +123,9 @@ steps:
                   matching.append({"name": name, "config": cfg})
 
           if len(matching) == 0:
-              # Fall back to cwd if we're in a git repo
               cwd = os.getcwd()
               if os.path.exists(os.path.join(cwd, ".git")):
                   repo_path = cwd
-                  # Try to match to config
                   for name, cfg in repos.items():
                       if cfg.get("path") == cwd:
                           gitlab_project = cfg.get("gitlab")
@@ -135,8 +134,7 @@ steps:
                           break
               else:
                   raise ValueError(
-                      f"No repository configured for {project_prefix} issues. "
-                      "Please specify 'repo' or 'repo_name'."
+                      f"No repository configured for {project_prefix} issues."
                   )
           elif len(matching) == 1:
               repo_config = matching[0]["config"]
@@ -145,193 +143,121 @@ steps:
               default_branch = repo_config.get("default_branch", "main")
           else:
               names = ", ".join(m["name"] for m in matching)
-              raise ValueError(
-                  f"Multiple repositories match {project_prefix}: {names}. "
-                  "Please specify 'repo_name'."
-              )
+              raise ValueError(f"Multiple repos match {project_prefix}: {names}")
 
       if not repo_path or not os.path.exists(repo_path):
           raise ValueError(f"Repository path not found: {repo_path}")
 
-      # Override default_branch if explicitly specified
       if inputs.target_branch:
           default_branch = inputs.target_branch
 
-      # Get Jira URL from config
       jira_url = config.get("jira", {}).get("url", "https://issues.redhat.com")
 
       result = {
           "path": repo_path,
           "gitlab_project": gitlab_project or "automation-analytics/automation-analytics-backend",
           "default_branch": default_branch,
-          "lint_command": repo_config.get("lint_command", "black --check . && flake8 ."),
           "jira_url": jira_url,
       }
     output: resolved_repo
+
   # ==================== PRE-FLIGHT CHECKS ====================
 
-  # Step 0: Validate git repository state
-  - name: validate_git_state
-    description: "Check for rebase/merge in progress"
+  # Step 1: Check git status using MCP tool
+  - name: check_git_status
+    description: "Check for uncommitted changes and git state"
+    tool: git_status
+    args:
+      repo: "{{ resolved_repo.path }}"
+    output: git_status_raw
+    on_error: continue
+
+  - name: validate_git_status
+    description: "Parse git status for issues"
     compute: |
-      import subprocess
-      import os
-
-      repo = resolved_repo["path"]
-
-      # Get git dir
-      result = subprocess.run(
-          ["git", "rev-parse", "--git-dir"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      if result.returncode != 0:
-          raise ValueError(f"Not a git repository: {repo}")
-
-      git_dir = result.stdout.strip()
-      if not git_dir.startswith("/"):
-          git_dir = os.path.join(repo, git_dir)
-
-      # Check for operations in progress
-      if os.path.exists(os.path.join(git_dir, "rebase-merge")):
-          raise ValueError(
-              "Rebase in progress. Run 'git rebase --continue' or '--abort'"
-          )
-      if os.path.exists(os.path.join(git_dir, "MERGE_HEAD")):
-          raise ValueError(
-              "Merge in progress. Run 'git merge --continue' or '--abort'"
-          )
-
-      result = "Git state OK"
-    output: git_state_check
-
-  # Step 1: Get current branch and validate
-  - name: get_current_branch
-    description: "Get current branch name"
-    compute: |
-      import subprocess
       import os
       import re
-
+      
       repo = resolved_repo["path"]
-
-      result = subprocess.run(
-          ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      if result.returncode != 0:
-          raise ValueError(f"Not a git repository: {repo}")
-
-      branch = result.stdout.strip()
-
-      # Check for detached HEAD
-      if branch == "HEAD":
-          raise ValueError(
-              "Detached HEAD state. Checkout a branch first: "
-              "'git checkout -b <branch-name>'"
-          )
-
-      # Validate not on main/master
+      status_output = str(git_status_raw) if git_status_raw else ""
+      
+      # Check for rebase/merge in progress
+      git_dir = os.path.join(repo, ".git")
+      if os.path.exists(os.path.join(git_dir, "rebase-merge")):
+          raise ValueError("Rebase in progress. Run 'git rebase --continue' or '--abort'")
+      if os.path.exists(os.path.join(git_dir, "MERGE_HEAD")):
+          raise ValueError("Merge in progress. Run 'git merge --continue' or '--abort'")
+      
+      # Check for uncommitted changes
+      if "Changes not staged" in status_output or "Changes to be committed" in status_output:
+          raise ValueError("Uncommitted changes detected. Please commit or stash before creating MR.")
+      
+      # Extract current branch
+      branch_match = re.search(r"On branch (\S+)", status_output)
+      branch = branch_match.group(1) if branch_match else None
+      
+      if not branch or branch == "HEAD":
+          raise ValueError("Detached HEAD state. Checkout a branch first.")
+      
       if branch in ["main", "master"]:
-          raise ValueError(
-              "Cannot create MR from main/master. "
-              "Create a feature branch first."
-          )
-
-      # Check if branch contains issue key
+          raise ValueError("Cannot create MR from main/master. Create a feature branch first.")
+      
       issue_key = inputs.issue_key.upper()
-      branch_has_key = issue_key in branch.upper()
-
+      
       result = {
           "name": branch,
-          "has_issue_key": branch_has_key,
+          "has_issue_key": issue_key in branch.upper(),
           "issue_key": issue_key,
       }
     output: current_branch
 
-  # Step 2: Check for uncommitted changes
-  - name: check_uncommitted
-    description: "Check for uncommitted changes"
-    compute: |
-      import subprocess
-      import os
+  # Step 2: Fetch latest using MCP tool
+  - name: fetch_origin
+    description: "Fetch latest from origin"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved_repo.path }}"
+      prune: true
+    output: fetch_result
+    on_error: continue
 
-      repo = resolved_repo["path"]
+  # Step 3: Validate commits using MCP tool
+  - name: get_commit_log
+    description: "Get commits ahead of target branch"
+    tool: git_log
+    args:
+      repo: "{{ resolved_repo.path }}"
+      limit: 20
+      oneline: true
+    output: commit_log_raw
+    on_error: continue
 
-      result = subprocess.run(
-          ["git", "status", "--porcelain"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      uncommitted = result.stdout.strip()
-      if uncommitted:
-          files = uncommitted.split("\n")
-          raise ValueError(
-              f"Uncommitted changes detected ({len(files)} files). "
-              "Please commit or stash before creating MR:\n"
-              + "\n".join(files[:5])
-          )
-
-      result = "Clean working tree"
-    output: uncommitted_check
-
-  # Step 3: Validate commit messages
   - name: validate_commits
     description: "Check commit messages follow AAP-XXXXX convention"
     compute: |
-      import subprocess
-      import os
       import re
-
-      repo = resolved_repo["path"]
-      target = resolved_repo["default_branch"]
+      
       issue_key = inputs.issue_key.upper()
-
-      # Get commits not in target branch
-      result = subprocess.run(
-          ["git", "log", f"origin/{target}..HEAD", "--oneline"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      if result.returncode != 0:
-          # Fetch and retry
-          subprocess.run(["git", "fetch", "origin"], cwd=repo, capture_output=True)
-          result = subprocess.run(
-              ["git", "log", f"origin/{target}..HEAD", "--oneline"],
-              cwd=repo,
-              capture_output=True,
-              text=True,
-          )
-
-      commits = result.stdout.strip().split("\n") if result.stdout.strip() else []
-
+      
+      commits = []
+      bad_commits = []
+      
+      if commit_log_raw:
+        for line in str(commit_log_raw).split('\n'):
+          if line.strip():
+            commits.append(line.strip())
+            if not re.search(r"AAP-\d+", line, re.IGNORECASE):
+              bad_commits.append(line)
+      
       if not commits:
           raise ValueError(
-              f"No commits found ahead of origin/{target}. "
-              "Make some commits first."
+              f"No commits found. Make some commits first."
           )
-
-      # Check each commit for issue key pattern
-      bad_commits = []
-      for commit in commits:
-          if not re.search(r"AAP-\d+", commit, re.IGNORECASE):
-              bad_commits.append(commit)
-
+      
       warnings = []
       if bad_commits:
-          warnings.append(
-              f"⚠️ {len(bad_commits)} commit(s) missing AAP-XXXXX prefix"
-          )
-
+          warnings.append(f"⚠️ {len(bad_commits)} commit(s) missing AAP-XXXXX prefix")
+      
       result = {
           "count": len(commits),
           "commits": commits[:10],
@@ -340,19 +266,15 @@ steps:
       }
     output: commit_validation
 
-  # Step 4: Check for merge conflicts with target
+  # Step 4: Check for merge conflicts
   - name: check_mergeable
     description: "Check if branch can merge cleanly"
     compute: |
       import subprocess
-      import os
-
+      
       repo = resolved_repo["path"]
       target = resolved_repo["default_branch"]
-
-      # Fetch latest
-      subprocess.run(["git", "fetch", "origin", target], cwd=repo, capture_output=True)
-
+      
       # Try merge --no-commit --no-ff to check for conflicts
       result = subprocess.run(
           ["git", "merge", "--no-commit", "--no-ff", f"origin/{target}"],
@@ -360,34 +282,27 @@ steps:
           capture_output=True,
           text=True,
       )
-
+      
       has_conflicts = result.returncode != 0
-      conflict_info = result.stderr if has_conflicts else ""
-
+      
       # Abort the merge attempt
       subprocess.run(["git", "merge", "--abort"], cwd=repo, capture_output=True)
-
+      
       if has_conflicts:
           result = {
               "mergeable": False,
-              "message": (
-                  f"Branch has conflicts with {target}. "
-                  "Run: skill_run(\"rebase_pr\", '{\"branch\": \""
-                  + current_branch["name"]
-                  + "\"}')"
-              ),
+              "message": f"Branch has conflicts with {target}. Rebase needed.",
           }
       else:
           result = {"mergeable": True, "message": "Branch can merge cleanly"}
     output: merge_check
 
-  # Step 4b: Check for existing MR for this branch
+  # Step 5: Check for existing MR using MCP tool
   - name: check_existing_mr
     description: "Check if MR already exists for this branch"
     tool: gitlab_mr_list
     args:
       project: "{{ resolved_repo.gitlab_project }}"
-      state: opened
     output: existing_mrs_raw
     on_error: continue
 
@@ -395,32 +310,23 @@ steps:
     description: "Parse MRs to find duplicate"
     compute: |
       import re
-
+      
       branch = current_branch["name"]
       existing_mrs_text = str(existing_mrs_raw) if existing_mrs_raw else ""
-
-      # Look for this branch in existing MRs
+      
       duplicate = None
       for line in existing_mrs_text.split("\n"):
           if branch.lower() in line.lower():
-              # Extract MR ID
               match = re.search(r"!(\d+)", line)
               if match:
-                  duplicate = {
-                      "iid": match.group(1),
-                      "line": line.strip()[:80],
-                  }
+                  duplicate = {"iid": match.group(1), "line": line.strip()[:80]}
                   break
-
+      
       if duplicate:
           result = {
               "exists": True,
               "mr_iid": duplicate["iid"],
-              "message": (
-                  f"MR !{duplicate['iid']} already exists for branch '{branch}'. "
-                  f"View it: gitlab_mr_view(project=\"{resolved_repo['gitlab_project']}\", "
-                  f"mr_id={duplicate['iid']})"
-              ),
+              "message": f"MR !{duplicate['iid']} already exists for branch '{branch}'.",
           }
       else:
           result = {"exists": False, "message": "No existing MR found"}
@@ -428,123 +334,75 @@ steps:
 
   # ==================== LINTING ====================
 
-  # Step 5a: Check if linting tools are available
   - name: check_lint_tools
     description: "Check if black and flake8 are installed"
     condition: "inputs.run_linting"
     compute: |
       import shutil
-
+      
       missing = []
       if not shutil.which("black"):
           missing.append("black")
       if not shutil.which("flake8"):
           missing.append("flake8")
-
-      if missing:
-          result = {
-              "available": False,
-              "missing": missing,
-              "message": f"Linting tools not installed: {missing}. Install with: pip install {' '.join(missing)}",
-          }
-      else:
-          result = {"available": True, "missing": [], "message": "OK"}
+      
+      result = {
+          "available": not missing,
+          "missing": missing,
+          "message": f"Missing: {missing}" if missing else "OK",
+      }
     output: lint_tools_check
 
-  # Step 5: Run black check
   - name: run_black
     description: "Run black formatter check"
     condition: "inputs.run_linting and (not lint_tools_check or lint_tools_check.get('available', True))"
     compute: |
       import subprocess
-      import os
-
+      
       repo = resolved_repo["path"]
-
+      
       if inputs.auto_fix_lint:
-          # Run black to fix
-          result = subprocess.run(
-              ["black", "."],
-              cwd=repo,
-              capture_output=True,
-              text=True,
-          )
-          if result.returncode == 0:
-              black_result = {"passed": True, "fixed": True, "message": "Black applied"}
-          else:
-              black_result = {
-                  "passed": False,
-                  "fixed": False,
-                  "message": result.stderr[:200],
-              }
+          result = subprocess.run(["black", "."], cwd=repo, capture_output=True, text=True)
+          black_result = {"passed": result.returncode == 0, "fixed": True, "message": "Black applied"}
       else:
-          # Just check
-          result = subprocess.run(
-              ["black", "--check", "."],
-              cwd=repo,
-              capture_output=True,
-              text=True,
-          )
+          result = subprocess.run(["black", "--check", "."], cwd=repo, capture_output=True, text=True)
           if result.returncode == 0:
               black_result = {"passed": True, "message": "Black check passed"}
           else:
-              # Count files that need formatting
-              lines = result.stdout.strip().split("\n")
-              files = [
-                  ln
-                  for ln in lines
-                  if ln.startswith("would reformat") or ln.startswith("Oh no!")
-              ]
-              black_result = {
-                  "passed": False,
-                  "message": f"{len(files)} file(s) need formatting. "
-                  "Run with auto_fix_lint=true or `black .`",
-              }
-
+              black_result = {"passed": False, "message": "Files need formatting. Run 'black .'"}
+      
       result = black_result
     output: black_result
     on_error: continue
 
-  # Step 6: Run flake8 check
   - name: run_flake8
     description: "Run flake8 linting"
     condition: "inputs.run_linting"
     compute: |
       import subprocess
-      import os
-
+      
       repo = resolved_repo["path"]
-
+      
       result = subprocess.run(
-          [
-              "flake8",
-              "--max-line-length=100",
-              "--ignore=E501,W503,E203",
-              "--exclude=.git,__pycache__,migrations,venv,.venv",
-              ".",
-          ],
+          ["flake8", "--max-line-length=100", "--ignore=E501,W503,E203",
+           "--exclude=.git,__pycache__,migrations,venv,.venv", "."],
           cwd=repo,
           capture_output=True,
           text=True,
       )
-
+      
       if result.returncode == 0:
           flake8_result = {"passed": True, "message": "Flake8 passed", "issues": []}
       else:
           issues = result.stdout.strip().split("\n")[:10]
-          flake8_result = {
-              "passed": False,
-              "message": f"{len(issues)} flake8 issue(s)",
-              "issues": issues,
-          }
-
+          flake8_result = {"passed": False, "message": f"{len(issues)} flake8 issue(s)", "issues": issues}
+      
       result = flake8_result
     output: flake8_result
     on_error: continue
 
   # ==================== JIRA INTEGRATION ====================
 
-  # Step 7: Get Jira issue details
   - name: get_issue
     description: "Fetch Jira issue details"
     tool: jira_view_issue
@@ -553,7 +411,6 @@ steps:
     output: issue
     on_error: continue
 
-  # Step 8: Run Jira hygiene check
   - name: jira_hygiene_check
     description: "Check Jira issue quality"
     condition: "inputs.check_jira and issue"
@@ -566,49 +423,26 @@ steps:
 
   # ==================== CREATE MR ====================
 
-  # Step 9: Push branch
   - name: push_branch
     description: "Push branch to origin"
-    compute: |
-      import subprocess
-      import os
-
-      repo = resolved_repo["path"]
-      branch = current_branch["name"]
-
-      result = subprocess.run(
-          ["git", "push", "-u", "origin", branch],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      if result.returncode != 0 and "already exists" not in result.stderr:
-          # Try force push if rejected
-          result = subprocess.run(
-              ["git", "push", "-u", "origin", branch, "--force-with-lease"],
-              cwd=repo,
-              capture_output=True,
-              text=True,
-          )
-
-      result = "Pushed to origin"
+    tool: git_push
+    args:
+      repo: "{{ resolved_repo.path }}"
+      branch: "{{ current_branch.name }}"
+      set_upstream: true
     output: push_result
+    on_error: continue
 
-  # Step 10: Build MR description
   - name: build_description
     description: "Build MR description with Jira link"
     compute: |
       import textwrap
-
+      
       jira_url = resolved_repo.get("jira_url", "https://issues.redhat.com")
       issue_key = inputs.issue_key.upper()
-
-      # Extract issue summary
       issue_text = str(issue) if issue else ""
       summary_match = issue_text[:100] if issue_text else "No description"
-
-      # Build description
+      
       description = textwrap.dedent(f"""
           ## Summary
           {summary_match}
@@ -629,11 +463,10 @@ steps:
           - [ ] Documentation updated if needed
           - [ ] No secrets or sensitive data
       """).strip()
-
+      
       result = description
     output: mr_description
 
-  # Step 11: Create the MR
   - name: create_mr
     description: "Create GitLab merge request"
     tool: gitlab_mr_create
@@ -646,7 +479,6 @@ steps:
       draft: "{{ inputs.draft }}"
     output: mr
 
-  # Step 12: Update Jira with MR link
   - name: update_jira
     description: "Add MR link to Jira issue"
     condition: "mr"
@@ -655,12 +487,10 @@ steps:
       issue_key: "{{ inputs.issue_key }}"
       comment: |
         MR created: {{ mr.web_url }}
-        
         Branch: {{ current_branch.name }}
         Status: {{ "Draft" if inputs.draft else "Ready for Review" }}
     on_error: continue
 
-  # Step 13: Update Jira status if not draft
   - name: update_status
     description: "Move Jira to In Review (if not draft)"
     condition: "not inputs.draft and mr"
@@ -670,7 +500,6 @@ steps:
       status: "In Review"
     on_error: continue
 
-  # Step 14: Emit MR created hook
   - name: emit_mr_created_hook
     description: "Notify team channel about new MR"
     condition: "mr and not inputs.draft"
@@ -682,20 +511,16 @@ steps:
       
       try:
           from scripts.skill_hooks import emit_event
-          
           asyncio.run(emit_event("mr_created", {
               "mr_id": str(mr.get('iid', '')),
               "issue_key": inputs.issue_key,
               "project": resolved_repo.get("gitlab_project", ""),
-              "author": "",  # self - no need to DM
           }))
           result = "hook sent"
       except Exception as e:
           result = f"hook skipped: {e}"
     output: mr_hook_result
     on_error: continue
-
-# ==================== OUTPUT ====================
 
 outputs:
   - name: summary
@@ -707,7 +532,6 @@ outputs:
       **URL:** {{ mr.web_url }}
       **Status:** {{ "Draft" if inputs.draft else "Ready for Review" }}
       **Branch:** `{{ current_branch.name }}` → `{{ resolved_repo.default_branch }}`
-      **Project:** {{ resolved_repo.gitlab_project }}
       {% endif %}
       
       ---
@@ -716,7 +540,6 @@ outputs:
       
       | Check | Status |
       |-------|--------|
-      | Uncommitted changes | ✅ Clean |
       | Commits | {{ commit_validation.count }} commit(s) |
       | Commit format | {{ "⚠️ " + commit_validation.warnings[0] if commit_validation.warnings else "✅ OK" }} |
       | Merge conflicts | {{ "❌ Has conflicts" if not merge_check.mergeable else "✅ Mergeable" }} |
@@ -724,30 +547,23 @@ outputs:
       | Black | {{ "✅ Passed" if black_result and black_result.passed else "⚠️ " + (black_result.message if black_result else "Skipped") }} |
       | Flake8 | {{ "✅ Passed" if flake8_result and flake8_result.passed else "⚠️ " + (flake8_result.message if flake8_result else "Skipped") }} |
       {% endif %}
-      {% if inputs.check_jira %}
-      | Jira hygiene | {{ "✅ Checked" if jira_check else "⚠️ Skipped" }} |
-      {% endif %}
       
       {% if not merge_check.mergeable %}
       ---
-      
       ### ⚠️ Action Required
-      
       {{ merge_check.message }}
       {% endif %}
       
       {% if mr %}
       ---
-      
       ### Next Steps
       {% if inputs.draft %}
       1. Complete your changes
       2. Push updates: `git push`
-      3. Mark as ready: `gitlab_mr_update(project="...", mr_id={{ mr.iid }}, draft=false)`
+      3. Mark as ready when done
       {% else %}
       1. Wait for pipeline to complete
       2. Request review from teammates
-      3. Address feedback: `skill_run("check_my_prs", '{}')`
       {% endif %}
       {% endif %}
 
@@ -759,4 +575,3 @@ outputs:
       repo: "{{ resolved_repo.path }}"
       gitlab_project: "{{ resolved_repo.gitlab_project }}"
       mergeable: "{{ merge_check.mergeable }}"
-      lint_passed: "{{ (black_result.passed if black_result else true) and (flake8_result.passed if flake8_result else true) }}"
