@@ -1,1 +1,11 @@
-{"mcpServers":{"semgrep":{"type":"streamable-http","url":"https://mcp.semgrep.ai/mcp"}}}
+{
+  "mcpServers": {
+    "aa-workflow": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ~/src/redhat-ai-workflow/mcp-servers/aa-common && source ~/bonfire_venv/bin/activate && python3 -m src.server"
+      ]
+    }
+  }
+}
