@@ -143,7 +143,7 @@ TOOL_TEST_PARAMS = {
     
     # Jira tools - read only
     "jira_view_issue": {"issue_key": "AAP-1"},  # Will fail but tests connectivity
-    "jira_search": {"jql": "project=AAP AND created >= -1d", "limit": 1},
+    "jira_search": {"jql": "project=AAP AND created >= -1d", "max_results": 3},
     
     # GitLab tools - read only
     "gitlab_mr_list": {"project": "automation-analytics/automation-analytics-backend", "limit": 1},
