@@ -10,9 +10,9 @@ tools:
   - git             # 15 tools - Git operations
   - gitlab          # 35 tools - MRs, CI/CD
   - jira            # 24 tools - Issue tracking
-  - google-calendar # 5 tools - Calendar & meetings
+  - google-calendar # 6 tools - Calendar & meetings
 
-# Total: ~79 tools (under 80 limit)
+# Total: ~80 tools (at limit)
 # For ephemeral deployment, use the devops agent which has bonfire, k8s, quay
 
 skills:

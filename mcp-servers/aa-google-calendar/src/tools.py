@@ -245,6 +245,168 @@ def find_free_slots(
     return free_slots
 
 
+def find_existing_meeting(
+    service,
+    search_terms: list[str],
+    attendee_email: str = "",
+    days_back: int = 30,
+    days_ahead: int = 30,
+) -> dict | None:
+    """
+    Search for an existing meeting matching the criteria.
+    
+    Args:
+        service: Google Calendar service
+        search_terms: List of terms to search for in event title (e.g., ["!1445", "MR 1445"])
+        attendee_email: Optional - also check if this attendee is invited
+        days_back: How many days in the past to search
+        days_ahead: How many days in the future to search
+    
+    Returns:
+        Matching event dict or None
+    """
+    tz = ZoneInfo(TIMEZONE)
+    now = datetime.now(tz)
+    
+    time_min = (now - timedelta(days=days_back)).isoformat()
+    time_max = (now + timedelta(days=days_ahead)).isoformat()
+    
+    try:
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=time_min,
+            timeMax=time_max,
+            maxResults=100,
+            singleEvents=True,
+            orderBy='startTime',
+        ).execute()
+        
+        events = events_result.get('items', [])
+        
+        for event in events:
+            summary = event.get('summary', '').lower()
+            
+            # Check if any search term is in the title
+            matches_term = any(term.lower() in summary for term in search_terms)
+            
+            if not matches_term:
+                continue
+            
+            # If attendee specified, check if they're invited
+            if attendee_email:
+                attendees = event.get('attendees', [])
+                attendee_emails = [a.get('email', '').lower() for a in attendees]
+                if attendee_email.lower() not in attendee_emails:
+                    continue
+            
+            # Found a matching meeting
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            try:
+                if 'T' in start:
+                    dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                    dt = dt.astimezone(tz)
+                    when = dt.strftime('%A %Y-%m-%d %H:%M')
+                else:
+                    when = start
+            except:
+                when = start
+            
+            return {
+                "exists": True,
+                "event_id": event.get('id'),
+                "title": event.get('summary'),
+                "when": when,
+                "link": event.get('htmlLink'),
+                "status": event.get('status'),
+            }
+        
+        return None
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def google_calendar_find_meeting(
+    mr_id: str = "",
+    jira_key: str = "",
+    attendee_email: str = "",
+    search_text: str = "",
+) -> str:
+    """
+    Check if a meeting already exists for a specific MR, Jira issue, or topic.
+    
+    Use this before scheduling to avoid duplicate meeting requests.
+    
+    Args:
+        mr_id: GitLab MR ID (e.g., "1445" or "!1445")
+        jira_key: Jira issue key (e.g., "AAP-60034")
+        attendee_email: Optional - also check if this person is invited
+        search_text: Custom search text for the meeting title
+    
+    Returns:
+        Meeting details if found, or confirmation none exists
+    """
+    service, error = get_calendar_service()
+    
+    if error:
+        return f"❌ {error}"
+    
+    if not service:
+        return "❌ Google Calendar service not available"
+    
+    # Build search terms
+    search_terms = []
+    
+    if mr_id:
+        mr_num = mr_id.replace("!", "").replace("MR", "").strip()
+        search_terms.extend([
+            f"!{mr_num}",
+            f"MR {mr_num}",
+            f"MR!{mr_num}",
+            f"MR-{mr_num}",
+        ])
+    
+    if jira_key:
+        search_terms.append(jira_key.upper())
+    
+    if search_text:
+        search_terms.append(search_text)
+    
+    if not search_terms:
+        return "❌ Please provide at least one of: mr_id, jira_key, or search_text"
+    
+    result = find_existing_meeting(service, search_terms, attendee_email)
+    
+    if result is None:
+        lines = [
+            f"✅ **No existing meeting found**",
+            "",
+            f"Search terms: {', '.join(search_terms)}",
+        ]
+        if attendee_email:
+            lines.append(f"Attendee: {attendee_email}")
+        lines.append("")
+        lines.append("You can schedule a new meeting.")
+        return '\n'.join(lines)
+    
+    if "error" in result:
+        return f"❌ Error searching calendar: {result['error']}"
+    
+    lines = [
+        f"📅 **Meeting Already Exists**",
+        "",
+        f"**Title:** {result['title']}",
+        f"**When:** {result['when']} Irish time",
+        f"**Status:** {result['status']}",
+        f"**Link:** {result['link']}",
+        "",
+        "⚠️ A meeting for this topic already exists. No need to create another.",
+    ]
+    
+    return '\n'.join(lines)
+
+
 @mcp.tool()
 async def google_calendar_check_mutual_availability(
     attendee_email: str,
@@ -379,14 +541,18 @@ async def google_calendar_schedule_meeting(
     duration_minutes: int = 30,
     description: str = "",
     auto_find_slot: bool = True,
+    skip_duplicate_check: bool = False,
 ) -> str:
     """
     Schedule a meeting with an attendee, enforcing Irish time constraints.
+    
+    AUTOMATICALLY checks if a meeting already exists for this topic before creating.
     
     CONSTRAINTS:
     - All times in Irish time (Europe/Dublin)
     - Meetings only between 15:00-19:00 Irish time
     - Checks attendee availability before scheduling
+    - Won't create duplicate meetings for the same topic
     
     Args:
         title: Meeting title (e.g., "MR !1445 Race Condition Discussion")
@@ -395,6 +561,7 @@ async def google_calendar_schedule_meeting(
         duration_minutes: Duration in minutes (default: 30)
         description: Meeting agenda/description
         auto_find_slot: If start_time not specified, find next available slot (default: True)
+        skip_duplicate_check: Skip the existing meeting check (default: False)
     
     Returns:
         Event details including Google Meet link
@@ -409,6 +576,43 @@ async def google_calendar_schedule_meeting(
     
     tz = ZoneInfo(TIMEZONE)
     now = datetime.now(tz)
+    
+    # Check for existing meeting before creating a new one
+    if not skip_duplicate_check:
+        import re
+        
+        # Extract MR ID or Jira key from title
+        search_terms = []
+        
+        # Look for MR patterns: !1445, MR 1445, MR-1445
+        mr_match = re.search(r'[!#]?(\d{3,5})', title)
+        if mr_match:
+            mr_num = mr_match.group(1)
+            search_terms.extend([f"!{mr_num}", f"MR {mr_num}", f"MR-{mr_num}"])
+        
+        # Look for Jira patterns: AAP-12345
+        jira_match = re.search(r'(AAP-\d+)', title, re.IGNORECASE)
+        if jira_match:
+            search_terms.append(jira_match.group(1).upper())
+        
+        # If we have search terms, check for existing meeting
+        if search_terms:
+            existing = find_existing_meeting(service, search_terms, attendee_email)
+            
+            if existing and "error" not in existing:
+                return (
+                    f"📅 **Meeting Already Scheduled**\n"
+                    f"\n"
+                    f"A meeting for this topic already exists:\n"
+                    f"\n"
+                    f"**Title:** {existing['title']}\n"
+                    f"**When:** {existing['when']} Irish time\n"
+                    f"**Link:** {existing['link']}\n"
+                    f"\n"
+                    f"⚠️ No new meeting created to avoid duplicate invites.\n"
+                    f"\n"
+                    f"If you really need a new meeting, use `skip_duplicate_check=True`."
+                )
     
     # If no start time, find next available slot
     if not start_time and auto_find_slot:
@@ -806,6 +1010,7 @@ def register_tools(server: FastMCP):
     server.add_tool(google_calendar_schedule_meeting)
     server.add_tool(google_calendar_quick_meeting)
     server.add_tool(google_calendar_check_mutual_availability)
+    server.add_tool(google_calendar_find_meeting)
     server.add_tool(google_calendar_list_events)
     server.add_tool(google_calendar_status)
 
