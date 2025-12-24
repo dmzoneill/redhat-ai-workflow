@@ -1041,6 +1041,16 @@ class SlackDaemon:
         print(f"✅ Keywords: {', '.join(config.watched_keywords) or 'none'}")
         if self_dm_channel:
             print(f"✅ Self-DM testing enabled: {self_dm_channel}")
+        
+        # Show alert channels
+        alert_channels = self.alert_detector.alert_channels
+        if alert_channels:
+            print(f"🚨 Alert channels: {len(alert_channels)} (auto-investigate enabled)")
+            for channel_id, info in alert_channels.items():
+                env = info.get("environment", "unknown")
+                ns = info.get("namespace", "unknown")
+                auto = "✓" if info.get("auto_investigate") else "✗"
+                print(f"   • {env}: {ns} [{auto}]")
 
         # Show user classification summary
         safe_count = len(self.user_classifier.safe_user_ids) + len(
