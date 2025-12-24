@@ -188,6 +188,15 @@ def create_mcp_server(
     except Exception as e:
         logger.warning(f"Could not register debug_tool: {e}")
     
+    # Initialize dynamic agent loader
+    try:
+        from .agent_loader import init_loader
+        loader = init_loader(server)
+        loader.loaded_modules = set(loaded_modules)
+        logger.info("Initialized dynamic agent loader")
+    except Exception as e:
+        logger.warning(f"Could not initialize agent loader: {e}")
+    
     logger.info(f"Server ready with tools from {len(loaded_modules)} modules: {loaded_modules}")
     return server
 
@@ -280,12 +289,14 @@ Examples:
     logger = setup_logging(web_mode=args.web)
     
     # Determine tools to load
+    dynamic_mode = False
+    
     if args.agent:
         # Load from agent config
         tools = load_agent_config(args.agent)
         if tools is None:
             logger.error(f"Agent config not found: {args.agent}")
-            logger.info("Available agents: devops, developer, incident, release")
+            logger.info("Available agents: devops, developer, incident, release, universal")
             sys.exit(1)
         server_name = args.name or f"aa-{args.agent}"
         estimated = sum(TOOL_MODULES.get(t, 0) for t in tools)
@@ -298,9 +309,11 @@ Examples:
         tools = [t.strip() for t in args.tools.split(",") if t.strip()]
         server_name = args.name or "aa-workflow"
     else:
-        logger.error("Specify --agent, --tools, or --all")
-        parser.print_help()
-        sys.exit(1)
+        # Default: start with workflow tools only (dynamic mode)
+        tools = ["workflow"]
+        server_name = args.name or "aa-workflow"
+        dynamic_mode = True
+        logger.info("Starting in dynamic mode - use agent_load() to switch agents")
     
     try:
         server = create_mcp_server(name=server_name, tools=tools)

@@ -1834,27 +1834,63 @@ def register_tools(server: "FastMCP") -> int:
         return [TextContent(type="text", text="\n".join(lines))]
     
     @server.tool()
-    async def agent_load(agent_name: str) -> list[TextContent]:
+    async def agent_load(agent_name: str, ctx=None) -> list[TextContent]:
         """
-        Load an agent's full context and persona.
+        Load an agent with its full toolset and persona.
         
-        This returns the complete agent definition including their role, goals,
-        available tools, workflows, and communication style. Use this context
-        to adopt the agent's persona for the current task.
+        This dynamically switches to the specified agent by:
+        1. Unloading current tools (except core tools)
+        2. Loading the agent's tool modules
+        3. Notifying Cursor of the tool change
+        4. Returning the agent's persona for adoption
         
         Args:
             agent_name: Agent to load (e.g., "devops", "developer", "incident", "release")
         
         Returns:
-            Full agent context for persona adoption.
+            Agent context with confirmation of tools loaded.
         """
+        # Try dynamic loading first
+        try:
+            import sys
+            # Add aa-common to path if needed
+            common_path = str(Path(__file__).parent.parent.parent / "aa-common")
+            if common_path not in sys.path:
+                sys.path.insert(0, common_path)
+            
+            from src.agent_loader import get_loader
+            
+            loader = get_loader()
+            if loader and ctx:
+                # Dynamic mode - switch tools
+                result = await loader.switch_agent(agent_name, ctx)
+                
+                if result["success"]:
+                    lines = [
+                        f"## 🔄 Agent Switched: {agent_name}",
+                        "",
+                        f"**Description:** {result['description']}",
+                        f"**Modules:** {', '.join(result['modules_loaded'])}",
+                        f"**Tools loaded:** {result['tool_count']}",
+                        "",
+                        "---",
+                        "",
+                        result["persona"],
+                    ]
+                    return [TextContent(type="text", text="\n".join(lines))]
+                else:
+                    return [TextContent(type="text", text=f"❌ {result['error']}\n\nAvailable: {', '.join(result.get('available', []))}")]
+        except Exception as e:
+            logger.warning(f"Dynamic loading not available: {e}")
+        
+        # Fallback: just load persona (static mode)
         agent_file = AGENTS_DIR / f"{agent_name}.md"
         if not agent_file.exists():
             return [TextContent(type="text", text=f"❌ Agent not found: {agent_name}\n\nUse agent_list() to see available agents.")]
         
         try:
             content = agent_file.read_text()
-            return [TextContent(type="text", text=f"## Loading Agent: {agent_name}\n\n---\n\n{content}")]
+            return [TextContent(type="text", text=f"## Loading Agent: {agent_name}\n\n*(Static mode - tools unchanged)*\n\n---\n\n{content}")]
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error loading agent: {e}")]
 
