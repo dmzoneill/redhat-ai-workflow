@@ -11,10 +11,8 @@ description: |
   - Auto-resolves simple conflicts
   - Reports status
   
-  If 'repo' is not provided, can be resolved from 'issue_key' or 'repo_name' via config.
-  
-  Use rebase_pr for MRs with merge commits that need cleanup.
-version: "1.1"
+  Uses MCP tools: git_status, git_fetch, git_stash, git_push
+version: "1.2"
 
 inputs:
   - name: repo
@@ -64,7 +62,6 @@ steps:
       repo_path = None
       default_branch = "main"
 
-      # Load config
       config_paths = [
           Path.cwd() / "config.json",
           Path.home() / "src/redhat-ai-workflow/config.json",
@@ -78,19 +75,16 @@ steps:
 
       repos = config.get("repositories", {})
 
-      # Explicit repo path
       if inputs.repo and inputs.repo != "" and inputs.repo != ".":
           repo_path = inputs.repo
           for name, cfg in repos.items():
               if cfg.get("path") == repo_path:
                   default_branch = cfg.get("default_branch", "main")
                   break
-      # Repo name from config
       elif inputs.repo_name and inputs.repo_name in repos:
           cfg = repos[inputs.repo_name]
           repo_path = cfg.get("path")
           default_branch = cfg.get("default_branch", "main")
-      # Resolve from issue key
       elif inputs.issue_key:
           project_prefix = inputs.issue_key.split("-")[0].upper()
           for name, cfg in repos.items():
@@ -98,7 +92,6 @@ steps:
                   repo_path = cfg.get("path")
                   default_branch = cfg.get("default_branch", "main")
                   break
-      # Fall back to cwd
       else:
           cwd = os.getcwd()
           if os.path.exists(os.path.join(cwd, ".git")):
@@ -109,162 +102,118 @@ steps:
                       break
 
       if not repo_path:
-          raise ValueError("Repository not specified. Provide 'repo', 'repo_name', or 'issue_key'.")
+          raise ValueError("Repository not specified.")
 
-      # Override default_branch if explicitly specified
       if inputs.base_branch:
           default_branch = inputs.base_branch
 
       result = {"path": repo_path, "default_branch": default_branch}
     output: resolved_repo
 
-  # ==================== PRE-FLIGHT ====================
+  # ==================== PRE-FLIGHT (using MCP tools) ====================
 
-  - name: get_current_branch
-    description: "Get current branch name"
+  - name: check_git_status
+    description: "Get current branch and check for uncommitted changes"
+    tool: git_status
+    args:
+      repo: "{{ resolved_repo.path }}"
+    output: git_status_raw
+    on_error: continue
+
+  - name: parse_git_status
+    description: "Parse git status output"
     compute: |
-      import subprocess
-      import os
-
-      repo = resolved_repo["path"]
-
-      result = subprocess.run(
-          ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      if result.returncode != 0:
-          raise ValueError(f"Not a git repository: {repo}")
-
-      branch = result.stdout.strip()
-
+      import re
+      
+      status_output = str(git_status_raw) if git_status_raw else ""
+      
+      # Extract current branch
+      branch_match = re.search(r"On branch (\S+)", status_output)
+      branch = branch_match.group(1) if branch_match else None
+      
+      if not branch:
+          raise ValueError("Could not determine current branch")
+      
       if branch in ["main", "master"]:
-          raise ValueError(
-              f"Already on {branch}. "
-              "Switch to a feature branch first."
-          )
+          raise ValueError(f"Already on {branch}. Switch to a feature branch first.")
+      
+      # Check for uncommitted changes
+      has_changes = "Changes not staged" in status_output or "Changes to be committed" in status_output
+      
+      result = {"branch": branch, "has_changes": has_changes}
+    output: branch_status
 
-      result = branch
-    output: current_branch
-
-  - name: check_uncommitted
-    description: "Check for uncommitted changes"
-    compute: |
-      import subprocess
-      import os
-
-      repo = resolved_repo["path"]
-
-      result = subprocess.run(
-          ["git", "status", "--porcelain"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      has_changes = bool(result.stdout.strip())
-      change_count = len(result.stdout.strip().split("\n")) if has_changes else 0
-
-      result = {"has_changes": has_changes, "count": change_count}
-    output: uncommitted
-
-  # ==================== STASH IF NEEDED ====================
+  # ==================== STASH IF NEEDED (using MCP tool) ====================
 
   - name: stash_changes
     description: "Stash uncommitted changes"
-    condition: "uncommitted.has_changes and inputs.stash_changes"
-    compute: |
-      import subprocess
-      import os
-
-      repo = resolved_repo["path"]
-
-      result = subprocess.run(
-          ["git", "stash", "push", "-m", f"sync_branch: auto-stash before rebase"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      if result.returncode != 0:
-          raise ValueError(f"Failed to stash: {result.stderr}")
-
-      result = "Stashed changes"
+    condition: "branch_status.has_changes and inputs.stash_changes"
+    tool: git_stash
+    args:
+      repo: "{{ resolved_repo.path }}"
+      action: "push"
+      message: "sync_branch: auto-stash before rebase"
     output: stash_result
+    on_error: continue
 
-  # ==================== FETCH AND REBASE ====================
+  # ==================== FETCH (using MCP tool) ====================
 
   - name: fetch_base
     description: "Fetch latest from remote"
-    compute: |
-      import subprocess
-      import os
-
-      repo = resolved_repo["path"]
-      base = resolved_repo["default_branch"]
-
-      result = subprocess.run(
-          ["git", "fetch", "origin", base],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      if result.returncode != 0:
-          raise ValueError(f"Failed to fetch: {result.stderr}")
-
-      result = f"Fetched origin/{base}"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved_repo.path }}"
+      prune: true
     output: fetch_result
+    on_error: continue
+
+  # ==================== CHECK COMMITS ====================
 
   - name: get_commits_behind
     description: "Check how many commits behind"
     compute: |
       import subprocess
-      import os
-
+      
       repo = resolved_repo["path"]
       base = resolved_repo["default_branch"]
-
+      
       result = subprocess.run(
           ["git", "rev-list", "--count", f"HEAD..origin/{base}"],
           cwd=repo,
           capture_output=True,
           text=True,
       )
-
       behind = int(result.stdout.strip()) if result.returncode == 0 else 0
-
+      
       result = subprocess.run(
           ["git", "rev-list", "--count", f"origin/{base}..HEAD"],
           cwd=repo,
           capture_output=True,
           text=True,
       )
-
       ahead = int(result.stdout.strip()) if result.returncode == 0 else 0
-
+      
       result = {"behind": behind, "ahead": ahead}
     output: commit_status
+
+  # ==================== REBASE ====================
 
   - name: rebase
     description: "Rebase onto base branch"
     condition: "commit_status.behind > 0"
     compute: |
       import subprocess
-      import os
-
+      
       repo = resolved_repo["path"]
       base = resolved_repo["default_branch"]
-
+      
       result = subprocess.run(
           ["git", "rebase", f"origin/{base}"],
           cwd=repo,
           capture_output=True,
           text=True,
       )
-
+      
       if result.returncode == 0:
           rebase_result = {
               "success": True,
@@ -272,19 +221,18 @@ steps:
               "message": f"Rebased onto origin/{base}",
           }
       else:
-          # Check for conflicts
           status = subprocess.run(
               ["git", "status", "--porcelain"],
               cwd=repo,
               capture_output=True,
               text=True,
           )
-
+          
           conflict_files = [
               ln[3:] for ln in status.stdout.split("\n")
               if ln.startswith("UU") or ln.startswith("AA")
           ]
-
+          
           if conflict_files:
               rebase_result = {
                   "success": False,
@@ -298,7 +246,7 @@ steps:
                   "conflicts": False,
                   "message": result.stderr[:200],
               }
-
+      
       result = rebase_result
     output: rebase_result
 
@@ -313,63 +261,35 @@ steps:
       }
     output: rebase_result
 
-  # ==================== POP STASH ====================
+  # ==================== POP STASH (using MCP tool) ====================
 
   - name: pop_stash
     description: "Restore stashed changes"
     condition: "stash_result and rebase_result.success"
-    compute: |
-      import subprocess
-      import os
-
-      repo = resolved_repo["path"]
-
-      result = subprocess.run(
-          ["git", "stash", "pop"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      if result.returncode != 0:
-          result = f"⚠️ Could not pop stash: {result.stderr[:100]}"
-      else:
-          result = "Restored stashed changes"
+    tool: git_stash
+    args:
+      repo: "{{ resolved_repo.path }}"
+      action: "pop"
     output: pop_result
     on_error: continue
 
-  # ==================== FORCE PUSH ====================
+  # ==================== FORCE PUSH (using MCP tool) ====================
 
   - name: do_force_push
     description: "Force push rebased branch"
     condition: "rebase_result.success and inputs.force_push and commit_status.behind > 0"
-    compute: |
-      import subprocess
-      import os
-
-      repo = resolved_repo["path"]
-      branch = current_branch
-
-      result = subprocess.run(
-          ["git", "push", "--force-with-lease", "origin", branch],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      if result.returncode != 0:
-          result = f"⚠️ Push failed: {result.stderr[:100]}"
-      else:
-          result = f"Force pushed {branch}"
+    tool: git_push
+    args:
+      repo: "{{ resolved_repo.path }}"
+      branch: "{{ branch_status.branch }}"
+      force: true
     output: push_result
     on_error: continue
-
-# ==================== OUTPUT ====================
 
 outputs:
   - name: summary
     value: |
-      ## 🔄 Sync Branch: `{{ current_branch }}`
+      ## 🔄 Sync Branch: `{{ branch_status.branch }}`
       
       **Repo:** {{ resolved_repo.path }}
       **Base:** `{{ resolved_repo.default_branch }}`
@@ -380,18 +300,17 @@ outputs:
       {% elif rebase_result.success %}
       ✅ Successfully rebased onto `{{ resolved_repo.default_branch }}`
       {% if stash_result %}
-      - {{ stash_result }}
+      - Stashed changes
       - {{ pop_result if pop_result else "Changes restored" }}
       {% endif %}
       {% if push_result %}
-      - {{ push_result }}
+      - Pushed to origin
       {% else %}
       
       Ready to push:
       ```bash
-      git push --force-with-lease origin {{ current_branch }}
+      git push --force-with-lease origin {{ branch_status.branch }}
       ```
-      Or: `skill_run("sync_branch", '{"force_push": true}')`
       {% endif %}
       {% else %}
       
@@ -410,8 +329,6 @@ outputs:
       4. `git push --force-with-lease`
       
       **To abort:** `git rebase --abort`
-      
-      For auto-resolution, try: `skill_run("rebase_pr", '{"branch": "{{ current_branch }}"}')`
       {% else %}
       ❌ Rebase failed: {{ rebase_result.message }}
       {% endif %}
@@ -419,12 +336,10 @@ outputs:
 
   - name: context
     value:
-      branch: "{{ current_branch }}"
+      branch: "{{ branch_status.branch }}"
       repo: "{{ resolved_repo.path }}"
       base_branch: "{{ resolved_repo.default_branch }}"
       success: "{{ rebase_result.success }}"
       behind: "{{ commit_status.behind }}"
       ahead: "{{ commit_status.ahead }}"
       pushed: "{{ push_result is defined }}"
-
-

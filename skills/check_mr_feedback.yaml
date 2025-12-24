@@ -13,7 +13,9 @@ description: |
   - Approval status
   
   Optionally creates Google Meet invitations when meetings are requested.
-version: "1.0"
+  
+  Uses MCP tools: gitlab_mr_list, gitlab_mr_comments
+version: "1.1"
 
 inputs:
   - name: project
@@ -34,31 +36,31 @@ inputs:
     description: "Specific MR IDs to check (optional - defaults to all open MRs)"
 
 steps:
-  # Step 1: Get list of user's open MRs
+  # Step 1: Get list of user's open MRs using MCP tool
   - name: get_my_mrs
     description: "Fetch all open MRs authored by the current user"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ inputs.project }}"
+      author: "@me"
+    output: open_mrs_raw
+    on_error: continue
+
+  - name: parse_open_mrs
+    description: "Parse MR list output"
     compute: |
-      import subprocess
       import re
       
-      project = inputs.get('project', 'automation-analytics/automation-analytics-backend')
-      
-      # Get MRs from glab
-      result = subprocess.run(
-        ["glab", "mr", "list", "--author=@me", "-R", project],
-        capture_output=True,
-        text=True
-      )
-      
       mrs = []
-      for line in result.stdout.split('\n'):
-        # Parse: !1452  automation-analytics/automation-analytics-backend!1452  AAP-58394 - feat(clowder)...
-        match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
-        if match:
-          mrs.append({
-            "id": int(match.group(1)),
-            "title": match.group(2).strip()
-          })
+      if open_mrs_raw:
+        for line in str(open_mrs_raw).split('\n'):
+          # Parse: !1452  automation-analytics/automation-analytics-backend!1452  AAP-58394 - feat(clowder)...
+          match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
+          if match:
+            mrs.append({
+              "id": int(match.group(1)),
+              "title": match.group(2).strip()
+            })
       
       # Filter to specific MRs if provided
       if inputs.get('mr_ids'):
@@ -68,7 +70,18 @@ steps:
       result = mrs
     output: open_mrs
 
-  # Step 2: Check each MR for comments
+  # Step 2: Get comments for each MR using MCP tool
+  - name: fetch_comments
+    description: "Fetch comments for each open MR"
+    compute: |
+      # This step prepares MR IDs for gitlab_mr_comments tool calls
+      # The actual tool calls happen in the next step
+      result = [{"mr_id": mr["id"], "title": mr["title"]} for mr in open_mrs]
+    output: mrs_to_check
+    on_error: continue
+
+  # Step 3: Analyze comments (using subprocess for now as gitlab_mr_comments 
+  # returns raw text that needs per-MR iteration)
   - name: check_comments
     description: "Fetch and analyze comments for each MR"
     compute: |
@@ -76,20 +89,12 @@ steps:
       import re
       from datetime import datetime
       
-      project = inputs.get('project', 'automation-analytics/automation-analytics-backend')
+      # Import shared parser utilities
+      import sys
+      sys.path.insert(0, '/home/daoneill/src/redhat-ai-workflow/scripts')
+      from common.parsers import BOT_PATTERNS, is_bot_comment
       
-      # Bot patterns to filter out
-      bot_patterns = [
-        r'group_\d+_bot',
-        r'konflux',
-        r'Starting Pipelinerun',
-        r'stone-prod',
-        r'tkn pr logs',
-        r'Integration test for component',
-        r'aap-aa-on-pull-request',
-        r'^/retest',
-        r'^/approve',
-      ]
+      project = inputs.get('project', 'automation-analytics/automation-analytics-backend')
       
       # Meeting keywords
       meeting_keywords = [
@@ -137,19 +142,16 @@ steps:
           else:
             comment_text = ""
           
-          # Skip bot comments
-          is_bot = any(re.search(pattern, author + ' ' + comment_text, re.IGNORECASE) for pattern in bot_patterns)
-          
-          if not is_bot and author.lower() != 'daoneill':  # Skip own comments
+          # Skip bot comments using shared utility
+          if not is_bot_comment(comment_text, author) and author.lower() != 'daoneill':
             # Check for meeting request
             is_meeting_request = any(kw in comment_text.lower() for kw in meeting_keywords)
             
             # Check for feedback requiring response
             needs_response = any(kw in comment_text.lower() for kw in feedback_keywords)
             
-            # Extract email if available (for meeting invite)
-            email_match = re.search(r'@(\w+)', author)
-            author_email = f"{author}@redhat.com" if email_match else None
+            # Extract email
+            author_email = f"{author}@redhat.com"
             
             human_comments.append({
               "author": author,
@@ -174,17 +176,12 @@ steps:
       result = feedback_results
     output: feedback_analysis
 
-  # Step 3: Check for existing meetings to avoid duplicates
+  # Step 4: Check for existing meetings to avoid duplicates
   - name: check_existing_meetings
     description: "Check if meetings already exist for meeting requests"
     condition: "{{ feedback_analysis }}"
     compute: |
-      import subprocess
-      import json
-      
-      # For each MR with meeting requests, check if a meeting already exists
-      # This uses glab to search calendar (or could use the google_calendar tool)
-      
+      # For each MR with meeting requests, mark for calendar check
       for mr_feedback in feedback_analysis:
         mr_id = mr_feedback['mr_id']
         
@@ -194,14 +191,13 @@ steps:
           meeting_req['already_scheduled'] = False
           meeting_req['existing_meeting'] = None
         
-        # Note: Full calendar check requires google_calendar_find_meeting tool
-        # For now, we'll flag for the format_summary step to remind about checking
+        # Flag for the format_summary step to remind about checking
         mr_feedback['needs_calendar_check'] = len(mr_feedback.get('meeting_requests', [])) > 0
       
       result = feedback_analysis
     output: feedback_with_calendar_check
 
-  # Step 4: Create meeting invites if requested
+  # Step 5: Create meeting invites if requested
   - name: create_meeting_invites
     description: "Create Google Meet invitations for meeting requests"
     condition: "{{ inputs.create_meetings and feedback_with_calendar_check }}"
@@ -264,7 +260,7 @@ steps:
     output: meeting_results
     on_error: continue
 
-  # Step 5: Format summary
+  # Step 6: Format summary
   - name: format_summary
     description: "Create human-readable summary"
     compute: |
@@ -366,4 +362,3 @@ outputs:
       meeting_requests: "{{ (feedback_with_calendar_check or feedback_analysis) | sum(attribute='meeting_requests') | list | length if (feedback_with_calendar_check or feedback_analysis) else 0 }}"
       needs_response: "{{ feedback_analysis | sum(attribute='needs_response') | list | length if feedback_analysis else 0 }}"
       details: "{{ feedback_analysis }}"
-
