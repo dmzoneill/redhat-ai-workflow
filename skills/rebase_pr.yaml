@@ -156,11 +156,20 @@ steps:
     output: mr_details
     on_error: continue
 
+  - name: list_branches
+    description: "List all branches for issue key lookup"
+    condition: "inputs.get('issue_key') and not inputs.get('branch')"
+    tool: git_branch_list
+    args:
+      repo: "{{ resolved_repo.path }}"
+      all_branches: true
+    output: branches_raw
+    on_error: continue
+
   - name: extract_branch
     description: "Extract branch name from MR or issue key"
     compute: |
       import re
-      import subprocess
       
       branch = inputs.get('branch')
       
@@ -171,17 +180,14 @@ steps:
           branch = match.group(1)
       
       if not branch and inputs.get('issue_key'):
-        # Find branch by issue key
+        # Find branch by issue key - use branches_raw from earlier step
         issue_key = inputs.issue_key.upper()
-        result = subprocess.run(
-          ['git', 'branch', '-a', '--list', f'*{issue_key}*'],
-          capture_output=True, text=True,
-          cwd=resolved_repo["path"]
-        )
-        branches = [b.strip().replace('* ', '').replace('remotes/origin/', '') 
-                   for b in result.stdout.strip().split('\n') if b.strip()]
-        if branches:
-          branch = branches[0]
+        if branches_raw:
+          all_branches = [b.strip().replace('* ', '').replace('remotes/origin/', '') 
+                         for b in str(branches_raw).split('\n') if b.strip()]
+          matching = [b for b in all_branches if issue_key in b.upper()]
+          if matching:
+            branch = matching[0]
       
       if not branch:
         raise ValueError("Could not determine branch name. Please provide 'branch' input directly.")
@@ -193,20 +199,12 @@ steps:
   
   - name: fetch_all
     description: "Fetch latest from all remotes"
-    compute: |
-      import subprocess
-      
-      result = subprocess.run(
-        ['git', 'fetch', '--all', '--prune'],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"]
-      )
-      
-      if result.returncode != 0:
-        raise ValueError(f"Failed to fetch: {result.stderr}")
-      
-      result = "Fetched all remotes"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved_repo.path }}"
+      prune: true
     output: fetch_result
+    on_error: continue
 
   - name: check_merge_commits
     description: "Check if branch has merge commits"
@@ -241,72 +239,71 @@ steps:
       }
     output: merge_check
 
-  # ==================== CHECKOUT AND PREPARE ====================
+  # ==================== CHECKOUT AND PREPARE (using MCP tools) ====================
   
+  - name: check_status
+    description: "Check for uncommitted changes"
+    tool: git_status
+    args:
+      repo: "{{ resolved_repo.path }}"
+    output: git_status_raw
+    on_error: continue
+
   - name: stash_changes
     description: "Stash any local changes"
-    compute: |
-      import subprocess
-      
-      # Check for uncommitted changes
-      status = subprocess.run(
-        ['git', 'status', '--porcelain'],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"]
-      )
-      
-      if status.stdout.strip():
-        # Stash changes
-        stash = subprocess.run(
-          ['git', 'stash', 'push', '-m', 'rebase_pr: auto-stash before rebase'],
-          capture_output=True, text=True,
-          cwd=resolved_repo["path"]
-        )
-        result = "Stashed local changes"
-      else:
-        result = "No changes to stash"
+    condition: "git_status_raw and ('Changes not staged' in str(git_status_raw) or 'Changes to be committed' in str(git_status_raw))"
+    tool: git_stash
+    args:
+      repo: "{{ resolved_repo.path }}"
+      action: "push"
+      message: "rebase_pr: auto-stash before rebase"
     output: stash_result
+    on_error: continue
 
   - name: checkout_branch
     description: "Checkout the target branch"
+    tool: git_checkout
+    args:
+      repo: "{{ resolved_repo.path }}"
+      target: "{{ target_branch }}"
+    output: checkout_result
+    on_error: continue
+
+  - name: checkout_fallback
+    description: "Fallback: checkout from remote if local failed"
+    condition: "checkout_result and 'error' in str(checkout_result).lower()"
     compute: |
       import subprocess
       
       branch = target_branch
-      
-      # Try to checkout
       result = subprocess.run(
-        ['git', 'checkout', branch],
+        ['git', 'checkout', '-B', branch, f'origin/{branch}'],
         capture_output=True, text=True,
         cwd=resolved_repo["path"]
       )
-      
       if result.returncode != 0:
-        # Try to checkout from remote
-        result = subprocess.run(
-          ['git', 'checkout', '-B', branch, f'origin/{branch}'],
-          capture_output=True, text=True,
-          cwd=resolved_repo["path"]
-        )
-        if result.returncode != 0:
-          raise ValueError(f"Failed to checkout {branch}: {result.stderr}")
-      
-      result = f"Checked out: {branch}"
-    output: checkout_result
+        raise ValueError(f"Failed to checkout {branch}: {result.stderr}")
+      result = f"Checked out from remote: {branch}"
+    output: checkout_fallback_result
+    on_error: continue
 
   - name: pull_latest
     description: "Pull latest from remote"
+    tool: git_pull
+    args:
+      repo: "{{ resolved_repo.path }}"
+    output: pull_result_raw
+    on_error: continue
+
+  - name: sync_with_remote
+    description: "Ensure branch is synced with remote"
     compute: |
       import subprocess
       
-      result = subprocess.run(
-        ['git', 'pull', '--ff-only', 'origin', target_branch],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"]
-      )
+      # If pull failed, try reset to remote
+      pull_ok = pull_result_raw and 'error' not in str(pull_result_raw).lower()
       
-      # If fast-forward fails, reset to remote
-      if result.returncode != 0:
+      if not pull_ok:
         result = subprocess.run(
           ['git', 'reset', '--hard', f'origin/{target_branch}'],
           capture_output=True, text=True,
@@ -315,6 +312,7 @@ steps:
       
       result = "Branch synced with remote"
     output: pull_result
+    on_error: continue
 
   # ==================== PERFORM REBASE ====================
   
