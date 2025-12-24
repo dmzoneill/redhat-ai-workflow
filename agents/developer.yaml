@@ -16,6 +16,7 @@ tools:
 # For ephemeral deployment, use the devops agent which has bonfire, k8s, quay
 
 skills:
+  - coffee              # ☕ Morning briefing - email, PRs, Jira, calendar
   - start_work
   - create_mr           # Create MR with validation, linting, conflict detection
   - close_issue         # Close issue with commit summary
