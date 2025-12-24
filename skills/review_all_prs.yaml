@@ -117,16 +117,23 @@ steps:
       import getpass
       import os
       
-      # Try multiple methods to get username
-      username = os.getenv('USER') or os.getenv('USERNAME') or getpass.getuser()
+      # Get username from config or fallback to system
+      from pathlib import Path
+      import json
       
-      # Common username mappings (system username -> GitLab username)
-      # Add your mapping here if they differ
-      username_map = {
-        'daoneill': 'daoneill',  # Add GitLab username if different
-      }
+      config_paths = [Path.cwd() / "config.json", Path.home() / "src/redhat-ai-workflow/config.json"]
+      cfg = {}
+      for p in config_paths:
+        if p.exists():
+          with open(p) as f:
+            cfg = json.load(f)
+          break
       
-      gitlab_username = username_map.get(username, username)
+      # Use config if available, otherwise fallback to system user
+      gitlab_username = cfg.get("user", {}).get("gitlab_username") or \
+                        cfg.get("user", {}).get("username") or \
+                        os.getenv('USER') or getpass.getuser()
+      
       result = gitlab_username
     output: my_username
 
@@ -350,18 +357,19 @@ steps:
       mr = mr_analysis[0]
       details = first_mr_details or ""
       
+      # Get username for pattern matching
+      username = my_username  # From earlier step
+      
       # Look for my previous comments/feedback
-      # This looks for patterns like "daoneill commented" or review feedback markers
-      my_comments = re.findall(r'(daoneill|Dave O\'Neill).*?commented|reviewed by.*?(daoneill)', details, re.IGNORECASE)
+      my_comments = re.findall(rf'({username}|Dave O\'Neill).*?commented|reviewed by.*?({username})', details, re.IGNORECASE)
       my_feedback_exists = len(my_comments) > 0
       
       # Look for author's replies after my feedback
-      # Check for "Author replied" or author's username after my comment
       author = mr.get('author', '')
       author_replied = author and re.search(rf'{author}.*?commented|replied', details, re.IGNORECASE)
       
       # Look for approval status
-      already_approved = re.search(r'approved by.*?daoneill|LGTM|Looks good', details, re.IGNORECASE)
+      already_approved = re.search(rf'approved by.*?{username}|LGTM|Looks good', details, re.IGNORECASE)
       
       # Check for unresolved discussions
       unresolved = re.search(r'unresolved.*?discussion|open thread', details, re.IGNORECASE)

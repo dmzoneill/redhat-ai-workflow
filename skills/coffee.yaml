@@ -292,8 +292,9 @@ steps:
         )
         
         # Find human comments (same logic as check_mr_feedback)
+        current_user = ctx.get('config', {}).get('user', {}).get('username', 'daoneill')
         for line in result.stdout.split('\n'):
-          if ' commented ' in line and 'daoneill' not in line.lower():
+          if ' commented ' in line and current_user.lower() not in line.lower():
             is_bot = any(re.search(p, line, re.IGNORECASE) for p in bot_patterns)
             if not is_bot:
               match = re.match(r'^(\w+) commented', line)
@@ -480,8 +481,9 @@ steps:
       # Get commits from yesterday
       yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
       
+      git_author = ctx.get('config', {}).get('user', {}).get('username', 'daoneill')
       result = subprocess.run(
-        ["git", "log", "--oneline", "--author=daoneill", f"--since={yesterday}", "--until=today"],
+        ["git", "log", "--oneline", f"--author={git_author}", f"--since={yesterday}", "--until=today"],
         capture_output=True,
         text=True,
         cwd=os.path.expanduser("~/src/automation-analytics-backend")

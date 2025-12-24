@@ -91,7 +91,20 @@ steps:
       
       # Import shared parser utilities
       import sys
-      sys.path.insert(0, '/home/daoneill/src/redhat-ai-workflow/scripts')
+      import json
+      from pathlib import Path
+      
+      # Load config for username
+      config_paths = [Path.cwd() / "config.json", Path.home() / "src/redhat-ai-workflow/config.json"]
+      cfg = {}
+      for p in config_paths:
+        if p.exists():
+          with open(p) as f:
+            cfg = json.load(f)
+          break
+      current_user = cfg.get("user", {}).get("username", "daoneill")
+      
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
       from common.parsers import BOT_PATTERNS, is_bot_comment
       
       project = inputs.get('project', 'automation-analytics/automation-analytics-backend')
@@ -143,7 +156,7 @@ steps:
             comment_text = ""
           
           # Skip bot comments using shared utility
-          if not is_bot_comment(comment_text, author) and author.lower() != 'daoneill':
+          if not is_bot_comment(comment_text, author) and author.lower() != current_user.lower():
             # Check for meeting request
             is_meeting_request = any(kw in comment_text.lower() for kw in meeting_keywords)
             

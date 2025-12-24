@@ -304,7 +304,8 @@ steps:
     compute: |
       # Import shared parsers
       import sys
-      sys.path.insert(0, '/home/daoneill/src/redhat-ai-workflow/scripts')
+      from pathlib import Path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
       from common.parsers import BOT_PATTERNS, is_bot_comment
       
       mr_id = existing_mr['id']
