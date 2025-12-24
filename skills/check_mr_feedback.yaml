@@ -1,0 +1,301 @@
+# Skill: Check MR Feedback
+# Reviews your open MRs for comments awaiting your response
+
+name: check_mr_feedback
+description: |
+  Check your open Merge Requests for feedback that needs your attention.
+  
+  Scans for:
+  - Human reviewer comments (filters out bot/CI comments)
+  - Meeting requests (can trigger Google Calendar invite)
+  - Code change requests
+  - Questions requiring answers
+  - Approval status
+  
+  Optionally creates Google Meet invitations when meetings are requested.
+version: "1.0"
+
+inputs:
+  - name: project
+    type: string
+    required: false
+    default: "automation-analytics/automation-analytics-backend"
+    description: "GitLab project path"
+  
+  - name: create_meetings
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically create Google Meet invites for meeting requests"
+  
+  - name: mr_ids
+    type: array
+    required: false
+    description: "Specific MR IDs to check (optional - defaults to all open MRs)"
+
+steps:
+  # Step 1: Get list of user's open MRs
+  - name: get_my_mrs
+    description: "Fetch all open MRs authored by the current user"
+    compute: |
+      import subprocess
+      import re
+      
+      project = inputs.get('project', 'automation-analytics/automation-analytics-backend')
+      
+      # Get MRs from glab
+      result = subprocess.run(
+        ["glab", "mr", "list", "--author=@me", "-R", project],
+        capture_output=True,
+        text=True
+      )
+      
+      mrs = []
+      for line in result.stdout.split('\n'):
+        # Parse: !1452  automation-analytics/automation-analytics-backend!1452  AAP-58394 - feat(clowder)...
+        match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
+        if match:
+          mrs.append({
+            "id": int(match.group(1)),
+            "title": match.group(2).strip()
+          })
+      
+      # Filter to specific MRs if provided
+      if inputs.get('mr_ids'):
+        mr_ids = inputs.mr_ids
+        mrs = [mr for mr in mrs if mr['id'] in mr_ids]
+      
+      result = mrs
+    output: open_mrs
+
+  # Step 2: Check each MR for comments
+  - name: check_comments
+    description: "Fetch and analyze comments for each MR"
+    compute: |
+      import subprocess
+      import re
+      from datetime import datetime
+      
+      project = inputs.get('project', 'automation-analytics/automation-analytics-backend')
+      
+      # Bot patterns to filter out
+      bot_patterns = [
+        r'group_\d+_bot',
+        r'konflux',
+        r'Starting Pipelinerun',
+        r'stone-prod',
+        r'tkn pr logs',
+        r'Integration test for component',
+        r'aap-aa-on-pull-request',
+        r'^/retest',
+        r'^/approve',
+      ]
+      
+      # Meeting keywords
+      meeting_keywords = [
+        'meeting', 'meet', 'call', 'discuss', 'sync', 'chat',
+        'walk through', 'walkthrough', 'talk about', 'prepared to talk',
+        'let\'s discuss', 'schedule a', 'set up a call'
+      ]
+      
+      # Feedback requiring response
+      feedback_keywords = [
+        'please', 'could you', 'can you', 'would be better',
+        'consider', 'suggest', 'recommend', 'instead of',
+        'why not', 'what about', 'have you considered',
+        '?'  # Questions
+      ]
+      
+      feedback_results = []
+      
+      for mr in open_mrs:
+        mr_id = mr['id']
+        
+        # Get comments for this MR
+        result = subprocess.run(
+          ["glab", "mr", "view", str(mr_id), "--comments", "-R", project],
+          capture_output=True,
+          text=True
+        )
+        
+        comments_text = result.stdout
+        
+        # Parse comments
+        # Format: "username commented YYYY-MM-DD HH:MM:SS.xxx +0000 UTC\ncomment text"
+        comment_blocks = re.split(r'\n(\w+) commented (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', comments_text)
+        
+        human_comments = []
+        
+        i = 1
+        while i < len(comment_blocks) - 1:
+          author = comment_blocks[i]
+          timestamp_str = comment_blocks[i + 1]
+          
+          # Get the comment text (next block until next comment)
+          if i + 2 < len(comment_blocks):
+            comment_text = comment_blocks[i + 2].split('\n\n')[0] if '\n\n' in comment_blocks[i + 2] else comment_blocks[i + 2]
+          else:
+            comment_text = ""
+          
+          # Skip bot comments
+          is_bot = any(re.search(pattern, author + ' ' + comment_text, re.IGNORECASE) for pattern in bot_patterns)
+          
+          if not is_bot and author.lower() != 'daoneill':  # Skip own comments
+            # Check for meeting request
+            is_meeting_request = any(kw in comment_text.lower() for kw in meeting_keywords)
+            
+            # Check for feedback requiring response
+            needs_response = any(kw in comment_text.lower() for kw in feedback_keywords)
+            
+            # Extract email if available (for meeting invite)
+            email_match = re.search(r'@(\w+)', author)
+            author_email = f"{author}@redhat.com" if email_match else None
+            
+            human_comments.append({
+              "author": author,
+              "author_email": author_email,
+              "timestamp": timestamp_str,
+              "text": comment_text[:500],  # Truncate long comments
+              "is_meeting_request": is_meeting_request,
+              "needs_response": needs_response,
+            })
+          
+          i += 3
+        
+        if human_comments:
+          feedback_results.append({
+            "mr_id": mr_id,
+            "title": mr['title'],
+            "comments": human_comments,
+            "meeting_requests": [c for c in human_comments if c['is_meeting_request']],
+            "needs_response": [c for c in human_comments if c['needs_response']],
+          })
+      
+      result = feedback_results
+    output: feedback_analysis
+
+  # Step 3: Create meeting invites if requested
+  - name: create_meeting_invites
+    description: "Create Google Meet invitations for meeting requests"
+    condition: "{{ inputs.create_meetings and feedback_analysis }}"
+    compute: |
+      import json
+      from pathlib import Path
+      from datetime import datetime, timedelta
+      
+      # Check if Google Calendar is configured
+      config_paths = [
+        Path.cwd() / "config.json",
+        Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+        if p.exists():
+          with open(p) as f:
+            config = json.load(f)
+          break
+      
+      google_config = config.get("google_calendar", {})
+      
+      if not google_config.get("enabled"):
+        result = {
+          "created": [],
+          "skipped": "Google Calendar not configured. Add google_calendar config to config.json"
+        }
+      else:
+        created_meetings = []
+        
+        for mr_feedback in feedback_analysis:
+          for meeting_req in mr_feedback.get('meeting_requests', []):
+            # Meeting details
+            meeting_info = {
+              "mr_id": mr_feedback['mr_id'],
+              "title": f"MR !{mr_feedback['mr_id']} Review Discussion",
+              "requester": meeting_req['author'],
+              "requester_email": meeting_req.get('author_email'),
+              "context": meeting_req['text'][:200],
+              "status": "pending_google_calendar_tool"
+            }
+            created_meetings.append(meeting_info)
+        
+        result = {
+          "created": created_meetings,
+          "note": "Use google_calendar_create_event tool to finalize invites"
+        }
+    output: meeting_results
+    on_error: continue
+
+  # Step 4: Format summary
+  - name: format_summary
+    description: "Create human-readable summary"
+    compute: |
+      lines = []
+      lines.append("# MR Feedback Summary")
+      lines.append("")
+      
+      if not feedback_analysis:
+        lines.append("✅ **No pending feedback found!** All your MRs are clear.")
+      else:
+        # Count totals
+        total_mrs = len(feedback_analysis)
+        total_comments = sum(len(f['comments']) for f in feedback_analysis)
+        meeting_requests = sum(len(f['meeting_requests']) for f in feedback_analysis)
+        needs_response = sum(len(f['needs_response']) for f in feedback_analysis)
+        
+        lines.append(f"Found feedback on **{total_mrs}** MRs ({total_comments} comments)")
+        lines.append("")
+        
+        if meeting_requests > 0:
+          lines.append(f"⚠️ **{meeting_requests} meeting request(s)** detected")
+        if needs_response > 0:
+          lines.append(f"📝 **{needs_response} comment(s)** may need your response")
+        lines.append("")
+        
+        # Details per MR
+        for mr_feedback in feedback_analysis:
+          mr_id = mr_feedback['mr_id']
+          title = mr_feedback['title'][:60]
+          
+          lines.append(f"## MR !{mr_id}")
+          lines.append(f"*{title}*")
+          lines.append("")
+          
+          for comment in mr_feedback['comments']:
+            author = comment['author']
+            text = comment['text'][:300]
+            
+            # Icons based on type
+            icon = "💬"
+            if comment['is_meeting_request']:
+              icon = "📅"
+            elif comment['needs_response']:
+              icon = "❓"
+            
+            lines.append(f"| {icon} | **{author}** |")
+            lines.append(f"| | {text} |")
+            lines.append("")
+          
+          lines.append("---")
+          lines.append("")
+      
+      # Meeting creation results
+      if meeting_results and meeting_results.get('created'):
+        lines.append("## Meeting Invites")
+        for m in meeting_results['created']:
+          lines.append(f"- 📅 **{m['title']}** with {m['requester']}")
+        lines.append("")
+      
+      result = '\n'.join(lines)
+    output: summary
+
+outputs:
+  - name: summary
+    value: "{{ summary }}"
+  
+  - name: context
+    value:
+      total_mrs_with_feedback: "{{ feedback_analysis | length }}"
+      meeting_requests: "{{ feedback_analysis | sum(attribute='meeting_requests') | list | length if feedback_analysis else 0 }}"
+      needs_response: "{{ feedback_analysis | sum(attribute='needs_response') | list | length if feedback_analysis else 0 }}"
+      details: "{{ feedback_analysis }}"
+

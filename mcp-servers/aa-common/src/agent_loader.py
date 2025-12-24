@@ -44,6 +44,7 @@ TOOL_MODULES = {
     "appinterface": 6,
     "workflow": 26,
     "slack": 15,
+    "google-calendar": 5,
 }
 
 # Core tools that should never be removed

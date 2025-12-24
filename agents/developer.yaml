@@ -7,11 +7,12 @@ persona: agents/developer.md
 
 # Tool modules to load (from mcp-servers/aa-*)
 tools:
-  - git           # 15 tools - Git operations
-  - gitlab        # 35 tools - MRs, CI/CD
-  - jira          # 24 tools - Issue tracking
+  - git             # 15 tools - Git operations
+  - gitlab          # 35 tools - MRs, CI/CD
+  - jira            # 24 tools - Issue tracking
+  - google-calendar # 5 tools - Calendar & meetings
 
-# Total: ~74 tools (under 80 limit)
+# Total: ~79 tools (under 80 limit)
 # For ephemeral deployment, use the devops agent which has bonfire, k8s, quay
 
 skills:
@@ -22,6 +23,7 @@ skills:
   - review_pr           # PR review workflow (auto-approves or posts feedback)
   - review_all_prs      # Batch review open PRs (excludes your own)
   - check_my_prs        # Check your PRs for reviewer feedback
+  - check_mr_feedback   # Check MRs for comments needing response
   - rebase_pr           # Rebase PR onto main, handle conflicts
   - sync_branch         # Quick sync with main (daily rebase)
   - test_mr_ephemeral   # Test in ephemeral
