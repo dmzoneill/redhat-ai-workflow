@@ -308,6 +308,19 @@ integration-test-dry:
 	@printf "\033[36mRunning integration tests (dry-run)...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) scripts/integration_test.py --dry-run
 
+# Skill tests - actually execute skills with safe params
+skill-test:
+	@printf "\033[36mRunning skill tests (live execution)...\033[0m\n"
+	cd $(PROJECT_ROOT) && source ~/bonfire_venv/bin/activate && $(PYTHON) scripts/skill_test_runner.py
+
+skill-test-list:
+	@printf "\033[36mListing all skills...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/skill_test_runner.py --list
+
+skill-test-dry:
+	@printf "\033[36mRunning skill tests (dry-run)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/skill_test_runner.py --dry-run
+
 lint:
 	@printf "\033[36mRunning linters...\033[0m\n"
 	cd $(PROJECT_ROOT) && flake8 scripts/ mcp-servers/ --max-line-length=100 --ignore=E501,W503
