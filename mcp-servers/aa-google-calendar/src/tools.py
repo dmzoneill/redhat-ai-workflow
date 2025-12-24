@@ -3,15 +3,16 @@ Google Calendar MCP Tools
 
 Provides tools for creating Google Calendar events with Google Meet links.
 
+CONSTRAINTS:
+- All meetings scheduled in Irish time (Europe/Dublin)
+- Meetings only between 15:00-19:00 Irish time
+- Checks attendee availability before scheduling
+- Finds mutually free slots
+
 Setup:
 1. Create OAuth 2.0 credentials in Google Cloud Console
 2. Download credentials.json to ~/.config/google-calendar/credentials.json
 3. Run the server once to complete OAuth flow and save token.json
-
-Or use service account:
-1. Create service account in Google Cloud Console
-2. Enable domain-wide delegation
-3. Download service account JSON to ~/.config/google-calendar/service_account.json
 """
 
 import json
@@ -19,6 +20,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP
 
@@ -31,11 +33,23 @@ CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 TOKEN_FILE = CONFIG_DIR / "token.json"
 SERVICE_ACCOUNT_FILE = CONFIG_DIR / "service_account.json"
 
-# Scopes required for calendar access
+# Scopes required for calendar access (includes freebusy for availability)
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly",
 ]
+
+# CONSTRAINTS
+TIMEZONE = "Europe/Dublin"
+MEETING_START_HOUR = 15  # 3pm Irish time
+MEETING_END_HOUR = 19    # 7pm Irish time
+DEFAULT_DURATION = 30    # minutes
+
+
+def get_irish_time() -> datetime:
+    """Get current time in Irish timezone."""
+    return datetime.now(ZoneInfo(TIMEZONE))
 
 
 def get_calendar_service():
@@ -104,30 +118,154 @@ def get_calendar_service():
         return None, f"Failed to build calendar service: {e}"
 
 
-@mcp.tool()
-async def google_calendar_create_event(
-    summary: str,
-    start_time: str,
-    duration_minutes: int = 30,
-    attendees: str = "",
-    description: str = "",
-    add_meet_link: bool = True,
-    timezone: str = "Europe/Dublin",
-) -> str:
+def get_freebusy(service, calendars: list[str], start: datetime, end: datetime) -> dict:
     """
-    Create a Google Calendar event with optional Google Meet link.
+    Query freebusy information for multiple calendars.
     
     Args:
-        summary: Event title (e.g., "MR !1450 Review Discussion")
-        start_time: Start time in ISO format (e.g., "2025-12-26T10:00:00")
-        duration_minutes: Duration in minutes (default: 30)
-        attendees: Comma-separated email addresses
-        description: Event description/agenda
-        add_meet_link: Create Google Meet video conference (default: True)
-        timezone: Timezone for the event (default: Europe/Dublin)
+        service: Google Calendar service
+        calendars: List of email addresses to check
+        start: Start of time range
+        end: End of time range
     
     Returns:
-        Event details including Google Meet link if created
+        Dict mapping email -> list of busy periods
+    """
+    body = {
+        "timeMin": start.isoformat(),
+        "timeMax": end.isoformat(),
+        "timeZone": TIMEZONE,
+        "items": [{"id": email} for email in calendars],
+    }
+    
+    try:
+        result = service.freebusy().query(body=body).execute()
+        busy_info = {}
+        
+        for email in calendars:
+            cal_info = result.get("calendars", {}).get(email, {})
+            
+            # Check for errors (user not in domain or calendar not shared)
+            if cal_info.get("errors"):
+                busy_info[email] = {"error": cal_info["errors"][0].get("reason", "unknown")}
+            else:
+                busy_info[email] = cal_info.get("busy", [])
+        
+        return busy_info
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def find_free_slots(
+    busy_periods: dict,
+    date: datetime,
+    duration_minutes: int = 30,
+) -> list[dict]:
+    """
+    Find free slots within the allowed meeting window (15:00-19:00 Irish time).
+    
+    Args:
+        busy_periods: Dict from get_freebusy (email -> busy list)
+        date: The date to find slots for
+        duration_minutes: Required meeting duration
+    
+    Returns:
+        List of free slot dicts with start/end times
+    """
+    tz = ZoneInfo(TIMEZONE)
+    
+    # Set up the meeting window for this date
+    window_start = date.replace(hour=MEETING_START_HOUR, minute=0, second=0, microsecond=0, tzinfo=tz)
+    window_end = date.replace(hour=MEETING_END_HOUR, minute=0, second=0, microsecond=0, tzinfo=tz)
+    
+    # Collect all busy periods across all attendees
+    all_busy = []
+    for email, periods in busy_periods.items():
+        if isinstance(periods, dict) and "error" in periods:
+            continue  # Skip calendars we couldn't access
+        
+        for period in periods:
+            try:
+                start = datetime.fromisoformat(period["start"].replace("Z", "+00:00"))
+                end = datetime.fromisoformat(period["end"].replace("Z", "+00:00"))
+                # Convert to Irish time
+                start = start.astimezone(tz)
+                end = end.astimezone(tz)
+                all_busy.append((start, end))
+            except Exception:
+                continue
+    
+    # Sort busy periods by start time
+    all_busy.sort(key=lambda x: x[0])
+    
+    # Find free slots
+    free_slots = []
+    current = window_start
+    
+    for busy_start, busy_end in all_busy:
+        # If busy period is outside our window, skip
+        if busy_end <= window_start or busy_start >= window_end:
+            continue
+        
+        # Clip busy period to our window
+        busy_start = max(busy_start, window_start)
+        busy_end = min(busy_end, window_end)
+        
+        # If there's a gap before this busy period, that's a free slot
+        if current < busy_start:
+            gap_minutes = (busy_start - current).total_seconds() / 60
+            if gap_minutes >= duration_minutes:
+                free_slots.append({
+                    "start": current,
+                    "end": busy_start,
+                    "duration_minutes": int(gap_minutes),
+                })
+        
+        # Move current pointer past this busy period
+        current = max(current, busy_end)
+    
+    # Check if there's time left at the end of the window
+    if current < window_end:
+        gap_minutes = (window_end - current).total_seconds() / 60
+        if gap_minutes >= duration_minutes:
+            free_slots.append({
+                "start": current,
+                "end": window_end,
+                "duration_minutes": int(gap_minutes),
+            })
+    
+    # If no busy periods, the whole window is free
+    if not all_busy and not free_slots:
+        free_slots.append({
+            "start": window_start,
+            "end": window_end,
+            "duration_minutes": int((window_end - window_start).total_seconds() / 60),
+        })
+    
+    return free_slots
+
+
+@mcp.tool()
+async def google_calendar_check_mutual_availability(
+    attendee_email: str,
+    date: str = "",
+    days_ahead: int = 5,
+    duration_minutes: int = 30,
+) -> str:
+    """
+    Check mutual availability between you and an attendee.
+    
+    Finds free slots within the allowed meeting window (15:00-19:00 Irish time).
+    Checks both your calendar and the attendee's calendar.
+    
+    Args:
+        attendee_email: Email of the person to meet with
+        date: Specific date to check (YYYY-MM-DD), or empty to scan next few days
+        days_ahead: Number of days to scan if no specific date (default: 5)
+        duration_minutes: Required meeting duration (default: 30)
+    
+    Returns:
+        Available time slots that work for both parties
     """
     service, error = get_calendar_service()
     
@@ -137,64 +275,252 @@ async def google_calendar_create_event(
     if not service:
         return "❌ Google Calendar service not available"
     
-    try:
-        # Parse start time
+    tz = ZoneInfo(TIMEZONE)
+    now = datetime.now(tz)
+    
+    # Determine dates to check
+    if date:
         try:
-            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            check_dates = [datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=tz)]
         except ValueError:
-            # Try common formats
-            for fmt in ["%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%d/%m/%Y %H:%M"]:
-                try:
-                    start_dt = datetime.strptime(start_time, fmt)
-                    break
-                except ValueError:
-                    continue
+            return f"❌ Invalid date format: {date}. Use YYYY-MM-DD."
+    else:
+        # Check next N business days
+        check_dates = []
+        current = now
+        while len(check_dates) < days_ahead:
+            current += timedelta(days=1)
+            # Skip weekends
+            if current.weekday() < 5:
+                check_dates.append(current)
+    
+    lines = [
+        f"# Mutual Availability with {attendee_email}",
+        f"",
+        f"📍 **Timezone:** Irish time (Europe/Dublin)",
+        f"⏰ **Meeting window:** {MEETING_START_HOUR}:00 - {MEETING_END_HOUR}:00",
+        f"⏱️ **Duration needed:** {duration_minutes} minutes",
+        "",
+    ]
+    
+    # Get my email
+    try:
+        profile = service.calendars().get(calendarId='primary').execute()
+        my_email = profile.get('id', 'primary')
+    except Exception:
+        my_email = 'primary'
+    
+    calendars_to_check = [my_email, attendee_email]
+    all_slots = []
+    
+    for check_date in check_dates:
+        day_start = check_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        
+        # Query freebusy for both calendars
+        busy_info = get_freebusy(service, calendars_to_check, day_start, day_end)
+        
+        # Check for errors
+        attendee_error = None
+        if isinstance(busy_info.get(attendee_email), dict) and "error" in busy_info[attendee_email]:
+            attendee_error = busy_info[attendee_email]["error"]
+        
+        # Find free slots
+        free_slots = find_free_slots(busy_info, check_date, duration_minutes)
+        
+        if free_slots:
+            day_name = check_date.strftime("%A %Y-%m-%d")
+            lines.append(f"## {day_name}")
+            
+            if attendee_error:
+                lines.append(f"⚠️ Could not check {attendee_email}'s calendar: {attendee_error}")
+                lines.append("   (Showing your free slots only)")
+            
+            for slot in free_slots:
+                start_str = slot["start"].strftime("%H:%M")
+                end_str = slot["end"].strftime("%H:%M")
+                lines.append(f"✅ **{start_str} - {end_str}** ({slot['duration_minutes']} min available)")
+                all_slots.append({
+                    "date": check_date.strftime("%Y-%m-%d"),
+                    "start": slot["start"].isoformat(),
+                    "start_display": f"{check_date.strftime('%A')} {start_str}",
+                })
+            
+            lines.append("")
+    
+    if not all_slots:
+        lines.append("❌ No mutual free slots found in the meeting window (15:00-19:00 Irish time)")
+        lines.append("")
+        lines.append("Consider:")
+        lines.append("- Checking more days ahead")
+        lines.append("- Using a shorter duration")
+        lines.append("- Scheduling outside the preferred window")
+    else:
+        lines.append("---")
+        lines.append("")
+        lines.append("**To schedule the first available slot:**")
+        first_slot = all_slots[0]
+        lines.append(f"```")
+        lines.append(f'google_calendar_schedule_meeting(')
+        lines.append(f'    title="Your Meeting Title",')
+        lines.append(f'    attendee_email="{attendee_email}",')
+        lines.append(f'    start_time="{first_slot["start"]}"')
+        lines.append(f')')
+        lines.append(f"```")
+    
+    return '\n'.join(lines)
+
+
+@mcp.tool()
+async def google_calendar_schedule_meeting(
+    title: str,
+    attendee_email: str,
+    start_time: str = "",
+    duration_minutes: int = 30,
+    description: str = "",
+    auto_find_slot: bool = True,
+) -> str:
+    """
+    Schedule a meeting with an attendee, enforcing Irish time constraints.
+    
+    CONSTRAINTS:
+    - All times in Irish time (Europe/Dublin)
+    - Meetings only between 15:00-19:00 Irish time
+    - Checks attendee availability before scheduling
+    
+    Args:
+        title: Meeting title (e.g., "MR !1445 Race Condition Discussion")
+        attendee_email: Email of the person to meet with
+        start_time: Start time in ISO format, or empty to auto-find a slot
+        duration_minutes: Duration in minutes (default: 30)
+        description: Meeting agenda/description
+        auto_find_slot: If start_time not specified, find next available slot (default: True)
+    
+    Returns:
+        Event details including Google Meet link
+    """
+    service, error = get_calendar_service()
+    
+    if error:
+        return f"❌ {error}"
+    
+    if not service:
+        return "❌ Google Calendar service not available"
+    
+    tz = ZoneInfo(TIMEZONE)
+    now = datetime.now(tz)
+    
+    # If no start time, find next available slot
+    if not start_time and auto_find_slot:
+        # Check next 5 business days
+        check_dates = []
+        current = now
+        for _ in range(7):
+            current += timedelta(days=1)
+            if current.weekday() < 5:  # Skip weekends
+                check_dates.append(current)
+            if len(check_dates) >= 5:
+                break
+        
+        # Get my email
+        try:
+            profile = service.calendars().get(calendarId='primary').execute()
+            my_email = profile.get('id', 'primary')
+        except Exception:
+            my_email = 'primary'
+        
+        calendars_to_check = [my_email, attendee_email]
+        
+        # Find first available slot
+        for check_date in check_dates:
+            day_start = check_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            
+            busy_info = get_freebusy(service, calendars_to_check, day_start, day_end)
+            free_slots = find_free_slots(busy_info, check_date, duration_minutes)
+            
+            if free_slots:
+                start_dt = free_slots[0]["start"]
+                break
+        else:
+            return (
+                f"❌ No mutual free slots found in the next 5 business days.\n"
+                f"📍 Meeting window: 15:00-19:00 Irish time\n"
+                f"⏱️ Duration needed: {duration_minutes} minutes\n\n"
+                f"Use `google_calendar_check_mutual_availability` to see detailed availability."
+            )
+    else:
+        # Parse provided start time
+        try:
+            if 'T' in start_time:
+                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
             else:
-                return f"❌ Invalid start_time format: {start_time}. Use ISO format: 2025-12-26T10:00:00"
-        
-        end_dt = start_dt + timedelta(minutes=duration_minutes)
-        
+                start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+            
+            # Ensure it has timezone
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=tz)
+            else:
+                start_dt = start_dt.astimezone(tz)
+                
+        except ValueError:
+            return f"❌ Invalid start_time format: {start_time}. Use ISO format or 'YYYY-MM-DD HH:MM'."
+    
+    # Validate time is within allowed window
+    if start_dt.hour < MEETING_START_HOUR or start_dt.hour >= MEETING_END_HOUR:
+        return (
+            f"❌ Meeting time {start_dt.strftime('%H:%M')} is outside allowed window.\n"
+            f"📍 Meetings must be between {MEETING_START_HOUR}:00 and {MEETING_END_HOUR}:00 Irish time.\n\n"
+            f"Use `google_calendar_check_mutual_availability` to find valid slots."
+        )
+    
+    # Check if end time exceeds window
+    end_dt = start_dt + timedelta(minutes=duration_minutes)
+    if end_dt.hour > MEETING_END_HOUR or (end_dt.hour == MEETING_END_HOUR and end_dt.minute > 0):
+        return (
+            f"❌ Meeting would end at {end_dt.strftime('%H:%M')}, past the {MEETING_END_HOUR}:00 cutoff.\n"
+            f"Consider a shorter duration or earlier start time."
+        )
+    
+    # Validate weekend
+    if start_dt.weekday() >= 5:
+        return f"❌ Cannot schedule meetings on weekends. Please choose a weekday."
+    
+    try:
         # Build event
         event = {
-            'summary': summary,
-            'description': description,
+            'summary': title,
+            'description': description or f"Meeting scheduled via AI Workflow assistant.",
             'start': {
                 'dateTime': start_dt.isoformat(),
-                'timeZone': timezone,
+                'timeZone': TIMEZONE,
             },
             'end': {
                 'dateTime': end_dt.isoformat(),
-                'timeZone': timezone,
+                'timeZone': TIMEZONE,
             },
-        }
-        
-        # Add attendees
-        if attendees:
-            attendee_list = [{'email': email.strip()} for email in attendees.split(',') if email.strip()]
-            if attendee_list:
-                event['attendees'] = attendee_list
-        
-        # Add Google Meet
-        if add_meet_link:
-            event['conferenceData'] = {
+            'attendees': [
+                {'email': attendee_email},
+            ],
+            'conferenceData': {
                 'createRequest': {
                     'requestId': f"meet-{datetime.now().strftime('%Y%m%d%H%M%S')}",
                     'conferenceSolutionKey': {
                         'type': 'hangoutsMeet'
                     }
                 }
-            }
+            },
+        }
         
         # Create event
         created_event = service.events().insert(
             calendarId='primary',
             body=event,
-            conferenceDataVersion=1 if add_meet_link else 0,
+            conferenceDataVersion=1,
             sendUpdates='all'  # Send invites to attendees
         ).execute()
         
-        # Format response
-        event_link = created_event.get('htmlLink', '')
+        # Extract Meet link
         meet_link = ""
         if created_event.get('conferenceData', {}).get('entryPoints'):
             for entry in created_event['conferenceData']['entryPoints']:
@@ -202,24 +528,117 @@ async def google_calendar_create_event(
                     meet_link = entry.get('uri', '')
                     break
         
+        event_link = created_event.get('htmlLink', '')
+        
         result = [
-            f"✅ **Event Created**",
+            f"✅ **Meeting Scheduled**",
             f"",
-            f"**Title:** {summary}",
-            f"**When:** {start_dt.strftime('%Y-%m-%d %H:%M')} ({duration_minutes} min)",
+            f"**Title:** {title}",
+            f"**When:** {start_dt.strftime('%A %Y-%m-%d %H:%M')} Irish time",
+            f"**Duration:** {duration_minutes} minutes",
+            f"**Attendee:** {attendee_email} (invite sent ✉️)",
+            f"",
             f"**Calendar Link:** {event_link}",
         ]
         
         if meet_link:
             result.append(f"**Google Meet:** {meet_link}")
         
-        if attendees:
-            result.append(f"**Attendees:** {attendees} (invites sent)")
-        
         return '\n'.join(result)
         
     except Exception as e:
         return f"❌ Failed to create event: {e}"
+
+
+@mcp.tool()
+async def google_calendar_quick_meeting(
+    title: str,
+    attendee_email: str,
+    when: str = "auto",
+    duration_minutes: int = 30,
+) -> str:
+    """
+    Quickly schedule a meeting - finds the next available slot automatically.
+    
+    This is the easiest way to schedule a meeting. It will:
+    1. Check both your and the attendee's calendar
+    2. Find the next mutually free slot (15:00-19:00 Irish time)
+    3. Create the meeting with a Google Meet link
+    4. Send an invite to the attendee
+    
+    Args:
+        title: Meeting title (e.g., "MR !1445 Race Condition Discussion")
+        attendee_email: Email of the person to meet with (e.g., "bthomass@redhat.com")
+        when: "auto" to find next available, or "YYYY-MM-DD HH:MM" for specific time
+        duration_minutes: Meeting duration (default: 30)
+    
+    Returns:
+        Meeting details and Google Meet link
+    """
+    if when.lower() == "auto":
+        # Auto-find next slot
+        return await google_calendar_schedule_meeting(
+            title=title,
+            attendee_email=attendee_email,
+            start_time="",
+            duration_minutes=duration_minutes,
+            auto_find_slot=True,
+        )
+    else:
+        # Parse natural language or specific time
+        import re
+        tz = ZoneInfo(TIMEZONE)
+        now = datetime.now(tz)
+        
+        when_lower = when.lower()
+        
+        # Extract time component
+        time_match = re.search(r'(\d{1,2})[:\.]?(\d{2})?', when)
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2) or 0)
+        else:
+            hour, minute = 15, 0  # Default to 3pm if no time specified
+        
+        # Parse date component
+        if 'tomorrow' in when_lower:
+            target_date = now + timedelta(days=1)
+        elif 'today' in when_lower:
+            target_date = now
+        elif 'monday' in when_lower:
+            days_ahead = (0 - now.weekday()) % 7 or 7
+            target_date = now + timedelta(days=days_ahead)
+        elif 'tuesday' in when_lower:
+            days_ahead = (1 - now.weekday()) % 7 or 7
+            target_date = now + timedelta(days=days_ahead)
+        elif 'wednesday' in when_lower:
+            days_ahead = (2 - now.weekday()) % 7 or 7
+            target_date = now + timedelta(days=days_ahead)
+        elif 'thursday' in when_lower:
+            days_ahead = (3 - now.weekday()) % 7 or 7
+            target_date = now + timedelta(days=days_ahead)
+        elif 'friday' in when_lower:
+            days_ahead = (4 - now.weekday()) % 7 or 7
+            target_date = now + timedelta(days=days_ahead)
+        elif re.match(r'\d{4}-\d{2}-\d{2}', when):
+            # Full date provided
+            try:
+                target_date = datetime.strptime(when[:10], "%Y-%m-%d").replace(tzinfo=tz)
+            except ValueError:
+                target_date = now + timedelta(days=1)
+        else:
+            target_date = now + timedelta(days=1)  # Default to tomorrow
+        
+        # Build datetime
+        start_time = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0, tzinfo=tz)
+        
+        return await google_calendar_schedule_meeting(
+            title=title,
+            attendee_email=attendee_email,
+            start_time=start_time.isoformat(),
+            duration_minutes=duration_minutes,
+            auto_find_slot=False,
+        )
 
 
 @mcp.tool()
@@ -235,7 +654,7 @@ async def google_calendar_list_events(
         max_results: Maximum number of events to return (default: 10)
     
     Returns:
-        List of upcoming events
+        List of upcoming events (displayed in Irish time)
     """
     service, error = get_calendar_service()
     
@@ -246,16 +665,20 @@ async def google_calendar_list_events(
         return "❌ Google Calendar service not available"
     
     try:
-        now = datetime.utcnow().isoformat() + 'Z'
-        end = (datetime.utcnow() + timedelta(days=days)).isoformat() + 'Z'
+        tz = ZoneInfo(TIMEZONE)
+        now = datetime.now(tz)
+        
+        time_min = now.isoformat()
+        time_max = (now + timedelta(days=days)).isoformat()
         
         events_result = service.events().list(
             calendarId='primary',
-            timeMin=now,
-            timeMax=end,
+            timeMin=time_min,
+            timeMax=time_max,
             maxResults=max_results,
             singleEvents=True,
-            orderBy='startTime'
+            orderBy='startTime',
+            timeZone=TIMEZONE,
         ).execute()
         
         events = events_result.get('items', [])
@@ -263,17 +686,22 @@ async def google_calendar_list_events(
         if not events:
             return f"📅 No upcoming events in the next {days} days."
         
-        lines = [f"📅 **Upcoming Events** (next {days} days):", ""]
+        lines = [
+            f"📅 **Upcoming Events** (next {days} days)",
+            f"📍 Times shown in Irish time (Europe/Dublin)",
+            "",
+        ]
         
         for event in events:
             start = event['start'].get('dateTime', event['start'].get('date'))
             summary = event.get('summary', 'No title')
             
-            # Parse and format start time
+            # Parse and format start time in Irish timezone
             try:
                 if 'T' in start:
                     dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                    time_str = dt.strftime('%Y-%m-%d %H:%M')
+                    dt = dt.astimezone(tz)
+                    time_str = dt.strftime('%a %Y-%m-%d %H:%M')
                 else:
                     time_str = start
             except:
@@ -284,7 +712,7 @@ async def google_calendar_list_events(
             if event.get('conferenceData', {}).get('entryPoints'):
                 for entry in event['conferenceData']['entryPoints']:
                     if entry.get('entryPointType') == 'video':
-                        meet_link = f" 📹 [Join]({entry.get('uri', '')})"
+                        meet_link = f" 📹"
                         break
             
             lines.append(f"- **{time_str}** - {summary}{meet_link}")
@@ -296,180 +724,6 @@ async def google_calendar_list_events(
 
 
 @mcp.tool()
-async def google_calendar_quick_meeting(
-    title: str,
-    attendee_email: str,
-    when: str = "tomorrow 10:00",
-    duration_minutes: int = 30,
-) -> str:
-    """
-    Quickly schedule a meeting with a single attendee.
-    
-    This is a convenience wrapper for common meeting scenarios like
-    "schedule a meeting with Brian about the race condition fix".
-    
-    Args:
-        title: Meeting title
-        attendee_email: Email of the person to meet with
-        when: Natural language time like "tomorrow 10:00", "next monday 14:00"
-        duration_minutes: Meeting duration (default: 30)
-    
-    Returns:
-        Meeting details and Google Meet link
-    """
-    from datetime import datetime, timedelta
-    import re
-    
-    # Parse natural language time
-    now = datetime.now()
-    
-    when_lower = when.lower()
-    
-    # Extract time component
-    time_match = re.search(r'(\d{1,2})[:\.]?(\d{2})?', when)
-    if time_match:
-        hour = int(time_match.group(1))
-        minute = int(time_match.group(2) or 0)
-    else:
-        hour, minute = 10, 0  # Default to 10:00
-    
-    # Parse date component
-    if 'tomorrow' in when_lower:
-        target_date = now + timedelta(days=1)
-    elif 'today' in when_lower:
-        target_date = now
-    elif 'monday' in when_lower:
-        days_ahead = (0 - now.weekday()) % 7 or 7
-        target_date = now + timedelta(days=days_ahead)
-    elif 'tuesday' in when_lower:
-        days_ahead = (1 - now.weekday()) % 7 or 7
-        target_date = now + timedelta(days=days_ahead)
-    elif 'wednesday' in when_lower:
-        days_ahead = (2 - now.weekday()) % 7 or 7
-        target_date = now + timedelta(days=days_ahead)
-    elif 'thursday' in when_lower:
-        days_ahead = (3 - now.weekday()) % 7 or 7
-        target_date = now + timedelta(days=days_ahead)
-    elif 'friday' in when_lower:
-        days_ahead = (4 - now.weekday()) % 7 or 7
-        target_date = now + timedelta(days=days_ahead)
-    else:
-        # Try to parse as date
-        target_date = now + timedelta(days=1)  # Default to tomorrow
-    
-    # Build datetime
-    start_time = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    
-    # Call the main create function
-    return await google_calendar_create_event(
-        summary=title,
-        start_time=start_time.isoformat(),
-        duration_minutes=duration_minutes,
-        attendees=attendee_email,
-        description=f"Meeting scheduled via AI Workflow assistant.\n\nRequested: {title}",
-        add_meet_link=True,
-    )
-
-
-@mcp.tool()
-async def google_calendar_check_availability(
-    date: str,
-    attendees: str = "",
-) -> str:
-    """
-    Check calendar availability for a specific date.
-    
-    Args:
-        date: Date to check (YYYY-MM-DD format)
-        attendees: Comma-separated emails to check availability for (requires domain-wide delegation)
-    
-    Returns:
-        Free/busy information for the date
-    """
-    service, error = get_calendar_service()
-    
-    if error:
-        return f"❌ {error}"
-    
-    if not service:
-        return "❌ Google Calendar service not available"
-    
-    try:
-        # Parse date
-        try:
-            check_date = datetime.strptime(date, "%Y-%m-%d")
-        except ValueError:
-            return f"❌ Invalid date format: {date}. Use YYYY-MM-DD."
-        
-        # Set time bounds for the day
-        time_min = check_date.replace(hour=0, minute=0, second=0).isoformat() + 'Z'
-        time_max = (check_date + timedelta(days=1)).replace(hour=0, minute=0, second=0).isoformat() + 'Z'
-        
-        # Get events for the day
-        events_result = service.events().list(
-            calendarId='primary',
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-        
-        events = events_result.get('items', [])
-        
-        lines = [f"📅 **Availability for {date}**", ""]
-        
-        if not events:
-            lines.append("✅ Calendar is clear for the day!")
-        else:
-            # Build busy periods
-            busy_periods = []
-            for event in events:
-                start = event['start'].get('dateTime', event['start'].get('date'))
-                end = event['end'].get('dateTime', event['end'].get('date'))
-                summary = event.get('summary', 'Busy')
-                
-                try:
-                    start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                    end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
-                    busy_periods.append({
-                        'start': start_dt.strftime('%H:%M'),
-                        'end': end_dt.strftime('%H:%M'),
-                        'summary': summary,
-                    })
-                except:
-                    continue
-            
-            lines.append("**Busy times:**")
-            for period in busy_periods:
-                lines.append(f"- {period['start']} - {period['end']}: {period['summary']}")
-            
-            lines.append("")
-            
-            # Suggest free slots (simple version - working hours 9-17)
-            lines.append("**Suggested free slots:**")
-            
-            # Very simplified free slot detection
-            busy_hours = set()
-            for period in busy_periods:
-                try:
-                    start_hour = int(period['start'].split(':')[0])
-                    end_hour = int(period['end'].split(':')[0])
-                    for h in range(start_hour, end_hour + 1):
-                        busy_hours.add(h)
-                except:
-                    continue
-            
-            for hour in range(9, 17):
-                if hour not in busy_hours:
-                    lines.append(f"- {hour:02d}:00 - {hour+1:02d}:00")
-        
-        return '\n'.join(lines)
-        
-    except Exception as e:
-        return f"❌ Failed to check availability: {e}"
-
-
-@mcp.tool()
 async def google_calendar_status() -> str:
     """
     Check Google Calendar integration status and configuration.
@@ -477,7 +731,17 @@ async def google_calendar_status() -> str:
     Returns:
         Configuration status and setup instructions if needed
     """
-    lines = ["# Google Calendar Integration Status", ""]
+    tz = ZoneInfo(TIMEZONE)
+    now = datetime.now(tz)
+    
+    lines = [
+        "# Google Calendar Integration Status",
+        "",
+        f"📍 **Timezone:** {TIMEZONE}",
+        f"⏰ **Current Irish time:** {now.strftime('%Y-%m-%d %H:%M')}",
+        f"🕐 **Meeting window:** {MEETING_START_HOUR}:00 - {MEETING_END_HOUR}:00",
+        "",
+    ]
     
     # Check config directory
     lines.append(f"**Config directory:** `{CONFIG_DIR}`")
@@ -512,7 +776,7 @@ async def google_calendar_status() -> str:
         try:
             calendar = service.calendars().get(calendarId='primary').execute()
             lines.append(f"   Calendar: {calendar.get('summary', 'Primary')}")
-            lines.append(f"   Timezone: {calendar.get('timeZone', 'Unknown')}")
+            lines.append(f"   Email: {calendar.get('id', 'Unknown')}")
         except Exception as e:
             lines.append(f"   (Could not fetch calendar details: {e})")
     else:
@@ -527,19 +791,24 @@ async def google_calendar_status() -> str:
     lines.append("4. Create OAuth 2.0 credentials (Desktop app)")
     lines.append(f"5. Download and save as `{CREDENTIALS_FILE}`")
     lines.append("6. Run any calendar tool to complete OAuth flow")
+    lines.append("")
+    lines.append("## Attendee Availability")
+    lines.append("")
+    lines.append("For checking attendee availability, the attendee must:")
+    lines.append("- Be in the same Google Workspace organization (Red Hat), OR")
+    lines.append("- Have shared their calendar with you")
     
     return '\n'.join(lines)
 
 
 def register_tools(server: FastMCP):
     """Register all Google Calendar tools with a FastMCP server."""
-    server.add_tool(google_calendar_create_event)
-    server.add_tool(google_calendar_list_events)
+    server.add_tool(google_calendar_schedule_meeting)
     server.add_tool(google_calendar_quick_meeting)
-    server.add_tool(google_calendar_check_availability)
+    server.add_tool(google_calendar_check_mutual_availability)
+    server.add_tool(google_calendar_list_events)
     server.add_tool(google_calendar_status)
 
 
 if __name__ == "__main__":
     mcp.run()
-
