@@ -5,7 +5,9 @@ name: close_issue
 description: |
   Close a Jira issue by transitioning it to Done.
   Adds a comment summarizing the work from branch commits.
-version: "1.0"
+  
+  Resolves Jira statuses from config.json.
+version: "1.1"
 
 inputs:
   - name: issue_key
@@ -25,11 +27,35 @@ inputs:
     default: true
     description: "Whether to add a closing comment with commit summary"
 
-constants:
-  done_status: "Done"
-  pending_release_status: "Pending Release"
+# No hardcoded constants - resolved from config.json
 
 steps:
+  # ==================== LOAD CONFIG ====================
+
+  - name: load_config
+    description: "Load Jira status configuration"
+    compute: |
+      import json
+      from pathlib import Path
+
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      jira_statuses = config.get("jira", {}).get("statuses", {})
+
+      result = {
+          "done_status": jira_statuses.get("done", "Done"),
+          "pending_release_status": jira_statuses.get("pending_release", "Pending Release"),
+      }
+    output: cfg
   # ==================== GET ISSUE DETAILS ====================
 
   # Step 1: Get current issue status
@@ -263,7 +289,7 @@ steps:
     compute: |
       import re
       
-      target_status = constants.done_status
+      target_status = cfg["done_status"]
       transitions_text = str(available_transitions) if available_transitions else ""
       
       # Look for Done transition in available transitions
@@ -323,6 +349,31 @@ steps:
     args:
       issue_key: "{{ inputs.issue_key }}"
     output: final_issue
+    on_error: continue
+
+  # Step 11: Emit issue closed hook
+  - name: emit_issue_closed_hook
+    description: "Notify team channel about closed issue"
+    condition: "not status_check.already_done"
+    compute: |
+      import asyncio
+      import sys
+      from pathlib import Path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      
+      try:
+          from scripts.skill_hooks import emit_event
+          
+          commit_count = commit_info.get("count", 0) if commit_info else 0
+          
+          asyncio.run(emit_event("issue_closed", {
+              "issue_key": inputs.issue_key,
+              "commit_count": str(commit_count),
+          }))
+          result = "hook sent"
+      except Exception as e:
+          result = f"hook skipped: {e}"
+    output: close_hook_result
     on_error: continue
 
 outputs:

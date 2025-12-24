@@ -69,3 +69,6 @@ memory/sessions/*.yaml
 
 # Generated files
 docs/*.pdf
+
+# slack db
+slack_state.db

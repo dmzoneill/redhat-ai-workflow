@@ -13,7 +13,9 @@ description: |
   5. Escalate to debug_prod if serious
   
   Use this for quick triage. For deep investigation, use debug_prod directly.
-version: "2.0"
+  
+  Resolves namespaces and paths from config.json.
+version: "2.1"
 
 inputs:
   - name: environment
@@ -38,18 +40,40 @@ inputs:
     default: true
     description: "Auto-run debug_prod if critical issues found"
 
-constants:
-  # Automation Analytics namespaces
-  namespace_stage: tower-analytics-stage
-  namespace_prod_main: tower-analytics-prod
-  namespace_prod_billing: tower-analytics-prod-billing
-
-  # Alert definition paths in app-interface
-  alerts_prod_main: /home/daoneill/src/app-interface/resources/insights-prod/tower-analytics-prod
-  alerts_prod_billing: /home/daoneill/src/app-interface/resources/insights-prod/tower-analytics-prod-billing
-  alerts_stage: /home/daoneill/src/app-interface/resources/insights-stage/tower-analytics-stage
+# No hardcoded constants - resolved dynamically from config.json
 
 steps:
+  # ==================== LOAD CONFIG ====================
+
+  - name: load_config
+    description: "Load namespace configuration"
+    compute: |
+      import json
+      from pathlib import Path
+
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      ns_config = config.get("namespaces", {})
+      ai_config = config.get("app_interface", {})
+
+      result = {
+          "namespace_stage": ns_config.get("stage", {}).get("main", "tower-analytics-stage"),
+          "namespace_prod_main": ns_config.get("production", {}).get("main", "tower-analytics-prod"),
+          "namespace_prod_billing": ns_config.get("production", {}).get("billing", "tower-analytics-prod-billing"),
+          "alerts_stage": ai_config.get("alerts", {}).get("stage", "resources/insights-stage/tower-analytics-stage"),
+          "alerts_prod_main": ai_config.get("alerts", {}).get("prod_main", "resources/insights-prod/tower-analytics-prod"),
+          "alerts_prod_billing": ai_config.get("alerts", {}).get("prod_billing", "resources/insights-prod/tower-analytics-prod-billing"),
+      }
+    output: cfg
   # ==================== RESOLVE NAMESPACE ====================
 
   - name: resolve_namespace
@@ -59,13 +83,13 @@ steps:
       ns_input = (inputs.namespace or "main").lower()
 
       if env == "stage":
-          namespace = constants.namespace_stage
+          namespace = cfg["namespace_stage"]
           env_label = "stage"
       elif "billing" in ns_input:
-          namespace = constants.namespace_prod_billing
+          namespace = cfg["namespace_prod_billing"]
           env_label = "production"
       else:
-          namespace = constants.namespace_prod_main
+          namespace = cfg["namespace_prod_main"]
           env_label = "production"
 
       result = {
@@ -284,6 +308,46 @@ steps:
           "time_range": "1h"
         }
     output: debug_result
+    on_error: continue
+
+  # Emit alert hooks
+  - name: emit_alert_hooks
+    description: "Notify team channel about critical alerts"
+    compute: |
+      import asyncio
+      import sys
+      from pathlib import Path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      
+      try:
+          from scripts.skill_hooks import emit_event
+          
+          # Emit critical alert if applicable
+          if assessment.get("severity") == "critical":
+              alert_name = inputs.alert_name or "unknown"
+              if alert_info.get("alerts"):
+                  alert_name = alert_info["alerts"][0].get("name", alert_name)
+              
+              asyncio.run(emit_event("alert_critical", {
+                  "alert_name": alert_name,
+                  "namespace": target.get("namespace", ""),
+                  "environment": target.get("environment", ""),
+              }))
+              result = "critical hook sent"
+          
+          # Emit escalated if we ran debug_prod
+          elif assessment.get("needs_escalation") and debug_result:
+              alert_name = inputs.alert_name or "unknown"
+              asyncio.run(emit_event("alert_escalated", {
+                  "alert_name": alert_name,
+                  "namespace": target.get("namespace", ""),
+              }))
+              result = "escalated hook sent"
+          else:
+              result = "no hook needed"
+      except Exception as e:
+          result = f"hook skipped: {e}"
+    output: alert_hook_result
     on_error: continue
 
 # ==================== OUTPUT ====================

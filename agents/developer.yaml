@@ -6,19 +6,19 @@ description: Coding, PRs, and code review
 persona: agents/developer.md
 
 # Tool modules to load (from mcp-servers/aa-*)
-# Reduced to stay under 80 tool limit
 tools:
   - git           # 15 tools - Git operations
   - gitlab        # 35 tools - MRs, CI/CD
   - jira          # 24 tools - Issue tracking
 
 # Total: ~74 tools (under 80 limit)
-# Note: Use tool_exec() for konflux, bonfire, quay, k8s when needed
+# For ephemeral deployment, use the devops agent which has bonfire, k8s, quay
 
 skills:
   - start_work
   - create_mr           # Create MR with validation, linting, conflict detection
   - close_issue         # Close issue with commit summary
+  - review_mr           # Review GitLab MR from URL - details, diff, pipeline
   - review_pr           # PR review workflow (auto-approves or posts feedback)
   - review_all_prs      # Batch review open PRs (excludes your own)
   - check_my_prs        # Check your PRs for reviewer feedback

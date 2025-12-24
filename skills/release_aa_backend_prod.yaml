@@ -6,7 +6,9 @@ description: |
   Release Automation Analytics backend to production.
   This skill guides you through the promotion process from stage to production
   by updating the commit SHA in app-interface and creating a PR for approval.
-version: "1.0"
+  
+  Resolves paths and Quay images from config.json.
+version: "1.1"
 
 inputs:
   - name: commit_sha
@@ -26,16 +28,49 @@ inputs:
     default: false
     description: "Also promote the billing component to production"
 
-# Paths used by this skill
-constants:
-  backend_repo: /home/daoneill/src/automation-analytics-backend
-  appinterface_repo: /home/daoneill/src/app-interface
-  deploy_file: data/services/insights/tower-analytics/cicd/deploy-clowder.yml
-  quay_image: quay.io/redhat-services-prod/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main
-  prod_namespace_pattern: "tower-analytics-prod.yml"
-  billing_namespace_pattern: "tower-analytics-prod-billing.yml"
+# No hardcoded constants - resolved dynamically from config.json
 
 steps:
+  # ==================== LOAD CONFIG ====================
+
+  - name: load_config
+    description: "Load release configuration from config.json"
+    compute: |
+      import json
+      from pathlib import Path
+
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      repos = config.get("repositories", {})
+      ai_config = config.get("app_interface", {})
+      quay_config = config.get("quay", {})
+      ns_config = config.get("namespaces", {}).get("production", {})
+
+      # Get repo paths
+      backend_cfg = repos.get("automation-analytics-backend", {})
+      ai_cfg = repos.get("app-interface", {})
+
+      result = {
+          "backend_repo": backend_cfg.get("path", str(Path.home() / "src/automation-analytics-backend")),
+          "appinterface_repo": ai_cfg.get("path", str(Path.home() / "src/app-interface")),
+          "deploy_file": ai_config.get("deploy_file", "data/services/insights/tower-analytics/cicd/deploy-clowder.yml"),
+          "quay_image": f"quay.io/redhat-services-prod/{quay_config.get('repositories', {}).get('automation-analytics', 'aap-aa-tenant/aap-aa-main/automation-analytics-backend-main')}",
+          "quay_repository": quay_config.get("repositories", {}).get("automation-analytics", "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"),
+          "namespace_main": ns_config.get("main", "tower-analytics-prod"),
+          "namespace_billing": ns_config.get("billing", "tower-analytics-prod-billing"),
+          "prod_namespace_pattern": "tower-analytics-prod.yml",
+          "billing_namespace_pattern": "tower-analytics-prod-billing.yml",
+      }
+    output: cfg
   # ==================== VERIFICATION ====================
   
   # Step 1: Verify commit exists in backend repo
@@ -43,11 +78,11 @@ steps:
     description: "Verify the commit SHA exists in automation-analytics-backend"
     tool: git_log
     args:
-      repo: "{{ constants.backend_repo }}"
+      repo: "{{ cfg.backend_repo }}"
       limit: 1
     validate:
       - command: "git cat-file -t {{ inputs.commit_sha }}"
-        cwd: "{{ constants.backend_repo }}"
+        cwd: "{{ cfg.backend_repo }}"
         expect_success: true
         error_message: "Commit {{ inputs.commit_sha }} not found in automation-analytics-backend. Did you fetch latest?"
     output: commit_info
@@ -72,7 +107,7 @@ steps:
     description: "Read current production SHA from app-interface"
     compute: |
       import re
-      deploy_path = f"{constants.appinterface_repo}/{constants.deploy_file}"
+      deploy_path = f"{cfg["appinterface_repo"]}/{cfg["deploy_file"]}"
       with open(deploy_path, 'r') as f:
         content = f.read()
       
@@ -95,7 +130,7 @@ steps:
       import subprocess
       result = subprocess.run(
         ["git", "log", "--oneline", f"{current_prod_sha}..{inputs.commit_sha}"],
-        cwd=constants.backend_repo,
+        cwd=cfg["backend_repo"],
         capture_output=True,
         text=True
       )
@@ -103,7 +138,7 @@ steps:
         # Try the reverse in case current is ahead
         result = subprocess.run(
           ["git", "log", "--oneline", f"{inputs.commit_sha}..{current_prod_sha}"],
-          cwd=constants.backend_repo,
+          cwd=cfg["backend_repo"],
           capture_output=True,
           text=True
         )
@@ -137,7 +172,7 @@ steps:
     description: "Check app-interface repo status"
     tool: git_status
     args:
-      repo: "{{ constants.appinterface_repo }}"
+      repo: "{{ cfg.appinterface_repo }}"
     output: appinterface_status
 
   - name: validate_clean_repo
@@ -151,7 +186,7 @@ steps:
     description: "Switch to master branch"
     tool: git_checkout
     args:
-      repo: "{{ constants.appinterface_repo }}"
+      repo: "{{ cfg.appinterface_repo }}"
       target: "master"
 
   - name: pull_upstream
@@ -160,7 +195,7 @@ steps:
       import subprocess
       result = subprocess.run(
         ["git", "pull", "--rebase", "upstream", "master"],
-        cwd=constants.appinterface_repo,
+        cwd=cfg["appinterface_repo"],
         capture_output=True,
         text=True
       )
@@ -175,7 +210,7 @@ steps:
       import subprocess
       
       base_name = f"aa-release-{inputs.release_date}"
-      repo = constants.appinterface_repo
+      repo = cfg["appinterface_repo"]
       
       # Check if branch already exists
       result = subprocess.run(
@@ -211,7 +246,7 @@ steps:
     compute: |
       import subprocess
       
-      repo = constants.appinterface_repo
+      repo = cfg["appinterface_repo"]
       branch = branch_info["name"]
       
       # Create and checkout
@@ -246,7 +281,7 @@ steps:
     description: "Update production namespace ref to new SHA"
     compute: |
       import re
-      deploy_path = f"{constants.appinterface_repo}/{constants.deploy_file}"
+      deploy_path = f"{cfg["appinterface_repo"]}/{cfg["deploy_file"]}"
       
       with open(deploy_path, 'r') as f:
         content = f.read()
@@ -275,7 +310,7 @@ steps:
     condition: "{{ inputs.include_billing }}"
     compute: |
       import re
-      deploy_path = f"{constants.appinterface_repo}/{constants.deploy_file}"
+      deploy_path = f"{cfg["appinterface_repo"]}/{cfg["deploy_file"]}"
       
       with open(deploy_path, 'r') as f:
         content = f.read()
@@ -304,8 +339,8 @@ steps:
     description: "Stage the deploy file changes"
     tool: git_add
     args:
-      repo: "{{ constants.appinterface_repo }}"
-      files: "{{ constants.deploy_file }}"
+      repo: "{{ cfg.appinterface_repo }}"
+      files: "{{ cfg.deploy_file }}"
 
   - name: commit_changes
     description: "Commit the release changes"
@@ -318,7 +353,7 @@ steps:
       
       result = subprocess.run(
         ["git", "commit", "-m", commit_msg],
-        cwd=constants.appinterface_repo,
+        cwd=cfg["appinterface_repo"],
         capture_output=True,
         text=True
       )
@@ -334,7 +369,7 @@ steps:
     description: "Push release branch to origin"
     tool: git_push
     args:
-      repo: "{{ constants.appinterface_repo }}"
+      repo: "{{ cfg.appinterface_repo }}"
       branch: "{{ branch_name }}"
       set_upstream: true
     output: push_result
@@ -360,7 +395,7 @@ steps:
         {% if inputs.include_billing %}- [x] tower-analytics-prod-billing{% endif %}
         
         ### Quay Image
-        `{{ constants.quay_image }}:{{ inputs.commit_sha }}`
+        `{{ cfg.quay_image }}:{{ inputs.commit_sha }}`
         
         ### Checklist
         - [ ] Verified image exists in Quay
@@ -386,6 +421,36 @@ steps:
         
         Releasing commit: {{ inputs.commit_sha }}
         {{ changelog }}
+    on_error: continue
+
+  # Step 15: Emit release started hook
+  - name: emit_release_started_hook
+    description: "Notify team channel about release"
+    condition: "mr_result"
+    compute: |
+      import asyncio
+      import sys
+      from pathlib import Path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      
+      try:
+          from scripts.skill_hooks import emit_event
+          
+          # Emit release started
+          asyncio.run(emit_event("release_started", {
+              "sha": inputs.commit_sha[:12],
+              "environment": "production",
+          }))
+          
+          # Also emit release MR ready
+          asyncio.run(emit_event("release_mr_ready", {
+              "mr_url": mr_result.get('web_url', ''),
+              "sha": inputs.commit_sha[:12],
+          }))
+          result = "hooks sent"
+      except Exception as e:
+          result = f"hooks skipped: {e}"
+    output: release_hook_result
     on_error: continue
 
 # ==================== OUTPUT ====================

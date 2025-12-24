@@ -9,15 +9,27 @@ description: |
   - MRs created/reviewed
   - Issues closed
   
+  If 'repo' is not provided, can be resolved from 'repo_name' or 'issue_key' via config.
+  
   Perfect for daily standups or status updates.
-version: "1.0"
+version: "1.1"
 
 inputs:
   - name: repo
     type: string
     required: false
-    default: "."
-    description: "Repository path (defaults to current directory)"
+    default: ""
+    description: "Repository path - if not provided, resolved from repo_name or issue_key"
+
+  - name: repo_name
+    type: string
+    required: false
+    description: "Repository name from config (e.g., 'automation-analytics-backend')"
+
+  - name: issue_key
+    type: string
+    required: false
+    description: "Jira issue key - used to resolve repo and Jira project"
 
   - name: days
     type: integer
@@ -42,11 +54,78 @@ inputs:
     required: false
     description: "Git author email (defaults to git config)"
 
+# Note: constants now resolved dynamically from config
 constants:
-  gitlab_project: automation-analytics/automation-analytics-backend
-  jira_project: AAP
+  jira_url: https://issues.redhat.com
 
 steps:
+  # ==================== RESOLVE REPOSITORY ====================
+
+  - name: resolve_repo
+    description: "Determine which repo and GitLab project to use"
+    compute: |
+      import json
+      import os
+      from pathlib import Path
+
+      repo_path = None
+      gitlab_project = "automation-analytics/automation-analytics-backend"
+      jira_project = "AAP"
+
+      # Load config
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      repos = config.get("repositories", {})
+
+      # Explicit repo path
+      if inputs.repo and inputs.repo != "" and inputs.repo != ".":
+          repo_path = inputs.repo
+          for name, cfg in repos.items():
+              if cfg.get("path") == repo_path:
+                  gitlab_project = cfg.get("gitlab", gitlab_project)
+                  jira_project = cfg.get("jira_project", jira_project)
+                  break
+      # Repo name from config
+      elif inputs.repo_name and inputs.repo_name in repos:
+          cfg = repos[inputs.repo_name]
+          repo_path = cfg.get("path")
+          gitlab_project = cfg.get("gitlab", gitlab_project)
+          jira_project = cfg.get("jira_project", jira_project)
+      # Resolve from issue key
+      elif inputs.issue_key:
+          project_prefix = inputs.issue_key.split("-")[0].upper()
+          jira_project = project_prefix
+          for name, cfg in repos.items():
+              if cfg.get("jira_project") == project_prefix:
+                  repo_path = cfg.get("path")
+                  gitlab_project = cfg.get("gitlab", gitlab_project)
+                  break
+      # Fall back to cwd
+      else:
+          cwd = os.getcwd()
+          if os.path.exists(os.path.join(cwd, ".git")):
+              repo_path = cwd
+              for name, cfg in repos.items():
+                  if cfg.get("path") == cwd:
+                      gitlab_project = cfg.get("gitlab", gitlab_project)
+                      jira_project = cfg.get("jira_project", jira_project)
+                      break
+
+      if not repo_path:
+          raise ValueError("Repository not specified. Provide 'repo', 'repo_name', or 'issue_key'.")
+
+      result = {"path": repo_path, "gitlab_project": gitlab_project, "jira_project": jira_project}
+    output: resolved_repo
+
   # ==================== GET AUTHOR ====================
 
   - name: get_author
@@ -55,7 +134,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       if inputs.author:
           author = inputs.author
@@ -89,7 +168,7 @@ steps:
       import os
       from datetime import datetime, timedelta
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
       days = inputs.days
 
       # Calculate since date
@@ -145,7 +224,7 @@ steps:
     condition: "inputs.include_jira"
     tool: jira_search
     args:
-      jql: 'project = AAP AND assignee = currentUser() AND status in ("In Progress", "In Review") ORDER BY updated DESC'
+      jql: 'project = {{ resolved_repo.jira_project }} AND assignee = currentUser() AND status in ("In Progress", "In Review") ORDER BY updated DESC'
     output: jira_in_progress
     on_error: continue
 
@@ -154,7 +233,7 @@ steps:
     condition: "inputs.include_jira"
     tool: jira_search
     args:
-      jql: 'project = AAP AND assignee = currentUser() AND status = Done AND updated >= -{{ inputs.days }}d ORDER BY updated DESC'
+      jql: 'project = {{ resolved_repo.jira_project }} AND assignee = currentUser() AND status = Done AND updated >= -{{ inputs.days }}d ORDER BY updated DESC'
     output: jira_done
     on_error: continue
 
@@ -203,7 +282,7 @@ steps:
     condition: "inputs.include_gitlab"
     tool: gitlab_mr_list
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved_repo.gitlab_project }}"
       state: all
       author: "{{ author_info.name }}"
     output: my_mrs_raw
@@ -214,7 +293,7 @@ steps:
     condition: "inputs.include_gitlab"
     tool: gitlab_mr_list
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved_repo.gitlab_project }}"
       state: all
       reviewer: "{{ author_info.name }}"
     output: reviewed_mrs_raw
@@ -339,6 +418,10 @@ outputs:
   - name: context
     value:
       author: "{{ author_info.name }}"
+      repo: "{{ resolved_repo.path }}"
+      gitlab_project: "{{ resolved_repo.gitlab_project }}"
+      jira_project: "{{ resolved_repo.jira_project }}"
       commits: "{{ commit_info.count }}"
       issue_keys: "{{ commit_info.issue_keys }}"
+
 

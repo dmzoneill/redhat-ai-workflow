@@ -1,13 +1,21 @@
 # Shared Constants for AI Workflow Skills
 # All skills can reference these via {{ shared.key }}
+#
+# NOTE: User-specific paths are in config.json (gitignored).
+# This file contains project-wide constants only.
+# Skills should use config.json for:
+#   - repositories.*.path  (absolute paths)
+#   - slack.*              (credentials, channels)
+#   - kubernetes.*         (kubeconfig paths)
 
 # ==================== AUTOMATION ANALYTICS ====================
 
-# Repository paths
+# Repository names (paths come from config.json)
 repositories:
-  backend: /home/daoneill/src/automation-analytics-backend
-  app_interface: /home/daoneill/src/app-interface
-  workflow: /home/daoneill/src/redhat-ai-workflow
+  backend: automation-analytics-backend
+  pdf_generator: pdf-generator
+  app_interface: app-interface
+  workflow: redhat-ai-workflow
 
 # GitLab configuration
 gitlab:
@@ -119,4 +127,5 @@ timeouts:
   
   # Standup lookback
   standup_days: 1
+
 

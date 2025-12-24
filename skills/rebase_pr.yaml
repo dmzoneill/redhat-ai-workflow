@@ -5,6 +5,8 @@ name: rebase_pr
 description: |
   Rebase a PR branch onto main to clean up merge commits.
   
+  If 'repo_path' is not provided, resolves from issue_key or repo_name via config.
+  
   Steps:
   1. Check for merge commits on the PR
   2. Checkout the branch locally
@@ -15,7 +17,7 @@ description: |
   
   Handles merge conflicts by pausing and showing what needs to be fixed.
 
-version: "1.0"
+version: "1.1"
 
 inputs:
   - name: mr_id
@@ -26,7 +28,7 @@ inputs:
   - name: issue_key
     type: string
     required: false
-    description: "Jira issue key - will find the branch"
+    description: "Jira issue key - will find the branch and resolve repo"
   
   - name: branch
     type: string
@@ -36,14 +38,19 @@ inputs:
   - name: repo_path
     type: string
     required: false
-    default: "."
-    description: "Path to repository (default: current directory)"
+    default: ""
+    description: "Path to repository - if not provided, resolved from issue_key or repo_name"
+  
+  - name: repo_name
+    type: string
+    required: false
+    description: "Repository name from config (e.g., 'automation-analytics-backend')"
   
   - name: base_branch
     type: string
     required: false
-    default: "main"
-    description: "Branch to rebase onto (default: main)"
+    default: ""
+    description: "Branch to rebase onto (default: repo's default_branch from config)"
   
   - name: force_push
     type: boolean
@@ -51,10 +58,84 @@ inputs:
     default: false
     description: "Auto force-push after successful rebase (asks if false)"
 
-constants:
-  gitlab_project: automation-analytics/automation-analytics-backend
+# No hardcoded constants - resolved dynamically
 
 steps:
+  # ==================== RESOLVE REPOSITORY ====================
+  
+  - name: resolve_repo
+    description: "Determine which repo and GitLab project to use"
+    compute: |
+      import json
+      import os
+      from pathlib import Path
+
+      repo_path = None
+      gitlab_project = None
+      default_branch = "main"
+
+      # Load config
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      repos = config.get("repositories", {})
+
+      # Explicit repo path
+      if inputs.repo_path and inputs.repo_path != "" and inputs.repo_path != ".":
+          repo_path = inputs.repo_path
+          for name, cfg in repos.items():
+              if cfg.get("path") == repo_path:
+                  gitlab_project = cfg.get("gitlab")
+                  default_branch = cfg.get("default_branch", "main")
+                  break
+      # Repo name from config
+      elif inputs.repo_name and inputs.repo_name in repos:
+          cfg = repos[inputs.repo_name]
+          repo_path = cfg.get("path")
+          gitlab_project = cfg.get("gitlab")
+          default_branch = cfg.get("default_branch", "main")
+      # Resolve from issue key
+      elif inputs.issue_key:
+          project_prefix = inputs.issue_key.split("-")[0].upper()
+          for name, cfg in repos.items():
+              if cfg.get("jira_project") == project_prefix:
+                  repo_path = cfg.get("path")
+                  gitlab_project = cfg.get("gitlab")
+                  default_branch = cfg.get("default_branch", "main")
+                  break
+      # Fall back to cwd
+      else:
+          cwd = os.getcwd()
+          if os.path.exists(os.path.join(cwd, ".git")):
+              repo_path = cwd
+              for name, cfg in repos.items():
+                  if cfg.get("path") == cwd:
+                      gitlab_project = cfg.get("gitlab")
+                      default_branch = cfg.get("default_branch", "main")
+                      break
+
+      if not repo_path:
+          raise ValueError("Repository not specified. Provide 'repo_path', 'repo_name', or 'issue_key'.")
+
+      # Override default_branch if explicitly specified
+      if inputs.base_branch:
+          default_branch = inputs.base_branch
+
+      result = {
+          "path": repo_path,
+          "gitlab_project": gitlab_project or "automation-analytics/automation-analytics-backend",
+          "default_branch": default_branch,
+      }
+    output: resolved_repo
+
   # ==================== RESOLVE BRANCH NAME ====================
   
   - name: validate_input
@@ -70,7 +151,7 @@ steps:
     condition: "inputs.get('mr_id') and not inputs.get('branch')"
     tool: gitlab_mr_view
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved_repo.gitlab_project }}"
       mr_id: "{{ inputs.mr_id }}"
     output: mr_details
     on_error: continue
@@ -95,7 +176,7 @@ steps:
         result = subprocess.run(
           ['git', 'branch', '-a', '--list', f'*{issue_key}*'],
           capture_output=True, text=True,
-          cwd=inputs.repo_path
+          cwd=resolved_repo["path"]
         )
         branches = [b.strip().replace('* ', '').replace('remotes/origin/', '') 
                    for b in result.stdout.strip().split('\n') if b.strip()]
@@ -118,7 +199,7 @@ steps:
       result = subprocess.run(
         ['git', 'fetch', '--all', '--prune'],
         capture_output=True, text=True,
-        cwd=inputs.repo_path
+        cwd=resolved_repo["path"]
       )
       
       if result.returncode != 0:
@@ -132,14 +213,14 @@ steps:
     compute: |
       import subprocess
       
-      base = inputs.base_branch
+      base = resolved_repo["default_branch"]
       branch = target_branch
       
       # Get merge commits on the branch
       result = subprocess.run(
         ['git', 'log', '--merges', '--oneline', f'origin/{base}..origin/{branch}'],
         capture_output=True, text=True,
-        cwd=inputs.repo_path
+        cwd=resolved_repo["path"]
       )
       
       merge_commits = [l for l in result.stdout.strip().split('\n') if l.strip()]
@@ -148,7 +229,7 @@ steps:
       total_result = subprocess.run(
         ['git', 'log', '--oneline', f'origin/{base}..origin/{branch}'],
         capture_output=True, text=True,
-        cwd=inputs.repo_path
+        cwd=resolved_repo["path"]
       )
       total_commits = len([l for l in total_result.stdout.strip().split('\n') if l.strip()])
       
@@ -171,7 +252,7 @@ steps:
       status = subprocess.run(
         ['git', 'status', '--porcelain'],
         capture_output=True, text=True,
-        cwd=inputs.repo_path
+        cwd=resolved_repo["path"]
       )
       
       if status.stdout.strip():
@@ -179,7 +260,7 @@ steps:
         stash = subprocess.run(
           ['git', 'stash', 'push', '-m', 'rebase_pr: auto-stash before rebase'],
           capture_output=True, text=True,
-          cwd=inputs.repo_path
+          cwd=resolved_repo["path"]
         )
         result = "Stashed local changes"
       else:
@@ -197,7 +278,7 @@ steps:
       result = subprocess.run(
         ['git', 'checkout', branch],
         capture_output=True, text=True,
-        cwd=inputs.repo_path
+        cwd=resolved_repo["path"]
       )
       
       if result.returncode != 0:
@@ -205,7 +286,7 @@ steps:
         result = subprocess.run(
           ['git', 'checkout', '-B', branch, f'origin/{branch}'],
           capture_output=True, text=True,
-          cwd=inputs.repo_path
+          cwd=resolved_repo["path"]
         )
         if result.returncode != 0:
           raise ValueError(f"Failed to checkout {branch}: {result.stderr}")
@@ -221,7 +302,7 @@ steps:
       result = subprocess.run(
         ['git', 'pull', '--ff-only', 'origin', target_branch],
         capture_output=True, text=True,
-        cwd=inputs.repo_path
+        cwd=resolved_repo["path"]
       )
       
       # If fast-forward fails, reset to remote
@@ -229,7 +310,7 @@ steps:
         result = subprocess.run(
           ['git', 'reset', '--hard', f'origin/{target_branch}'],
           capture_output=True, text=True,
-          cwd=inputs.repo_path
+          cwd=resolved_repo["path"]
         )
       
       result = "Branch synced with remote"
@@ -242,11 +323,11 @@ steps:
     compute: |
       import subprocess
       
-      base = inputs.base_branch
+      base = resolved_repo["default_branch"]
       
       # Fetch and update local base branch
       subprocess.run(['git', 'fetch', 'origin', base], 
-                    capture_output=True, cwd=inputs.repo_path)
+                    capture_output=True, cwd=resolved_repo["path"])
       
       result = f"Updated origin/{base}"
     output: base_updated
@@ -256,13 +337,13 @@ steps:
     compute: |
       import subprocess
       
-      base = inputs.base_branch
+      base = resolved_repo["default_branch"]
       
       # Start rebase
       result = subprocess.run(
         ['git', 'rebase', f'origin/{base}'],
         capture_output=True, text=True,
-        cwd=inputs.repo_path
+        cwd=resolved_repo["path"]
       )
       
       if result.returncode == 0:
@@ -276,7 +357,7 @@ steps:
         status = subprocess.run(
           ['git', 'status', '--porcelain'],
           capture_output=True, text=True,
-          cwd=inputs.repo_path
+          cwd=resolved_repo["path"]
         )
         
         # UU = both modified (conflict)
@@ -311,7 +392,7 @@ steps:
       import os
       
       conflict_files = rebase_result.get('conflict_files', [])
-      repo = inputs.repo_path
+      repo = resolved_repo["path"]
       
       auto_resolved = []
       needs_human = []
@@ -438,7 +519,7 @@ steps:
       result = subprocess.run(
         ['git', 'rebase', '--continue'],
         capture_output=True, text=True,
-        cwd=inputs.repo_path,
+        cwd=resolved_repo["path"],
         env={**dict(subprocess.os.environ), 'GIT_EDITOR': 'true'}  # Skip commit message editor
       )
       
@@ -452,7 +533,7 @@ steps:
         status = subprocess.run(
           ['git', 'status', '--porcelain'],
           capture_output=True, text=True,
-          cwd=inputs.repo_path
+          cwd=resolved_repo["path"]
         )
         new_conflicts = [l[3:] for l in status.stdout.split('\n') if l.startswith('UU')]
         
@@ -499,7 +580,7 @@ steps:
       result = subprocess.run(
         ['git', 'push', '--dry-run', '--force-with-lease', 'origin', target_branch],
         capture_output=True, text=True,
-        cwd=inputs.repo_path
+        cwd=resolved_repo["path"]
       )
       
       stderr = result.stderr.lower()
@@ -534,7 +615,7 @@ steps:
       result = subprocess.run(
         ['git', 'push', '--force-with-lease', 'origin', target_branch],
         capture_output=True, text=True,
-        cwd=inputs.repo_path
+        cwd=resolved_repo["path"]
       )
       
       if result.returncode != 0:
@@ -553,8 +634,8 @@ steps:
     compute: |
       lines = ["## 🔄 Rebase PR Summary", ""]
       lines.append(f"**Branch:** `{target_branch}`")
-      lines.append(f"**Base:** `{inputs.base_branch}`")
-      lines.append(f"**Repository:** `{inputs.repo_path}`")
+      lines.append(f"**Base:** `{resolved_repo['default_branch']}`")
+      lines.append(f"**Repository:** `{resolved_repo['path']}`")
       lines.append("")
       
       # Merge commits info
@@ -608,6 +689,42 @@ steps:
       
       result = '\n'.join(lines)
     output: summary
+
+  # Emit rebase hooks
+  - name: emit_rebase_hook
+    description: "Notify author about rebase result"
+    compute: |
+      import asyncio
+      import sys
+      from pathlib import Path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      
+      try:
+          from scripts.skill_hooks import emit_event
+          
+          effective_result = final_rebase_result if final_rebase_result else rebase_result
+          
+          if effective_result.get('success'):
+              asyncio.run(emit_event("rebase_completed", {
+                  "mr_id": str(inputs.get('mr_id', '')),
+                  "branch": target_branch,
+                  "base_branch": resolved_repo.get("default_branch", "main"),
+                  "author": "",  # self - no DM needed
+              }))
+              result = "rebase_completed hook sent"
+          elif effective_result.get('conflicts') and conflict_resolution and conflict_resolution.get('needs_human'):
+              asyncio.run(emit_event("rebase_conflict", {
+                  "mr_id": str(inputs.get('mr_id', '')),
+                  "branch": target_branch,
+                  "author": "",  # self - no DM needed
+              }))
+              result = "rebase_conflict hook sent"
+          else:
+              result = "no hook needed"
+      except Exception as e:
+          result = f"hook skipped: {e}"
+    output: rebase_hook_result
+    on_error: continue
 
 # ==================== OUTPUT ====================
 

@@ -11,15 +11,22 @@ description: |
   - MRs ready to merge (approved)
   
   Helps you respond to reviewer comments.
+  
+  Resolves project from repo_name or issue_key if not explicitly provided.
 
-version: "1.0"
+version: "1.1"
 
 inputs:
   - name: project
     type: string
     required: false
-    default: automation-analytics/automation-analytics-backend
-    description: "GitLab project path"
+    default: ""
+    description: "GitLab project path (resolved from repo_name if not provided)"
+  
+  - name: repo_name
+    type: string
+    required: false
+    description: "Repository name from config (e.g., 'automation-analytics-backend')"
   
   - name: show_approved
     type: boolean
@@ -39,10 +46,53 @@ inputs:
     default: false
     description: "Automatically rebase MRs with merge conflicts"
 
-constants:
-  gitlab_project: automation-analytics/automation-analytics-backend
+# No hardcoded constants - resolved dynamically
 
 steps:
+  # ==================== RESOLVE PROJECT ====================
+  
+  - name: resolve_project
+    description: "Determine which GitLab project to check"
+    compute: |
+      import json
+      import os
+      from pathlib import Path
+
+      gitlab_project = None
+
+      # Load config
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      repos = config.get("repositories", {})
+
+      # Explicit project
+      if inputs.project:
+          gitlab_project = inputs.project
+      # Repo name from config
+      elif inputs.repo_name and inputs.repo_name in repos:
+          gitlab_project = repos[inputs.repo_name].get("gitlab")
+      # Fall back to cwd
+      else:
+          cwd = os.getcwd()
+          for name, cfg in repos.items():
+              if cfg.get("path") == cwd:
+                  gitlab_project = cfg.get("gitlab")
+                  break
+
+      if not gitlab_project:
+          gitlab_project = "automation-analytics/automation-analytics-backend"
+
+      result = {"gitlab_project": gitlab_project}
+    output: resolved
   # ==================== GET CURRENT USER ====================
   
   - name: get_username
@@ -61,7 +111,7 @@ steps:
     description: "Fetch my open MRs from GitLab"
     tool: gitlab_mr_list
     args:
-      project: "{{ inputs.project }}"
+      project: "{{ resolved.gitlab_project }}"
       state: opened
       author: "{{ my_username }}"
     output: my_mrs_raw
@@ -107,7 +157,7 @@ steps:
     condition: "len(my_mrs) > 0"
     tool: gitlab_mr_view
     args:
-      project: "{{ inputs.project }}"
+      project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ my_mrs[0]['iid'] }}"
     output: first_mr_details
     on_error: continue
@@ -202,7 +252,7 @@ steps:
     condition: "first_mr_status and first_mr_status.get('status') == 'needs_response'"
     tool: gitlab_mr_view
     args:
-      project: "{{ inputs.project }}"
+      project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ first_mr_status.get('iid') }}"
     output: feedback_details
     on_error: continue
@@ -226,7 +276,7 @@ steps:
     compute: |
       lines = ["## 📋 Your Open MRs", ""]
       lines.append(f"**User:** {my_username}")
-      lines.append(f"**Project:** {inputs.project}")
+      lines.append(f"**Project:** {resolved['gitlab_project']}")
       lines.append(f"**Open MRs:** {len(my_mrs)}")
       lines.append("")
       
@@ -310,7 +360,7 @@ steps:
     condition: "inputs.auto_merge and first_mr_status and first_mr_status.get('status') == 'approved'"
     tool: gitlab_mr_merge
     args:
-      project: "{{ inputs.project }}"
+      project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ first_mr_status.get('iid') }}"
     output: merge_result
     on_error: continue
@@ -342,12 +392,12 @@ outputs:
       
       1. View the comments:
          ```
-         gitlab_mr_view(project="{{ inputs.project }}", mr_id={{ first_mr_status.get('iid') }})
+         gitlab_mr_view(project="{{ resolved.gitlab_project }}", mr_id={{ first_mr_status.get('iid') }})
          ```
       
       2. After making changes, push and comment:
          ```
-         gitlab_mr_comment(project="{{ inputs.project }}", mr_id={{ first_mr_status.get('iid') }}, comment="Addressed feedback: ...")
+         gitlab_mr_comment(project="{{ resolved.gitlab_project }}", mr_id={{ first_mr_status.get('iid') }}, comment="Addressed feedback: ...")
          ```
       {% elif first_mr_status and first_mr_status.get('status') == 'approved' %}
       🎉 **!{{ first_mr_status.get('iid') }} is approved!**

@@ -1,11 +1,53 @@
 # Skill: Test MR in Ephemeral Environment
 # Deploy PR/MR image to ephemeral namespace and run pytest validation
+#
+# IMPORTANT: This skill uses MCP tools (aa-bonfire, aa-quay). DO NOT run raw bonfire commands.
+# The skill handles: kubeconfig, component names, image tags, and bonfire syntax automatically.
 
 name: test_mr_ephemeral
 description: |
   Deploy an MR's image to an ephemeral namespace for testing.
-  Finds the Konflux build, reserves a namespace, deploys, and runs pytest against the ephemeral DB.
-version: "1.1"
+  
+  ## How It Works
+  1. Gets commit SHA from MR (via GitLab MCP)
+  2. Checks if Konflux has built the image (via Quay MCP) - STOPS if not ready
+  3. Reserves ephemeral namespace (via bonfire MCP)
+  4. Deploys using full SHA image tag (via bonfire_deploy_aa)
+  5. Runs pytest against ephemeral DB (optional)
+  
+  ## Prerequisites
+  - Konflux must have built the image (check quay.io/redhat-user-workloads/aap-aa-tenant)
+  - User must be logged into ephemeral cluster (run `kube e` once)
+  
+  ## NEVER Do These Things
+  - DO NOT copy kubeconfig files (cp ~/.kube/config.e ~/.kube/config)
+  - DO NOT run raw `bonfire deploy` without --set-image-tag with FULL SHA
+  - DO NOT use short SHA (8 chars like 8d23cab) - images are tagged with FULL 40-char SHA
+  - DO NOT truncate the SHA - Quay only has images tagged with full 40-char commit SHA
+  
+  ## Why Full SHA Matters
+  Konflux tags images with the FULL 40-char git commit SHA, not short form.
+  - WRONG: quay.io/.../image:8d23cab (manifest unknown!)
+  - RIGHT: quay.io/.../image:8d23cab1234567890abcdef1234567890abcdef12
+  
+  ## Key Config Values (from config.json)
+  - App: tower-analytics
+  - Component: tower-analytics-clowdapp (main) or tower-analytics-billing-clowdapp (billing)
+  - Image base: quay.io/redhat-user-workloads/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main
+  
+  ## ITS Deploy Pattern (what bonfire needs)
+  - template_ref: Full 40-char git commit SHA
+  - IMAGE: quay.io/.../image@sha256 (base + @sha256 suffix)
+  - IMAGE_TAG: 64-char sha256 digest from Quay (NOT the git SHA!)
+  
+  The skill automatically extracts the sha256 digest from Quay after checking the image exists.
+  
+  ## STOP Conditions
+  - If image not in Quay: STOP, tell user to wait for Konflux build
+  - If namespace reservation fails: STOP, check cluster login
+  
+  DO NOT fall back to raw bonfire commands - always use the MCP tools.
+version: "1.3"
 
 inputs:
   - name: mr_id
@@ -33,8 +75,17 @@ inputs:
   - name: billing
     type: boolean
     required: false
-    default: false
-    description: "Test billing component instead of main"
+    default: null
+    description: |
+      Which ClowdApp to deploy:
+      - null (default): AUTO-DETECT from Jira issue and commit diff
+      - false: Force tower-analytics-clowdapp (main app)
+      - true: Force tower-analytics-billing-clowdapp (billing features)
+      
+      Auto-detection checks:
+      1. Jira issue key in commit → search for "billing" in issue
+      2. Commit modifies aap_billing_controller/ files
+      3. Commit modifies test/processor/aap_billing_controller/ files
 
   - name: cleanup_on_failure
     type: boolean
@@ -48,17 +99,45 @@ inputs:
     default: false
     description: "Release namespace after successful tests (default: keep for manual testing)"
 
-constants:
-  gitlab_project: automation-analytics/automation-analytics-backend
-  konflux_namespace: aap-aa-tenant
-  # PR images are in user-workloads repo
-  quay_pr_repo: aap-aa-tenant/aap-aa-main/automation-analytics-backend-main
-  quay_pr_namespace: redhat-user-workloads
-  # Release images are in services-prod repo
-  quay_release_repo: aap-aa-tenant/aap-aa-main/automation-analytics-backend-main
-  quay_release_namespace: redhat-services-prod
+# No hardcoded constants - resolved from config.json
 
 steps:
+  # ==================== LOAD CONFIG ====================
+
+  - name: load_config
+    description: "Load Konflux, Quay, and GitLab configuration"
+    compute: |
+      import json
+      from pathlib import Path
+
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      repos = config.get("repositories", {})
+      quay_config = config.get("quay", {})
+      bonfire_config = config.get("bonfire", {})
+
+      # Get automation-analytics-backend config
+      aa_config = repos.get("automation-analytics-backend", {})
+
+      result = {
+          "gitlab_project": aa_config.get("gitlab", "automation-analytics/automation-analytics-backend"),
+          "konflux_namespace": aa_config.get("konflux_namespace", "aap-aa-tenant"),
+          "quay_pr_repo": quay_config.get("repositories", {}).get("automation-analytics", "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"),
+          "quay_pr_namespace": quay_config.get("default_namespace", "redhat-user-workloads"),
+          "quay_release_namespace": "redhat-services-prod",
+          "ephemeral_kubeconfig": bonfire_config.get("kubeconfig", str(Path.home() / ".kube/config.e")),
+      }
+    output: cfg
+
   # ==================== PRE-FLIGHT CHECKS ====================
 
   # Step 0: Check required tools
@@ -94,43 +173,57 @@ steps:
   # ==================== GET COMMIT SHA ====================
 
   # Step 1: Get commit SHA from MR (if mr_id provided)
+  # Gets short SHA from GitLab, then expands to full 40-char using local git
   - name: get_mr_commit
-    description: "Get the latest commit SHA from the MR"
+    description: "Get the FULL commit SHA from the MR (40 chars)"
     condition: "{{ inputs.mr_id and not inputs.commit_sha }}"
     compute: |
       import subprocess
-      import re
+      import json
       
-      result = subprocess.run(
-        ["glab", "mr", "view", str(inputs.mr_id)],
+      # Get MR info from GitLab (may return short SHA)
+      api_result = subprocess.run(
+        ["glab", "api", f"projects/:id/merge_requests/{inputs.mr_id}"],
         capture_output=True,
         text=True
       )
       
-      commit_sha = None
+      short_sha = None
       source_branch = None
       
-      if result.returncode == 0:
-        output = result.stdout
-        
-        sha_match = re.search(r'[Ss]ha:?\s*([a-f0-9]{40})', output)
-        if sha_match:
-          commit_sha = sha_match.group(1)
-        
-        branch_match = re.search(r'[Ss]ource [Bb]ranch:?\s*(\S+)', output)
-        if branch_match:
-          source_branch = branch_match.group(1)
-        
-        if not commit_sha and source_branch:
-          sha_result = subprocess.run(
-            ["git", "ls-remote", "origin", source_branch],
-            capture_output=True,
-            text=True
-          )
-          if sha_result.returncode == 0 and sha_result.stdout:
-            commit_sha = sha_result.stdout.split()[0]
+      if api_result.returncode == 0:
+        try:
+          mr_data = json.loads(api_result.stdout)
+          short_sha = mr_data.get("sha", "")
+          source_branch = mr_data.get("source_branch", "")
+        except:
+          pass
       
-      result = {"sha": commit_sha, "branch": source_branch}
+      if not short_sha:
+        raise ValueError(f"Could not get SHA for MR {inputs.mr_id}")
+      
+      # Expand to full SHA using local git repo
+      expand_result = subprocess.run(
+        ["git", "rev-parse", short_sha],
+        capture_output=True,
+        text=True
+      )
+      
+      if expand_result.returncode != 0:
+        # Maybe need to fetch first
+        subprocess.run(["git", "fetch", "origin"], capture_output=True)
+        expand_result = subprocess.run(
+          ["git", "rev-parse", short_sha],
+          capture_output=True,
+          text=True
+        )
+      
+      full_sha = expand_result.stdout.strip() if expand_result.returncode == 0 else None
+      
+      if not full_sha or len(full_sha) != 40:
+        raise ValueError(f"Could not expand SHA '{short_sha}' to full 40-char. Run 'git fetch origin' and retry.")
+      
+      result = {"sha": full_sha, "branch": source_branch}
     output: mr_info
 
   # Step 2: Determine final commit SHA
@@ -153,6 +246,164 @@ steps:
       result = f"Using commit: {commit_sha[:12]}"
     output: commit_status
 
+  # ==================== AUTO-DETECT CLOWDAPP ====================
+  # Determine if we should deploy billing or main ClowdApp
+  
+  # Step 3a: Get commit message and extract Jira issue key
+  - name: get_commit_info
+    description: "Get commit message to extract Jira issue key"
+    compute: |
+      import subprocess
+      import re
+      
+      # Get commit message
+      result_msg = subprocess.run(
+        ["git", "log", "-1", "--format=%s%n%b", commit_sha],
+        capture_output=True,
+        text=True
+      )
+      
+      commit_message = result_msg.stdout.strip() if result_msg.returncode == 0 else ""
+      
+      # Extract Jira issue key (AAP-XXXXX pattern)
+      jira_match = re.search(r'(AAP-\d+)', commit_message, re.IGNORECASE)
+      jira_key = jira_match.group(1).upper() if jira_match else None
+      
+      # Check for billing keywords in commit message itself
+      billing_keywords = ['billing', 'subscription', 'vcpu', 'host_count', 'infra_usage']
+      commit_has_billing = any(kw in commit_message.lower() for kw in billing_keywords)
+      
+      result = {
+        "message": commit_message[:200],
+        "jira_key": jira_key,
+        "commit_mentions_billing": commit_has_billing
+      }
+    output: commit_info
+  
+  # Step 3b: Check Jira issue for billing indicators
+  - name: check_jira_billing
+    description: "Look for billing indicators in Jira issue"
+    condition: "{{ commit_info.get('jira_key') }}"
+    tool: jira_get_issue
+    args:
+      issue_key: "{{ commit_info.jira_key }}"
+    output: jira_issue
+    on_error: continue
+  
+  # Step 3c: Analyze Jira issue for billing signals
+  - name: analyze_jira_billing
+    description: "Check if Jira issue mentions billing"
+    compute: |
+      jira_text = str(jira_issue).lower() if jira_issue else ""
+      
+      billing_signals = [
+        'billing',
+        'subscription watch',
+        'subscription-watch',
+        'vcpu',
+        'host count',
+        'metering',
+        'rhsm',
+        'red hat subscription',
+        'aap-billing',
+        'billing-controller',
+        'billing controller',
+        'billing exporter',
+        'swatch',
+      ]
+      
+      found_signals = [s for s in billing_signals if s in jira_text]
+      
+      result = {
+        "is_billing": len(found_signals) > 0,
+        "signals": found_signals[:5],  # Top 5 matches
+        "jira_checked": bool(jira_issue)
+      }
+    output: jira_billing_check
+  
+  # Step 3d: Check commit diff for billing file changes
+  - name: check_commit_diff
+    description: "Check if commit modifies billing-related files"
+    compute: |
+      import subprocess
+      
+      # Get list of files changed in this commit
+      diff_result = subprocess.run(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha],
+        capture_output=True,
+        text=True
+      )
+      
+      changed_files = diff_result.stdout.strip().split('\n') if diff_result.returncode == 0 else []
+      
+      # Billing-related paths
+      billing_paths = [
+        'tower_analytics_report/processor/aap_billing_controller',
+        'test/processor/aap_billing_controller',
+        'aap_billing',
+        'billing',
+        'subscription_watch',
+      ]
+      
+      billing_files = []
+      for f in changed_files:
+        for bp in billing_paths:
+          if bp in f.lower():
+            billing_files.append(f)
+            break
+      
+      result = {
+        "total_files_changed": len(changed_files),
+        "billing_files_changed": billing_files,
+        "has_billing_changes": len(billing_files) > 0
+      }
+    output: diff_billing_check
+  
+  # Step 3e: Determine final ClowdApp selection
+  - name: determine_clowdapp
+    description: "Decide whether to deploy billing or main ClowdApp"
+    compute: |
+      # If user explicitly specified, use that
+      if inputs.billing is not None:
+        use_billing = inputs.billing
+        reason = "User explicitly specified"
+      else:
+        # Auto-detect based on signals
+        signals = []
+        
+        # Signal 1: Commit message mentions billing
+        if commit_info.get('commit_mentions_billing'):
+          signals.append("commit_message")
+        
+        # Signal 2: Jira issue mentions billing
+        if jira_billing_check.get('is_billing'):
+          signals.append(f"jira_issue({', '.join(jira_billing_check.get('signals', [])[:2])})")
+        
+        # Signal 3: Commit changes billing files
+        if diff_billing_check.get('has_billing_changes'):
+          signals.append(f"files({len(diff_billing_check.get('billing_files_changed', []))} billing files)")
+        
+        use_billing = len(signals) > 0
+        reason = f"Auto-detected: {', '.join(signals)}" if signals else "No billing signals found, using main"
+      
+      # Select ClowdApp
+      if use_billing:
+        clowdapp = "tower-analytics-billing-clowdapp"
+        template = "clowderapp-billing.yaml"
+      else:
+        clowdapp = "tower-analytics-clowdapp"
+        template = "clowderapp.yaml"
+      
+      result = {
+        "use_billing": use_billing,
+        "clowdapp": clowdapp,
+        "template": template,
+        "reason": reason,
+        "jira_key": commit_info.get('jira_key'),
+        "billing_files": diff_billing_check.get('billing_files_changed', [])[:5]
+      }
+    output: clowdapp_selection
+
   # ==================== CHECK IMAGE EXISTS ====================
 
   # Step 4: Check if image exists in PR repo (redhat-user-workloads)
@@ -160,9 +411,9 @@ steps:
     description: "Verify the image was built and pushed to Quay (PR repo)"
     tool: quay_get_tag
     args:
-      repository: "{{ constants.quay_pr_repo }}"
+      repository: "{{ cfg.quay_pr_repo }}"
       tag: "{{ commit_sha }}"
-      namespace: "{{ constants.quay_pr_namespace }}"
+      namespace: "{{ cfg.quay_pr_namespace }}"
     output: quay_result
     on_error: continue
 
@@ -172,25 +423,58 @@ steps:
     condition: "{{ not quay_result or 'not found' in str(quay_result).lower() }}"
     tool: konflux_list_builds
     args:
-      namespace: "{{ constants.konflux_namespace }}"
+      namespace: "{{ cfg.konflux_namespace }}"
       limit: 10
     output: konflux_builds
 
-  # Step 6: Validate image availability
+  # Step 6: Validate image availability and extract sha256 digest
   - name: validate_image
     compute: |
-      if quay_result and 'not found' not in str(quay_result).lower():
-        result = {"available": True, "status": "Image ready in Quay"}
+      import re
+      
+      quay_output = str(quay_result) if quay_result else ""
+      
+      if quay_output and 'not found' not in quay_output.lower():
+        # Extract the sha256 digest from Manifest Digest line
+        # Format: **Manifest Digest:** `sha256:abc123...`
+        digest_match = re.search(r'sha256:([a-f0-9]{64})', quay_output)
+        if digest_match:
+          sha256_digest = digest_match.group(1)  # Just the 64-char hex part
+          result = {
+            "available": True, 
+            "status": "Image ready in Quay",
+            "sha256_digest": sha256_digest
+          }
+        else:
+          result = {"available": False, "status": "Could not extract sha256 digest from Quay response"}
       else:
         result = {"available": False, "status": "Image not found - build may be in progress"}
     output: image_status
 
+  # Step 6b: HARD STOP if image not available
+  # DO NOT proceed to namespace reservation or deployment if image doesn't exist
+  - name: check_image_ready
+    description: "STOP if image not built yet"
+    compute: |
+      if not image_status.get("available", False):
+        # Return early with clear message - do NOT try to deploy
+        result = {
+          "error": True,
+          "message": f"STOP: Image for commit {commit_sha[:12] if commit_sha else 'unknown'} not found in Quay.",
+          "action": "Wait for Konflux to build the image, then retry.",
+          "check_command": f"quay_get_tag(repository='automation-analytics-backend-main', tag='{commit_sha}', namespace='aap-aa-tenant')"
+        }
+      else:
+        result = {"error": False, "message": "Image available, proceeding with deployment"}
+    output: image_check
+
   # ==================== RESERVE NAMESPACE ====================
+  # Only proceed if image is available (image_check.error == False)
 
   # Step 7: Reserve ephemeral namespace
   - name: reserve_namespace
     description: "Reserve an ephemeral namespace"
-    condition: "{{ image_status.get('available', False) }}"
+    condition: "{{ image_status.get('available', False) and not image_check.get('error', True) }}"
     tool: bonfire_namespace_reserve
     args:
       duration: "{{ inputs.duration }}"
@@ -201,7 +485,7 @@ steps:
 
   # Step 8: Extract namespace name
   - name: get_namespace_name
-    condition: "{{ image_status.get('available', False) }}"
+    condition: "{{ image_status.get('available', False) and not image_check.get('error', True) }}"
     compute: |
       import re
       
@@ -216,15 +500,17 @@ steps:
   # ==================== DEPLOY ====================
 
   # Step 9: Deploy to ephemeral
+  # Uses ITS pattern: template_ref = git SHA, image_tag = sha256 digest
+  # ClowdApp is auto-detected from Jira/commit or explicitly specified
   - name: deploy_app
-    description: "Deploy AA to ephemeral namespace"
-    condition: "{{ namespace_name }}"
+    description: "Deploy AA to ephemeral namespace using {{ clowdapp_selection.clowdapp }}"
+    condition: "{{ namespace_name and image_status.get('sha256_digest') }}"
     tool: bonfire_deploy_aa
     args:
       namespace: "{{ namespace_name }}"
       template_ref: "{{ commit_sha }}"
-      image_tag: "{{ commit_sha }}"
-      billing: "{{ inputs.billing }}"
+      image_tag: "{{ image_status.sha256_digest }}"
+      billing: "{{ clowdapp_selection.use_billing }}"
       timeout: 900
     output: deploy_result
 
@@ -251,13 +537,13 @@ steps:
       import base64
       
       ns = namespace_name
+      kubeconfig = cfg.get("ephemeral_kubeconfig", __import__('os').path.expanduser("~/.kube/config.e"))
       
       # Get the database service/pod info
       svc_result = subprocess.run(
-        ["kubectl", "get", "svc", "-n", ns, "-o", "wide"],
+        ["kubectl", f"--kubeconfig={kubeconfig}", "get", "svc", "-n", ns, "-o", "wide"],
         capture_output=True,
-        text=True,
-        env={**__import__('os').environ, "KUBECONFIG": __import__('os').path.expanduser("~/.kube/config")}
+        text=True
       )
       
       # Find postgres service
@@ -276,10 +562,9 @@ steps:
       
       # Get secrets
       secret_result = subprocess.run(
-        ["kubectl", "get", "secret", "-n", ns, "-o", "name"],
+        ["kubectl", f"--kubeconfig={kubeconfig}", "get", "secret", "-n", ns, "-o", "name"],
         capture_output=True,
-        text=True,
-        env={**__import__('os').environ, "KUBECONFIG": __import__('os').path.expanduser("~/.kube/config")}
+        text=True
       )
       
       db_user = None
@@ -290,10 +575,9 @@ steps:
         if 'db' in secret_name.lower() or 'postgres' in secret_name.lower():
           # Get the secret data
           secret_data = subprocess.run(
-            ["kubectl", "get", secret_name.strip(), "-n", ns, "-o", "jsonpath={.data}"],
+            ["kubectl", f"--kubeconfig={kubeconfig}", "get", secret_name.strip(), "-n", ns, "-o", "jsonpath={.data}"],
             capture_output=True,
-            text=True,
-            env={**__import__('os').environ, "KUBECONFIG": __import__('os').path.expanduser("~/.kube/config")}
+            text=True
           )
           
           if secret_data.returncode == 0:
@@ -367,19 +651,21 @@ steps:
       db = db_creds
       
       # Create test script with ephemeral DB connection
-      test_script = f'''#!/bin/bash
-set -e
-pipenv sync --dev 2>/dev/null || pip install pytest pytest-cov 2>/dev/null
-export POSTGRESQL_USER="{db.get('user', 'postgres')}"
-export POSTGRESQL_PASSWORD="{db.get('password', '')}"
-export POSTGRESQL_HOST="{db.get('host', 'localhost')}"
-export POSTGRESQL_PORT="{db.get('port', '5432')}"
-export SECRET_KEY="test-secret-key-12345"
-export DB_SSLMODE=disable
-export DATABASE_PREFIX="postgresql://$POSTGRESQL_USER:$POSTGRESQL_PASSWORD@$POSTGRESQL_HOST:$POSTGRESQL_PORT"
-echo "Testing connection to: $POSTGRESQL_HOST:$POSTGRESQL_PORT"
-pytest -vv --tb=short -q -x 2>&1 | tail -100
-'''
+      import textwrap
+      test_script = textwrap.dedent(f"""
+          #!/bin/bash
+          set -e
+          pipenv sync --dev 2>/dev/null || pip install pytest pytest-cov 2>/dev/null
+          export POSTGRESQL_USER="{db.get('user', 'postgres')}"
+          export POSTGRESQL_PASSWORD="{db.get('password', '')}"
+          export POSTGRESQL_HOST="{db.get('host', 'localhost')}"
+          export POSTGRESQL_PORT="{db.get('port', '5432')}"
+          export SECRET_KEY="test-secret-key-12345"
+          export DB_SSLMODE=disable
+          export DATABASE_PREFIX="postgresql://$POSTGRESQL_USER:$POSTGRESQL_PASSWORD@$POSTGRESQL_HOST:$POSTGRESQL_PORT"
+          echo "Testing connection to: $POSTGRESQL_HOST:$POSTGRESQL_PORT"
+          pytest -vv --tb=short -q -x 2>&1 | tail -100
+      """).strip()
       
       # Write script to temp file
       script_path = "/tmp/ephemeral_test.sh"
@@ -387,20 +673,20 @@ pytest -vv --tb=short -q -x 2>&1 | tail -100
         f.write(test_script)
       os.chmod(script_path, 0o755)
       
+      kubeconfig = cfg.get("ephemeral_kubeconfig", os.path.expanduser("~/.kube/config.e"))
+      
       # Copy to pod
       subprocess.run(
-        ["kubectl", "cp", script_path, f"{ns}/{pod}:/tmp/test.sh"],
-        capture_output=True,
-        env={**os.environ, "KUBECONFIG": os.path.expanduser("~/.kube/config")}
+        ["kubectl", f"--kubeconfig={kubeconfig}", "cp", script_path, f"{ns}/{pod}:/tmp/test.sh"],
+        capture_output=True
       )
       
       # Execute
       test_result = subprocess.run(
-        ["kubectl", "exec", "-n", ns, pod, "--", "bash", "/tmp/test.sh"],
+        ["kubectl", f"--kubeconfig={kubeconfig}", "exec", "-n", ns, pod, "--", "bash", "/tmp/test.sh"],
         capture_output=True,
         text=True,
-        timeout=300,
-        env={**os.environ, "KUBECONFIG": os.path.expanduser("~/.kube/config")}
+        timeout=300
       )
       
       output = test_result.stdout + test_result.stderr
@@ -448,12 +734,72 @@ pytest -vv --tb=short -q -x 2>&1 | tail -100
         result = {"cleaned_up": False, "reason": "kept"}
     output: cleanup_info
 
+  # Step 17: Emit ephemeral hooks
+  - name: emit_ephemeral_hooks
+    description: "Notify about ephemeral environment status"
+    compute: |
+      import asyncio
+      import sys
+      from pathlib import Path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      
+      try:
+          from scripts.skill_hooks import emit_event
+          
+          # Emit ready notification when deployed
+          if namespace_name and deploy_result and 'fail' not in str(deploy_result).lower():
+              asyncio.run(emit_event("ephemeral_ready", {
+                  "namespace": namespace_name,
+                  "mr_id": str(inputs.get('mr_id', '')),
+                  "author": "",  # self
+              }))
+              result = "ephemeral_ready hook sent"
+          
+          # Emit test failure notification
+          if test_result and not test_result.get('passed'):
+              asyncio.run(emit_event("ephemeral_tests_failed", {
+                  "mr_id": str(inputs.get('mr_id', '')),
+                  "namespace": namespace_name or "",
+                  "author": "",  # self
+              }))
+              result = "ephemeral_tests_failed hook sent"
+          else:
+              result = "no failure hook needed"
+      except Exception as e:
+          result = f"hook skipped: {e}"
+    output: ephemeral_hook_result
+    on_error: continue
+
 outputs:
   - name: summary
     value: |
       ## 🧪 Ephemeral Test Environment
       
-      {% if not image_status.available %}
+      {% if image_check and image_check.get('error') %}
+      ### 🛑 STOPPED: Image Not Ready
+      
+      **Commit:** `{{ commit_sha[:12] if commit_sha else 'unknown' }}`
+      **Message:** {{ image_check.message }}
+      
+      **Action Required:** {{ image_check.action }}
+      
+      #### Check Image Status
+      ```python
+      # Via MCP tool:
+      {{ image_check.check_command }}
+      
+      # Or check Quay directly:
+      # https://quay.io/repository/redhat-user-workloads/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main?tag={{ commit_sha }}
+      ```
+      
+      #### Check Konflux Build
+      ```python
+      konflux_list_builds(namespace='{{ cfg.konflux_namespace }}')
+      ```
+      
+      **DO NOT** try to deploy manually - wait for the image to be built first.
+      
+      {% elif not image_status.available %}
       ### ❌ Image Not Available
       
       **Commit:** `{{ commit_sha[:12] if commit_sha else 'unknown' }}`
@@ -461,16 +807,26 @@ outputs:
       
       The image hasn't been built yet. Check Konflux:
       ```
-      konflux_list_builds(namespace='{{ constants.konflux_namespace }}')
+      konflux_list_builds(namespace='{{ cfg.konflux_namespace }}')
       ```
       
-      **Quay (PR images):** `quay.io/{{ constants.quay_pr_namespace }}/{{ constants.quay_pr_repo }}`
+      **Quay (PR images):** `quay.io/{{ cfg.quay_pr_namespace }}/{{ cfg.quay_pr_repo }}`
       
       {% else %}
       **Commit:** `{{ commit_sha[:12] }}`
       **Namespace:** `{{ namespace_name }}`
       **Duration:** {{ inputs.duration }}
-      **Component:** {{ "billing" if inputs.billing else "main" }}
+      
+      ### ClowdApp Selection
+      **Component:** `{{ clowdapp_selection.clowdapp }}`
+      **Reason:** {{ clowdapp_selection.reason }}
+      {% if clowdapp_selection.jira_key %}**Jira:** [{{ clowdapp_selection.jira_key }}](https://issues.redhat.com/browse/{{ clowdapp_selection.jira_key }}){% endif %}
+      {% if clowdapp_selection.billing_files %}
+      **Billing files changed:**
+      {% for f in clowdapp_selection.billing_files %}
+      - `{{ f }}`
+      {% endfor %}
+      {% endif %}
       
       ### Deployment Status
       {% if deploy_result and '✅' in str(deploy_result) %}

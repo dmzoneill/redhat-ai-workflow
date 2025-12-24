@@ -4,6 +4,7 @@
 name: create_mr
 description: |
   Create a merge request with full validation:
+  - Automatically resolves repo and GitLab project from issue key if not provided
   - Checks for uncommitted changes
   - Validates commit message format (AAP-XXXXX)
   - Runs black/flake8 linting
@@ -11,7 +12,7 @@ description: |
   - Optionally runs jira_hygiene first
   - Creates MR with proper description
   - Links to Jira and updates status
-version: "2.0"
+version: "2.1"
 
 inputs:
   - name: issue_key
@@ -22,8 +23,13 @@ inputs:
   - name: repo
     type: string
     required: false
-    default: "."
-    description: "Repository path (defaults to current directory)"
+    default: ""
+    description: "Repository path - if not provided, resolved from issue key via config"
+
+  - name: repo_name
+    type: string
+    required: false
+    description: "Repository name from config (e.g., 'automation-analytics-backend')"
 
   - name: draft
     type: boolean
@@ -34,8 +40,8 @@ inputs:
   - name: target_branch
     type: string
     required: false
-    default: "main"
-    description: "Target branch for MR"
+    default: ""
+    description: "Target branch for MR (defaults to repo's default_branch from config)"
 
   - name: run_linting
     type: boolean
@@ -55,11 +61,113 @@ inputs:
     default: false
     description: "Auto-fix linting issues with black"
 
+# Note: constants are now resolved dynamically from config
 constants:
-  gitlab_project: automation-analytics/automation-analytics-backend
   jira_url: https://issues.redhat.com
 
 steps:
+  # ==================== RESOLVE REPOSITORY ====================
+
+  - name: resolve_repo
+    description: "Determine which repo and GitLab project to use"
+    compute: |
+      import json
+      import os
+      from pathlib import Path
+
+      repo_path = None
+      gitlab_project = None
+      default_branch = "main"
+      repo_config = {}
+
+      # Load config
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      repos = config.get("repositories", {})
+
+      # Explicit repo path takes priority
+      if inputs.repo and inputs.repo != "" and inputs.repo != ".":
+          repo_path = inputs.repo
+          # Try to find matching config for GitLab project
+          for name, cfg in repos.items():
+              if cfg.get("path") == repo_path:
+                  gitlab_project = cfg.get("gitlab")
+                  default_branch = cfg.get("default_branch", "main")
+                  repo_config = cfg
+                  break
+      # Then repo name from config
+      elif inputs.repo_name:
+          if inputs.repo_name in repos:
+              repo_config = repos[inputs.repo_name]
+              repo_path = repo_config.get("path", "")
+              gitlab_project = repo_config.get("gitlab")
+              default_branch = repo_config.get("default_branch", "main")
+          else:
+              raise ValueError(f"Repository '{inputs.repo_name}' not found in config.json")
+      # Finally, resolve from issue key prefix
+      else:
+          project_prefix = inputs.issue_key.split("-")[0].upper()
+          matching = []
+          for name, cfg in repos.items():
+              if cfg.get("jira_project") == project_prefix:
+                  matching.append({"name": name, "config": cfg})
+
+          if len(matching) == 0:
+              # Fall back to cwd if we're in a git repo
+              cwd = os.getcwd()
+              if os.path.exists(os.path.join(cwd, ".git")):
+                  repo_path = cwd
+                  # Try to match to config
+                  for name, cfg in repos.items():
+                      if cfg.get("path") == cwd:
+                          gitlab_project = cfg.get("gitlab")
+                          default_branch = cfg.get("default_branch", "main")
+                          repo_config = cfg
+                          break
+              else:
+                  raise ValueError(
+                      f"No repository configured for {project_prefix} issues. "
+                      "Please specify 'repo' or 'repo_name'."
+                  )
+          elif len(matching) == 1:
+              repo_config = matching[0]["config"]
+              repo_path = repo_config.get("path")
+              gitlab_project = repo_config.get("gitlab")
+              default_branch = repo_config.get("default_branch", "main")
+          else:
+              names = ", ".join(m["name"] for m in matching)
+              raise ValueError(
+                  f"Multiple repositories match {project_prefix}: {names}. "
+                  "Please specify 'repo_name'."
+              )
+
+      if not repo_path or not os.path.exists(repo_path):
+          raise ValueError(f"Repository path not found: {repo_path}")
+
+      # Override default_branch if explicitly specified
+      if inputs.target_branch:
+          default_branch = inputs.target_branch
+
+      # Get Jira URL from config
+      jira_url = config.get("jira", {}).get("url", "https://issues.redhat.com")
+
+      result = {
+          "path": repo_path,
+          "gitlab_project": gitlab_project or "automation-analytics/automation-analytics-backend",
+          "default_branch": default_branch,
+          "lint_command": repo_config.get("lint_command", "black --check . && flake8 ."),
+          "jira_url": jira_url,
+      }
+    output: resolved_repo
   # ==================== PRE-FLIGHT CHECKS ====================
 
   # Step 0: Validate git repository state
@@ -69,7 +177,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       # Get git dir
       result = subprocess.run(
@@ -107,7 +215,7 @@ steps:
       import os
       import re
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       result = subprocess.run(
           ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -153,7 +261,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       result = subprocess.run(
           ["git", "status", "--porcelain"],
@@ -182,8 +290,8 @@ steps:
       import os
       import re
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
-      target = inputs.target_branch
+      repo = resolved_repo["path"]
+      target = resolved_repo["default_branch"]
       issue_key = inputs.issue_key.upper()
 
       # Get commits not in target branch
@@ -239,8 +347,8 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
-      target = inputs.target_branch
+      repo = resolved_repo["path"]
+      target = resolved_repo["default_branch"]
 
       # Fetch latest
       subprocess.run(["git", "fetch", "origin", target], cwd=repo, capture_output=True)
@@ -278,7 +386,7 @@ steps:
     description: "Check if MR already exists for this branch"
     tool: gitlab_mr_list
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved_repo.gitlab_project }}"
       state: opened
     output: existing_mrs_raw
     on_error: continue
@@ -310,7 +418,7 @@ steps:
               "mr_iid": duplicate["iid"],
               "message": (
                   f"MR !{duplicate['iid']} already exists for branch '{branch}'. "
-                  f"View it: gitlab_mr_view(project=\"{constants.gitlab_project}\", "
+                  f"View it: gitlab_mr_view(project=\"{resolved_repo['gitlab_project']}\", "
                   f"mr_id={duplicate['iid']})"
               ),
           }
@@ -351,7 +459,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       if inputs.auto_fix_lint:
           # Run black to fix
@@ -405,7 +513,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       result = subprocess.run(
           [
@@ -465,7 +573,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
       branch = current_branch["name"]
 
       result = subprocess.run(
@@ -493,7 +601,7 @@ steps:
     compute: |
       import textwrap
 
-      jira_url = constants.get("jira_url", "https://issues.redhat.com")
+      jira_url = resolved_repo.get("jira_url", "https://issues.redhat.com")
       issue_key = inputs.issue_key.upper()
 
       # Extract issue summary
@@ -530,10 +638,10 @@ steps:
     description: "Create GitLab merge request"
     tool: gitlab_mr_create
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved_repo.gitlab_project }}"
       title: "{{ inputs.issue_key }} - {{ issue.summary[:50] if issue else 'Update' }}"
       description: "{{ mr_description }}"
-      target_branch: "{{ inputs.target_branch }}"
+      target_branch: "{{ resolved_repo.default_branch }}"
       source_branch: "{{ current_branch.name }}"
       draft: "{{ inputs.draft }}"
     output: mr
@@ -562,6 +670,31 @@ steps:
       status: "In Review"
     on_error: continue
 
+  # Step 14: Emit MR created hook
+  - name: emit_mr_created_hook
+    description: "Notify team channel about new MR"
+    condition: "mr and not inputs.draft"
+    compute: |
+      import asyncio
+      import sys
+      from pathlib import Path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      
+      try:
+          from scripts.skill_hooks import emit_event
+          
+          asyncio.run(emit_event("mr_created", {
+              "mr_id": str(mr.get('iid', '')),
+              "issue_key": inputs.issue_key,
+              "project": resolved_repo.get("gitlab_project", ""),
+              "author": "",  # self - no need to DM
+          }))
+          result = "hook sent"
+      except Exception as e:
+          result = f"hook skipped: {e}"
+    output: mr_hook_result
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
@@ -573,7 +706,8 @@ outputs:
       **MR:** {{ mr.title }}
       **URL:** {{ mr.web_url }}
       **Status:** {{ "Draft" if inputs.draft else "Ready for Review" }}
-      **Branch:** `{{ current_branch.name }}` → `{{ inputs.target_branch }}`
+      **Branch:** `{{ current_branch.name }}` → `{{ resolved_repo.default_branch }}`
+      **Project:** {{ resolved_repo.gitlab_project }}
       {% endif %}
       
       ---
@@ -622,5 +756,7 @@ outputs:
       mr_url: "{{ mr.web_url if mr else none }}"
       mr_id: "{{ mr.iid if mr else none }}"
       branch: "{{ current_branch.name }}"
+      repo: "{{ resolved_repo.path }}"
+      gitlab_project: "{{ resolved_repo.gitlab_project }}"
       mergeable: "{{ merge_check.mergeable }}"
       lint_passed: "{{ (black_result.passed if black_result else true) and (flake8_result.passed if flake8_result else true) }}"

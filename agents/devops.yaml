@@ -6,17 +6,16 @@ description: Infrastructure, monitoring, and incident response
 persona: agents/devops.md
 
 # Tool modules to load (from mcp-servers/aa-*)
-# Reduced to stay under 80 tool limit
 tools:
   - k8s           # 26 tools - Kubernetes operations
-  - prometheus    # 13 tools - Metrics and alerts  
-  - alertmanager  # 6 tools - Silence management
-  - kibana        # 9 tools - Log search
   - bonfire       # 21 tools - Ephemeral namespaces
+  - quay          # 8 tools - Container image checks
+  - gitlab        # 35 tools - MR lookup for ephemeral deploy
 
-# Total: ~75 tools (under 80 limit)
-# Note: Use tool_exec() for git, jira, workflow when needed
+# Total: ~90 tools (well under 128 limit)
+# Focused on ephemeral deployment workflow
 
 skills:
   - investigate_alert
   - debug_prod
+  - test_mr_ephemeral  # Deploy MR to ephemeral for testing

@@ -27,7 +27,8 @@
       "poll_interval": 5,
       "watched_channels": ["C12345678", "C87654321"],
       "watched_keywords": ["help", "question", "urgent", "review"],
-      "self_user_id": "U12345678"
+      "self_user_id": "U12345678",
+      "self_dm_channel": ""
     },
     "response_rules": {
       "description": "Rules for when the agent should respond",

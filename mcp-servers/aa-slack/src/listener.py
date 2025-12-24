@@ -12,6 +12,7 @@ This runs as a background asyncio task alongside the MCP server.
 import asyncio
 import logging
 import os
+import random
 import re
 import time
 from dataclasses import dataclass, field
@@ -27,8 +28,9 @@ logger = logging.getLogger(__name__)
 class ListenerConfig:
     """Configuration for the Slack listener."""
     
-    # Polling interval in seconds
-    poll_interval: float = 5.0
+    # Polling interval range in seconds (randomized for natural feel)
+    poll_interval_min: float = 5.0
+    poll_interval_max: float = 15.0
     
     # Channels to monitor (list of channel IDs)
     watched_channels: list[str] = field(default_factory=list)
@@ -42,6 +44,9 @@ class ListenerConfig:
     # Our own user ID (to ignore our messages)
     self_user_id: str = ""
     
+    # Self-DM channel for testing (messages from self in this channel are NOT ignored)
+    self_dm_channel: str = ""
+    
     # Enable debug logging
     debug: bool = False
     
@@ -49,7 +54,8 @@ class ListenerConfig:
     def from_env(cls) -> "ListenerConfig":
         """Create configuration from environment variables."""
         return cls(
-            poll_interval=float(os.getenv("SLACK_POLL_INTERVAL", "5")),
+            poll_interval_min=float(os.getenv("SLACK_POLL_INTERVAL_MIN", "5")),
+            poll_interval_max=float(os.getenv("SLACK_POLL_INTERVAL_MAX", "15")),
             watched_channels=[
                 c.strip() for c in os.getenv("SLACK_WATCHED_CHANNELS", "").split(",")
                 if c.strip()
@@ -63,6 +69,7 @@ class ListenerConfig:
                 if u.strip()
             ],
             self_user_id=os.getenv("SLACK_SELF_USER_ID", ""),
+            self_dm_channel=os.getenv("SLACK_SELF_DM_CHANNEL", ""),
             debug=os.getenv("SLACK_DEBUG", "").lower() in ("true", "1", "yes"),
         )
 
@@ -149,7 +156,7 @@ class SlackListener:
         self._task = asyncio.create_task(self._poll_loop())
         logger.info(
             f"Started listener polling {len(self.config.watched_channels)} channels "
-            f"every {self.config.poll_interval}s"
+            f"every {self.config.poll_interval_min}-{self.config.poll_interval_max}s"
         )
     
     async def stop(self):
@@ -189,40 +196,66 @@ class SlackListener:
     
     async def _poll_loop(self):
         """Main polling loop."""
+        logger.info("Poll loop starting...")
         while self._running:
             try:
+                logger.debug(f"Polling {len(self.config.watched_channels)} channels...")
                 await self._poll_all_channels()
                 self._stats["polls"] += 1
+                logger.debug(f"Poll complete. Total polls: {self._stats['polls']}")
             except asyncio.CancelledError:
+                logger.info("Poll loop cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in poll loop: {e}")
+                logger.error(f"Error in poll loop: {e}", exc_info=True)
                 self._stats["errors"] += 1
             
-            # Wait for next poll interval
-            await asyncio.sleep(self.config.poll_interval)
+            # Wait for next poll interval (randomized for natural feel)
+            interval = random.uniform(self.config.poll_interval_min, self.config.poll_interval_max)
+            await asyncio.sleep(interval)
+        logger.info("Poll loop exiting")
     
     async def _poll_all_channels(self):
         """Poll all watched channels for new messages."""
-        for channel_id in self.config.watched_channels:
+        for i, channel_id in enumerate(self.config.watched_channels):
             try:
+                logger.debug(f"Polling channel {i+1}/{len(self.config.watched_channels)}: {channel_id}")
                 await self._poll_channel(channel_id)
+                logger.debug(f"Done polling {channel_id}")
             except Exception as e:
-                logger.error(f"Error polling channel {channel_id}: {e}")
+                logger.error(f"Error polling channel {channel_id}: {e}", exc_info=True)
                 self._stats["errors"] += 1
     
     async def _poll_channel(self, channel_id: str):
         """Poll a single channel for new messages."""
         # Get last processed timestamp
+        logger.debug(f"  Getting last_ts for {channel_id}")
         last_ts = await self.state_db.get_last_processed_ts(channel_id)
+        logger.debug(f"  last_ts={last_ts}, fetching history...")
         
-        # Fetch new messages
+        # First run: just get the latest message to set our baseline
+        if last_ts is None:
+            logger.info(f"First poll of {channel_id} - setting baseline (not processing historical)")
+            messages = await self.session.get_channel_history(
+                channel_id=channel_id,
+                limit=1,  # Just get the latest to set timestamp
+            )
+            if messages:
+                # Set the latest message as our starting point
+                await self.state_db.set_last_processed_ts(
+                    channel_id=channel_id,
+                    timestamp=messages[0].get("ts", "0"),
+                )
+            return  # Don't process historical messages
+        
+        # Fetch new messages since last processed
         messages = await self.session.get_channel_history(
             channel_id=channel_id,
             limit=50,
             oldest=last_ts,
             inclusive=False,
         )
+        logger.debug(f"  Got {len(messages) if messages else 0} messages")
         
         if not messages:
             return
@@ -240,8 +273,8 @@ class SlackListener:
             if not newest_ts or ts > newest_ts:
                 newest_ts = ts
             
-            # Filter and process
-            if self._should_process(msg):
+            # Filter and process (pass channel_id since Slack API doesn't include it in message)
+            if self._should_process(msg, channel_id):
                 await self._process_message(channel_id, msg)
         
         # Update last processed timestamp
@@ -251,25 +284,35 @@ class SlackListener:
             if self.config.debug:
                 logger.debug(f"Updated {channel_id} last_ts to {newest_ts}")
     
-    def _should_process(self, message: dict[str, Any]) -> bool:
+    def _should_process(self, message: dict[str, Any], channel_id: str) -> bool:
         """
         Determine if a message should trigger the agent.
         
         Filters:
-        - Ignore our own messages
+        - Ignore our own messages (unless in self-DM testing channel)
         - Ignore bot messages (unless watched user)
         - Process @mentions to us
         - Process messages from watched users
         - Process messages containing watched keywords
+        
+        Args:
+            message: The Slack message dict
+            channel_id: The channel this message is from (Slack API doesn't include it in message)
         """
         # Get message metadata
         user_id = message.get("user", "")
         text = message.get("text", "")
         subtype = message.get("subtype", "")
         
-        # Ignore our own messages
+        # Ignore our own messages (UNLESS in self-DM testing channel)
         if user_id == self.config.self_user_id:
-            return False
+            # Allow self messages in the designated self-DM channel for testing
+            if self.config.self_dm_channel and channel_id == self.config.self_dm_channel:
+                logger.debug(f"Self-DM testing: processing message from self in {channel_id}")
+                return True  # Process ALL messages from self in self-DM channel
+            else:
+                logger.debug(f"Ignoring self message in {channel_id} (not self-DM channel)")
+                return False
         
         # Ignore message subtypes (join, leave, etc.) unless it's a bot_message from watched user
         if subtype and subtype not in ("bot_message", "thread_broadcast"):
@@ -454,9 +497,10 @@ class SlackListenerManager:
             "pending_messages": pending_count,
             "stats": self.listener.stats,
             "config": {
-                "poll_interval": self.listener.config.poll_interval,
+                "poll_interval": f"{self.listener.config.poll_interval_min}-{self.listener.config.poll_interval_max}s",
                 "watched_channels": len(self.listener.config.watched_channels),
                 "watched_keywords": self.listener.config.watched_keywords,
             },
         }
+
 

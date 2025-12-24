@@ -183,7 +183,23 @@ All configuration is in `config.json`:
 | Konflux | CI/CD builds | `~/.kube/config.k` |
 | Stage | QA/Testing | `~/.kube/config.s` |
 | Production | Live | `~/.kube/config.p` |
-| Ephemeral | PR testing | Via bonfire |
+| Ephemeral | PR testing | `~/.kube/config.e` |
+
+### ⚠️ CRITICAL: Kubeconfig Rules
+
+**NEVER copy kubeconfig files!** Use the correct config for each environment:
+
+```bash
+# WRONG - NEVER DO THIS:
+cp ~/.kube/config.e ~/.kube/config
+
+# RIGHT - use --kubeconfig flag for kubectl/oc:
+kubectl --kubeconfig=~/.kube/config.e get pods -n ephemeral-xxx
+oc --kubeconfig=~/.kube/config.e get pods -n ephemeral-xxx
+
+# RIGHT - use KUBECONFIG env for bonfire:
+KUBECONFIG=~/.kube/config.e bonfire namespace list --mine
+```
 
 ### Namespaces
 | Environment | Namespace |
@@ -306,3 +322,37 @@ ai-workflow/
 5. **Be specific with tools** - Always include required parameters
 6. **Handle errors gracefully** - Check tool output before proceeding
 7. **Link Jira + GitLab** - Always reference issues in commits/MRs
+
+## ⚠️ Critical Don'ts
+
+1. **NEVER copy kubeconfig files** - Use `--kubeconfig=` flag or `KUBECONFIG=` env
+2. **NEVER use short SHAs for image tags** - Konflux uses full 40-char git SHA
+3. **NEVER release namespaces you don't own** - Check `bonfire namespace list --mine` first
+4. **NEVER run raw bonfire deploy without `--set-image-tag`** - Will use wrong image
+
+## Ephemeral Environment Checklist
+
+Before deploying to ephemeral:
+1. ✅ **Ask which ClowdApp** - main (default) or billing?
+2. ✅ Get full 40-char commit SHA: `git rev-parse <short_sha>`
+3. ✅ Check image exists: `quay_get_tag(repository="...", tag="<full_sha>")`
+4. ✅ Get sha256 digest from Quay response
+5. ✅ Use skill: `skill_run("test_mr_ephemeral", '{"mr_id": 1459, "billing": false}')`
+
+### ClowdApp Options (automation-analytics-backend)
+
+| Option | Component | Use When |
+|--------|-----------|----------|
+| `billing: false` (default) | `tower-analytics-clowdapp` | Testing main app |
+| `billing: true` | `tower-analytics-billing-clowdapp` | Testing billing features |
+
+If user doesn't specify, **default to main** (`billing: false`).
+
+Or if manual:
+```bash
+KUBECONFIG=~/.kube/config.e bonfire deploy \
+  --set-template-ref component=<40-char-git-sha> \
+  --set-parameter component/IMAGE=quay.io/.../image@sha256 \
+  --set-parameter component/IMAGE_TAG=<64-char-sha256-digest> \
+  app-name
+```

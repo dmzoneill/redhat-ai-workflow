@@ -2,20 +2,23 @@
 """
 Autonomous Slack Agent Daemon
 
-A standalone process that monitors Slack and responds using the AI Workflow
-tools and skills. Runs outside of Cursor with full access to all capabilities.
+A standalone process that monitors Slack and responds using Claude + MCP tools.
+The daemon is just a Slack interface - all intelligence goes through ClaudeAgent,
+which routes to MCP servers (aa-jira, aa-gitlab, aa-k8s, aa-bonfire, etc.)
+
+Requirements:
+- Claude API credentials (ANTHROPIC_API_KEY or Vertex AI)
+- Slack credentials (config.json or environment variables)
 
 Features:
 - Continuous Slack monitoring with configurable poll interval
-- Intent detection and routing to appropriate tools
+- Claude-powered message understanding and tool execution
 - User classification (safe/concerned/unknown) for response modulation
-- Optional LLM integration for intelligent responses
 - Rich terminal UI with status display
 - Graceful shutdown handling
 
 Usage:
-    python scripts/slack_daemon.py                    # Run with defaults
-    python scripts/slack_daemon.py --llm              # Enable LLM responses
+    python scripts/slack_daemon.py                    # Run with Claude
     python scripts/slack_daemon.py --dry-run          # Process but don't respond
     python scripts/slack_daemon.py --verbose          # Detailed logging
 
@@ -40,12 +43,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-# Add project paths
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-slack"))
-sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-jira"))
-sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-gitlab"))
+# Add project paths (use resolve() to get absolute paths)
+# NOTE: aa-slack must come LAST in inserts so it's FIRST in sys.path
+# (because insert(0, x) prepends, so last insert = first in list)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-git"))
+sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-gitlab"))
+sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-jira"))
+sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-slack"))  # Must be first in path
 
 from dotenv import load_dotenv
 
@@ -685,181 +690,14 @@ class TerminalUI:
 # =============================================================================
 
 
-@dataclass
-class Intent:
-    """Detected intent from a message."""
-
-    type: str
-    confidence: float
-    entities: dict = field(default_factory=dict)
-    requires_confirmation: bool = False
-
-
-class IntentDetector:
-    """Detects intent from Slack messages."""
-
-    PATTERNS = {
-        "jira_query": [
-            (r"AAP-\d+", 0.95),
-            (r"\b(issue|ticket|story|bug|epic)\b", 0.6),
-            (r"\bjira\b", 0.7),
-        ],
-        "mr_status": [
-            (r"!\d+", 0.95),
-            (r"\b(MR|PR|merge request|pull request)\s*#?\d+", 0.9),
-        ],
-        "check_my_prs": [
-            (r"\bmy\s+(MRs?|PRs?|merge requests?|pull requests?)\b", 0.85),
-        ],
-        "prod_debug": [
-            (r"\b(prod|production)\s+(down|issue|problem|error)\b", 0.9),
-            (r"\b(alert|incident|outage)\b", 0.8),
-        ],
-        "start_work": [
-            (r"\b(start|begin|pick up|work on)\s+(AAP-\d+)", 0.9),
-        ],
-        "standup": [
-            (r"\b(standup|stand-up|status update|daily)\b", 0.85),
-        ],
-        "help": [
-            (r"\b(help|how do|what is|explain|guide)\b", 0.7),
-        ],
-    }
-
-    def detect(self, text: str, is_mention: bool = False) -> Intent:
-        """Detect intent from message text."""
-        text_lower = text.lower()
-        best_intent = Intent(type="general", confidence=0.5)
-
-        for intent_type, patterns in self.PATTERNS.items():
-            for pattern, base_confidence in patterns:
-                if re.search(pattern, text_lower, re.IGNORECASE):
-                    confidence = base_confidence
-                    if is_mention:
-                        confidence = min(1.0, confidence + 0.1)
-
-                    if confidence > best_intent.confidence:
-                        best_intent = Intent(
-                            type=intent_type,
-                            confidence=confidence,
-                            entities=self._extract_entities(text, intent_type),
-                            requires_confirmation=intent_type in ["prod_debug", "start_work"],
-                        )
-
-        return best_intent
-
-    def _extract_entities(self, text: str, intent_type: str) -> dict:
-        """Extract entities based on intent type."""
-        entities = {}
-
-        # Extract Jira keys
-        jira_keys = re.findall(r"AAP-\d+", text, re.IGNORECASE)
-        if jira_keys:
-            entities["issue_keys"] = [k.upper() for k in jira_keys]
-
-        # Extract MR IDs
-        mr_ids = re.findall(r"!(\d+)", text)
-        if mr_ids:
-            entities["mr_ids"] = mr_ids
-
-        return entities
-
-
 # =============================================================================
-# TOOL EXECUTOR
+# NOTE: IntentDetector and ToolExecutor classes have been REMOVED.
+# 
+# All message understanding and tool execution now goes through ClaudeAgent,
+# which routes to MCP servers (aa-jira, aa-gitlab, aa-k8s, aa-bonfire, etc.)
+#
+# The Slack daemon is just a Slack interface - all intelligence is in Claude.
 # =============================================================================
-
-
-class ToolExecutor:
-    """Executes tools directly (not via MCP)."""
-
-    def __init__(self, project_root: Path):
-        self.project_root = project_root
-
-    async def execute_jira_view(self, issue_key: str) -> str:
-        """View a Jira issue."""
-        try:
-            result = subprocess.run(
-                ["rh-issue", "view", issue_key],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                return result.stdout
-            return f"Error viewing {issue_key}: {result.stderr}"
-        except Exception as e:
-            return f"Error: {e}"
-
-    async def execute_jira_search(self, query: str) -> str:
-        """Search Jira issues."""
-        try:
-            result = subprocess.run(
-                ["rh-issue", "search", query],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return result.stdout if result.returncode == 0 else result.stderr
-        except Exception as e:
-            return f"Error: {e}"
-
-    async def execute_gitlab_mr_view(self, mr_id: str) -> str:
-        """View a GitLab MR."""
-        try:
-            # Use glab if available
-            result = subprocess.run(
-                ["glab", "mr", "view", mr_id],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return result.stdout if result.returncode == 0 else result.stderr
-        except Exception as e:
-            return f"Error: {e}"
-
-    async def execute_gitlab_mr_list(self, author: str = "") -> str:
-        """List GitLab MRs."""
-        try:
-            cmd = ["glab", "mr", "list", "--state", "opened"]
-            if author:
-                cmd.extend(["--author", author])
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return result.stdout if result.returncode == 0 else result.stderr
-        except Exception as e:
-            return f"Error: {e}"
-
-    async def execute_git_status(self, repo: str = ".") -> str:
-        """Get git status."""
-        try:
-            result = subprocess.run(
-                ["git", "status", "--short"],
-                capture_output=True,
-                text=True,
-                cwd=repo,
-                timeout=10,
-            )
-            return result.stdout if result.returncode == 0 else result.stderr
-        except Exception as e:
-            return f"Error: {e}"
-
-    async def execute_kubectl_pods(self, namespace: str) -> str:
-        """Get pods in namespace."""
-        try:
-            result = subprocess.run(
-                ["kubectl", "get", "pods", "-n", namespace, "-o", "wide"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return result.stdout if result.returncode == 0 else result.stderr
-        except Exception as e:
-            return f"Error: {e}"
 
 
 # =============================================================================
@@ -877,41 +715,61 @@ except ImportError:
 
 class ResponseGenerator:
     """
-    Generates responses for messages.
-
-    Two modes:
-    1. Claude Agent Mode (--llm): Uses Claude to understand requests and call tools
-    2. Pattern Mode (default): Uses simple pattern matching for known intents
+    Generates responses for messages using Claude.
+    
+    All message understanding and tool execution goes through ClaudeAgent,
+    which routes to MCP servers (aa-jira, aa-gitlab, aa-k8s, etc.)
+    
+    The Slack daemon is just a Slack interface - all intelligence is in Claude.
     """
 
     def __init__(
         self,
-        executor: ToolExecutor,
-        use_llm: bool = False,
         notifier: DesktopNotifier | None = None,
     ):
-        self.executor = executor
-        self.use_llm = use_llm
-        self.llm_client = None
         self.claude_agent = None
         self.templates = SLACK_CONFIG.get("response_templates", {})
         self.notifier = notifier or DesktopNotifier(enabled=False)
+        self._init_claude()
 
-        if use_llm:
-            self._init_claude()
+    def _init_claude(self):
+        """Initialize Claude agent - REQUIRED for operation."""
+        if not ANTHROPIC_AVAILABLE:
+            logger.error("anthropic package not installed. Install with: pip install anthropic")
+            raise RuntimeError("Claude agent required but anthropic package not available")
 
-    def _get_greeting(self, user_name: str, classification: UserClassification) -> str:
-        """Get appropriate greeting based on user classification."""
-        style = classification.response_style
-        template_key = f"{style}_greeting"
-        template = self.templates.get(template_key, "Hi {user_name},")
-        return template.format(user_name=user_name)
+        # Check for either direct API key or Vertex AI credentials
+        use_vertex = os.getenv("CLAUDE_CODE_USE_VERTEX") == "1"
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        vertex_project = os.getenv("ANTHROPIC_VERTEX_PROJECT_ID")
 
-    def _get_closing(self, classification: UserClassification) -> str:
-        """Get appropriate closing based on user classification."""
-        style = classification.response_style
-        template_key = f"{style}_closing"
-        return self.templates.get(template_key, "")
+        if not api_key and not (use_vertex and vertex_project):
+            raise RuntimeError(
+                "Claude credentials required. Set ANTHROPIC_API_KEY or "
+                "CLAUDE_CODE_USE_VERTEX=1 with ANTHROPIC_VERTEX_PROJECT_ID"
+            )
+
+        try:
+            # Get model from config
+            agent_config = CONFIG.get("agent", {})
+            model = agent_config.get("model", "claude-sonnet-4-20250514")
+            vertex_model = agent_config.get("vertex_model", "claude-sonnet-4-5@20250929")
+            max_tokens = agent_config.get("max_tokens", 4096)
+            system_prompt = agent_config.get("system_prompt")
+
+            self.claude_agent = ClaudeAgent(
+                model=model,
+                vertex_model=vertex_model,
+                max_tokens=max_tokens,
+                system_prompt=system_prompt,
+            )
+            if use_vertex:
+                logger.info(f"Claude agent initialized via Vertex AI: {vertex_project}")
+            else:
+                logger.info(f"Claude agent initialized with model: {model}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Claude agent: {e}")
+            raise RuntimeError(f"Claude agent initialization failed: {e}")
 
     def _modulate_response(
         self,
@@ -919,107 +777,62 @@ class ResponseGenerator:
         user_name: str,
         classification: UserClassification,
     ) -> str:
-        """Modulate response based on user classification."""
-        # Remove emojis if not allowed
-        if not classification.include_emojis:
-            # Remove common emoji patterns
-            response = re.sub(r"[📋🦊✅❌🚀🔍📊🎉👋📬📩💬🤖⚡🚨📝🔄]", "", response)
-            response = re.sub(r":\w+:", "", response)  # Remove :emoji: style
+        """
+        Light post-processing of Claude's response.
+        
+        Note: Claude now handles tone adjustment directly based on user classification
+        passed in context. This just handles truncation and safety-net formatting.
+        """
+        if response is None:
+            return None
 
-        # Truncate if max length specified
+        # Truncate if max length specified (unknown users get 500 char limit)
         if classification.max_response_length:
             if len(response) > classification.max_response_length:
                 response = response[: classification.max_response_length - 50]
-                response += "\n\n_...response truncated_"
-
-        # Add formal structure for concerned users
-        if classification.response_style == "formal":
-            greeting = self._get_greeting(user_name, classification)
-            closing = self._get_closing(classification)
-            response = f"{greeting}\n\n{response}"
-            if closing:
-                response = f"{response}\n\n{closing}"
+                response += "\n\n_...truncated_"
 
         return response
-
-    def _init_claude(self):
-        """Initialize Claude agent if available."""
-        if not ANTHROPIC_AVAILABLE:
-            logger.warning("anthropic package not installed. Install with: pip install anthropic")
-            self.use_llm = False
-            return
-
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            logger.warning("No ANTHROPIC_API_KEY found, Claude agent disabled")
-            self.use_llm = False
-            return
-
-        try:
-            # Get model from config
-            agent_config = CONFIG.get("agent", {})
-            model = agent_config.get("model", "claude-sonnet-4-20250514")
-            max_tokens = agent_config.get("max_tokens", 4096)
-            system_prompt = agent_config.get("system_prompt")
-
-            self.claude_agent = ClaudeAgent(
-                model=model,
-                max_tokens=max_tokens,
-                system_prompt=system_prompt,
-            )
-            logger.info(f"Claude agent initialized with model: {model}")
-        except Exception as e:
-            logger.error(f"Failed to initialize Claude agent: {e}")
-            self.use_llm = False
 
     async def generate(
         self,
         message: PendingMessage,
-        intent: Intent,
         classification: UserClassification,
-    ) -> tuple[str, bool]:
+    ) -> tuple[str | None, bool]:
         """
-        Generate a response for the given message and intent.
+        Generate a response for the given message using Claude.
 
-        Two modes:
-        1. Claude Agent Mode (use_llm=True): Claude understands the request and calls tools
-        2. Pattern Mode (default): Simple pattern matching for known intents
+        All requests go through ClaudeAgent which:
+        - Understands the user's intent
+        - Calls appropriate MCP tools (aa-jira, aa-gitlab, aa-k8s, etc.)
+        - Runs skills when needed
+        - Formats the response
 
         Returns:
             tuple of (response_text, should_send)
+            response_text is None if an error occurred (silently skip)
             should_send is False if user classification requires review
         """
-        # Use Claude agent if available
-        if self.use_llm and self.claude_agent:
-            self.notifier.skill_activated("claude_agent", "Processing with Claude...")
-            try:
-                context = {
-                    "user_name": message.user_name,
-                    "channel_name": message.channel_name,
-                    "is_dm": message.is_dm,
-                    "is_mention": message.is_mention,
-                }
-                response = await self.claude_agent.process_message(message.text, context)
-                self.notifier.skill_completed("claude_agent", success=True)
-            except Exception as e:
-                logger.error(f"Claude agent error: {e}")
-                self.notifier.skill_completed("claude_agent", success=False)
-                response = f"I encountered an error processing your request: {e}"
-        else:
-            # Fallback to pattern-based handlers
-            handlers = {
-                "jira_query": self._handle_jira_query,
-                "mr_status": self._handle_mr_status,
-                "check_my_prs": self._handle_check_my_prs,
-                "prod_debug": self._handle_prod_debug,
-                "start_work": self._handle_start_work,
-                "standup": self._handle_standup,
-                "help": self._handle_help,
-                "general": self._handle_general,
+        self.notifier.skill_activated("claude_agent", "Processing with Claude...")
+        
+        try:
+            context = {
+                "user_name": message.user_name,
+                "channel_name": message.channel_name,
+                "is_dm": message.is_dm,
+                "is_mention": message.is_mention,
+                # User classification for tone adjustment
+                "user_category": classification.category.value,  # safe, concerned, unknown
+                "response_style": classification.response_style,  # casual, formal, professional
+                "include_emojis": classification.include_emojis,
             }
-
-            handler = handlers.get(intent.type, self._handle_general)
-            response = await handler(message, intent)
+            response = await self.claude_agent.process_message(message.text, context)
+            self.notifier.skill_completed("claude_agent", success=True)
+        except Exception as e:
+            # Log full error internally - stay completely silent to user
+            logger.error(f"Claude agent error: {e}", exc_info=True)
+            self.notifier.skill_completed("claude_agent", success=False)
+            return None, False  # Don't respond at all on error
 
         # Modulate response based on user classification
         response = self._modulate_response(response, message.user_name, classification)
@@ -1029,169 +842,6 @@ class ResponseGenerator:
 
         return response, should_send
 
-    async def _handle_jira_query(self, msg: PendingMessage, intent: Intent) -> str:
-        """Handle Jira issue query."""
-        issue_keys = intent.entities.get("issue_keys", [])
-        if not issue_keys:
-            return "I couldn't find a Jira issue key in your message. Try: `AAP-12345`"
-
-        key = issue_keys[0]
-        self.notifier.skill_activated("jira_view", f"Fetching {key}")
-        result = await self.executor.execute_jira_view(key)
-        self.notifier.skill_completed("jira_view", "Error" not in result)
-
-        # Format for Slack
-        if "Error" in result:
-            return f"❌ Could not fetch {key}: {result}"
-
-        # Truncate if too long
-        if len(result) > 1500:
-            result = result[:1500] + "\n\n_...truncated_"
-
-        return f"📋 *{key}*\n\n```\n{result}\n```"
-
-    async def _handle_mr_status(self, msg: PendingMessage, intent: Intent) -> str:
-        """Handle MR status query."""
-        mr_ids = intent.entities.get("mr_ids", [])
-        if not mr_ids:
-            return "I couldn't find an MR ID. Try: `!123`"
-
-        mr_id = mr_ids[0]
-        self.notifier.skill_activated("gitlab_mr_view", f"Fetching MR !{mr_id}")
-        result = await self.executor.execute_gitlab_mr_view(mr_id)
-        self.notifier.skill_completed("gitlab_mr_view", bool(result))
-
-        if len(result) > 1500:
-            result = result[:1500] + "\n\n_...truncated_"
-
-        return f"🦊 *MR !{mr_id}*\n\n```\n{result}\n```"
-
-    async def _handle_check_my_prs(self, msg: PendingMessage, intent: Intent) -> str:
-        """Handle 'my PRs' query."""
-        self.notifier.skill_activated("check_my_prs", f"Listing MRs for {msg.user_name}")
-        result = await self.executor.execute_gitlab_mr_list(msg.user_name)
-        self.notifier.skill_completed("check_my_prs")
-
-        if not result.strip():
-            return f"🎉 No open MRs found for {msg.user_name}!"
-
-        return f"📋 *Open MRs for {msg.user_name}*\n\n```\n{result[:1500]}\n```"
-
-    async def _handle_prod_debug(self, msg: PendingMessage, intent: Intent) -> str:
-        """Handle production debug request."""
-        return """🚨 *Production Issue Detected*
-
-I can help investigate! To proceed, reply with:
-• `debug tower-analytics-prod` - Check main namespace
-• `debug tower-analytics-prod-billing` - Check billing
-
-Or provide more context about the issue you're seeing."""
-
-    async def _handle_start_work(self, msg: PendingMessage, intent: Intent) -> str:
-        """Handle start work request."""
-        issue_keys = intent.entities.get("issue_keys", [])
-        if not issue_keys:
-            return "Please include a Jira issue key, e.g., `start AAP-12345`"
-
-        key = issue_keys[0]
-        return f"""🚀 *Ready to Start Work on {key}*
-
-This will:
-1. Create/checkout branch `{key.lower()}-...`
-2. Update Jira status to In Progress
-
-Reply `yes start {key}` to proceed, or `info {key}` for details first."""
-
-    async def _handle_standup(self, msg: PendingMessage, intent: Intent) -> str:
-        """Handle standup request."""
-        # For now, return a template
-        today = datetime.now().strftime("%Y-%m-%d")
-        return f"""📊 *Standup for {today}*
-
-To generate a full standup summary, I need to check:
-• Your git commits from today
-• Your Jira updates
-• Your MR activity
-
-Would you like me to generate this? Reply `yes standup`."""
-
-    async def _handle_help(self, msg: PendingMessage, intent: Intent) -> str:
-        """Handle help request."""
-        return """👋 *AI Workflow Slack Agent*
-
-I can help with:
-
-📋 *Jira*
-• `AAP-12345` - View issue details
-• `my issues` - List your assigned issues
-
-🦊 *GitLab*
-• `!123` - View MR details
-• `my MRs` - List your open MRs
-
-📂 *Git*
-• `start AAP-12345` - Start working on issue
-
-🚨 *Production*
-• `debug prod` - Debug production issues
-
-📊 *Status*
-• `standup` - Generate daily standup
-
-Just mention me with your request!"""
-
-    async def _handle_general(self, msg: PendingMessage, intent: Intent) -> str:
-        """Handle general/unknown request."""
-        if self.use_llm and self.llm_client:
-            return await self._llm_response(msg)
-
-        return f"""👋 Hi {msg.user_name}!
-
-I received your message but I'm not sure what action to take:
-> {msg.text[:150]}{"..." if len(msg.text) > 150 else ""}
-
-Try:
-• Include a Jira key: `AAP-12345`
-• Include an MR: `!123`
-• Ask for help: `help`"""
-
-    async def _llm_response(self, msg: PendingMessage) -> str:
-        """Generate response using LLM."""
-        self.notifier.skill_activated("llm_response", "Generating AI response...")
-        try:
-            response = await self.llm_client.post(
-                "/chat/completions",
-                json={
-                    "model": os.getenv("OPENAI_MODEL", "gpt-4"),
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are a helpful AI assistant in a Slack channel. "
-                                "Keep responses concise and use Slack formatting. "
-                                "If you can't help, suggest specific commands."
-                            ),
-                        },
-                        {"role": "user", "content": msg.text},
-                    ],
-                    "max_tokens": 500,
-                },
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                self.notifier.skill_completed("llm_response", success=True)
-                return data["choices"][0]["message"]["content"]
-            else:
-                logger.warning(f"LLM error: {response.status_code}")
-                self.notifier.skill_completed("llm_response", success=False)
-                return await self._handle_general.__wrapped__(
-                    self, msg, Intent(type="general", confidence=0.5)
-                )
-        except Exception as e:
-            logger.error(f"LLM error: {e}")
-            return f"I encountered an error. Please try a specific command like `help`."
-
 
 # =============================================================================
 # MAIN DAEMON
@@ -1199,31 +849,36 @@ Try:
 
 
 class SlackDaemon:
-    """Main autonomous Slack agent daemon."""
+    """
+    Main autonomous Slack agent daemon.
+    
+    All message understanding and tool execution goes through ClaudeAgent.
+    The daemon is just a Slack interface - all intelligence is in Claude.
+    """
 
     def __init__(
         self,
         dry_run: bool = False,
-        use_llm: bool = False,
         verbose: bool = False,
-        poll_interval: float = 5.0,
+        poll_interval_min: float = 5.0,
+        poll_interval_max: float = 15.0,
         enable_dbus: bool = False,
         enable_notify: bool = True,
     ):
         self.dry_run = dry_run
-        self.use_llm = use_llm
         self.verbose = verbose
-        self.poll_interval = poll_interval
+        self.poll_interval_min = poll_interval_min
+        self.poll_interval_max = poll_interval_max
         self.enable_dbus = enable_dbus
         self.enable_notify = enable_notify
 
         self.ui = TerminalUI(verbose=verbose)
         self.notifier = DesktopNotifier(enabled=enable_notify)
-        self.intent_detector = IntentDetector()
-        self.executor = ToolExecutor(PROJECT_ROOT)
-        self.response_generator = ResponseGenerator(
-            self.executor, use_llm=use_llm, notifier=self.notifier
-        )
+        
+        # Initialize Claude-based response generator (REQUIRED)
+        # Will raise RuntimeError if Claude is not available
+        self.response_generator = ResponseGenerator(notifier=self.notifier)
+        
         self.user_classifier = UserClassifier()
         self.channel_permissions = ChannelPermissions()
 
@@ -1300,23 +955,33 @@ class SlackDaemon:
             watched_keywords = [k.strip().lower() for k in watched_keywords.split(",") if k.strip()]
 
         self_user_id = get_slack_config("listener.self_user_id", "", "SLACK_SELF_USER_ID")
-        poll_interval = get_slack_config("listener.poll_interval", 5.0)
+        poll_interval_min = get_slack_config("listener.poll_interval_min", 5.0)
+        poll_interval_max = get_slack_config("listener.poll_interval_max", 15.0)
 
         # Allow command line to override
-        if self.poll_interval != 5.0:
-            poll_interval = self.poll_interval
+        if self.poll_interval_min != 5.0:
+            poll_interval_min = self.poll_interval_min
+        if self.poll_interval_max != 15.0:
+            poll_interval_max = self.poll_interval_max
+
+        # Self-DM channel for testing (messages from self in this channel are processed)
+        self_dm_channel = get_slack_config("listener.self_dm_channel", "", "SLACK_SELF_DM_CHANNEL")
 
         config = ListenerConfig(
-            poll_interval=poll_interval,
+            poll_interval_min=poll_interval_min,
+            poll_interval_max=poll_interval_max,
             watched_channels=watched_channels,
             watched_keywords=watched_keywords,
             self_user_id=self_user_id,
+            self_dm_channel=self_dm_channel,
         )
 
         self.listener = SlackListener(self.session, self.state_db, config)
 
         print(f"✅ Watching {len(config.watched_channels)} channels")
         print(f"✅ Keywords: {', '.join(config.watched_keywords) or 'none'}")
+        if self_dm_channel:
+            print(f"✅ Self-DM testing enabled: {self_dm_channel}")
 
         # Show user classification summary
         safe_count = len(self.user_classifier.safe_user_ids) + len(
@@ -1351,19 +1016,13 @@ class SlackDaemon:
         else:
             print("⚠️  Desktop notifications: disabled (install PyGObject)")
 
-        # Show Claude agent status
-        if self.use_llm:
-            if self.response_generator.claude_agent:
-                agent = self.response_generator.claude_agent
-                model = agent.model
-                if agent.use_vertex:
-                    print(f"🧠 Claude Agent: Vertex AI ({model})")
-                else:
-                    print(f"🧠 Claude Agent: Direct API ({model})")
-            else:
-                print("⚠️  Claude Agent: failed to initialize")
+        # Show Claude agent status (required for operation)
+        agent = self.response_generator.claude_agent
+        model = agent.model
+        if agent.use_vertex:
+            print(f"🧠 Claude Agent: Vertex AI ({model})")
         else:
-            print("📋 Mode: Pattern matching (use --llm for Claude)")
+            print(f"🧠 Claude Agent: Direct API ({model})")
 
         if self.dry_run:
             print("⚠️  DRY RUN MODE - no responses will be sent")
@@ -1382,10 +1041,18 @@ class SlackDaemon:
 
     async def _main_loop(self):
         """Main processing loop."""
+        loop_count = 0
         while self._running:
             try:
+                loop_count += 1
+                stats = self.listener.stats
+                
+                # Debug: print stats every 10 loops
+                if loop_count % 10 == 1:
+                    logger.debug(f"Loop {loop_count}: polls={stats.get('polls', 0)}, seen={stats.get('messages_seen', 0)}")
+                
                 # Update status display
-                self.ui.print_status(self.listener.stats)
+                self.ui.print_status(stats)
 
                 # Check for pending messages
                 pending = await self.state_db.get_pending_messages(limit=10)
@@ -1417,10 +1084,8 @@ class SlackDaemon:
             mentioned_groups=getattr(msg, "mentioned_groups", []),
         )
 
-        # Detect intent
-        intent = self.intent_detector.detect(msg.text, msg.is_mention)
-
-        self.ui.print_message(msg, intent.type, classification, channel_allowed=can_respond)
+        # Note: Intent detection removed - Claude handles all understanding
+        self.ui.print_message(msg, "claude", classification, channel_allowed=can_respond)
         self.ui.messages_processed += 1
 
         # Desktop notification - message received
@@ -1431,8 +1096,14 @@ class SlackDaemon:
             classification=classification.category.value,
         )
 
-        # Generate response (with classification-aware modulation)
-        response, should_send = await self.response_generator.generate(msg, intent, classification)
+        # Generate response using Claude (handles intent, tool calls, everything)
+        response, should_send = await self.response_generator.generate(msg, classification)
+
+        # If response is None (error occurred), silently skip - don't respond at all
+        if response is None:
+            logger.debug(f"No response generated for message {msg.id} - silently skipping")
+            await self.state_db.mark_message_processed(msg.id)
+            return
 
         # Update D-Bus handler stats
         if self._dbus_handler:
@@ -1446,7 +1117,7 @@ class SlackDaemon:
                     "message": msg,
                     "response": response,
                     "classification": classification,
-                    "intent": intent.type,
+                    "intent": "claude",
                 }
             )
             print(
@@ -1474,7 +1145,7 @@ class SlackDaemon:
                     user_id=msg.user_id,
                     user_name=msg.user_name,
                     text=msg.text,
-                    intent=intent.type,
+                    intent="claude",
                     classification=classification.category.value,
                     response=response,
                     status="pending",
@@ -1513,7 +1184,7 @@ class SlackDaemon:
                     user_id=msg.user_id,
                     user_name=msg.user_name,
                     text=msg.text,
-                    intent=intent.type,
+                    intent="claude",
                     classification=classification.category.value,
                     response="",
                     status="skipped",
@@ -1534,16 +1205,24 @@ class SlackDaemon:
             self.notifier.responding(
                 user_name=msg.user_name,
                 channel_name=msg.channel_name,
-                intent=intent.type,
+                intent="claude",
             )
             try:
-                thread_ts = msg.thread_ts or msg.timestamp
-                await self.session.send_message(
+                # In DMs (channel starts with D), don't use threading
+                # In channels, reply in thread to keep things organized
+                is_dm = msg.channel_id.startswith("D")
+                thread_ts = None if is_dm else (msg.thread_ts or msg.timestamp)
+                sent_msg = await self.session.send_message(
                     channel_id=msg.channel_id,
                     text=response,
                     thread_ts=thread_ts,
                     typing_delay=True,
                 )
+                # Update last_processed_ts to our sent message so we don't respond to ourselves
+                if sent_msg and "ts" in sent_msg:
+                    await self.state_db.set_last_processed_ts(
+                        msg.channel_id, sent_msg["ts"], msg.channel_name
+                    )
                 self.ui.messages_responded += 1
                 if self._dbus_handler:
                     self._dbus_handler.messages_responded = self.ui.messages_responded
@@ -1575,7 +1254,7 @@ class SlackDaemon:
                 user_id=msg.user_id,
                 user_name=msg.user_name,
                 text=msg.text,
-                intent=intent.type,
+                intent="claude",
                 classification=classification.category.value,
                 response=response,
                 status=status,
@@ -1680,11 +1359,8 @@ Single Instance:
         action="store_true",
         help="Process messages but don't send responses",
     )
-    parser.add_argument(
-        "--llm",
-        action="store_true",
-        help="Enable LLM for intelligent responses",
-    )
+    # NOTE: --llm flag removed - Claude is now REQUIRED for operation
+    # The Slack daemon is just a Slack interface; all intelligence is in Claude
     parser.add_argument(
         "--verbose",
         "-v",
@@ -1692,10 +1368,16 @@ Single Instance:
         help="Verbose output",
     )
     parser.add_argument(
-        "--poll-interval",
+        "--poll-min",
         type=float,
         default=5.0,
-        help="Polling interval in seconds (default: 5)",
+        help="Minimum polling interval in seconds (default: 5)",
+    )
+    parser.add_argument(
+        "--poll-max",
+        type=float,
+        default=15.0,
+        help="Maximum polling interval in seconds (default: 15)",
     )
     parser.add_argument(
         "--dbus",
@@ -1778,9 +1460,9 @@ Single Instance:
 
     daemon = SlackDaemon(
         dry_run=args.dry_run,
-        use_llm=args.llm,
         verbose=args.verbose,
-        poll_interval=args.poll_interval,
+        poll_interval_min=args.poll_min,
+        poll_interval_max=args.poll_max,
         enable_dbus=args.dbus,
         enable_notify=not args.no_notify,
     )

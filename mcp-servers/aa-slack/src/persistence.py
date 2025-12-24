@@ -101,12 +101,16 @@ class SlackStateDB:
         self._lock = asyncio.Lock()
     
     async def connect(self):
-        """Connect to database and create tables."""
+        """Connect to database and create tables (public, acquires lock)."""
         async with self._lock:
-            if self._db is None:
-                self._db = await aiosqlite.connect(self.db_path)
-                await self._create_tables()
-                logger.info(f"Connected to state database: {self.db_path}")
+            await self._connect_unlocked()
+    
+    async def _connect_unlocked(self):
+        """Connect to database (internal, caller must hold lock)."""
+        if self._db is None:
+            self._db = await aiosqlite.connect(self.db_path)
+            await self._create_tables()
+            logger.info(f"Connected to state database: {self.db_path}")
     
     async def close(self):
         """Close database connection."""
@@ -157,7 +161,7 @@ class SlackStateDB:
     async def get_last_processed_ts(self, channel_id: str) -> str | None:
         """Get the last processed message timestamp for a channel."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             cursor = await self._db.execute(
                 "SELECT last_processed_ts FROM channel_state WHERE channel_id = ?",
                 (channel_id,)
@@ -173,7 +177,7 @@ class SlackStateDB:
     ):
         """Update the last processed timestamp for a channel."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             await self._db.execute(
                 """
                 INSERT OR REPLACE INTO channel_state 
@@ -187,7 +191,7 @@ class SlackStateDB:
     async def get_all_channel_states(self) -> dict[str, str]:
         """Get all channel states as dict of channel_id -> last_processed_ts."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             cursor = await self._db.execute(
                 "SELECT channel_id, last_processed_ts FROM channel_state"
             )
@@ -199,7 +203,7 @@ class SlackStateDB:
     async def add_pending_message(self, message: PendingMessage):
         """Add a message to the pending queue."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             await self._db.execute(
                 """
                 INSERT OR REPLACE INTO pending_messages 
@@ -222,7 +226,7 @@ class SlackStateDB:
     ) -> list[PendingMessage]:
         """Get unprocessed pending messages."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             
             if channel_id:
                 cursor = await self._db.execute(
@@ -249,7 +253,7 @@ class SlackStateDB:
     async def mark_message_processed(self, message_id: str):
         """Mark a message as processed."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             await self._db.execute(
                 "UPDATE pending_messages SET processed_at = ? WHERE id = ?",
                 (time.time(), message_id)
@@ -259,7 +263,7 @@ class SlackStateDB:
     async def get_pending_count(self) -> int:
         """Get count of unprocessed messages."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             cursor = await self._db.execute(
                 "SELECT COUNT(*) FROM pending_messages WHERE processed_at IS NULL"
             )
@@ -269,7 +273,7 @@ class SlackStateDB:
     async def clear_old_messages(self, older_than_hours: int = 24):
         """Remove processed messages older than specified hours."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             cutoff = time.time() - (older_than_hours * 3600)
             await self._db.execute(
                 "DELETE FROM pending_messages WHERE processed_at IS NOT NULL AND processed_at < ?",
@@ -282,7 +286,7 @@ class SlackStateDB:
     async def get_user_name(self, user_id: str) -> str | None:
         """Get cached user name."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             cursor = await self._db.execute(
                 "SELECT user_name FROM user_cache WHERE user_id = ?",
                 (user_id,)
@@ -299,7 +303,7 @@ class SlackStateDB:
     ):
         """Cache user information."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             await self._db.execute(
                 """
                 INSERT OR REPLACE INTO user_cache 
@@ -313,7 +317,7 @@ class SlackStateDB:
     async def get_all_cached_users(self) -> dict[str, dict[str, str]]:
         """Get all cached users."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             cursor = await self._db.execute(
                 "SELECT user_id, user_name, display_name, real_name FROM user_cache"
             )
@@ -332,7 +336,7 @@ class SlackStateDB:
     async def get_meta(self, key: str, default: str = "") -> str:
         """Get metadata value."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             cursor = await self._db.execute(
                 "SELECT value FROM listener_meta WHERE key = ?",
                 (key,)
@@ -343,7 +347,7 @@ class SlackStateDB:
     async def set_meta(self, key: str, value: str):
         """Set metadata value."""
         async with self._lock:
-            await self.connect()
+            await self._connect_unlocked()
             await self._db.execute(
                 """
                 INSERT OR REPLACE INTO listener_meta (key, value, updated_at)
@@ -352,4 +356,5 @@ class SlackStateDB:
                 (key, value, time.time())
             )
             await self._db.commit()
+
 

@@ -29,27 +29,57 @@ def load_bonfire_config() -> dict:
     return {}
 
 
+def get_kubeconfig() -> str:
+    """Get kubeconfig path for ephemeral cluster."""
+    config = load_bonfire_config()
+    return config.get("kubeconfig", str(Path.home() / ".kube/config.e"))
+
+
 def get_app_config(app_name: str = "", billing: bool = False) -> dict:
-    """Get app configuration from config.json."""
+    """Get app configuration from config.json.
+    
+    For Automation Analytics, the app_name is 'tower-analytics' (the bonfire app name),
+    components are 'tower-analytics-clowdapp' or 'tower-analytics-billing-clowdapp'.
+    """
     config = load_bonfire_config()
     apps = config.get("apps", {})
     
-    # Try to find the app
+    # Try to find the app by name
+    resolved_app_name = app_name
     app_config = apps.get(app_name, {})
+    
     if not app_config:
-        # Fallback to first app or empty
-        if apps:
-            app_config = next(iter(apps.values()))
+        # Fallback to tower-analytics (default for AA) or first app
+        if "tower-analytics" in apps:
+            resolved_app_name = "tower-analytics"
+            app_config = apps["tower-analytics"]
+        elif apps:
+            resolved_app_name = next(iter(apps.keys()))
+            app_config = apps[resolved_app_name]
+    
+    # HARDCODED FALLBACK: If config loading completely failed, use known defaults
+    if not resolved_app_name:
+        resolved_app_name = "tower-analytics"
     
     # Get component config
     comp_key = "billing" if billing else "main"
     components = app_config.get("components", {})
     comp_config = components.get(comp_key, components.get("main", {}))
     
+    # Determine component name with proper fallback
+    if comp_config and "name" in comp_config:
+        component = comp_config["name"]
+    else:
+        # Hardcoded fallback for AA when config is missing
+        if billing:
+            component = "tower-analytics-billing-clowdapp"
+        else:
+            component = "tower-analytics-clowdapp"
+    
     return {
-        "app_name": app_name,
-        "component": comp_config.get("name", f"{app_name}-clowdapp"),
-        "image_base": app_config.get("image_base", ""),
+        "app_name": resolved_app_name,
+        "component": component,
+        "image_base": app_config.get("image_base", "quay.io/redhat-user-workloads/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"),
         "ref_env": config.get("ref_env", "insights-production"),
     }
 
@@ -68,6 +98,8 @@ async def run_bonfire(
     logger.info(f"Running: {' '.join(cmd)}")
     
     run_env = os.environ.copy()
+    # Always set KUBECONFIG for ephemeral cluster
+    run_env["KUBECONFIG"] = get_kubeconfig()
     if env:
         run_env.update(env)
     
@@ -173,19 +205,28 @@ def register_tools(server: "FastMCP") -> int:
 
 
     @server.tool()
-    async def bonfire_namespace_list() -> list[TextContent]:
+    async def bonfire_namespace_list(mine_only: bool = True) -> list[TextContent]:
         """
         List current ephemeral namespace reservations.
+
+        Args:
+            mine_only: If True (default), only show namespaces owned by current user.
+                      ALWAYS use True unless explicitly asked to see all namespaces.
 
         Returns:
             List of reserved namespaces with status.
         """
-        success, output = await run_bonfire(["namespace", "list"])
+        args = ["namespace", "list"]
+        if mine_only:
+            args.append("--mine")
+        
+        success, output = await run_bonfire(args)
 
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to list namespaces:\n\n{output}")]
 
-        return [TextContent(type="text", text=f"## Ephemeral Namespaces\n\n```\n{output}\n```")]
+        title = "My Ephemeral Namespaces" if mine_only else "All Ephemeral Namespaces"
+        return [TextContent(type="text", text=f"## {title}\n\n```\n{output}\n```")]
 
 
     @server.tool()
@@ -208,17 +249,38 @@ def register_tools(server: "FastMCP") -> int:
 
 
     @server.tool()
-    async def bonfire_namespace_release(namespace: str) -> list[TextContent]:
+    async def bonfire_namespace_release(namespace: str, force: bool = False) -> list[TextContent]:
         """
         Release an ephemeral namespace reservation.
+        
+        SAFETY: Only releases namespaces owned by the current user unless force=True.
 
         Args:
             namespace: Namespace to release
+            force: If False (default), verify ownership before release.
+                   Only set True if you're absolutely sure.
 
         Returns:
             Confirmation of release.
         """
-        success, output = await run_bonfire(["namespace", "release", namespace])
+        # First verify ownership by checking --mine list
+        if not force:
+            check_success, check_output = await run_bonfire(["namespace", "list", "--mine"])
+            
+            if check_success and namespace not in check_output:
+                return [TextContent(type="text", text=f"""❌ **Cannot release namespace `{namespace}`**
+
+This namespace is not owned by you (not in `bonfire namespace list --mine`).
+
+Your namespaces:
+```
+{check_output}
+```
+
+If you're sure you want to release it, call with `force=True` (not recommended).""")]
+        
+        # Always use --force to skip interactive confirmation (non-TTY safe)
+        success, output = await run_bonfire(["namespace", "release", namespace, "--force"])
 
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to release namespace:\n\n{output}")]
@@ -655,13 +717,27 @@ def register_tools(server: "FastMCP") -> int:
         timeout: int = 900,
     ) -> list[TextContent]:
         """
-        Deploy Automation Analytics to ephemeral namespace (matches ITS pattern).
+        Deploy Automation Analytics to ephemeral namespace (matches ITS pattern exactly).
+
+        Command format (billing=false):
+        KUBECONFIG=~/.kube/config.e bonfire deploy \\
+          --source=appsre --ref-env insights-production \\
+          --namespace ephemeral-xxx --timeout 900 \\
+          --optional-deps-method hybrid --frontends false \\
+          --component tower-analytics-clowdapp \\
+          --no-remove-resources all \\
+          --set-template-ref tower-analytics-clowdapp=<40-char-git-sha> \\
+          --set-parameter tower-analytics-clowdapp/IMAGE=quay.io/.../image@sha256 \\
+          --set-parameter tower-analytics-clowdapp/IMAGE_TAG=<64-char-sha256-digest> \\
+          tower-analytics
 
         Args:
             namespace: Target ephemeral namespace (e.g., "ephemeral-uhfivg")
-            template_ref: Git commit SHA for template (e.g., "6b8b3924ab85...")
-            image_tag: Image digest/tag from Konflux snapshot
-            billing: If True, deploy billing component; if False, deploy main component
+            template_ref: Full 40-char git commit SHA for template
+            image_tag: 64-char sha256 digest from Quay (NOT git SHA!)
+                       Get this from quay_get_tag output: "Manifest Digest: sha256:..."
+            billing: If True, deploy tower-analytics-billing-clowdapp
+                     If False, deploy tower-analytics-clowdapp
             timeout: Deployment timeout in seconds
 
         Returns:
@@ -670,13 +746,107 @@ def register_tools(server: "FastMCP") -> int:
         # Load app config from config.json
         app_cfg = get_app_config(billing=billing)
         component = app_cfg["component"]
-        image_base = app_cfg["image_base"] + "@sha256" if app_cfg["image_base"] else ""
+        image_base = app_cfg["image_base"]
         app_name = app_cfg["app_name"]
         ref_env = app_cfg["ref_env"]
 
         if not image_base:
             return [TextContent(type="text", text="❌ image_base not configured in config.json bonfire.apps section")]
 
+        # VALIDATE template_ref: Must be FULL 40-char git commit SHA
+        if len(template_ref) != 40:
+            return [TextContent(type="text", text=f"""❌ **Invalid template_ref: `{template_ref}` ({len(template_ref)} chars)**
+
+template_ref must be a FULL 40-character git commit SHA.
+
+**Fix:** Get the full SHA:
+```bash
+git rev-parse {template_ref}
+```""")]
+
+        # Strip sha256: prefix if present
+        digest = image_tag
+        if digest.startswith("sha256:"):
+            digest = digest[7:]
+        
+        # VALIDATE image_tag: Must be 64-char sha256 digest
+        if len(digest) != 64:
+            return [TextContent(type="text", text=f"""❌ **Invalid image_tag: `{image_tag}` ({len(digest)} chars)**
+
+image_tag must be the 64-char sha256 digest from the built image (NOT the git SHA).
+
+**How to get it:**
+1. Call `quay_get_tag(repository='...', tag='{template_ref}')`
+2. Look for "Manifest Digest: sha256:XXXX..."
+3. Use the 64-char hex part after "sha256:"
+
+**Or via CLI:**
+```bash
+skopeo inspect docker://{image_base}:{template_ref} | jq -r '.Digest' | cut -d: -f2
+```""")]
+
+        # Validate digest is hex
+        if not all(c in '0123456789abcdef' for c in digest.lower()):
+            return [TextContent(type="text", text=f"""❌ **Invalid digest format: `{digest}`**
+
+Expected 64 hex characters (0-9, a-f). Got non-hex characters.""")]
+
+        # HARD STOP: Check if image exists in Quay before deploying
+        repository = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
+        image_ref = f"docker://quay.io/redhat-user-workloads/{repository}:{template_ref}"
+        
+        logger.info(f"Checking if image exists: {image_ref}")
+        
+        try:
+            check_result = await asyncio.to_thread(
+                subprocess.run,
+                ["skopeo", "inspect", "--raw", image_ref],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            check_output = check_result.stdout + check_result.stderr
+            
+            if check_result.returncode != 0 or "manifest unknown" in check_output.lower():
+                return [TextContent(type="text", text=f"""❌ **STOP: Image not found in Quay**
+
+The image for commit `{template_ref[:12]}...` does not exist in redhat-user-workloads.
+
+**Image checked:** `{image_base}:{template_ref}`
+
+**Possible causes:**
+1. Konflux hasn't built the image yet (check pipeline status)
+2. The commit SHA is incorrect
+3. The build failed
+
+**What to do:**
+1. Check Konflux build status for this commit
+2. Wait for the build to complete
+3. Retry once the image is available
+
+**DO NOT** proceed with deployment - it will fail with ImagePullBackOff.""")]
+                
+        except subprocess.TimeoutExpired:
+            return [TextContent(type="text", text="❌ Image check timed out. Verify image exists before retrying.")]
+        except FileNotFoundError:
+            logger.warning("skopeo not found, skipping image check")
+            # Continue without check if skopeo not installed
+
+        logger.info(f"Image verified, proceeding with deploy")
+
+        # Build the exact command matching ITS pattern
+        # Example:
+        # KUBECONFIG=~/.kube/config.e bonfire deploy \
+        #   --source=appsre --ref-env insights-production \
+        #   --namespace ephemeral-cr3t3n --timeout 900 \
+        #   --optional-deps-method hybrid --frontends false \
+        #   --component tower-analytics-clowdapp \
+        #   --no-remove-resources all \
+        #   --set-template-ref tower-analytics-clowdapp=1244ec49e6... \
+        #   --set-parameter tower-analytics-clowdapp/IMAGE=quay.io/.../image@sha256 \
+        #   --set-parameter tower-analytics-clowdapp/IMAGE_TAG=20a4c976... \
+        #   tower-analytics
+        
         args = [
             "deploy",
             "--source=appsre",
@@ -687,16 +857,32 @@ def register_tools(server: "FastMCP") -> int:
             "--frontends", "false",
             "--component", component,
             "--no-remove-resources", "all",
-            "--set-template-ref", f"{component}={template_ref}",
-            "--set-parameter", f"{component}/IMAGE={image_base}",
-            "--set-parameter", f"{component}/IMAGE_TAG={image_tag}",
+            f"--set-template-ref", f"{component}={template_ref}",
+            "--set-parameter", f"{component}/IMAGE={image_base}@sha256",
+            "--set-parameter", f"{component}/IMAGE_TAG={digest}",
             app_name,
         ]
+
+        # Log the full command for debugging
+        kubeconfig = get_kubeconfig()
+        cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
+        logger.info(f"Deploying AA: {cmd_preview}")
 
         success, output = await run_bonfire(args, timeout=timeout + 120)
 
         if not success:
-            return [TextContent(type="text", text=f"❌ AA {'billing' if billing else 'main'} deployment failed:\n\n```\n{output}\n```")]
+            # Include the command in error output for debugging
+            return [TextContent(type="text", text=f"""❌ AA {'billing' if billing else 'main'} deployment failed
+
+**Command:**
+```bash
+{cmd_preview}
+```
+
+**Output:**
+```
+{output}
+```""")]
 
         display_output = output[-5000:] if len(output) > 5000 else output
 
@@ -705,8 +891,15 @@ def register_tools(server: "FastMCP") -> int:
             "",
             f"**Namespace:** `{namespace}`",
             f"**Component:** `{component}`",
-            f"**Template Ref:** `{template_ref[:12]}...`",
+            f"**Template Ref:** `{template_ref}`",
+            f"**Image Digest:** `{digest[:16]}...`",
             "",
+            "**Command used:**",
+            "```bash",
+            cmd_preview,
+            "```",
+            "",
+            "**Output:**",
             "```",
             display_output,
             "```",
@@ -726,11 +919,14 @@ def register_tools(server: "FastMCP") -> int:
         timeout: int = 900,
     ) -> list[TextContent]:
         """
-        Deploy Automation Analytics for local development (uses current branch).
+        Deploy Automation Analytics for local development (uses default refs from ref-env).
+
+        This is for quick local testing without specifying a specific commit.
+        For MR testing, use bonfire_deploy_aa with specific template_ref and image_tag.
 
         Args:
             namespace: Target ephemeral namespace
-            billing: If True, deploy billing component
+            billing: If True, deploy tower-analytics-billing-clowdapp
             timeout: Deployment timeout
 
         Returns:
@@ -742,6 +938,7 @@ def register_tools(server: "FastMCP") -> int:
         app_name = app_cfg["app_name"]
         ref_env = app_cfg["ref_env"]
 
+        # Local deploy without image overrides - uses defaults from ref-env
         args = [
             "deploy",
             "--source=appsre",
@@ -751,18 +948,45 @@ def register_tools(server: "FastMCP") -> int:
             "--optional-deps-method", "hybrid",
             "--frontends", "false",
             "--component", component,
-            "--single-replicas",
+            "--no-remove-resources", "all",
             app_name,
         ]
+
+        kubeconfig = get_kubeconfig()
+        cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
+        logger.info(f"Local deploy: {cmd_preview}")
 
         success, output = await run_bonfire(args, timeout=timeout + 120)
 
         if not success:
-            return [TextContent(type="text", text=f"❌ Local deploy failed:\n\n```\n{output}\n```")]
+            return [TextContent(type="text", text=f"""❌ Local deploy failed
+
+**Command:**
+```bash
+{cmd_preview}
+```
+
+**Output:**
+```
+{output}
+```""")]
 
         display_output = output[-5000:] if len(output) > 5000 else output
 
-        return [TextContent(type="text", text=f"## ✅ Local Deploy: {app_name} ({'billing' if billing else 'main'})\n\n**Namespace:** `{namespace}`\n**Component:** `{component}`\n\n```\n{display_output}\n```")]
+        return [TextContent(type="text", text=f"""## ✅ Local Deploy: {app_name} ({'billing' if billing else 'main'})
+
+**Namespace:** `{namespace}`
+**Component:** `{component}`
+
+**Command:**
+```bash
+{cmd_preview}
+```
+
+**Output:**
+```
+{display_output}
+```""")]
 
 
     @server.tool()
@@ -824,7 +1048,7 @@ def register_tools(server: "FastMCP") -> int:
         app_name = app_cfg["app_name"]
         ref_env = app_cfg["ref_env"]
         
-        lines.append(f"### Step 2: Deploying {app_name}...")
+        lines.append(f"### Step 2: Deploying {app_name} ({component})...")
 
         deploy_args = [
             "deploy",
@@ -835,7 +1059,7 @@ def register_tools(server: "FastMCP") -> int:
             "--optional-deps-method", "hybrid",
             "--frontends", "false",
             "--component", component,
-            "--single-replicas",
+            "--no-remove-resources", "all",
             app_name,
         ]
 
@@ -893,7 +1117,8 @@ def register_tools(server: "FastMCP") -> int:
         """
         Deploy Automation Analytics using Konflux snapshot data.
 
-        Parses the snapshot to extract template_ref and image_tag, then deploys.
+        Parses the snapshot to extract template_ref and image_tag, then deploys
+        using the exact ITS bonfire command pattern.
 
         Args:
             namespace: Target ephemeral namespace
@@ -921,33 +1146,42 @@ def register_tools(server: "FastMCP") -> int:
             components = snapshot.get("spec", {}).get("components", [])
 
             template_ref = None
-            image_tag = None
+            image_digest = None
 
             for comp in components:
-                if "your-app-backend" in comp.get("containerImage", ""):
-                    image_ref = comp.get("containerImage", "")
-                    if "@sha256:" in image_ref:
-                        image_tag = image_ref.split("@sha256:")[-1][:12]
+                container_image = comp.get("containerImage", "")
+                if "automation-analytics" in container_image or "your-app-backend" in container_image:
+                    if "@sha256:" in container_image:
+                        # Extract the 64-char sha256 digest
+                        image_digest = container_image.split("@sha256:")[-1]
                     template_ref = comp.get("source", {}).get("git", {}).get("revision", "")
                     break
 
-            if not template_ref or not image_tag:
-                return [TextContent(type="text", text="❌ Could not extract template_ref and image_tag from snapshot")]
+            if not template_ref or not image_digest:
+                return [TextContent(type="text", text="❌ Could not extract template_ref and sha256 digest from snapshot")]
+
+            # Validate lengths
+            if len(template_ref) != 40:
+                return [TextContent(type="text", text=f"❌ Invalid template_ref from snapshot: `{template_ref}` ({len(template_ref)} chars, need 40)")]
+            
+            if len(image_digest) != 64:
+                return [TextContent(type="text", text=f"❌ Invalid image digest from snapshot: `{image_digest}` ({len(image_digest)} chars, need 64)")]
 
             lines.append(f"**Template Ref:** `{template_ref}`")
-            lines.append(f"**Image Tag:** `{image_tag}`")
+            lines.append(f"**Image Digest:** `{image_digest[:16]}...`")
             lines.append("")
 
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Failed to parse snapshot: {e}")]
 
-        # Deploy using app config from config.json
+        # Deploy using exact ITS pattern
         app_cfg = get_app_config(billing=billing)
         component = app_cfg["component"]
         app_name = app_cfg["app_name"]
         ref_env = app_cfg["ref_env"]
         image_base = app_cfg.get("image_base", "")
 
+        # Exact ITS command pattern
         deploy_args = [
             "deploy",
             "--source=appsre",
@@ -957,13 +1191,20 @@ def register_tools(server: "FastMCP") -> int:
             "--optional-deps-method", "hybrid",
             "--frontends", "false",
             "--component", component,
-            "--set-template-ref", f"{app_name}/{component}={template_ref}",
-            "--set-image-tag", f"{image_base}={image_tag}" if image_base else f"image={image_tag}",
-            "--single-replicas",
+            "--no-remove-resources", "all",
+            "--set-template-ref", f"{component}={template_ref}",
+            "--set-parameter", f"{component}/IMAGE={image_base}@sha256",
+            "--set-parameter", f"{component}/IMAGE_TAG={image_digest}",
             app_name,
         ]
 
+        kubeconfig = get_kubeconfig()
+        cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(deploy_args)}"
+
         lines.append("### Deploying...")
+        lines.append(f"```bash\n{cmd_preview}\n```")
+        lines.append("")
+        
         success, output = await run_bonfire(deploy_args, timeout=timeout + 60)
 
         if not success:

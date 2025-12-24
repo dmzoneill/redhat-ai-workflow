@@ -35,18 +35,20 @@ def get_kubeconfig(env: str, namespace: str = "") -> str:
 async def run_kubectl(
     args: list[str], kubeconfig: str | None = None, namespace: str | None = None, timeout: int = 60
 ) -> tuple[bool, str]:
-    """Run kubectl command and return (success, output)."""
-    cmd = ["kubectl"] + args
+    """Run kubectl command and return (success, output).
+    
+    Uses --kubeconfig= flag for explicit config selection.
+    """
+    cmd = ["kubectl"]
+    if kubeconfig:
+        cmd.append(f"--kubeconfig={kubeconfig}")
+    cmd.extend(args)
     if namespace:
         cmd.extend(["-n", namespace])
     
-    env = os.environ.copy()
-    if kubeconfig:
-        env["KUBECONFIG"] = kubeconfig
-    
     try:
         result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, timeout=timeout, env=env
+            subprocess.run, cmd, capture_output=True, text=True, timeout=timeout
         )
         output = result.stdout
         if result.returncode != 0:

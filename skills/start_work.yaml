@@ -2,8 +2,18 @@
 # Combines issue lookup, branch creation/checkout, MR feedback, and status update
 
 name: start_work
-description: Begin or resume working on a Jira issue - gets context, handles existing branches and MR feedback
-version: "1.2"
+description: |
+  Begin or resume working on a Jira issue.
+  
+  If 'repo' is not provided, automatically resolves the repository from the
+  issue key prefix (e.g., AAP → automation-analytics-backend) using config.json.
+  
+  Features:
+  - Gets issue context from Jira
+  - Creates or checks out feature branch
+  - Shows MR feedback if exists
+  - Updates Jira status
+version: "1.3"
 
 inputs:
   - name: issue_key
@@ -13,10 +23,99 @@ inputs:
   - name: repo
     type: string
     required: false
-    default: "."
-    description: "Repository path (defaults to current directory)"
+    default: ""
+    description: "Repository path - if not provided, resolved from issue key via config"
+  - name: repo_name
+    type: string
+    required: false
+    description: "Repository name from config (e.g., 'automation-analytics-backend') - alternative to repo path"
 
 steps:
+  # ==================== RESOLVE REPOSITORY ====================
+
+  # Step 0: Resolve repository from issue key if not provided
+  - name: resolve_repo
+    description: "Determine which repo to use based on issue key or explicit input"
+    compute: |
+      import json
+      import os
+      from pathlib import Path
+
+      # Explicit repo path takes priority
+      if inputs.repo and inputs.repo != "" and inputs.repo != ".":
+          repo_path = inputs.repo
+          repo_source = "explicit"
+      # Then repo name from config
+      elif inputs.repo_name:
+          config_paths = [
+              Path.cwd() / "config.json",
+              Path.home() / "src/redhat-ai-workflow/config.json",
+          ]
+          config = {}
+          for p in config_paths:
+              if p.exists():
+                  with open(p) as f:
+                      config = json.load(f)
+                  break
+          
+          repos = config.get("repositories", {})
+          if inputs.repo_name in repos:
+              repo_path = repos[inputs.repo_name].get("path", "")
+              repo_source = "config_name"
+          else:
+              raise ValueError(f"Repository '{inputs.repo_name}' not found in config.json")
+      # Finally, try to resolve from issue key prefix
+      else:
+          # Load config
+          config_paths = [
+              Path.cwd() / "config.json",
+              Path.home() / "src/redhat-ai-workflow/config.json",
+          ]
+          config = {}
+          for p in config_paths:
+              if p.exists():
+                  with open(p) as f:
+                      config = json.load(f)
+                  break
+          
+          repos = config.get("repositories", {})
+          project_prefix = inputs.issue_key.split("-")[0].upper()
+          
+          # Find repos matching this Jira project
+          matching = []
+          for name, cfg in repos.items():
+              if cfg.get("jira_project") == project_prefix:
+                  matching.append({"name": name, "path": cfg.get("path"), "gitlab": cfg.get("gitlab")})
+          
+          if len(matching) == 0:
+              # Fall back to cwd if we're in a git repo
+              cwd = os.getcwd()
+              git_check = os.path.exists(os.path.join(cwd, ".git"))
+              if git_check:
+                  repo_path = cwd
+                  repo_source = "cwd_fallback"
+              else:
+                  raise ValueError(
+                      f"No repository configured for {project_prefix} issues. "
+                      "Please specify 'repo' or 'repo_name', or run from within a git repository."
+                  )
+          elif len(matching) == 1:
+              repo_path = matching[0]["path"]
+              repo_source = "issue_key"
+          else:
+              # Multiple matches - need clarification
+              names = ", ".join(m["name"] for m in matching)
+              raise ValueError(
+                  f"Multiple repositories match {project_prefix} issues: {names}. "
+                  "Please specify 'repo_name' to choose one."
+              )
+      
+      if not repo_path or not os.path.exists(repo_path):
+          raise ValueError(f"Repository path not found: {repo_path}")
+      
+      result = {"path": repo_path, "source": repo_source}
+    output: resolved_repo
+
   # ==================== PRE-FLIGHT VALIDATION ====================
 
   # Step 0a: Validate git repository
@@ -26,7 +125,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       # Check if git repo
       result = subprocess.run(
@@ -100,7 +199,7 @@ steps:
       import re
       import os
       
-      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo_path = resolved_repo["path"]
       issue_key = inputs.issue_key.upper()
       
       # Fetch all remotes
@@ -141,7 +240,7 @@ steps:
       import os
       import re
       
-      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo_path = resolved_repo["path"]
       branch = branch_check['branch']
       issue_key = inputs.issue_key.upper()
       
@@ -177,7 +276,7 @@ steps:
       import subprocess
       import os
       
-      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo_path = resolved_repo["path"]
       mr_id = existing_mr['id']
       
       # Get MR details
@@ -280,7 +379,7 @@ steps:
       import subprocess
       import os
       
-      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo_path = resolved_repo["path"]
       branch = branch_check['branch']
       
       result = subprocess.run(
@@ -310,7 +409,7 @@ steps:
       import subprocess
       import os
       
-      repo_path = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo_path = resolved_repo["path"]
       branch_name = new_branch_name
       
       subprocess.run(["git", "checkout", "main"], cwd=repo_path, capture_output=True)
@@ -406,7 +505,7 @@ outputs:
       ### Next Steps
       1. Make your changes
       2. Commit: `git commit -m "{{ inputs.issue_key }} - feat: description"`
-      3. When ready: `skill_run("create_mr", '{"issue_key": "{{ inputs.issue_key }}"}')`
+      3. When ready: `skill_run("create_mr", '{"issue_key": "{{ inputs.issue_key }}", "repo": "{{ resolved_repo.path }}"}')`
       
       {% endif %}
   
@@ -414,7 +513,8 @@ outputs:
     value:
       issue: "{{ issue }}"
       branch: "{{ final_branch }}"
-      repo: "{{ inputs.repo }}"
+      repo: "{{ resolved_repo.path }}"
+      repo_source: "{{ resolved_repo.source }}"
       was_existing: "{{ branch_check.exists }}"
       has_mr: "{{ existing_mr is not none }}"
       has_feedback: "{{ mr_feedback.has_feedback if mr_feedback else false }}"

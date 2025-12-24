@@ -1,9 +1,11 @@
-# Skill: Review PR/MR for automation-analytics-backend
+# Skill: Review PR/MR
 # Structured code review with local testing
 
 name: review_pr
 description: |
-  Review a colleague's PR in automation-analytics-backend.
+  Review a colleague's PR/MR.
+  
+  Resolves repository from issue_key, repo_name, or current directory.
   
   Accepts EITHER:
   - mr_id: GitLab MR number (e.g., 123)
@@ -13,7 +15,7 @@ description: |
   runs local tests, and provides brief focused feedback.
   
   Automatically approves or posts feedback based on findings.
-version: "1.1"
+version: "1.2"
 
 inputs:
   - name: mr_id
@@ -21,10 +23,20 @@ inputs:
     required: false
     description: "GitLab MR ID (e.g., 1234)"
   
+  - name: url
+    type: string
+    required: false
+    description: "Full GitLab MR URL (e.g., https://gitlab.cee.redhat.com/org/repo/-/merge_requests/123)"
+  
   - name: issue_key
     type: string
     required: false
     description: "Jira issue key (e.g., AAP-61214) - will search for associated MR"
+  
+  - name: repo_name
+    type: string
+    required: false
+    description: "Repository name from config (e.g., 'automation-analytics-backend')"
   
   - name: run_tests
     type: boolean
@@ -32,46 +44,121 @@ inputs:
     default: false
     description: "Checkout branch and run local tests (default: false, static analysis only)"
 
-# Paths and config
-constants:
-  repo_path: /home/daoneill/src/automation-analytics-backend
-  gitlab_project: automation-analytics/automation-analytics-backend
-  konflux_namespace: aap-aa-tenant
-  fastapi_container: automation-analytics-backend-api-fastapi-1
+# No hardcoded constants - resolved dynamically
 
 steps:
+  # ==================== RESOLVE REPOSITORY ====================
+  
+  - name: resolve_repo
+    description: "Determine which repo, GitLab project, and settings to use"
+    compute: |
+      import json
+      import os
+      import re
+      from pathlib import Path
+
+      repo_path = None
+      gitlab_project = None
+      konflux_namespace = "aap-aa-tenant"
+      fastapi_container = "automation-analytics-backend-api-fastapi-1"
+      mr_id_from_url = None
+
+      # Parse URL if provided
+      if inputs.url:
+          url_match = re.match(r'https?://[^/]+/(.+?)/-/merge_requests/(\d+)', inputs.url)
+          if url_match:
+              gitlab_project = url_match.group(1)
+              mr_id_from_url = int(url_match.group(2))
+
+      # Load config
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      repos = config.get("repositories", {})
+
+      # Repo name from config
+      if inputs.repo_name and inputs.repo_name in repos:
+          cfg = repos[inputs.repo_name]
+          repo_path = cfg.get("path")
+          gitlab_project = cfg.get("gitlab")
+      # Resolve from issue key
+      elif inputs.issue_key:
+          project_prefix = inputs.issue_key.split("-")[0].upper()
+          for name, cfg in repos.items():
+              if cfg.get("jira_project") == project_prefix:
+                  repo_path = cfg.get("path")
+                  gitlab_project = cfg.get("gitlab")
+                  break
+      # Fall back to cwd
+      else:
+          cwd = os.getcwd()
+          for name, cfg in repos.items():
+              if cfg.get("path") == cwd:
+                  repo_path = cfg.get("path")
+                  gitlab_project = cfg.get("gitlab")
+                  break
+
+      if not gitlab_project:
+          gitlab_project = "automation-analytics/automation-analytics-backend"
+      if not repo_path:
+          repo_path = os.getcwd()
+
+      result = {
+          "path": repo_path,
+          "gitlab_project": gitlab_project,
+          "konflux_namespace": konflux_namespace,
+          "fastapi_container": fastapi_container,
+          "mr_id_from_url": mr_id_from_url,
+      }
+    output: resolved
   # ==================== RESOLVE MR ID ====================
   
-  # Step 0a: Validate we have either mr_id or issue_key
+  # Step 0a: Validate we have either mr_id, url, or issue_key
   - name: validate_input
-    description: "Ensure we have either mr_id or issue_key"
+    description: "Ensure we have mr_id, url, or issue_key"
     compute: |
-      if not inputs.get('mr_id') and not inputs.get('issue_key'):
-        raise ValueError("Must provide either 'mr_id' or 'issue_key'")
+      has_mr_id = inputs.get('mr_id') or resolved.get('mr_id_from_url')
+      has_issue_key = inputs.get('issue_key')
+      
+      if not has_mr_id and not has_issue_key:
+        raise ValueError("Must provide 'mr_id', 'url', or 'issue_key'")
       result = "OK"
     output: input_valid
 
   # Step 0b: Search for MR by Jira key if no mr_id provided
   - name: find_mr_by_jira
     description: "Find MR associated with Jira issue"
-    condition: "not inputs.get('mr_id') and inputs.get('issue_key')"
+    condition: "not inputs.get('mr_id') and not resolved.get('mr_id_from_url') and inputs.get('issue_key')"
     tool: gitlab_mr_list
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved.gitlab_project }}"
       state: opened
       search: "{{ inputs.issue_key }}"
     output: mr_search_results
     on_error: continue
 
-  # Step 0c: Extract MR ID from search results
+  # Step 0c: Extract MR ID from search results or URL
   - name: extract_mr_id
-    description: "Extract MR ID from search results"
-    condition: "not inputs.get('mr_id') and inputs.get('issue_key')"
+    description: "Extract MR ID from inputs, URL, or search results"
     compute: |
       import re
       
+      resolved_mr_id = None
+      
+      # Priority 1: Explicit mr_id input
       if inputs.get('mr_id'):
         resolved_mr_id = inputs.mr_id
+      # Priority 2: Extracted from URL
+      elif resolved.get('mr_id_from_url'):
+        resolved_mr_id = resolved.mr_id_from_url
       else:
         # Parse search results to find MR ID
         search_text = mr_search_results or ""
@@ -116,7 +203,7 @@ steps:
     description: "Fetch MR details from GitLab"
     tool: gitlab_mr_view
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ mr_id }}"
     output: mr_details
 
@@ -155,7 +242,7 @@ steps:
     description: "Get code changes"
     tool: gitlab_mr_diff
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ mr_id }}"
     output: mr_diff_raw
 
@@ -210,7 +297,7 @@ steps:
     description: "Check GitLab CI status"
     tool: gitlab_ci_status
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved.gitlab_project }}"
     output: gitlab_pipeline
     on_error: continue
 
@@ -219,7 +306,7 @@ steps:
     description: "Check Konflux integration tests"
     tool: konflux_list_pipelines
     args:
-      namespace: "{{ constants.konflux_namespace }}"
+      namespace: "{{ resolved.konflux_namespace }}"
       limit: 5
     output: konflux_pipelines
     on_error: continue
@@ -228,15 +315,28 @@ steps:
 
   # Step 7: Validate commit title format
   - name: validate_commit_format
-    description: "Check commit title matches commitlint config"
+    description: "Check commit title matches commitlint config from config.json"
     compute: |
       import re
+      import json
+      from pathlib import Path
       
       issues = []
       
-      # Expected format: AAP-XXXXX - type(scope): description
-      # Types from commitlint: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
-      valid_types = ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build', 'revert']
+      # Load commit_format from config.json
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      commit_cfg = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  commit_cfg = json.load(f).get("commit_format", {})
+              break
+      
+      # Get valid types from config, with fallback
+      valid_types = commit_cfg.get("types", ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build', 'revert'])
       
       # Extract title from MR details (first line usually)
       title_line = mr_details.split('\n')[0] if mr_details else ""
@@ -298,10 +398,10 @@ steps:
         branch = f"mr-{mr_id}"
       
       # Fetch and checkout
-      subprocess.run(["git", "fetch", "origin"], cwd=constants.repo_path, capture_output=True)
+      subprocess.run(["git", "fetch", "origin"], cwd=resolved["path"], capture_output=True)
       result = subprocess.run(
         ["git", "checkout", "-B", branch, f"origin/{branch}"],
-        cwd=constants.repo_path,
+        cwd=resolved["path"],
         capture_output=True,
         text=True
       )
@@ -310,10 +410,10 @@ steps:
         # Try fetching the MR directly
         subprocess.run(
           ["git", "fetch", "origin", f"merge-requests/{mr_id}/head:{branch}"],
-          cwd=constants.repo_path,
+          cwd=resolved["path"],
           capture_output=True
         )
-        subprocess.run(["git", "checkout", branch], cwd=constants.repo_path, capture_output=True)
+        subprocess.run(["git", "checkout", branch], cwd=resolved["path"], capture_output=True)
       
       result = f"Checked out branch: {branch}"
     output: checkout_result
@@ -338,7 +438,7 @@ steps:
         # Try to start
         start_result = subprocess.run(
           ["docker-compose", "up", "-d"],
-          cwd=constants.repo_path,
+          cwd=resolved["path"],
           capture_output=True,
           text=True,
           timeout=120
@@ -361,7 +461,7 @@ steps:
       # Run migrations
       mig_result = subprocess.run(
         ["make", "migrations"],
-        cwd=constants.repo_path,
+        cwd=resolved["path"],
         capture_output=True,
         text=True,
         timeout=60
@@ -371,7 +471,7 @@ steps:
       # Run data
       data_result = subprocess.run(
         ["make", "data"],
-        cwd=constants.repo_path,
+        cwd=resolved["path"],
         capture_output=True,
         text=True,
         timeout=60
@@ -411,7 +511,7 @@ steps:
       os.chmod(script_path, 0o755)
       
       # Copy to container and run
-      container = constants.fastapi_container
+      container = resolved["fastapi_container"]
       
       # Copy script
       subprocess.run(
@@ -637,7 +737,7 @@ steps:
     condition: "review_action.get('action') == 'request_changes'"
     tool: gitlab_mr_comment
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ mr_id }}"
       comment: "{{ feedback_message }}"
     output: feedback_posted
@@ -649,9 +749,72 @@ steps:
     condition: "review_action.get('action') == 'approve'"
     tool: gitlab_mr_approve
     args:
-      project: "{{ constants.gitlab_project }}"
+      project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ mr_id }}"
     output: approval_result
+    on_error: continue
+
+  # Step 18b: Emit approval hook
+  - name: emit_approval_hook
+    description: "Notify author that MR was approved"
+    condition: "review_action.get('action') == 'approve' and approval_result"
+    compute: |
+      import asyncio
+      import sys
+      from pathlib import Path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      
+      try:
+          from scripts.skill_hooks import emit_event
+          
+          # Extract author from MR details
+          import re
+          author_match = re.search(r'Author[:\s]+@?(\w+)', mr_details or "", re.IGNORECASE)
+          author = author_match.group(1) if author_match else ""
+          
+          asyncio.run(emit_event("review_approved", {
+              "mr_id": str(mr_id),
+              "author": author,
+              "project": resolved.get("gitlab_project", ""),
+          }))
+          result = "hook sent"
+      except Exception as e:
+          result = f"hook skipped: {e}"
+    output: approval_hook_result
+    on_error: continue
+
+  # Step 18c: Emit feedback hook
+  - name: emit_feedback_hook
+    description: "Notify author that feedback was posted"
+    condition: "review_action.get('action') == 'request_changes' and feedback_posted"
+    compute: |
+      import asyncio
+      import sys
+      from pathlib import Path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      
+      try:
+          from scripts.skill_hooks import emit_event
+          
+          # Extract author from MR details
+          import re
+          author_match = re.search(r'Author[:\s]+@?(\w+)', mr_details or "", re.IGNORECASE)
+          author = author_match.group(1) if author_match else ""
+          
+          issue_count = len(code_issues) if code_issues else 0
+          if format_issues and format_issues != ["Format OK"]:
+              issue_count += len(format_issues)
+          
+          asyncio.run(emit_event("review_comment", {
+              "mr_id": str(mr_id),
+              "author": author,
+              "project": resolved.get("gitlab_project", ""),
+              "issue_count": str(issue_count),
+          }))
+          result = "hook sent"
+      except Exception as e:
+          result = f"hook skipped: {e}"
+    output: feedback_hook_result
     on_error: continue
 
   # Step 19: Add Jira comment about review

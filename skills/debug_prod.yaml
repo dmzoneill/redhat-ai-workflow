@@ -6,7 +6,9 @@ description: |
   Investigate production issues in Automation Analytics.
   Gathers pod status, logs, metrics, alerts, and recent deployments.
   Suggests likely causes based on patterns and learned knowledge.
-version: "1.0"
+  
+  Resolves namespace and paths from config.json.
+version: "1.1"
 
 inputs:
   - name: namespace
@@ -30,23 +32,49 @@ inputs:
     default: "1h"
     description: "How far back to search (15m, 1h, 6h, 24h)"
 
-constants:
-  # Namespaces
-  namespace_main: tower-analytics-prod
-  namespace_billing: tower-analytics-prod-billing
-  
-  # Alert definition paths
-  alerts_main: /home/daoneill/src/app-interface/resources/insights-prod/tower-analytics-prod
-  alerts_billing: /home/daoneill/src/app-interface/resources/insights-prod/tower-analytics-prod-billing
-  
-  # SaaS configuration paths (app-interface)
-  saas_namespaces: /home/daoneill/src/app-interface/data/services/insights/tower-analytics/namespaces
-  saas_cicd: /home/daoneill/src/app-interface/data/services/insights/tower-analytics/cicd
-  
-  # Known error patterns (from memory/learned/patterns.yaml)
-  memory_patterns: learned/patterns
+# No hardcoded constants - resolved dynamically from config.json
 
 steps:
+  # ==================== LOAD CONFIG ====================
+
+  - name: load_config
+    description: "Load namespace and path configuration"
+    compute: |
+      import json
+      from pathlib import Path
+
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      # Get namespace config
+      ns_config = config.get("namespaces", {}).get("production", {})
+      ai_config = config.get("app_interface", {})
+      repos = config.get("repositories", {})
+
+      # Get app-interface repo path
+      ai_repo_name = ai_config.get("repo", "app-interface")
+      ai_repo_path = repos.get(ai_repo_name, {}).get("path", str(Path.home() / "src/app-interface"))
+
+      result = {
+          "namespace_main": ns_config.get("main", "tower-analytics-prod"),
+          "namespace_billing": ns_config.get("billing", "tower-analytics-prod-billing"),
+          "kubeconfig": ns_config.get("kubeconfig", "~/.kube/config.p"),
+          "alerts_main": ai_config.get("alerts", {}).get("prod_main", "resources/insights-prod/tower-analytics-prod"),
+          "alerts_billing": ai_config.get("alerts", {}).get("prod_billing", "resources/insights-prod/tower-analytics-prod-billing"),
+          "saas_namespaces": ai_config.get("saas_namespaces", "data/services/insights/tower-analytics/namespaces"),
+          "saas_cicd": ai_config.get("deploy_file", "data/services/insights/tower-analytics/cicd/deploy-clowder.yml").rsplit("/", 1)[0],
+          "appinterface_path": ai_repo_path,
+      }
+    output: cfg
+
   # ==================== RESOLVE NAMESPACE ====================
 
   # Step 1: Determine namespace
@@ -56,10 +84,10 @@ steps:
       if inputs.namespace:
         ns_input = inputs.namespace.lower()
         if 'billing' in ns_input:
-          ns = constants.namespace_billing
+          ns = cfg["namespace_billing"]
           ns_short = "billing"
         else:
-          ns = constants.namespace_main
+          ns = cfg["namespace_main"]
           ns_short = "main"
       else:
         # Default to main, but note we should ask
@@ -75,7 +103,7 @@ steps:
     compute: |
       result = {
         "ask_namespace": True,
-        "message": "Which namespace to investigate?\n\n1. **main** - tower-analytics-prod\n2. **billing** - tower-analytics-prod-billing\n\nRun again with: `skill_run(\"debug_prod\", '{\"namespace\": \"main\"}')`"
+        "message": f"Which namespace to investigate?\n\n1. **main** - {cfg['namespace_main']}\n2. **billing** - {cfg['namespace_billing']}\n\nRun again with: `skill_run(\"debug_prod\", '{{\"namespace\": \"main\"}}')`"
       }
     output: namespace_prompt
 
@@ -276,10 +304,11 @@ steps:
       alert_def = None
       
       # Determine which path based on namespace
+      ai_path = Path(cfg["appinterface_path"])
       if 'billing' in ns_info.get('short', ''):
-        alert_path = Path(constants.alerts_billing)
+        alert_path = ai_path / cfg["alerts_billing"]
       else:
-        alert_path = Path(constants.alerts_main)
+        alert_path = ai_path / cfg["alerts_main"]
       
       # Search for alert in yaml files
       if alert_path.exists():
@@ -378,7 +407,7 @@ steps:
       import yaml
       from pathlib import Path
       
-      cicd_file = Path(constants.saas_cicd) / "deploy-clowder.yml"
+      cicd_file = Path(cfg["appinterface_path"]) / cfg["saas_cicd"] / "deploy-clowder.yml"
       deployed_info = {"sha": None, "namespace_config": None}
       
       if cicd_file.exists():
@@ -418,7 +447,7 @@ steps:
       import yaml
       from pathlib import Path
       
-      ns_path = Path(constants.saas_namespaces)
+      ns_path = Path(cfg["appinterface_path"]) / cfg["saas_namespaces"]
       config_info = {}
       
       if 'billing' in ns_info.get('short', ''):
@@ -606,7 +635,7 @@ outputs:
       2. **Describe pod:** `kubectl_describe_pod(pod_name='<pod>', namespace='{{ ns_info.namespace }}', environment='production')`
       3. **Query metrics:** `prometheus_query(query='...', environment='production')`
       4. **Check Kibana:** `kibana_search_logs(namespace='{{ ns_info.namespace }}', query='error')`
-      5. **View git history since deployment:** `git_log(repo='/home/daoneill/src/automation-analytics-backend', since='<deployed_sha>')`
+      5. **View git history since deployment:** `git_log(repo='automation-analytics-backend', since='<deployed_sha>')`
       
       {% if pattern_matches %}
       ### 📝 Remember This?

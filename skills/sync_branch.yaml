@@ -11,21 +11,33 @@ description: |
   - Auto-resolves simple conflicts
   - Reports status
   
+  If 'repo' is not provided, can be resolved from 'issue_key' or 'repo_name' via config.
+  
   Use rebase_pr for MRs with merge commits that need cleanup.
-version: "1.0"
+version: "1.1"
 
 inputs:
   - name: repo
     type: string
     required: false
-    default: "."
-    description: "Repository path (defaults to current directory)"
+    default: ""
+    description: "Repository path - if not provided, resolved from issue_key or repo_name"
+
+  - name: repo_name
+    type: string
+    required: false
+    description: "Repository name from config (e.g., 'automation-analytics-backend')"
+
+  - name: issue_key
+    type: string
+    required: false
+    description: "Jira issue key - used to resolve repo if repo not specified"
 
   - name: base_branch
     type: string
     required: false
-    default: "main"
-    description: "Branch to sync with (default: main)"
+    default: ""
+    description: "Branch to sync with (default: repo's default_branch from config)"
 
   - name: stash_changes
     type: boolean
@@ -40,6 +52,72 @@ inputs:
     description: "Force push after successful rebase"
 
 steps:
+  # ==================== RESOLVE REPOSITORY ====================
+
+  - name: resolve_repo
+    description: "Determine which repo to use"
+    compute: |
+      import json
+      import os
+      from pathlib import Path
+
+      repo_path = None
+      default_branch = "main"
+
+      # Load config
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      repos = config.get("repositories", {})
+
+      # Explicit repo path
+      if inputs.repo and inputs.repo != "" and inputs.repo != ".":
+          repo_path = inputs.repo
+          for name, cfg in repos.items():
+              if cfg.get("path") == repo_path:
+                  default_branch = cfg.get("default_branch", "main")
+                  break
+      # Repo name from config
+      elif inputs.repo_name and inputs.repo_name in repos:
+          cfg = repos[inputs.repo_name]
+          repo_path = cfg.get("path")
+          default_branch = cfg.get("default_branch", "main")
+      # Resolve from issue key
+      elif inputs.issue_key:
+          project_prefix = inputs.issue_key.split("-")[0].upper()
+          for name, cfg in repos.items():
+              if cfg.get("jira_project") == project_prefix:
+                  repo_path = cfg.get("path")
+                  default_branch = cfg.get("default_branch", "main")
+                  break
+      # Fall back to cwd
+      else:
+          cwd = os.getcwd()
+          if os.path.exists(os.path.join(cwd, ".git")):
+              repo_path = cwd
+              for name, cfg in repos.items():
+                  if cfg.get("path") == cwd:
+                      default_branch = cfg.get("default_branch", "main")
+                      break
+
+      if not repo_path:
+          raise ValueError("Repository not specified. Provide 'repo', 'repo_name', or 'issue_key'.")
+
+      # Override default_branch if explicitly specified
+      if inputs.base_branch:
+          default_branch = inputs.base_branch
+
+      result = {"path": repo_path, "default_branch": default_branch}
+    output: resolved_repo
+
   # ==================== PRE-FLIGHT ====================
 
   - name: get_current_branch
@@ -48,7 +126,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       result = subprocess.run(
           ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -77,7 +155,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       result = subprocess.run(
           ["git", "status", "--porcelain"],
@@ -101,7 +179,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       result = subprocess.run(
           ["git", "stash", "push", "-m", f"sync_branch: auto-stash before rebase"],
@@ -124,8 +202,8 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
-      base = inputs.base_branch
+      repo = resolved_repo["path"]
+      base = resolved_repo["default_branch"]
 
       result = subprocess.run(
           ["git", "fetch", "origin", base],
@@ -146,8 +224,8 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
-      base = inputs.base_branch
+      repo = resolved_repo["path"]
+      base = resolved_repo["default_branch"]
 
       result = subprocess.run(
           ["git", "rev-list", "--count", f"HEAD..origin/{base}"],
@@ -177,8 +255,8 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
-      base = inputs.base_branch
+      repo = resolved_repo["path"]
+      base = resolved_repo["default_branch"]
 
       result = subprocess.run(
           ["git", "rebase", f"origin/{base}"],
@@ -244,7 +322,7 @@ steps:
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
 
       result = subprocess.run(
           ["git", "stash", "pop"],
@@ -262,14 +340,14 @@ steps:
 
   # ==================== FORCE PUSH ====================
 
-  - name: force_push
+  - name: do_force_push
     description: "Force push rebased branch"
     condition: "rebase_result.success and inputs.force_push and commit_status.behind > 0"
     compute: |
       import subprocess
       import os
 
-      repo = inputs.repo if inputs.repo != "." else os.getcwd()
+      repo = resolved_repo["path"]
       branch = current_branch
 
       result = subprocess.run(
@@ -293,13 +371,14 @@ outputs:
     value: |
       ## 🔄 Sync Branch: `{{ current_branch }}`
       
-      **Base:** `{{ inputs.base_branch }}`
+      **Repo:** {{ resolved_repo.path }}
+      **Base:** `{{ resolved_repo.default_branch }}`
       **Status:** {{ commit_status.behind }} behind, {{ commit_status.ahead }} ahead
       
       {% if commit_status.behind == 0 %}
-      ✅ Already up to date with `{{ inputs.base_branch }}`
+      ✅ Already up to date with `{{ resolved_repo.default_branch }}`
       {% elif rebase_result.success %}
-      ✅ Successfully rebased onto `{{ inputs.base_branch }}`
+      ✅ Successfully rebased onto `{{ resolved_repo.default_branch }}`
       {% if stash_result %}
       - {{ stash_result }}
       - {{ pop_result if pop_result else "Changes restored" }}
@@ -341,8 +420,11 @@ outputs:
   - name: context
     value:
       branch: "{{ current_branch }}"
+      repo: "{{ resolved_repo.path }}"
+      base_branch: "{{ resolved_repo.default_branch }}"
       success: "{{ rebase_result.success }}"
       behind: "{{ commit_status.behind }}"
       ahead: "{{ commit_status.ahead }}"
       pushed: "{{ push_result is defined }}"
+
 

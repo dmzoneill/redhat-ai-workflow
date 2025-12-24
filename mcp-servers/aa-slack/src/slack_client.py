@@ -52,15 +52,18 @@ class SlackSession:
     _rate_limit: RateLimitState = field(default_factory=RateLimitState)
     _user_id: str = ""
     
-    # High-fidelity spoofing headers
+    # High-fidelity spoofing headers - updated to match current Chrome
     USER_AGENT = (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "Mozilla/5.0 (X11; Linux x86_64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+        "Chrome/143.0.0.0 Safari/537.36"
     )
     
-    REFERER = "https://app.slack.com/"
+    # Enterprise Slack URLs - configurable via environment
+    SLACK_HOST = os.getenv("SLACK_HOST", "redhat.enterprise.slack.com")
+    REFERER = f"https://{SLACK_HOST}/"
     
+    # API endpoint - enterprise still uses slack.com/api
     BASE_URL = "https://slack.com/api"
     
     def __post_init__(self):
@@ -107,7 +110,7 @@ class SlackSession:
                     "Accept": "application/json",
                     "Accept-Language": "en-US,en;q=0.9",
                     "Content-Type": "application/x-www-form-urlencoded",
-                    "Origin": "https://app.slack.com",
+                    "Origin": f"https://{self.SLACK_HOST}",
                     "Sec-Fetch-Dest": "empty",
                     "Sec-Fetch-Mode": "cors",
                     "Sec-Fetch-Site": "same-site",

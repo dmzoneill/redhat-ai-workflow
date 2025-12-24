@@ -512,3 +512,5 @@ class SlackAgentClient:
         interface = self._get_interface()
         result = await interface.call_shutdown()
         return json.loads(result)
+
+

@@ -6,13 +6,20 @@ description: |
   Check and fix Jira issue hygiene - ensures issues have proper details,
   acceptance criteria, priority, labels, epic links, and formatting.
   Transitions New issues to Refinement when complete.
-version: "1.0"
+  
+  Resolves project and component from issue_key prefix or repo_name.
+version: "1.1"
 
 inputs:
   - name: issue_key
     type: string
     required: true
     description: "Jira issue key to check (e.g., AAP-12345)"
+  
+  - name: repo_name
+    type: string
+    required: false
+    description: "Repository name from config to determine component"
   
   - name: auto_fix
     type: boolean
@@ -26,25 +33,64 @@ inputs:
     default: true
     description: "Auto-transition New → Refinement when ready"
 
-constants:
-  project: AAP
-  component: "Automation Analytics"
-  # Statuses
-  status_new: "New"
-  status_refinement: "Refinement"
-  status_in_progress: "In Progress"
-  # Required fields by status
-  always_required:
-    - description
-    - acceptance_criteria
-    - priority
-    - labels
-    - epic_link
-    - fix_version
-  in_progress_required:
-    - story_points
+# No hardcoded constants - resolved dynamically
 
 steps:
+  # ==================== RESOLVE PROJECT/COMPONENT ====================
+  
+  - name: resolve_context
+    description: "Determine Jira project and default component from issue key"
+    compute: |
+      import json
+      import os
+      from pathlib import Path
+
+      # Default values
+      jira_project = "AAP"
+      component = "Automation Analytics"
+
+      # Load config
+      config_paths = [
+          Path.cwd() / "config.json",
+          Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+          if p.exists():
+              with open(p) as f:
+                  config = json.load(f)
+              break
+
+      repos = config.get("repositories", {})
+
+      # Extract project prefix from issue key
+      project_prefix = inputs.issue_key.split("-")[0].upper() if inputs.issue_key else ""
+      
+      # Set jira_project from issue key
+      if project_prefix:
+          jira_project = project_prefix
+
+      # Try to find component from repo config
+      if inputs.repo_name and inputs.repo_name in repos:
+          cfg = repos[inputs.repo_name]
+          if cfg.get("jira_component"):
+              component = cfg["jira_component"]
+      else:
+          # Look for repo matching jira_project
+          for name, cfg in repos.items():
+              if cfg.get("jira_project") == jira_project:
+                  if cfg.get("jira_component"):
+                      component = cfg["jira_component"]
+                  break
+
+      result = {
+          "jira_project": jira_project,
+          "component": component,
+          "status_new": "New",
+          "status_refinement": "Refinement",
+          "status_in_progress": "In Progress",
+      }
+    output: resolved
   # ==================== GET ISSUE DETAILS ====================
 
   # Step 1: Get full issue details
@@ -368,4 +414,5 @@ outputs:
       issues_count: "{{ validation.issues | length }}"
       needs_input: "{{ validation.needs_input }}"
       transition_ready: "{{ validation.transition_ready }}"
+
 

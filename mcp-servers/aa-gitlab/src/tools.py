@@ -1,30 +1,139 @@
 """AA GitLab MCP Server - GitLab operations via glab CLI.
 
 Authentication: glab auth login or GITLAB_TOKEN environment variable.
+
+Supports:
+- Running from project directories (auto-resolved from config.json)
+- Full GitLab URLs (parsed to extract project and MR ID)
+- Direct project paths with --repo flag
 """
 
 import asyncio
+import json
 import os
+import re
 import subprocess
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 
-GITLAB_HOST = os.getenv("GITLAB_HOST", "gitlab.com")  # Configure in GITLAB_HOST env or config.json
+GITLAB_HOST = os.getenv("GITLAB_HOST", "gitlab.cee.redhat.com")
 
 
-async def run_glab(args: list[str], repo: str | None = None, timeout: int = 60) -> tuple[bool, str]:
-    """Run glab command and return (success, output)."""
+def _load_repo_config() -> dict[str, dict]:
+    """Load repository configuration from config.json."""
+    config_paths = [
+        Path.cwd() / "config.json",
+        Path(__file__).parent.parent.parent.parent.parent / "config.json",
+        Path.home() / "src/redhat-ai-workflow/config.json",
+    ]
+    for config_path in config_paths:
+        if config_path.exists():
+            try:
+                with open(config_path) as f:
+                    return json.load(f).get("repositories", {})
+            except Exception:
+                pass
+    return {}
+
+
+def _resolve_gitlab_to_local(gitlab_path: str) -> str | None:
+    """
+    Resolve a GitLab project path to a local directory.
+    
+    Args:
+        gitlab_path: e.g., "automation-analytics/automation-analytics-backend"
+    
+    Returns:
+        Local directory path or None if not found.
+    """
+    repos = _load_repo_config()
+    for repo_name, repo_config in repos.items():
+        if repo_config.get("gitlab") == gitlab_path:
+            local_path = repo_config.get("path")
+            if local_path and Path(local_path).exists():
+                return local_path
+    return None
+
+
+def parse_gitlab_url(url_or_id: str) -> tuple[str | None, str | None]:
+    """
+    Parse a GitLab URL or MR reference to extract project and MR ID.
+    
+    Args:
+        url_or_id: Full URL, "!123", or just "123"
+    
+    Returns:
+        (project_path, mr_id) - either can be None
+    
+    Examples:
+        "https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/1449"
+        -> ("automation-analytics/automation-analytics-backend", "1449")
+        
+        "!1449" -> (None, "1449")
+        "1449"  -> (None, "1449")
+    """
+    # Full URL pattern
+    url_match = re.match(r'https?://[^/]+/(.+?)/-/merge_requests/(\d+)', url_or_id)
+    if url_match:
+        return url_match.group(1), url_match.group(2)
+    
+    # Issue URL pattern
+    issue_match = re.match(r'https?://[^/]+/(.+?)/-/issues/(\d+)', url_or_id)
+    if issue_match:
+        return issue_match.group(1), issue_match.group(2)
+    
+    # Just an ID (with or without !)
+    clean_id = url_or_id.lstrip("!").strip()
+    if clean_id.isdigit():
+        return None, clean_id
+    
+    return None, None
+
+
+async def run_glab(
+    args: list[str], 
+    repo: str | None = None, 
+    cwd: str | None = None,
+    timeout: int = 60
+) -> tuple[bool, str]:
+    """
+    Run glab command and return (success, output).
+    
+    Args:
+        args: glab command arguments
+        repo: GitLab project path (used with --repo if no cwd)
+        cwd: Local directory to run from (preferred over --repo)
+        timeout: Command timeout in seconds
+    """
     cmd = ["glab"] + args
-    if repo:
-        cmd.extend(["--repo", repo])
+    
+    # If we have a local directory, run from there (glab uses git remote)
+    # Otherwise, use --repo flag
+    run_cwd = None
+    if cwd and Path(cwd).exists():
+        run_cwd = cwd
+    elif repo:
+        # Try to resolve to local directory first
+        local_dir = _resolve_gitlab_to_local(repo)
+        if local_dir:
+            run_cwd = local_dir
+        else:
+            cmd.extend(["--repo", repo])
     
     env = os.environ.copy()
     env["GITLAB_HOST"] = GITLAB_HOST
     
     try:
         result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, timeout=timeout, env=env
+            subprocess.run, 
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            timeout=timeout, 
+            env=env,
+            cwd=run_cwd
         )
         output = result.stdout
         if result.returncode != 0:
@@ -45,11 +154,57 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     
     @server.tool()
+    async def gitlab_view_url(url: str) -> str:
+        """
+        View a GitLab merge request or issue from a full URL.
+        
+        This is the preferred way to view MRs/issues when given a URL.
+        Automatically resolves the project and runs from the local repo directory.
+        
+        Args:
+            url: Full GitLab URL like https://gitlab.cee.redhat.com/org/repo/-/merge_requests/123
+        
+        Returns:
+            MR or issue details.
+        """
+        project, item_id = parse_gitlab_url(url)
+        if not project or not item_id:
+            return f"Could not parse URL: {url}"
+        
+        # Determine if it's an MR or issue
+        if "/merge_requests/" in url:
+            success, output = await run_glab(["mr", "view", item_id, "--web=false"], repo=project)
+        elif "/issues/" in url:
+            success, output = await run_glab(["issue", "view", item_id, "--web=false"], repo=project)
+        else:
+            return f"Unknown URL type: {url}"
+        
+        return output if success else f"Unable to access {url}"
+    
+    @server.tool()
     async def gitlab_mr_list(
         project: str, state: str = "opened", author: str = "", assignee: str = "", reviewer: str = "", label: str = ""
     ) -> str:
-        """List merge requests for a GitLab project."""
-        args = ["mr", "list", "--state", state]
+        """List merge requests for a GitLab project.
+        
+        Args:
+            project: GitLab project path
+            state: Filter by state - 'opened', 'closed', 'merged', or 'all'
+            author: Filter by author username
+            assignee: Filter by assignee username
+            reviewer: Filter by reviewer username
+            label: Filter by label name
+        """
+        # glab uses flags instead of --state: --closed, --merged, --all
+        args = ["mr", "list"]
+        if state == "closed":
+            args.append("--closed")
+        elif state == "merged":
+            args.append("--merged")
+        elif state == "all":
+            args.append("--all")
+        # "opened" is the default, no flag needed
+        
         if author: args.extend(["--author", author])
         if assignee: args.extend(["--assignee", assignee])
         if reviewer: args.extend(["--reviewer", reviewer])
@@ -279,8 +434,24 @@ def register_tools(server: "FastMCP") -> int:
 
     @server.tool()
     async def gitlab_issue_list(project: str, state: str = "opened", label: str = "", assignee: str = "") -> str:
-        """List GitLab issues for a project."""
-        args = ["issue", "list", "--state", state]
+        """List GitLab issues for a project.
+        
+        Args:
+            project: GitLab project path
+            state: Filter by state - 'opened', 'closed', or 'all'
+            label: Filter by label name
+            assignee: Filter by assignee username
+        """
+        # glab uses flags instead of --state: --closed, --opened, --all
+        args = ["issue", "list"]
+        if state == "closed":
+            args.append("--closed")
+        elif state == "all":
+            args.append("--all")
+        elif state == "opened":
+            args.append("--opened")
+        # default is opened anyway
+        
         if label: args.extend(["--label", label])
         if assignee: args.extend(["--assignee", assignee])
         success, output = await run_glab(args, repo=project)
@@ -341,13 +512,22 @@ def register_tools(server: "FastMCP") -> int:
 
         Args:
             project: Project name or path
-            state: MR state - opened, merged, closed, all
+            state: MR state - 'opened', 'merged', 'closed', or 'all'
             author: Filter by author username
 
         Returns:
             List of merge requests.
         """
-        args = ["mr", "list", "--state", state]
+        # glab uses flags instead of --state: --closed, --merged, --all
+        args = ["mr", "list"]
+        if state == "closed":
+            args.append("--closed")
+        elif state == "merged":
+            args.append("--merged")
+        elif state == "all":
+            args.append("--all")
+        # "opened" is the default, no flag needed
+        
         if author:
             args.extend(["--author", author])
         success, output = await run_glab(args, repo=project)
@@ -436,8 +616,8 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of MRs mentioning the issue key.
         """
-        # Search in MR titles/descriptions for the issue key
-        success, output = await run_glab(["mr", "list", "--state", "all", "--search", issue_key], repo=project)
+        # Search in MR titles/descriptions for the issue key (--all instead of --state all)
+        success, output = await run_glab(["mr", "list", "--all", "--search", issue_key], repo=project)
         if not success:
             return f"❌ Failed: {output}"
         if not output.strip() or "no merge requests" in output.lower():
