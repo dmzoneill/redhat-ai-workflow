@@ -16,14 +16,61 @@ logger = logging.getLogger(__name__)
 # Create the MCP server
 
 
+def get_jira_env() -> dict:
+    """
+    Get environment with Jira variables.
+    
+    If critical env vars are missing, try to source from user's shell profile.
+    """
+    env = os.environ.copy()
+    
+    # Default values
+    if "JIRA_AFFECTS_VERSION" not in env:
+        env["JIRA_AFFECTS_VERSION"] = "1.0"
+    
+    # Check if critical vars are missing
+    required_vars = ["JIRA_URL", "JIRA_JPAT"]
+    missing = [v for v in required_vars if not env.get(v)]
+    
+    if missing:
+        # Try to source from user's shell profile
+        try:
+            result = subprocess.run(
+                ["bash", "-l", "-c", "env"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if '=' in line:
+                        key, _, value = line.partition('=')
+                        if key in required_vars and value:
+                            env[key] = value
+        except Exception:
+            pass  # Ignore - will fail with clear error message
+    
+    return env
+
+
 async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
     """Run rh-issue command and return (success, output)."""
     cmd = ["rh-issue"] + args
     
-    # Ensure required env vars are set
-    env = os.environ.copy()
-    if "JIRA_AFFECTS_VERSION" not in env:
-        env["JIRA_AFFECTS_VERSION"] = "1.0"
+    # Get environment with Jira variables
+    env = get_jira_env()
+    
+    # Check for missing required vars
+    if not env.get("JIRA_JPAT") and not env.get("JIRA_TOKEN"):
+        return False, (
+            "❌ Missing Jira authentication.\n\n"
+            "Set one of these environment variables:\n"
+            "  - JIRA_JPAT: Personal Access Token (recommended)\n"
+            "  - JIRA_TOKEN: API token\n\n"
+            "Or add to your ~/.bashrc:\n"
+            "  export JIRA_JPAT='your-token-here'\n"
+            "  export JIRA_URL='https://issues.redhat.com'"
+        )
     
     try:
         result = await asyncio.to_thread(
@@ -383,28 +430,94 @@ def register_tools(server: "FastMCP") -> int:
     async def jira_create_issue(
         issue_type: str,
         summary: str,
+        description: str = "",
         story_points: int = 0,
+        labels: str = "",
+        components: str = "",
+        project: str = "AAP",
+        convert_markdown: bool = True,
     ) -> str:
         """
         Create a new Jira issue.
+        
+        Accepts Markdown in description and auto-converts to Jira wiki markup.
+        Issue type is case-insensitive (Story, story, STORY all work).
 
         Args:
-            issue_type: Type of issue - "bug", "story", "task", "spike"
+            issue_type: Type of issue - "bug", "story", "task", "epic" (case insensitive)
             summary: Issue title/summary
+            description: Issue description (accepts Markdown, auto-converted to Jira markup)
             story_points: Story points (optional, for stories)
+            labels: Comma-separated labels (e.g., "testing,performance")
+            components: Comma-separated components (e.g., "Automation Analytics")
+            project: Jira project key (default: AAP)
+            convert_markdown: Whether to convert Markdown to Jira markup (default: True)
 
         Returns:
             The created issue key and details.
+            
+        Example:
+            jira_create_issue(
+                issue_type="story",
+                summary="Add pytest-xdist support",
+                description="## Overview\\n\\n**Speed up** test suite with parallel execution.",
+                labels="testing,performance",
+                components="Automation Analytics"
+            )
         """
-        args = ["create-issue", issue_type, summary]
+        import re
+        import sys
+        from pathlib import Path
+        
+        # Normalize issue type to lowercase
+        valid_types = {'bug', 'story', 'task', 'epic', 'spike', 'subtask'}
+        issue_type_normalized = issue_type.lower().strip()
+        
+        if issue_type_normalized not in valid_types:
+            return f"❌ Invalid issue type: '{issue_type}'. Valid types: {', '.join(sorted(valid_types))}"
+        
+        # Convert Markdown to Jira if needed
+        if convert_markdown and description:
+            try:
+                sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
+                from common.jira_utils import markdown_to_jira
+                description = markdown_to_jira(description)
+            except ImportError:
+                # Fallback: basic conversion
+                description = description.replace('**', '*').replace('`', '{{')
+        
+        args = ["create-issue", issue_type_normalized, summary, "--project", project]
+        
+        if description:
+            args.extend(["--description", description])
+        
         if story_points > 0:
             args.extend(["--story-points", str(story_points)])
+        
+        if labels:
+            for label in labels.split(","):
+                label = label.strip()
+                if label:
+                    args.extend(["--label", label])
+        
+        if components:
+            for comp in components.split(","):
+                comp = comp.strip()
+                if comp:
+                    args.extend(["--component", comp])
 
         success, output = await run_rh_issue(args, timeout=60)
 
         if not success:
-            return f"❌ Failed to create issue: {output}"
+            return f"❌ Failed to create issue: {output}\n\n💡 Tip: If env vars are missing, use the create_jira_issue skill instead which runs via CLI with your shell environment."
 
+        # Extract issue key from output
+        issue_key_match = re.search(r'([A-Z]+-\d+)', output)
+        if issue_key_match:
+            issue_key = issue_key_match.group(1)
+            url = f"https://issues.redhat.com/browse/{issue_key}"
+            return f"✅ Issue created: [{issue_key}]({url})\n\n{output}"
+        
         return f"✅ Issue created\n\n{output}"
 
 
@@ -619,5 +732,162 @@ Use `jira_view_issue({issue_key})` for full details including linked issues.
 """
         else:
             return f"Unknown action: {action}. Use: summarize, next_steps, blockers"
+
+
+    @server.tool()
+    async def jira_show_template(issue_type: str = "story") -> str:
+        """
+        Show the expected YAML template for creating Jira issues.
+        
+        This helps understand the exact field names and format expected
+        by the rh-issue CLI's --input-file option.
+
+        Args:
+            issue_type: Issue type to show template for (story, bug, task, epic)
+
+        Returns:
+            YAML template with all supported fields.
+        """
+        issue_type = issue_type.lower().strip()
+        
+        templates = {
+            "story": '''# YAML Template for Story
+# Save this to a file and use with: rh-issue create-issue story "Summary" --input-file story.yaml
+
+Summary: "Add feature X to improve Y"
+
+Description: |
+  h2. Overview
+  
+  Brief description of the feature.
+  
+  h3. Background
+  
+  Why this is needed.
+
+"User Story": |
+  As a [user role],
+  I want [goal],
+  So that [benefit].
+
+"Acceptance Criteria": |
+  * Criterion 1 is met
+  * Criterion 2 is verified
+  * Tests pass with 90% coverage
+
+"Supporting Documentation": |
+  * [Design Doc|https://docs.example.com/design]
+  * [API Spec|https://docs.example.com/api]
+
+"Definition of Done": |
+  * Code reviewed and approved
+  * Unit tests added
+  * Integration tests pass
+  * Documentation updated
+  * Deployed to stage
+
+Labels:
+  - feature
+  - sprint-xx
+
+Components:
+  - Automation Analytics
+
+"Story Points": 5
+
+"Epic Link": AAP-12345
+''',
+            "bug": '''# YAML Template for Bug
+# Save this to a file and use with: rh-issue create-issue bug "Summary" --input-file bug.yaml
+
+Summary: "API returns 500 on empty request body"
+
+Description: |
+  h2. Bug Description
+  
+  The API crashes when receiving an empty POST body.
+  
+  h3. Steps to Reproduce
+  
+  # Send POST request to /api/v1/data
+  # Include empty body: {{}}
+  # Observe 500 error
+  
+  h3. Expected Behavior
+  
+  Should return 400 Bad Request with helpful message.
+  
+  h3. Actual Behavior
+  
+  Returns 500 Internal Server Error.
+  
+  h3. Environment
+  
+  * Stage environment
+  * Version: 2.1.0
+
+Labels:
+  - bug
+  - api
+
+Components:
+  - Automation Analytics
+
+Priority: High
+''',
+            "task": '''# YAML Template for Task
+# Save this to a file and use with: rh-issue create-issue task "Summary" --input-file task.yaml
+
+Summary: "Update dependencies to latest versions"
+
+Description: |
+  h2. Task Description
+  
+  Update all Python dependencies to their latest compatible versions.
+  
+  h3. Checklist
+  
+  * Update requirements.txt
+  * Run test suite
+  * Check for breaking changes
+  * Update documentation if needed
+
+Labels:
+  - maintenance
+  - dependencies
+
+Components:
+  - Automation Analytics
+''',
+        }
+        
+        template = templates.get(issue_type, templates["story"])
+        
+        return f"""## Jira YAML Template: {issue_type.capitalize()}
+
+{template}
+
+---
+
+## Important Notes
+
+**Field Names:** Must use Title Case with spaces in quotes:
+- ✅ `"User Story":`
+- ✅ `"Acceptance Criteria":`
+- ❌ `user_story:` (won't work)
+- ❌ `acceptance_criteria:` (won't work)
+
+**Markup:** Use Jira wiki markup, NOT Markdown:
+- `h2. Heading` not `## Heading`
+- `*bold*` not `**bold**`
+- `{{code}}` not `` `code` ``
+- `* item` not `- item`
+
+**Tip:** Use the `create_jira_issue` skill to auto-convert Markdown:
+```
+skill_run("create_jira_issue", '{{"summary": "...", "description": "## Markdown works here!"}}'
+```
+"""
+
 
     return len([m for m in dir() if not m.startswith('_')])  # Approximate count

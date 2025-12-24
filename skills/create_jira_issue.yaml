@@ -1,0 +1,321 @@
+# Skill: Create Jira Issue
+# Creates a Jira issue with proper formatting, accepting Markdown input
+
+name: create_jira_issue
+description: |
+  Create a Jira issue with all the complexity handled:
+  - Accepts Markdown and auto-converts to Jira wiki markup
+  - Normalizes field names (snake_case → Title Case)
+  - Normalizes issue type case (Story → story)
+  - Uses CLI with user's shell environment for auth
+  
+  Supports: story, bug, task, epic
+  
+  Example usage:
+    skill_run("create_jira_issue", '{
+      "summary": "Add pytest-xdist parallelization",
+      "issue_type": "story",
+      "description": "## Overview\n\nSpeed up test suite...",
+      "labels": ["testing", "performance"]
+    }')
+version: "1.0"
+
+inputs:
+  - name: summary
+    type: string
+    required: true
+    description: "Issue summary/title"
+
+  - name: issue_type
+    type: string
+    required: false
+    default: "story"
+    description: "Issue type: story, bug, task, epic (case insensitive)"
+
+  - name: project
+    type: string
+    required: false
+    default: ""
+    description: "Jira project key (default: AAP from config)"
+
+  - name: description
+    type: string
+    required: false
+    default: ""
+    description: "Issue description (accepts Markdown)"
+
+  - name: user_story
+    type: string
+    required: false
+    default: ""
+    description: "User story text (accepts Markdown)"
+
+  - name: acceptance_criteria
+    type: string
+    required: false
+    default: ""
+    description: "Acceptance criteria (accepts Markdown)"
+
+  - name: supporting_documentation
+    type: string
+    required: false
+    default: ""
+    description: "Supporting documentation (accepts Markdown)"
+
+  - name: definition_of_done
+    type: string
+    required: false
+    default: ""
+    description: "Definition of done (accepts Markdown)"
+
+  - name: labels
+    type: array
+    required: false
+    description: "Labels to apply"
+
+  - name: components
+    type: array
+    required: false
+    description: "Components to set"
+
+  - name: story_points
+    type: integer
+    required: false
+    description: "Story points estimate"
+
+  - name: epic_link
+    type: string
+    required: false
+    default: ""
+    description: "Epic issue key to link to (e.g., AAP-12345)"
+
+  - name: assignee
+    type: string
+    required: false
+    default: ""
+    description: "Assignee username"
+
+  - name: convert_markdown
+    type: boolean
+    required: false
+    default: true
+    description: "Convert Markdown to Jira wiki markup"
+
+steps:
+  # Step 1: Load config for defaults
+  - name: load_config
+    description: "Load config for project defaults"
+    compute: |
+      import json
+      from pathlib import Path
+      
+      config_paths = [
+        Path.cwd() / "config.json",
+        Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+        if p.exists():
+          with open(p) as f:
+            config = json.load(f)
+          break
+      
+      jira_config = config.get("jira", {})
+      user_config = config.get("user", {})
+      
+      result = {
+        "default_project": jira_config.get("default_project", "AAP"),
+        "jira_url": jira_config.get("url", "https://issues.redhat.com"),
+        "cli": jira_config.get("cli", "rh-issue"),
+        "default_component": "Automation Analytics",
+        "username": user_config.get("jira_username", user_config.get("username", "")),
+      }
+    output: cfg
+
+  # Step 2: Normalize inputs
+  - name: normalize_inputs
+    description: "Normalize issue type and prepare data"
+    compute: |
+      import sys
+      from pathlib import Path
+      
+      # Add our utilities to path
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
+      from common.jira_utils import (
+        normalize_issue_type, 
+        markdown_to_jira,
+        build_jira_yaml
+      )
+      
+      # Normalize issue type
+      issue_type = normalize_issue_type(inputs.get("issue_type", "story"))
+      
+      # Get project
+      project = inputs.get("project") or cfg["default_project"]
+      
+      # Build labels list
+      labels = inputs.get("labels", [])
+      if isinstance(labels, str):
+        labels = [l.strip() for l in labels.split(",")]
+      
+      # Build components list
+      components = inputs.get("components", [])
+      if isinstance(components, str):
+        components = [c.strip() for c in components.split(",")]
+      if not components:
+        components = [cfg["default_component"]]
+      
+      # Build YAML content
+      yaml_content = build_jira_yaml(
+        summary=inputs["summary"],
+        issue_type=issue_type,
+        description=inputs.get("description", ""),
+        user_story=inputs.get("user_story", ""),
+        acceptance_criteria=inputs.get("acceptance_criteria", ""),
+        supporting_documentation=inputs.get("supporting_documentation", ""),
+        definition_of_done=inputs.get("definition_of_done", ""),
+        labels=labels,
+        components=components,
+        story_points=inputs.get("story_points"),
+        epic_link=inputs.get("epic_link", ""),
+        convert_markdown=inputs.get("convert_markdown", True),
+      )
+      
+      result = {
+        "issue_type": issue_type,
+        "project": project,
+        "yaml_content": yaml_content,
+        "summary": inputs["summary"],
+        "labels": labels,
+        "components": components,
+      }
+    output: normalized
+
+  # Step 3: Write YAML to temp file
+  - name: write_yaml_file
+    description: "Write YAML input to temp file"
+    compute: |
+      import tempfile
+      import os
+      
+      # Create temp file with YAML content
+      fd, yaml_path = tempfile.mkstemp(suffix=".yaml", prefix="jira_issue_")
+      
+      with os.fdopen(fd, 'w') as f:
+        f.write(normalized["yaml_content"])
+      
+      result = yaml_path
+    output: yaml_file_path
+
+  # Step 4: Create the issue via CLI
+  - name: create_issue
+    description: "Create Jira issue using CLI"
+    compute: |
+      import subprocess
+      import os
+      import re
+      
+      project = normalized["project"]
+      issue_type = normalized["issue_type"]
+      summary = normalized["summary"]
+      
+      # Build command
+      cmd = [
+        cfg["cli"],
+        "create-issue",
+        issue_type,
+        summary,
+        "--project", project,
+        "--input-file", yaml_file_path,
+      ]
+      
+      # Add assignee if provided
+      if inputs.get("assignee"):
+        cmd.extend(["--assignee", inputs["assignee"]])
+      elif cfg.get("username"):
+        cmd.extend(["--assignee", cfg["username"]])
+      
+      # Execute with user's shell environment
+      result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy()  # Inherit full environment
+      )
+      
+      # Clean up temp file
+      try:
+        os.unlink(yaml_file_path)
+      except:
+        pass
+      
+      if result.returncode != 0:
+        error_msg = result.stderr or result.stdout
+        raise ValueError(f"Failed to create issue: {error_msg}")
+      
+      # Parse output for issue key
+      output = result.stdout
+      
+      # Look for issue key pattern (e.g., AAP-12345)
+      match = re.search(r'([A-Z]+-\d+)', output)
+      issue_key = match.group(1) if match else None
+      
+      if not issue_key:
+        # Try to extract from "Created issue: AAP-12345" pattern
+        match = re.search(r'[Cc]reated.*?([A-Z]+-\d+)', output)
+        issue_key = match.group(1) if match else None
+      
+      result = {
+        "success": True,
+        "issue_key": issue_key,
+        "output": output,
+        "url": f"{cfg['jira_url']}/browse/{issue_key}" if issue_key else None,
+      }
+    output: create_result
+
+  # Step 5: Verify issue was created
+  - name: verify_issue
+    description: "Verify the issue was created"
+    condition: "create_result.get('issue_key')"
+    tool: jira_view_issue
+    args:
+      issue_key: "{{ create_result.issue_key }}"
+    output: verification
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## {{ "✅" if create_result.success else "❌" }} Jira Issue {{ "Created" if create_result.success else "Failed" }}
+      
+      {% if create_result.issue_key %}
+      **Issue:** [{{ create_result.issue_key }}]({{ create_result.url }})
+      **Summary:** {{ normalized.summary }}
+      **Type:** {{ normalized.issue_type | capitalize }}
+      **Project:** {{ normalized.project }}
+      
+      {% if normalized.labels %}
+      **Labels:** {{ normalized.labels | join(', ') }}
+      {% endif %}
+      {% if normalized.components %}
+      **Components:** {{ normalized.components | join(', ') }}
+      {% endif %}
+      
+      ---
+      
+      ### Next Steps
+      1. [View issue in Jira]({{ create_result.url }})
+      2. Add to sprint: `jira_add_to_sprint("{{ create_result.issue_key }}", "Sprint X")`
+      3. Start work: `skill_run("start_work", '{"issue_key": "{{ create_result.issue_key }}"}')`
+      {% else %}
+      **Error:** {{ create_result.output }}
+      {% endif %}
+
+  - name: context
+    value:
+      issue_key: "{{ create_result.issue_key }}"
+      url: "{{ create_result.url }}"
+      project: "{{ normalized.project }}"
+      issue_type: "{{ normalized.issue_type }}"
+      success: "{{ create_result.success }}"
+

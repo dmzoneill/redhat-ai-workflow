@@ -18,6 +18,7 @@ tools:
 skills:
   - coffee              # ☕ Morning briefing - email, PRs, Jira, calendar
   - start_work
+  - create_jira_issue   # Create Jira issue with Markdown support
   - create_mr           # Create MR with validation, linting, conflict detection
   - close_issue         # Close issue with commit summary
   - review_mr           # Review GitLab MR from URL - details, diff, pipeline
