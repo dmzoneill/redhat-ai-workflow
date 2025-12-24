@@ -230,52 +230,56 @@ steps:
     output: email_summary
     on_error: continue
 
-  # ==================== OPEN PRs ====================
+  # ==================== OPEN PRs (using MCP tools) ====================
   
   - name: get_open_prs
     description: "Get all open PRs in the repo"
     tool: gitlab_mr_list
     args:
       project: "automation-analytics/automation-analytics-backend"
-    output: all_open_prs
+    output: all_open_prs_raw
     on_error: continue
 
   - name: get_my_prs
     description: "Get PRs authored by me"
+    tool: gitlab_mr_list
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      author: "@me"
+    output: my_prs_raw
+    on_error: continue
+
+  - name: parse_my_prs
+    description: "Parse MR list output"
     compute: |
-      import subprocess
       import re
       
-      result = subprocess.run(
-        ["glab", "mr", "list", "--author=@me", "-R", "automation-analytics/automation-analytics-backend"],
-        capture_output=True,
-        text=True
-      )
-      
       my_mrs = []
-      for line in result.stdout.split('\n'):
-        match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
-        if match:
-          my_mrs.append({
-            "id": int(match.group(1)),
-            "title": match.group(2).strip()[:60]
-          })
+      if my_prs_raw:
+        for line in str(my_prs_raw).split('\n'):
+          match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
+          if match:
+            my_mrs.append({
+              "id": int(match.group(1)),
+              "title": match.group(2).strip()[:60]
+            })
       
       result = my_mrs
     output: my_prs
 
   - name: check_pr_feedback
-    description: "Check my PRs for new feedback"
+    description: "Check my PRs for new feedback (reuses check_mr_feedback pattern)"
     compute: |
       import subprocess
       import re
       
       feedback = []
       
-      # Bot patterns to filter
+      # Bot patterns to filter (same as check_mr_feedback skill)
       bot_patterns = [
         r'group_\d+_bot', r'konflux', r'Starting Pipelinerun',
-        r'^/retest', r'^/approve'
+        r'stone-prod', r'tkn pr logs', r'Integration test for component',
+        r'aap-aa-on-pull-request', r'^/retest', r'^/approve',
       ]
       
       for pr in my_prs[:5]:  # Check last 5
@@ -287,12 +291,11 @@ steps:
           text=True
         )
         
-        # Find human comments
+        # Find human comments (same logic as check_mr_feedback)
         for line in result.stdout.split('\n'):
           if ' commented ' in line and 'daoneill' not in line.lower():
             is_bot = any(re.search(p, line, re.IGNORECASE) for p in bot_patterns)
             if not is_bot:
-              # Extract author
               match = re.match(r'^(\w+) commented', line)
               if match:
                 feedback.append({
@@ -306,35 +309,32 @@ steps:
     output: pr_feedback
     on_error: continue
 
-  # ==================== JIRA ACTIVITY ====================
+  # ==================== JIRA ACTIVITY (using MCP tool) ====================
   
   - name: get_sprint_activity
     description: "Get Jira activity for the sprint"
+    tool: jira_search
+    args:
+      jql: "project = AAP AND updated >= -{{ inputs.days_back or 1 }}d AND component = 'Automation Analytics' ORDER BY updated DESC"
+      max_results: 20
+    output: jira_activity_raw
+    on_error: continue
+
+  - name: parse_jira_activity
+    description: "Parse Jira search results"
     compute: |
-      import subprocess
       import re
-      from datetime import datetime, timedelta
-      
-      days_back = inputs.get('days_back', 1)
-      
-      # Get recently updated issues
-      result = subprocess.run(
-        ["rh-issue", "search", 
-         f"project = AAP AND updated >= -{days_back}d AND component = 'Automation Analytics' ORDER BY updated DESC",
-         "--max-results", "20"],
-        capture_output=True,
-        text=True
-      )
       
       recent_issues = []
-      for line in result.stdout.split('\n'):
-        # Parse: AAP-12345  Summary text
-        match = re.match(r'(AAP-\d+)\s+(.+)', line)
-        if match:
-          recent_issues.append({
-            "key": match.group(1),
-            "summary": match.group(2)[:50]
-          })
+      if jira_activity_raw:
+        for line in str(jira_activity_raw).split('\n'):
+          # Parse: AAP-12345  Summary text or AAP-12345: Summary text
+          match = re.match(r'(AAP-\d+)[:\s]+(.+)', line)
+          if match:
+            recent_issues.append({
+              "key": match.group(1),
+              "summary": match.group(2)[:50]
+            })
       
       result = {
         "count": len(recent_issues),
@@ -343,32 +343,31 @@ steps:
     output: jira_activity
     on_error: continue
 
-  # ==================== MERGED CODE ====================
+  # ==================== MERGED CODE (using MCP tool) ====================
   
   - name: get_recent_merges
     description: "Get recently merged MRs"
+    tool: gitlab_mr_list
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      state: "merged"
+    output: recent_merges_raw
+    on_error: continue
+
+  - name: parse_recent_merges
+    description: "Parse merged MRs"
     compute: |
-      import subprocess
       import re
-      from datetime import datetime, timedelta
       
-      days_back = inputs.get('days_back', 1)
-      
-      result = subprocess.run(
-        ["glab", "mr", "list", "--merged", "-R", "automation-analytics/automation-analytics-backend"],
-        capture_output=True,
-        text=True
-      )
-      
-      # Parse merged MRs (glab shows recent first)
       merged_mrs = []
-      for line in result.stdout.split('\n')[:10]:
-        match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
-        if match:
-          merged_mrs.append({
-            "id": int(match.group(1)),
-            "title": match.group(2).strip()[:50]
-          })
+      if recent_merges_raw:
+        for line in str(recent_merges_raw).split('\n')[:10]:
+          match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
+          if match:
+            merged_mrs.append({
+              "id": int(match.group(1)),
+              "title": match.group(2).strip()[:50]
+            })
       
       result = merged_mrs[:5]  # Last 5
     output: recent_merges
@@ -428,44 +427,39 @@ steps:
     output: failed_pipelines
     on_error: continue
 
-  # ==================== EPHEMERAL NAMESPACES ====================
+  # ==================== EPHEMERAL NAMESPACES (using MCP tool) ====================
   
   - name: check_ephemeral_namespaces
     description: "List your active ephemeral environments"
+    tool: bonfire_namespace_list
+    args:
+      mine: true
+    output: ephemeral_namespaces_raw
+    on_error: continue
+
+  - name: parse_ephemeral_namespaces
+    description: "Parse namespace list"
     compute: |
-      import subprocess
       import re
-      import os
       
       namespaces = []
-      
-      # Set kubeconfig for ephemeral
-      env = os.environ.copy()
-      env['KUBECONFIG'] = os.path.expanduser('~/.kube/config.e')
-      
-      result = subprocess.run(
-        ["bonfire", "namespace", "list", "--mine"],
-        capture_output=True,
-        text=True,
-        env=env
-      )
-      
-      for line in result.stdout.split('\n'):
-        # Parse: ephemeral-xxxxx  expires in 2h 30m
-        match = re.search(r'(ephemeral-\w+)\s+.*?(\d+[hm].*?)(?:\s|$)', line)
-        if match:
-          namespaces.append({
-            "name": match.group(1),
-            "expires": match.group(2).strip()
-          })
-        elif 'ephemeral-' in line:
-          # Fallback: just get the namespace name
-          ns_match = re.search(r'(ephemeral-\w+)', line)
-          if ns_match:
+      if ephemeral_namespaces_raw:
+        for line in str(ephemeral_namespaces_raw).split('\n'):
+          # Parse: ephemeral-xxxxx  expires in 2h 30m
+          match = re.search(r'(ephemeral-\w+)\s+.*?(\d+[hm].*?)(?:\s|$)', line)
+          if match:
             namespaces.append({
-              "name": ns_match.group(1),
-              "expires": "unknown"
+              "name": match.group(1),
+              "expires": match.group(2).strip()
             })
+          elif 'ephemeral-' in line:
+            # Fallback: just get the namespace name
+            ns_match = re.search(r'(ephemeral-\w+)', line)
+            if ns_match:
+              namespaces.append({
+                "name": ns_match.group(1),
+                "expires": "unknown"
+              })
       
       result = namespaces
     output: ephemeral_namespaces
@@ -507,29 +501,31 @@ steps:
     output: yesterdays_commits
     on_error: continue
 
-  # ==================== REVIEW REQUESTS ====================
+  # ==================== REVIEW REQUESTS (using MCP tool) ====================
   
   - name: get_review_requests
     description: "Get PRs where you're assigned as reviewer"
+    tool: gitlab_mr_list
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      reviewer: "@me"
+    output: review_requests_raw
+    on_error: continue
+
+  - name: parse_review_requests
+    description: "Parse review request list"
     compute: |
-      import subprocess
       import re
       
       review_requests = []
-      
-      result = subprocess.run(
-        ["glab", "mr", "list", "--reviewer=@me", "-R", "automation-analytics/automation-analytics-backend"],
-        capture_output=True,
-        text=True
-      )
-      
-      for line in result.stdout.split('\n'):
-        match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
-        if match:
-          review_requests.append({
-            "id": int(match.group(1)),
-            "title": match.group(2).strip()[:50]
-          })
+      if review_requests_raw:
+        for line in str(review_requests_raw).split('\n'):
+          match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
+          if match:
+            review_requests.append({
+              "id": int(match.group(1)),
+              "title": match.group(2).strip()[:50]
+            })
       
       result = review_requests[:5]  # Limit to 5
     output: review_requests
