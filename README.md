@@ -233,25 +233,25 @@ graph TD
         
         subgraph DEV["<b>👨‍💻 Developer</b>"]
             DEV_DESC[Write code & ship features]
-            DEV_TOOLS[git, gitlab, jira]
+            DEV_TOOLS[git, gitlab, jira ~74 tools]
             DEV_SKILLS[start_work, create_mr, close_issue]
         end
         
         subgraph OPS["<b>🔧 DevOps</b>"]
-            OPS_DESC[Monitor & maintain]
-            OPS_TOOLS[k8s, prometheus, alertmanager, kibana, bonfire]
-            OPS_SKILLS[investigate_alert, debug_prod]
+            OPS_DESC[Deploy & manage infra]
+            OPS_TOOLS[k8s, bonfire, quay, gitlab ~90 tools]
+            OPS_SKILLS[test_mr_ephemeral, investigate_alert]
         end
         
         subgraph INC["<b>🚨 Incident</b>"]
             INC_DESC[Respond to production issues]
-            INC_TOOLS[k8s, prometheus, alertmanager, kibana, jira]
+            INC_TOOLS[k8s, kibana, jira ~78 tools]
             INC_SKILLS[investigate_alert, debug_prod]
         end
         
         subgraph REL["<b>📦 Release</b>"]
             REL_DESC[Ship software safely]
-            REL_TOOLS[konflux, quay, appinterface, git]
+            REL_TOOLS[konflux, quay, appinterface, git ~69 tools]
             REL_SKILLS[release_aa_backend_prod]
         end
         
