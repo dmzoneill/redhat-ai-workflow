@@ -164,6 +164,30 @@ def create_mcp_server(
         except Exception as e:
             logger.error(f"Error loading {tool_name}: {e}")
     
+    # Register debug_tool for auto-fixing broken tools
+    try:
+        from .debuggable import register_debug_tool, wrap_all_tools
+        register_debug_tool(server)
+        
+        # Register all loaded tools in the debug registry
+        for tool_name in loaded_modules:
+            module_dir = SERVERS_DIR / f"aa-{tool_name}"
+            tools_file = module_dir / "src" / "tools.py"
+            if tools_file.exists():
+                # Import and wrap
+                import importlib.util
+                spec = importlib.util.spec_from_file_location(
+                    f"aa_{tool_name}_tools_debug",
+                    tools_file
+                )
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    wrap_all_tools(server, module)
+        
+        logger.info("Registered debug_tool for auto-fixing")
+    except Exception as e:
+        logger.warning(f"Could not register debug_tool: {e}")
+    
     logger.info(f"Server ready with tools from {len(loaded_modules)} modules: {loaded_modules}")
     return server
 
