@@ -32,11 +32,16 @@ This is a complete AI-powered development workflow system with **MCP Tools**, **
 
 ## Quick Start
 
-### Load an Agent
+### Load an Agent (Dynamic!)
 ```
-I need help as a DevOps engineer. Load the devops agent.
+Load the devops agent
 ```
-Then Claude reads `agents/devops.md` and adopts that persona.
+Tools switch dynamically! You go from ~29 workflow tools to ~90 devops tools.
+
+```
+Load the developer agent
+```
+Now you have git, gitlab, jira tools (~74 tools).
 
 ### Run a Skill
 ```
@@ -49,6 +54,13 @@ Claude follows the workflow in `skills/start_work.yaml`.
 What am I currently working on?
 ```
 Claude reads `memory/state/current_work.yaml`.
+
+### Deploy to Ephemeral
+```
+Deploy MR 1459 to ephemeral
+Test AAP-61214 in ephemeral
+```
+Claude runs the `test_mr_ephemeral` skill automatically.
 
 ---
 
@@ -103,14 +115,34 @@ bonfire_deploy(app="your-app", namespace="ephemeral-xxx")
 
 ---
 
-## Agents
+## Agents (Dynamic Loading!)
 
-Agents are specialized personas. Load one to get focused expertise.
+Agents are specialized personas with focused tool sets. **Load one and tools switch dynamically!**
+
+### How It Works
+```
+You: Load the devops agent
+
+[Server unloads current tools, loads k8s/bonfire/quay/gitlab]
+[Server sends tools/list_changed to Cursor]
+[Cursor refreshes available tools]
+
+Claude: DevOps agent loaded with ~90 tools!
+```
+
+### Available Agents
+
+| Agent | Modules | ~Tools | Best For |
+|-------|---------|--------|----------|
+| **devops** | k8s, bonfire, quay, gitlab | 90 | Ephemeral deployments, K8s ops |
+| **developer** | git, gitlab, jira | 74 | Coding, PRs, code review |
+| **incident** | k8s, kibana, jira | 78 | Production debugging |
+| **release** | konflux, quay, appinterface, git | 69 | Shipping releases |
 
 ### DevOps Agent (`agents/devops.md`)
-- Focus: Infrastructure, monitoring, incident response
-- Tools: aa-k8s, aa-prometheus, aa-alertmanager, aa-kibana
-- Use when: Investigating alerts, managing deployments
+- Focus: Infrastructure, ephemeral environments, deployments
+- Tools: aa-k8s, aa-bonfire, aa-quay, aa-gitlab
+- Use when: Deploying to ephemeral, checking namespaces
 
 ### Developer Agent (`agents/developer.md`)
 - Focus: Coding, PRs, code review
@@ -119,12 +151,12 @@ Agents are specialized personas. Load one to get focused expertise.
 
 ### Incident Agent (`agents/incident.md`)
 - Focus: Rapid triage, mitigation, recovery
-- Tools: All observability tools
+- Tools: aa-k8s, aa-kibana, aa-jira
 - Use when: Production incidents
 
 ### Release Agent (`agents/release.md`)
 - Focus: Release coordination, deployment
-- Tools: aa-konflux, aa-quay, aa-bonfire, aa-appinterface
+- Tools: aa-konflux, aa-quay, aa-appinterface, aa-git
 - Use when: Managing releases
 
 ---
@@ -316,12 +348,33 @@ ai-workflow/
 ## Tips for AI Assistants
 
 1. **Load memory first** - Check `memory/state/current_work.yaml` for context
-2. **Use the right agent** - Match persona to the task
+2. **Use the right agent** - Match persona to the task (agent_load)
 3. **Follow skills** - Use predefined workflows for common tasks
 4. **Update memory** - Save learned patterns for future sessions
 5. **Be specific with tools** - Always include required parameters
 6. **Handle errors gracefully** - Check tool output before proceeding
 7. **Link Jira + GitLab** - Always reference issues in commits/MRs
+8. **Auto-debug on failures** - When a tool fails, call `debug_tool()` to fix it
+
+## 🔧 Auto-Debug: Self-Healing Tools
+
+When a tool fails (returns `❌`), you can diagnose and fix it:
+
+### Workflow
+1. **Tool fails** → Look for hint: `💡 To auto-fix: debug_tool('tool_name')`
+2. **Call debug_tool** → `debug_tool('bonfire_namespace_release', 'error message')`
+3. **Analyze source** → Compare error to code, identify bug
+4. **Propose fix** → Show exact `search_replace` edit
+5. **Ask user** → "Found bug: missing --force flag. Apply fix?"
+6. **Apply & commit** → `git commit -m "fix(tool_name): description"`
+
+### Common Fixable Bugs
+| Error Pattern | Likely Cause |
+|---------------|--------------|
+| "Output is not a TTY" | Missing --force/--yes flag |
+| "Unknown flag: --state" | CLI syntax changed |
+| "Unauthorized" | Auth not passed correctly |
+| "manifest unknown" | Wrong image tag format |
 
 ## ⚠️ Critical Don'ts
 
@@ -329,6 +382,7 @@ ai-workflow/
 2. **NEVER use short SHAs for image tags** - Konflux uses full 40-char git SHA
 3. **NEVER release namespaces you don't own** - Check `bonfire namespace list --mine` first
 4. **NEVER run raw bonfire deploy without `--set-image-tag`** - Will use wrong image
+5. **NEVER guess tool parameters** - Call `debug_tool()` to inspect the source
 
 ## Ephemeral Environment Checklist
 

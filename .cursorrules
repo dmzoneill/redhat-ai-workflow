@@ -12,14 +12,27 @@ If you know the type of work:
 - Incidents: `session_start(agent="incident")`
 - Releases: `session_start(agent="release")`
 
+## 🔄 Dynamic Agent Loading
+
+**Tools switch automatically when you load a new agent!**
+
+This is a single MCP server that dynamically loads/unloads tools based on the active agent.
+
+```
+You: Load the devops agent
+Claude: [calls agent_load("devops")]
+        Server unloads current tools, loads k8s/bonfire/quay/gitlab (~90 tools)
+        Cursor receives tools/list_changed notification and refreshes
+```
+
 ## Available Agents
 
 Load an agent when the task matches their expertise:
 
-- **DevOps tasks** (alerts, deployments, k8s): `agent_load("devops")`
-- **Development tasks** (coding, PRs): `agent_load("developer")`  
-- **Incidents** (production issues): `agent_load("incident")`
-- **Releases** (shipping): `agent_load("release")`
+- **DevOps tasks** (deployments, ephemeral, k8s): `agent_load("devops")` → k8s, bonfire, quay, gitlab (~90 tools)
+- **Development tasks** (coding, PRs): `agent_load("developer")` → git, gitlab, jira (~74 tools)
+- **Incidents** (production issues): `agent_load("incident")` → k8s, kibana, jira (~78 tools)
+- **Releases** (shipping): `agent_load("release")` → konflux, quay, appinterface, git (~69 tools)
 
 ## Available Skills
 

@@ -90,9 +90,9 @@ Create `.cursor/mcp.json` in your project:
 ```json
 {
   "mcpServers": {
-    "aa-developer": {
+    "aa-workflow": {
       "command": "bash",
-      "args": ["-c", "cd ~/src/ai-workflow/mcp-servers/aa-common && python3 -m src.server --agent developer"]
+      "args": ["-c", "cd ~/src/ai-workflow/mcp-servers/aa-common && source ~/bonfire_venv/bin/activate && python3 -m src.server"]
     }
   }
 }
@@ -101,26 +101,46 @@ Create `.cursor/mcp.json` in your project:
 ### 3️⃣ Restart Cursor & Go!
 
 ```
-You: Start working on AAP-12345
+You: Load the devops agent
 
-Claude: 🚀 Executing Skill: start_work
-        ✅ Fetched issue details
-        ✅ Created branch: AAP-12345-implement-feature
-        ✅ Updated Jira status → In Progress
+Claude: 🔧 DevOps Agent Loaded
+        I'm now focused on infrastructure and deployments.
+        Tools loaded: k8s, bonfire, quay, gitlab (~90 tools)
+
+You: Deploy MR 1459 to ephemeral
+
+Claude: 🚀 Deploying to ephemeral...
+        ✅ Reserved namespace: ephemeral-nx6n2s
+        ✅ Image verified in Quay
+        ✅ Deployed tower-analytics-clowdapp
         
-        Ready to code!
+        Your namespace is ready!
+```
+
+### 🔄 Dynamic Agent Loading
+
+Switch agents mid-session with tools updating dynamically:
+
+```
+You: Load the developer agent
+
+Claude: 👨‍💻 Developer Agent Loaded (git, gitlab, jira - 74 tools)
+
+You: Now I need to deploy. Load devops agent
+
+Claude: 🔧 DevOps Agent Loaded (k8s, bonfire, quay, gitlab - 90 tools)
+        [Tools automatically switch!]
 ```
 
 <details>
-<summary><b>📁 More agent configurations</b></summary>
+<summary><b>📁 Available agents and tool counts</b></summary>
 
-| Agent | Command | Tools |
-|-------|---------|-------|
-| developer | `--agent developer` | git, gitlab, jira (74 tools) |
-| devops | `--agent devops` | k8s, prometheus, alertmanager (75 tools) |
-| incident | `--agent incident` | k8s, prometheus, jira (78 tools) |
-| release | `--agent release` | konflux, quay, appinterface (69 tools) |
-| all | `--all` | All 150+ tools |
+| Agent | Modules | Tools | Best For |
+|-------|---------|-------|----------|
+| developer | git, gitlab, jira | ~74 | Daily coding, PRs |
+| devops | k8s, bonfire, quay, gitlab | ~90 | Deployments, ephemeral |
+| incident | k8s, kibana, jira | ~78 | Production debugging |
+| release | konflux, quay, appinterface, git | ~69 | Shipping releases |
 
 </details>
 
@@ -253,48 +273,67 @@ graph TD
 
 | Agent | Focus | Tools Loaded | Best For |
 |-------|-------|--------------|----------|
-| 👨‍💻 **developer** | Code & MRs | 74 tools | Daily development work |
-| 🔧 **devops** | Infrastructure | 75 tools | Monitoring, deployments |
-| 🚨 **incident** | Production issues | 78 tools | Alert triage, debugging |
-| 📦 **release** | Shipping | 69 tools | Releases, promotions |
-| 💬 **slack** | Autonomous chat | 74 tools | Slack-based workflows |
+| 👨‍💻 **developer** | Code & MRs | ~74 tools | Daily development work |
+| 🔧 **devops** | Infrastructure | ~90 tools | Ephemeral deployments, K8s ops |
+| 🚨 **incident** | Production issues | ~78 tools | Alert triage, debugging |
+| 📦 **release** | Shipping | ~69 tools | Releases, promotions |
+| 💬 **slack** | Autonomous chat | ~74 tools | Slack-based workflows |
 
-> **Note:** Each agent is limited to <80 tools to stay within Cursor's limits. For tools not in your agent, use `tool_exec()`:
-> ```python
-> tool_exec("konflux_list_builds", '{"namespace": "aap-aa-tenant"}')
-> ```
+> **Note:** Each agent is limited to ~90 tools to stay within Cursor's 128 limit. Use `agent_load()` to switch agents dynamically and get different tool sets.
 
 ### Agent Tool Modules
 
 | Agent | Modules Loaded |
 |-------|----------------|
 | developer | git, gitlab, jira |
-| devops | k8s, prometheus, alertmanager, kibana, bonfire |
-| incident | k8s, prometheus, alertmanager, kibana, jira |
+| devops | k8s, bonfire, quay, gitlab |
+| incident | k8s, kibana, jira |
 | release | konflux, quay, appinterface, git |
 | slack | slack, jira, gitlab |
 
-### Loading an Agent
+### Loading an Agent (Dynamic)
+
+Agents can be loaded dynamically mid-session. Tools switch automatically!
 
 ```
 You: Load the devops agent
 
 Claude: ## 🔧 DevOps Agent Loaded
         
-        I'm now focused on infrastructure and monitoring.
+        I'm now focused on infrastructure and deployments.
+        
+        **Tools loaded:** k8s, bonfire, quay, gitlab (~90 tools)
         
         **My capabilities:**
         • Kubernetes operations (pods, deployments, logs)
-        • Prometheus metrics and alerts
-        • Alertmanager silence management
-        • Kibana log analysis
-        • Bonfire ephemeral namespaces
+        • Bonfire ephemeral namespace management
+        • Quay image verification (via skopeo)
+        • GitLab MR and pipeline ops
         
         **Available skills:**
+        • test_mr_ephemeral - Deploy MR to ephemeral
         • investigate_alert - Systematic alert triage
-        • debug_prod - Debug production issues
         
         What infrastructure task can I help with?
+```
+
+### How Dynamic Loading Works
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Claude
+    participant MCP as MCP Server
+    participant Cursor
+    
+    User->>Claude: "Load devops agent"
+    Claude->>MCP: agent_load("devops")
+    MCP->>MCP: Unload current tools
+    MCP->>MCP: Load devops modules
+    MCP->>Cursor: tools/list_changed notification
+    Cursor->>Cursor: Refresh tool list
+    MCP-->>Claude: Persona + new capabilities
+    Claude-->>User: "DevOps agent loaded with 90 tools"
 ```
 
 ---
@@ -1395,7 +1434,8 @@ graph TB
 | `GITLAB_TOKEN` | aa-gitlab | GitLab API token |
 | `KUBECONFIG` | aa-k8s | Default kubeconfig path |
 | `KUBECONFIG_KONFLUX` | aa-konflux | Konflux cluster kubeconfig |
-| `QUAY_TOKEN` | aa-quay | Quay.io API token (or uses Docker auth) |
+
+> **Note:** Quay tools use `skopeo` which leverages your existing `podman login` or `docker login` credentials - no separate token needed!
 
 ### Server Architecture
 
@@ -1419,36 +1459,46 @@ cd mcp-servers/aa-git && pip install -e .
 for d in mcp-servers/aa-*/; do pip install -e "$d"; done
 ```
 
-### Dynamic Tool Loading
+### Dynamic Agent Loading
 
-To work around Cursor's 128-tool limit, we use **dynamic tool loading**:
+To work around Cursor's 128-tool limit, we use **dynamic agent loading** where tools switch when you change agents:
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Claude
-    participant tool_exec
-    participant Module
+    participant MCP as MCP Server
+    participant Cursor
     
-    User->>Claude: "Check GitLab MRs"
-    Note over Claude: gitlab_mr_list not in<br/>current tool set
-    Claude->>tool_exec: tool_exec("gitlab_mr_list", {...})
-    tool_exec->>Module: Load aa-gitlab dynamically
-    Module-->>tool_exec: Execute tool
-    tool_exec-->>Claude: Return results
-    Claude-->>User: "Found 3 open MRs..."
+    User->>Claude: "Load devops agent"
+    Claude->>MCP: agent_load("devops")
+    MCP->>MCP: Unload developer tools
+    MCP->>MCP: Load k8s, bonfire, quay, gitlab
+    MCP->>Cursor: tools/list_changed
+    Cursor->>Cursor: Refresh available tools
+    MCP-->>Claude: "Loaded 90 tools"
+    Claude-->>User: "DevOps agent ready!"
+    
+    User->>Claude: "Check my namespaces"
+    Claude->>MCP: bonfire_namespace_list()
+    MCP-->>Claude: Namespace list
+    Claude-->>User: "Found ephemeral-nx6n2s..."
 ```
 
 ```
-You: I need to check something in Prometheus but I'm using the developer agent
+You: I need to deploy but I'm using the developer agent
 
-Claude: No problem! I can use tool_exec to access Prometheus tools:
+Claude: Let me switch to the devops agent for deployment tools:
         
-        [Calls tool_exec("prometheus_get_alerts", '{"environment": "stage"}')]
+        [Calls agent_load("devops")]
         
-        Found 2 active alerts in stage:
-        🟠 HighMemoryUsage - analytics-api at 85%
-        🟢 SlowQueries - resolved 5m ago
+        🔧 DevOps Agent Loaded
+        Now I have access to bonfire, k8s, and quay tools.
+        
+        [Calls bonfire_namespace_list(mine_only=true)]
+        
+        Your namespaces:
+        • ephemeral-nx6n2s (ready, expires in 1h38m)
 ```
 
 ### 📋 Prompts
@@ -1488,6 +1538,77 @@ Claude: [Reads memory://learned/patterns resource]
 I see there are 12 known error patterns including:
 - OOMKilled: Increase memory limits or fix memory leaks
 - CrashLoopBackOff: Check logs, verify config/secrets
+```
+
+---
+
+## 🔧 Auto-Debug: Self-Healing Tools
+
+When an MCP tool fails, Claude can **diagnose and fix the tool itself**!
+
+### How It Works
+
+```mermaid
+flowchart LR
+    A[Tool Fails] --> B[Returns ❌ with hint]
+    B --> C[Claude calls debug_tool]
+    C --> D[Analyze source code]
+    D --> E[Propose fix]
+    E --> F{User confirms?}
+    F -->|Yes| G[Apply fix & commit]
+    F -->|No| H[Manual investigation]
+    G --> I[Retry operation]
+```
+
+### The Workflow
+
+1. **Tool fails** → Look for the hint: `💡 To auto-fix: debug_tool('tool_name')`
+2. **Call debug_tool** → `debug_tool('bonfire_namespace_release', 'error message')`
+3. **Analyze the source** → Claude compares error to actual code
+4. **Propose a fix** → Shows exact `search_replace` edit
+5. **Ask user to confirm** → "Found bug: missing --force flag. Apply fix?"
+6. **Apply and commit** → `git commit -m "fix(tool_name): description"`
+
+### Example
+
+```
+Tool output: ❌ Failed to release namespace
+             💡 To auto-fix: `debug_tool('bonfire_namespace_release')`
+
+Claude: I found the bug. The bonfire CLI prompts for confirmation but we're
+        not passing --force. Here's the fix:
+
+        File: mcp-servers/aa-bonfire/src/tools.py
+        - args = ['namespace', 'release', namespace]
+        + args = ['namespace', 'release', namespace, '--force']
+
+        Apply this fix?
+
+User: yes
+
+Claude: [applies fix, commits, retries operation]
+```
+
+### Common Auto-Fixable Bugs
+
+| Error Pattern | Likely Cause |
+|---------------|--------------|
+| "Output is not a TTY" | Missing --force/--yes flag |
+| "Unknown flag: --state" | CLI syntax changed |
+| "Unauthorized" | Auth not passed correctly |
+| "manifest unknown" | Wrong image tag format |
+
+### The @debuggable Decorator
+
+All tools are automatically wrapped with debugging support:
+
+```python
+@debuggable
+async def my_tool(param: str) -> str:
+    """My tool description."""
+    # If this fails, Claude can inspect the source and fix it!
+    result = do_something(param)
+    return result
 ```
 
 ---

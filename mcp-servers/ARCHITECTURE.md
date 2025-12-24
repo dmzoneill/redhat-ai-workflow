@@ -2,9 +2,11 @@
 
 ## Design Principles
 
-1. **Shared Infrastructure**: Server setup (stdio, web, logging) is in `aa-common`
-2. **Tool Modules**: Each domain has tools in a `tools.py` with `register_tools(server)` function
-3. **Dual Mode**: Each module can run standalone OR be loaded as a plugin
+1. **Single MCP Server**: One server loads/unloads tools dynamically based on active agent
+2. **Dynamic Agent Loading**: Switch agents mid-session with tools updating automatically
+3. **Tool Modules**: Each domain has tools in a `tools.py` with `register_tools(server)` function
+4. **Auto-Debug**: All tools wrapped with `@debuggable` for self-healing capabilities
+5. **Dual Mode**: Each module can run standalone OR be loaded as a plugin
 
 ## Directory Structure
 
@@ -89,9 +91,45 @@ __all__ = ["register_tools"]
 
 ## Usage Patterns
 
-### 1. Single Tool Module (Standalone)
+### 1. Dynamic Mode (Recommended)
 
-Run just git tools:
+Start with minimal tools, switch agents dynamically:
+
+```bash
+python -m src.server  # Starts with workflow tools only (~29)
+```
+
+Cursor config (in your project's `.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "aa-workflow": {
+      "command": "bash",
+      "args": ["-c", "cd ~/src/ai-workflow/mcp-servers/aa-common && source ~/bonfire_venv/bin/activate && python3 -m src.server"]
+    }
+  }
+}
+```
+
+Then in chat:
+```
+You: Load the devops agent
+Claude: [calls agent_load("devops")]
+        DevOps agent loaded! Now have k8s, bonfire, quay, gitlab (~90 tools)
+```
+
+### 2. Static Agent Mode
+
+Start with a specific agent's tools pre-loaded:
+
+```bash
+python -m src.server --agent developer  # ~74 tools
+python -m src.server --agent devops     # ~90 tools
+```
+
+### 3. Single Tool Module (Standalone)
+
+Run just one module:
 
 ```bash
 python -m aa_git.server
@@ -109,37 +147,74 @@ Cursor config:
 }
 ```
 
-### 2. Multiple Tool Modules (Combined)
-
-Run git + jira + gitlab:
-
-```bash
-python -m aa_common.server --tools git,jira,gitlab
-```
-
-Cursor config:
-```json
-{
-  "mcpServers": {
-    "aa-workflow": {
-      "command": "python",
-      "args": ["-m", "aa_common.server", "--tools", "git,jira,gitlab"]
-    }
-  }
-}
-```
-
-### 3. All Tools
-
-```bash
-python -m aa_common.server --all
-```
-
 ### 4. With Web UI
 
 ```bash
-python -m aa_common.server --tools git,jira --web --port 8765
+python -m src.server --agent devops --web --port 8765
 ```
+
+## Dynamic Agent Loading
+
+### How It Works
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Claude
+    participant MCP as MCP Server
+    participant Loader as AgentLoader
+    participant Cursor
+    
+    User->>Claude: "Load devops agent"
+    Claude->>MCP: agent_load("devops")
+    MCP->>Loader: switch_agent("devops")
+    Loader->>Loader: Unload current tools
+    Loader->>Loader: Load k8s, bonfire, quay, gitlab
+    Loader->>MCP: Register new tools
+    MCP->>Cursor: tools/list_changed notification
+    Cursor->>Cursor: Refresh tool list
+    Loader-->>MCP: Agent persona
+    MCP-->>Claude: "Loaded 90 tools"
+    Claude-->>User: "DevOps agent ready!"
+```
+
+### Implementation
+
+The `AgentLoader` class (`aa-common/src/agent_loader.py`) manages dynamic tool switching:
+
+```python
+class AgentLoader:
+    CORE_TOOLS = {"agent_load", "agent_list", "session_start", "debug_tool"}
+    
+    async def switch_agent(self, agent_name: str, ctx: Context) -> dict:
+        """Switch to a different agent, loading its tools dynamically."""
+        
+        # 1. Read agent config (agents/devops.yaml)
+        config = self.load_agent_config(agent_name)
+        
+        # 2. Unload current tools (keep core)
+        for tool_name in list(self.server._tool_manager._tools.keys()):
+            if tool_name not in self.CORE_TOOLS:
+                self.server._tool_manager._tools.pop(tool_name)
+        
+        # 3. Load new tool modules
+        for module in config["tools"]:
+            mod = importlib.import_module(f"aa_{module}.tools")
+            mod.register_tools(self.server)
+        
+        # 4. Notify Cursor
+        await ctx.session.send_tool_list_changed()
+        
+        return {"persona": config["persona"], "tools": len(self.server._tools)}
+```
+
+### Core Tools (Always Available)
+
+These tools are never unloaded:
+- `agent_load` - Switch agents
+- `agent_list` - List available agents  
+- `session_start` - Initialize session
+- `debug_tool` - Self-healing tool debugger
 
 ## Special Modules
 
@@ -222,11 +297,85 @@ TOOL_MODULES = {
 }
 ```
 
+## Auto-Debug Infrastructure
+
+All tools are automatically wrapped with debugging support via the `@debuggable` decorator.
+
+### How It Works
+
+```mermaid
+flowchart LR
+    A[Tool Fails] --> B[Returns ❌ with hint]
+    B --> C["💡 debug_tool('tool_name')"]
+    C --> D[Claude inspects source]
+    D --> E[Proposes fix]
+    E --> F{User confirms?}
+    F -->|Yes| G[Apply & commit]
+    G --> H[Retry operation]
+```
+
+### The @debuggable Decorator
+
+```python
+# mcp-servers/aa-common/src/debuggable.py
+
+@debuggable
+async def my_tool(param: str) -> str:
+    """My tool description."""
+    result = do_something(param)
+    return result
+```
+
+The decorator:
+1. Captures source file and line numbers
+2. Registers tool in `TOOL_REGISTRY`
+3. If tool returns `❌`, appends debug hint
+4. If exception occurs, captures error context
+
+### debug_tool() Function
+
+```python
+async def debug_tool(tool_name: str, error_message: str = "") -> str:
+    """Analyze a failed tool's source code for debugging.
+    
+    Returns the tool's source code along with the error context,
+    allowing Claude to propose a fix.
+    """
+    source_path = TOOL_REGISTRY.get(tool_name)
+    # Returns: source code + error message for analysis
+```
+
+### Example Fix Workflow
+
+```
+Tool output: ❌ Failed to release namespace
+             💡 To auto-fix: `debug_tool('bonfire_namespace_release')`
+
+Claude: [calls debug_tool('bonfire_namespace_release', 'Output is not a TTY')]
+
+        I found the issue! The bonfire CLI prompts for confirmation
+        but we're not passing --force. Here's the fix:
+
+        ```
+        - args = ['namespace', 'release', namespace]
+        + args = ['namespace', 'release', namespace, '--force']
+        ```
+
+        Apply this fix?
+
+User: yes
+
+Claude: [applies fix with search_replace, commits]
+        ✅ Fixed! Retrying the operation...
+```
+
 ## Benefits
 
 1. **No Code Duplication**: Server infrastructure is shared
 2. **Flexible Loading**: Load any combination of tools
-3. **Easy Testing**: Test individual tools or combinations
-4. **Cursor Compatible**: Works with Cursor's MCP config
-5. **Maintainable**: Each domain is isolated
+3. **Dynamic Agents**: Switch agent mid-session with tools updating
+4. **Self-Healing**: Auto-debug failed tools
+5. **Easy Testing**: Test individual tools or combinations
+6. **Cursor Compatible**: Works with Cursor's MCP config
+7. **Maintainable**: Each domain is isolated
 
