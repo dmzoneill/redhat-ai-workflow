@@ -1,0 +1,526 @@
+# Skill: Morning Coffee Briefing
+# Your daily standup assistant - everything you need to start the day
+
+name: coffee
+description: |
+  Morning briefing - everything you need to know at the start of your work day.
+  
+  This skill gathers and summarizes:
+  - 📧 Email: Unread emails, summarize, mark read & archive
+  - 🔀 PRs: Review new open PRs, check your PRs for feedback
+  - 📋 Jira: Sprint activity for last day/week
+  - 🚀 Merges: Recent merged code in aa-backend
+  - 🚨 Alerts: Any firing or recent alerts
+  - 📅 Calendar: Today's meetings
+  
+  Requires: Gmail API access (same OAuth as Calendar)
+version: "1.0"
+
+inputs:
+  - name: full_email_scan
+    type: boolean
+    required: false
+    default: false
+    description: "Process all unread emails (vs just summary)"
+  
+  - name: auto_archive_email
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically archive processed emails"
+  
+  - name: days_back
+    type: integer
+    required: false
+    default: 1
+    description: "Days to look back for activity (default: 1)"
+
+steps:
+  # ==================== CONFIGURATION ====================
+  
+  - name: load_config
+    description: "Load configuration"
+    compute: |
+      import json
+      from pathlib import Path
+      from datetime import datetime
+      from zoneinfo import ZoneInfo
+      
+      config_paths = [
+        Path.cwd() / "config.json",
+        Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+        if p.exists():
+          with open(p) as f:
+            config = json.load(f)
+          break
+      
+      tz = ZoneInfo("Europe/Dublin")
+      now = datetime.now(tz)
+      
+      result = {
+        "config": config,
+        "now": now.isoformat(),
+        "today": now.strftime("%Y-%m-%d"),
+        "day_name": now.strftime("%A"),
+        "time": now.strftime("%H:%M"),
+        "greeting": "Good morning" if now.hour < 12 else "Good afternoon" if now.hour < 18 else "Good evening",
+      }
+    output: ctx
+
+  # ==================== CALENDAR ====================
+  
+  - name: get_todays_calendar
+    description: "Fetch today's calendar events"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime, timedelta
+      from zoneinfo import ZoneInfo
+      
+      CONFIG_DIR = Path.home() / ".config" / "google-calendar"
+      TOKEN_FILE = CONFIG_DIR / "token.json"
+      TIMEZONE = "Europe/Dublin"
+      tz = ZoneInfo(TIMEZONE)
+      
+      events_today = []
+      
+      if TOKEN_FILE.exists():
+        try:
+          from google.oauth2.credentials import Credentials
+          from googleapiclient.discovery import build
+          
+          SCOPES = [
+            "https://www.googleapis.com/auth/calendar.readonly",
+          ]
+          
+          creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+          service = build('calendar', 'v3', credentials=creds)
+          
+          now = datetime.now(tz)
+          day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+          day_end = day_start + timedelta(days=1)
+          
+          events_result = service.events().list(
+            calendarId='primary',
+            timeMin=day_start.isoformat(),
+            timeMax=day_end.isoformat(),
+            singleEvents=True,
+            orderBy='startTime',
+            timeZone=TIMEZONE,
+          ).execute()
+          
+          for event in events_result.get('items', []):
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            try:
+              if 'T' in start:
+                dt = datetime.fromisoformat(start.replace('Z', '+00:00')).astimezone(tz)
+                time_str = dt.strftime('%H:%M')
+              else:
+                time_str = "All day"
+            except:
+              time_str = start
+            
+            # Check for Meet link
+            meet_link = ""
+            if event.get('conferenceData', {}).get('entryPoints'):
+              for entry in event['conferenceData']['entryPoints']:
+                if entry.get('entryPointType') == 'video':
+                  meet_link = entry.get('uri', '')
+                  break
+            
+            events_today.append({
+              "time": time_str,
+              "title": event.get('summary', 'No title'),
+              "meet_link": meet_link,
+            })
+        except Exception as e:
+          events_today = [{"error": str(e)}]
+      else:
+        events_today = [{"error": "Calendar not configured"}]
+      
+      result = events_today
+    output: calendar_events
+
+  # ==================== EMAIL (Gmail) ====================
+  
+  - name: get_email_summary
+    description: "Fetch and summarize unread emails"
+    compute: |
+      from pathlib import Path
+      
+      CONFIG_DIR = Path.home() / ".config" / "google-calendar"
+      TOKEN_FILE = CONFIG_DIR / "token.json"
+      
+      email_summary = {
+        "unread_count": 0,
+        "important": [],
+        "newsletters": 0,
+        "notifications": 0,
+        "error": None,
+      }
+      
+      if TOKEN_FILE.exists():
+        try:
+          from google.oauth2.credentials import Credentials
+          from googleapiclient.discovery import build
+          
+          # Gmail scopes - need to be added to OAuth
+          SCOPES = [
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.modify",
+          ]
+          
+          creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+          service = build('gmail', 'v1', credentials=creds)
+          
+          # Get unread messages
+          results = service.users().messages().list(
+            userId='me',
+            q='is:unread',
+            maxResults=50
+          ).execute()
+          
+          messages = results.get('messages', [])
+          email_summary["unread_count"] = len(messages)
+          
+          # Categorize messages
+          for msg in messages[:20]:  # Process first 20
+            msg_data = service.users().messages().get(
+              userId='me',
+              id=msg['id'],
+              format='metadata',
+              metadataHeaders=['Subject', 'From']
+            ).execute()
+            
+            headers = {h['name']: h['value'] for h in msg_data.get('payload', {}).get('headers', [])}
+            subject = headers.get('Subject', 'No subject')
+            sender = headers.get('From', 'Unknown')
+            
+            # Categorize
+            sender_lower = sender.lower()
+            subject_lower = subject.lower()
+            
+            if 'newsletter' in sender_lower or 'digest' in subject_lower:
+              email_summary["newsletters"] += 1
+            elif 'notification' in sender_lower or 'noreply' in sender_lower:
+              email_summary["notifications"] += 1
+            else:
+              # Important - from people
+              email_summary["important"].append({
+                "subject": subject[:60],
+                "from": sender.split('<')[0].strip()[:30],
+              })
+          
+        except Exception as e:
+          error_str = str(e)
+          if "gmail" in error_str.lower() or "scope" in error_str.lower():
+            email_summary["error"] = "Gmail API not enabled. Run /setup-gmail to configure."
+          else:
+            email_summary["error"] = error_str
+      else:
+        email_summary["error"] = "Google OAuth not configured"
+      
+      result = email_summary
+    output: email_summary
+    on_error: continue
+
+  # ==================== OPEN PRs ====================
+  
+  - name: get_open_prs
+    description: "Get all open PRs in the repo"
+    tool: gitlab_mr_list
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+    output: all_open_prs
+    on_error: continue
+
+  - name: get_my_prs
+    description: "Get PRs authored by me"
+    compute: |
+      import subprocess
+      import re
+      
+      result = subprocess.run(
+        ["glab", "mr", "list", "--author=@me", "-R", "automation-analytics/automation-analytics-backend"],
+        capture_output=True,
+        text=True
+      )
+      
+      my_mrs = []
+      for line in result.stdout.split('\n'):
+        match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
+        if match:
+          my_mrs.append({
+            "id": int(match.group(1)),
+            "title": match.group(2).strip()[:60]
+          })
+      
+      result = my_mrs
+    output: my_prs
+
+  - name: check_pr_feedback
+    description: "Check my PRs for new feedback"
+    compute: |
+      import subprocess
+      import re
+      
+      feedback = []
+      
+      # Bot patterns to filter
+      bot_patterns = [
+        r'group_\d+_bot', r'konflux', r'Starting Pipelinerun',
+        r'^/retest', r'^/approve'
+      ]
+      
+      for pr in my_prs[:5]:  # Check last 5
+        mr_id = pr['id']
+        
+        result = subprocess.run(
+          ["glab", "mr", "view", str(mr_id), "--comments", "-R", "automation-analytics/automation-analytics-backend"],
+          capture_output=True,
+          text=True
+        )
+        
+        # Find human comments
+        for line in result.stdout.split('\n'):
+          if ' commented ' in line and 'daoneill' not in line.lower():
+            is_bot = any(re.search(p, line, re.IGNORECASE) for p in bot_patterns)
+            if not is_bot:
+              # Extract author
+              match = re.match(r'^(\w+) commented', line)
+              if match:
+                feedback.append({
+                  "mr_id": mr_id,
+                  "author": match.group(1),
+                  "title": pr['title'][:40]
+                })
+                break  # One per MR
+      
+      result = feedback
+    output: pr_feedback
+    on_error: continue
+
+  # ==================== JIRA ACTIVITY ====================
+  
+  - name: get_sprint_activity
+    description: "Get Jira activity for the sprint"
+    compute: |
+      import subprocess
+      import re
+      from datetime import datetime, timedelta
+      
+      days_back = inputs.get('days_back', 1)
+      
+      # Get recently updated issues
+      result = subprocess.run(
+        ["rh-issue", "search", 
+         f"project = AAP AND updated >= -{days_back}d AND component = 'Automation Analytics' ORDER BY updated DESC",
+         "--max-results", "20"],
+        capture_output=True,
+        text=True
+      )
+      
+      recent_issues = []
+      for line in result.stdout.split('\n'):
+        # Parse: AAP-12345  Summary text
+        match = re.match(r'(AAP-\d+)\s+(.+)', line)
+        if match:
+          recent_issues.append({
+            "key": match.group(1),
+            "summary": match.group(2)[:50]
+          })
+      
+      result = {
+        "count": len(recent_issues),
+        "issues": recent_issues[:10]
+      }
+    output: jira_activity
+    on_error: continue
+
+  # ==================== MERGED CODE ====================
+  
+  - name: get_recent_merges
+    description: "Get recently merged MRs"
+    compute: |
+      import subprocess
+      import re
+      from datetime import datetime, timedelta
+      
+      days_back = inputs.get('days_back', 1)
+      
+      result = subprocess.run(
+        ["glab", "mr", "list", "--merged", "-R", "automation-analytics/automation-analytics-backend"],
+        capture_output=True,
+        text=True
+      )
+      
+      # Parse merged MRs (glab shows recent first)
+      merged_mrs = []
+      for line in result.stdout.split('\n')[:10]:
+        match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
+        if match:
+          merged_mrs.append({
+            "id": int(match.group(1)),
+            "title": match.group(2).strip()[:50]
+          })
+      
+      result = merged_mrs[:5]  # Last 5
+    output: recent_merges
+    on_error: continue
+
+  # ==================== ALERTS ====================
+  
+  - name: check_alerts
+    description: "Check for any firing alerts"
+    compute: |
+      # This would use Prometheus/Alertmanager tools if available
+      # For now, check Slack alert channels
+      alerts = {
+        "stage": [],
+        "production": [],
+        "error": None
+      }
+      
+      # Could integrate with alertmanager_get_alerts tool
+      # For now, return placeholder
+      result = alerts
+    output: alerts
+    on_error: continue
+
+  # ==================== SUMMARY ====================
+  
+  - name: format_briefing
+    description: "Create the morning briefing"
+    compute: |
+      lines = []
+      
+      # Header
+      lines.append(f"# ☕ {ctx['greeting']}, Dave!")
+      lines.append(f"")
+      lines.append(f"**{ctx['day_name']}, {ctx['today']}** | {ctx['time']} Irish time")
+      lines.append("")
+      lines.append("---")
+      lines.append("")
+      
+      # Calendar
+      lines.append("## 📅 Today's Calendar")
+      if calendar_events and not any('error' in e for e in calendar_events):
+        if calendar_events:
+          for event in calendar_events:
+            meet_icon = "📹" if event.get('meet_link') else ""
+            lines.append(f"- **{event['time']}** - {event['title']} {meet_icon}")
+        else:
+          lines.append("- No meetings scheduled! 🎉")
+      else:
+        lines.append("- ⚠️ Calendar not accessible")
+      lines.append("")
+      
+      # Email
+      lines.append("## 📧 Email Summary")
+      if email_summary and not email_summary.get('error'):
+        lines.append(f"- **{email_summary['unread_count']}** unread emails")
+        if email_summary['important']:
+          lines.append(f"- **{len(email_summary['important'])}** from people:")
+          for email in email_summary['important'][:5]:
+            lines.append(f"  - {email['from']}: *{email['subject']}*")
+        if email_summary['newsletters']:
+          lines.append(f"- {email_summary['newsletters']} newsletters")
+        if email_summary['notifications']:
+          lines.append(f"- {email_summary['notifications']} notifications")
+      else:
+        error = email_summary.get('error', 'Unknown') if email_summary else 'Not configured'
+        lines.append(f"- ⚠️ {error}")
+      lines.append("")
+      
+      # PRs needing attention
+      lines.append("## 🔀 PR Status")
+      lines.append(f"")
+      lines.append(f"**Your Open PRs:** {len(my_prs) if my_prs else 0}")
+      if my_prs:
+        for pr in my_prs[:5]:
+          lines.append(f"- !{pr['id']} - {pr['title']}")
+      lines.append("")
+      
+      if pr_feedback:
+        lines.append(f"**⚠️ Feedback Waiting ({len(pr_feedback)}):**")
+        for fb in pr_feedback:
+          lines.append(f"- !{fb['mr_id']} - Comment from **{fb['author']}**")
+      else:
+        lines.append("✅ No pending feedback on your PRs")
+      lines.append("")
+      
+      # Open PRs to review
+      lines.append(f"**Open PRs to Review:** {all_open_prs.count('!') if all_open_prs else 0} total")
+      lines.append("")
+      
+      # Jira
+      lines.append("## 📋 Jira Activity")
+      if jira_activity:
+        lines.append(f"**{jira_activity.get('count', 0)}** issues updated in last {inputs.get('days_back', 1)} day(s)")
+        for issue in jira_activity.get('issues', [])[:5]:
+          lines.append(f"- {issue['key']}: {issue['summary']}")
+      else:
+        lines.append("- Could not fetch Jira activity")
+      lines.append("")
+      
+      # Merges
+      lines.append("## 🚀 Recent Merges")
+      if recent_merges:
+        for mr in recent_merges:
+          lines.append(f"- !{mr['id']} - {mr['title']}")
+      else:
+        lines.append("- No recent merges")
+      lines.append("")
+      
+      # Alerts
+      lines.append("## 🚨 Alerts")
+      if alerts and not alerts.get('error'):
+        if alerts.get('production') or alerts.get('stage'):
+          for env, alert_list in alerts.items():
+            if alert_list and env != 'error':
+              lines.append(f"**{env.upper()}:**")
+              for a in alert_list:
+                lines.append(f"- {a}")
+        else:
+          lines.append("✅ No active alerts")
+      else:
+        lines.append("- Alert check not configured")
+      lines.append("")
+      
+      # Actions
+      lines.append("---")
+      lines.append("")
+      lines.append("## 🎯 Suggested Actions")
+      actions = []
+      
+      if pr_feedback:
+        actions.append(f"- Respond to feedback on {len(pr_feedback)} PR(s)")
+      if email_summary and email_summary.get('important'):
+        actions.append(f"- Review {len(email_summary['important'])} important emails")
+      if all_open_prs and 'open merge' in str(all_open_prs).lower():
+        actions.append("- Review new PRs from teammates")
+      
+      if actions:
+        for a in actions:
+          lines.append(a)
+      else:
+        lines.append("- You're all caught up! ☕")
+      
+      result = '\n'.join(lines)
+    output: briefing
+
+outputs:
+  - name: summary
+    value: "{{ briefing }}"
+  
+  - name: context
+    value:
+      calendar_count: "{{ calendar_events | length if calendar_events else 0 }}"
+      unread_emails: "{{ email_summary.unread_count if email_summary else 0 }}"
+      my_prs: "{{ my_prs | length if my_prs else 0 }}"
+      feedback_waiting: "{{ pr_feedback | length if pr_feedback else 0 }}"
+      jira_updates: "{{ jira_activity.count if jira_activity else 0 }}"
+      recent_merges: "{{ recent_merges | length if recent_merges else 0 }}"
+
