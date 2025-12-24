@@ -6,15 +6,19 @@ description: |
   Morning briefing - everything you need to know at the start of your work day.
   
   This skill gathers and summarizes:
-  - 📧 Email: Unread emails, summarize, mark read & archive
-  - 🔀 PRs: Review new open PRs, check your PRs for feedback
+  - 📅 Calendar: Today's meetings with Meet links
+  - 📧 Email: Unread emails categorized (people vs newsletters)
+  - 🔀 PRs: Your open PRs, feedback waiting, failed pipelines
+  - 👀 Reviews: PRs assigned to you for review
   - 📋 Jira: Sprint activity for last day/week
   - 🚀 Merges: Recent merged code in aa-backend
+  - 🧪 Ephemeral: Your active test environments with expiry
+  - 📝 Yesterday: Your commits (for standup prep)
   - 🚨 Alerts: Any firing or recent alerts
-  - 📅 Calendar: Today's meetings
+  - 🎯 Actions: Suggested next steps
   
   Requires: Gmail API access (same OAuth as Calendar)
-version: "1.0"
+version: "1.1"
 
 inputs:
   - name: full_email_scan
@@ -389,11 +393,155 @@ steps:
     output: alerts
     on_error: continue
 
+  # ==================== FAILED PIPELINES ====================
+  
+  - name: check_failed_pipelines
+    description: "Check for failed pipelines on your MRs"
+    compute: |
+      import subprocess
+      import re
+      
+      failed_pipelines = []
+      
+      # Get your open MRs and check their pipeline status
+      for pr in my_prs[:5] if my_prs else []:
+        mr_id = pr.get('id')
+        if not mr_id:
+          continue
+        
+        # Get MR details including pipeline status
+        result = subprocess.run(
+          ["glab", "mr", "view", str(mr_id), "-R", "automation-analytics/automation-analytics-backend"],
+          capture_output=True,
+          text=True
+        )
+        
+        output = result.stdout.lower()
+        if 'failed' in output or 'canceled' in output:
+          failed_pipelines.append({
+            "mr_id": mr_id,
+            "title": pr.get('title', '')[:40],
+            "status": "failed" if 'failed' in output else "canceled"
+          })
+      
+      result = failed_pipelines
+    output: failed_pipelines
+    on_error: continue
+
+  # ==================== EPHEMERAL NAMESPACES ====================
+  
+  - name: check_ephemeral_namespaces
+    description: "List your active ephemeral environments"
+    compute: |
+      import subprocess
+      import re
+      import os
+      
+      namespaces = []
+      
+      # Set kubeconfig for ephemeral
+      env = os.environ.copy()
+      env['KUBECONFIG'] = os.path.expanduser('~/.kube/config.e')
+      
+      result = subprocess.run(
+        ["bonfire", "namespace", "list", "--mine"],
+        capture_output=True,
+        text=True,
+        env=env
+      )
+      
+      for line in result.stdout.split('\n'):
+        # Parse: ephemeral-xxxxx  expires in 2h 30m
+        match = re.search(r'(ephemeral-\w+)\s+.*?(\d+[hm].*?)(?:\s|$)', line)
+        if match:
+          namespaces.append({
+            "name": match.group(1),
+            "expires": match.group(2).strip()
+          })
+        elif 'ephemeral-' in line:
+          # Fallback: just get the namespace name
+          ns_match = re.search(r'(ephemeral-\w+)', line)
+          if ns_match:
+            namespaces.append({
+              "name": ns_match.group(1),
+              "expires": "unknown"
+            })
+      
+      result = namespaces
+    output: ephemeral_namespaces
+    on_error: continue
+
+  # ==================== YESTERDAY'S WORK ====================
+  
+  - name: get_yesterdays_commits
+    description: "Get your commits from yesterday (for standup)"
+    compute: |
+      import subprocess
+      import re
+      import os
+      from datetime import datetime, timedelta
+      
+      commits = []
+      
+      # Get commits from yesterday
+      yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+      
+      result = subprocess.run(
+        ["git", "log", "--oneline", "--author=daoneill", f"--since={yesterday}", "--until=today"],
+        capture_output=True,
+        text=True,
+        cwd=os.path.expanduser("~/src/automation-analytics-backend")
+      )
+      
+      for line in result.stdout.strip().split('\n')[:10]:
+        if line.strip():
+          # Parse: abc1234 Commit message
+          parts = line.split(' ', 1)
+          if len(parts) == 2:
+            commits.append({
+              "sha": parts[0][:7],
+              "message": parts[1][:60]
+            })
+      
+      result = commits
+    output: yesterdays_commits
+    on_error: continue
+
+  # ==================== REVIEW REQUESTS ====================
+  
+  - name: get_review_requests
+    description: "Get PRs where you're assigned as reviewer"
+    compute: |
+      import subprocess
+      import re
+      
+      review_requests = []
+      
+      result = subprocess.run(
+        ["glab", "mr", "list", "--reviewer=@me", "-R", "automation-analytics/automation-analytics-backend"],
+        capture_output=True,
+        text=True
+      )
+      
+      for line in result.stdout.split('\n'):
+        match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
+        if match:
+          review_requests.append({
+            "id": int(match.group(1)),
+            "title": match.group(2).strip()[:50]
+          })
+      
+      result = review_requests[:5]  # Limit to 5
+    output: review_requests
+    on_error: continue
+
   # ==================== SUMMARY ====================
   
   - name: format_briefing
     description: "Create the morning briefing"
     compute: |
+      import re
+      
       lines = []
       
       # Header
@@ -451,6 +599,20 @@ steps:
         lines.append("✅ No pending feedback on your PRs")
       lines.append("")
       
+      # Failed pipelines
+      if failed_pipelines:
+        lines.append(f"**🔴 Failed Pipelines ({len(failed_pipelines)}):**")
+        for fp in failed_pipelines:
+          lines.append(f"- !{fp['mr_id']} - {fp['status'].upper()}")
+        lines.append("")
+      
+      # Review requests
+      if review_requests:
+        lines.append(f"**👀 Awaiting Your Review ({len(review_requests)}):**")
+        for rr in review_requests:
+          lines.append(f"- !{rr['id']} - {rr['title']}")
+        lines.append("")
+      
       # Open PRs to review
       lines.append(f"**Open PRs to Review:** {all_open_prs.count('!') if all_open_prs else 0} total")
       lines.append("")
@@ -472,6 +634,25 @@ steps:
           lines.append(f"- !{mr['id']} - {mr['title']}")
       else:
         lines.append("- No recent merges")
+      lines.append("")
+      
+      # Ephemeral Environments
+      lines.append("## 🧪 Ephemeral Environments")
+      if ephemeral_namespaces:
+        for ns in ephemeral_namespaces:
+          expires = ns.get('expires', 'unknown')
+          lines.append(f"- **{ns['name']}** - expires {expires}")
+      else:
+        lines.append("- No active ephemeral environments")
+      lines.append("")
+      
+      # Yesterday's Work (for standup)
+      lines.append("## 📝 Yesterday's Work")
+      if yesterdays_commits:
+        for commit in yesterdays_commits[:5]:
+          lines.append(f"- `{commit['sha']}` {commit['message']}")
+      else:
+        lines.append("- No commits yesterday")
       lines.append("")
       
       # Alerts
@@ -497,10 +678,16 @@ steps:
       
       if pr_feedback:
         actions.append(f"- Respond to feedback on {len(pr_feedback)} PR(s)")
+      if failed_pipelines:
+        actions.append(f"- Fix {len(failed_pipelines)} failed pipeline(s)")
+      if review_requests:
+        actions.append(f"- Review {len(review_requests)} PR(s) assigned to you")
       if email_summary and email_summary.get('important'):
         actions.append(f"- Review {len(email_summary['important'])} important emails")
-      if all_open_prs and 'open merge' in str(all_open_prs).lower():
-        actions.append("- Review new PRs from teammates")
+      if ephemeral_namespaces:
+        expiring = [ns for ns in ephemeral_namespaces if 'h' in str(ns.get('expires', '')) and int(re.search(r'(\d+)h', str(ns.get('expires', '0h'))).group(1) if re.search(r'(\d+)h', str(ns.get('expires', ''))) else 99) < 2]
+        if expiring:
+          actions.append(f"- ⏰ {len(expiring)} ephemeral env(s) expiring soon!")
       
       if actions:
         for a in actions:
@@ -521,6 +708,10 @@ outputs:
       unread_emails: "{{ email_summary.unread_count if email_summary else 0 }}"
       my_prs: "{{ my_prs | length if my_prs else 0 }}"
       feedback_waiting: "{{ pr_feedback | length if pr_feedback else 0 }}"
+      failed_pipelines: "{{ failed_pipelines | length if failed_pipelines else 0 }}"
+      review_requests: "{{ review_requests | length if review_requests else 0 }}"
+      ephemeral_envs: "{{ ephemeral_namespaces | length if ephemeral_namespaces else 0 }}"
+      yesterdays_commits: "{{ yesterdays_commits | length if yesterdays_commits else 0 }}"
       jira_updates: "{{ jira_activity.count if jira_activity else 0 }}"
       recent_merges: "{{ recent_merges | length if recent_merges else 0 }}"
 

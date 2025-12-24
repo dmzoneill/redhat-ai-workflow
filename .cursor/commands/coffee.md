@@ -16,12 +16,14 @@ skill_run("coffee")
 |---------|-------------|
 | 📅 Calendar | Today's meetings with Meet links |
 | 📧 Email | Unread count, categorized (people vs newsletters) |
-| 🔀 PRs | Your open PRs + PRs needing review |
-| ⚠️ Feedback | Comments waiting for your response |
+| 🔀 PRs | Your open PRs, feedback waiting, failed pipelines |
+| 👀 Reviews | PRs assigned to you for review |
+| 🧪 Ephemeral | Your active test environments with expiry times |
+| 📝 Yesterday | Your commits from yesterday (for standup) |
 | 📋 Jira | Sprint activity for the day/week |
 | 🚀 Merges | Recently merged code in aa-backend |
 | 🚨 Alerts | Any firing Prometheus alerts |
-| 🎯 Actions | Suggested next steps |
+| 🎯 Actions | Smart suggestions based on all the above |
 
 ## Options
 
