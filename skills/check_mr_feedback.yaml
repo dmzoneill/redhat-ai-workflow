@@ -174,10 +174,37 @@ steps:
       result = feedback_results
     output: feedback_analysis
 
-  # Step 3: Create meeting invites if requested
+  # Step 3: Check for existing meetings to avoid duplicates
+  - name: check_existing_meetings
+    description: "Check if meetings already exist for meeting requests"
+    condition: "{{ feedback_analysis }}"
+    compute: |
+      import subprocess
+      import json
+      
+      # For each MR with meeting requests, check if a meeting already exists
+      # This uses glab to search calendar (or could use the google_calendar tool)
+      
+      for mr_feedback in feedback_analysis:
+        mr_id = mr_feedback['mr_id']
+        
+        # Mark meeting requests as already_scheduled if meeting exists
+        for meeting_req in mr_feedback.get('meeting_requests', []):
+          # Default to not scheduled
+          meeting_req['already_scheduled'] = False
+          meeting_req['existing_meeting'] = None
+        
+        # Note: Full calendar check requires google_calendar_find_meeting tool
+        # For now, we'll flag for the format_summary step to remind about checking
+        mr_feedback['needs_calendar_check'] = len(mr_feedback.get('meeting_requests', [])) > 0
+      
+      result = feedback_analysis
+    output: feedback_with_calendar_check
+
+  # Step 4: Create meeting invites if requested
   - name: create_meeting_invites
     description: "Create Google Meet invitations for meeting requests"
-    condition: "{{ inputs.create_meetings and feedback_analysis }}"
+    condition: "{{ inputs.create_meetings and feedback_with_calendar_check }}"
     compute: |
       import json
       from pathlib import Path
@@ -204,9 +231,20 @@ steps:
         }
       else:
         created_meetings = []
+        skipped_meetings = []
         
-        for mr_feedback in feedback_analysis:
+        for mr_feedback in feedback_with_calendar_check:
           for meeting_req in mr_feedback.get('meeting_requests', []):
+            # Skip if already scheduled
+            if meeting_req.get('already_scheduled'):
+              skipped_meetings.append({
+                "mr_id": mr_feedback['mr_id'],
+                "requester": meeting_req['author'],
+                "reason": "Meeting already exists",
+                "existing": meeting_req.get('existing_meeting')
+              })
+              continue
+            
             # Meeting details
             meeting_info = {
               "mr_id": mr_feedback['mr_id'],
@@ -220,12 +258,13 @@ steps:
         
         result = {
           "created": created_meetings,
-          "note": "Use google_calendar_create_event tool to finalize invites"
+          "skipped": skipped_meetings,
+          "note": "Use google_calendar_quick_meeting tool to create meetings"
         }
     output: meeting_results
     on_error: continue
 
-  # Step 4: Format summary
+  # Step 5: Format summary
   - name: format_summary
     description: "Create human-readable summary"
     compute: |
@@ -233,26 +272,29 @@ steps:
       lines.append("# MR Feedback Summary")
       lines.append("")
       
-      if not feedback_analysis:
+      # Use feedback_with_calendar_check if available, otherwise feedback_analysis
+      analysis = feedback_with_calendar_check if feedback_with_calendar_check else feedback_analysis
+      
+      if not analysis:
         lines.append("✅ **No pending feedback found!** All your MRs are clear.")
       else:
         # Count totals
-        total_mrs = len(feedback_analysis)
-        total_comments = sum(len(f['comments']) for f in feedback_analysis)
-        meeting_requests = sum(len(f['meeting_requests']) for f in feedback_analysis)
-        needs_response = sum(len(f['needs_response']) for f in feedback_analysis)
+        total_mrs = len(analysis)
+        total_comments = sum(len(f['comments']) for f in analysis)
+        meeting_requests = sum(len(f['meeting_requests']) for f in analysis)
+        needs_response = sum(len(f['needs_response']) for f in analysis)
         
         lines.append(f"Found feedback on **{total_mrs}** MRs ({total_comments} comments)")
         lines.append("")
         
         if meeting_requests > 0:
-          lines.append(f"⚠️ **{meeting_requests} meeting request(s)** detected")
+          lines.append(f"📅 **{meeting_requests} meeting request(s)** detected")
         if needs_response > 0:
           lines.append(f"📝 **{needs_response} comment(s)** may need your response")
         lines.append("")
         
         # Details per MR
-        for mr_feedback in feedback_analysis:
+        for mr_feedback in analysis:
           mr_id = mr_feedback['mr_id']
           title = mr_feedback['title'][:60]
           
@@ -263,6 +305,7 @@ steps:
           for comment in mr_feedback['comments']:
             author = comment['author']
             text = comment['text'][:300]
+            author_email = comment.get('author_email', f"{author}@redhat.com")
             
             # Icons based on type
             icon = "💬"
@@ -273,17 +316,42 @@ steps:
             
             lines.append(f"| {icon} | **{author}** |")
             lines.append(f"| | {text} |")
+            
+            # Add meeting scheduling suggestion for meeting requests
+            if comment['is_meeting_request']:
+              lines.append("")
+              lines.append(f"**⚠️ Before scheduling, check if meeting already exists:**")
+              lines.append(f"```")
+              lines.append(f'google_calendar_find_meeting(mr_id="{mr_id}", attendee_email="{author_email}")')
+              lines.append(f"```")
+              lines.append("")
+              lines.append(f"**To schedule (if no meeting exists):**")
+              lines.append(f"```")
+              lines.append(f'google_calendar_quick_meeting(')
+              lines.append(f'    title="MR !{mr_id} Discussion",')
+              lines.append(f'    attendee_email="{author_email}",')
+              lines.append(f'    when="auto"')
+              lines.append(f')')
+              lines.append(f"```")
+            
             lines.append("")
           
           lines.append("---")
           lines.append("")
       
       # Meeting creation results
-      if meeting_results and meeting_results.get('created'):
-        lines.append("## Meeting Invites")
-        for m in meeting_results['created']:
-          lines.append(f"- 📅 **{m['title']}** with {m['requester']}")
-        lines.append("")
+      if meeting_results:
+        if meeting_results.get('skipped'):
+          lines.append("## ⏭️ Skipped Meeting Requests (already scheduled)")
+          for m in meeting_results['skipped']:
+            lines.append(f"- MR !{m['mr_id']} with {m['requester']}: {m['reason']}")
+          lines.append("")
+        
+        if meeting_results.get('created'):
+          lines.append("## 📅 Meeting Invites to Create")
+          for m in meeting_results['created']:
+            lines.append(f"- **{m['title']}** with {m['requester']}")
+          lines.append("")
       
       result = '\n'.join(lines)
     output: summary
@@ -294,8 +362,8 @@ outputs:
   
   - name: context
     value:
-      total_mrs_with_feedback: "{{ feedback_analysis | length }}"
-      meeting_requests: "{{ feedback_analysis | sum(attribute='meeting_requests') | list | length if feedback_analysis else 0 }}"
+      total_mrs_with_feedback: "{{ (feedback_with_calendar_check or feedback_analysis) | length if (feedback_with_calendar_check or feedback_analysis) else 0 }}"
+      meeting_requests: "{{ (feedback_with_calendar_check or feedback_analysis) | sum(attribute='meeting_requests') | list | length if (feedback_with_calendar_check or feedback_analysis) else 0 }}"
       needs_response: "{{ feedback_analysis | sum(attribute='needs_response') | list | length if feedback_analysis else 0 }}"
       details: "{{ feedback_analysis }}"
 
