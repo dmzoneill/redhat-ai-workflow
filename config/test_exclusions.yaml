@@ -126,7 +126,7 @@ safe_tool_tests:
       
   jira:
     - tool: jira_search
-      args: { jql: "project=AAP AND created >= -1d", limit: 1 }
+      args: { jql: "project=AAP AND created >= -1d", max_results: 3 }
       
   k8s:
     - tool: kubectl_get_pods
