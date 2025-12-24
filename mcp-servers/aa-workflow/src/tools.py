@@ -1875,6 +1875,14 @@ def register_tools(server: "FastMCP") -> int:
                         "",
                         "---",
                         "",
+                        "⚠️ **IMPORTANT:** Call tools DIRECTLY by name now!",
+                        "   ✅ `bonfire_namespace_list(mine_only=True)`",
+                        "   ❌ `tool_exec('bonfire_namespace_list', ...)`",
+                        "",
+                        "This way Cursor shows the actual tool name instead of 'tool_exec'.",
+                        "",
+                        "---",
+                        "",
                         result["persona"],
                     ]
                     return [TextContent(type="text", text="\n".join(lines))]
@@ -2384,7 +2392,10 @@ def register_tools(server: "FastMCP") -> int:
             total += len(tools)
         lines.append(f"\n**Total: {total} tools**")
         lines.append("\nUse `tool_list(module='git')` to see tools in a module")
-        lines.append("Use `tool_exec(tool_name, args)` to execute any tool")
+        lines.append("\n**💡 TIP:** After loading an agent, call tools DIRECTLY by name:")
+        lines.append("   `bonfire_namespace_list(mine_only=True)`  ← Cursor shows actual name")
+        lines.append("   NOT: `tool_exec('bonfire_namespace_list', ...)`  ← Shows as 'tool_exec'")
+        lines.append("\nUse `tool_exec()` only for tools from non-loaded agents.")
         
         return [TextContent(type="text", text="\n".join(lines))]
     

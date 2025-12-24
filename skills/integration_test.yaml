@@ -1,0 +1,265 @@
+name: integration_test
+description: |
+  Run integration tests across all agents and tools with auto-remediation.
+  
+  This skill iterates through agents, tests their tools, and automatically
+  fixes any issues found using the debug_tool infrastructure.
+  
+  Use this to validate the MCP ecosystem is working correctly.
+
+version: "1.0"
+
+inputs:
+  - name: agent
+    type: string
+    required: false
+    description: "Specific agent to test (omit for all agents)"
+  
+  - name: auto_fix
+    type: boolean
+    required: false
+    default: true
+    description: "Automatically fix failing tools"
+  
+  - name: skip_destructive
+    type: boolean
+    required: false
+    default: true
+    description: "Skip destructive operations (commits, deletes, etc.)"
+
+constants:
+  safe_agents:
+    - developer
+    - devops
+    - incident
+    - release
+  
+  # Tools to test per module with safe read-only parameters
+  tool_tests:
+    git:
+      - tool: git_status
+        args: { repo: "." }
+      - tool: git_branch
+        args: { repo: "." }
+      - tool: git_log
+        args: { repo: ".", limit: 1 }
+    
+    gitlab:
+      - tool: gitlab_mr_list
+        args: { limit: 1 }
+      - tool: gitlab_project_info
+        args: {}
+    
+    jira:
+      - tool: jira_search
+        args: { jql: "project=AAP AND created >= -1d", limit: 1 }
+    
+    k8s:
+      - tool: kubectl_get_pods
+        args: { namespace: "tower-analytics-stage", environment: "stage" }
+    
+    bonfire:
+      - tool: bonfire_namespace_list
+        args: { mine_only: true }
+    
+    quay:
+      - tool: quay_list_tags
+        args: { limit: 1 }
+    
+    workflow:
+      - tool: agent_list
+        args: {}
+      - tool: memory_read
+        args: {}
+      - tool: skill_list
+        args: {}
+
+steps:
+  # Step 1: Get list of agents to test
+  - name: get_agents
+    compute: |
+      if inputs.get('agent'):
+        agents = [inputs['agent']]
+      else:
+        agents = constants['safe_agents']
+      
+      result = {
+        'agents': agents,
+        'total': len(agents)
+      }
+    output: agent_list
+
+  # Step 2: Initialize results tracking
+  - name: init_results
+    compute: |
+      result = {
+        'tested': 0,
+        'passed': 0,
+        'failed': 0,
+        'fixed': 0,
+        'failures': [],
+        'by_agent': {}
+      }
+    output: results
+
+  # Step 3: Test each agent
+  - name: test_agents
+    loop: agent_list.agents
+    steps:
+      - name: load_agent
+        tool: agent_load
+        args:
+          agent_name: "{{ item }}"
+        output: agent_info
+      
+      - name: get_agent_tools
+        compute: |
+          # Get the modules for this agent
+          agent_name = item
+          
+          # Map agent to its modules
+          agent_modules = {
+            'developer': ['git', 'gitlab', 'jira'],
+            'devops': ['k8s', 'bonfire', 'quay', 'gitlab'],
+            'incident': ['k8s', 'kibana', 'jira'],
+            'release': ['konflux', 'quay', 'appinterface', 'git']
+          }
+          
+          modules = agent_modules.get(agent_name, [])
+          
+          # Get test cases for these modules
+          tests = []
+          for mod in modules:
+            if mod in constants['tool_tests']:
+              for test in constants['tool_tests'][mod]:
+                tests.append({
+                  'module': mod,
+                  'tool': test['tool'],
+                  'args': test['args']
+                })
+          
+          result = {
+            'agent': agent_name,
+            'modules': modules,
+            'tests': tests
+          }
+        output: agent_tests
+      
+      - name: run_tool_tests
+        loop: agent_tests.tests
+        steps:
+          - name: call_tool
+            tool: tool_exec
+            args:
+              tool_name: "{{ item.tool }}"
+              args: "{{ item.args | tojson }}"
+            output: tool_result
+            on_error: continue
+          
+          - name: check_result
+            compute: |
+              tool_name = item['tool']
+              
+              # Check if tool succeeded
+              if 'error' in tool_result or tool_result.get('success') == False:
+                success = False
+                error_msg = tool_result.get('error', str(tool_result))
+              else:
+                success = True
+                error_msg = None
+              
+              result = {
+                'tool': tool_name,
+                'success': success,
+                'error': error_msg,
+                'needs_fix': not success and inputs.get('auto_fix', True)
+              }
+            output: check
+          
+          - name: attempt_fix
+            condition: "{{ check.needs_fix }}"
+            tool: debug_tool
+            args:
+              tool_name: "{{ check.tool }}"
+              error_message: "{{ check.error }}"
+            output: fix_info
+            on_error: continue
+          
+          - name: update_results
+            compute: |
+              # Update running totals
+              results['tested'] += 1
+              
+              if check['success']:
+                results['passed'] += 1
+              else:
+                results['failed'] += 1
+                results['failures'].append({
+                  'agent': agent_tests['agent'],
+                  'tool': check['tool'],
+                  'error': check['error'][:200] if check['error'] else 'Unknown error'
+                })
+              
+              # Track by agent
+              agent = agent_tests['agent']
+              if agent not in results['by_agent']:
+                results['by_agent'][agent] = {'tested': 0, 'passed': 0, 'failed': 0}
+              
+              results['by_agent'][agent]['tested'] += 1
+              if check['success']:
+                results['by_agent'][agent]['passed'] += 1
+              else:
+                results['by_agent'][agent]['failed'] += 1
+              
+              result = results
+            output: results
+
+  # Step 4: Generate report
+  - name: generate_report
+    compute: |
+      total = results['tested']
+      passed = results['passed']
+      failed = results['failed']
+      
+      pass_rate = (passed / total * 100) if total > 0 else 0
+      
+      report = f"""
+## 🧪 Integration Test Results
+
+| Metric | Value |
+|--------|-------|
+| Agents Tested | {len(agent_list['agents'])} |
+| Tools Tested | {total} |
+| Passed | {passed} ✅ |
+| Failed | {failed} ❌ |
+| Pass Rate | {pass_rate:.1f}% |
+
+### By Agent
+
+| Agent | Tested | Passed | Failed |
+|-------|--------|--------|--------|
+"""
+      
+      for agent, stats in results['by_agent'].items():
+        report += f"| {agent} | {stats['tested']} | {stats['passed']} | {stats['failed']} |\n"
+      
+      if results['failures']:
+        report += "\n### ❌ Failures\n\n"
+        for f in results['failures']:
+          report += f"- **{f['agent']}/{f['tool']}**: {f['error'][:100]}...\n"
+      
+      result = {'report': report, 'success': failed == 0}
+    output: final_report
+
+outputs:
+  - name: report
+    value: "{{ final_report.report }}"
+  
+  - name: success
+    value: "{{ final_report.success }}"
+  
+  - name: summary
+    value: |
+      Tested {{ results.tested }} tools across {{ agent_list.total }} agents.
+      {{ results.passed }} passed, {{ results.failed }} failed.
+

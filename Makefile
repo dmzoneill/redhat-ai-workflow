@@ -291,6 +291,23 @@ test:
 	@printf "\033[36mRunning tests...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) -m pytest tests/ -v
 
+# Integration tests with auto-remediation
+integration-test:
+	@printf "\033[36mRunning integration tests across all agents...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/integration_test.py --save
+
+integration-test-agent:
+	@printf "\033[36mRunning integration tests for agent: $(AGENT)\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/integration_test.py --agent $(AGENT)
+
+integration-test-fix:
+	@printf "\033[36mRunning integration tests with auto-fix...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/integration_test.py --fix --save
+
+integration-test-dry:
+	@printf "\033[36mRunning integration tests (dry-run)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/integration_test.py --dry-run
+
 lint:
 	@printf "\033[36mRunning linters...\033[0m\n"
 	cd $(PROJECT_ROOT) && flake8 scripts/ mcp-servers/ --max-line-length=100 --ignore=E501,W503
