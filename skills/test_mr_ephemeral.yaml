@@ -527,79 +527,76 @@ steps:
 
   # ==================== GET DB CREDENTIALS ====================
 
-  # Step 11: Get postgres connection info from pods/secrets
+  # Step 11: Get postgres connection info from automation-analytics-db secret
+  # The secret contains base64-encoded values that must be decoded
   - name: get_db_credentials
-    description: "Get PostgreSQL connection details from ephemeral environment"
+    description: "Get PostgreSQL connection details from automation-analytics-db secret"
     condition: "{{ namespace_name and inputs.run_tests }}"
     compute: |
       import subprocess
-      import re
+      import json
       import base64
+      import os
       
       ns = namespace_name
-      kubeconfig = cfg.get("ephemeral_kubeconfig", __import__('os').path.expanduser("~/.kube/config.e"))
+      kubeconfig = cfg.get("ephemeral_kubeconfig", os.path.expanduser("~/.kube/config.e"))
       
-      # Get the database service/pod info
-      svc_result = subprocess.run(
-        ["kubectl", f"--kubeconfig={kubeconfig}", "get", "svc", "-n", ns, "-o", "wide"],
+      # Get the automation-analytics-db secret directly
+      # Secret keys: db.host, db.name, db.password, db.port, db.user
+      secret_result = subprocess.run(
+        ["kubectl", f"--kubeconfig={kubeconfig}", "get", "secret", 
+         "automation-analytics-db", "-n", ns, "-ojson"],
         capture_output=True,
         text=True
       )
       
-      # Find postgres service
       db_host = None
       db_port = "5432"
-      for line in svc_result.stdout.split('\n'):
-        if 'postgres' in line.lower() or 'db' in line.lower():
-          parts = line.split()
-          if len(parts) > 0:
-            db_host = f"{parts[0]}.{ns}.svc.cluster.local"
-            # Try to get port
-            port_match = re.search(r'(\d+)/TCP', line)
-            if port_match:
-              db_port = port_match.group(1)
-          break
-      
-      # Get secrets
-      secret_result = subprocess.run(
-        ["kubectl", f"--kubeconfig={kubeconfig}", "get", "secret", "-n", ns, "-o", "name"],
-        capture_output=True,
-        text=True
-      )
-      
       db_user = None
       db_password = None
+      db_name = None
       
-      # Look for database secret
-      for secret_name in secret_result.stdout.split('\n'):
-        if 'db' in secret_name.lower() or 'postgres' in secret_name.lower():
-          # Get the secret data
-          secret_data = subprocess.run(
-            ["kubectl", f"--kubeconfig={kubeconfig}", "get", secret_name.strip(), "-n", ns, "-o", "jsonpath={.data}"],
-            capture_output=True,
-            text=True
-          )
+      if secret_result.returncode == 0:
+        try:
+          secret = json.loads(secret_result.stdout)
+          data = secret.get("data", {})
           
-          if secret_data.returncode == 0:
-            import json
-            try:
-              data = json.loads(secret_data.stdout)
-              for key, val in data.items():
-                decoded = base64.b64decode(val).decode('utf-8')
-                if 'user' in key.lower():
-                  db_user = decoded
-                elif 'password' in key.lower() or 'pass' in key.lower():
-                  db_password = decoded
-            except:
-              pass
-          break
+          # Decode base64 values
+          if "db.host" in data:
+            db_host = base64.b64decode(data["db.host"]).decode("utf-8")
+          elif "hostname" in data:
+            db_host = base64.b64decode(data["hostname"]).decode("utf-8")
+          
+          if "db.port" in data:
+            db_port = base64.b64decode(data["db.port"]).decode("utf-8")
+          elif "port" in data:
+            db_port = base64.b64decode(data["port"]).decode("utf-8")
+          
+          if "db.user" in data:
+            db_user = base64.b64decode(data["db.user"]).decode("utf-8")
+          elif "username" in data:
+            db_user = base64.b64decode(data["username"]).decode("utf-8")
+          
+          if "db.password" in data:
+            db_password = base64.b64decode(data["db.password"]).decode("utf-8")
+          elif "password" in data:
+            db_password = base64.b64decode(data["password"]).decode("utf-8")
+          
+          if "db.name" in data:
+            db_name = base64.b64decode(data["db.name"]).decode("utf-8")
+          elif "name" in data:
+            db_name = base64.b64decode(data["name"]).decode("utf-8")
+        except Exception as e:
+          pass
       
       result = {
-        "host": db_host or f"postgres.{ns}.svc.cluster.local",
+        "host": db_host or f"automation-analytics-db.{ns}.svc",
         "port": db_port,
         "user": db_user or "postgres",
         "password": db_password or "",
-        "found": bool(db_host and db_user)
+        "database": db_name or "tower-analytics",
+        "found": bool(db_host and db_user and db_password),
+        "connection_string": f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}" if all([db_user, db_password, db_host, db_name]) else None
       }
     output: db_creds
     on_error: continue
@@ -638,32 +635,66 @@ steps:
 
   # ==================== RUN TESTS ====================
 
-  # Step 14: Create and run test script
+  # Step 14: Create and run test script with DB credentials from secret
   - name: run_pytest
     description: "Run pytest in FastAPI pod against ephemeral DB"
     condition: "{{ fastapi_pod and db_creds }}"
     compute: |
       import subprocess
       import os
+      import textwrap
       
       pod = fastapi_pod
       ns = namespace_name
       db = db_creds
       
-      # Create test script with ephemeral DB connection
-      import textwrap
+      # Extract credentials
+      db_host = db.get('host', f'automation-analytics-db.{ns}.svc')
+      db_port = db.get('port', '5432')
+      db_user = db.get('user', 'postgres')
+      db_password = db.get('password', '')
+      db_name = db.get('database', 'tower-analytics')
+      
+      # Build DATABASE_URL for SQLAlchemy
+      # Format: postgresql://user:password@host:port/database
+      database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+      
+      # Create test script with all required env vars
       test_script = textwrap.dedent(f"""
           #!/bin/bash
           set -e
-          pipenv sync --dev 2>/dev/null || pip install pytest pytest-cov 2>/dev/null
-          export POSTGRESQL_USER="{db.get('user', 'postgres')}"
-          export POSTGRESQL_PASSWORD="{db.get('password', '')}"
-          export POSTGRESQL_HOST="{db.get('host', 'localhost')}"
-          export POSTGRESQL_PORT="{db.get('port', '5432')}"
+          
+          # Database connection from automation-analytics-db secret
+          export POSTGRESQL_USER="{db_user}"
+          export POSTGRESQL_PASSWORD="{db_password}"
+          export POSTGRESQL_HOST="{db_host}"
+          export POSTGRESQL_PORT="{db_port}"
+          export POSTGRESQL_DATABASE="{db_name}"
+          
+          # SQLAlchemy-style URLs (used by the app)
+          export DATABASE_URL="{database_url}"
+          export DATABASE_PREFIX="postgresql://{db_user}:{db_password}@{db_host}:{db_port}"
+          export SQLALCHEMY_DATABASE_URI="{database_url}"
+          
+          # App settings
           export SECRET_KEY="test-secret-key-12345"
-          export DB_SSLMODE=disable
-          export DATABASE_PREFIX="postgresql://$POSTGRESQL_USER:$POSTGRESQL_PASSWORD@$POSTGRESQL_HOST:$POSTGRESQL_PORT"
-          echo "Testing connection to: $POSTGRESQL_HOST:$POSTGRESQL_PORT"
+          export DB_SSLMODE="disable"
+          export FLASK_ENV="testing"
+          export TESTING="true"
+          
+          # Debug: verify connection works
+          echo "=== Database Connection ==="
+          echo "Host: $POSTGRESQL_HOST"
+          echo "Port: $POSTGRESQL_PORT"
+          echo "User: $POSTGRESQL_USER"
+          echo "Database: $POSTGRESQL_DATABASE"
+          echo ""
+          
+          # Install test dependencies if needed
+          pipenv sync --dev 2>/dev/null || pip install pytest pytest-cov 2>/dev/null || true
+          
+          # Run tests
+          echo "=== Running pytest ==="
           pytest -vv --tb=short -q -x 2>&1 | tail -100
       """).strip()
       
@@ -844,8 +875,16 @@ outputs:
       ### Database Connection
       - **Host:** `{{ db_creds.host }}`
       - **Port:** `{{ db_creds.port }}`
+      - **Database:** `{{ db_creds.database }}`
       - **User:** `{{ db_creds.user }}`
       - **Credentials found:** {{ '✅' if db_creds.found else '⚠️ Using defaults' }}
+      
+      {% if db_creds.found %}
+      **Connection String:**
+      ```
+      {{ db_creds.connection_string }}
+      ```
+      {% endif %}
       {% endif %}
       
       {% if inputs.run_tests and test_result %}
