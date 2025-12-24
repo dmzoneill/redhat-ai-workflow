@@ -295,6 +295,64 @@ class UserClassifier:
 
 
 # =============================================================================
+# ALERT DETECTION
+# =============================================================================
+
+
+class AlertDetector:
+    """
+    Detects Prometheus alert messages from app-sre-alerts bot.
+    
+    Alert messages come from the app-sre-alerts bot in specific channels
+    (stage/prod alerts) and contain Prometheus alert information with
+    links to Grafana, AlertManager, Runbook, etc.
+    """
+    
+    def __init__(self):
+        self.config = SLACK_CONFIG.get("listener", {})
+        self.alert_channels = self.config.get("alert_channels", {})
+        self.alert_bot_names = ["app-sre-alerts", "alertmanager"]
+        
+    def is_alert_message(self, channel_id: str, user_name: str, text: str) -> bool:
+        """
+        Check if this message is a Prometheus alert.
+        
+        An alert message is:
+        1. In an alert channel (C01CPSKFG0P or C01L1K82AP5)
+        2. From the app-sre-alerts bot
+        3. Contains alert indicators (FIRING, Alert:, alertmanager URL)
+        """
+        # Check if it's an alert channel
+        if channel_id not in self.alert_channels:
+            return False
+        
+        # Check if from alert bot
+        user_lower = (user_name or "").lower()
+        is_from_alert_bot = any(bot in user_lower for bot in self.alert_bot_names)
+        
+        # Check for alert indicators in text
+        text_lower = (text or "").lower()
+        alert_indicators = ["firing", "resolved", "alert:", "alertmanager", "prometheus"]
+        has_alert_indicator = any(ind in text_lower for ind in alert_indicators)
+        
+        return is_from_alert_bot or (channel_id in self.alert_channels and has_alert_indicator)
+    
+    def get_alert_info(self, channel_id: str) -> dict:
+        """Get the channel's alert configuration."""
+        return self.alert_channels.get(channel_id, {
+            "environment": "unknown",
+            "namespace": "tower-analytics-stage",
+            "severity": "medium",
+            "auto_investigate": False
+        })
+    
+    def should_auto_investigate(self, channel_id: str) -> bool:
+        """Check if this channel has auto-investigate enabled."""
+        info = self.get_alert_info(channel_id)
+        return info.get("auto_investigate", False)
+
+
+# =============================================================================
 # CHANNEL PERMISSIONS
 # =============================================================================
 
@@ -881,6 +939,7 @@ class SlackDaemon:
         
         self.user_classifier = UserClassifier()
         self.channel_permissions = ChannelPermissions()
+        self.alert_detector = AlertDetector()
 
         self.session: SlackSession | None = None
         self.state_db: SlackStateDB | None = None
@@ -1069,11 +1128,89 @@ class SlackDaemon:
                 self.ui.print_error(str(e))
                 await asyncio.sleep(5)
 
+    async def _handle_alert_message(self, msg: PendingMessage, alert_info: dict):
+        """
+        Handle a Prometheus alert message by running the investigate_slack_alert skill.
+        
+        This method:
+        1. Immediately acknowledges the alert in the thread
+        2. Invokes Claude to run the investigation skill
+        3. The skill will reply with findings and Jira link
+        """
+        try:
+            env = alert_info.get("environment", "unknown")
+            namespace = alert_info.get("namespace", "unknown")
+            
+            self.ui.print_status(f"🚨 Alert detected in {env} ({namespace})")
+            
+            # Build context for Claude to run the skill
+            alert_context = f"""
+This is a Prometheus alert from the {env} environment that needs investigation.
+
+**Channel:** {msg.channel_id}
+**Message TS:** {msg.ts}
+**Namespace:** {namespace}
+
+**Alert Message:**
+{msg.text[:2000]}
+
+Please run the `investigate_slack_alert` skill with these inputs:
+- channel_id: "{msg.channel_id}"
+- message_ts: "{msg.ts}"
+- message_text: (the alert message above)
+
+The skill will:
+1. Reply to acknowledge we're looking into it
+2. Check pod status and logs
+3. Search for or create a Jira issue
+4. Reply with findings
+"""
+            
+            # Use Claude to handle the investigation
+            if self.response_generator.claude_agent:
+                response = await self.response_generator.claude_agent.process_message(
+                    alert_context,
+                    context={
+                        "is_alert": True,
+                        "environment": env,
+                        "namespace": namespace,
+                        "channel_id": msg.channel_id,
+                        "message_ts": msg.ts,
+                    }
+                )
+                
+                if response:
+                    self.ui.print_status(f"✅ Alert investigation complete")
+                else:
+                    self.ui.print_status(f"⚠️ Alert investigation returned no response")
+            else:
+                # Fallback: just acknowledge the alert
+                logger.warning("Claude agent not available for alert investigation")
+                
+        except Exception as e:
+            logger.error(f"Error handling alert: {e}")
+            self.ui.print_error(f"Alert handling failed: {e}")
+
     async def _process_message(self, msg: PendingMessage):
         """Process a single pending message."""
         # Classify user
         classification = self.user_classifier.classify(msg.user_id, msg.user_name)
 
+        # ==================== ALERT DETECTION ====================
+        # Check if this is a Prometheus alert that should be auto-investigated
+        if self.alert_detector.is_alert_message(msg.channel_id, msg.user_name, msg.text):
+            alert_info = self.alert_detector.get_alert_info(msg.channel_id)
+            
+            if self.alert_detector.should_auto_investigate(msg.channel_id):
+                logger.info(f"🚨 Alert detected in {alert_info.get('environment', 'unknown')}: auto-investigating")
+                await self._handle_alert_message(msg, alert_info)
+                await self.state_db.mark_message_processed(msg.id)
+                return
+            else:
+                logger.debug(f"Alert detected but auto-investigate disabled for channel {msg.channel_id}")
+
+        # ==================== NORMAL MESSAGE PROCESSING ====================
+        
         # Check response rules - should we respond to this message?
         can_respond, permission_reason = self.channel_permissions.should_respond(
             channel_id=msg.channel_id,
