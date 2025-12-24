@@ -1,17 +1,10 @@
 {
   "mcpServers": {
-    "aa-developer": {
+    "aa-workflow": {
       "command": "bash",
       "args": [
         "-c",
-        "cd ~/src/redhat-ai-workflow/mcp-servers/aa-common && source ~/bonfire_venv/bin/activate && python3 -m src.server --agent developer"
-      ]
-    },
-    "aa-devops": {
-      "command": "bash",
-      "args": [
-        "-c",
-        "cd ~/src/redhat-ai-workflow/mcp-servers/aa-common && source ~/bonfire_venv/bin/activate && python3 -m src.server --agent devops"
+        "cd ~/src/redhat-ai-workflow/mcp-servers/aa-common && source ~/bonfire_venv/bin/activate && python3 -m src.server --agent universal"
       ]
     }
   }
