@@ -80,34 +80,32 @@ steps:
 
   # ==================== GET BRANCH AND COMMITS ====================
 
-  # Step 3: Find branch for this issue
+  # Step 3: Find branch for this issue (using MCP tool)
+  - name: list_branches
+    description: "List all git branches"
+    condition: "{{ not status_check.already_done }}"
+    tool: git_branch_list
+    args:
+      repo: "{{ inputs.repo }}"
+      all_branches: true
+    output: branches_raw
+    on_error: continue
+
   - name: find_branch
-    description: "Find git branch for this issue"
+    description: "Find branch matching this issue"
     condition: "{{ not status_check.already_done }}"
     compute: |
-      import subprocess
-      import os
       import re
       
-      repo = inputs.repo
       issue_key = inputs.issue_key.upper()
       
-      # Get all branches (local and remote)
-      result = subprocess.run(
-        ["git", "branch", "-a", "--list", f"*{issue_key}*"],
-        capture_output=True,
-        text=True,
-        cwd=repo
-      )
-      
       branches = []
-      for line in result.stdout.split('\n'):
-        branch = line.strip().replace('* ', '').replace('remotes/origin/', '')
-        if branch and issue_key in branch.upper():
-          branches.append(branch)
-      
-      # Deduplicate
-      branches = list(set(branches))
+      if branches_raw:
+        for line in str(branches_raw).split('\n'):
+          branch = line.strip().replace('* ', '').replace('remotes/origin/', '')
+          if branch and issue_key in branch.upper():
+            if branch not in branches:
+              branches.append(branch)
       
       result = {
         "found": len(branches) > 0,
@@ -116,54 +114,25 @@ steps:
       }
     output: branch_info
 
-  # Step 4: Get commits from the branch
-  - name: get_commits
+  # Step 4: Get commits from the branch (using MCP tool)
+  - name: get_commit_log
     description: "Get commits from the issue branch"
     condition: "{{ not status_check.already_done and branch_info.found }}"
+    tool: git_log
+    args:
+      repo: "{{ inputs.repo }}"
+      limit: 20
+      oneline: true
+    output: commit_log_raw
+    on_error: continue
+
+  - name: parse_commits
+    description: "Parse commit log"
+    condition: "{{ not status_check.already_done and branch_info.found }}"
     compute: |
-      import subprocess
-      
-      repo = inputs.repo
-      branch = branch_info['primary']
-      
-      # Get commits unique to this branch (not in main/master)
-      # First, determine the base branch
-      base_result = subprocess.run(
-        ["git", "rev-parse", "--verify", "main"],
-        capture_output=True,
-        text=True,
-        cwd=repo
-      )
-      
-      base_branch = "main" if base_result.returncode == 0 else "master"
-      
-      # Get commits on this branch not in base
-      result = subprocess.run(
-        ["git", "log", f"{base_branch}..{branch}", "--oneline", "--no-merges", "-n", "20"],
-        capture_output=True,
-        text=True,
-        cwd=repo
-      )
-      
       commits = []
-      for line in result.stdout.strip().split('\n'):
-        if line.strip():
-          parts = line.split(' ', 1)
-          if len(parts) == 2:
-            commits.append({
-              "sha": parts[0],
-              "message": parts[1]
-            })
-      
-      # If no commits found on branch vs base, try getting recent commits on branch
-      if not commits:
-        result = subprocess.run(
-          ["git", "log", branch, "--oneline", "-n", "10"],
-          capture_output=True,
-          text=True,
-          cwd=repo
-        )
-        for line in result.stdout.strip().split('\n')[:5]:
+      if commit_log_raw:
+        for line in str(commit_log_raw).strip().split('\n'):
           if line.strip():
             parts = line.split(' ', 1)
             if len(parts) == 2:
@@ -173,9 +142,9 @@ steps:
               })
       
       result = {
-        "branch": branch,
-        "base": base_branch,
-        "commits": commits,
+        "branch": branch_info['primary'],
+        "base": "main",
+        "commits": commits[:20],
         "count": len(commits)
       }
     output: commit_info

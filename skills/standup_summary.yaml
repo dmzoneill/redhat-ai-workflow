@@ -159,61 +159,43 @@ steps:
       result = {"email": author, "name": name}
     output: author_info
 
-  # ==================== GET COMMITS ====================
+  # ==================== GET COMMITS (using MCP tool) ====================
 
-  - name: get_recent_commits
-    description: "Get commits from recent days"
+  - name: get_commit_log
+    description: "Get recent commits"
+    tool: git_log
+    args:
+      repo: "{{ resolved_repo.path }}"
+      limit: 30
+      oneline: true
+    output: commit_log_raw
+    on_error: continue
+
+  - name: parse_commits
+    description: "Parse commit log for standup"
     compute: |
-      import subprocess
-      import os
-      from datetime import datetime, timedelta
-
-      repo = resolved_repo["path"]
-      days = inputs.days
-
-      # Calculate since date
-      since_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-
-      # Get commits by author
-      author = author_info.get("email", "")
-      cmd = [
-          "git", "log",
-          f"--since={since_date}",
-          "--oneline",
-          "--format=%h %s",
-      ]
-      if author:
-          cmd.append(f"--author={author}")
-
-      result = subprocess.run(
-          cmd,
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-
-      commits = []
-      if result.returncode == 0 and result.stdout.strip():
-          lines = result.stdout.strip().split("\n")
-          for line in lines:
-              if line.strip():
-                  parts = line.split(" ", 1)
-                  commits.append({
-                      "sha": parts[0],
-                      "message": parts[1] if len(parts) > 1 else "",
-                  })
-
-      # Extract issue keys from commit messages
       import re
+      
+      commits = []
+      if commit_log_raw:
+        for line in str(commit_log_raw).strip().split("\n"):
+          if line.strip():
+            parts = line.split(" ", 1)
+            commits.append({
+              "sha": parts[0],
+              "message": parts[1] if len(parts) > 1 else "",
+            })
+      
+      # Extract issue keys from commit messages
       issue_keys = set()
       for commit in commits:
-          keys = re.findall(r"AAP-\d+", commit["message"], re.IGNORECASE)
-          issue_keys.update(k.upper() for k in keys)
-
+        keys = re.findall(r"AAP-\d+", commit["message"], re.IGNORECASE)
+        issue_keys.update(k.upper() for k in keys)
+      
       result = {
-          "commits": commits[:20],
-          "count": len(commits),
-          "issue_keys": list(issue_keys),
+        "commits": commits[:20],
+        "count": len(commits),
+        "issue_keys": list(issue_keys),
       }
     output: commit_info
 
