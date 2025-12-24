@@ -54,6 +54,16 @@ class AgentTestResult:
     duration_s: float = 0
 
 @dataclass
+class FeatureTodo:
+    """A feature idea or improvement discovered during testing."""
+    category: str  # "enhancement", "bug", "missing", "optimization"
+    title: str
+    description: str
+    source: str  # What test/tool triggered this
+    priority: str = "medium"  # "low", "medium", "high"
+
+
+@dataclass
 class TestReport:
     """Full test report across all agents."""
     timestamp: str = ""
@@ -62,7 +72,20 @@ class TestReport:
     total_passed: int = 0
     total_failed: int = 0
     total_fixed: int = 0
+    total_skipped: int = 0
     agent_results: list = field(default_factory=list)
+    feature_todos: list = field(default_factory=list)  # Discovered improvements
+    excluded_skills: list = field(default_factory=list)  # Skills we skipped
+    
+    def add_todo(self, category: str, title: str, description: str, source: str, priority: str = "medium"):
+        """Add a feature todo discovered during testing."""
+        self.feature_todos.append(FeatureTodo(
+            category=category,
+            title=title,
+            description=description,
+            source=source,
+            priority=priority
+        ))
     
     def to_dict(self) -> dict:
         return {
@@ -73,6 +96,7 @@ class TestReport:
                 "passed": self.total_passed,
                 "failed": self.total_failed,
                 "fixed": self.total_fixed,
+                "skipped": self.total_skipped,
                 "pass_rate": f"{(self.total_passed / self.total_tools * 100):.1f}%" if self.total_tools > 0 else "N/A"
             },
             "agents": [
@@ -94,6 +118,17 @@ class TestReport:
                     ]
                 }
                 for ar in self.agent_results
+            ],
+            "excluded_skills": self.excluded_skills,
+            "feature_todos": [
+                {
+                    "category": t.category,
+                    "title": t.title,
+                    "description": t.description,
+                    "source": t.source,
+                    "priority": t.priority
+                }
+                for t in self.feature_todos
             ]
         }
 
@@ -152,6 +187,39 @@ SKIP_TOOLS = {
     "slack_listener_start", "slack_listener_stop",
 }
 
+# Skills that should NEVER be tested automatically (production impact)
+EXCLUDED_SKILLS = {
+    # Production releases - could deploy to prod!
+    "release_aa_backend_prod",
+    
+    # Ephemeral deployment - reserves real resources
+    "test_mr_ephemeral",
+    
+    # Slack interactions - sends real messages
+    "slack_daemon_control",
+    
+    # Could create real Jira issues
+    "jira_hygiene",
+    
+    # Could modify real MRs
+    "create_mr",
+    "review_pr",
+    "review_all_prs",
+    "rebase_pr",
+}
+
+# Skills safe for read-only testing
+SAFE_SKILLS = {
+    "start_work",      # Just reads Jira and creates local branch
+    "close_issue",     # We'll skip the actual close
+    "check_my_prs",    # Read-only
+    "sync_branch",     # Local git only
+    "standup_summary", # Read-only
+    "debug_prod",      # Read-only investigation
+    "investigate_alert", # Read-only
+    "integration_test", # Meta - testing itself
+}
+
 
 class IntegrationTestRunner:
     """Runs integration tests across all agents and tools."""
@@ -161,7 +229,46 @@ class IntegrationTestRunner:
         self.dry_run = dry_run
         self.project_root = Path(__file__).parent.parent
         self.agents_dir = self.project_root / "agents"
+        self.config_dir = self.project_root / "config"
         self.report = TestReport(timestamp=datetime.now().isoformat())
+        
+        # Load exclusions from config
+        self.exclusions = self._load_exclusions()
+    
+    def _load_exclusions(self) -> dict:
+        """Load test exclusions from config/test_exclusions.yaml."""
+        exclusions_file = self.config_dir / "test_exclusions.yaml"
+        
+        if not exclusions_file.exists():
+            print(f"  ⚠️  No exclusions file found at {exclusions_file}")
+            return {
+                "excluded_skills": [],
+                "excluded_tools": [],
+                "safe_skills": [],
+                "safe_tool_tests": {}
+            }
+        
+        try:
+            with open(exclusions_file) as f:
+                config = yaml.safe_load(f)
+            
+            # Extract skill names from the detailed format
+            excluded_skills = []
+            for item in config.get("excluded_skills", []):
+                if isinstance(item, dict):
+                    excluded_skills.append(item["name"])
+                else:
+                    excluded_skills.append(item)
+            
+            return {
+                "excluded_skills": excluded_skills,
+                "excluded_tools": config.get("excluded_tools", []),
+                "safe_skills": config.get("safe_skills", []),
+                "safe_tool_tests": config.get("safe_tool_tests", {})
+            }
+        except Exception as e:
+            print(f"  ⚠️  Error loading exclusions: {e}")
+            return {"excluded_skills": [], "excluded_tools": [], "safe_skills": [], "safe_tool_tests": {}}
         
     def load_agent_config(self, agent_name: str) -> dict:
         """Load agent configuration from YAML."""
@@ -217,14 +324,24 @@ class IntegrationTestRunner:
         
         result = ToolTestResult(tool_name=tool_name, agent=agent_name, success=False)
         
-        # Skip destructive tools
-        if tool_name in SKIP_TOOLS:
+        # Skip tools from exclusion list
+        if tool_name in self.exclusions.get("excluded_tools", []) or tool_name in SKIP_TOOLS:
             result.success = True
-            result.output = "SKIPPED (destructive/contextual)"
+            result.output = "SKIPPED (excluded/destructive)"
+            self.report.total_skipped += 1
             return result
         
-        # Get test parameters
-        params = TOOL_TEST_PARAMS.get(tool_name, {})
+        # Get test parameters from exclusions config first, then fallback
+        params = {}
+        safe_tests = self.exclusions.get("safe_tool_tests", {})
+        for module_tests in safe_tests.values():
+            for test in module_tests:
+                if test.get("tool") == tool_name:
+                    params = test.get("args", {})
+                    break
+        
+        if not params:
+            params = TOOL_TEST_PARAMS.get(tool_name, {})
         
         try:
             # Dynamic import and call
@@ -238,9 +355,15 @@ class IntegrationTestRunner:
                 result.success = True
                 result.output = f"VALIDATED: {tool_name} exists"
                 
+                # Capture feature ideas based on patterns
+                self._capture_feature_ideas(tool_name, agent_name)
+                
         except Exception as e:
             result.success = False
             result.error = str(e)
+            
+            # Capture improvement ideas from errors
+            self._capture_error_improvements(tool_name, str(e), agent_name)
             
             # Attempt auto-fix if enabled
             if self.auto_fix and not self.dry_run:
@@ -251,6 +374,55 @@ class IntegrationTestRunner:
         
         result.duration_ms = (time.time() - start) * 1000
         return result
+    
+    def _capture_feature_ideas(self, tool_name: str, agent_name: str):
+        """Capture feature improvement ideas based on tool patterns."""
+        # Check for missing test coverage
+        if tool_name not in TOOL_TEST_PARAMS and tool_name not in self._get_all_safe_test_tools():
+            self.report.add_todo(
+                category="missing",
+                title=f"Add test params for {tool_name}",
+                description=f"Tool {tool_name} has no test parameters defined. Add safe read-only params.",
+                source=f"{agent_name}/{tool_name}",
+                priority="low"
+            )
+    
+    def _capture_error_improvements(self, tool_name: str, error: str, agent_name: str):
+        """Capture improvement ideas from tool errors."""
+        error_lower = error.lower()
+        
+        if "not found" in error_lower or "does not exist" in error_lower:
+            self.report.add_todo(
+                category="bug",
+                title=f"Fix missing dependency in {tool_name}",
+                description=f"Tool failed with 'not found' error: {error[:100]}",
+                source=f"{agent_name}/{tool_name}",
+                priority="high"
+            )
+        elif "unauthorized" in error_lower or "permission" in error_lower:
+            self.report.add_todo(
+                category="enhancement",
+                title=f"Improve auth handling in {tool_name}",
+                description=f"Auth error encountered. Consider better error messages or credential checking.",
+                source=f"{agent_name}/{tool_name}",
+                priority="medium"
+            )
+        elif "timeout" in error_lower:
+            self.report.add_todo(
+                category="optimization",
+                title=f"Add timeout handling to {tool_name}",
+                description=f"Tool timed out. Consider adding configurable timeouts.",
+                source=f"{agent_name}/{tool_name}",
+                priority="medium"
+            )
+    
+    def _get_all_safe_test_tools(self) -> set:
+        """Get all tools that have safe test params defined."""
+        tools = set(TOOL_TEST_PARAMS.keys())
+        for module_tests in self.exclusions.get("safe_tool_tests", {}).values():
+            for test in module_tests:
+                tools.add(test.get("tool", ""))
+        return tools
     
     async def attempt_fix(self, tool_name: str, error: str) -> str | None:
         """Attempt to auto-fix a failing tool."""
@@ -337,6 +509,16 @@ class IntegrationTestRunner:
         print(f"  Auto-fix: {'ENABLED' if self.auto_fix else 'DISABLED'}")
         print(f"  Timestamp: {self.report.timestamp}")
         
+        # Show exclusions
+        excluded_skills = self.exclusions.get("excluded_skills", [])
+        excluded_tools = self.exclusions.get("excluded_tools", [])
+        print(f"\n  📋 Exclusions loaded:")
+        print(f"     • {len(excluded_skills)} skills excluded (production-impacting)")
+        print(f"     • {len(excluded_tools)} tools excluded (destructive)")
+        
+        # Store excluded skills in report
+        self.report.excluded_skills = excluded_skills
+        
         # Get agents to test
         if agent_filter:
             agents = [agent_filter]
@@ -372,12 +554,22 @@ class IntegrationTestRunner:
         print(f"  Tools tested:  {self.report.total_tools}")
         print(f"  Passed:        {self.report.total_passed} ✅")
         print(f"  Failed:        {self.report.total_failed} ❌")
+        print(f"  Skipped:       {self.report.total_skipped} ⏭️")
         print(f"  Auto-fixed:    {self.report.total_fixed} 🔧")
         
         if self.report.total_tools > 0:
             pass_rate = self.report.total_passed / self.report.total_tools * 100
             print(f"  Pass rate:     {pass_rate:.1f}%")
         
+        # Show excluded skills
+        if self.report.excluded_skills:
+            print(f"\n  ⏭️  EXCLUDED SKILLS ({len(self.report.excluded_skills)}):")
+            for skill in self.report.excluded_skills[:5]:  # Show first 5
+                print(f"     • {skill}")
+            if len(self.report.excluded_skills) > 5:
+                print(f"     ... and {len(self.report.excluded_skills) - 5} more")
+        
+        # Show failures
         if self.report.total_failed > 0:
             print("\n  ❌ FAILURES:")
             for ar in self.report.agent_results:
@@ -385,7 +577,27 @@ class IntegrationTestRunner:
                     if not tr.success and not tr.fixed:
                         print(f"     • {ar.agent_name}/{tr.tool_name}: {tr.error[:50]}...")
         
-        print("="*60)
+        # Show feature todos
+        if self.report.feature_todos:
+            print(f"\n  💡 FEATURE IDEAS ({len(self.report.feature_todos)}):")
+            
+            # Group by category
+            by_category = {}
+            for todo in self.report.feature_todos:
+                cat = todo.category
+                if cat not in by_category:
+                    by_category[cat] = []
+                by_category[cat].append(todo)
+            
+            for cat, todos in by_category.items():
+                icon = {"bug": "🐛", "enhancement": "✨", "missing": "📝", "optimization": "⚡"}.get(cat, "📋")
+                print(f"\n     {icon} {cat.upper()} ({len(todos)}):")
+                for todo in todos[:3]:  # Show first 3 per category
+                    print(f"        • [{todo.priority}] {todo.title}")
+                if len(todos) > 3:
+                    print(f"        ... and {len(todos) - 3} more")
+        
+        print("\n" + "="*60)
     
     def save_report(self, path: str | None = None):
         """Save test report to JSON."""
@@ -398,6 +610,73 @@ class IntegrationTestRunner:
             json.dump(self.report.to_dict(), f, indent=2)
         
         print(f"\n📄 Report saved: {path}")
+        
+        # Also save feature todos as a separate markdown file for easy tracking
+        if self.report.feature_todos:
+            todos_path = self.project_root / "test-results" / "FEATURE_TODOS.md"
+            self._save_feature_todos(todos_path)
+    
+    def _save_feature_todos(self, path: Path):
+        """Save feature todos as markdown for easy tracking."""
+        lines = [
+            "# Feature TODOs from Integration Tests",
+            "",
+            f"*Generated: {self.report.timestamp}*",
+            "",
+            "These are improvement ideas discovered during integration testing.",
+            "Review and create Jira issues for items worth pursuing.",
+            "",
+        ]
+        
+        # Group by category
+        by_category = {}
+        for todo in self.report.feature_todos:
+            cat = todo.category
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(todo)
+        
+        category_order = ["bug", "enhancement", "optimization", "missing"]
+        icons = {"bug": "🐛", "enhancement": "✨", "missing": "📝", "optimization": "⚡"}
+        
+        for cat in category_order:
+            if cat not in by_category:
+                continue
+            
+            todos = by_category[cat]
+            icon = icons.get(cat, "📋")
+            lines.append(f"## {icon} {cat.title()} ({len(todos)})")
+            lines.append("")
+            
+            # Sort by priority
+            priority_order = {"high": 0, "medium": 1, "low": 2}
+            todos.sort(key=lambda t: priority_order.get(t.priority, 1))
+            
+            for todo in todos:
+                priority_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(todo.priority, "⚪")
+                lines.append(f"### {priority_badge} {todo.title}")
+                lines.append("")
+                lines.append(f"- **Source:** `{todo.source}`")
+                lines.append(f"- **Priority:** {todo.priority}")
+                lines.append(f"- **Description:** {todo.description}")
+                lines.append("")
+        
+        # Summary
+        lines.append("---")
+        lines.append("")
+        lines.append("## Summary")
+        lines.append("")
+        lines.append(f"| Category | Count |")
+        lines.append(f"|----------|-------|")
+        for cat in category_order:
+            if cat in by_category:
+                lines.append(f"| {cat.title()} | {len(by_category[cat])} |")
+        lines.append(f"| **Total** | **{len(self.report.feature_todos)}** |")
+        
+        with open(path, "w") as f:
+            f.write("\n".join(lines))
+        
+        print(f"📝 Feature TODOs saved: {path}")
 
 
 async def main():
