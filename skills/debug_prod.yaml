@@ -156,38 +156,41 @@ steps:
     description: "Identify unhealthy pods"
     condition: "{{ ns_info.namespace }}"
     compute: |
-      import re
+      import sys
+      from pathlib import Path
       
-      pods_output = str(pod_status)
+      # Add scripts path for shared parsers
+      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
+      if scripts_path not in sys.path:
+          sys.path.insert(0, scripts_path)
+      from common.parsers import parse_kubectl_pods
+      
+      # Use shared parser for kubectl pods
+      pods = parse_kubectl_pods(str(pod_status))
+      
+      # Analyze for issues
       issues = []
       healthy = []
       
-      for line in pods_output.split('\n'):
-        if not line.strip() or 'NAME' in line:
-          continue
+      for pod in pods:
+        name = pod.get("name", "")
+        status = pod.get("status", "")
+        restarts = pod.get("restarts", "0")
         
-        parts = line.split()
-        if len(parts) >= 3:
-          pod_name = parts[0]
-          ready = parts[1] if len(parts) > 1 else ""
-          status = parts[2] if len(parts) > 2 else ""
-          restarts = parts[3] if len(parts) > 3 else "0"
-          
-          # Check for issues
-          if 'CrashLoopBackOff' in status:
-            issues.append({"pod": pod_name, "issue": "CrashLoopBackOff", "severity": "critical"})
-          elif 'OOMKilled' in line:
-            issues.append({"pod": pod_name, "issue": "OOMKilled", "severity": "critical"})
-          elif 'Error' in status:
-            issues.append({"pod": pod_name, "issue": status, "severity": "high"})
-          elif 'Pending' in status:
-            issues.append({"pod": pod_name, "issue": "Pending", "severity": "medium"})
-          elif 'ImagePullBackOff' in status:
-            issues.append({"pod": pod_name, "issue": "ImagePullBackOff", "severity": "high"})
-          elif int(restarts.split()[0] if restarts else 0) > 5:
-            issues.append({"pod": pod_name, "issue": f"High restarts: {restarts}", "severity": "medium"})
-          elif 'Running' in status:
-            healthy.append(pod_name)
+        if 'CrashLoopBackOff' in status:
+          issues.append({"pod": name, "issue": "CrashLoopBackOff", "severity": "critical"})
+        elif 'OOMKilled' in status:
+          issues.append({"pod": name, "issue": "OOMKilled", "severity": "critical"})
+        elif 'Error' in status:
+          issues.append({"pod": name, "issue": status, "severity": "high"})
+        elif 'Pending' in status:
+          issues.append({"pod": name, "issue": "Pending", "severity": "medium"})
+        elif 'ImagePullBackOff' in status:
+          issues.append({"pod": name, "issue": "ImagePullBackOff", "severity": "high"})
+        elif int(str(restarts).split()[0] if restarts else 0) > 5:
+          issues.append({"pod": name, "issue": f"High restarts: {restarts}", "severity": "medium"})
+        elif pod.get("healthy", False):
+          healthy.append(name)
       
       result = {
         "issues": issues,

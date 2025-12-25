@@ -203,19 +203,17 @@ steps:
   - name: extract_jira_key
     description: "Extract AAP-XXXXX from MR title"
     compute: |
-      import re
-      # MR title should be: AAP-12345 - type(scope): description
-      match = re.match(r'^(AAP-\d+)', mr_details)
-      if match:
-        jira_key = match.group(1)
-      else:
-        # Try to find it anywhere in the title
-        match = re.search(r'(AAP-\d+)', mr_details)
-        jira_key = match.group(1) if match else None
+      import sys
+      from pathlib import Path
       
-      if not jira_key:
-        jira_key = "NOT_FOUND"
+      # Add scripts path for shared parsers
+      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
+      if scripts_path not in sys.path:
+          sys.path.insert(0, scripts_path)
+      from common.parsers import extract_jira_key as parse_jira_key
       
+      # Use shared parser
+      jira_key = parse_jira_key(mr_details) or "NOT_FOUND"
       result = jira_key
     output: jira_key
 
