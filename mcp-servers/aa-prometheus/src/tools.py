@@ -32,7 +32,8 @@ def get_prometheus_url(environment: str) -> str:
     """Get Prometheus URL for environment from config.json or env vars."""
     # Try to load from config.json first
     try:
-        config_path = Path(__file__).parent.parent.parent.parent.parent / "config.json"
+        # Path: tools.py -> src -> aa-prometheus -> mcp-servers -> redhat-ai-workflow
+        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
         if config_path.exists():
             import json
             with open(config_path) as f:
@@ -475,7 +476,8 @@ def register_tools(server: "FastMCP") -> int:
         # Load namespace from config.json
         namespace = ""
         try:
-            config_path = Path(__file__).parent.parent.parent.parent.parent / "config.json"
+            # Path: tools.py -> src -> aa-prometheus -> mcp-servers -> redhat-ai-workflow
+        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
             if config_path.exists():
                 import json
                 with open(config_path) as f:

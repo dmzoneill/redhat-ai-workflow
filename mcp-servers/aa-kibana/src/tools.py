@@ -32,7 +32,8 @@ class KibanaEnvironment:
 def _load_kibana_config() -> dict:
     """Load Kibana config from config.json."""
     try:
-        config_path = Path(__file__).parent.parent.parent.parent.parent / "config.json"
+        # Path: tools.py -> src -> aa-kibana -> mcp-servers -> redhat-ai-workflow
+        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
         if config_path.exists():
             import json
             with open(config_path) as f:

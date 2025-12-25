@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 def load_bonfire_config() -> dict:
     """Load bonfire configuration from config.json."""
     try:
-        config_path = Path(__file__).parent.parent.parent.parent.parent / "config.json"
+        # Path: tools.py -> src -> aa-bonfire -> mcp-servers -> redhat-ai-workflow
+        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
         if config_path.exists():
             with open(config_path) as f:
                 return json.load(f).get("bonfire", {})

@@ -25,7 +25,8 @@ def _load_repo_config() -> dict[str, dict]:
     """Load repository configuration from config.json."""
     config_paths = [
         Path.cwd() / "config.json",
-        Path(__file__).parent.parent.parent.parent.parent / "config.json",
+        # Path: tools.py -> src -> aa-gitlab -> mcp-servers -> redhat-ai-workflow
+        Path(__file__).parent.parent.parent.parent / "config.json",
         Path.home() / "src/redhat-ai-workflow/config.json",
     ]
     for config_path in config_paths:

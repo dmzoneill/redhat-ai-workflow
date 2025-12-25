@@ -32,7 +32,8 @@ def get_alertmanager_url(environment: str) -> str:
     """Get Alertmanager URL for environment from config.json or env vars."""
     # Try to load from config.json first
     try:
-        config_path = Path(__file__).parent.parent.parent.parent.parent / "config.json"
+        # Path: tools.py -> src -> aa-alertmanager -> mcp-servers -> redhat-ai-workflow
+        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
         if config_path.exists():
             import json
             with open(config_path) as f:
@@ -503,7 +504,7 @@ def register_tools(server: "FastMCP") -> int:
         # Get Prometheus URL from config.json or env
         prom_url = ""
         try:
-            config_path = Path(__file__).parent.parent.parent.parent.parent / "config.json"
+            config_path = Path(__file__).parent.parent.parent.parent / "config.json"
             if config_path.exists():
                 import json
                 with open(config_path) as f:
