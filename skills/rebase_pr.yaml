@@ -332,49 +332,40 @@ steps:
 
   - name: start_rebase
     description: "Start the rebase onto base branch"
+    tool: git_rebase
+    args:
+      repo: "{{ resolved_repo.path }}"
+      onto: "origin/{{ resolved_repo.default_branch }}"
+    output: rebase_raw
+    on_error: continue
+
+  - name: parse_rebase_result
+    description: "Parse rebase output into structured result"
     compute: |
-      import subprocess
+      rebase_output = str(rebase_raw) if rebase_raw else ""
       
-      base = resolved_repo["default_branch"]
-      
-      # Start rebase
-      result = subprocess.run(
-        ['git', 'rebase', f'origin/{base}'],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"]
-      )
-      
-      if result.returncode == 0:
+      if "Successfully rebased" in rebase_output or "✅" in rebase_output:
         rebase_status = {
           'success': True,
           'conflicts': False,
           'message': 'Rebase completed successfully!'
         }
+      elif "conflict" in rebase_output.lower() or "⚠️" in rebase_output:
+        # Extract conflict files from the output
+        import re
+        conflict_files = re.findall(r'- `([^`]+)`', rebase_output)
+        rebase_status = {
+          'success': False,
+          'conflicts': True,
+          'conflict_files': conflict_files,
+          'message': f'Rebase paused - {len(conflict_files)} file(s) have conflicts'
+        }
       else:
-        # Check if there are conflicts
-        status = subprocess.run(
-          ['git', 'status', '--porcelain'],
-          capture_output=True, text=True,
-          cwd=resolved_repo["path"]
-        )
-        
-        # UU = both modified (conflict)
-        conflict_files = [l[3:] for l in status.stdout.split('\n') 
-                         if l.startswith('UU') or l.startswith('AA') or l.startswith('DU')]
-        
-        if conflict_files:
-          rebase_status = {
-            'success': False,
-            'conflicts': True,
-            'conflict_files': conflict_files,
-            'message': f'Rebase paused - {len(conflict_files)} file(s) have conflicts'
-          }
-        else:
-          rebase_status = {
-            'success': False,
-            'conflicts': False,
-            'message': f'Rebase failed: {result.stderr[:200]}'
-          }
+        rebase_status = {
+          'success': False,
+          'conflicts': False,
+          'message': f'Rebase failed: {rebase_output[:200]}'
+        }
       
       result = rebase_status
     output: rebase_result

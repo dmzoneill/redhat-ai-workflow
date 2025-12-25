@@ -172,58 +172,74 @@ steps:
 
   # ==================== GET COMMIT SHA ====================
 
-  # Step 1: Get commit SHA from MR (if mr_id provided)
-  # Gets short SHA from GitLab, then expands to full 40-char using local git
-  - name: get_mr_commit
-    description: "Get the FULL commit SHA from the MR (40 chars)"
+  # Step 1: Get MR info from GitLab (if mr_id provided)
+  - name: get_mr_info
+    description: "Get MR details from GitLab including short SHA"
+    condition: "{{ inputs.mr_id and not inputs.commit_sha }}"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ cfg.gitlab.backend_project }}"
+      mr_id: "{{ inputs.mr_id }}"
+    output: mr_view_raw
+    on_error: continue
+
+  - name: parse_mr_info
+    description: "Extract SHA and branch from MR info"
     condition: "{{ inputs.mr_id and not inputs.commit_sha }}"
     compute: |
-      import subprocess
       import json
+      import re
       
-      # Get MR info from GitLab (may return short SHA)
-      api_result = subprocess.run(
-        ["glab", "api", f"projects/:id/merge_requests/{inputs.mr_id}"],
-        capture_output=True,
-        text=True
-      )
-      
+      mr_text = str(mr_view_raw) if mr_view_raw else ""
       short_sha = None
       source_branch = None
       
-      if api_result.returncode == 0:
-        try:
-          mr_data = json.loads(api_result.stdout)
-          short_sha = mr_data.get("sha", "")
-          source_branch = mr_data.get("source_branch", "")
-        except:
-          pass
+      # Try to parse as JSON first
+      try:
+        mr_data = json.loads(mr_text)
+        short_sha = mr_data.get("sha", "")
+        source_branch = mr_data.get("source_branch", "")
+      except:
+        # Parse from markdown output
+        sha_match = re.search(r'SHA[:\s]+`?([a-f0-9]{7,40})`?', mr_text, re.IGNORECASE)
+        branch_match = re.search(r'Source[:\s]+`?([^`\s]+)`?', mr_text, re.IGNORECASE)
+        if sha_match:
+          short_sha = sha_match.group(1)
+        if branch_match:
+          source_branch = branch_match.group(1)
       
       if not short_sha:
         raise ValueError(f"Could not get SHA for MR {inputs.mr_id}")
       
-      # Expand to full SHA using local git repo
-      expand_result = subprocess.run(
-        ["git", "rev-parse", short_sha],
-        capture_output=True,
-        text=True
-      )
+      result = {"short_sha": short_sha, "branch": source_branch}
+    output: mr_parsed
+
+  # Step 1b: Expand short SHA to full 40-char using git_rev_parse
+  - name: expand_sha
+    description: "Expand short SHA to full 40-char SHA"
+    condition: "{{ mr_parsed and mr_parsed.short_sha }}"
+    tool: git_rev_parse
+    args:
+      repo: "{{ cfg.repositories.backend.path }}"
+      ref: "{{ mr_parsed.short_sha }}"
+    output: full_sha_raw
+    on_error: continue
+
+  - name: build_mr_info
+    description: "Build mr_info from expanded SHA"
+    condition: "{{ mr_parsed }}"
+    compute: |
+      sha_output = str(full_sha_raw) if full_sha_raw else ""
       
-      if expand_result.returncode != 0:
-        # Maybe need to fetch first
-        subprocess.run(["git", "fetch", "origin"], capture_output=True)
-        expand_result = subprocess.run(
-          ["git", "rev-parse", short_sha],
-          capture_output=True,
-          text=True
-        )
+      # Extract SHA (it's the output directly, or in error message)
+      sha = sha_output.strip()
+      if sha.startswith("❌"):
+        raise ValueError(f"Could not expand SHA: {sha}")
       
-      full_sha = expand_result.stdout.strip() if expand_result.returncode == 0 else None
+      if len(sha) != 40:
+        raise ValueError(f"Expected 40-char SHA, got: {sha}")
       
-      if not full_sha or len(full_sha) != 40:
-        raise ValueError(f"Could not expand SHA '{short_sha}' to full 40-char. Run 'git fetch origin' and retry.")
-      
-      result = {"sha": full_sha, "branch": source_branch}
+      result = {"sha": sha, "branch": mr_parsed.get("branch", "")}
     output: mr_info
 
   # Step 2: Determine final commit SHA

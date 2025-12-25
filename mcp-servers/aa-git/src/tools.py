@@ -519,5 +519,171 @@ def register_tools(server: FastMCP) -> int:
         return "\n".join(lines)
     tool_count += 1
     
+    # ==================== REBASE ====================
+    
+    @server.tool()
+    async def git_rebase(
+        repo: str,
+        onto: str = "",
+        abort: bool = False,
+        continue_rebase: bool = False,
+        skip: bool = False,
+        interactive: bool = False,
+    ) -> str:
+        """
+        Rebase current branch onto another branch, or manage in-progress rebase.
+        
+        Args:
+            repo: Repository path
+            onto: Branch/commit to rebase onto (e.g., "origin/main", "main")
+            abort: Abort an in-progress rebase
+            continue_rebase: Continue after resolving conflicts
+            skip: Skip current commit and continue rebase
+            interactive: Use interactive rebase (opens editor - not recommended for automation)
+        
+        Returns:
+            Rebase status with conflict information if any.
+        """
+        path = resolve_repo_path(repo)
+        
+        # Handle rebase control operations
+        if abort:
+            success, output = await run_git(["rebase", "--abort"], cwd=path)
+            if success:
+                return "✅ Rebase aborted. Back to original state."
+            return f"❌ Failed to abort rebase: {output}"
+        
+        if continue_rebase:
+            success, output = await run_git(["rebase", "--continue"], cwd=path)
+            if success:
+                return f"✅ Rebase continued successfully.\n\n{output}"
+            return f"❌ Conflicts remain or rebase failed:\n{output}"
+        
+        if skip:
+            success, output = await run_git(["rebase", "--skip"], cwd=path)
+            if success:
+                return f"✅ Skipped commit, continuing rebase.\n\n{output}"
+            return f"❌ Failed to skip: {output}"
+        
+        # Start new rebase
+        if not onto:
+            return "❌ Must specify 'onto' branch for rebase, or use abort/continue_rebase/skip"
+        
+        args = ["rebase"]
+        if interactive:
+            args.append("-i")
+        args.append(onto)
+        
+        success, output = await run_git(args, cwd=path)
+        
+        if success:
+            return f"✅ Successfully rebased onto `{onto}`\n\n{output or 'Rebase complete.'}"
+        
+        # Check for conflicts
+        status_ok, status_output = await run_git(["status", "--porcelain"], cwd=path)
+        
+        conflict_files = []
+        if status_ok:
+            for line in status_output.split('\n'):
+                # UU = both modified, AA = both added, DU = deleted by us
+                if line.startswith('UU') or line.startswith('AA') or line.startswith('DU') or line.startswith('UD'):
+                    conflict_files.append(line[3:].strip())
+        
+        if conflict_files:
+            lines = [
+                f"⚠️ Rebase paused - {len(conflict_files)} conflict(s) detected",
+                "",
+                "**Conflict files:**",
+            ]
+            for f in conflict_files[:10]:
+                lines.append(f"- `{f}`")
+            if len(conflict_files) > 10:
+                lines.append(f"- ... and {len(conflict_files) - 10} more")
+            
+            lines.extend([
+                "",
+                "**Next steps:**",
+                "1. Resolve conflicts in the files above",
+                "2. Stage resolved files: `git_add(repo, 'file1 file2')`",
+                "3. Continue: `git_rebase(repo, continue_rebase=True)`",
+                "   Or abort: `git_rebase(repo, abort=True)`",
+            ])
+            return "\n".join(lines)
+        
+        return f"❌ Rebase failed:\n{output}"
+    tool_count += 1
+    
+    @server.tool()
+    async def git_rev_parse(
+        repo: str,
+        ref: str,
+        short: bool = False,
+        verify: bool = True,
+    ) -> str:
+        """
+        Resolve a git reference to its SHA.
+        
+        Args:
+            repo: Repository path
+            ref: Reference to resolve (branch, tag, short SHA, HEAD, etc.)
+            short: Return short SHA (7 chars) instead of full 40-char
+            verify: Verify the reference exists (fail if not found)
+        
+        Returns:
+            The resolved SHA, or error message.
+        
+        Examples:
+            git_rev_parse(repo, "HEAD")           -> "a1b2c3d4e5..."
+            git_rev_parse(repo, "main")           -> "f6g7h8i9..."
+            git_rev_parse(repo, "abc123", short=True) -> "abc1234"
+        """
+        path = resolve_repo_path(repo)
+        
+        args = ["rev-parse"]
+        if verify:
+            args.append("--verify")
+        if short:
+            args.append("--short")
+        args.append(ref)
+        
+        success, output = await run_git(args, cwd=path)
+        
+        if not success:
+            # Try fetching and retrying
+            await run_git(["fetch", "origin"], cwd=path)
+            success, output = await run_git(args, cwd=path)
+        
+        if not success:
+            return f"❌ Could not resolve ref '{ref}': {output}"
+        
+        sha = output.strip()
+        
+        # Validate SHA format
+        if not sha or (not short and len(sha) != 40) or (short and len(sha) < 7):
+            return f"❌ Invalid SHA returned for '{ref}': {sha}"
+        
+        return sha
+    tool_count += 1
+    
+    @server.tool()
+    async def git_merge_abort(repo: str) -> str:
+        """
+        Abort an in-progress merge.
+        
+        Args:
+            repo: Repository path
+        
+        Returns:
+            Success or error message.
+        """
+        path = resolve_repo_path(repo)
+        
+        success, output = await run_git(["merge", "--abort"], cwd=path)
+        
+        if success:
+            return "✅ Merge aborted. Working tree restored."
+        return f"❌ Failed to abort merge (perhaps no merge in progress?): {output}"
+    tool_count += 1
+    
     return tool_count
 
