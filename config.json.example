@@ -341,8 +341,18 @@
       }
     },
     "user_mapping": {
-      "description": "Map GitLab usernames to Slack user IDs for DMs",
-      "your_username": "U_YOUR_USER_ID"
+      "description": "Map GitLab usernames to Slack user IDs for DM notifications",
+      "app_interface_url": "https://gitlab.cee.redhat.com/service/app-interface/-/raw/master/data/teams/{team}/users/{user}.yml",
+      "users": {
+        "your_username": {
+          "slack_id": "U_YOUR_USER_ID",
+          "name": "Your Name"
+        },
+        "teammate1": {
+          "slack_id": "U_TEAMMATE1_ID",
+          "name": "Teammate One"
+        }
+      }
     },
     "state_db_path": "./slack_state.db",
     "debug": false
@@ -472,8 +482,18 @@
       }
     },
     "user_mapping": {
-      "description": "Map GitLab usernames to Slack user IDs for DMs",
-      "your_username": "U_YOUR_USER_ID"
+      "description": "Map GitLab usernames to Slack user IDs for DM notifications",
+      "app_interface_url": "https://gitlab.cee.redhat.com/service/app-interface/-/raw/master/data/teams/{team}/users/{user}.yml",
+      "users": {
+        "your_username": {
+          "slack_id": "U_YOUR_USER_ID",
+          "name": "Your Name"
+        },
+        "teammate1": {
+          "slack_id": "U_TEAMMATE1_ID",
+          "name": "Teammate One"
+        }
+      }
     },
     "debug": {
       "enabled": false,
@@ -557,6 +577,7 @@
     "docker_config": "/home/YOUR_USER/.docker/config.json",
     "container_auth": "/home/YOUR_USER/.config/containers/auth.json",
     "google_calendar_config": "/home/YOUR_USER/.config/google-calendar",
+    "vpn_connect_script": "/home/YOUR_USER/src/redhatter/src/redhatter_vpn/vpn-connect",
     "workspace_roots": [
       "/home/YOUR_USER/src",
       "/home/YOUR_USER/repos",

@@ -819,6 +819,75 @@ steps:
     output: feedback_hook_result
     on_error: continue
 
+  # Step 18d: Extract author for Slack notification
+  - name: extract_mr_author
+    description: "Extract MR author GitLab username for Slack notification"
+    compute: |
+      from scripts.common.parsers import extract_author_from_mr
+      
+      author = extract_author_from_mr(mr_details) or ""
+      
+      # Get MR URL for the notification
+      mr_url = ""
+      for line in str(mr_details).split("\n"):
+          if "web_url" in line.lower() or "url:" in line.lower():
+              import re
+              url_match = re.search(r'https://[^\s"\']+merge_requests/\d+', line)
+              if url_match:
+                  mr_url = url_match.group(0)
+                  break
+      
+      if not mr_url:
+          # Construct URL from project and mr_id
+          mr_url = f"https://gitlab.cee.redhat.com/{resolved.get('gitlab_project', '')}/-/merge_requests/{mr_id}"
+      
+      result = {
+          "author": author,
+          "mr_url": mr_url
+      }
+    output: author_info
+
+  # Step 18e: Slack DM author on approval
+  - name: slack_notify_approval
+    description: "Send Slack DM to author that MR was approved"
+    condition: "review_action.get('action') == 'approve' and author_info.get('author')"
+    tool: slack_dm_gitlab_user
+    args:
+      gitlab_username: "{{ author_info.get('author') }}"
+      notification_type: "approval"
+      text: |
+        Your MR has been *approved*! 🎉
+        
+        📋 *MR:* <{{ author_info.get('mr_url', '') }}|!{{ mr_id }}>
+        {% if jira_key != 'NOT_FOUND' %}
+        🎫 *Jira:* {{ jira_key }}
+        {% endif %}
+        
+        Ready to merge when you are.
+    output: slack_approval_result
+    on_error: continue
+
+  # Step 18f: Slack DM author on feedback
+  - name: slack_notify_feedback
+    description: "Send Slack DM to author that feedback was posted"
+    condition: "review_action.get('action') == 'request_changes' and author_info.get('author')"
+    tool: slack_dm_gitlab_user
+    args:
+      gitlab_username: "{{ author_info.get('author') }}"
+      notification_type: "feedback"
+      text: |
+        I've left some feedback on your MR.
+        
+        📋 *MR:* <{{ author_info.get('mr_url', '') }}|!{{ mr_id }}>
+        {% if jira_key != 'NOT_FOUND' %}
+        🎫 *Jira:* {{ jira_key }}
+        {% endif %}
+        📝 *Issues found:* {{ (code_issues|length if code_issues else 0) + (format_issues|length if format_issues and format_issues != ['Format OK'] else 0) }}
+        
+        Please take a look when you get a chance.
+    output: slack_feedback_result
+    on_error: continue
+
   # Step 19: Add Jira comment about review
   - name: jira_comment
     description: "Add review note to Jira issue"

@@ -430,6 +430,194 @@ def register_tools(server: "FastMCP") -> int:
         return [TextContent(type="text", text=result)]
 
 
+    # ==================== INFRASTRUCTURE CONNECTIVITY ====================
+    
+    @server.tool()
+    async def vpn_connect() -> list[TextContent]:
+        """
+        Connect to the Red Hat VPN.
+        
+        Use this when tools fail with 'No route to host' or similar network errors.
+        
+        The VPN is required for:
+        - Ephemeral cluster access
+        - Stage cluster access
+        - Konflux cluster access
+        - Internal GitLab access
+        
+        Returns:
+            VPN connection result.
+        """
+        config = load_config()
+        paths = config.get("paths", {})
+        
+        # Get VPN script path from config or use default
+        vpn_script = paths.get("vpn_connect_script")
+        if not vpn_script:
+            # Default location
+            vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
+        
+        vpn_script = os.path.expanduser(vpn_script)
+        
+        if not os.path.exists(vpn_script):
+            return [TextContent(type="text", text=f"""❌ VPN connect script not found at: {vpn_script}
+
+**To fix:**
+1. Clone the redhatter repo or ensure the script exists
+2. Or add to config.json:
+```json
+{{
+  "paths": {{
+    "vpn_connect_script": "/path/to/vpn-connect"
+  }}
+}}
+```
+
+💡 Alternatively, run manually: `vpn-connect` or use your VPN client.""")]
+        
+        lines = ["## Connecting to VPN...", ""]
+        
+        try:
+            # Run the VPN connect script
+            success, stdout, stderr = await run_cmd_full(
+                ["bash", vpn_script],
+                timeout=120,  # VPN connection can take time
+            )
+            
+            output = stdout + stderr
+            
+            if success or "successfully activated" in output.lower() or "connection successfully" in output.lower():
+                lines.append("✅ VPN connected successfully")
+            else:
+                lines.append("⚠️ VPN connection may have failed")
+            
+            lines.append("")
+            lines.append("```")
+            lines.append(output[-2000:] if len(output) > 2000 else output)
+            lines.append("```")
+            
+        except asyncio.TimeoutError:
+            lines.append("❌ VPN connection timed out after 120s")
+            lines.append("Try running manually: `vpn-connect`")
+        except Exception as e:
+            lines.append(f"❌ Error: {e}")
+        
+        return [TextContent(type="text", text="\n".join(lines))]
+    
+    @server.tool()
+    async def kube_login(
+        cluster: str,
+    ) -> list[TextContent]:
+        """
+        Refresh Kubernetes credentials for a cluster.
+        
+        Use this when tools fail with 'Unauthorized', 'token expired', or similar auth errors.
+        
+        Args:
+            cluster: Cluster to login to:
+                     - 's' or 'stage' = Stage cluster
+                     - 'p' or 'prod' = Production cluster  
+                     - 'k' or 'konflux' = Konflux cluster
+                     - 'e' or 'ephemeral' = Ephemeral cluster
+        
+        Returns:
+            Login result with new token info.
+        """
+        # Normalize cluster name to short form
+        cluster_map = {
+            "stage": "s",
+            "production": "p",
+            "prod": "p",
+            "konflux": "k",
+            "ephemeral": "e",
+        }
+        
+        short_cluster = cluster_map.get(cluster.lower(), cluster.lower())
+        
+        if short_cluster not in ["s", "p", "k", "e"]:
+            return [TextContent(type="text", text=f"""❌ Unknown cluster: {cluster}
+
+**Valid options:**
+- `s` or `stage` = Stage cluster
+- `p` or `prod` = Production cluster
+- `k` or `konflux` = Konflux cluster
+- `e` or `ephemeral` = Ephemeral cluster""")]
+        
+        cluster_names = {
+            "s": "Stage",
+            "p": "Production", 
+            "k": "Konflux",
+            "e": "Ephemeral",
+        }
+        
+        lines = [f"## Logging into {cluster_names[short_cluster]} cluster...", ""]
+        
+        # Check if kube command exists
+        kube_cmd = ["kube", short_cluster]
+        
+        try:
+            success, stdout, stderr = await run_cmd_full(
+                kube_cmd,
+                timeout=60,
+            )
+            
+            output = stdout + stderr
+            
+            if success:
+                lines.append(f"✅ Logged into {cluster_names[short_cluster]} cluster")
+            else:
+                lines.append(f"⚠️ Login may have issues")
+            
+            lines.append("")
+            lines.append("```")
+            lines.append(output[-1500:] if len(output) > 1500 else output)
+            lines.append("```")
+            
+            # Test the connection
+            config = load_config()
+            clusters = config.get("clusters", {})
+            
+            kubeconfig_suffix = {
+                "s": ".s",
+                "p": ".p",
+                "k": ".k", 
+                "e": ".e",
+            }
+            
+            kubeconfig = os.path.expanduser(f"~/.kube/config{kubeconfig_suffix[short_cluster]}")
+            
+            if os.path.exists(kubeconfig):
+                lines.append("")
+                lines.append("### Testing connection...")
+                
+                test_success, test_out, test_err = await run_cmd_full(
+                    ["kubectl", "--kubeconfig", kubeconfig, "get", "ns", "--no-headers", "-o", "name"],
+                    timeout=30,
+                )
+                
+                if test_success:
+                    ns_count = len(test_out.strip().split("\n")) if test_out.strip() else 0
+                    lines.append(f"✅ Connection verified ({ns_count} namespaces accessible)")
+                else:
+                    lines.append(f"⚠️ Connection test failed: {test_err}")
+            
+        except FileNotFoundError:
+            lines.append("❌ `kube` command not found")
+            lines.append("")
+            lines.append("The `kube` script should be in your PATH. It typically:")
+            lines.append("1. Runs `oc login` with the appropriate cluster URL")
+            lines.append("2. Saves credentials to `~/.kube/config.{s,p,k,e}`")
+            lines.append("")
+            lines.append("**Alternative manual login:**")
+            lines.append("```bash")
+            lines.append("oc login --server=<cluster-url>")
+            lines.append("```")
+        except Exception as e:
+            lines.append(f"❌ Error: {e}")
+        
+        return [TextContent(type="text", text="\n".join(lines))]
+
+
     # ==================== PYTHON LINTING ====================
 
     @server.tool()
@@ -2693,5 +2881,5 @@ Be constructive, specific, and kind. Suggest alternatives, don't just criticize.
     # ==================== ENTRY POINT ====================
     
     # Count registered tools
-    tool_count = 16 + 2 + 2 + 5 + 1 + 2  # Original + skills + agents + memory + bootstrap + dynamic
+    tool_count = 16 + 2 + 2 + 5 + 1 + 2 + 2  # Original + skills + agents + memory + bootstrap + dynamic + infrastructure (vpn, kube)
     return tool_count

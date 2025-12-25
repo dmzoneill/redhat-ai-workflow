@@ -366,6 +366,99 @@ def register_tools(server: "FastMCP") -> int:
 
 
     @server.tool()
+    async def appinterface_get_user(
+        username: str,
+        team: str = "insights",
+    ) -> list[TextContent]:
+        """
+        Get user information from app-interface.
+        
+        Fetches user YAML from app-interface GitLab which contains:
+        - Slack username
+        - GitLab username
+        - Red Hat email
+        - Manager info
+        - Roles and permissions
+        
+        Args:
+            username: GitLab/Kerberos username (e.g., 'bthomass', 'akarve')
+            team: Team directory in app-interface (default: 'insights')
+        
+        Returns:
+            User information from app-interface.
+        """
+        import yaml
+        import urllib.request
+        import urllib.error
+        
+        config = load_config()
+        
+        # Get URL template from config or use default
+        slack_config = config.get("slack", {})
+        user_mapping_config = slack_config.get("user_mapping", {})
+        url_template = user_mapping_config.get(
+            "app_interface_url",
+            "https://gitlab.cee.redhat.com/service/app-interface/-/raw/master/data/teams/{team}/users/{user}.yml"
+        )
+        
+        url = url_template.format(team=team, user=username)
+        
+        lines = [f"## User: `{username}`", ""]
+        
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                content = response.read().decode("utf-8")
+            
+            data = yaml.safe_load(content)
+            
+            if isinstance(data, dict):
+                lines.append("### Profile")
+                
+                name = data.get("name", username)
+                lines.append(f"- **Name:** {name}")
+                
+                if "org_username" in data:
+                    lines.append(f"- **Kerberos:** {data['org_username']}")
+                
+                if "slack_username" in data:
+                    lines.append(f"- **Slack:** @{data['slack_username']}")
+                
+                if "github_username" in data:
+                    lines.append(f"- **GitHub:** @{data['github_username']}")
+                
+                if "redhat_email" in data or "mail" in data:
+                    email = data.get("redhat_email") or data.get("mail")
+                    lines.append(f"- **Email:** {email}")
+                
+                if "manager" in data:
+                    manager_ref = data["manager"]
+                    if isinstance(manager_ref, dict) and "$ref" in manager_ref:
+                        manager_name = manager_ref["$ref"].split("/")[-1].replace(".yml", "")
+                        lines.append(f"- **Manager:** {manager_name}")
+                
+                lines.append("")
+                lines.append("### Raw YAML")
+                lines.append("```yaml")
+                lines.append(yaml.dump(data, default_flow_style=False)[:1500])
+                lines.append("```")
+            else:
+                lines.append(f"```yaml\n{content[:2000]}\n```")
+                
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                lines.append(f"⚠️ User `{username}` not found in team `{team}`")
+                lines.append(f"URL tried: {url}")
+                lines.append("")
+                lines.append("Try a different team directory or check the username spelling.")
+            else:
+                lines.append(f"❌ HTTP Error: {e.code} {e.reason}")
+        except Exception as e:
+            lines.append(f"❌ Error fetching user info: {e}")
+        
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @server.tool()
     async def appinterface_clusters(path: str = "") -> list[TextContent]:
         """
         List clusters defined in app-interface.

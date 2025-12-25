@@ -400,6 +400,84 @@ def wrap_server_tools_runtime(server) -> int:
     return count
 
 
+def _get_remediation_hints(error_text: str, tool_name: str) -> list[str]:
+    """
+    Detect common error patterns and suggest remediation tools.
+    
+    Returns a list of remediation hints based on the error.
+    """
+    hints = []
+    error_lower = error_text.lower()
+    
+    # VPN connectivity issues
+    vpn_patterns = [
+        "no route to host",
+        "network is unreachable",
+        "connection timed out",
+        "could not resolve host",
+        "name or service not known",
+        "connection refused",
+        "failed to connect",
+        "enetunreach",
+    ]
+    
+    if any(pattern in error_lower for pattern in vpn_patterns):
+        hints.append("🌐 VPN may be disconnected. Try: `vpn_connect()`")
+    
+    # Kubernetes auth issues
+    k8s_auth_patterns = [
+        "unauthorized",
+        "token expired",
+        "token is expired",
+        "the server has asked for the client to provide credentials",
+        "you must be logged in to the server",
+        "forbidden",
+        "error: you must be logged in",
+        "no valid credentials found",
+    ]
+    
+    if any(pattern in error_lower for pattern in k8s_auth_patterns):
+        # Try to detect which cluster from the error or tool name
+        cluster_hint = ""
+        if "stage" in error_lower or "stage" in tool_name:
+            cluster_hint = " Try: `kube_login(cluster='stage')`"
+        elif "prod" in error_lower or "prod" in tool_name:
+            cluster_hint = " Try: `kube_login(cluster='prod')`"
+        elif "ephemeral" in error_lower or "bonfire" in tool_name:
+            cluster_hint = " Try: `kube_login(cluster='ephemeral')`"
+        elif "konflux" in error_lower or "konflux" in tool_name:
+            cluster_hint = " Try: `kube_login(cluster='konflux')`"
+        else:
+            cluster_hint = " Try: `kube_login(cluster='stage')` or appropriate cluster"
+        
+        hints.append(f"🔑 Kubernetes auth may be stale.{cluster_hint}")
+    
+    # GitLab auth issues  
+    gitlab_auth_patterns = [
+        "401 unauthorized",
+        "403 forbidden",
+        "authentication required",
+        "invalid token",
+        "glab auth login",
+    ]
+    
+    if any(pattern in error_lower for pattern in gitlab_auth_patterns):
+        hints.append("🦊 GitLab auth may be stale. Try: `glab auth login`")
+    
+    # Slack auth issues
+    slack_auth_patterns = [
+        "invalid_auth",
+        "token_expired",
+        "not_authed",
+        "xoxc",
+    ]
+    
+    if any(pattern in error_lower for pattern in slack_auth_patterns):
+        hints.append("💬 Slack auth may be stale. Re-obtain XOXC token from browser.")
+    
+    return hints
+
+
 def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
     """Create a wrapper that adds debug hints on failure."""
     # Capture tool_name and original_fn in closure defaults to avoid late binding
@@ -415,35 +493,59 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
 
                 if text.startswith("❌"):
                     error_line = text.split('\n')[0][:80]
+                    
+                    # Get remediation hints
+                    remediation = _get_remediation_hints(text, _name)
+                    
+                    hint_parts = [f"\n---\n💡 Auto-fix: `debug_tool('{_name}')`"]
+                    if remediation:
+                        hint_parts.extend(["", "**Quick fixes:**"])
+                        hint_parts.extend(remediation)
+                    
                     debug_hint = TextContent(
                         type="text",
-                        text=f"\n---\n💡 Auto-fix: `debug_tool('{_name}')`"
+                        text="\n".join(hint_parts)
                     )
                     result.append(debug_hint)
                     logger.warning(f"Tool {_name} failed: {error_line}")
 
             elif isinstance(result, str) and result.startswith("❌"):
                 error_line = result.split('\n')[0][:80]
-                result = f"{result}\n\n---\n💡 Auto-fix: `debug_tool('{_name}')`"
+                
+                # Get remediation hints
+                remediation = _get_remediation_hints(result, _name)
+                
+                hint_parts = [f"\n---\n💡 Auto-fix: `debug_tool('{_name}')`"]
+                if remediation:
+                    hint_parts.extend(["", "**Quick fixes:**"])
+                    hint_parts.extend(remediation)
+                
+                result = f"{result}\n{chr(10).join(hint_parts)}"
                 logger.warning(f"Tool {_name} failed: {error_line}")
 
             return result
 
         except Exception as e:
-            error_msg = str(e)[:80]
+            error_msg = str(e)
             logger.exception(f"Tool {_name} crashed")
 
             info = TOOL_REGISTRY.get(_name, {})
             source = info.get("source_file", "unknown")
             line = info.get("start_line", 0)
+            
+            # Get remediation hints
+            remediation = _get_remediation_hints(error_msg, _name)
+            remediation_text = ""
+            if remediation:
+                remediation_text = "\n\n**Quick fixes:**\n" + "\n".join(remediation)
 
             return f"""❌ **{_name}** crashed
 
-**Error:** `{error_msg}`
+**Error:** `{error_msg[:80]}`
 **Source:** `{source}:{line}`
 
 ---
-💡 Auto-fix: `debug_tool('{_name}', '{error_msg}')`"""
+💡 Auto-fix: `debug_tool('{_name}', '{error_msg[:60]}')`{remediation_text}"""
 
     return wrapper
 

@@ -44,9 +44,9 @@ TOOL_MODULES = {
     "konflux": 40,
     "bonfire": 21,
     "quay": 8,
-    "appinterface": 6,
-    "workflow": 26,
-    "slack": 15,  # Proactive Slack listener (event-based)
+    "appinterface": 7,  # +1 for appinterface_get_user
+    "workflow": 28,  # +2 for vpn_connect, kube_login
+    "slack": 16,  # +1 for slack_dm_gitlab_user
 }
 
 def load_agent_config(agent_name: str) -> list[str] | None:

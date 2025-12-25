@@ -407,6 +407,82 @@ def register_tools(server: FastMCP) -> int:
             return json.dumps({"error": str(e), "success": False})
     
     @server.tool()
+    async def slack_dm_gitlab_user(
+        gitlab_username: str,
+        text: str,
+        notification_type: str = "info",
+    ) -> str:
+        """
+        Send a Slack DM to a user based on their GitLab username.
+        
+        Uses the user_mapping in config.json to resolve GitLab usernames
+        to Slack user IDs. Perfect for notifying PR authors about feedback.
+        
+        Args:
+            gitlab_username: GitLab username (e.g., 'bthomass', 'akarve')
+            text: Message text (supports Slack markdown)
+            notification_type: Type of notification for styling (info, feedback, approval)
+        
+        Returns:
+            Confirmation with message timestamp or error if user not found.
+        """
+        try:
+            config = _get_slack_config()
+            
+            # Get user mapping
+            user_mapping = config.get("user_mapping", {}).get("users", {})
+            
+            if gitlab_username not in user_mapping:
+                return json.dumps({
+                    "success": False,
+                    "error": f"GitLab user '{gitlab_username}' not found in user_mapping",
+                    "hint": "Add this user to config.json: slack.user_mapping.users",
+                    "known_users": list(user_mapping.keys()),
+                })
+            
+            user_info = user_mapping[gitlab_username]
+            slack_id = user_info.get("slack_id")
+            
+            if not slack_id:
+                return json.dumps({
+                    "success": False,
+                    "error": f"No slack_id configured for '{gitlab_username}'",
+                })
+            
+            # Add emoji prefix based on notification type
+            prefix = ""
+            if notification_type == "feedback":
+                prefix = "💬 "
+            elif notification_type == "approval":
+                prefix = "✅ "
+            elif notification_type == "info":
+                prefix = "ℹ️ "
+            
+            formatted_text = prefix + text
+            
+            manager = await get_manager()
+            await manager.initialize()
+            
+            result = await manager.session.send_dm(
+                user_id=slack_id,
+                text=formatted_text,
+                typing_delay=True,
+            )
+            
+            return json.dumps({
+                "success": True,
+                "gitlab_user": gitlab_username,
+                "slack_user": user_info.get("name", gitlab_username),
+                "slack_id": slack_id,
+                "channel": result.get("channel", ""),
+                "timestamp": result.get("ts", ""),
+                "message": f"DM sent to {user_info.get('name', gitlab_username)}",
+            })
+            
+        except Exception as e:
+            return json.dumps({"error": str(e), "success": False})
+    
+    @server.tool()
     async def slack_get_user(user_id: str) -> str:
         """
         Get information about a Slack user.
@@ -799,5 +875,5 @@ def register_tools(server: FastMCP) -> int:
             })
     
     # Return count of registered tools
-    return 15
+    return 16  # +1 for slack_dm_gitlab_user
 
