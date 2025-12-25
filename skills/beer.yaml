@@ -1,0 +1,566 @@
+# Skill: End of Day Wrap-Up
+# Your daily wrap-up assistant - wind down and prepare for tomorrow
+
+name: beer
+description: |
+  End of day wrap-up - review what you accomplished and prep for tomorrow.
+  
+  This skill gathers and summarizes:
+  - ✅ Wins: Commits pushed, PRs merged, issues closed
+  - 📊 Stats: Lines changed, files touched
+  - 🔄 WIP: Uncommitted changes, draft PRs
+  - ⏰ Tomorrow: Early meetings, deadlines
+  - 🧹 Cleanup: Stale branches, expiring ephemeral envs
+  - 📝 Standup: Auto-generated standup notes
+  - 🎯 Follow-ups: PRs needing attention tomorrow
+  
+version: "1.0"
+
+inputs:
+  - name: generate_standup
+    type: boolean
+    required: false
+    default: true
+    description: "Generate standup notes for tomorrow"
+  
+  - name: cleanup_prompts
+    type: boolean
+    required: false
+    default: true
+    description: "Show cleanup reminders (branches, ephemeral)"
+
+steps:
+  # ==================== CONFIGURATION ====================
+  
+  - name: load_config
+    description: "Load configuration"
+    compute: |
+      import json
+      from pathlib import Path
+      from datetime import datetime, timedelta
+      from zoneinfo import ZoneInfo
+      
+      config_paths = [
+        Path.cwd() / "config.json",
+        Path.home() / "src/redhat-ai-workflow/config.json",
+      ]
+      config = {}
+      for p in config_paths:
+        if p.exists():
+          with open(p) as f:
+            config = json.load(f)
+          break
+      
+      tz = ZoneInfo("Europe/Dublin")
+      now = datetime.now(tz)
+      tomorrow = now + timedelta(days=1)
+      
+      # Determine greeting based on time
+      hour = now.hour
+      if hour < 17:
+        greeting = "Wrapping up early"
+        emoji = "☀️"
+      elif hour < 20:
+        greeting = "Cheers"
+        emoji = "🍺"
+      else:
+        greeting = "Burning the midnight oil"
+        emoji = "🌙"
+      
+      result = {
+        "config": config,
+        "now": now.isoformat(),
+        "today": now.strftime("%Y-%m-%d"),
+        "tomorrow": tomorrow.strftime("%Y-%m-%d"),
+        "day_name": now.strftime("%A"),
+        "tomorrow_name": tomorrow.strftime("%A"),
+        "time": now.strftime("%H:%M"),
+        "greeting": greeting,
+        "emoji": emoji,
+      }
+    output: ctx
+
+  # ==================== TODAY'S COMMITS ====================
+  
+  - name: get_todays_commits
+    description: "Get commits you pushed today"
+    tool: git_log
+    args:
+      repo: "automation-analytics-backend"
+      author: "{{ ctx.config.user.username | default('daoneill') }}"
+      since: "{{ ctx.today }}"
+      limit: 20
+    output: todays_commits_raw
+    on_error: continue
+
+  - name: parse_todays_commits
+    description: "Parse today's commits"
+    compute: |
+      import re
+      
+      commits = []
+      raw = str(todays_commits_raw) if todays_commits_raw else ""
+      
+      for line in raw.split('\n'):
+        match = re.search(r'`([a-f0-9]{7,})\s+(.+?)`', line)
+        if match:
+          commits.append({
+            "sha": match.group(1)[:7],
+            "message": match.group(2)[:60]
+          })
+      
+      # Calculate stats
+      result = {
+        "commits": commits,
+        "count": len(commits)
+      }
+    output: todays_work
+    on_error: continue
+
+  # ==================== UNCOMMITTED CHANGES ====================
+  
+  - name: check_uncommitted
+    description: "Check for uncommitted work"
+    compute: |
+      import subprocess
+      import os
+      
+      repos_to_check = [
+        os.path.expanduser("~/src/automation-analytics-backend"),
+        os.path.expanduser("~/src/redhat-ai-workflow"),
+      ]
+      
+      uncommitted = []
+      
+      for repo_path in repos_to_check:
+        if os.path.exists(repo_path):
+          result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            cwd=repo_path
+          )
+          if result.stdout.strip():
+            lines = result.stdout.strip().split('\n')
+            repo_name = os.path.basename(repo_path)
+            uncommitted.append({
+              "repo": repo_name,
+              "files": len(lines),
+              "changes": lines[:5]  # First 5 changes
+            })
+      
+      result = uncommitted
+    output: uncommitted_changes
+    on_error: continue
+
+  # ==================== TODAY'S MERGED PRs ====================
+  
+  - name: get_merged_today
+    description: "Get PRs merged today"
+    tool: gitlab_mr_list
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      state: "merged"
+    output: merged_mrs_raw
+    on_error: continue
+
+  - name: parse_merged_today
+    description: "Filter for today's merges"
+    compute: |
+      import re
+      from datetime import datetime
+      
+      today = ctx['today']
+      merged_today = []
+      
+      # Parse MR list - we'll take first few as "recent"
+      # Real implementation would filter by merge date
+      raw = str(merged_mrs_raw) if merged_mrs_raw else ""
+      
+      for line in raw.split('\n')[:10]:
+        match = re.search(r'!(\d+)\s+.+?\s+(.+?)\s+\(main\)', line)
+        if match:
+          merged_today.append({
+            "id": match.group(1),
+            "title": match.group(2)[:50]
+          })
+      
+      result = merged_today[:5]  # Top 5 recent merges
+    output: merged_today
+    on_error: continue
+
+  # ==================== MY OPEN PRs STATUS ====================
+  
+  - name: get_my_prs
+    description: "Get my open PRs"
+    tool: gitlab_mr_list
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      author: "@me"
+    output: my_prs_raw
+    on_error: continue
+
+  - name: parse_my_prs
+    description: "Parse my open PRs"
+    compute: |
+      import re
+      
+      prs = []
+      raw = str(my_prs_raw) if my_prs_raw else ""
+      
+      for line in raw.split('\n'):
+        match = re.search(r'!(\d+)\s+.+?\s+(.+?)\s+\(main\)', line)
+        if match:
+          is_draft = 'draft' in line.lower()
+          prs.append({
+            "id": match.group(1),
+            "title": match.group(2)[:50],
+            "draft": is_draft
+          })
+      
+      result = prs
+    output: my_prs
+    on_error: continue
+
+  # ==================== TOMORROW'S CALENDAR ====================
+  
+  - name: get_tomorrows_calendar
+    description: "Fetch tomorrow's calendar events"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime, timedelta
+      from zoneinfo import ZoneInfo
+      
+      CONFIG_DIR = Path.home() / ".config" / "google-calendar"
+      TOKEN_FILE = CONFIG_DIR / "token.json"
+      TIMEZONE = "Europe/Dublin"
+      tz = ZoneInfo(TIMEZONE)
+      
+      events_tomorrow = []
+      
+      if TOKEN_FILE.exists():
+        try:
+          from google.oauth2.credentials import Credentials
+          from googleapiclient.discovery import build
+          
+          creds = Credentials.from_authorized_user_file(str(TOKEN_FILE))
+          service = build('calendar', 'v3', credentials=creds)
+          
+          # Get tomorrow's events
+          tomorrow = datetime.now(tz) + timedelta(days=1)
+          start = tomorrow.replace(hour=0, minute=0, second=0).isoformat()
+          end = tomorrow.replace(hour=23, minute=59, second=59).isoformat()
+          
+          events = service.events().list(
+            calendarId='primary',
+            timeMin=start,
+            timeMax=end,
+            singleEvents=True,
+            orderBy='startTime'
+          ).execute().get('items', [])
+          
+          for event in events[:10]:
+            start_time = event['start'].get('dateTime', event['start'].get('date', ''))
+            if 'T' in start_time:
+              time_str = start_time[11:16]
+            else:
+              time_str = 'All day'
+            
+            events_tomorrow.append({
+              "time": time_str,
+              "title": event.get('summary', 'No title')[:40],
+              "meet_link": event.get('hangoutLink', ''),
+              "early": time_str < '10:00' if time_str != 'All day' else False
+            })
+        except Exception as e:
+          events_tomorrow = [{"error": str(e)}]
+      
+      result = events_tomorrow
+    output: tomorrow_calendar
+    on_error: continue
+
+  # ==================== EPHEMERAL CLEANUP ====================
+  
+  - name: check_ephemeral
+    description: "Check ephemeral namespaces for cleanup"
+    tool: bonfire_namespace_list
+    args:
+      mine: true
+    output: ephemeral_raw
+    on_error: continue
+
+  - name: parse_ephemeral
+    description: "Parse ephemeral namespaces"
+    compute: |
+      import re
+      
+      namespaces = []
+      raw = str(ephemeral_raw) if ephemeral_raw else ""
+      
+      # Look for namespace names and expiry times
+      for line in raw.split('\n'):
+        if 'ephemeral-' in line:
+          match = re.search(r'(ephemeral-\w+)', line)
+          if match:
+            ns_name = match.group(1)
+            # Try to extract expiry
+            expiry_match = re.search(r'(\d+[hm])', line)
+            expiry = expiry_match.group(1) if expiry_match else 'unknown'
+            namespaces.append({
+              "name": ns_name,
+              "expires": expiry
+            })
+      
+      result = namespaces
+    output: ephemeral_namespaces
+    on_error: continue
+
+  # ==================== STALE BRANCHES ====================
+  
+  - name: check_stale_branches
+    description: "Check for merged branches that can be deleted"
+    compute: |
+      import subprocess
+      import os
+      
+      repo_path = os.path.expanduser("~/src/automation-analytics-backend")
+      stale_branches = []
+      
+      if os.path.exists(repo_path):
+        # Get local branches
+        result = subprocess.run(
+          ["git", "branch", "--merged", "main"],
+          capture_output=True,
+          text=True,
+          cwd=repo_path
+        )
+        
+        for line in result.stdout.strip().split('\n'):
+          branch = line.strip().replace('* ', '')
+          if branch and branch not in ['main', 'master']:
+            stale_branches.append(branch)
+      
+      result = stale_branches[:5]  # Top 5
+    output: stale_branches
+    on_error: continue
+
+  # ==================== GENERATE STANDUP ====================
+  
+  - name: generate_standup_notes
+    description: "Generate standup notes for tomorrow"
+    condition: "inputs.get('generate_standup', True)"
+    compute: |
+      lines = []
+      
+      # Yesterday (what I did today)
+      lines.append("**Yesterday:**")
+      if todays_work and todays_work.get('commits'):
+        for c in todays_work['commits'][:3]:
+          lines.append(f"- {c['message']}")
+      else:
+        lines.append("- (no commits today)")
+      
+      # Today (what I'll work on)
+      lines.append("")
+      lines.append("**Today:**")
+      if my_prs:
+        for pr in my_prs[:2]:
+          if not pr.get('draft'):
+            lines.append(f"- Continue !{pr['id']}: {pr['title']}")
+            break
+      else:
+        lines.append("- (check Jira board)")
+      
+      # Blockers
+      lines.append("")
+      lines.append("**Blockers:**")
+      lines.append("- None")
+      
+      result = '\n'.join(lines)
+    output: standup_notes
+    on_error: continue
+
+  # ==================== WEEKLY STATS ====================
+  
+  - name: get_weekly_stats
+    description: "Get this week's activity stats"
+    compute: |
+      import subprocess
+      import os
+      from datetime import datetime, timedelta
+      
+      repo_path = os.path.expanduser("~/src/automation-analytics-backend")
+      stats = {
+        "commits_this_week": 0,
+        "lines_added": 0,
+        "lines_removed": 0,
+      }
+      
+      if os.path.exists(repo_path):
+        # Get week's commits
+        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        username = ctx.get('config', {}).get('user', {}).get('username', 'daoneill')
+        
+        result = subprocess.run(
+          ["git", "log", f"--since={week_ago}", f"--author={username}", "--oneline"],
+          capture_output=True,
+          text=True,
+          cwd=repo_path
+        )
+        stats["commits_this_week"] = len([l for l in result.stdout.strip().split('\n') if l])
+        
+        # Get line stats
+        result = subprocess.run(
+          ["git", "log", f"--since={week_ago}", f"--author={username}", "--numstat", "--pretty="],
+          capture_output=True,
+          text=True,
+          cwd=repo_path
+        )
+        for line in result.stdout.strip().split('\n'):
+          parts = line.split('\t')
+          if len(parts) >= 2:
+            try:
+              stats["lines_added"] += int(parts[0]) if parts[0] != '-' else 0
+              stats["lines_removed"] += int(parts[1]) if parts[1] != '-' else 0
+            except:
+              pass
+      
+      result = stats
+    output: weekly_stats
+    on_error: continue
+
+  # ==================== FORMAT BRIEFING ====================
+  
+  - name: format_briefing
+    description: "Create the end of day wrap-up"
+    compute: |
+      import re
+      
+      lines = []
+      
+      # Get user's first name from config
+      full_name = ctx.get('config', {}).get('user', {}).get('full_name', 'there')
+      first_name = full_name.split()[0] if full_name else 'there'
+      
+      # Header
+      lines.append(f"# {ctx['emoji']} {ctx['greeting']}, {first_name}!")
+      lines.append("")
+      lines.append(f"**{ctx['day_name']}, {ctx['today']}** | {ctx['time']} Irish time")
+      lines.append("")
+      lines.append("---")
+      lines.append("")
+      
+      # Today's Wins
+      lines.append("## ✅ Today's Wins")
+      if todays_work and todays_work.get('count', 0) > 0:
+        lines.append(f"**{todays_work['count']}** commits pushed:")
+        for c in todays_work.get('commits', [])[:5]:
+          lines.append(f"- `{c['sha']}` {c['message']}")
+      else:
+        lines.append("- No commits today (and that's okay! 🎄)")
+      lines.append("")
+      
+      # Weekly Stats
+      lines.append("## 📊 This Week's Stats")
+      if weekly_stats:
+        lines.append(f"- **{weekly_stats.get('commits_this_week', 0)}** commits")
+        lines.append(f"- **+{weekly_stats.get('lines_added', 0)}** / **-{weekly_stats.get('lines_removed', 0)}** lines")
+      else:
+        lines.append("- Stats unavailable")
+      lines.append("")
+      
+      # Uncommitted Work
+      if uncommitted_changes:
+        lines.append("## 🔄 Uncommitted Work")
+        lines.append("⚠️ Don't forget to commit or stash:")
+        for uc in uncommitted_changes:
+          lines.append(f"- **{uc['repo']}**: {uc['files']} changed files")
+        lines.append("")
+      
+      # Open PRs
+      lines.append("## 🔀 Your Open PRs")
+      if my_prs:
+        drafts = [p for p in my_prs if p.get('draft')]
+        active = [p for p in my_prs if not p.get('draft')]
+        lines.append(f"**{len(active)}** active, **{len(drafts)}** draft")
+        for pr in active[:3]:
+          lines.append(f"- !{pr['id']} - {pr['title']}")
+      else:
+        lines.append("- No open PRs")
+      lines.append("")
+      
+      # Tomorrow's Calendar
+      lines.append("## ⏰ Tomorrow's Schedule")
+      if tomorrow_calendar and not any('error' in e for e in tomorrow_calendar):
+        early_meetings = [e for e in tomorrow_calendar if e.get('early')]
+        if early_meetings:
+          lines.append("**⚠️ Early meetings:**")
+          for e in early_meetings:
+            lines.append(f"- **{e['time']}** {e['title']} 📹")
+        
+        for e in tomorrow_calendar[:5]:
+          if not e.get('early'):
+            meet = "📹" if e.get('meet_link') else ""
+            lines.append(f"- {e['time']} - {e['title']} {meet}")
+        
+        if not tomorrow_calendar:
+          lines.append("- No meetings tomorrow! 🎉")
+      else:
+        lines.append("- Calendar not accessible")
+      lines.append("")
+      
+      # Cleanup Reminders
+      if inputs.get('cleanup_prompts', True):
+        cleanup_items = []
+        
+        if ephemeral_namespaces:
+          for ns in ephemeral_namespaces:
+            cleanup_items.append(f"🧪 Release `{ns['name']}`? (expires {ns['expires']})")
+        
+        if stale_branches:
+          for br in stale_branches[:3]:
+            cleanup_items.append(f"🌿 Delete merged branch `{br}`?")
+        
+        if cleanup_items:
+          lines.append("## 🧹 Cleanup Reminders")
+          for item in cleanup_items:
+            lines.append(f"- {item}")
+          lines.append("")
+      
+      # Standup Notes
+      if standup_notes:
+        lines.append("## 📝 Tomorrow's Standup (ready to paste)")
+        lines.append("```")
+        lines.append(standup_notes)
+        lines.append("```")
+        lines.append("")
+      
+      # Sign off
+      lines.append("---")
+      lines.append("")
+      
+      # Fun sign-off based on day
+      day = ctx['day_name']
+      if day == 'Friday':
+        lines.append("🍻 **Happy Friday!** Have a great weekend!")
+      elif day == 'Thursday':
+        lines.append("🍺 Almost there! One more day to Friday.")
+      else:
+        lines.append("🍺 Have a good evening!")
+      
+      result = '\n'.join(lines)
+    output: briefing
+
+outputs:
+  - name: summary
+    value: "{{ briefing }}"
+  
+  - name: context
+    value:
+      commits_today: "{{ todays_work.count if todays_work else 0 }}"
+      uncommitted_repos: "{{ uncommitted_changes | length if uncommitted_changes else 0 }}"
+      open_prs: "{{ my_prs | length if my_prs else 0 }}"
+      meetings_tomorrow: "{{ tomorrow_calendar | length if tomorrow_calendar else 0 }}"
+      ephemeral_to_clean: "{{ ephemeral_namespaces | length if ephemeral_namespaces else 0 }}"
+      stale_branches: "{{ stale_branches | length if stale_branches else 0 }}"
+
