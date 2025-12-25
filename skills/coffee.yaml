@@ -614,14 +614,23 @@ steps:
       full_name = ctx.get('config', {}).get('user', {}).get('full_name', 'there')
       first_name = full_name.split()[0] if full_name else 'there'
       
-      # GitLab base URL for MR links
-      gitlab_base = "https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests"
+      # GitLab and Jira base URLs for hyperlinks
+      GITLAB_MR_BASE = "https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests"
+      JIRA_BASE = "https://issues.redhat.com/browse"
       
       def mr_link(mr_id, title=""):
         """Create a markdown hyperlink for an MR."""
+        url = f"{GITLAB_MR_BASE}/{mr_id}"
         if title:
-          return f"[!{mr_id}]({gitlab_base}/{mr_id}) - {title}"
-        return f"[!{mr_id}]({gitlab_base}/{mr_id})"
+          return f"[!{mr_id}]({url}) - {title}"
+        return f"[!{mr_id}]({url})"
+      
+      def jira_link(key, summary=""):
+        """Create a markdown hyperlink for a Jira issue."""
+        url = f"{JIRA_BASE}/{key}"
+        if summary:
+          return f"[{key}]({url}) - {summary}"
+        return f"[{key}]({url})"
       
       # Header
       lines.append(f"# ☕ {ctx['greeting']}, {first_name}!")
@@ -696,14 +705,6 @@ steps:
       lines.append("")
       
       # Jira
-      jira_base = "https://issues.redhat.com/browse"
-      
-      def jira_link(key, summary=""):
-        """Create a markdown hyperlink for a Jira issue."""
-        if summary:
-          return f"[{key}]({jira_base}/{key}) - {summary}"
-        return f"[{key}]({jira_base}/{key})"
-      
       lines.append("## 📋 Jira Activity")
       if jira_activity and jira_activity.get('count', 0) > 0:
         lines.append(f"**{jira_activity.get('count', 0)}** issues updated in last {inputs.get('days_back', 1)} day(s)")
