@@ -14,3 +14,4 @@ KUBECONFIG=~/.kube/config.e bonfire namespace release <namespace-name> --force
 **Note**: Only releases namespaces you own (safety check built-in).
 
 
+

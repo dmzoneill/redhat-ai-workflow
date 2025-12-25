@@ -1423,7 +1423,7 @@ def register_tools(server: "FastMCP") -> int:
             self.inputs = inputs
             self.debug = debug
             # Load config.json config for compute blocks
-            self.config = load_repos_config()
+            self.config = load_config()
             self.context = {
                 "inputs": inputs,
                 "config": self.config,  # Make config available in templates
@@ -2873,7 +2873,7 @@ Be constructive, specific, and kind. Suggest alternatives, don't just criticize.
     async def resource_repositories() -> str:
         """Configured repositories from config.json."""
         import yaml
-        config = load_repos_config()
+        config = load_config()
         repos = config.get("repositories", {})
         return yaml.dump({"repositories": repos}, default_flow_style=False)
 
