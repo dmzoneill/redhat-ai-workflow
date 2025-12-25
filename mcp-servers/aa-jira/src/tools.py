@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
     """Run rh-issue command through user's login shell for proper environment."""
+    import os
+    
     # Build the command string for bash -l -c
     # Quote each arg properly to handle spaces
     cmd_str = "rh-issue " + " ".join(shlex.quote(arg) for arg in args)
@@ -32,6 +34,17 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
     # This ensures JIRA_JPAT and other env vars from ~/.bashrc are available
     cmd = ["bash", "-l", "-c", cmd_str]
     
+    # Ensure critical environment variables are passed through
+    # pipenv needs HOME to find its virtualenvs
+    env = os.environ.copy()
+    home = Path.home()
+    env["HOME"] = str(home)
+    env["USER"] = home.name
+    # Make sure PATH includes user's bin directory
+    user_bin = str(home / "bin")
+    if user_bin not in env.get("PATH", ""):
+        env["PATH"] = f"{user_bin}:{env.get('PATH', '')}"
+    
     try:
         result = await asyncio.to_thread(
             subprocess.run,
@@ -39,6 +52,7 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
         
         output = result.stdout
