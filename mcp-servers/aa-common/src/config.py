@@ -46,24 +46,6 @@ def get_env_config(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 
-def get_kubeconfig(env: str) -> str:
-    """Get kubeconfig path for an environment."""
-    config = load_repos_config()
-    k8s = config.get("kubernetes", {}).get("environments", {})
-    
-    if env in k8s:
-        return k8s[env].get("kubeconfig", "")
-    
-    # Fallbacks
-    env_map = {
-        "stage": "~/.kube/config.s",
-        "production": "~/.kube/config.p", 
-        "ephemeral": "~/.kube/config.e",
-        "konflux": "~/.kube/config.k",
-    }
-    return str(Path(env_map.get(env, "~/.kube/config")).expanduser())
-
-
 def get_token_from_kubeconfig(kubeconfig: str) -> str:
     """Extract bearer token from kubeconfig using oc/kubectl."""
     if not kubeconfig or not Path(kubeconfig).expanduser().exists():

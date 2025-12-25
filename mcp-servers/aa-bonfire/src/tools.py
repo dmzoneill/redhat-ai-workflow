@@ -30,10 +30,11 @@ def load_bonfire_config() -> dict:
 
 
 def get_kubeconfig() -> str:
-    """Get kubeconfig path for ephemeral cluster."""
-    config = load_bonfire_config()
-    kubeconfig = config.get("kubeconfig", str(Path.home() / ".kube/config.e"))
-    return os.path.expanduser(kubeconfig)
+    """Get kubeconfig path for ephemeral cluster.
+    
+    Uses common utils.get_kubeconfig() with 'ephemeral' environment.
+    """
+    return get_kubeconfig_base("ephemeral")
 
 
 def get_app_config(app_name: str = "", billing: bool = False) -> dict:
