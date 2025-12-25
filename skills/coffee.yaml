@@ -346,11 +346,19 @@ steps:
 
   # ==================== JIRA ACTIVITY (using MCP tool) ====================
   
+  - name: build_jira_jql
+    description: "Build JQL query with proper days_back value"
+    compute: |
+      days = inputs.get('days_back', 1) if inputs else 1
+      # Use labels instead of component (component 'Automation Analytics' doesn't exist)
+      result = f"project = AAP AND updated >= -{days}d AND labels = 'automation-analytics' ORDER BY updated DESC"
+    output: jira_jql
+  
   - name: get_sprint_activity
     description: "Get Jira activity for the sprint"
     tool: jira_search
     args:
-      jql: "project = AAP AND updated >= -{{ inputs.days_back or 1 }}d AND component = 'Automation Analytics' ORDER BY updated DESC"
+      jql: "{{ jira_jql }}"
       max_results: 20
     output: jira_activity_raw
     on_error: continue

@@ -359,8 +359,10 @@ async def run_cmd_shell(
         cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
     
     # Explicitly source shell config files to get all environment variables
-    # 1. ~/.bashrc for basic shell setup
-    # 2. ~/.bashrc.d/00-loader.sh loads additional configs (JIRA, etc.)
+    # and functions (like 'kube' for k8s auth)
+    #
+    # .bashrc has conditions (interactive, DESKTOP_SESSION) that won't be met
+    # when running from MCP server, so we source bashrc.d scripts directly.
     home = Path.home()
     sources = []
     
@@ -372,6 +374,16 @@ async def run_cmd_shell(
     bashrc_d_loader = home / ".bashrc.d" / "00-loader.sh"
     if bashrc_d_loader.exists():
         sources.append(f"source {bashrc_d_loader} 2>/dev/null")
+    
+    # IMPORTANT: Also source all .sh files in bashrc.d root directly
+    # These define functions like 'kube' for kubernetes auth
+    # .bashrc conditionally loads these only for interactive+desktop sessions,
+    # so we need to explicitly source them for MCP server context
+    bashrc_d = home / ".bashrc.d"
+    if bashrc_d.is_dir():
+        for script in sorted(bashrc_d.glob("*.sh")):
+            if script.name != "00-loader.sh":  # Already sourced above
+                sources.append(f"source {script} 2>/dev/null")
     
     if sources:
         cmd_str = f"{'; '.join(sources)}; {cmd_str}"

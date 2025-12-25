@@ -553,15 +553,19 @@ def register_tools(server: "FastMCP") -> int:
         }
         
         lines = [f"## Logging into {cluster_names[short_cluster]} cluster...", ""]
+        lines.append("🌐 *A browser window may open for SSO authentication*")
+        lines.append("")
         
-        # Check if kube command exists
-        # Run through user's login shell to get DISPLAY/XAUTHORITY for browser auth
+        # Run kube through user's login shell to get:
+        # - DISPLAY/XAUTHORITY for browser auth (rhtoken opens Chrome)
+        # - Access to kube bash function from ~/.bashrc.d/01-redhatter-kubeconfig.sh
         kube_cmd = ["kube", short_cluster]
         
         try:
+            # Longer timeout for browser-based SSO auth
             success, stdout, stderr = await run_cmd_shell(
                 kube_cmd,
-                timeout=60,
+                timeout=120,  # 2 minutes for SSO
             )
             
             output = stdout + stderr
