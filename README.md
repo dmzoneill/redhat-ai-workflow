@@ -15,8 +15,9 @@
 
 [Getting Started](#-quick-start) •
 [Skills](docs/skills/README.md) •
-[Architecture](docs/architecture/README.md) •
-[MCP Servers](mcp-servers/ARCHITECTURE.md)
+[Agents](docs/agents/README.md) •
+[MCP Servers](docs/mcp-servers/README.md) •
+[Architecture](docs/architecture/README.md)
 
 </div>
 
@@ -88,14 +89,14 @@ Claude: [Runs start_work skill]
 
 ## 🎭 Agents
 
-Switch agents to get different tool sets:
+Switch agents to get different tool sets. See [full agent reference](docs/agents/README.md).
 
 | Agent | Command | Tools | Focus |
 |-------|---------|-------|-------|
-| 👨‍💻 developer | `Load developer agent` | ~86 | Daily coding, PRs |
-| 🔧 devops | `Load devops agent` | ~90 | Deployments, K8s |
-| 🚨 incident | `Load incident agent` | ~78 | Production debugging |
-| 📦 release | `Load release agent` | ~69 | Shipping releases |
+| [👨‍💻 developer](docs/agents/developer.md) | `Load developer agent` | ~86 | Daily coding, PRs |
+| [🔧 devops](docs/agents/devops.md) | `Load devops agent` | ~90 | Deployments, K8s |
+| [🚨 incident](docs/agents/incident.md) | `Load incident agent` | ~78 | Production debugging |
+| [📦 release](docs/agents/release.md) | `Load release agent` | ~69 | Shipping releases |
 
 ```mermaid
 graph LR
@@ -139,20 +140,20 @@ Skills are reusable workflows. See [full skills reference](docs/skills/README.md
 
 ## 🔧 Tool Modules
 
-150+ tools across 14 modules:
+150+ tools across 14 modules. See [full MCP server reference](docs/mcp-servers/README.md).
 
 | Module | Tools | Description |
 |--------|-------|-------------|
-| git | 19 | Git operations |
-| gitlab | 35 | MRs, pipelines |
-| jira | 24 | Issue tracking |
-| k8s | 26 | Kubernetes |
-| bonfire | 21 | Ephemeral envs |
-| quay | 8 | Container registry |
-| google-calendar | 6 | Calendar & meetings |
-| gmail | 6 | Email processing |
+| [git](docs/mcp-servers/git.md) | 19 | Git operations |
+| [gitlab](docs/mcp-servers/gitlab.md) | 35 | MRs, pipelines |
+| [jira](docs/mcp-servers/jira.md) | 24 | Issue tracking |
+| [k8s](docs/mcp-servers/k8s.md) | 26 | Kubernetes |
+| [bonfire](docs/mcp-servers/bonfire.md) | 21 | Ephemeral envs |
+| [quay](docs/mcp-servers/quay.md) | 8 | Container registry |
+| [google-calendar](docs/mcp-servers/google-calendar.md) | 6 | Calendar & meetings |
+| [gmail](docs/mcp-servers/gmail.md) | 6 | Email processing |
 
-See [MCP Server Architecture](mcp-servers/ARCHITECTURE.md) for details.
+See [MCP Server Architecture](docs/architecture/README.md) for implementation details.
 
 ---
 
@@ -183,10 +184,13 @@ ai-workflow/
 ├── memory/              # Persistent context
 ├── mcp-servers/         # Tool modules (aa-git/, aa-jira/, etc.)
 ├── docs/                # Documentation
-│   ├── skills/          # Skill reference
-│   └── architecture/    # Architecture docs
+│   ├── skills/          # Skill reference docs
+│   ├── agents/          # Agent persona docs
+│   ├── mcp-servers/     # MCP tool module docs
+│   └── architecture/    # Architecture overview
+├── scripts/             # Python utilities and runners
 ├── config.json          # Configuration
-└── .cursor/commands/    # Cursor slash commands
+└── .cursor/commands/    # Cursor slash commands (/coffee, /beer, etc.)
 ```
 
 ---
@@ -195,9 +199,11 @@ ai-workflow/
 
 | Document | Description |
 |----------|-------------|
-| [Skills Reference](docs/skills/README.md) | All available skills |
+| [Skills Reference](docs/skills/README.md) | All 20+ available skills |
+| [Agents Reference](docs/agents/README.md) | 5 specialized agent personas |
+| [MCP Servers Reference](docs/mcp-servers/README.md) | 14 tool modules |
 | [Architecture Overview](docs/architecture/README.md) | High-level design |
-| [MCP Server Architecture](mcp-servers/ARCHITECTURE.md) | Server implementation |
+| [MCP Server Implementation](mcp-servers/ARCHITECTURE.md) | Server code details |
 
 ---
 
