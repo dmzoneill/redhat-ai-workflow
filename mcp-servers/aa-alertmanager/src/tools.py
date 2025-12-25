@@ -119,7 +119,24 @@ async def alertmanager_request(
 async def get_env_config(environment: str) -> tuple[str, str | None]:
     """Get URL and token for environment."""
     url = get_alertmanager_url(environment)
-    kubeconfig = get_kubeconfig(environment)
+    
+    # Try to get kubeconfig from config.json first
+    kubeconfig = None
+    try:
+        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
+        if config_path.exists():
+            import json
+            with open(config_path) as f:
+                config = json.load(f)
+            env_key = "production" if environment.lower() == "prod" else environment.lower()
+            kubeconfig = config.get("alertmanager", {}).get("environments", {}).get(env_key, {}).get("kubeconfig")
+    except Exception:
+        pass
+    
+    # Fall back to default path
+    if not kubeconfig:
+        kubeconfig = get_kubeconfig(environment)
+    
     token = get_alertmanager_token(kubeconfig)
     return url, token
 
