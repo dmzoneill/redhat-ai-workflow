@@ -108,6 +108,7 @@ steps:
     compute: |
       import json
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       
       config_paths = [
         Path.cwd() / "config.json",
@@ -138,6 +139,7 @@ steps:
     compute: |
       import sys
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       
       # Add our utilities to path
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))

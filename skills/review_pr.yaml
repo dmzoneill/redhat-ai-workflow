@@ -117,6 +117,7 @@ steps:
           "konflux_namespace": konflux_namespace,
           "fastapi_container": fastapi_container,
           "mr_id_from_url": mr_id_from_url,
+          "jira_url": config.get("jira", {}).get("url", "https://issues.redhat.com"),
       }
     output: resolved
   # ==================== RESOLVE MR ID ====================
@@ -370,9 +371,11 @@ steps:
         issues.append("MR description is minimal - consider adding context")
       
       # Check for Jira link
-      if 'issues.redhat.com' not in mr_details and 'jira' not in mr_details.lower():
+      jira_url = resolved.get("jira_url", "https://issues.redhat.com")
+      jira_domain = jira_url.replace("https://", "").replace("http://", "").split("/")[0]
+      if jira_domain not in mr_details and 'jira' not in mr_details.lower():
         if jira_key != 'NOT_FOUND':
-          issues.append(f"Missing Jira link - add: https://issues.redhat.com/browse/{jira_key}")
+          issues.append(f"Missing Jira link - add: {jira_url}/browse/{jira_key}")
       
       result = issues if issues else ["Description OK"]
     output: description_issues

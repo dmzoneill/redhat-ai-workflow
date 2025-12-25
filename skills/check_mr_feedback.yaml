@@ -130,6 +130,7 @@ steps:
       import sys
       import json
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       
       # Load config for username
       config_paths = [Path.cwd() / "config.json", Path.home() / "src/redhat-ai-workflow/config.json"]
@@ -139,7 +140,7 @@ steps:
           with open(p) as f:
             cfg = json.load(f)
           break
-      current_user = cfg.get("user", {}).get("username", "daoneill")
+      current_user = cfg.get("user", {}).get("username") or os.getenv("USER", "unknown")
       
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
       from common.parsers import is_bot_comment
@@ -254,6 +255,7 @@ steps:
     compute: |
       import json
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       from datetime import datetime, timedelta
       
       # Check if Google Calendar is configured

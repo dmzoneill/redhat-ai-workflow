@@ -63,6 +63,7 @@ steps:
     compute: |
       import json
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       
       config_paths = [
           Path.cwd() / "config.json",
@@ -439,7 +440,7 @@ steps:
       result = {
           "key": issue_key,
           "action": action,
-          "url": f"https://issues.redhat.com/browse/{issue_key}" if issue_key else None
+          "url": f"{cfg.get('jira', {}).get('url', 'https://issues.redhat.com')}/browse/{issue_key}" if issue_key else None
       }
     output: jira_result
 

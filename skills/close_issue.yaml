@@ -37,6 +37,7 @@ steps:
     compute: |
       import json
       from pathlib import Path
+      from scripts.common.config_loader import load_config
 
       config_paths = [
           Path.cwd() / "config.json",
@@ -328,6 +329,7 @@ steps:
       import asyncio
       import sys
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
       
       try:
@@ -374,7 +376,7 @@ outputs:
       📝 Closing comment added to Jira
       {% endif %}
       
-      🔗 [View Issue](https://issues.redhat.com/browse/{{ inputs.issue_key }})
+      🔗 [View Issue]({{ cfg.jira.url }}/browse/{{ inputs.issue_key }})
       {% endif %}
   
   - name: context

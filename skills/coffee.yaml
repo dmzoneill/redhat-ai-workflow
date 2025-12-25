@@ -43,25 +43,14 @@ steps:
   # ==================== CONFIGURATION ====================
   
   - name: load_config
-    description: "Load configuration"
+    description: "Load configuration using shared loader"
     compute: |
-      import json
-      from pathlib import Path
       from datetime import datetime
       from zoneinfo import ZoneInfo
+      from scripts.common.config_loader import load_config, get_timezone
       
-      config_paths = [
-        Path.cwd() / "config.json",
-        Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-        if p.exists():
-          with open(p) as f:
-            config = json.load(f)
-          break
-      
-      tz = ZoneInfo("Europe/Dublin")
+      config = load_config()
+      tz = ZoneInfo(get_timezone())
       now = datetime.now(tz)
       
       result = {
@@ -311,7 +300,7 @@ steps:
       from common.parsers import is_bot_comment
       
       feedback = []
-      current_user = ctx.get('config', {}).get('user', {}).get('username', 'daoneill')
+      current_user = ctx.get('config', {}).get('user', {}).get('username', os.getenv('USER', 'unknown'))
       
       # Process each MR's comments
       comments_data = [
@@ -546,7 +535,7 @@ steps:
     args:
       repo: "automation-analytics-backend"
       limit: 10
-      author: "{{ ctx.config.user.username | default('daoneill') }}"
+      author: "{{ ctx.config.user.username }}"
       since: "yesterday"
       until: "today"
     output: yesterdays_commits_raw

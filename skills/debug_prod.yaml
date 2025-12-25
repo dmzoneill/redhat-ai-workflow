@@ -42,6 +42,7 @@ steps:
     compute: |
       import json
       from pathlib import Path
+      from scripts.common.config_loader import load_config
 
       config_paths = [
           Path.cwd() / "config.json",
@@ -116,6 +117,7 @@ steps:
     compute: |
       import yaml
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       
       patterns = {}
       memory_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
@@ -325,6 +327,7 @@ steps:
     compute: |
       import os
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       
       alert_name = inputs.alert_name
       alert_def = None
@@ -433,6 +436,7 @@ steps:
     compute: |
       import yaml
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       
       cicd_file = Path(cfg["appinterface_path"]) / cfg["saas_cicd"] / "deploy-clowder.yml"
       deployed_info = {"sha": None, "namespace_config": None}
@@ -473,6 +477,7 @@ steps:
     compute: |
       import yaml
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       
       ns_path = Path(cfg["appinterface_path"]) / cfg["saas_namespaces"]
       config_info = {}

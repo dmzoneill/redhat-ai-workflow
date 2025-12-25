@@ -183,9 +183,15 @@ def resolve_repo_path(repo: str) -> str:
             if os.path.isdir(expanded_path):
                 return expanded_path
     
-    # Try common source directories
-    for base in [Path.home() / "src", Path.home() / "repos", Path.home() / "projects"]:
-        candidate = base / repo
+    # Try workspace roots from config, then fall back to common directories
+    paths_config = config.get("paths", {})
+    workspace_roots = paths_config.get("workspace_roots", [
+        str(Path.home() / "src"),
+        str(Path.home() / "repos"),
+        str(Path.home() / "projects"),
+    ])
+    for base_path in workspace_roots:
+        candidate = Path(os.path.expanduser(base_path)) / repo
         if candidate.exists():
             return str(candidate)
     

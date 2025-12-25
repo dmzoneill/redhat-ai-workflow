@@ -33,25 +33,14 @@ steps:
   # ==================== CONFIGURATION ====================
   
   - name: load_config
-    description: "Load configuration"
+    description: "Load configuration using shared loader"
     compute: |
-      import json
-      from pathlib import Path
       from datetime import datetime, timedelta
       from zoneinfo import ZoneInfo
+      from scripts.common.config_loader import load_config, get_timezone
       
-      config_paths = [
-        Path.cwd() / "config.json",
-        Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-        if p.exists():
-          with open(p) as f:
-            config = json.load(f)
-          break
-      
-      tz = ZoneInfo("Europe/Dublin")
+      config = load_config()
+      tz = ZoneInfo(get_timezone())
       now = datetime.now(tz)
       tomorrow = now + timedelta(days=1)
       
@@ -87,7 +76,7 @@ steps:
     tool: git_log
     args:
       repo: "automation-analytics-backend"
-      author: "{{ ctx.config.user.username | default('daoneill') }}"
+      author: "{{ ctx.config.user.username }}"
       since: "{{ ctx.today }}"
       limit: 20
     output: todays_commits_raw

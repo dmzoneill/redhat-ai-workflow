@@ -64,8 +64,7 @@ inputs:
     default: false
     description: "Auto-fix linting issues with black"
 
-constants:
-  jira_url: https://issues.redhat.com
+# jira_url loaded from config.json in load_config step
 
 steps:
   # ==================== RESOLVE REPOSITORY ====================

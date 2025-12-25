@@ -54,9 +54,7 @@ inputs:
     required: false
     description: "Git author email (defaults to git config)"
 
-# Note: constants now resolved dynamically from config
-constants:
-  jira_url: https://issues.redhat.com
+# jira_url loaded from config.json in load_config step
 
 steps:
   # ==================== RESOLVE REPOSITORY ====================

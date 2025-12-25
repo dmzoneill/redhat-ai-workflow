@@ -50,6 +50,7 @@ steps:
     compute: |
       import json
       from pathlib import Path
+      from scripts.common.config_loader import load_config
 
       config_paths = [
           Path.cwd() / "config.json",
@@ -229,6 +230,7 @@ steps:
     compute: |
       import yaml
       from pathlib import Path
+      from scripts.common.config_loader import load_config
 
       patterns_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
       matches = []
@@ -317,6 +319,7 @@ steps:
       import asyncio
       import sys
       from pathlib import Path
+      from scripts.common.config_loader import load_config
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
       
       try:

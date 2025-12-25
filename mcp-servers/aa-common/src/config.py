@@ -41,8 +41,12 @@ def load_repos_config() -> dict[str, Any]:
         return {}
 
 
-def get_env_config(key: str, default: str = "") -> str:
-    """Get configuration from environment variable."""
+def get_os_env(key: str, default: str = "") -> str:
+    """Get value from OS environment variable.
+    
+    Note: This is different from utils.get_env_config() which gets
+    service config from config.json for a specific environment.
+    """
     return os.getenv(key, default)
 
 

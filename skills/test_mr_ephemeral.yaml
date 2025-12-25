@@ -107,23 +107,13 @@ steps:
   - name: load_config
     description: "Load Konflux, Quay, and GitLab configuration"
     compute: |
-      import json
       from pathlib import Path
+      from scripts.common.config_loader import load_config, get_config_section
 
-      config_paths = [
-          Path.cwd() / "config.json",
-          Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-          if p.exists():
-              with open(p) as f:
-                  config = json.load(f)
-              break
-
+      config = load_config()
       repos = config.get("repositories", {})
-      quay_config = config.get("quay", {})
-      bonfire_config = config.get("bonfire", {})
+      quay_config = get_config_section("quay", {})
+      bonfire_config = get_config_section("bonfire", {})
 
       # Get automation-analytics-backend config
       aa_config = repos.get("automation-analytics-backend", {})
@@ -945,7 +935,7 @@ outputs:
       ### ClowdApp Selection
       **Component:** `{{ clowdapp_selection.clowdapp }}`
       **Reason:** {{ clowdapp_selection.reason }}
-      {% if clowdapp_selection.jira_key %}**Jira:** [{{ clowdapp_selection.jira_key }}](https://issues.redhat.com/browse/{{ clowdapp_selection.jira_key }}){% endif %}
+      {% if clowdapp_selection.jira_key %}**Jira:** [{{ clowdapp_selection.jira_key }}]({{ cfg.jira.url }}/browse/{{ clowdapp_selection.jira_key }}){% endif %}
       {% if clowdapp_selection.billing_files %}
       **Billing files changed:**
       {% for f in clowdapp_selection.billing_files %}

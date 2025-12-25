@@ -91,6 +91,7 @@
   },
   "app_interface": {
     "repo": "app-interface",
+    "path": "/home/YOUR_USER/src/app-interface",
     "deploy_file": "data/services/your-org/your-app/cicd/deploy-clowder.yml",
     "saas_namespaces": "data/services/your-org/your-app/namespaces",
     "alerts": {
@@ -448,6 +449,17 @@
       "5. Add gmail.readonly and gmail.modify scopes",
       "6. Delete ~/.config/google-calendar/token.json",
       "7. Run google_calendar_status() to re-authenticate"
+    ]
+  },
+  "paths": {
+    "kube_base": "/home/YOUR_USER/.kube",
+    "docker_config": "/home/YOUR_USER/.docker/config.json",
+    "container_auth": "/home/YOUR_USER/.config/containers/auth.json",
+    "google_calendar_config": "/home/YOUR_USER/.config/google-calendar",
+    "workspace_roots": [
+      "/home/YOUR_USER/src",
+      "/home/YOUR_USER/repos",
+      "/home/YOUR_USER/projects"
     ]
   }
 }
