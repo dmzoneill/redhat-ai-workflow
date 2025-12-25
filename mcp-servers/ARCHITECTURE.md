@@ -1,4 +1,4 @@
-# Modular MCP Server Architecture
+# 🔧 MCP Server Architecture
 
 ## Design Principles
 
@@ -8,31 +8,60 @@
 4. **Auto-Debug**: All tools wrapped with `@debuggable` for self-healing capabilities
 5. **Dual Mode**: Each module can run standalone OR be loaded as a plugin
 
+## Quick Start
+
+Add to your project's `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "aa-workflow": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ~/src/redhat-ai-workflow/mcp-servers/aa-common && source ~/src/redhat-ai-workflow/.venv/bin/activate && python3 -m src.server"
+      ]
+    }
+  }
+}
+```
+
 ## Directory Structure
 
 ```
 mcp-servers/
-├── aa-common/                    # Shared infrastructure
+├── aa-common/                    # Core infrastructure
 │   ├── src/
-│   │   ├── __init__.py
-│   │   ├── server.py             # Main server with tool loading
-│   │   ├── config.py             # Shared configuration
-│   │   └── web.py                # Web UI (optional)
+│   │   ├── server.py             # Main server entry point
+│   │   ├── agent_loader.py       # Dynamic agent/tool loading
+│   │   ├── debuggable.py         # Auto-debug decorator
+│   │   └── config.py             # Shared configuration
 │   └── pyproject.toml
 │
-├── aa-git/                       # Example tool module
+├── aa-git/                       # Git operations (19 tools)
 │   ├── src/
-│   │   ├── __init__.py           # Exports register_tools
-│   │   ├── tools.py              # Tool definitions with register_tools(server)
-│   │   └── server.py             # Thin standalone wrapper
+│   │   ├── tools.py              # register_tools(server) function
+│   │   └── server.py             # Standalone wrapper
 │   └── pyproject.toml
 │
-└── aa-{other}/                   # Same pattern for all modules
+├── aa-gitlab/                    # GitLab MRs & pipelines (35 tools)
+├── aa-jira/                      # Jira issues (24 tools)
+├── aa-k8s/                       # Kubernetes operations (26 tools)
+├── aa-bonfire/                   # Ephemeral environments (21 tools)
+├── aa-quay/                      # Container registry (8 tools)
+├── aa-prometheus/                # Metrics queries (13 tools)
+├── aa-alertmanager/              # Alert management (6 tools)
+├── aa-kibana/                    # Log search (9 tools)
+├── aa-google-calendar/           # Calendar & meetings (6 tools)
+├── aa-gmail/                     # Email processing (6 tools)
+├── aa-slack/                     # Slack integration (15 tools)
+├── aa-konflux/                   # Build pipelines (40 tools)
+└── aa-appinterface/              # App-interface config (6 tools)
 ```
 
 ## Tool Module Pattern
 
-### tools.py - The Tool Definitions
+### tools.py - Tool Definitions
 
 ```python
 """Git tool definitions."""
@@ -82,77 +111,6 @@ if __name__ == "__main__":
     main()
 ```
 
-### __init__.py - Export
-
-```python
-from .tools import register_tools
-__all__ = ["register_tools"]
-```
-
-## Usage Patterns
-
-### 1. Dynamic Mode (Recommended)
-
-Start with minimal tools, switch agents dynamically:
-
-```bash
-python -m src.server  # Starts with workflow tools only (~29)
-```
-
-Cursor config (in your project's `.cursor/mcp.json`):
-```json
-{
-  "mcpServers": {
-    "aa-workflow": {
-      "command": "bash",
-      "args": ["-c", "cd ~/src/ai-workflow/mcp-servers/aa-common && source ~/bonfire_venv/bin/activate && python3 -m src.server"]
-    }
-  }
-}
-```
-
-Then in chat:
-```
-You: Load the devops agent
-Claude: [calls agent_load("devops")]
-        DevOps agent loaded! Now have k8s, bonfire, quay, gitlab (~90 tools)
-```
-
-### 2. Static Agent Mode
-
-Start with a specific agent's tools pre-loaded:
-
-```bash
-python -m src.server --agent developer  # ~74 tools
-python -m src.server --agent devops     # ~90 tools
-```
-
-### 3. Single Tool Module (Standalone)
-
-Run just one module:
-
-```bash
-python -m aa_git.server
-```
-
-Cursor config:
-```json
-{
-  "mcpServers": {
-    "aa-git": {
-      "command": "python",
-      "args": ["-m", "aa_git.server"]
-    }
-  }
-}
-```
-
-### 4. With Web UI
-
-```bash
-python -m src.server --agent devops --web --port 8765
-```
-
 ## Dynamic Agent Loading
 
 ### How It Works
@@ -178,7 +136,7 @@ sequenceDiagram
     Claude-->>User: "DevOps agent ready!"
 ```
 
-### Implementation
+### AgentLoader Implementation
 
 The `AgentLoader` class (`aa-common/src/agent_loader.py`) manages dynamic tool switching:
 
@@ -211,97 +169,28 @@ class AgentLoader:
 ### Core Tools (Always Available)
 
 These tools are never unloaded:
-- `agent_load` - Switch agents
-- `agent_list` - List available agents  
-- `session_start` - Initialize session
-- `debug_tool` - Self-healing tool debugger
 
-## Special Modules
+| Tool | Purpose |
+|------|---------|
+| `agent_load` | Switch agents |
+| `agent_list` | List available agents |
+| `session_start` | Initialize session |
+| `debug_tool` | Self-healing tool debugger |
 
-### aa-slack: Event-Driven Architecture
+## Available Agents
 
-The `aa-slack` module is different from other modules - it implements a **long-running listener** pattern:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  aa-slack MCP Server                                            │
-│                                                                 │
-│  ┌──────────────────┐     ┌──────────────────┐                 │
-│  │  Background      │     │  SQLite State    │                 │
-│  │  Polling Loop    │────▶│  - Last TS       │                 │
-│  │  (asyncio task)  │     │  - Pending Queue │                 │
-│  └────────┬─────────┘     │  - User Cache    │                 │
-│           │               └────────┬─────────┘                 │
-│           ▼                        │                           │
-│  ┌──────────────────┐              │                           │
-│  │  Slack Web API   │              │                           │
-│  │  (httpx client)  │              ▼                           │
-│  │  - Auth spoof    │     ┌──────────────────┐                 │
-│  │  - Rate limiting │     │  MCP Tools       │                 │
-│  └──────────────────┘     │  - get_pending   │◀─── LLM Calls   │
-│                           │  - send_message  │                 │
-│                           │  - respond_mark  │                 │
-│                           └──────────────────┘                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Key differences from other modules:**
-- Background asyncio task polls Slack continuously
-- State persisted to SQLite for restart survival
-- Uses internal web API (xoxc tokens) not Bot API
-- Proactive message queuing for LLM processing
-
-## Adding a New Tool Module
-
-1. Create directory: `aa-{name}/src/`
-
-2. Create `tools.py`:
-```python
-from mcp.server.fastmcp import FastMCP
-
-def register_tools(server: FastMCP) -> int:
-    @server.tool()
-    async def my_tool(arg: str) -> str:
-        """Tool description."""
-        return f"Result: {arg}"
-    
-    return 1
-```
-
-3. Create `__init__.py`:
-```python
-from .tools import register_tools
-__all__ = ["register_tools"]
-```
-
-4. Create `server.py`:
-```python
-import asyncio
-from mcp.server.fastmcp import FastMCP
-from .tools import register_tools
-
-def main():
-    server = FastMCP("aa-{name}")
-    register_tools(server)
-    asyncio.run(server.run_stdio_async())
-
-if __name__ == "__main__":
-    main()
-```
-
-5. Add to `aa-common/src/server.py` TOOL_MODULES:
-```python
-TOOL_MODULES = {
-    # ...
-    "{name}": "aa_{name}.tools",
-}
-```
+| Agent | Modules | Tool Count | Focus |
+|-------|---------|------------|-------|
+| developer | git, gitlab, jira, google-calendar, gmail | ~86 | Daily coding |
+| devops | k8s, bonfire, quay, gitlab | ~90 | Deployments |
+| incident | k8s, kibana, jira | ~78 | Production debugging |
+| release | konflux, quay, appinterface, git | ~69 | Shipping |
 
 ## Auto-Debug Infrastructure
 
 All tools are automatically wrapped with debugging support via the `@debuggable` decorator.
 
-### How It Works
+### Flow
 
 ```mermaid
 flowchart LR
@@ -332,50 +221,129 @@ The decorator:
 3. If tool returns `❌`, appends debug hint
 4. If exception occurs, captures error context
 
-### debug_tool() Function
+### Common Auto-Fixable Bugs
 
+| Error Pattern | Likely Cause |
+|---------------|--------------|
+| "Output is not a TTY" | Missing --force/--yes flag |
+| "Unknown flag: --state" | CLI syntax changed |
+| "Unauthorized" | Auth not passed correctly |
+| "manifest unknown" | Wrong image tag format |
+
+## Usage Patterns
+
+### 1. Dynamic Mode (Recommended)
+
+Start with minimal tools, switch agents dynamically:
+
+```bash
+python -m src.server  # Starts with workflow tools only (~29)
+```
+
+Then in chat:
+```
+You: Load the devops agent
+Claude: [calls agent_load("devops")]
+        DevOps agent loaded! Now have k8s, bonfire, quay, gitlab (~90 tools)
+```
+
+### 2. Static Agent Mode
+
+Start with a specific agent's tools pre-loaded:
+
+```bash
+python -m src.server --agent developer  # ~86 tools
+python -m src.server --agent devops     # ~90 tools
+```
+
+### 3. Single Tool Module (Standalone)
+
+Run just one module:
+
+```bash
+cd mcp-servers/aa-git
+python -m src.server
+```
+
+## Adding a New Tool Module
+
+1. **Create directory**: `aa-{name}/src/`
+
+2. **Create `tools.py`**:
 ```python
-async def debug_tool(tool_name: str, error_message: str = "") -> str:
-    """Analyze a failed tool's source code for debugging.
+from mcp.server.fastmcp import FastMCP
+
+def register_tools(server: FastMCP) -> int:
+    @server.tool()
+    async def my_tool(arg: str) -> str:
+        """Tool description."""
+        return f"Result: {arg}"
     
-    Returns the tool's source code along with the error context,
-    allowing Claude to propose a fix.
-    """
-    source_path = TOOL_REGISTRY.get(tool_name)
-    # Returns: source code + error message for analysis
+    return 1
 ```
 
-### Example Fix Workflow
-
-```
-Tool output: ❌ Failed to release namespace
-             💡 To auto-fix: `debug_tool('bonfire_namespace_release')`
-
-Claude: [calls debug_tool('bonfire_namespace_release', 'Output is not a TTY')]
-
-        I found the issue! The bonfire CLI prompts for confirmation
-        but we're not passing --force. Here's the fix:
-
-        ```
-        - args = ['namespace', 'release', namespace]
-        + args = ['namespace', 'release', namespace, '--force']
-        ```
-
-        Apply this fix?
-
-User: yes
-
-Claude: [applies fix with search_replace, commits]
-        ✅ Fixed! Retrying the operation...
+3. **Create `__init__.py`**:
+```python
+from .tools import register_tools
+__all__ = ["register_tools"]
 ```
 
-## Benefits
+4. **Add to TOOL_MODULES** in `agent_loader.py`:
+```python
+TOOL_MODULES = {
+    # ...
+    "{name}": 5,  # estimated tool count
+}
+```
 
-1. **No Code Duplication**: Server infrastructure is shared
-2. **Flexible Loading**: Load any combination of tools
-3. **Dynamic Agents**: Switch agent mid-session with tools updating
-4. **Self-Healing**: Auto-debug failed tools
-5. **Easy Testing**: Test individual tools or combinations
-6. **Cursor Compatible**: Works with Cursor's MCP config
-7. **Maintainable**: Each domain is isolated
+5. **Add to agent config** in `agents/{agent}.yaml`:
+```yaml
+tools:
+  - {name}
+```
 
+## Special Modules
+
+### aa-slack: Event-Driven Architecture
+
+The `aa-slack` module implements a **long-running listener** pattern:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  aa-slack MCP Server                                            │
+│                                                                 │
+│  ┌──────────────────┐     ┌──────────────────┐                 │
+│  │  Background      │     │  SQLite State    │                 │
+│  │  Polling Loop    │────▶│  - Last TS       │                 │
+│  │  (asyncio task)  │     │  - Pending Queue │                 │
+│  └────────┬─────────┘     │  - User Cache    │                 │
+│           │               └────────┬─────────┘                 │
+│           ▼                        │                           │
+│  ┌──────────────────┐              │                           │
+│  │  Slack Web API   │              │                           │
+│  │  (httpx client)  │              ▼                           │
+│  │  - Auth spoof    │     ┌──────────────────┐                 │
+│  │  - Rate limiting │     │  MCP Tools       │                 │
+│  └──────────────────┘     │  - get_pending   │◀─── LLM Calls   │
+│                           │  - send_message  │                 │
+│                           │  - respond_mark  │                 │
+│                           └──────────────────┘                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Environment Variables
+
+| Variable | Module | Description |
+|----------|--------|-------------|
+| `JIRA_URL` | aa-jira | Jira instance URL |
+| `JIRA_JPAT` | aa-jira | Jira Personal Access Token |
+| `GITLAB_TOKEN` | aa-gitlab | GitLab API token |
+| `KUBECONFIG` | aa-k8s | Default kubeconfig path |
+
+> **Note:** Quay tools use `skopeo` which leverages your existing `podman login` or `docker login` credentials - no separate token needed!
+
+## See Also
+
+- [Skills Reference](../docs/skills/README.md) - Available skills
+- [Architecture Overview](../docs/architecture/README.md) - High-level architecture
+- [README](../README.md) - Getting started
