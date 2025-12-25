@@ -44,9 +44,11 @@ from pathlib import Path
 from typing import Any
 
 # Add project paths (use resolve() to get absolute paths)
-# NOTE: aa-slack must come LAST in inserts so it's FIRST in sys.path
+# NOTE: aa-common provides shared utils (src.utils), must be before servers that import from it
+# aa-slack must come LAST in inserts so it's FIRST in sys.path
 # (because insert(0, x) prepends, so last insert = first in list)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-common"))  # Shared utils first
 sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-git"))
 sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-gitlab"))
 sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-jira"))
