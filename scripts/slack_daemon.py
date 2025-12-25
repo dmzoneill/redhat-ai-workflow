@@ -166,15 +166,8 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-
-def load_config() -> dict:
-    """Load configuration from config.json."""
-    config_path = PROJECT_ROOT / "config.json"
-    if config_path.exists():
-        with open(config_path) as f:
-            return json.load(f)
-    return {}
-
+# Use shared config loader from aa-common (avoids duplicate load_config implementation)
+from src.utils import load_config
 
 CONFIG = load_config()
 SLACK_CONFIG = CONFIG.get("slack", {})

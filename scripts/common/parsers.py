@@ -613,6 +613,55 @@ def validate_jira_key(key: str) -> bool:
     return bool(re.match(r'^[A-Z]{2,10}-\d+$', str(key).strip().upper()))
 
 
+def extract_web_url(text: str, pattern: str = None) -> Optional[str]:
+    """
+    Extract a URL from text.
+    
+    Args:
+        text: Text to search for URLs
+        pattern: Optional regex pattern to match specific URLs.
+                 Default matches any https:// URL.
+    
+    Returns:
+        First matching URL, or None if not found
+        
+    Examples:
+        >>> extract_web_url("Check out https://example.com/page")
+        'https://example.com/page'
+        >>> extract_web_url("MR at https://gitlab.com/org/repo/-/merge_requests/123", r'merge_requests/\d+')
+        'https://gitlab.com/org/repo/-/merge_requests/123'
+    """
+    if not text:
+        return None
+    
+    # Build pattern - match URLs, optionally containing a specific pattern
+    if pattern:
+        url_pattern = rf'(https://\S*{pattern}\S*)'
+    else:
+        url_pattern = r'(https://\S+)'
+    
+    match = re.search(url_pattern, str(text))
+    if match:
+        url = match.group(1)
+        # Clean up trailing punctuation that might be captured
+        url = url.rstrip('.,;:\'\")')
+        return url
+    return None
+
+
+def extract_mr_url(text: str) -> Optional[str]:
+    """
+    Extract a GitLab merge request URL from text.
+    
+    Args:
+        text: Text to search for MR URLs
+        
+    Returns:
+        First MR URL found, or None
+    """
+    return extract_web_url(text, r'merge_requests/\d+')
+
+
 def extract_mr_id_from_url(url: str) -> Optional[Dict[str, Any]]:
     """
     Extract project and MR ID from a GitLab MR URL.
