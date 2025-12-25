@@ -167,24 +167,9 @@ steps:
   - name: parse_merged_today
     description: "Filter for today's merges"
     compute: |
-      import re
-      from datetime import datetime
+      from scripts.common.parsers import parse_mr_list
       
-      today = ctx['today']
-      merged_today = []
-      
-      # Parse MR list - we'll take first few as "recent"
-      # Real implementation would filter by merge date
-      raw = str(merged_mrs_raw) if merged_mrs_raw else ""
-      
-      for line in raw.split('\n')[:10]:
-        match = re.search(r'!(\d+)\s+.+?\s+(.+?)\s+\(main\)', line)
-        if match:
-          merged_today.append({
-            "id": match.group(1),
-            "title": match.group(2)[:50]
-          })
-      
+      merged_today = parse_mr_list(merged_mrs_raw) if merged_mrs_raw else []
       result = merged_today[:5]  # Top 5 recent merges
     output: merged_today
     on_error: continue
@@ -292,26 +277,9 @@ steps:
   - name: parse_ephemeral
     description: "Parse ephemeral namespaces"
     compute: |
-      import re
+      from scripts.common.parsers import parse_namespaces
       
-      namespaces = []
-      raw = str(ephemeral_raw) if ephemeral_raw else ""
-      
-      # Look for namespace names and expiry times
-      for line in raw.split('\n'):
-        if 'ephemeral-' in line:
-          match = re.search(r'(ephemeral-\w+)', line)
-          if match:
-            ns_name = match.group(1)
-            # Try to extract expiry
-            expiry_match = re.search(r'(\d+[hm])', line)
-            expiry = expiry_match.group(1) if expiry_match else 'unknown'
-            namespaces.append({
-              "name": ns_name,
-              "expires": expiry
-            })
-      
-      result = namespaces
+      result = parse_namespaces(ephemeral_raw) if ephemeral_raw else []
     output: ephemeral_namespaces
     on_error: continue
 
