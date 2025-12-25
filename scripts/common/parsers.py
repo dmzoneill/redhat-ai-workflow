@@ -793,3 +793,202 @@ def extract_current_branch(git_status_output: str) -> Optional[str]:
     match = re.search(r"On branch (\S+)", str(git_status_output))
     return match.group(1) if match else None
 
+
+def parse_prometheus_alert(message: str) -> Dict[str, Any]:
+    """
+    Parse Prometheus alert message from Slack or AlertManager.
+    
+    Args:
+        message: Raw alert message (may contain HTML)
+        
+    Returns:
+        Dict with:
+        - alert_name: Name of the alert
+        - firing_count: Number of firing instances
+        - description: Alert description
+        - namespace: Affected namespace (if found)
+        - is_billing: Whether this is a billing-related alert
+        - links: Dict of extracted links (grafana, prometheus, alertmanager, etc.)
+    """
+    import html
+    
+    if not message:
+        return {
+            "alert_name": "Unknown Alert",
+            "firing_count": 1,
+            "description": "",
+            "namespace": None,
+            "is_billing": False,
+            "links": {}
+        }
+    
+    msg = html.unescape(str(message))
+    
+    # Extract alert name (pattern: Alert: NAME [FIRING:N])
+    alert_name_match = re.search(r'Alert:\s*([^\[]+)', msg, re.IGNORECASE)
+    alert_name = alert_name_match.group(1).strip() if alert_name_match else "Unknown Alert"
+    
+    # Extract firing count
+    firing_match = re.search(r'\[FIRING:(\d+)\]', msg)
+    firing_count = int(firing_match.group(1)) if firing_match else 1
+    
+    # Extract description (text after alert name)
+    desc_match = re.search(r'\[FIRING:\d+\]\s*(.+?)(?:<|$)', msg, re.DOTALL)
+    description = desc_match.group(1).strip()[:500] if desc_match else ""
+    
+    # Extract namespace from links or message
+    ns_match = re.search(r'namespace[=:]([a-z0-9-]+)', msg, re.IGNORECASE)
+    namespace = ns_match.group(1) if ns_match else None
+    
+    # Check if billing-related
+    billing_keywords = ['billing', 'subscription', 'vcpu', 'host_count', 
+                        'infra_usage', 'metering', 'swatch', 'rhsm']
+    is_billing = any(kw in msg.lower() for kw in billing_keywords)
+    
+    # Extract links
+    links = {}
+    link_patterns = {
+        "alertmanager": r'href="(https://alertmanager[^"]+)"',
+        "grafana": r'href="(https://grafana[^"]+)"',
+        "prometheus": r'href="(https://prometheus[^"]+)"',
+        "runbook": r'href="(https://gitlab[^"]+\.rst)"',
+        "console": r'href="(https://console-openshift[^"]+)"',
+        "silence": r'href="(https://alertmanager[^"]+silences[^"]+)"'
+    }
+    for name, pattern in link_patterns.items():
+        match = re.search(pattern, msg)
+        if match:
+            links[name] = match.group(1)
+    
+    return {
+        "alert_name": alert_name,
+        "firing_count": firing_count,
+        "description": description,
+        "namespace": namespace,
+        "is_billing": is_billing,
+        "links": links
+    }
+
+
+def extract_billing_event_number(jira_output: str) -> int:
+    """
+    Extract the next billing event number from Jira search results.
+    
+    Args:
+        jira_output: Raw output from jira_search for BillingEvent issues
+        
+    Returns:
+        Next billing event number (highest found + 1, or 1 if none found)
+    """
+    if not jira_output:
+        return 1
+    
+    billing_numbers = re.findall(r'BillingEvent\s*(\d+)', str(jira_output))
+    if billing_numbers:
+        highest = max(int(n) for n in billing_numbers)
+        return highest + 1
+    return 1
+
+
+def parse_quay_manifest(output: str) -> Optional[Dict[str, str]]:
+    """
+    Parse Quay manifest output for image digest.
+    
+    Args:
+        output: Raw output from quay_get_manifest or similar
+        
+    Returns:
+        Dict with 'digest' (sha256 hash) and 'full_digest' (sha256:hash), or None
+    """
+    if not output or 'not found' in output.lower():
+        return None
+    
+    # Format: **Manifest Digest:** `sha256:abc123...` or sha256:abc123
+    digest_match = re.search(r'sha256:([a-f0-9]{64})', str(output))
+    if digest_match:
+        digest = digest_match.group(1)
+        return {
+            "digest": digest,
+            "full_digest": f"sha256:{digest}"
+        }
+    return None
+
+
+def extract_ephemeral_namespace(output: str) -> Optional[str]:
+    """
+    Extract ephemeral namespace name from bonfire output.
+    
+    Args:
+        output: Raw output from bonfire namespace commands
+        
+    Returns:
+        Namespace name like 'ephemeral-abc123' or None
+    """
+    if not output:
+        return None
+    
+    match = re.search(r'(ephemeral-[a-z0-9]+)', str(output).lower())
+    return match.group(1) if match else None
+
+
+def extract_git_sha(text: str) -> Optional[str]:
+    """
+    Extract git SHA from text (commit message, MR details, etc.).
+    
+    Args:
+        text: Text containing a git SHA
+        
+    Returns:
+        Git SHA (7-40 chars) or None
+    """
+    if not text:
+        return None
+    
+    # Try with label first
+    sha_match = re.search(r'SHA[:\s]+`?([a-f0-9]{7,40})`?', str(text), re.IGNORECASE)
+    if sha_match:
+        return sha_match.group(1)
+    
+    # Try standalone SHA
+    sha_match = re.search(r'\b([a-f0-9]{40})\b', str(text))
+    if sha_match:
+        return sha_match.group(1)
+    
+    # Try short SHA (must be at word boundary)
+    sha_match = re.search(r'\b([a-f0-9]{7,12})\b', str(text))
+    if sha_match:
+        return sha_match.group(1)
+    
+    return None
+
+
+def parse_error_logs(logs: str, max_errors: int = 5) -> List[str]:
+    """
+    Extract error patterns from log output.
+    
+    Args:
+        logs: Raw log output
+        max_errors: Maximum number of errors to return
+        
+    Returns:
+        List of error messages (truncated to 200 chars each)
+    """
+    if not logs:
+        return []
+    
+    error_patterns = [
+        r'(Error|ERROR|Exception|EXCEPTION):\s*(.+?)(?:\n|$)',
+        r'(Failed|FAILED):\s*(.+?)(?:\n|$)',
+        r'(Traceback|traceback)(.+?)(?:\n\n|\Z)',
+    ]
+    
+    errors_found = []
+    for pattern in error_patterns:
+        matches = re.findall(pattern, str(logs), re.MULTILINE | re.DOTALL)
+        for match in matches[:3]:  # Limit to 3 per pattern
+            error_text = match[1] if isinstance(match, tuple) else match
+            if len(error_text) > 20:  # Filter noise
+                errors_found.append(error_text[:200])
+    
+    return errors_found[:max_errors]
+
