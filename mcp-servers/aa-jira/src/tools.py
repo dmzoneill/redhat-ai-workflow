@@ -17,7 +17,7 @@ from mcp.server.fastmcp import FastMCP
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_section_config
+from src.utils import get_section_config, get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -487,7 +487,9 @@ def register_tools(server: "FastMCP") -> int:
         # Convert Markdown to Jira if needed
         if convert_markdown and description:
             try:
-                sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
+                scripts_path = str(get_project_root() / "scripts")
+                if scripts_path not in sys.path:
+                    sys.path.insert(0, scripts_path)
                 from common.jira_utils import markdown_to_jira
                 description = markdown_to_jira(description)
             except ImportError:

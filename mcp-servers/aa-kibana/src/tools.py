@@ -49,9 +49,15 @@ def get_kibana_environment(environment: str) -> "KibanaEnvironment":
     config = _load_kibana_config()
     if env_key in config:
         env_config = config[env_key]
+        # Use get_kubeconfig for consistent kubeconfig resolution
+        kubeconfig = env_config.get("kubeconfig")
+        if not kubeconfig:
+            kubeconfig = get_kubeconfig(env_key)
+        else:
+            kubeconfig = os.path.expanduser(kubeconfig)
         return KibanaEnvironment(
             url=env_config.get("url", ""),
-            kubeconfig=env_config.get("kubeconfig", str(Path.home() / f".kube/config.{env_key[0]}")),
+            kubeconfig=kubeconfig,
             index_pattern=env_config.get("index_pattern", "app-logs-*"),
             namespace=env_config.get("namespace", "default"),
         )
@@ -63,7 +69,7 @@ def get_kibana_environment(environment: str) -> "KibanaEnvironment":
     
     return KibanaEnvironment(
         url=url,
-        kubeconfig=str(Path.home() / f".kube/config.{env_key[0]}"),
+        kubeconfig=get_kubeconfig(env_key),  # Use centralized kubeconfig resolution
         index_pattern="app-logs-*",
         namespace="default",
     )
@@ -73,8 +79,12 @@ def get_kibana_environment(environment: str) -> "KibanaEnvironment":
 _KIBANA_ENV_CACHE: dict = {}
 
 
-def get_env_config(environment: str) -> "KibanaEnvironment | None":
-    """Get environment config, with caching."""
+def get_cached_kibana_config(environment: str) -> "KibanaEnvironment | None":
+    """Get Kibana environment config, with caching.
+    
+    Note: Named to avoid confusion with utils.get_env_config() which
+    retrieves service config from config.json.
+    """
     env_key = "production" if environment.lower() == "prod" else environment.lower()
     if env_key not in _KIBANA_ENV_CACHE:
         try:
@@ -114,7 +124,7 @@ async def kibana_request(
     """Make authenticated request to Kibana."""
     import httpx
     
-    env_config = get_env_config(environment)
+    env_config = get_cached_kibana_config(environment)
     if not env_config:
         return False, f"Unknown environment: {environment}. Configure in config.json or set KIBANA_{environment.upper()}_URL"
     
@@ -158,7 +168,7 @@ def build_kibana_url(
     time_to: str = "now",
 ) -> str:
     """Build a Kibana Discover URL for the given parameters."""
-    env_config = get_env_config(environment)
+    env_config = get_cached_kibana_config(environment)
     if not env_config:
         return ""
     
@@ -206,7 +216,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Matching log entries.
         """
-        env_config = get_env_config(environment)
+        env_config = get_cached_kibana_config(environment)
         if not env_config:
             return [TextContent(type="text", text=f"❌ Unknown environment: {environment}")]
 
@@ -403,7 +413,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Clickable Kibana URL.
         """
-        env_config = get_env_config(environment)
+        env_config = get_cached_kibana_config(environment)
         if not env_config:
             return [TextContent(type="text", text=f"❌ Unknown environment: {environment}")]
 
@@ -466,7 +476,7 @@ def register_tools(server: "FastMCP") -> int:
         lines = ["## Kibana Status", ""]
 
         for env in envs:
-            env_config = get_env_config(env)
+            env_config = get_cached_kibana_config(env)
             if not env_config:
                 lines.append(f"**{env}:** ❌ Unknown environment")
                 continue
@@ -553,7 +563,7 @@ def register_tools(server: "FastMCP") -> int:
             return [TextContent(type="text", text=f"❌ Failed to list dashboards: {result}")]
 
         dashboards = result.get("saved_objects", [])
-        env_config = get_env_config(environment)
+        env_config = get_cached_kibana_config(environment)
 
         lines = [f"## Dashboards: {environment}", ""]
 

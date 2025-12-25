@@ -140,3 +140,4 @@ Claude: 📋 Your Open MRs
 - [rebase_pr](./rebase_pr.md) - Resolve conflicts
 - [create_mr](./create_mr.md) - Create new MR
 
+

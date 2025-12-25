@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import httpx
@@ -16,13 +17,26 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+
+from src.utils import load_config
+
 logger = logging.getLogger(__name__)
 
 
 # ==================== Configuration ====================
 
-QUAY_API_URL = os.getenv("QUAY_API_URL", "https://quay.io/api/v1")
-QUAY_DEFAULT_NAMESPACE = os.getenv("QUAY_NAMESPACE", "redhat-user-workloads")
+def _get_quay_config() -> dict:
+    """Get Quay configuration from config.json."""
+    config = load_config()
+    return config.get("quay", {})
+
+
+_quay_cfg = _get_quay_config()
+QUAY_API_URL = _quay_cfg.get("api_url") or os.getenv("QUAY_API_URL", "https://quay.io/api/v1")
+QUAY_DEFAULT_NAMESPACE = _quay_cfg.get("default_namespace") or os.getenv("QUAY_NAMESPACE", "redhat-user-workloads")
 QUAY_REGISTRY = "quay.io"
 
 

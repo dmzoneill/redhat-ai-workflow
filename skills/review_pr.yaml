@@ -70,18 +70,9 @@ steps:
               gitlab_project = url_match.group(1)
               mr_id_from_url = int(url_match.group(2))
 
-      # Load config
-      config_paths = [
-          Path.cwd() / "config.json",
-          Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-          if p.exists():
-              with open(p) as f:
-                  config = json.load(f)
-              break
-
+      # Load config using shared loader
+      from scripts.common.config_loader import load_config
+      config = load_config()
       repos = config.get("repositories", {})
 
       # Repo name from config
@@ -319,22 +310,13 @@ steps:
     description: "Check commit title matches commitlint config from config.json"
     compute: |
       import re
-      import json
-      from pathlib import Path
+      from scripts.common.config_loader import load_config
       
       issues = []
       
       # Load commit_format from config.json
-      config_paths = [
-          Path.cwd() / "config.json",
-          Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      commit_cfg = {}
-      for p in config_paths:
-          if p.exists():
-              with open(p) as f:
-                  commit_cfg = json.load(f).get("commit_format", {})
-              break
+      config = load_config()
+      commit_cfg = config.get("commit_format", {})
       
       # Get valid types from config, with fallback
       valid_types = commit_cfg.get("types", ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build', 'revert'])

@@ -71,3 +71,4 @@ Uses kubeconfig for authentication:
 - [investigate_alert](../skills/investigate_alert.md) - Queries metrics
 - [debug_prod](../skills/debug_prod.md) - Deep analysis
 
+

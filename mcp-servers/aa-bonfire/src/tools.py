@@ -19,7 +19,7 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import load_config, get_section_config, get_kubeconfig as get_kubeconfig_base
+from src.utils import load_config, get_section_config, get_kubeconfig
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +29,12 @@ def load_bonfire_config() -> dict:
     return get_section_config("bonfire", {})
 
 
-def get_kubeconfig() -> str:
+def get_ephemeral_kubeconfig() -> str:
     """Get kubeconfig path for ephemeral cluster.
     
-    Uses common utils.get_kubeconfig() with 'ephemeral' environment.
+    Convenience function - calls get_kubeconfig("ephemeral").
     """
-    return get_kubeconfig_base("ephemeral")
+    return get_kubeconfig("ephemeral")
 
 
 def get_app_config(app_name: str = "", billing: bool = False) -> dict:
@@ -101,7 +101,7 @@ async def run_bonfire(
     
     run_env = os.environ.copy()
     # Always set KUBECONFIG for ephemeral cluster
-    run_env["KUBECONFIG"] = get_kubeconfig()
+    run_env["KUBECONFIG"] = get_ephemeral_kubeconfig()
     if env:
         run_env.update(env)
     
@@ -866,7 +866,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
         ]
 
         # Log the full command for debugging
-        kubeconfig = get_kubeconfig()
+        kubeconfig = get_ephemeral_kubeconfig()
         cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
         logger.info(f"Deploying AA: {cmd_preview}")
 
@@ -954,7 +954,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
             app_name,
         ]
 
-        kubeconfig = get_kubeconfig()
+        kubeconfig = get_ephemeral_kubeconfig()
         cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
         logger.info(f"Local deploy: {cmd_preview}")
 
@@ -1200,7 +1200,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
             app_name,
         ]
 
-        kubeconfig = get_kubeconfig()
+        kubeconfig = get_ephemeral_kubeconfig()
         cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(deploy_args)}"
 
         lines.append("### Deploying...")

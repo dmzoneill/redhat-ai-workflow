@@ -69,24 +69,13 @@ steps:
   - name: resolve_project
     description: "Determine which GitLab project to check"
     compute: |
-      import json
       import os
-      from pathlib import Path
-
+      from scripts.common.config_loader import load_config
+      
       gitlab_project = None
-
-      # Load config
-      config_paths = [
-          Path.cwd() / "config.json",
-          Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-          if p.exists():
-              with open(p) as f:
-                  config = json.load(f)
-              break
-
+      
+      # Load config using shared loader
+      config = load_config()
       repos = config.get("repositories", {})
 
       # Explicit project
@@ -116,18 +105,10 @@ steps:
     compute: |
       import getpass
       import os
+      from scripts.common.config_loader import load_config
       
       # Get username from config or fallback to system
-      from pathlib import Path
-      import json
-      
-      config_paths = [Path.cwd() / "config.json", Path.home() / "src/redhat-ai-workflow/config.json"]
-      cfg = {}
-      for p in config_paths:
-        if p.exists():
-          with open(p) as f:
-            cfg = json.load(f)
-          break
+      cfg = load_config()
       
       # Use config if available, otherwise fallback to system user
       gitlab_username = cfg.get("user", {}).get("gitlab_username") or \

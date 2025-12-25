@@ -27,3 +27,4 @@ I will:
 - Image tag must be 64-char SHA256 digest
 - Template ref must be 40-char git SHA
 
+

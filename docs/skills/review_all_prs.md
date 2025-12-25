@@ -160,3 +160,4 @@ Claude: 📋 Reviewing 6 open MRs...
 - [check_my_prs](./check_my_prs.md) - Focus on your PRs
 - [rebase_pr](./rebase_pr.md) - Rebase conflicts
 
+

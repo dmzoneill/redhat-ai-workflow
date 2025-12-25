@@ -26,3 +26,4 @@ kubectl --kubeconfig=~/.kube/config.e get namespaces | grep ephemeral | head -5
 
 Run each command to verify the tool stack is working.
 
+

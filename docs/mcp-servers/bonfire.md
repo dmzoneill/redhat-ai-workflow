@@ -105,3 +105,4 @@ KUBECONFIG=~/.kube/config.e bonfire deploy \
 
 - [test_mr_ephemeral](../skills/test_mr_ephemeral.md) - Full deployment workflow
 
+

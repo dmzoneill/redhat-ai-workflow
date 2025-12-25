@@ -40,30 +40,32 @@ steps:
   - name: load_config
     description: "Load namespace and path configuration"
     compute: |
-      import json
-      from pathlib import Path
+      import os
       from scripts.common.config_loader import load_config
-
-      config_paths = [
-          Path.cwd() / "config.json",
-          Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-          if p.exists():
-              with open(p) as f:
-                  config = json.load(f)
-              break
-
+      
+      config = load_config()
+      
       # Get namespace config
       ns_config = config.get("namespaces", {}).get("production", {})
       ai_config = config.get("app_interface", {})
       repos = config.get("repositories", {})
-
+      paths_cfg = config.get("paths", {})
+      
       # Get app-interface repo path
       ai_repo_name = ai_config.get("repo", "app-interface")
-      ai_repo_path = repos.get(ai_repo_name, {}).get("path", str(Path.home() / "src/app-interface"))
-
+      ai_repo_path = ai_config.get("path") or repos.get(ai_repo_name, {}).get("path", "")
+      if not ai_repo_path:
+          # Try workspace_roots
+          workspace_roots = paths_cfg.get("workspace_roots", [])
+          for root in workspace_roots:
+              candidate = os.path.join(os.path.expanduser(root), "app-interface")
+              if os.path.exists(candidate):
+                  ai_repo_path = candidate
+                  break
+      
+      # Get namespace file names from config
+      ns_files = ai_config.get("namespace_files", {})
+      
       result = {
           "namespace_main": ns_config.get("main", "tower-analytics-prod"),
           "namespace_billing": ns_config.get("billing", "tower-analytics-prod-billing"),
@@ -73,6 +75,9 @@ steps:
           "saas_namespaces": ai_config.get("saas_namespaces", "data/services/insights/tower-analytics/namespaces"),
           "saas_cicd": ai_config.get("deploy_file", "data/services/insights/tower-analytics/cicd/deploy-clowder.yml").rsplit("/", 1)[0],
           "appinterface_path": ai_repo_path,
+          "jira_url": config.get("jira", {}).get("url", "https://issues.redhat.com"),
+          "ns_file_main": ns_files.get("prod_main", "tower-analytics-prod.yml"),
+          "ns_file_billing": ns_files.get("prod_billing", "tower-analytics-prod-billing.yml"),
       }
     output: cfg
 
@@ -449,11 +454,11 @@ steps:
           # Parse to find the ref for this namespace
           data = yaml.safe_load(content)
           
-          # Target namespace file based on which we're debugging
+          # Target namespace file based on which we're debugging (from config)
           if 'billing' in ns_info.get('short', ''):
-            target_ns = "tower-analytics-prod-billing.yml"
+            target_ns = cfg.get("ns_file_billing", "tower-analytics-prod-billing.yml")
           else:
-            target_ns = "tower-analytics-prod.yml"
+            target_ns = cfg.get("ns_file_main", "tower-analytics-prod.yml")
           
           # Find the ref for this namespace in resourceTemplates
           for template in data.get('resourceTemplates', []):
@@ -482,10 +487,11 @@ steps:
       ns_path = Path(cfg["appinterface_path"]) / cfg["saas_namespaces"]
       config_info = {}
       
+      # Use namespace file from config
       if 'billing' in ns_info.get('short', ''):
-        ns_file = ns_path / "tower-analytics-prod-billing.yml"
+        ns_file = ns_path / cfg.get("ns_file_billing", "tower-analytics-prod-billing.yml")
       else:
-        ns_file = ns_path / "tower-analytics-prod.yml"
+        ns_file = ns_path / cfg.get("ns_file_main", "tower-analytics-prod.yml")
       
       if ns_file.exists():
         try:

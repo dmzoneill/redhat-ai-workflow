@@ -145,3 +145,4 @@ flowchart TD
 - [standup_summary](./standup_summary.md) - Detailed standup generation
 - [sync_branch](./sync_branch.md) - Quick sync before going home
 
+

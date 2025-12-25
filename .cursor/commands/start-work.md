@@ -41,3 +41,4 @@ After starting work:
 2. Commit with: `AAP-61214 - type(scope): description`
 3. Push and create MR: `/create-mr`
 
+
