@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "k8s": { "command": "aa-k8s" },
-    "prometheus": { "command": "aa-prometheus" },
-    "alertmanager": { "command": "aa-alertmanager" },
-    "kibana": { "command": "aa-kibana" }
-  }
-}
-
