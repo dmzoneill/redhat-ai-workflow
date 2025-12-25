@@ -129,6 +129,109 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     
     @server.tool()
+    async def alertmanager_alerts(
+        environment: str = "stage",
+        filter_name: str = "",
+        silenced: bool = False,
+        inhibited: bool = False,
+    ) -> list[TextContent]:
+        """
+        List active alerts in Alertmanager.
+
+        Args:
+            environment: Target environment (stage, production)
+            filter_name: Filter alerts by name containing this string (e.g., "Automation Analytics")
+            silenced: Include silenced alerts (default: False)
+            inhibited: Include inhibited alerts (default: False)
+
+        Returns:
+            List of active alerts with their details.
+        """
+        url, token = await get_env_config(environment)
+
+        # Build query params
+        params = []
+        if silenced:
+            params.append("silenced=true")
+        else:
+            params.append("silenced=false")
+        if inhibited:
+            params.append("inhibited=true")
+        else:
+            params.append("inhibited=false")
+        params.append("active=true")
+        
+        endpoint = "/alerts?" + "&".join(params)
+        success, result = await alertmanager_request(url, endpoint, token=token)
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to get alerts: {result}")]
+
+        if not isinstance(result, list):
+            return [TextContent(type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}")]
+
+        alerts = result
+        
+        # Filter by name if specified
+        if filter_name:
+            filter_lower = filter_name.lower()
+            filtered = []
+            for a in alerts:
+                labels = a.get("labels", {})
+                annotations = a.get("annotations", {})
+                
+                # Check alertname, namespace, and common labels/annotations
+                searchable = " ".join([
+                    str(labels.get("alertname", "")),
+                    str(labels.get("namespace", "")),
+                    str(labels.get("service", "")),
+                    str(annotations.get("summary", "")),
+                    str(annotations.get("description", "")),
+                ]).lower()
+                
+                if filter_lower in searchable:
+                    filtered.append(a)
+            alerts = filtered
+
+        if not alerts:
+            return [TextContent(type="text", text=f"✅ No active alerts in {environment}" + (f" matching '{filter_name}'" if filter_name else ""))]
+
+        lines = [f"## 🚨 Active Alerts in {environment}", f"**Count:** {len(alerts)}", ""]
+
+        for a in alerts[:20]:
+            labels = a.get("labels", {})
+            annotations = a.get("annotations", {})
+            status = a.get("status", {})
+            
+            alertname = labels.get("alertname", "Unknown")
+            severity = labels.get("severity", "unknown")
+            namespace = labels.get("namespace", "")
+            
+            severity_icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(severity, "⚪")
+            
+            summary = annotations.get("summary", "")[:80]
+            description = annotations.get("description", "")[:100]
+            
+            starts_at = a.get("startsAt", "")[:19]
+            
+            lines.append(f"{severity_icon} **{alertname}** ({severity})")
+            if namespace:
+                lines.append(f"   Namespace: `{namespace}`")
+            if summary:
+                lines.append(f"   {summary}")
+            lines.append(f"   Started: {starts_at}")
+            
+            # Add runbook link if available
+            runbook = annotations.get("runbook_url", "")
+            if runbook:
+                lines.append(f"   [Runbook]({runbook})")
+            
+            lines.append("")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+
+    @server.tool()
     async def alertmanager_silences(
         environment: str = "stage",
         state: str = "",

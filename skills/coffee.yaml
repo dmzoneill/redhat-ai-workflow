@@ -268,35 +268,34 @@ steps:
     output: my_prs
 
   - name: check_pr_feedback
-    description: "Check my PRs for new feedback (reuses check_mr_feedback pattern)"
+    description: "Check my PRs for new feedback (using shared parsers)"
     compute: |
       import subprocess
-      import re
+      import sys
+      from pathlib import Path
+      
+      # Add shared parsers
+      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
+      from common.parsers import BOT_PATTERNS, is_bot_comment
       
       feedback = []
-      
-      # Bot patterns to filter (same as check_mr_feedback skill)
-      bot_patterns = [
-        r'group_\d+_bot', r'konflux', r'Starting Pipelinerun',
-        r'stone-prod', r'tkn pr logs', r'Integration test for component',
-        r'aap-aa-on-pull-request', r'^/retest', r'^/approve',
-      ]
+      current_user = ctx.get('config', {}).get('user', {}).get('username', 'daoneill')
       
       for pr in my_prs[:5]:  # Check last 5
         mr_id = pr['id']
         
+        # Get comments via glab CLI (subprocess required for loop)
         result = subprocess.run(
           ["glab", "mr", "view", str(mr_id), "--comments", "-R", "automation-analytics/automation-analytics-backend"],
           capture_output=True,
           text=True
         )
         
-        # Find human comments (same logic as check_mr_feedback)
-        current_user = ctx.get('config', {}).get('user', {}).get('username', 'daoneill')
+        # Find human comments using shared filter
+        import re
         for line in result.stdout.split('\n'):
           if ' commented ' in line and current_user.lower() not in line.lower():
-            is_bot = any(re.search(p, line, re.IGNORECASE) for p in bot_patterns)
-            if not is_bot:
+            if not is_bot_comment(line, ''):
               match = re.match(r'^(\w+) commented', line)
               if match:
                 feedback.append({
@@ -374,21 +373,67 @@ steps:
     output: recent_merges
     on_error: continue
 
-  # ==================== ALERTS ====================
+  # ==================== ALERTS (using Alertmanager MCP tools) ====================
   
-  - name: check_alerts
-    description: "Check for any firing alerts"
+  - name: check_alerts_stage
+    description: "Check for Automation Analytics alerts in stage"
+    tool: alertmanager_alerts
+    args:
+      environment: "stage"
+      filter_name: "Automation Analytics"
+      silenced: false
+    output: alerts_stage_raw
+    on_error: continue
+
+  - name: check_alerts_prod
+    description: "Check for Automation Analytics alerts in production"
+    tool: alertmanager_alerts
+    args:
+      environment: "production"
+      filter_name: "Automation Analytics"
+      silenced: false
+    output: alerts_prod_raw
+    on_error: continue
+
+  - name: parse_alerts
+    description: "Parse alert results"
     compute: |
-      # This would use Prometheus/Alertmanager tools if available
-      # For now, check Slack alert channels
+      import re
+      
       alerts = {
         "stage": [],
         "production": [],
         "error": None
       }
       
-      # Could integrate with alertmanager_get_alerts tool
-      # For now, return placeholder
+      # Parse stage alerts
+      stage_text = str(alerts_stage_raw) if alerts_stage_raw else ""
+      if "No active alerts" in stage_text or not stage_text:
+        alerts["stage"] = []
+      elif "Failed to get alerts" in stage_text:
+        alerts["error"] = "Could not connect to Alertmanager (stage)"
+      else:
+        # Extract alert names from the output
+        for line in stage_text.split('\n'):
+          if line.startswith('🔴') or line.startswith('🟡') or line.startswith('🔵'):
+            match = re.search(r'\*\*(.+?)\*\*', line)
+            if match:
+              alerts["stage"].append(match.group(1))
+      
+      # Parse production alerts
+      prod_text = str(alerts_prod_raw) if alerts_prod_raw else ""
+      if "No active alerts" in prod_text or not prod_text:
+        alerts["production"] = []
+      elif "Failed to get alerts" in prod_text:
+        if not alerts["error"]:
+          alerts["error"] = "Could not connect to Alertmanager (prod)"
+      else:
+        for line in prod_text.split('\n'):
+          if line.startswith('🔴') or line.startswith('🟡') or line.startswith('🔵'):
+            match = re.search(r'\*\*(.+?)\*\*', line)
+            if match:
+              alerts["production"].append(match.group(1))
+      
       result = alerts
     output: alerts
     on_error: continue
@@ -466,38 +511,36 @@ steps:
     output: ephemeral_namespaces
     on_error: continue
 
-  # ==================== YESTERDAY'S WORK ====================
+  # ==================== YESTERDAY'S WORK (using MCP tool) ====================
   
-  - name: get_yesterdays_commits
+  - name: get_yesterdays_commits_raw
     description: "Get your commits from yesterday (for standup)"
+    tool: git_log
+    args:
+      repo: "automation-analytics-backend"
+      limit: 10
+      author: "{{ ctx.config.user.username | default('daoneill') }}"
+      since: "yesterday"
+      until: "today"
+    output: yesterdays_commits_raw
+    on_error: continue
+
+  - name: parse_yesterdays_commits
+    description: "Parse commit output"
     compute: |
-      import subprocess
       import re
-      import os
-      from datetime import datetime, timedelta
       
       commits = []
+      raw = str(yesterdays_commits_raw) if yesterdays_commits_raw else ""
       
-      # Get commits from yesterday
-      yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-      
-      git_author = ctx.get('config', {}).get('user', {}).get('username', 'daoneill')
-      result = subprocess.run(
-        ["git", "log", "--oneline", f"--author={git_author}", f"--since={yesterday}", "--until=today"],
-        capture_output=True,
-        text=True,
-        cwd=os.path.expanduser("~/src/automation-analytics-backend")
-      )
-      
-      for line in result.stdout.strip().split('\n')[:10]:
-        if line.strip():
-          # Parse: abc1234 Commit message
-          parts = line.split(' ', 1)
-          if len(parts) == 2:
-            commits.append({
-              "sha": parts[0][:7],
-              "message": parts[1][:60]
-            })
+      for line in raw.split('\n'):
+        # Look for lines like "- `abc1234 commit message`"
+        match = re.search(r'`([a-f0-9]{7,})\s+(.+?)`', line)
+        if match:
+          commits.append({
+            "sha": match.group(1)[:7],
+            "message": match.group(2)[:60]
+          })
       
       result = commits
     output: yesterdays_commits
@@ -542,8 +585,12 @@ steps:
       
       lines = []
       
+      # Get user's first name from config
+      full_name = ctx.get('config', {}).get('user', {}).get('full_name', 'there')
+      first_name = full_name.split()[0] if full_name else 'there'
+      
       # Header
-      lines.append(f"# ☕ {ctx['greeting']}, Dave!")
+      lines.append(f"# ☕ {ctx['greeting']}, {first_name}!")
       lines.append(f"")
       lines.append(f"**{ctx['day_name']}, {ctx['today']}** | {ctx['time']} Irish time")
       lines.append("")

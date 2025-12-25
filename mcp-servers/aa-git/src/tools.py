@@ -178,8 +178,30 @@ def register_tools(server: FastMCP) -> int:
     tool_count += 1
     
     @server.tool()
-    async def git_log(repo: str, limit: int = 10, oneline: bool = True) -> str:
-        """Show recent commit history."""
+    async def git_log(
+        repo: str, 
+        limit: int = 10, 
+        oneline: bool = True,
+        author: str = "",
+        since: str = "",
+        until: str = "",
+        branch: str = "",
+    ) -> str:
+        """
+        Show commit history with optional filters.
+        
+        Args:
+            repo: Repository name or path
+            limit: Maximum commits to show
+            oneline: Use compact format
+            author: Filter by author name/email
+            since: Only commits after date (e.g., "2024-01-01", "yesterday", "1 week ago")
+            until: Only commits before date
+            branch: Specific branch to show (default: current)
+            
+        Returns:
+            Commit history.
+        """
         path = resolve_repo_path(repo)
         
         if oneline:
@@ -187,11 +209,34 @@ def register_tools(server: FastMCP) -> int:
         else:
             args = ["log", f"-{limit}", "--format=%h|%an|%ar|%s"]
         
+        if author:
+            args.append(f"--author={author}")
+        if since:
+            args.append(f"--since={since}")
+        if until:
+            args.append(f"--until={until}")
+        if branch:
+            args.append(branch)
+        
         success, output = await run_git(args, cwd=path)
         if not success:
             return f"❌ Failed to get log: {output}"
         
-        lines = [f"## Recent Commits in `{repo}`", ""]
+        # Build header
+        filters = []
+        if author:
+            filters.append(f"by {author}")
+        if since:
+            filters.append(f"since {since}")
+        if until:
+            filters.append(f"until {until}")
+        filter_str = f" ({', '.join(filters)})" if filters else ""
+        
+        lines = [f"## Recent Commits in `{repo}`{filter_str}", ""]
+        
+        if not output.strip():
+            lines.append("*No commits found matching criteria*")
+            return "\n".join(lines)
         
         if oneline:
             for line in output.strip().split("\n")[:limit]:
@@ -200,9 +245,9 @@ def register_tools(server: FastMCP) -> int:
             for line in output.strip().split("\n")[:limit]:
                 parts = line.split("|")
                 if len(parts) >= 4:
-                    hash_, author, date, msg = parts[0], parts[1], parts[2], parts[3]
+                    hash_, author_name, date, msg = parts[0], parts[1], parts[2], parts[3]
                     lines.append(f"- `{hash_}` {msg}")
-                    lines.append(f"  *{author}* - {date}")
+                    lines.append(f"  *{author_name}* - {date}")
         
         return "\n".join(lines)
     tool_count += 1
