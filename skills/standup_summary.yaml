@@ -62,26 +62,15 @@ steps:
   - name: resolve_repo
     description: "Determine which repo and GitLab project to use"
     compute: |
-      import json
       import os
-      from pathlib import Path
-
+      from scripts.common.config_loader import load_config
+      
       repo_path = None
       gitlab_project = "automation-analytics/automation-analytics-backend"
       jira_project = "AAP"
-
-      # Load config
-      config_paths = [
-          Path.cwd() / "config.json",
-          Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-          if p.exists():
-              with open(p) as f:
-                  config = json.load(f)
-              break
-
+      
+      # Load config using shared loader
+      config = load_config()
       repos = config.get("repositories", {})
 
       # Explicit repo path

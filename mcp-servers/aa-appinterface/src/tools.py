@@ -24,23 +24,37 @@ logger = logging.getLogger(__name__)
 
 def find_app_interface_path() -> str:
     """Find app-interface repository path."""
-    # Try config.json first
     config = load_config()
+    
+    # Try app_interface section first
+    app_interface = config.get("app_interface", {})
+    if app_interface.get("path"):
+        path = os.path.expanduser(app_interface["path"])
+        if Path(path).exists():
+            return path
+    
+    # Try repositories section
     repos = config.get("repositories", {})
     if "app-interface" in repos:
         path = repos["app-interface"].get("path", "")
         if path and Path(os.path.expanduser(path)).exists():
             return os.path.expanduser(path)
     
-    # Fallback to common paths
+    # Try workspace_roots from paths section
+    paths_cfg = config.get("paths", {})
+    workspace_roots = paths_cfg.get("workspace_roots", [])
+    for root in workspace_roots:
+        candidate = Path(os.path.expanduser(root)) / "app-interface"
+        if candidate.exists():
+            return str(candidate)
+    
+    # Fallback to env var and common paths
     candidates = [
-        Path.home() / "src/app-interface",
-        Path.home() / "repos/app-interface",
-        Path("/opt/app-interface"),
         Path(os.getenv("APP_INTERFACE_PATH", "")),
+        Path("/opt/app-interface"),
     ]
     for c in candidates:
-        if c.exists():
+        if c and c.exists():
             return str(c)
     return ""
 

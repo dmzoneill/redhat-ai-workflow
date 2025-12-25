@@ -68,7 +68,15 @@ def get_section_config(section: str, default: dict | None = None) -> dict:
 
 # ==================== Kubeconfig Handling ====================
 
-KUBE_BASE = Path.home() / ".kube"
+def _get_kube_base() -> Path:
+    """Get kube config base directory from config.json or default."""
+    config = load_config()
+    paths_cfg = config.get("paths", {})
+    kube_base = paths_cfg.get("kube_base")
+    if kube_base:
+        return Path(os.path.expanduser(kube_base))
+    return Path.home() / ".kube"
+
 
 # Environment to kubeconfig suffix mapping
 KUBECONFIG_MAP = {
@@ -113,9 +121,10 @@ def get_kubeconfig(environment: str, namespace: str = "") -> str:
         if kubeconfig:
             return os.path.expanduser(kubeconfig)
     
-    # Fall back to standard mapping
+    # Fall back to standard mapping using kube_base from config
+    kube_base = _get_kube_base()
     suffix = KUBECONFIG_MAP.get(env_lower, env_lower)
-    return str(KUBE_BASE / f"config.{suffix}")
+    return str(kube_base / f"config.{suffix}")
 
 
 def get_env_config(environment: str, service: str) -> dict:

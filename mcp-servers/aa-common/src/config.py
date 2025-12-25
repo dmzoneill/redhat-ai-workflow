@@ -15,30 +15,14 @@ from pathlib import Path
 from typing import Any
 
 
-def find_repos_json() -> Path | None:
-    """Find config.json in standard locations."""
-    locations = [
-        Path.cwd() / "config.json",
-        Path.cwd().parent / "config.json",
-        Path(__file__).parent.parent.parent.parent / "config.json",
-        Path.home() / "src/ai-workflow/config.json",
-    ]
-    for loc in locations:
-        if loc.exists():
-            return loc
-    return None
-
-
-def load_repos_config() -> dict[str, Any]:
-    """Load config.json configuration."""
-    path = find_repos_json()
-    if not path:
-        return {}
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except Exception:
-        return {}
+def load_config() -> dict[str, Any]:
+    """Load config.json configuration.
+    
+    Delegates to utils.load_config() for the canonical implementation.
+    This function exists for backward compatibility.
+    """
+    from src.utils import load_config as utils_load_config
+    return utils_load_config()
 
 
 def get_os_env(key: str, default: str = "") -> str:
@@ -90,11 +74,27 @@ def get_docker_auth(registry: str = "quay.io") -> str | None:
     """Get auth token from Docker/Podman config for a registry."""
     import base64
     
-    config_paths = [
+    # Try config.json paths first
+    try:
+        from src.utils import load_config
+        cfg = load_config()
+        paths_cfg = cfg.get("paths", {})
+        docker_config = paths_cfg.get("docker_config")
+        container_auth = paths_cfg.get("container_auth")
+        config_paths = []
+        if docker_config:
+            config_paths.append(Path(os.path.expanduser(docker_config)))
+        if container_auth:
+            config_paths.append(Path(os.path.expanduser(container_auth)))
+    except ImportError:
+        config_paths = []
+    
+    # Fall back to standard locations
+    config_paths.extend([
         Path.home() / ".docker/config.json",
         Path.home() / ".config/containers/auth.json",
         Path(os.getenv("DOCKER_CONFIG", "")) / "config.json",
-    ]
+    ])
     
     for path in config_paths:
         if not path.exists():

@@ -41,10 +41,9 @@ steps:
   - name: resolve_repo
     description: "Determine which repo to use based on issue key or explicit input"
     compute: |
-      import json
       import os
-      from pathlib import Path
-
+      from scripts.common.config_loader import load_config, resolve_repo
+      
       # Explicit repo path takes priority
       if inputs.repo and inputs.repo != "" and inputs.repo != ".":
           repo_path = inputs.repo
@@ -52,17 +51,7 @@ steps:
           repo_source = "explicit"
       # Then repo name from config
       elif inputs.repo_name:
-          config_paths = [
-              Path.cwd() / "config.json",
-              Path.home() / "src/redhat-ai-workflow/config.json",
-          ]
-          config = {}
-          for p in config_paths:
-              if p.exists():
-                  with open(p) as f:
-                      config = json.load(f)
-                  break
-          
+          config = load_config()
           repos = config.get("repositories", {})
           if inputs.repo_name in repos:
               repo_path = repos[inputs.repo_name].get("path", "")
@@ -72,18 +61,7 @@ steps:
               raise ValueError(f"Repository '{inputs.repo_name}' not found in config.json")
       # Finally, try to resolve from issue key prefix
       else:
-          # Load config
-          config_paths = [
-              Path.cwd() / "config.json",
-              Path.home() / "src/redhat-ai-workflow/config.json",
-          ]
-          config = {}
-          for p in config_paths:
-              if p.exists():
-                  with open(p) as f:
-                      config = json.load(f)
-                  break
-          
+          config = load_config()
           repos = config.get("repositories", {})
           project_prefix = inputs.issue_key.split("-")[0].upper()
           

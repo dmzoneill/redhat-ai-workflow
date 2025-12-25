@@ -66,3 +66,4 @@ kibana_count(
 - [investigate_alert](../skills/investigate_alert.md) - Searches for errors
 - [debug_prod](../skills/debug_prod.md) - Deep log analysis
 
+

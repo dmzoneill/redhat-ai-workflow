@@ -16,12 +16,26 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+
+from src.utils import load_config
+
 logger = logging.getLogger(__name__)
+
+
+def _get_slack_config() -> dict:
+    """Get Slack configuration from config.json."""
+    config = load_config()
+    return config.get("slack", {})
 
 # Global manager instance (initialized on first use)
 _manager = None

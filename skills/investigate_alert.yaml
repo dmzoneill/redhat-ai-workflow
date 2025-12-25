@@ -48,24 +48,12 @@ steps:
   - name: load_config
     description: "Load namespace configuration"
     compute: |
-      import json
-      from pathlib import Path
       from scripts.common.config_loader import load_config
-
-      config_paths = [
-          Path.cwd() / "config.json",
-          Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-          if p.exists():
-              with open(p) as f:
-                  config = json.load(f)
-              break
-
+      
+      config = load_config()
       ns_config = config.get("namespaces", {})
       ai_config = config.get("app_interface", {})
-
+      
       result = {
           "namespace_stage": ns_config.get("stage", {}).get("main", "tower-analytics-stage"),
           "namespace_prod_main": ns_config.get("production", {}).get("main", "tower-analytics-prod"),
@@ -73,6 +61,7 @@ steps:
           "alerts_stage": ai_config.get("alerts", {}).get("stage", "resources/insights-stage/tower-analytics-stage"),
           "alerts_prod_main": ai_config.get("alerts", {}).get("prod_main", "resources/insights-prod/tower-analytics-prod"),
           "alerts_prod_billing": ai_config.get("alerts", {}).get("prod_billing", "resources/insights-prod/tower-analytics-prod-billing"),
+          "jira_url": config.get("jira", {}).get("url", "https://issues.redhat.com"),
       }
     output: cfg
   # ==================== RESOLVE NAMESPACE ====================

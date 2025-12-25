@@ -17,6 +17,7 @@ Setup:
 
 import json
 import os
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -24,11 +25,28 @@ from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP
 
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+
+from src.utils import load_config
+
 # Initialize FastMCP
 mcp = FastMCP("aa-google-calendar")
 
-# Config paths
-CONFIG_DIR = Path.home() / ".config" / "google-calendar"
+
+def _get_google_calendar_config_dir() -> Path:
+    """Get Google Calendar config directory from config.json or default."""
+    config = load_config()
+    paths_cfg = config.get("paths", {})
+    gc_config = paths_cfg.get("google_calendar_config")
+    if gc_config:
+        return Path(os.path.expanduser(gc_config))
+    return Path.home() / ".config" / "google-calendar"
+
+
+# Config paths - use config.json paths section if available
+CONFIG_DIR = _get_google_calendar_config_dir()
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 TOKEN_FILE = CONFIG_DIR / "token.json"
 SERVICE_ACCOUNT_FILE = CONFIG_DIR / "service_account.json"

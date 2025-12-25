@@ -1,44 +1,44 @@
 """
 Shared configuration loading for skills.
 
-Provides a standardized way to load config.json from multiple locations.
+Provides a standardized way to load config.json.
 Skills should import from this module instead of reimplementing config loading.
+
+All config loading delegates to the canonical implementation in:
+mcp-servers/aa-common/src/utils.py
 """
 import json
 import os
-from datetime import datetime
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-
-# Standard config file locations (in order of preference)
-CONFIG_PATHS = [
-    Path.cwd() / "config.json",
-    Path.home() / "src/redhat-ai-workflow/config.json",
-    Path(__file__).parent.parent.parent / "config.json",
-]
+# Add MCP servers path so we can import from utils
+_SERVERS_DIR = Path(__file__).parent.parent.parent / "mcp-servers" / "aa-common"
+if str(_SERVERS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SERVERS_DIR))
 
 
 def load_config() -> Dict[str, Any]:
     """
-    Load config.json from standard locations.
+    Load config.json using canonical implementation.
     
-    Searches in order:
-    1. Current working directory
-    2. ~/src/redhat-ai-workflow/
-    3. Project root (relative to this file)
+    Delegates to mcp-servers/aa-common/src/utils.py:load_config()
+    for consistent behavior across skills and MCP tools.
     
     Returns:
         Config dict, or empty dict if not found
     """
-    for config_path in CONFIG_PATHS:
+    try:
+        from src.utils import load_config as utils_load_config
+        return utils_load_config()
+    except ImportError:
+        # Fallback if utils not available
+        config_path = Path(__file__).parent.parent.parent / "config.json"
         if config_path.exists():
-            try:
-                with open(config_path) as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                continue
-    return {}
+            with open(config_path) as f:
+                return json.load(f)
+        return {}
 
 
 def get_config_section(section: str, default: Optional[Dict] = None) -> Dict[str, Any]:
@@ -192,4 +192,5 @@ def resolve_repo(
         })
     
     return result
+
 

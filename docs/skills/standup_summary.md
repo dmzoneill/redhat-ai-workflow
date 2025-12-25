@@ -123,3 +123,4 @@ The skill also provides a compact format:
 - [coffee](./coffee.md) - Full morning briefing
 - [beer](./beer.md) - End of day summary
 
+

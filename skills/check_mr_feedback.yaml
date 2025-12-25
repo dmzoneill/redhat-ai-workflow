@@ -126,23 +126,20 @@ steps:
     description: "Analyze comments from all MRs"
     compute: |
       import re
-      from datetime import datetime
+      import os
       import sys
-      import json
+      from datetime import datetime
       from pathlib import Path
       from scripts.common.config_loader import load_config
       
-      # Load config for username
-      config_paths = [Path.cwd() / "config.json", Path.home() / "src/redhat-ai-workflow/config.json"]
-      cfg = {}
-      for p in config_paths:
-        if p.exists():
-          with open(p) as f:
-            cfg = json.load(f)
-          break
+      # Load config using shared loader
+      cfg = load_config()
       current_user = cfg.get("user", {}).get("username") or os.getenv("USER", "unknown")
       
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
+      # Add scripts path for parsers
+      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
+      if scripts_path not in sys.path:
+          sys.path.insert(0, scripts_path)
       from common.parsers import is_bot_comment
       
       # Meeting keywords
@@ -253,23 +250,11 @@ steps:
     description: "Create Google Meet invitations for meeting requests"
     condition: "{{ inputs.create_meetings and feedback_with_calendar_check }}"
     compute: |
-      import json
-      from pathlib import Path
-      from scripts.common.config_loader import load_config
       from datetime import datetime, timedelta
+      from scripts.common.config_loader import load_config
       
-      # Check if Google Calendar is configured
-      config_paths = [
-        Path.cwd() / "config.json",
-        Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-        if p.exists():
-          with open(p) as f:
-            config = json.load(f)
-          break
-      
+      # Load config using shared loader
+      config = load_config()
       google_config = config.get("google_calendar", {})
       
       if not google_config.get("enabled"):

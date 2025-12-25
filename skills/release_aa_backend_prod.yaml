@@ -36,32 +36,33 @@ steps:
   - name: load_config
     description: "Load release configuration from config.json"
     compute: |
-      import json
-      from pathlib import Path
-
-      config_paths = [
-          Path.cwd() / "config.json",
-          Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-          if p.exists():
-              with open(p) as f:
-                  config = json.load(f)
-              break
-
+      import os
+      from scripts.common.config_loader import load_config
+      
+      config = load_config()
       repos = config.get("repositories", {})
       ai_config = config.get("app_interface", {})
       quay_config = config.get("quay", {})
       ns_config = config.get("namespaces", {}).get("production", {})
-
+      paths_cfg = config.get("paths", {})
+      
       # Get repo paths
       backend_cfg = repos.get("automation-analytics-backend", {})
       ai_cfg = repos.get("app-interface", {})
-
+      
+      # Use workspace_roots as fallback
+      workspace_roots = paths_cfg.get("workspace_roots", [])
+      default_backend = ""
+      default_ai = ""
+      for root in workspace_roots:
+          if os.path.exists(os.path.join(os.path.expanduser(root), "automation-analytics-backend")):
+              default_backend = os.path.join(os.path.expanduser(root), "automation-analytics-backend")
+          if os.path.exists(os.path.join(os.path.expanduser(root), "app-interface")):
+              default_ai = os.path.join(os.path.expanduser(root), "app-interface")
+      
       result = {
-          "backend_repo": backend_cfg.get("path", str(Path.home() / "src/automation-analytics-backend")),
-          "appinterface_repo": ai_cfg.get("path", str(Path.home() / "src/app-interface")),
+          "backend_repo": backend_cfg.get("path", default_backend),
+          "appinterface_repo": ai_cfg.get("path") or ai_config.get("path", default_ai),
           "deploy_file": ai_config.get("deploy_file", "data/services/insights/tower-analytics/cicd/deploy-clowder.yml"),
           "quay_image": f"quay.io/redhat-services-prod/{quay_config.get('repositories', {}).get('automation-analytics', 'aap-aa-tenant/aap-aa-main/automation-analytics-backend-main')}",
           "quay_repository": quay_config.get("repositories", {}).get("automation-analytics", "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"),

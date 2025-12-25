@@ -35,26 +35,15 @@ steps:
   - name: load_config
     description: "Load Jira status configuration"
     compute: |
-      import json
-      from pathlib import Path
       from scripts.common.config_loader import load_config
-
-      config_paths = [
-          Path.cwd() / "config.json",
-          Path.home() / "src/redhat-ai-workflow/config.json",
-      ]
-      config = {}
-      for p in config_paths:
-          if p.exists():
-              with open(p) as f:
-                  config = json.load(f)
-              break
-
+      
+      config = load_config()
       jira_statuses = config.get("jira", {}).get("statuses", {})
-
+      
       result = {
           "done_status": jira_statuses.get("done", "Done"),
           "pending_release_status": jira_statuses.get("pending_release", "Pending Release"),
+          "jira_url": config.get("jira", {}).get("url", "https://issues.redhat.com"),
       }
     output: cfg
   # ==================== GET ISSUE DETAILS ====================

@@ -94,6 +94,11 @@
     "path": "/home/YOUR_USER/src/app-interface",
     "deploy_file": "data/services/your-org/your-app/cicd/deploy-clowder.yml",
     "saas_namespaces": "data/services/your-org/your-app/namespaces",
+    "namespace_files": {
+      "prod_main": "your-app-prod.yml",
+      "prod_billing": "your-app-prod-billing.yml",
+      "stage": "your-app-stage.yml"
+    },
     "alerts": {
       "stage": "resources/your-stage/your-app-stage",
       "prod_main": "resources/your-prod/your-app-prod"
