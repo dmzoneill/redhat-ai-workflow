@@ -20,6 +20,7 @@ SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
 from src.utils import load_config, get_kubeconfig
+from src.config import get_token_from_kubeconfig
 
 logger = logging.getLogger(__name__)
 
@@ -99,20 +100,17 @@ KIBANA_ENVIRONMENTS = _KIBANA_ENV_CACHE
 
 
 def get_token(kubeconfig: str) -> str:
-    """Get OpenShift token from kubeconfig."""
-    try:
-        result = subprocess.run(
-            ["kubectl", "config", "view", "--minify", "-o", 
-             "jsonpath={.users[0].user.token}"],
-            capture_output=True,
-            text=True,
-            env={"KUBECONFIG": kubeconfig},
-            timeout=10,
-        )
-        return result.stdout.strip()
-    except Exception as e:
-        logger.warning(f"Failed to get token from {kubeconfig}: {e}")
-        return ""
+    """Get OpenShift token from kubeconfig.
+    
+    Delegates to shared get_token_from_kubeconfig() which:
+    - Tries oc whoami -t first (active sessions)
+    - Falls back to kubectl config view
+    - Supports all environment kubeconfigs (~/.kube/config.{s,p,e,k})
+    """
+    token = get_token_from_kubeconfig(kubeconfig)
+    if not token:
+        logger.warning(f"Failed to get token from {kubeconfig}")
+    return token
 
 
 async def kibana_request(

@@ -160,24 +160,31 @@ steps:
   - name: parse_pod_health
     description: "Parse pod health"
     compute: |
-      import re
-
-      pods_text = str(pods_raw) if pods_raw else ""
-
-      # Count pod states
-      running = len(re.findall(r"Running", pods_text, re.IGNORECASE))
-      not_running = len(re.findall(r"CrashLoopBackOff|Error|Pending|ImagePullBackOff", pods_text, re.IGNORECASE))
-      restarts = re.findall(r"(\d+)\s+\d+[smhd]", pods_text)
-      high_restarts = sum(1 for r in restarts if int(r) > 5)
-
+      import sys
+      from pathlib import Path
+      
+      # Add scripts path for shared parsers
+      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
+      if scripts_path not in sys.path:
+          sys.path.insert(0, scripts_path)
+      from common.parsers import parse_kubectl_pods
+      
+      # Use shared parser
+      pods = parse_kubectl_pods(str(pods_raw) if pods_raw else "")
+      
+      # Count health states
+      running = sum(1 for p in pods if p.get("status") == "Running")
+      not_running = sum(1 for p in pods if p.get("status") in ["CrashLoopBackOff", "Error", "Pending", "ImagePullBackOff"])
+      high_restarts = sum(1 for p in pods if int(str(p.get("restarts", "0")).split()[0]) > 5)
+      
       healthy = not_running == 0 and high_restarts == 0
-
+      
       issues = []
       if not_running > 0:
           issues.append(f"{not_running} pod(s) not running")
       if high_restarts > 0:
           issues.append(f"{high_restarts} pod(s) with high restarts")
-
+      
       result = {
           "running": running,
           "not_running": not_running,

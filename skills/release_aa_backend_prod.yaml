@@ -124,34 +124,37 @@ steps:
       return current_sha
     output: current_prod_sha
 
-  # Step 4: Generate changelog (commits between current and new SHA)
-  - name: generate_changelog
+  # Step 4: Get commit log for changelog (using MCP tool)
+  - name: get_changelog_log
     description: "Get list of commits being released"
+    tool: git_log
+    args:
+      repo: "{{ cfg.backend_repo }}"
+      range: "{{ current_prod_sha }}..{{ inputs.commit_sha }}"
+      oneline: true
+    output: changelog_raw
+    on_error: continue
+  
+  - name: format_changelog
+    description: "Format changelog output"
     compute: |
-      import subprocess
-      result = subprocess.run(
-        ["git", "log", "--oneline", f"{current_prod_sha}..{inputs.commit_sha}"],
-        cwd=cfg["backend_repo"],
-        capture_output=True,
-        text=True
-      )
-      if result.returncode != 0:
-        # Try the reverse in case current is ahead
-        result = subprocess.run(
-          ["git", "log", "--oneline", f"{inputs.commit_sha}..{current_prod_sha}"],
-          cwd=cfg["backend_repo"],
-          capture_output=True,
-          text=True
-        )
-        if result.returncode == 0 and result.stdout.strip():
-          return f"⚠️ ROLLBACK: Going back {len(result.stdout.strip().split(chr(10)))} commits\n\n{result.stdout}"
+      import sys
+      from pathlib import Path
       
-      commits = result.stdout.strip()
-      if not commits:
-        return "No new commits (same SHA as current production)"
+      # Add scripts path for shared parsers
+      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
+      if scripts_path not in sys.path:
+          sys.path.insert(0, scripts_path)
+      from common.parsers import parse_git_log
       
-      commit_count = len(commits.split('\n'))
-      return f"📦 {commit_count} commits to release:\n\n{commits}"
+      commits_str = str(changelog_raw) if changelog_raw else ""
+      
+      if not commits_str.strip() or "error" in commits_str.lower():
+        result = "No new commits (same SHA as current production)"
+      else:
+        commits = parse_git_log(commits_str)
+        commit_count = len(commits)
+        result = f"📦 {commit_count} commits to release:\n\n{commits_str.strip()}"
     output: changelog
 
   # ==================== CREATE JIRA ISSUE ====================
@@ -190,45 +193,57 @@ steps:
       repo: "{{ cfg.appinterface_repo }}"
       target: "master"
 
-  - name: pull_upstream
-    description: "Pull latest from upstream master"
-    compute: |
-      import subprocess
-      result = subprocess.run(
-        ["git", "pull", "--rebase", "upstream", "master"],
-        cwd=cfg["appinterface_repo"],
-        capture_output=True,
-        text=True
-      )
-      if result.returncode != 0:
-        raise Exception(f"Failed to pull upstream: {result.stderr}")
-      return result.stdout
+  - name: fetch_upstream
+    description: "Fetch latest from upstream"
+    tool: git_fetch
+    args:
+      repo: "{{ cfg.appinterface_repo }}"
+      remote: "upstream"
+    on_error: continue
+  
+  - name: rebase_upstream
+    description: "Rebase on upstream master"
+    tool: git_rebase
+    args:
+      repo: "{{ cfg.appinterface_repo }}"
+      onto: "upstream/master"
     output: pull_result
+    on_error: continue
 
-  # Step 8: Create release branch
+  # Step 8: Get existing branches (using MCP tool)
+  - name: list_existing_branches
+    description: "Check for existing release branches"
+    tool: git_branch_list
+    args:
+      repo: "{{ cfg.appinterface_repo }}"
+      pattern: "aa-release-{{ inputs.release_date }}"
+    output: existing_branches_raw
+    on_error: continue
+  
   - name: create_branch_name
+    description: "Determine branch name (handle existing versions)"
     compute: |
-      import subprocess
+      import re
+      import sys
+      from pathlib import Path
+      
+      # Add scripts path for shared parsers
+      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
+      if scripts_path not in sys.path:
+          sys.path.insert(0, scripts_path)
+      from common.parsers import parse_git_branches
       
       base_name = f"aa-release-{inputs.release_date}"
-      repo = cfg["appinterface_repo"]
       
-      # Check if branch already exists
-      result = subprocess.run(
-          ["git", "branch", "-a", "--list", f"*{base_name}*"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-      
-      existing = [b.strip() for b in result.stdout.split("\n") if b.strip()]
+      # Parse existing branches
+      existing = parse_git_branches(str(existing_branches_raw) if existing_branches_raw else "")
+      existing = [b for b in existing if base_name in b]
       
       if not existing:
           branch_name = base_name
           version = 1
       else:
           # Find highest version
-          import re
           versions = [1]
           for b in existing:
               match = re.search(r"-v(\d+)$", b)
@@ -244,30 +259,11 @@ steps:
 
   - name: create_release_branch
     description: "Create branch for this release"
-    compute: |
-      import subprocess
-      
-      repo = cfg["appinterface_repo"]
-      branch = branch_info["name"]
-      
-      # Create and checkout
-      result = subprocess.run(
-          ["git", "checkout", "-b", branch],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-      
-      if result.returncode != 0:
-          if "already exists" in result.stderr:
-              # Try with incremented version
-              raise ValueError(
-                  f"Branch {branch} already exists. "
-                  "Delete it or use a different release date."
-              )
-          raise ValueError(f"Failed to create branch: {result.stderr}")
-      
-      result = f"Created branch: {branch}"
+    tool: git_checkout
+    args:
+      repo: "{{ cfg.appinterface_repo }}"
+      target: "{{ branch_info.name }}"
+      force_create: true
     output: branch_result
 
   - name: set_branch_name
@@ -343,27 +339,21 @@ steps:
       repo: "{{ cfg.appinterface_repo }}"
       files: "{{ cfg.deploy_file }}"
 
-  - name: commit_changes
-    description: "Commit the release changes"
+  - name: build_commit_message
+    description: "Build commit message"
     compute: |
-      import subprocess
-      
       commit_msg = f"tower-analytics: release {inputs.commit_sha[:12]} to production"
       if inputs.include_billing:
         commit_msg += " (including billing)"
-      
-      result = subprocess.run(
-        ["git", "commit", "-m", commit_msg],
-        cwd=cfg["appinterface_repo"],
-        capture_output=True,
-        text=True
-      )
-      
-      if result.returncode != 0:
-        raise Exception(f"Commit failed: {result.stderr}")
-      
-      return commit_msg
+      result = commit_msg
     output: commit_message
+  
+  - name: commit_changes
+    description: "Commit the release changes"
+    tool: git_commit
+    args:
+      repo: "{{ cfg.appinterface_repo }}"
+      message: "{{ commit_message }}"
 
   # Step 12: Push branch to origin
   - name: push_branch

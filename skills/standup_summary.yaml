@@ -167,23 +167,24 @@ steps:
   - name: parse_commits
     description: "Parse commit log for standup"
     compute: |
-      import re
+      import sys
+      from pathlib import Path
       
-      commits = []
-      if commit_log_raw:
-        for line in str(commit_log_raw).strip().split("\n"):
-          if line.strip():
-            parts = line.split(" ", 1)
-            commits.append({
-              "sha": parts[0],
-              "message": parts[1] if len(parts) > 1 else "",
-            })
+      # Add scripts path for shared parsers
+      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
+      if scripts_path not in sys.path:
+          sys.path.insert(0, scripts_path)
+      from common.parsers import parse_git_log, extract_jira_key
       
-      # Extract issue keys from commit messages
+      # Use shared parser for git log
+      commits = parse_git_log(commit_log_raw) if commit_log_raw else []
+      
+      # Extract issue keys from commit messages using shared parser
       issue_keys = set()
       for commit in commits:
-        keys = re.findall(r"AAP-\d+", commit["message"], re.IGNORECASE)
-        issue_keys.update(k.upper() for k in keys)
+        key = extract_jira_key(commit.get("message", ""))
+        if key:
+          issue_keys.add(key.upper())
       
       result = {
         "commits": commits[:20],

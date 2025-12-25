@@ -34,15 +34,49 @@ def get_os_env(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 
-def get_token_from_kubeconfig(kubeconfig: str) -> str:
-    """Extract bearer token from kubeconfig using oc/kubectl."""
-    if not kubeconfig or not Path(kubeconfig).expanduser().exists():
+def get_token_from_kubeconfig(
+    kubeconfig: str | None = None,
+    environment: str | None = None,
+) -> str:
+    """Extract bearer token from kubeconfig using oc/kubectl.
+    
+    Supports multiple kubeconfig files for different environments:
+    - ~/.kube/config.s (stage)
+    - ~/.kube/config.p (production)
+    - ~/.kube/config.e (ephemeral)
+    - ~/.kube/config.k (konflux)
+    
+    Args:
+        kubeconfig: Explicit path to kubeconfig file (takes priority)
+        environment: Environment name (stage, prod, ephemeral, konflux)
+                    Used to resolve kubeconfig if path not provided
+    
+    Returns:
+        Bearer token string, or empty string if not available
+    
+    Example:
+        # Explicit path
+        token = get_token_from_kubeconfig("~/.kube/config.s")
+        
+        # By environment
+        token = get_token_from_kubeconfig(environment="stage")
+        token = get_token_from_kubeconfig(environment="prod")
+    """
+    # Resolve kubeconfig path
+    if not kubeconfig and environment:
+        from src.utils import get_kubeconfig
+        kubeconfig = get_kubeconfig(environment)
+    
+    if not kubeconfig:
         return ""
     
     kubeconfig = str(Path(kubeconfig).expanduser())
+    if not Path(kubeconfig).exists():
+        return ""
+    
     env = {**os.environ, "KUBECONFIG": kubeconfig}
     
-    # Try oc whoami -t first
+    # Try oc whoami -t first (works with active sessions)
     try:
         result = subprocess.run(
             ["oc", "whoami", "-t"],
@@ -56,10 +90,24 @@ def get_token_from_kubeconfig(kubeconfig: str) -> str:
     except Exception:
         pass
     
-    # Fallback to kubectl
+    # Fallback to kubectl config view (extracts stored token)
     try:
         result = subprocess.run(
             ["kubectl", "config", "view", "--minify", "-o", "jsonpath={.users[0].user.token}"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    
+    # Last resort: try to extract from raw kubeconfig
+    try:
+        result = subprocess.run(
+            ["kubectl", "config", "view", "--raw", "--minify", "-o", "jsonpath={.users[0].user.token}"],
             env=env,
             capture_output=True,
             text=True,
