@@ -4,7 +4,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "cd ~/src/redhat-ai-workflow/mcp-servers/aa-common && source ~/bonfire_venv/bin/activate && python3 -m src.server"
+        "cd ~/src/redhat-ai-workflow/mcp-servers/aa-common && source ~/src/redhat-ai-workflow/.venv/bin/activate && python3 -m src.server"
       ]
     }
   }
