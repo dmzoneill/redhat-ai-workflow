@@ -277,43 +277,61 @@ steps:
   # ==================== AUTO-FIX WHERE POSSIBLE ====================
 
   # Step 4: Apply auto-fixes
-  - name: apply_fixes
-    description: "Apply automatic fixes where possible"
+  # Check if status needs transition
+  - name: check_status_fix_needed
+    description: "Check if status transition is needed"
     condition: "{{ inputs.auto_fix and validation.can_fix }}"
     compute: |
-      import subprocess
+      needs_status_fix = False
+      other_fixes = []
       
+      for fix in validation.get('can_fix', []):
+        if fix['field'] == 'status' and inputs.get('auto_transition'):
+          needs_status_fix = True
+        else:
+          other_fixes.append(fix)
+      
+      result = {"needs_status_fix": needs_status_fix, "other_fixes": other_fixes}
+    output: fix_check
+
+  # Apply status transition using MCP tool
+  - name: apply_status_transition
+    description: "Transition issue status"
+    condition: "{{ fix_check.needs_status_fix }}"
+    tool: jira_set_status
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      status: "Refinement"
+    output: status_transition_raw
+    on_error: continue
+
+  # Apply other fixes
+  - name: apply_other_fixes
+    description: "Apply remaining fixes"
+    condition: "{{ inputs.auto_fix and validation.can_fix }}"
+    compute: |
       fixed = []
       failed = []
       
-      for fix in validation['can_fix']:
+      # Handle status transition result
+      if 'status_transition_raw' in dir() and status_transition_raw:
+        if "✅" in str(status_transition_raw) or "success" in str(status_transition_raw).lower():
+          fixed.append("✅ Status: New → Refinement")
+        elif "❌" in str(status_transition_raw):
+          failed.append(f"❌ Could not transition status: {str(status_transition_raw)[:100]}")
+      
+      # Handle other fixes
+      for fix in fix_check.get('other_fixes', []):
         field = fix['field']
         value = fix.get('value')
         
-        if field == 'status' and inputs.auto_transition:
-          # Transition status
-          result = subprocess.run(
-            ["rh-issue", "set-status", inputs.issue_key, "Refinement"],
-            capture_output=True,
-            text=True
-          )
-          if result.returncode == 0:
-            fixed.append(f"✅ Status: New → Refinement")
-          else:
-            failed.append(f"❌ Could not transition status: {result.stderr[:100]}")
-        
-        elif field == 'priority' and value:
-          # Note: rh-issue may not support setting priority directly
-          # This would need the actual Jira API or a different approach
+        if field == 'priority' and value:
           fixed.append(f"⚠️ Priority should be set to: {value} (manual)")
-        
         elif field == 'component' and value:
-          # Note: would need actual API call
           fixed.append(f"⚠️ Component should be: {value} (manual)")
       
       result = {"fixed": fixed, "failed": failed}
     output: fix_results
-    on_error: continue
 
   # ==================== GENERATE REPORT ====================
 

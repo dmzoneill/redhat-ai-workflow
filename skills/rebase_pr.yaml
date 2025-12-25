@@ -289,20 +289,14 @@ steps:
     on_error: continue
 
   - name: checkout_fallback
-    description: "Fallback: checkout from remote if local failed"
+    description: "Fallback: force checkout from remote if local failed"
     condition: "checkout_result and 'error' in str(checkout_result).lower()"
-    compute: |
-      import subprocess
-      
-      branch = target_branch
-      result = subprocess.run(
-        ['git', 'checkout', '-B', branch, f'origin/{branch}'],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"]
-      )
-      if result.returncode != 0:
-        raise ValueError(f"Failed to checkout {branch}: {result.stderr}")
-      result = f"Checked out from remote: {branch}"
+    tool: git_checkout
+    args:
+      repo: "{{ resolved_repo.path }}"
+      target: "{{ target_branch }}"
+      force_create: true
+      start_point: "origin/{{ target_branch }}"
     output: checkout_fallback_result
     on_error: continue
 
@@ -315,38 +309,36 @@ steps:
     on_error: continue
 
   - name: sync_with_remote
-    description: "Ensure branch is synced with remote"
-    compute: |
-      import subprocess
-      
-      # If pull failed, try reset to remote
-      pull_ok = pull_result_raw and 'error' not in str(pull_result_raw).lower()
-      
-      if not pull_ok:
-        result = subprocess.run(
-          ['git', 'reset', '--hard', f'origin/{target_branch}'],
-          capture_output=True, text=True,
-          cwd=resolved_repo["path"]
-        )
-      
-      result = "Branch synced with remote"
-    output: pull_result
+    description: "Reset to remote if pull failed"
+    condition: "pull_result_raw and 'error' in str(pull_result_raw).lower()"
+    tool: git_reset
+    args:
+      repo: "{{ resolved_repo.path }}"
+      target: "origin/{{ target_branch }}"
+      mode: "hard"
+    output: reset_result
     on_error: continue
+
+  - name: sync_status
+    description: "Record sync status"
+    compute: |
+      if 'reset_result' in dir() and reset_result:
+        result = f"Reset to remote: {reset_result}"
+      elif 'pull_result_raw' in dir():
+        result = f"Pulled: {pull_result_raw}"
+      else:
+        result = "Branch synced"
+    output: pull_result
 
   # ==================== PERFORM REBASE ====================
   
   - name: update_base
-    description: "Ensure base branch is up to date"
-    compute: |
-      import subprocess
-      
-      base = resolved_repo["default_branch"]
-      
-      # Fetch and update local base branch
-      subprocess.run(['git', 'fetch', 'origin', base], 
-                    capture_output=True, cwd=resolved_repo["path"])
-      
-      result = f"Updated origin/{base}"
+    description: "Fetch base branch from remote"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved_repo.path }}"
+      remote: "origin"
+      branch: "{{ resolved_repo.default_branch }}"
     output: base_updated
 
   - name: start_rebase
@@ -395,7 +387,6 @@ steps:
     description: "Analyze conflicts and auto-resolve obvious ones"
     condition: "rebase_result.get('conflicts')"
     compute: |
-      import subprocess
       import re
       import os
       
@@ -486,9 +477,7 @@ steps:
             with open(full_path, 'w') as f:
               f.write(new_content)
             
-            # Stage the file
-            subprocess.run(['git', 'add', filepath], cwd=repo, capture_output=True)
-            
+            # Track file for staging (will be staged in next step)
             auto_resolved.append({
               'file': filepath,
               'action': f'auto_resolved ({resolution_strategy})',
@@ -517,33 +506,54 @@ steps:
       }
     output: conflict_resolution
 
+  # Stage all auto-resolved files
+  - name: stage_resolved_files
+    description: "Stage auto-resolved conflict files"
+    condition: "conflict_resolution and conflict_resolution.get('auto_resolved')"
+    tool: git_add
+    args:
+      repo: "{{ resolved_repo.path }}"
+      files: "{{ ' '.join([f['file'] for f in conflict_resolution.auto_resolved]) }}"
+    output: stage_result
+    on_error: continue
+
+  # Continue the rebase
   - name: continue_rebase_if_resolved
     description: "Continue rebase if all conflicts auto-resolved"
     condition: "conflict_resolution and conflict_resolution.get('all_resolved')"
+    tool: git_rebase
+    args:
+      repo: "{{ resolved_repo.path }}"
+      continue_rebase: true
+    output: continue_raw
+    on_error: continue
+
+  # Check for new conflicts
+  - name: check_new_conflicts
+    description: "Check if new conflicts emerged after continue"
+    condition: "continue_raw and 'conflict' in str(continue_raw).lower()"
+    tool: git_status
+    args:
+      repo: "{{ resolved_repo.path }}"
+    output: new_status_raw
+    on_error: continue
+
+  # Parse continue result
+  - name: parse_continue_result
+    description: "Parse the rebase continue result"
+    condition: "conflict_resolution and conflict_resolution.get('all_resolved')"
     compute: |
-      import subprocess
+      continue_text = str(continue_raw) if 'continue_raw' in dir() and continue_raw else ""
+      new_status = str(new_status_raw) if 'new_status_raw' in dir() and new_status_raw else ""
       
-      # Try to continue the rebase
-      result = subprocess.run(
-        ['git', 'rebase', '--continue'],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"],
-        env={**dict(subprocess.os.environ), 'GIT_EDITOR': 'true'}  # Skip commit message editor
-      )
-      
-      if result.returncode == 0:
+      if 'success' in continue_text.lower() or ('conflict' not in continue_text.lower() and 'error' not in continue_text.lower()):
         continue_status = {
           'success': True,
           'message': 'Rebase continued successfully after auto-resolving conflicts'
         }
       else:
-        # Check if more conflicts
-        status = subprocess.run(
-          ['git', 'status', '--porcelain'],
-          capture_output=True, text=True,
-          cwd=resolved_repo["path"]
-        )
-        new_conflicts = [l[3:] for l in status.stdout.split('\n') if l.startswith('UU')]
+        # Check for new conflicts
+        new_conflicts = [l[3:] for l in new_status.split('\n') if 'both modified' in l.lower() or l.startswith('UU')]
         
         if new_conflicts:
           continue_status = {
@@ -554,7 +564,7 @@ steps:
         else:
           continue_status = {
             'success': False,
-            'message': f'Rebase continue failed: {result.stderr[:100]}'
+            'message': f'Rebase continue failed: {continue_text[:100]}'
           }
       
       result = continue_status
@@ -579,35 +589,31 @@ steps:
   # ==================== FORCE PUSH (if successful) ====================
   
   - name: check_branch_protection
-    description: "Check if force push is allowed"
+    description: "Dry-run to check if force push is allowed"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push"
+    tool: git_push
+    args:
+      repo: "{{ resolved_repo.path }}"
+      branch: "{{ target_branch }}"
+      force: true
+      dry_run: true
+    output: dry_run_result
+    on_error: continue
+  
+  - name: analyze_protection
+    description: "Check dry-run result for protection issues"
     condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push"
     compute: |
-      import subprocess
+      output_text = str(dry_run_result).lower() if 'dry_run_result' in dir() else ""
       
-      # Dry-run to check if push would be allowed
-      result = subprocess.run(
-        ['git', 'push', '--dry-run', '--force-with-lease', 'origin', target_branch],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"]
-      )
-      
-      stderr = result.stderr.lower()
-      
-      if 'protected branch' in stderr:
-        protection_check = {
-          'allowed': False,
-          'reason': f"Branch '{target_branch}' is protected. Cannot force push."
-        }
-      elif 'permission denied' in stderr or '403' in stderr:
-        protection_check = {
-          'allowed': False,
-          'reason': "Permission denied - you may not have push access."
-        }
-      elif 'remote rejected' in stderr:
-        protection_check = {
-          'allowed': False,
-          'reason': "Remote rejected push - check branch rules."
-        }
+      if 'protected branch' in output_text:
+        protection_check = {'allowed': False, 'reason': f"Branch '{target_branch}' is protected. Cannot force push."}
+      elif 'permission denied' in output_text or '403' in output_text:
+        protection_check = {'allowed': False, 'reason': "Permission denied - you may not have push access."}
+      elif 'remote rejected' in output_text:
+        protection_check = {'allowed': False, 'reason': "Remote rejected push - check branch rules."}
+      elif 'error' in output_text or 'failed' in output_text:
+        protection_check = {'allowed': False, 'reason': output_text[:200]}
       else:
         protection_check = {'allowed': True, 'reason': 'OK'}
       
@@ -617,22 +623,11 @@ steps:
   - name: force_push
     description: "Force push rebased branch"
     condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push and (not protection_check or protection_check.get('allowed', True))"
-    compute: |
-      import subprocess
-      
-      result = subprocess.run(
-        ['git', 'push', '--force-with-lease', 'origin', target_branch],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"]
-      )
-      
-      if result.returncode != 0:
-        stderr = result.stderr
-        if 'protected' in stderr.lower():
-          raise ValueError(f"Branch is protected: {target_branch}")
-        raise ValueError(f"Force push failed: {stderr[:200]}")
-      
-      result = f"Force pushed {target_branch} to origin"
+    tool: git_push
+    args:
+      repo: "{{ resolved_repo.path }}"
+      branch: "{{ target_branch }}"
+      force: true
     output: push_result
 
   # ==================== BUILD SUMMARY ====================

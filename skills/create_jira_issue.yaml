@@ -191,86 +191,78 @@ steps:
       }
     output: normalized
 
-  # Step 3: Write YAML to temp file
-  - name: write_yaml_file
-    description: "Write YAML input to temp file"
+  # Step 3: Build full description with all content sections
+  - name: build_full_description
+    description: "Combine all description fields into single description"
     compute: |
-      import tempfile
-      import os
+      parts = []
       
-      # Create temp file with YAML content
-      fd, yaml_path = tempfile.mkstemp(suffix=".yaml", prefix="jira_issue_")
+      # Main description
+      if inputs.get("description"):
+        parts.append(inputs["description"])
       
-      with os.fdopen(fd, 'w') as f:
-        f.write(normalized["yaml_content"])
+      # User story
+      if inputs.get("user_story"):
+        parts.append(f"\n\n## User Story\n\n{inputs['user_story']}")
       
-      result = yaml_path
-    output: yaml_file_path
+      # Acceptance criteria
+      if inputs.get("acceptance_criteria"):
+        parts.append(f"\n\n## Acceptance Criteria\n\n{inputs['acceptance_criteria']}")
+      
+      # Supporting documentation
+      if inputs.get("supporting_documentation"):
+        parts.append(f"\n\n## Supporting Documentation\n\n{inputs['supporting_documentation']}")
+      
+      # Definition of done
+      if inputs.get("definition_of_done"):
+        parts.append(f"\n\n## Definition of Done\n\n{inputs['definition_of_done']}")
+      
+      result = "".join(parts)
+    output: full_description
 
-  # Step 4: Create the issue via CLI
+  # Step 4: Create the issue via MCP tool
   - name: create_issue
-    description: "Create Jira issue using CLI"
+    description: "Create Jira issue using jira_create_issue tool"
+    tool: jira_create_issue
+    args:
+      issue_type: "{{ normalized.issue_type }}"
+      summary: "{{ normalized.summary }}"
+      description: "{{ full_description }}"
+      project: "{{ normalized.project }}"
+      labels: "{{ ','.join(normalized.labels) if normalized.labels else '' }}"
+      components: "{{ ','.join(normalized.components) if normalized.components else '' }}"
+      story_points: "{{ inputs.story_points or 0 }}"
+      convert_markdown: true
+    output: create_result_raw
+    on_error: continue
+
+  # Step 5: Parse result
+  - name: parse_create_result
+    description: "Parse the create issue result"
     compute: |
-      import subprocess
-      import os
       import re
       
-      project = normalized["project"]
-      issue_type = normalized["issue_type"]
-      summary = normalized["summary"]
+      output = str(create_result_raw) if 'create_result_raw' in dir() and create_result_raw else ""
       
-      # Build command
-      cmd = [
-        cfg["cli"],
-        "create-issue",
-        issue_type,
-        summary,
-        "--project", project,
-        "--input-file", yaml_file_path,
-      ]
-      
-      # Add assignee if provided
-      if inputs.get("assignee"):
-        cmd.extend(["--assignee", inputs["assignee"]])
-      elif cfg.get("username"):
-        cmd.extend(["--assignee", cfg["username"]])
-      
-      # Execute with user's shell environment
-      result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        env=os.environ.copy()  # Inherit full environment
-      )
-      
-      # Clean up temp file
-      try:
-        os.unlink(yaml_file_path)
-      except:
-        pass
-      
-      if result.returncode != 0:
-        error_msg = result.stderr or result.stdout
-        raise ValueError(f"Failed to create issue: {error_msg}")
-      
-      # Parse output for issue key
-      output = result.stdout
-      
-      # Look for issue key pattern (e.g., AAP-12345)
-      match = re.search(r'([A-Z]+-\d+)', output)
-      issue_key = match.group(1) if match else None
-      
-      if not issue_key:
-        # Try to extract from "Created issue: AAP-12345" pattern
-        match = re.search(r'[Cc]reated.*?([A-Z]+-\d+)', output)
+      # Check for error
+      if output.startswith("❌") or "error" in output.lower():
+        result = {
+          "success": False,
+          "issue_key": None,
+          "output": output,
+          "url": None,
+        }
+      else:
+        # Look for issue key pattern (e.g., AAP-12345)
+        match = re.search(r'([A-Z]+-\d+)', output)
         issue_key = match.group(1) if match else None
-      
-      result = {
-        "success": True,
-        "issue_key": issue_key,
-        "output": output,
-        "url": f"{cfg['jira_url']}/browse/{issue_key}" if issue_key else None,
-      }
+        
+        result = {
+          "success": True,
+          "issue_key": issue_key,
+          "output": output,
+          "url": f"{cfg['jira_url']}/browse/{issue_key}" if issue_key else None,
+        }
     output: create_result
 
   # Step 5: Verify issue was created

@@ -115,13 +115,54 @@ def register_tools(server: FastMCP) -> int:
     tool_count += 1
     
     @server.tool()
-    async def git_branch_list(repo: str, all_branches: bool = False) -> str:
-        """List branches in a repository."""
+    async def git_config_get(repo: str, key: str) -> str:
+        """
+        Get a git config value.
+        
+        Args:
+            repo: Repository path
+            key: Config key (e.g., "user.email", "user.name", "remote.origin.url")
+        
+        Returns:
+            Config value or error message.
+        """
+        path = resolve_repo_path(repo)
+        
+        success, output = await run_git(["config", "--get", key], cwd=path)
+        if not success:
+            return f"❌ Config key not found: {key}"
+        
+        return output.strip()
+    tool_count += 1
+    
+    @server.tool()
+    async def git_branch_list(
+        repo: str,
+        all_branches: bool = False,
+        merged: str = "",
+        no_merged: str = "",
+    ) -> str:
+        """
+        List branches in a repository.
+        
+        Args:
+            repo: Repository path
+            all_branches: Include remote branches
+            merged: Show branches merged into specified branch (e.g., "main")
+            no_merged: Show branches NOT merged into specified branch
+        
+        Returns:
+            Branch list.
+        """
         path = resolve_repo_path(repo)
         
         args = ["branch", "--format=%(refname:short)|%(upstream:short)|%(committerdate:relative)"]
         if all_branches:
             args.append("-a")
+        if merged:
+            args.append(f"--merged={merged}")
+        if no_merged:
+            args.append(f"--no-merged={no_merged}")
         
         success, output = await run_git(args, cwd=path)
         if not success:
@@ -162,6 +203,7 @@ def register_tools(server: FastMCP) -> int:
         merges_only: bool = False,
         no_merges: bool = False,
         count_only: bool = False,
+        numstat: bool = False,
     ) -> str:
         """
         Show commit history with optional filters.
@@ -178,6 +220,7 @@ def register_tools(server: FastMCP) -> int:
             merges_only: Show only merge commits (--merges)
             no_merges: Exclude merge commits (--no-merges)
             count_only: Return only count of commits (for range comparisons)
+            numstat: Show number of added/deleted lines per file (--numstat)
             
         Returns:
             Commit history or count.
@@ -186,6 +229,7 @@ def register_tools(server: FastMCP) -> int:
             git_log(repo, range_spec="origin/main..HEAD")  # Commits ahead of main
             git_log(repo, merges_only=True, range_spec="main..feature")  # Merge commits only
             git_log(repo, count_only=True, range_spec="HEAD..origin/main")  # How many behind
+            git_log(repo, numstat=True, since="1 week ago")  # Lines changed this week
         """
         path = resolve_repo_path(repo)
         
@@ -220,6 +264,12 @@ def register_tools(server: FastMCP) -> int:
             args.append("--merges")
         if no_merges:
             args.append("--no-merges")
+        if numstat:
+            args.append("--numstat")
+            if oneline:
+                # For numstat with oneline, use a different format
+                args = [a for a in args if a != "--oneline"]
+                args.insert(2, "--pretty=format:%h %s")
         
         # Range or branch comes last
         if range_spec:
@@ -314,6 +364,73 @@ def register_tools(server: FastMCP) -> int:
     tool_count += 1
     
     @server.tool()
+    async def git_show(
+        repo: str,
+        commit: str = "HEAD",
+        format: str = "",
+        name_only: bool = False,
+    ) -> str:
+        """
+        Show commit details.
+        
+        Args:
+            repo: Repository path
+            commit: Commit SHA or reference (default: HEAD)
+            format: Custom format string (e.g., "%s%n%b" for subject+body)
+            name_only: Show only file names, not diff
+        
+        Returns:
+            Commit details.
+        """
+        path = resolve_repo_path(repo)
+        
+        args = ["show", commit]
+        if format:
+            args.append(f"--format={format}")
+        if name_only:
+            args.append("--name-only")
+        
+        success, output = await run_git(args, cwd=path)
+        if not success:
+            return f"❌ Failed to show commit: {output}"
+        
+        if len(output) > 5000:
+            output = output[:5000] + "\n\n... (truncated)"
+        
+        return output
+    tool_count += 1
+    
+    @server.tool()
+    async def git_diff_tree(
+        repo: str,
+        commit: str,
+        name_only: bool = True,
+    ) -> str:
+        """
+        Get list of files changed in a commit.
+        
+        Args:
+            repo: Repository path
+            commit: Commit SHA to inspect
+            name_only: Return only filenames (default: True)
+        
+        Returns:
+            List of changed files.
+        """
+        path = resolve_repo_path(repo)
+        
+        args = ["diff-tree", "--no-commit-id", "-r", commit]
+        if name_only:
+            args.append("--name-only")
+        
+        success, output = await run_git(args, cwd=path)
+        if not success:
+            return f"❌ Failed to get diff-tree: {output}"
+        
+        return output.strip()
+    tool_count += 1
+    
+    @server.tool()
     async def git_branch_create(repo: str, branch_name: str, base: str = "", checkout: bool = True) -> str:
         """Create a new branch."""
         path = resolve_repo_path(repo)
@@ -341,20 +458,49 @@ def register_tools(server: FastMCP) -> int:
     tool_count += 1
     
     @server.tool()
-    async def git_checkout(repo: str, target: str, create: bool = False) -> str:
-        """Switch branches or restore files."""
+    async def git_checkout(
+        repo: str,
+        target: str,
+        create: bool = False,
+        force_create: bool = False,
+        start_point: str = "",
+    ) -> str:
+        """
+        Switch branches or restore files.
+        
+        Args:
+            repo: Repository path
+            target: Branch name or file to checkout
+            create: Create new branch (-b flag)
+            force_create: Force create branch, resetting if exists (-B flag)
+            start_point: Starting point for new branch (e.g., "origin/main")
+        
+        Returns:
+            Checkout result.
+        
+        Examples:
+            git_checkout(repo, "main")  # Switch to main
+            git_checkout(repo, "feature", create=True)  # Create and switch
+            git_checkout(repo, "feature", force_create=True, start_point="origin/feature")
+        """
         path = resolve_repo_path(repo)
         
         args = ["checkout"]
-        if create:
+        if force_create:
+            args.append("-B")
+        elif create:
             args.append("-b")
         args.append(target)
+        
+        if start_point:
+            args.append(start_point)
         
         success, output = await run_git(args, cwd=path)
         if not success:
             return f"❌ Failed to checkout: {output}"
         
-        return f"✅ Switched to `{target}`\n\n{output}"
+        action = "Created and switched" if (create or force_create) else "Switched"
+        return f"✅ {action} to `{target}`\n\n{output}"
     tool_count += 1
     
     @server.tool()
@@ -420,11 +566,31 @@ def register_tools(server: FastMCP) -> int:
     tool_count += 1
     
     @server.tool()
-    async def git_push(repo: str, branch: str = "", set_upstream: bool = False, force: bool = False) -> str:
-        """Push commits to remote."""
+    async def git_push(
+        repo: str,
+        branch: str = "",
+        set_upstream: bool = False,
+        force: bool = False,
+        dry_run: bool = False,
+    ) -> str:
+        """
+        Push commits to remote.
+        
+        Args:
+            repo: Repository path
+            branch: Branch to push (default: current)
+            set_upstream: Set upstream tracking (-u flag)
+            force: Force push with lease (--force-with-lease)
+            dry_run: Show what would be pushed without pushing
+        
+        Returns:
+            Push result.
+        """
         path = resolve_repo_path(repo)
         
         args = ["push"]
+        if dry_run:
+            args.append("--dry-run")
         if set_upstream:
             args.extend(["-u", "origin"])
         if force:
@@ -438,7 +604,8 @@ def register_tools(server: FastMCP) -> int:
         if not success:
             return f"❌ Failed to push: {output}"
         
-        return f"✅ Pushed successfully\n\n{output}"
+        prefix = "(dry-run) " if dry_run else ""
+        return f"✅ {prefix}Pushed successfully\n\n{output}"
     tool_count += 1
     
     @server.tool()
@@ -458,13 +625,41 @@ def register_tools(server: FastMCP) -> int:
     tool_count += 1
     
     @server.tool()
-    async def git_fetch(repo: str, prune: bool = True) -> str:
-        """Fetch changes from remote without merging."""
+    async def git_fetch(
+        repo: str,
+        prune: bool = True,
+        remote: str = "",
+        branch: str = "",
+        refspec: str = "",
+    ) -> str:
+        """
+        Fetch changes from remote without merging.
+        
+        Args:
+            repo: Repository path
+            prune: Remove remote-tracking refs that no longer exist on remote
+            remote: Specific remote to fetch from (default: all)
+            branch: Specific branch to fetch
+            refspec: Custom refspec (e.g., "merge-requests/123/head:mr-123")
+        
+        Returns:
+            Fetch result.
+        """
         path = resolve_repo_path(repo)
         
-        args = ["fetch", "--all"]
+        args = ["fetch"]
+        if not remote and not refspec:
+            args.append("--all")
         if prune:
             args.append("--prune")
+        if remote:
+            args.append(remote)
+        if branch and not refspec:
+            args.append(branch)
+        if refspec:
+            if not remote:
+                args.append("origin")
+            args.append(refspec)
         
         success, output = await run_git(args, cwd=path)
         if not success:
@@ -709,6 +904,49 @@ def register_tools(server: FastMCP) -> int:
     tool_count += 1
     
     @server.tool()
+    async def git_merge(
+        repo: str,
+        target: str,
+        no_commit: bool = False,
+        no_ff: bool = False,
+        message: str = "",
+    ) -> str:
+        """
+        Merge a branch into the current branch.
+        
+        Args:
+            repo: Repository path
+            target: Branch or commit to merge
+            no_commit: Don't commit the merge (for testing mergeability)
+            no_ff: Always create a merge commit, even if fast-forward is possible
+            message: Custom merge commit message
+        
+        Returns:
+            Merge result.
+        """
+        path = resolve_repo_path(repo)
+        
+        args = ["merge"]
+        if no_commit:
+            args.append("--no-commit")
+        if no_ff:
+            args.append("--no-ff")
+        if message:
+            args.extend(["-m", message])
+        args.append(target)
+        
+        success, output = await run_git(args, cwd=path)
+        
+        if success:
+            return f"✅ Merged {target} successfully\n\n{output}"
+        
+        if "conflict" in output.lower():
+            return f"⚠️ Merge conflicts detected:\n\n{output}"
+        
+        return f"❌ Merge failed: {output}"
+    tool_count += 1
+    
+    @server.tool()
     async def git_merge_abort(repo: str) -> str:
         """
         Abort an in-progress merge.
@@ -779,6 +1017,68 @@ def register_tools(server: FastMCP) -> int:
         if check_only:
             return f"⚠️ Formatting issues found ({tool}):\n\n{output}"
         return f"❌ Formatting failed:\n{output}"
+    tool_count += 1
+    
+    @server.tool()
+    async def code_lint(
+        repo: str,
+        tool: str = "flake8",
+        paths: str = ".",
+        max_line_length: int = 100,
+        ignore: str = "E501,W503,E203",
+        exclude: str = ".git,__pycache__,migrations,venv,.venv",
+    ) -> str:
+        """
+        Run linting checks on code using flake8, ruff, or pylint.
+        
+        Args:
+            repo: Repository path
+            tool: Linter to use (flake8, ruff, pylint)
+            paths: Paths to lint (default: current directory)
+            max_line_length: Maximum line length (default: 100)
+            ignore: Comma-separated error codes to ignore
+            exclude: Comma-separated directories to exclude
+        
+        Returns:
+            Linting results with issues found.
+        """
+        path = resolve_repo_path(repo)
+        
+        if tool == "flake8":
+            cmd = [
+                "flake8",
+                f"--max-line-length={max_line_length}",
+                f"--ignore={ignore}",
+                f"--exclude={exclude}",
+            ]
+            cmd.extend(paths.split())
+        elif tool == "ruff":
+            cmd = ["ruff", "check"]
+            if ignore:
+                cmd.extend(["--ignore", ignore])
+            cmd.extend(paths.split())
+        elif tool == "pylint":
+            cmd = ["pylint", f"--max-line-length={max_line_length}"]
+            if ignore:
+                cmd.extend([f"--disable={ignore}"])
+            cmd.extend(paths.split())
+        else:
+            return f"❌ Unknown linter: {tool}. Use 'flake8', 'ruff', or 'pylint'"
+        
+        success, output = await run_cmd(cmd, cwd=path, timeout=120)
+        
+        if success:
+            return f"✅ Linting passed ({tool}) - no issues found"
+        
+        # Parse output to count issues
+        lines = output.strip().split('\n') if output.strip() else []
+        issue_count = len([l for l in lines if l.strip() and ':' in l])
+        
+        # Truncate if too long
+        if len(output) > 3000:
+            output = output[:3000] + f"\n\n... truncated ({issue_count} total issues)"
+        
+        return f"⚠️ Linting issues found ({tool}): {issue_count} issues\n\n```\n{output}\n```"
     tool_count += 1
     
     # ==================== BUILD/MAKE ====================
@@ -917,6 +1217,63 @@ def register_tools(server: FastMCP) -> int:
         if success:
             return f"✅ docker-compose down completed\n\n{output}"
         return f"❌ docker-compose down failed:\n{output}"
+    tool_count += 1
+    
+    @server.tool()
+    async def docker_cp(
+        source: str,
+        destination: str,
+        to_container: bool = True,
+    ) -> str:
+        """
+        Copy files to/from a Docker container.
+        
+        Args:
+            source: Source path (local path or container:path)
+            destination: Destination path (container:path or local path)
+            to_container: If True, copy from local to container
+        
+        Returns:
+            Copy result.
+        
+        Examples:
+            docker_cp("/tmp/script.sh", "my_container:/tmp/script.sh", to_container=True)
+            docker_cp("my_container:/var/log/app.log", "/tmp/app.log", to_container=False)
+        """
+        cmd = ["docker", "cp", source, destination]
+        
+        success, output = await run_cmd(cmd, timeout=60)
+        
+        if success:
+            direction = "to container" if to_container else "from container"
+            return f"✅ Copied {direction}: {source} → {destination}"
+        return f"❌ Copy failed: {output}"
+    tool_count += 1
+    
+    @server.tool()
+    async def docker_exec(
+        container: str,
+        command: str,
+        timeout: int = 300,
+    ) -> str:
+        """
+        Execute a command in a running Docker container.
+        
+        Args:
+            container: Container name or ID
+            command: Command to execute
+            timeout: Timeout in seconds
+        
+        Returns:
+            Command output.
+        """
+        cmd = ["docker", "exec", container, "bash", "-c", command]
+        
+        success, output = await run_cmd(cmd, timeout=timeout)
+        
+        if success:
+            return f"## Docker exec: {command[:50]}...\n\n```\n{output}\n```"
+        return f"❌ Docker exec failed:\n{output}"
     tool_count += 1
     
     return tool_count

@@ -379,15 +379,13 @@ steps:
 
   # ==================== LOCAL TESTING (optional) ====================
 
-  # Step 9: Checkout branch locally
-  - name: checkout_branch
-    description: "Checkout MR branch locally"
+  # Step 9a: Extract branch name
+  - name: extract_branch_name
+    description: "Extract source branch from MR details"
     condition: "{{ inputs.run_tests }}"
     compute: |
-      import subprocess
       import re
       
-      # Extract branch name from MR details
       branch_match = re.search(r'Source branch:\s*(\S+)', mr_details)
       if not branch_match:
         branch_match = re.search(r'source_branch.*?[:\s]+(\S+)', mr_details, re.IGNORECASE)
@@ -397,26 +395,52 @@ steps:
       else:
         branch = f"mr-{mr_id}"
       
-      # Fetch and checkout
-      subprocess.run(["git", "fetch", "origin"], cwd=resolved["path"], capture_output=True)
-      result = subprocess.run(
-        ["git", "checkout", "-B", branch, f"origin/{branch}"],
-        cwd=resolved["path"],
-        capture_output=True,
-        text=True
-      )
-      
-      if result.returncode != 0:
-        # Try fetching the MR directly
-        subprocess.run(
-          ["git", "fetch", "origin", f"merge-requests/{mr_id}/head:{branch}"],
-          cwd=resolved["path"],
-          capture_output=True
-        )
-        subprocess.run(["git", "checkout", branch], cwd=resolved["path"], capture_output=True)
-      
-      result = f"Checked out branch: {branch}"
+      result = branch
+    output: source_branch
+
+  # Step 9b: Fetch from origin
+  - name: fetch_origin
+    description: "Fetch latest from origin"
+    condition: "{{ inputs.run_tests }}"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved.path }}"
+    output: fetch_result
+    on_error: continue
+
+  # Step 9c: Checkout branch
+  - name: checkout_branch
+    description: "Checkout MR branch locally"
+    condition: "{{ inputs.run_tests }}"
+    tool: git_checkout
+    args:
+      repo: "{{ resolved.path }}"
+      target: "{{ source_branch }}"
+      force_create: true
+      start_point: "origin/{{ source_branch }}"
     output: checkout_result
+    on_error: continue
+
+  # Step 9d: Fallback - try MR ref
+  - name: fetch_mr_ref
+    description: "Fallback: fetch MR directly"
+    condition: "{{ inputs.run_tests and checkout_result and 'error' in str(checkout_result).lower() }}"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved.path }}"
+      refspec: "merge-requests/{{ mr_id }}/head:{{ source_branch }}"
+    output: mr_fetch_result
+    on_error: continue
+
+  # Step 9e: Checkout after MR fetch
+  - name: checkout_mr_branch
+    description: "Checkout after MR fetch"
+    condition: "{{ inputs.run_tests and mr_fetch_result }}"
+    tool: git_checkout
+    args:
+      repo: "{{ resolved.path }}"
+      target: "{{ source_branch }}"
+    output: checkout_result_final
     on_error: continue
 
   # Step 10: Check if docker-compose is running
@@ -488,7 +512,6 @@ steps:
     description: "Run pytest in FastAPI container"
     condition: "{{ inputs.run_tests }}"
     compute: |
-      import subprocess
       import tempfile
       import os
       
@@ -511,35 +534,55 @@ steps:
         f.write(test_script)
       os.chmod(script_path, 0o755)
       
-      # Copy to container and run
-      container = resolved["fastapi_container"]
+      # Store container name and script path for tool calls
+      result = {
+        "container": resolved["fastapi_container"],
+        "script_path": script_path
+      }
+    output: test_prep
+
+  # Copy script to container
+  - name: copy_test_script
+    description: "Copy test script to container"
+    condition: "{{ test_prep }}"
+    tool: docker_cp
+    args:
+      source: "{{ test_prep.script_path }}"
+      destination: "{{ test_prep.container }}:/tmp/test.sh"
+      to_container: true
+    output: copy_result
+    on_error: continue
+
+  # Execute tests in container
+  - name: execute_tests
+    description: "Run tests in container"
+    condition: "{{ test_prep and copy_result }}"
+    tool: docker_exec
+    args:
+      container: "{{ test_prep.container }}"
+      command: "bash /tmp/test.sh"
+      timeout: 300
+    output: test_exec_raw
+    on_error: continue
+
+  # Parse test results
+  - name: parse_test_results
+    description: "Parse test execution results"
+    compute: |
+      output = str(test_exec_raw) if 'test_exec_raw' in dir() and test_exec_raw else ""
       
-      # Copy script
-      subprocess.run(
-        ["docker", "cp", script_path, f"{container}:/tmp/test.sh"],
-        capture_output=True
-      )
-      
-      # Execute
-      result = subprocess.run(
-        ["docker", "exec", container, "bash", "/tmp/test.sh"],
-        capture_output=True,
-        text=True,
-        timeout=300
-      )
-      
-      output = result.stdout + result.stderr
       if len(output) > 2000:
         output = output[-2000:]
       
-      if result.returncode == 0:
+      if "passed" in output.lower() and "failed" not in output.lower():
         test_result = f"✅ Tests passed\n{output}"
-      else:
+      elif "❌" in output:
         test_result = f"❌ Tests failed\n{output}"
+      else:
+        test_result = f"⚠️ Test status unclear\n{output}"
       
       result = test_result
     output: test_result
-    on_error: continue
 
   # ==================== CODE ANALYSIS ====================
 

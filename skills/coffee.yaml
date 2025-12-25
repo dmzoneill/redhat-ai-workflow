@@ -257,33 +257,80 @@ steps:
       result = parse_mr_list(my_prs_raw) if my_prs_raw else []
     output: my_prs
 
-  - name: check_pr_feedback
-    description: "Check my PRs for new feedback (using shared parsers)"
+  # Get MR IDs for comments check
+  - name: get_pr_ids_for_feedback
+    description: "Extract MR IDs for feedback check"
     compute: |
-      import subprocess
+      # Get up to 5 MR IDs to check
+      pr_ids = [pr['id'] for pr in (my_prs or [])[:5]]
+      result = pr_ids
+    output: pr_ids_to_check
+
+  # Get comments for MR 1
+  - name: get_pr1_comments
+    description: "Get comments for first PR"
+    condition: "{{ pr_ids_to_check|length > 0 }}"
+    tool: gitlab_mr_comments
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      mr_id: "{{ pr_ids_to_check[0] }}"
+    output: pr1_comments_raw
+    on_error: continue
+
+  # Get comments for MR 2
+  - name: get_pr2_comments
+    description: "Get comments for second PR"
+    condition: "{{ pr_ids_to_check|length > 1 }}"
+    tool: gitlab_mr_comments
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      mr_id: "{{ pr_ids_to_check[1] }}"
+    output: pr2_comments_raw
+    on_error: continue
+
+  # Get comments for MR 3
+  - name: get_pr3_comments
+    description: "Get comments for third PR"
+    condition: "{{ pr_ids_to_check|length > 2 }}"
+    tool: gitlab_mr_comments
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      mr_id: "{{ pr_ids_to_check[2] }}"
+    output: pr3_comments_raw
+    on_error: continue
+
+  # Parse all comments for feedback
+  - name: parse_pr_feedback
+    description: "Parse all PR comments for feedback"
+    compute: |
+      import re
       import sys
       from pathlib import Path
       
-      # Add shared parsers
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
-      from common.parsers import BOT_PATTERNS, is_bot_comment
+      from common.parsers import is_bot_comment
       
       feedback = []
       current_user = ctx.get('config', {}).get('user', {}).get('username', 'daoneill')
       
-      for pr in my_prs[:5]:  # Check last 5
-        mr_id = pr['id']
+      # Process each MR's comments
+      comments_data = [
+        (pr_ids_to_check[0] if pr_ids_to_check else None, pr1_comments_raw if 'pr1_comments_raw' in dir() else None),
+        (pr_ids_to_check[1] if len(pr_ids_to_check) > 1 else None, pr2_comments_raw if 'pr2_comments_raw' in dir() else None),
+        (pr_ids_to_check[2] if len(pr_ids_to_check) > 2 else None, pr3_comments_raw if 'pr3_comments_raw' in dir() else None),
+      ]
+      
+      # Map MR IDs back to titles
+      mr_titles = {pr['id']: pr.get('title', '')[:40] for pr in (my_prs or [])}
+      
+      for mr_id, comments_raw in comments_data:
+        if not mr_id or not comments_raw:
+          continue
         
-        # Get comments via glab CLI (subprocess required for loop)
-        result = subprocess.run(
-          ["glab", "mr", "view", str(mr_id), "--comments", "-R", "automation-analytics/automation-analytics-backend"],
-          capture_output=True,
-          text=True
-        )
+        comments_text = str(comments_raw)
         
-        # Find human comments using shared filter
-        import re
-        for line in result.stdout.split('\n'):
+        # Find human comments
+        for line in comments_text.split('\n'):
           if ' commented ' in line and current_user.lower() not in line.lower():
             if not is_bot_comment(line, ''):
               match = re.match(r'^(\w+) commented', line)
@@ -291,13 +338,12 @@ steps:
                 feedback.append({
                   "mr_id": mr_id,
                   "author": match.group(1),
-                  "title": pr['title'][:40]
+                  "title": mr_titles.get(mr_id, '')
                 })
-                break  # One per MR
+                break
       
       result = feedback
     output: pr_feedback
-    on_error: continue
 
   # ==================== JIRA ACTIVITY (using MCP tool) ====================
   
@@ -412,38 +458,66 @@ steps:
 
   # ==================== FAILED PIPELINES ====================
   
+  # Get MR details for pipeline status (reusing pr_ids_to_check from earlier)
+  - name: get_mr1_details
+    description: "Get details for first MR"
+    condition: "{{ pr_ids_to_check|length > 0 }}"
+    tool: gitlab_mr_view
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      mr_id: "{{ pr_ids_to_check[0] }}"
+    output: mr1_details_raw
+    on_error: continue
+
+  - name: get_mr2_details
+    description: "Get details for second MR"
+    condition: "{{ pr_ids_to_check|length > 1 }}"
+    tool: gitlab_mr_view
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      mr_id: "{{ pr_ids_to_check[1] }}"
+    output: mr2_details_raw
+    on_error: continue
+
+  - name: get_mr3_details
+    description: "Get details for third MR"
+    condition: "{{ pr_ids_to_check|length > 2 }}"
+    tool: gitlab_mr_view
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      mr_id: "{{ pr_ids_to_check[2] }}"
+    output: mr3_details_raw
+    on_error: continue
+
   - name: check_failed_pipelines
-    description: "Check for failed pipelines on your MRs"
+    description: "Parse MR details for failed pipelines"
     compute: |
-      import subprocess
-      import re
-      
       failed_pipelines = []
       
-      # Get your open MRs and check their pipeline status
-      for pr in my_prs[:5] if my_prs else []:
-        mr_id = pr.get('id')
-        if not mr_id:
+      # Map MR IDs to titles
+      mr_titles = {pr['id']: pr.get('title', '')[:40] for pr in (my_prs or [])}
+      
+      # Check each MR for failed status
+      mr_details_list = [
+        (pr_ids_to_check[0] if pr_ids_to_check else None, mr1_details_raw if 'mr1_details_raw' in dir() else None),
+        (pr_ids_to_check[1] if len(pr_ids_to_check) > 1 else None, mr2_details_raw if 'mr2_details_raw' in dir() else None),
+        (pr_ids_to_check[2] if len(pr_ids_to_check) > 2 else None, mr3_details_raw if 'mr3_details_raw' in dir() else None),
+      ]
+      
+      for mr_id, details_raw in mr_details_list:
+        if not mr_id or not details_raw:
           continue
         
-        # Get MR details including pipeline status
-        result = subprocess.run(
-          ["glab", "mr", "view", str(mr_id), "-R", "automation-analytics/automation-analytics-backend"],
-          capture_output=True,
-          text=True
-        )
-        
-        output = result.stdout.lower()
+        output = str(details_raw).lower()
         if 'failed' in output or 'canceled' in output:
           failed_pipelines.append({
             "mr_id": mr_id,
-            "title": pr.get('title', '')[:40],
+            "title": mr_titles.get(mr_id, ''),
             "status": "failed" if 'failed' in output else "canceled"
           })
       
       result = failed_pipelines
     output: failed_pipelines
-    on_error: continue
 
   # ==================== EPHEMERAL NAMESPACES (using MCP tool) ====================
   

@@ -61,26 +61,72 @@ steps:
       result = mrs
     output: open_mrs
 
-  # Step 2: Get comments for each MR using MCP tool
-  - name: fetch_comments
-    description: "Fetch comments for each open MR"
+  # Step 2: Extract MR IDs to check
+  - name: prepare_mr_ids
+    description: "Prepare MR IDs for individual tool calls"
     compute: |
-      # This step prepares MR IDs for gitlab_mr_comments tool calls
-      # The actual tool calls happen in the next step
-      result = [{"mr_id": mr["id"], "title": mr["title"]} for mr in open_mrs]
-    output: mrs_to_check
+      mr_ids = [mr['id'] for mr in (open_mrs or [])[:5]]
+      mr_info = {mr['id']: mr for mr in (open_mrs or [])}
+      result = {"ids": mr_ids, "info": mr_info}
+    output: mr_data
+
+  # Step 3: Get comments for each MR (up to 5)
+  - name: get_mr1_comments
+    description: "Get comments for first MR"
+    condition: "{{ mr_data.ids|length > 0 }}"
+    tool: gitlab_mr_comments
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ mr_data.ids[0] }}"
+    output: mr1_comments
     on_error: continue
 
-  # Step 3: Analyze comments (using subprocess for now as gitlab_mr_comments 
-  # returns raw text that needs per-MR iteration)
+  - name: get_mr2_comments
+    description: "Get comments for second MR"
+    condition: "{{ mr_data.ids|length > 1 }}"
+    tool: gitlab_mr_comments
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ mr_data.ids[1] }}"
+    output: mr2_comments
+    on_error: continue
+
+  - name: get_mr3_comments
+    description: "Get comments for third MR"
+    condition: "{{ mr_data.ids|length > 2 }}"
+    tool: gitlab_mr_comments
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ mr_data.ids[2] }}"
+    output: mr3_comments
+    on_error: continue
+
+  - name: get_mr4_comments
+    description: "Get comments for fourth MR"
+    condition: "{{ mr_data.ids|length > 3 }}"
+    tool: gitlab_mr_comments
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ mr_data.ids[3] }}"
+    output: mr4_comments
+    on_error: continue
+
+  - name: get_mr5_comments
+    description: "Get comments for fifth MR"
+    condition: "{{ mr_data.ids|length > 4 }}"
+    tool: gitlab_mr_comments
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ mr_data.ids[4] }}"
+    output: mr5_comments
+    on_error: continue
+
+  # Step 4: Analyze all comments
   - name: check_comments
-    description: "Fetch and analyze comments for each MR"
+    description: "Analyze comments from all MRs"
     compute: |
-      import subprocess
       import re
       from datetime import datetime
-      
-      # Import shared parser utilities
       import sys
       import json
       from pathlib import Path
@@ -96,9 +142,7 @@ steps:
       current_user = cfg.get("user", {}).get("username", "daoneill")
       
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
-      from common.parsers import BOT_PATTERNS, is_bot_comment
-      
-      project = inputs.get('project', 'automation-analytics/automation-analytics-backend')
+      from common.parsers import is_bot_comment
       
       # Meeting keywords
       meeting_keywords = [
@@ -117,17 +161,19 @@ steps:
       
       feedback_results = []
       
-      for mr in open_mrs:
-        mr_id = mr['id']
-        
-        # Get comments for this MR
-        result = subprocess.run(
-          ["glab", "mr", "view", str(mr_id), "--comments", "-R", project],
-          capture_output=True,
-          text=True
-        )
-        
-        comments_text = result.stdout
+      # Build list of (mr_id, comments_text) pairs from tool outputs
+      all_comments = []
+      for i, var_name in enumerate(['mr1_comments', 'mr2_comments', 'mr3_comments', 'mr4_comments', 'mr5_comments']):
+        if i >= len(mr_data.get('ids', [])):
+          break
+        mr_id = mr_data['ids'][i]
+        comments = eval(var_name) if var_name in dir() else None
+        if comments:
+          all_comments.append((mr_id, str(comments)))
+      
+      for mr_id, comments_text in all_comments:
+        # Get MR info from our data
+        mr_info = mr_data.get('info', {}).get(mr_id, {})
         
         # Parse comments
         # Format: "username commented YYYY-MM-DD HH:MM:SS.xxx +0000 UTC\ncomment text"
@@ -135,14 +181,14 @@ steps:
         
         human_comments = []
         
-        i = 1
-        while i < len(comment_blocks) - 1:
-          author = comment_blocks[i]
-          timestamp_str = comment_blocks[i + 1]
+        idx = 1
+        while idx < len(comment_blocks) - 1:
+          author = comment_blocks[idx]
+          timestamp_str = comment_blocks[idx + 1]
           
           # Get the comment text (next block until next comment)
-          if i + 2 < len(comment_blocks):
-            comment_text = comment_blocks[i + 2].split('\n\n')[0] if '\n\n' in comment_blocks[i + 2] else comment_blocks[i + 2]
+          if idx + 2 < len(comment_blocks):
+            comment_text = comment_blocks[idx + 2].split('\n\n')[0] if '\n\n' in comment_blocks[idx + 2] else comment_blocks[idx + 2]
           else:
             comment_text = ""
           
@@ -166,12 +212,12 @@ steps:
               "needs_response": needs_response,
             })
           
-          i += 3
+          idx += 3
         
         if human_comments:
           feedback_results.append({
             "mr_id": mr_id,
-            "title": mr['title'],
+            "title": mr_info.get('title', ''),
             "comments": human_comments,
             "meeting_requests": [c for c in human_comments if c['is_meeting_request']],
             "needs_response": [c for c in human_comments if c['needs_response']],
