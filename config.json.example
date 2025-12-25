@@ -375,11 +375,19 @@
       }
     },
     "channels": {
-      "team": "C_YOUR_TEAM_CHANNEL",
-      "description": "Team channel for notifications"
+      "team": {
+        "id": "C_YOUR_TEAM_CHANNEL",
+        "name": "your-team-channel",
+        "description": "Team channel for notifications and updates"
+      },
+      "standup": {
+        "id": "C_YOUR_STANDUP_CHANNEL",
+        "name": "your-standup-channel",
+        "description": "Daily standup summaries"
+      }
     },
     "user_mapping": {
-      "description": "Map usernames to Slack user IDs",
+      "description": "Map GitLab usernames to Slack user IDs for DMs",
       "your_username": "U_YOUR_USER_ID"
     },
     "debug": {
