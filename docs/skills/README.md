@@ -32,14 +32,14 @@ Skills are **reusable multi-step workflows** that chain MCP tools together with 
 
 ```mermaid
 graph LR
-    MORNING[☕ Morning] --> COFFEE[/coffee]
-    COFFEE --> WORK[💻 Work]
-    WORK --> START[start_work]
-    START --> CODE[Write Code]
-    CODE --> MR[create_mr]
-    MR --> REVIEW[review_pr]
-    REVIEW --> EVENING[🌙 Evening]
-    EVENING --> BEER[/beer]
+    MORNING["☕ Morning"] --> COFFEE["coffee"]
+    COFFEE --> WORK["💻 Work"]
+    WORK --> START["start_work"]
+    START --> CODE["Write Code"]
+    CODE --> MR["create_mr"]
+    MR --> REVIEW["review_pr"]
+    REVIEW --> EVENING["🌙 Evening"]
+    EVENING --> BEER["beer"]
     
     style COFFEE fill:#6366f1,stroke:#4f46e5,color:#fff
     style BEER fill:#f59e0b,stroke:#d97706,color:#fff
