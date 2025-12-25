@@ -101,7 +101,8 @@
     },
     "alerts": {
       "stage": "resources/your-stage/your-app-stage",
-      "prod_main": "resources/your-prod/your-app-prod"
+      "prod_main": "resources/your-prod/your-app-prod",
+      "prod_billing": "resources/your-prod/your-app-prod-billing"
     }
   },
   "prometheus": {
@@ -151,7 +152,8 @@
       "name": "stage-cluster",
       "description": "Staging environment cluster",
       "console_url": "https://console.stage.example.com",
-      "api_url": "https://api.stage.example.com:6443"
+      "api_url": "https://api.stage.example.com:6443",
+      "elb_fqdn": "elb.stage.example.com"
     },
     "production": {
       "name": "prod-cluster",
@@ -276,6 +278,7 @@
       },
       "channel_keywords": {
         "enabled": false,
+        "description": "Respond to messages containing these keywords",
         "keywords": ["urgent", "help needed"]
       },
       "ignore_unmentioned": true,
@@ -325,6 +328,22 @@
       "notification_channel": "",
       "notify_user_id": ""
     },
+    "channels": {
+      "team": {
+        "id": "C_YOUR_TEAM_CHANNEL",
+        "name": "your-team-channel",
+        "description": "Team channel for notifications and updates"
+      },
+      "standup": {
+        "id": "C_YOUR_STANDUP_CHANNEL",
+        "name": "your-standup-channel",
+        "description": "Daily standup summaries"
+      }
+    },
+    "user_mapping": {
+      "description": "Map GitLab usernames to Slack user IDs for DMs",
+      "your_username": "U_YOUR_USER_ID"
+    },
     "state_db_path": "./slack_state.db",
     "debug": false
   },
@@ -372,6 +391,72 @@
         "notify_author": true,
         "notify_channel": false,
         "template": "ephemeral env ready: {namespace}"
+      },
+      "ephemeral_tests_failed": {
+        "description": "Ephemeral tests failed",
+        "notify_author": true,
+        "notify_channel": true,
+        "template": "❌ ephemeral tests failed for !{mr_id}"
+      },
+      "mr_merged": {
+        "description": "MR merged to target",
+        "notify_author": false,
+        "notify_channel": true,
+        "template": "merged !{mr_id} into {target_branch}"
+      },
+      "issue_closed": {
+        "description": "Jira issue closed",
+        "notify_author": false,
+        "notify_channel": true,
+        "template": "{issue_key} closed ({commit_count} commits)"
+      },
+      "rebase_completed": {
+        "description": "Branch rebased successfully",
+        "notify_author": true,
+        "notify_channel": false,
+        "template": "rebased !{mr_id} onto {base_branch}"
+      },
+      "rebase_conflict": {
+        "description": "Rebase has conflicts",
+        "notify_author": true,
+        "notify_channel": false,
+        "template": "⚠️ !{mr_id} has conflicts - manual fix needed"
+      },
+      "release_started": {
+        "description": "Release to prod initiated",
+        "notify_author": false,
+        "notify_channel": true,
+        "template": "release started - {sha} going to prod"
+      },
+      "release_completed": {
+        "description": "Release deployed",
+        "notify_author": false,
+        "notify_channel": true,
+        "template": "release done - {sha} live in {environment}"
+      },
+      "release_mr_ready": {
+        "description": "Release MR ready for review",
+        "notify_author": false,
+        "notify_channel": true,
+        "template": "🚀 release MR ready: !{mr_id}"
+      },
+      "batch_review_completed": {
+        "description": "Batch review completed",
+        "notify_author": false,
+        "notify_channel": true,
+        "template": "reviewed {count} MRs: {approved} approved"
+      },
+      "alert_critical": {
+        "description": "Critical alert firing",
+        "notify_author": false,
+        "notify_channel": true,
+        "template": "🔴 {alert_name} firing in {namespace}"
+      },
+      "alert_escalated": {
+        "description": "Alert escalated",
+        "notify_author": false,
+        "notify_channel": true,
+        "template": "⚠️ escalated {alert_name}"
       }
     },
     "channels": {
@@ -412,11 +497,13 @@
     "default_duration_minutes": 30,
     "duplicate_check": {
       "enabled": true,
+      "description": "Check for duplicate meetings before creating",
       "days_back": 30,
       "days_ahead": 30
     },
     "availability_check": {
       "enabled": true,
+      "description": "Check participant availability before creating",
       "days_ahead": 5,
       "skip_weekends": true
     },
@@ -446,6 +533,7 @@
     ],
     "auto_archive": {
       "enabled": false,
+      "description": "Auto-archive processed emails after briefing",
       "exclude_labels": ["IMPORTANT", "STARRED"]
     },
     "categories": {

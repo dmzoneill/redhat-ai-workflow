@@ -138,7 +138,8 @@ Skills are reusable workflows. See [full skills reference](docs/skills/README.md
 | [☕ coffee](docs/skills/coffee.md) | Morning briefing |
 | [🍺 beer](docs/skills/beer.md) | End-of-day wrap-up |
 | [⚡ start_work](docs/skills/start_work.md) | Begin Jira issue |
-| [🚀 create_mr](docs/skills/create_mr.md) | Create merge request |
+| [🚀 create_mr](docs/skills/create_mr.md) | Create MR + Slack notify |
+| [✅ mark_mr_ready](docs/skills/mark_mr_ready.md) | Mark draft as ready |
 | [👀 review_pr](docs/skills/review_pr.md) | Review MR |
 | [🔄 sync_branch](docs/skills/sync_branch.md) | Rebase onto main |
 | [📋 standup_summary](docs/skills/standup_summary.md) | Generate standup |
@@ -151,10 +152,11 @@ Skills are reusable workflows. See [full skills reference](docs/skills/README.md
 
 ## 🔧 Tool Modules
 
-150+ tools across 14 modules. See [full MCP server reference](docs/mcp-servers/README.md).
+150+ tools across 15 modules. See [full MCP server reference](docs/mcp-servers/README.md).
 
 | Module | Tools | Description |
 |--------|-------|-------------|
+| [common](docs/mcp-servers/common.md) | 28 | Core server, agents, skills |
 | [git](docs/mcp-servers/git.md) | 19 | Git operations |
 | [gitlab](docs/mcp-servers/gitlab.md) | 35 | MRs, pipelines |
 | [jira](docs/mcp-servers/jira.md) | 24 | Issue tracking |
@@ -216,9 +218,9 @@ ai-workflow/
 
 | Document | Description |
 |----------|-------------|
-| [Skills Reference](docs/skills/README.md) | All 20+ available skills |
+| [Skills Reference](docs/skills/README.md) | All 21 available skills |
 | [Agents Reference](docs/agents/README.md) | 5 specialized agent personas |
-| [MCP Servers Reference](docs/mcp-servers/README.md) | 14 tool modules |
+| [MCP Servers Reference](docs/mcp-servers/README.md) | 15 tool modules |
 | [Architecture Overview](docs/architecture/README.md) | High-level design |
 | [MCP Server Implementation](docs/architecture/mcp-implementation.md) | Server code details |
 

@@ -108,6 +108,27 @@ These tools are available regardless of which agent is loaded:
 | `skill_run` | Execute a skill |
 | `skill_list` | List available skills |
 
+## Agent Variants
+
+Several agents have "slim" variants with fewer tools for better performance:
+
+| Variant | Base Agent | Description |
+|---------|------------|-------------|
+| `developer-slim` | developer | Core dev tools only |
+| `devops-slim` | devops | Essential k8s/deploy tools |
+| `incident-slim` | incident | Fast incident response |
+| `release-slim` | release | Streamlined release flow |
+
+**Special Agents:**
+
+| Agent | Description |
+|-------|-------------|
+| `core` | Minimal set - just workflow tools |
+| `combined` | All tools from multiple agents |
+| `universal` | Kitchen sink - all available tools |
+
+> ⚠️ `universal` may exceed Cursor's 128 tool limit
+
 ## Agent Configuration
 
 Agents are defined in YAML files in the `agents/` directory:

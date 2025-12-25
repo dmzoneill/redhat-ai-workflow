@@ -6,6 +6,7 @@ MCP servers are **tool modules** that provide specific capabilities. Each server
 
 | Server | Tools | Description |
 |--------|-------|-------------|
+| [common](./common.md) | 28 | Core server, agents, skills, memory |
 | [git](./git.md) | 15 | Git operations |
 | [gitlab](./gitlab.md) | 36 | MRs, pipelines, code review |
 | [jira](./jira.md) | 25 | Issue tracking |
@@ -22,7 +23,9 @@ MCP servers are **tool modules** that provide specific capabilities. Each server
 | [appinterface](./appinterface.md) | 6 | GitOps config |
 | [workflow](./workflow.md) | 28 | Core workflow tools |
 
-**Total:** ~250+ tools across all modules
+**Total:** ~260+ tools across 15 modules
+
+> Plus **42 shared parsers** in `scripts/common/parsers.py` for reusable output parsing
 
 ## Architecture
 

@@ -17,6 +17,7 @@
         slack-status slack-pending slack-approve slack-approve-all slack-history \
         slack-send slack-watch slack-reload \
         mcp-server mcp-devops mcp-developer mcp-incident mcp-release \
+        docs-serve docs-check list-skills list-tools config-validate \
         check-env
 
 # Use bash for proper escape sequence handling
@@ -78,7 +79,14 @@ help:
 	@printf "  \033[32mmake format\033[0m             Auto-format code with black\n"
 	@printf "  \033[32mmake check-env\033[0m          Validate environment variables\n"
 	@printf "\n"
+	@printf "\033[1mDocumentation:\033[0m\n"
+	@printf "  \033[32mmake list-skills\033[0m        List all available skills\n"
+	@printf "  \033[32mmake list-tools\033[0m         List all MCP tool modules\n"
+	@printf "  \033[32mmake docs-serve\033[0m         Serve docs locally (port 8000)\n"
+	@printf "  \033[32mmake docs-check\033[0m         Check for missing skill docs\n"
+	@printf "\n"
 	@printf "\033[1mUtilities:\033[0m\n"
+	@printf "  \033[32mmake config-validate\033[0m    Validate config.json\n"
 	@printf "  \033[32mmake clean\033[0m              Clean temporary files\n"
 	@printf "  \033[32mmake status\033[0m             Show status of running processes\n"
 	@printf "\n"
@@ -333,6 +341,57 @@ format:
 	@printf "\033[36mFormatting code...\033[0m\n"
 	cd $(PROJECT_ROOT) && black scripts/ mcp-servers/ --line-length=100
 	@printf "\033[32m✅ Code formatted\033[0m\n"
+
+# =============================================================================
+# DOCUMENTATION
+# =============================================================================
+
+docs-serve:
+	@printf "\033[36mServing documentation...\033[0m\n"
+	@printf "Open http://localhost:8000 in your browser\n"
+	cd $(PROJECT_ROOT)/docs && $(PYTHON) -m http.server 8000
+
+docs-check:
+	@printf "\033[36mChecking documentation...\033[0m\n"
+	@echo "Skills with docs:"
+	@ls -1 $(PROJECT_ROOT)/docs/skills/*.md 2>/dev/null | wc -l
+	@echo "Skills without docs:"
+	@for skill in $(PROJECT_ROOT)/skills/*.yaml; do \
+		name=$$(basename $$skill .yaml); \
+		if [ ! -f "$(PROJECT_ROOT)/docs/skills/$$name.md" ]; then \
+			echo "  ❌ $$name"; \
+		fi; \
+	done
+
+list-skills:
+	@printf "\033[36mAvailable Skills:\033[0m\n"
+	@for skill in $(PROJECT_ROOT)/skills/*.yaml; do \
+		name=$$(basename $$skill .yaml); \
+		desc=$$(grep -m1 "^description:" $$skill 2>/dev/null | sed 's/description: *//; s/"//g' | head -c 60); \
+		printf "  \033[32m%-25s\033[0m %s\n" "$$name" "$$desc"; \
+	done
+
+list-tools:
+	@printf "\033[36mMCP Tool Modules:\033[0m\n"
+	@for dir in $(PROJECT_ROOT)/mcp-servers/aa-*/; do \
+		name=$$(basename $$dir); \
+		if [ -f "$$dir/src/tools.py" ]; then \
+			count=$$(grep -c "@server.tool" $$dir/src/tools.py 2>/dev/null || echo "0"); \
+			printf "  \033[32m%-20s\033[0m %s tools\n" "$$name" "$$count"; \
+		fi; \
+	done
+
+config-validate:
+	@printf "\033[36mValidating config.json...\033[0m\n"
+	@$(PYTHON) -c "import json; json.load(open('config.json')); print('\033[32m✅ Valid JSON\033[0m')"
+	@$(PYTHON) -c "import json; c=json.load(open('config.json')); \
+		r=c.get('repositories',{}); \
+		u=c.get('user',{}); \
+		s=c.get('slack',{}).get('auth',{}); \
+		print(f'  Repositories: {len(r)}'); \
+		print(f'  User: {u.get(\"username\", \"NOT SET\")}'); \
+		print(f'  Slack: {\"configured\" if s.get(\"xoxc_token\") else \"NOT CONFIGURED\"}'); \
+		"
 
 # =============================================================================
 # UTILITIES
