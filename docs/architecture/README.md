@@ -139,7 +139,7 @@ Central configuration via `config.json`:
 
 ## See Also
 
-- [MCP Server Architecture](../../mcp-servers/ARCHITECTURE.md) - Detailed server docs
+- [MCP Implementation Details](./mcp-implementation.md) - Server code & patterns
 - [Skills Reference](../skills/README.md) - All available skills
 - [README](../../README.md) - Getting started
 

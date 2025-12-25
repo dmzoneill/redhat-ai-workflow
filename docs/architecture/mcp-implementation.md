@@ -344,6 +344,6 @@ The `aa-slack` module implements a **long-running listener** pattern:
 
 ## See Also
 
-- [Skills Reference](../docs/skills/README.md) - Available skills
-- [Architecture Overview](../docs/architecture/README.md) - High-level architecture
-- [README](../README.md) - Getting started
+- [Skills Reference](../skills/README.md) - Available skills
+- [Architecture Overview](./README.md) - High-level architecture
+- [README](../../README.md) - Getting started

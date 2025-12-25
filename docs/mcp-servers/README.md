@@ -152,5 +152,5 @@ tools:
 
 - [Architecture Overview](../architecture/README.md)
 - [Agents](../agents/README.md)
-- [Detailed Server Architecture](../../mcp-servers/ARCHITECTURE.md)
+- [MCP Implementation Details](../architecture/mcp-implementation.md)
 

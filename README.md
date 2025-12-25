@@ -209,7 +209,7 @@ ai-workflow/
 | [Agents Reference](docs/agents/README.md) | 5 specialized agent personas |
 | [MCP Servers Reference](docs/mcp-servers/README.md) | 14 tool modules |
 | [Architecture Overview](docs/architecture/README.md) | High-level design |
-| [MCP Server Implementation](mcp-servers/ARCHITECTURE.md) | Server code details |
+| [MCP Server Implementation](docs/architecture/mcp-implementation.md) | Server code details |
 
 ---
 
