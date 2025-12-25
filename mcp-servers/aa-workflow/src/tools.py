@@ -1447,10 +1447,36 @@ def register_tools(server: "FastMCP") -> int:
                 var_path = match.group(1).strip()
                 try:
                     # Navigate the context for nested paths like "inputs.issue_key" or "issue.summary"
+                    # Also handles array indexing like "pr_ids_to_check[0]" or "items[0].name"
                     value = self.context
-                    for part in var_path.split('.'):
-                        if isinstance(value, dict):
+                    
+                    # Split by '.' but preserve array indices
+                    # e.g., "pr_ids_to_check[0]" -> ["pr_ids_to_check[0]"]
+                    # e.g., "items[0].name" -> ["items[0]", "name"]
+                    parts = var_path.split('.')
+                    
+                    for part in parts:
+                        # Check for array index: "var[0]" or "var[1]"
+                        array_match = re.match(r'^(\w+)\[(\d+)\]$', part)
+                        if array_match:
+                            var_name, index = array_match.groups()
+                            index = int(index)
+                            # Get the variable
+                            if isinstance(value, dict):
+                                value = value.get(var_name)
+                            elif hasattr(value, var_name):
+                                value = getattr(value, var_name)
+                            else:
+                                return match.group(0)
+                            # Get the index
+                            if isinstance(value, (list, tuple)) and index < len(value):
+                                value = value[index]
+                            else:
+                                return match.group(0)
+                        elif isinstance(value, dict):
                             value = value.get(part, match.group(0))
+                            if value == match.group(0):
+                                return value  # Key not found
                         elif hasattr(value, part):
                             value = getattr(value, part)
                         else:
