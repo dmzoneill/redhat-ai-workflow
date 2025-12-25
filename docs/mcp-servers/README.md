@@ -8,24 +8,24 @@ MCP servers are **tool modules** that provide specific capabilities. Each server
 |--------|-------|-------------|
 | [common](./common.md) | 28 | Core server, agents, skills, memory |
 | [git](./git.md) | 15 | Git operations |
-| [gitlab](./gitlab.md) | 36 | MRs, pipelines, code review |
-| [jira](./jira.md) | 25 | Issue tracking |
+| [gitlab](./gitlab.md) | 35 | MRs, pipelines, code review |
+| [jira](./jira.md) | 24 | Issue tracking |
 | [k8s](./k8s.md) | 26 | Kubernetes operations |
 | [bonfire](./bonfire.md) | 21 | Ephemeral namespaces |
 | [quay](./quay.md) | 8 | Container registry |
 | [prometheus](./prometheus.md) | 13 | Metrics queries |
-| [alertmanager](./alertmanager.md) | 7 | Alert management |
+| [alertmanager](./alertmanager.md) | 6 | Alert management |
 | [kibana](./kibana.md) | 9 | Log search |
 | [google-calendar](./google-calendar.md) | 6 | Calendar & meetings |
 | [gmail](./gmail.md) | 6 | Email processing |
-| [slack](./slack.md) | 15 | Slack integration |
+| [slack](./slack.md) | 16 | Slack integration (+slack_dm_gitlab_user) |
 | [konflux](./konflux.md) | 40 | Build pipelines |
-| [appinterface](./appinterface.md) | 6 | GitOps config |
-| [workflow](./workflow.md) | 28 | Core workflow tools |
+| [appinterface](./appinterface.md) | 7 | GitOps config (+appinterface_get_user) |
+| [workflow](./workflow.md) | 30 | Core workflow (+vpn_connect, kube_login) |
 
 **Total:** ~260+ tools across 15 modules
 
-> Plus **42 shared parsers** in `scripts/common/parsers.py` for reusable output parsing
+> Plus **44 shared parsers** in `scripts/common/parsers.py` for reusable output parsing (including `extract_web_url`, `extract_mr_url`)
 
 ## Architecture
 

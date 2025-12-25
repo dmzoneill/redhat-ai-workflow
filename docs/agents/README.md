@@ -6,11 +6,12 @@ Agents are **specialized personas** with curated tool sets. Switch agents to get
 
 | Agent | Command | Tools | Focus |
 |-------|---------|-------|-------|
-| [👨‍💻 developer](./developer.md) | `Load developer agent` | ~80 | Daily coding, PRs |
-| [🔧 devops](./devops.md) | `Load devops agent` | ~90 | Deployments, K8s |
-| [🚨 incident](./incident.md) | `Load incident agent` | ~78 | Production debugging |
-| [📦 release](./release.md) | `Load release agent` | ~69 | Shipping releases |
-| [💬 slack](./slack.md) | `Load slack agent` | ~74 | Slack automation |
+| [👨‍💻 developer](./developer.md) | `Load developer agent` | ~102 | Daily coding, PRs |
+| [🔧 devops](./devops.md) | `Load devops agent` | ~118 | Deployments, K8s |
+| [🚨 incident](./incident.md) | `Load incident agent` | ~106 | Production debugging |
+| [📦 release](./release.md) | `Load release agent` | ~98 | Shipping releases |
+| [💬 slack](./slack.md) | `Load slack agent` | ~103 | Slack automation |
+| [🌐 universal](./universal.md) | `Load universal agent` | ~123 | All-in-one |
 
 ## How Agents Work
 
@@ -50,24 +51,28 @@ Each agent is designed to stay under Cursor's 128 tool limit:
 
 | Agent | Tool Count | Headroom |
 |-------|------------|----------|
-| developer | ~80 | 48 |
-| devops | ~90 | 38 |
-| incident | ~78 | 50 |
-| release | ~69 | 59 |
-| slack | ~74 | 54 |
+| developer | ~102 | 26 |
+| devops | ~118 | 10 |
+| incident | ~106 | 22 |
+| release | ~98 | 30 |
+| slack | ~103 | 25 |
+| universal | ~123 | 5 |
 
 ## Agent Tool Modules
+
+All agents include `workflow` module (required for skills/memory).
 
 ```mermaid
 graph TD
     subgraph Developer["👨‍💻 Developer"]
+        D_WF[workflow]
         D_GIT[git]
         D_GITLAB[gitlab]
         D_JIRA[jira]
-        D_CAL[google-calendar]
     end
     
     subgraph DevOps["🔧 DevOps"]
+        O_WF[workflow]
         O_K8S[k8s]
         O_BON[bonfire]
         O_QUAY[quay]
@@ -75,6 +80,7 @@ graph TD
     end
     
     subgraph Incident["🚨 Incident"]
+        I_WF[workflow]
         I_K8S[k8s]
         I_PROM[prometheus]
         I_ALERT[alertmanager]
@@ -83,6 +89,7 @@ graph TD
     end
     
     subgraph Release["📦 Release"]
+        R_WF[workflow]
         R_KON[konflux]
         R_QUAY[quay]
         R_APP[appinterface]
@@ -107,27 +114,28 @@ These tools are available regardless of which agent is loaded:
 | `debug_tool` | Self-healing tool debugger |
 | `skill_run` | Execute a skill |
 | `skill_list` | List available skills |
+| `vpn_connect` | Connect to VPN (fixes network errors) |
+| `kube_login` | Refresh k8s credentials |
 
 ## Agent Variants
 
-Several agents have "slim" variants with fewer tools for better performance:
+Several agents have "slim" variants with fewer tools for combining:
 
 | Variant | Base Agent | Description |
 |---------|------------|-------------|
-| `developer-slim` | developer | Core dev tools only |
-| `devops-slim` | devops | Essential k8s/deploy tools |
-| `incident-slim` | incident | Fast incident response |
-| `release-slim` | release | Streamlined release flow |
+| `developer-slim` | developer | Core dev tools only (~39 tools) |
+| `devops-slim` | devops | Essential k8s/deploy (~39 tools) |
+| `incident-slim` | incident | Fast incident response (~15 tools) |
+| `release-slim` | release | Streamlined release (~48 tools) |
 
 **Special Agents:**
 
 | Agent | Description |
 |-------|-------------|
-| `core` | Minimal set - just workflow tools |
-| `combined` | All tools from multiple agents |
-| `universal` | Kitchen sink - all available tools |
+| `core` | Essential shared tools (~106 tools) |
+| `universal` | Developer + DevOps combined (~123 tools) |
 
-> ⚠️ `universal` may exceed Cursor's 128 tool limit
+> All agents now include `workflow` module for skills, memory, and infrastructure tools
 
 ## Agent Configuration
 
@@ -139,15 +147,16 @@ description: Coding, PRs, and code review
 persona: agents/developer.md
 
 tools:
+  - workflow        # 30 tools - REQUIRED for skills/memory
   - git             # 15 tools
   - gitlab          # 35 tools
   - jira            # 24 tools
-  - google-calendar # 6 tools
 
 skills:
   - coffee
   - start_work
   - create_mr
+  - mark_mr_ready
   # ...
 ```
 
