@@ -221,9 +221,9 @@ steps:
     on_error: continue
 
   - name: validate_commits
-    description: "Check commit messages follow AAP-XXXXX convention"
+    description: "Check commit messages follow AAP-XXXXX convention using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import extract_jira_key
       
       issue_key = inputs.issue_key.upper()
       
@@ -234,7 +234,8 @@ steps:
         for line in str(commit_log_raw).split('\n'):
           if line.strip():
             commits.append(line.strip())
-            if not re.search(r"AAP-\d+", line, re.IGNORECASE):
+            # Use shared parser to check for Jira key
+            if not extract_jira_key(line):
               bad_commits.append(line)
       
       if not commits:

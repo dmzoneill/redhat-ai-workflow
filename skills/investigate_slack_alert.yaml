@@ -190,35 +190,29 @@ steps:
     on_error: continue
 
   - name: analyze_pod_status
-    description: "Identify unhealthy pods and extract error indicators"
+    description: "Identify unhealthy pods using shared parser"
     compute: |
-      pods_output = str(pod_status) if pod_status else ""
+      from scripts.common.parsers import parse_kubectl_pods
       
+      # Use shared parser to get structured pod data
+      pods = parse_kubectl_pods(str(pod_status) if pod_status else "")
+      
+      # Filter unhealthy pods
       unhealthy = []
       error_pods = []
       
-      for line in pods_output.split('\n'):
-          if not line.strip() or line.startswith('NAME'):
-              continue
-          parts = line.split()
-          if len(parts) >= 3:
-              pod_name = parts[0]
-              ready = parts[1]
-              status = parts[2]
-              
-              # Check for issues
-              if status not in ['Running', 'Completed']:
-                  unhealthy.append({"pod": pod_name, "status": status})
-              elif '/' in ready:
-                  ready_count, total = ready.split('/')
-                  if ready_count != total:
-                      unhealthy.append({"pod": pod_name, "ready": ready})
-              
-              # Find pods related to alert
-              alert_name_lower = alert_info.get("alert_name", "").lower()
-              if any(term in pod_name.lower() for term in ['processor', 'api', 'rollup', 'exporter']):
-                  if 'error' in status.lower() or 'crash' in status.lower():
-                      error_pods.append(pod_name)
+      for pod in pods:
+          if not pod.get("healthy"):
+              unhealthy.append({
+                  "pod": pod["name"],
+                  "status": pod["status"],
+                  "ready": pod.get("ready", "?/?")
+              })
+          
+          # Find pods related to alert that have errors
+          if any(term in pod["name"].lower() for term in ['processor', 'api', 'rollup', 'exporter']):
+              if 'error' in pod["status"].lower() or 'crash' in pod["status"].lower():
+                  error_pods.append(pod["name"])
       
       result = {
           "unhealthy_pods": unhealthy[:5],
@@ -413,17 +407,16 @@ steps:
     on_error: continue
 
   - name: get_jira_key
-    description: "Extract the Jira issue key"
+    description: "Extract the Jira issue key using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import extract_jira_key
       
       if jira_analysis.get("has_existing"):
           issue_key = jira_analysis.get("existing_issue")
           action = "linked"
       else:
           created = str(created_issue) if created_issue else ""
-          match = re.search(r'(AAP-\d+)', created)
-          issue_key = match.group(1) if match else None
+          issue_key = extract_jira_key(created)
           action = "created"
       
       result = {

@@ -20,29 +20,77 @@ BOT_PATTERNS = [
 ]
 
 
-def parse_mr_list(output: str) -> List[Dict[str, Any]]:
+def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, Any]]:
     """
     Parse gitlab_mr_list output into structured MR data.
     
+    Handles multiple output formats:
+    - Single line: "!1452  project!1452  AAP-58394 - feat... (main)"
+    - Multi-line with IID, Title, Author on separate lines
+    
     Args:
         output: Raw output from glab mr list
+        include_author: Whether to extract author from output
         
     Returns:
-        List of dicts with 'id' and 'title' keys
+        List of dicts with 'iid' (or 'id'), 'title', and optionally 'author' keys
     """
     mrs = []
     if not output:
         return mrs
+    
+    lines = str(output).split('\n')
+    current_mr = {}
+    
+    for line in lines:
+        # Try single-line format first: "!1452  project!1452  Title (main)"
+        single_match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
+        if single_match:
+            mr = {
+                "iid": int(single_match.group(1)),
+                "id": int(single_match.group(1)),  # Alias for compatibility
+                "title": single_match.group(2).strip()[:60]
+            }
+            if include_author:
+                author_match = re.search(r'@(\w+)', line)
+                if author_match:
+                    mr["author"] = author_match.group(1)
+            mrs.append(mr)
+            continue
         
-    for line in str(output).split('\n'):
-        # Parse: !1452  automation-analytics/automation-analytics-backend!1452  AAP-58394 - feat(clowder)... (main)
-        match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
-        if match:
-            mrs.append({
-                "id": int(match.group(1)),
-                "title": match.group(2).strip()[:60]
-            })
-    return mrs
+        # Multi-line format: Look for IID pattern
+        iid_match = re.search(r'!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)', line, re.IGNORECASE)
+        if iid_match:
+            # Save previous MR if exists
+            if current_mr.get('iid'):
+                mrs.append(current_mr)
+            iid = int(iid_match.group(1) or iid_match.group(2) or iid_match.group(3))
+            current_mr = {'iid': iid, 'id': iid}  # Both for compatibility
+        
+        # Extract title
+        title_match = re.search(r'Title[:\s]+(.+)', line, re.IGNORECASE)
+        if title_match and current_mr.get('iid') and not current_mr.get('title'):
+            current_mr['title'] = title_match.group(1).strip()[:60]
+        
+        # Extract author if requested
+        if include_author:
+            author_match = re.search(r'Author[:\s]+(\w+)|@(\w+)', line)
+            if author_match and current_mr.get('iid') and not current_mr.get('author'):
+                current_mr['author'] = author_match.group(1) or author_match.group(2)
+    
+    # Don't forget the last one
+    if current_mr.get('iid'):
+        mrs.append(current_mr)
+    
+    # Deduplicate by IID
+    seen = set()
+    unique = []
+    for mr in mrs:
+        if mr['iid'] not in seen:
+            seen.add(mr['iid'])
+            unique.append(mr)
+    
+    return unique
 
 
 def parse_jira_issues(output: str) -> List[Dict[str, str]]:
@@ -410,4 +458,142 @@ def extract_jira_key(text: str) -> Optional[str]:
         
     match = re.search(r'\b([A-Z]{2,10}-\d+)\b', str(text))
     return match.group(1) if match else None
+
+
+def analyze_mr_status(details: str, my_username: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Analyze MR details for approval status, conflicts, pipeline, and feedback.
+    
+    Args:
+        details: Raw MR details output from gitlab_mr_view
+        my_username: Current user's username (to filter own comments)
+        
+    Returns:
+        Dict with status analysis including:
+        - is_approved: bool
+        - has_conflicts: bool
+        - needs_rebase: bool
+        - pipeline_failed: bool
+        - has_feedback: bool
+        - reviewers: list of usernames who commented
+        - unresolved: bool (has unresolved discussions)
+        - status: string ('approved', 'needs_response', 'needs_rebase', etc)
+        - action: string (suggested action)
+    """
+    details = str(details) if details else ""
+    
+    result = {
+        "is_approved": False,
+        "has_conflicts": False,
+        "needs_rebase": False,
+        "pipeline_failed": False,
+        "has_feedback": False,
+        "reviewers": [],
+        "unresolved": False,
+        "status": "awaiting_review",
+        "action": "Waiting for reviewers"
+    }
+    
+    # Check approval status
+    result["is_approved"] = bool(re.search(
+        r'approved|LGTM|:white_check_mark:|✅', 
+        details, re.IGNORECASE
+    ))
+    
+    # Check for merge conflicts
+    result["has_conflicts"] = bool(re.search(
+        r'cannot be merged|has conflicts|merge conflicts?|needs rebase|unable to merge',
+        details, re.IGNORECASE
+    ))
+    
+    # Check for merge commits (should rebase)
+    has_merge_commits = bool(re.search(
+        r'merge branch|merge.*into|merge commit', 
+        details, re.IGNORECASE
+    ))
+    result["needs_rebase"] = result["has_conflicts"] or has_merge_commits
+    
+    # Check pipeline status
+    result["pipeline_failed"] = bool(re.search(
+        r'pipeline.*failed|CI.*failed|build.*failed', 
+        details, re.IGNORECASE
+    ))
+    
+    # Check for unresolved discussions
+    result["unresolved"] = bool(re.search(
+        r'unresolved|open discussion|needs work|request.*change', 
+        details, re.IGNORECASE
+    ))
+    
+    # Look for reviewer comments (not from me)
+    comment_patterns = [
+        r'(\w+)\s+commented',
+        r'Review by\s+(\w+)',
+        r'@(\w+)\s+:',
+        r'Feedback from\s+(\w+)',
+    ]
+    
+    my_user = (my_username or "").lower()
+    reviewers = set()
+    for pattern in comment_patterns:
+        matches = re.findall(pattern, details, re.IGNORECASE)
+        for match in matches:
+            if match.lower() != my_user:
+                reviewers.add(match)
+    
+    result["reviewers"] = list(reviewers)
+    result["has_feedback"] = len(reviewers) > 0
+    
+    # Determine status
+    if result["has_conflicts"]:
+        result["status"] = "needs_rebase"
+        result["action"] = "Has merge conflicts - needs rebase"
+    elif result["is_approved"] and not result["unresolved"]:
+        result["status"] = "approved"
+        result["action"] = "Ready to merge!"
+    elif result["unresolved"] or (result["has_feedback"] and not result["is_approved"]):
+        result["status"] = "needs_response"
+        result["action"] = "Reviewer feedback needs your response"
+    elif result["pipeline_failed"]:
+        result["status"] = "pipeline_failed"
+        result["action"] = "Fix pipeline before review"
+    elif has_merge_commits:
+        result["status"] = "needs_rebase"
+        result["action"] = "Has merge commits - consider rebasing"
+    else:
+        result["status"] = "awaiting_review"
+        result["action"] = "Waiting for reviewers"
+    
+    return result
+
+
+def separate_mrs_by_author(
+    mrs: List[Dict[str, Any]], 
+    my_username: str
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Separate MRs into own MRs and MRs to review (by others).
+    
+    Args:
+        mrs: List of MR dicts (must include 'author' key)
+        my_username: Current user's username
+        
+    Returns:
+        Dict with 'my_mrs' and 'to_review' lists
+    """
+    my_mrs = []
+    to_review = []
+    my_user = my_username.lower()
+    
+    for mr in mrs:
+        author = (mr.get('author', '') or '').lower()
+        if my_user in author or author == my_user:
+            my_mrs.append(mr)
+        else:
+            to_review.append(mr)
+    
+    return {
+        'my_mrs': my_mrs,
+        'to_review': to_review
+    }
 

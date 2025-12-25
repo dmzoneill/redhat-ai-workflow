@@ -132,65 +132,19 @@ steps:
 
   # Step 2: Parse MR list and separate own vs others
   - name: parse_mrs
-    description: "Extract MR IDs, separate own MRs from others to review"
+    description: "Extract MR IDs, separate own MRs from others to review using shared parsers"
     compute: |
-      import re
+      from scripts.common.parsers import parse_mr_list, separate_mrs_by_author
       
-      mrs_to_review = []  # MRs by others that I should review
-      my_mrs = []         # My own MRs (to check for feedback)
+      # Parse all MRs with author information
+      all_mrs = parse_mr_list(open_mrs or "", include_author=True)
       
-      # Parse the MR list output - format varies but usually contains IID, title, author
-      lines = open_mrs.split('\n') if open_mrs else []
-      
-      current_mr = {}
-      for line in lines:
-        # Look for MR ID patterns like "!123" or "IID: 123"
-        iid_match = re.search(r'!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)', line, re.IGNORECASE)
-        if iid_match:
-          if current_mr.get('iid'):
-            # Determine if this is my MR or someone else's
-            author = current_mr.get('author', '').lower()
-            if my_username.lower() in author:
-              my_mrs.append(current_mr)
-            else:
-              mrs_to_review.append(current_mr)
-          current_mr = {'iid': int(iid_match.group(1) or iid_match.group(2) or iid_match.group(3))}
-        
-        # Extract title
-        title_match = re.search(r'Title[:\s]+(.+)|^\s*(.+)\s*$', line)
-        if title_match and current_mr.get('iid') and not current_mr.get('title'):
-          current_mr['title'] = (title_match.group(1) or title_match.group(2) or '').strip()[:60]
-        
-        # Extract author
-        author_match = re.search(r'Author[:\s]+(\w+)|@(\w+)', line)
-        if author_match and current_mr.get('iid'):
-          current_mr['author'] = author_match.group(1) or author_match.group(2)
-      
-      # Don't forget the last one
-      if current_mr.get('iid'):
-        author = current_mr.get('author', '').lower()
-        if my_username.lower() in author:
-          my_mrs.append(current_mr)
-        else:
-          mrs_to_review.append(current_mr)
-      
-      # Deduplicate by IID
-      seen = set()
-      unique_to_review = []
-      for mr in mrs_to_review:
-        if mr['iid'] not in seen:
-          seen.add(mr['iid'])
-          unique_to_review.append(mr)
-      
-      unique_my_mrs = []
-      for mr in my_mrs:
-        if mr['iid'] not in seen:
-          seen.add(mr['iid'])
-          unique_my_mrs.append(mr)
+      # Separate into own vs others using shared function
+      separated = separate_mrs_by_author(all_mrs, my_username)
       
       result = {
-        'to_review': unique_to_review[:inputs.limit],
-        'my_mrs': unique_my_mrs,
+        'to_review': separated['to_review'][:inputs.limit],
+        'my_mrs': separated['my_mrs'],
         'my_username': my_username
       }
     output: parsed_mrs
@@ -210,49 +164,22 @@ steps:
 
   # Step 2c: Detect if my MR has merge conflicts
   - name: detect_merge_conflicts
-    description: "Check for merge conflicts or needs rebase"
+    description: "Check for merge conflicts or needs rebase using shared parser"
     condition: "my_first_mr_details"
     compute: |
-      import re
+      from scripts.common.parsers import analyze_mr_status
       
-      details = my_first_mr_details or ""
       mr = parsed_mrs['my_mrs'][0] if parsed_mrs.get('my_mrs') else {}
       
-      # Detect various merge conflict indicators
-      has_conflicts = False
-      needs_rebase = False
-      reason = None
-      
-      # GitLab indicators
-      conflict_patterns = [
-        r'cannot be merged',
-        r'has conflicts',
-        r'merge conflicts',
-        r'conflict',
-        r'needs rebase',
-        r'pipeline.*failed.*conflict',
-        r'cannot.*rebase',
-        r'unable to merge',
-      ]
-      
-      for pattern in conflict_patterns:
-        if re.search(pattern, details, re.IGNORECASE):
-          has_conflicts = True
-          reason = f"Detected: {pattern}"
-          break
-      
-      # Check for merge commits (indicator that rebase is needed)
-      if re.search(r'merge branch|merge.*into|merge commit', details, re.IGNORECASE):
-        needs_rebase = True
-        if not has_conflicts:
-          reason = "Has merge commits - should rebase"
+      # Use shared MR status analyzer
+      analysis = analyze_mr_status(my_first_mr_details or "")
       
       result = {
-        'has_conflicts': has_conflicts,
-        'needs_rebase': needs_rebase or has_conflicts,
+        'has_conflicts': analysis['has_conflicts'],
+        'needs_rebase': analysis['needs_rebase'],
         'mr_id': mr.get('iid'),
         'title': mr.get('title', ''),
-        'reason': reason
+        'reason': analysis['action'] if analysis['needs_rebase'] else None
       }
     output: my_mr_conflict_status
 
@@ -329,32 +256,33 @@ steps:
 
   # Step 6: Analyze first MR's review status
   - name: analyze_first_mr
-    description: "Check if first MR needs action"
+    description: "Check if first MR needs action using shared parser"
     condition: "len(mr_analysis) > 0 and first_mr_details"
     compute: |
       import re
+      from scripts.common.parsers import analyze_mr_status
       
       mr = mr_analysis[0]
       details = first_mr_details or ""
       
-      # Get username for pattern matching
-      username = my_username  # From earlier step
+      # Get base analysis from shared parser
+      analysis = analyze_mr_status(details, my_username)
+      
+      # Additional review-specific checks
+      username = my_username
       
       # Look for my previous comments/feedback
-      my_comments = re.findall(rf'({username}|Dave O\'Neill).*?commented|reviewed by.*?({username})', details, re.IGNORECASE)
+      my_comments = re.findall(rf'({username}).*?commented|reviewed by.*?({username})', details, re.IGNORECASE)
       my_feedback_exists = len(my_comments) > 0
       
       # Look for author's replies after my feedback
       author = mr.get('author', '')
       author_replied = author and re.search(rf'{author}.*?commented|replied', details, re.IGNORECASE)
       
-      # Look for approval status
+      # Look if I already approved
       already_approved = re.search(rf'approved by.*?{username}|LGTM|Looks good', details, re.IGNORECASE)
       
-      # Check for unresolved discussions
-      unresolved = re.search(r'unresolved.*?discussion|open thread', details, re.IGNORECASE)
-      
-      # Determine action
+      # Determine action based on review workflow
       if already_approved:
         action = "skip"
         reason = "Already approved"
@@ -364,10 +292,10 @@ steps:
       elif my_feedback_exists and not author_replied:
         action = "skip"
         reason = "Waiting for author response"
-      elif my_feedback_exists and author_replied and unresolved:
+      elif my_feedback_exists and author_replied and analysis['unresolved']:
         action = "needs_followup"
         reason = "Author replied but unresolved issues"
-      elif my_feedback_exists and author_replied and not unresolved:
+      elif my_feedback_exists and author_replied and not analysis['unresolved']:
         action = "can_approve"
         reason = "Author addressed feedback"
       else:

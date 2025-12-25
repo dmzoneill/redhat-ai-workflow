@@ -106,37 +106,12 @@ steps:
     output: my_mrs_raw
 
   - name: parse_my_mrs
-    description: "Parse MR list"
+    description: "Parse MR list using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import parse_mr_list
       
-      mrs = []
-      lines = my_mrs_raw.split('\n') if my_mrs_raw else []
-      
-      current_mr = {}
-      for line in lines:
-        iid_match = re.search(r'!(\d+)|IID[:\s]+(\d+)', line, re.IGNORECASE)
-        if iid_match:
-          if current_mr.get('iid'):
-            mrs.append(current_mr)
-          current_mr = {'iid': int(iid_match.group(1) or iid_match.group(2))}
-        
-        title_match = re.search(r'Title[:\s]+(.+)', line, re.IGNORECASE)
-        if title_match and current_mr.get('iid'):
-          current_mr['title'] = title_match.group(1).strip()[:60]
-      
-      if current_mr.get('iid'):
-        mrs.append(current_mr)
-      
-      # Deduplicate
-      seen = set()
-      unique = []
-      for mr in mrs:
-        if mr['iid'] not in seen:
-          seen.add(mr['iid'])
-          unique.append(mr)
-      
-      result = unique
+      # Use shared parser - already handles deduplication and multi-format parsing
+      result = parse_mr_list(my_mrs_raw or "")
     output: my_mrs
 
   # ==================== CHECK EACH MR FOR FEEDBACK ====================
@@ -152,85 +127,21 @@ steps:
     on_error: continue
 
   - name: analyze_first_mr
-    description: "Analyze feedback status of first MR"
+    description: "Analyze feedback status of first MR using shared parser"
     condition: "len(my_mrs) > 0 and first_mr_details"
     compute: |
-      import re
+      from scripts.common.parsers import analyze_mr_status
       
       mr = my_mrs[0]
-      details = first_mr_details or ""
       
-      # Check approval status
-      is_approved = bool(re.search(r'approved|LGTM|:white_check_mark:|✅', details, re.IGNORECASE))
+      # Use shared MR status analyzer
+      analysis = analyze_mr_status(first_mr_details or "", my_username)
       
-      # Check for reviewer comments (not from me)
-      my_user = my_username.lower()
-      
-      # Look for comments from others
-      comment_patterns = [
-        r'(\w+)\s+commented',
-        r'Review by\s+(\w+)',
-        r'@(\w+)\s+:',
-        r'Feedback from\s+(\w+)',
-      ]
-      
-      reviewers = set()
-      for pattern in comment_patterns:
-        matches = re.findall(pattern, details, re.IGNORECASE)
-        for match in matches:
-          if match.lower() != my_user:
-            reviewers.add(match)
-      
-      has_feedback = len(reviewers) > 0
-      
-      # Check for unresolved discussions
-      unresolved = bool(re.search(r'unresolved|open discussion|needs work|request.*change', details, re.IGNORECASE))
-      
-      # Check pipeline status
-      pipeline_failed = bool(re.search(r'pipeline.*failed|CI.*failed|build.*failed', details, re.IGNORECASE))
-      
-      # Check for merge conflicts
-      has_conflicts = bool(re.search(
-        r'cannot be merged|has conflicts|merge conflicts?|needs rebase|unable to merge',
-        details, re.IGNORECASE
-      ))
-      
-      # Check for merge commits (should rebase)
-      has_merge_commits = bool(re.search(r'merge branch|merge.*into|merge commit', details, re.IGNORECASE))
-      needs_rebase = has_conflicts or has_merge_commits
-      
-      # Determine status
-      if has_conflicts:
-        status = "needs_rebase"
-        action = "Has merge conflicts - needs rebase"
-      elif is_approved and not unresolved:
-        status = "approved"
-        action = "Ready to merge!"
-      elif unresolved or (has_feedback and not is_approved):
-        status = "needs_response"
-        action = "Reviewer feedback needs your response"
-      elif pipeline_failed:
-        status = "pipeline_failed"
-        action = "Fix pipeline before review"
-      elif has_merge_commits:
-        status = "needs_rebase"
-        action = "Has merge commits - consider rebasing"
-      else:
-        status = "awaiting_review"
-        action = "Waiting for reviewers"
-      
+      # Combine MR info with analysis
       result = {
         'iid': mr.get('iid'),
         'title': mr.get('title', ''),
-        'status': status,
-        'action': action,
-        'is_approved': is_approved,
-        'has_feedback': has_feedback,
-        'reviewers': list(reviewers),
-        'unresolved': unresolved,
-        'pipeline_failed': pipeline_failed,
-        'has_conflicts': has_conflicts,
-        'needs_rebase': needs_rebase
+        **analysis  # Spread all analysis fields (status, action, is_approved, etc.)
       }
     output: first_mr_status
 
