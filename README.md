@@ -103,6 +103,7 @@ Switch agents to get different tool sets. See [full agent reference](docs/agents
 | [🔧 devops](docs/agents/devops.md) | `Load devops agent` | ~90 | Deployments, K8s |
 | [🚨 incident](docs/agents/incident.md) | `Load incident agent` | ~78 | Production debugging |
 | [📦 release](docs/agents/release.md) | `Load release agent` | ~69 | Shipping releases |
+| [💬 slack](docs/agents/slack.md) | `Load slack agent` | ~52 | Slack bot daemon |
 
 ```mermaid
 graph LR
@@ -139,8 +140,12 @@ Skills are reusable workflows. See [full skills reference](docs/skills/README.md
 | [⚡ start_work](docs/skills/start_work.md) | Begin Jira issue |
 | [🚀 create_mr](docs/skills/create_mr.md) | Create merge request |
 | [👀 review_pr](docs/skills/review_pr.md) | Review MR |
+| [🔄 sync_branch](docs/skills/sync_branch.md) | Rebase onto main |
+| [📋 standup_summary](docs/skills/standup_summary.md) | Generate standup |
 | [🧪 test_mr_ephemeral](docs/skills/test_mr_ephemeral.md) | Deploy to ephemeral |
 | [🚨 investigate_alert](docs/skills/investigate_alert.md) | Triage alerts |
+| [🎫 create_jira_issue](docs/skills/create_jira_issue.md) | Create Jira issue |
+| [✅ close_issue](docs/skills/close_issue.md) | Close issue with summary |
 
 ---
 
@@ -156,8 +161,14 @@ Skills are reusable workflows. See [full skills reference](docs/skills/README.md
 | [k8s](docs/mcp-servers/k8s.md) | 26 | Kubernetes |
 | [bonfire](docs/mcp-servers/bonfire.md) | 21 | Ephemeral envs |
 | [quay](docs/mcp-servers/quay.md) | 8 | Container registry |
+| [prometheus](docs/mcp-servers/prometheus.md) | 13 | Metrics queries |
+| [alertmanager](docs/mcp-servers/alertmanager.md) | 7 | Alert management |
+| [kibana](docs/mcp-servers/kibana.md) | 9 | Log search |
 | [google-calendar](docs/mcp-servers/google-calendar.md) | 6 | Calendar & meetings |
 | [gmail](docs/mcp-servers/gmail.md) | 6 | Email processing |
+| [slack](docs/mcp-servers/slack.md) | 13 | Slack integration |
+| [konflux](docs/mcp-servers/konflux.md) | 40 | Build pipelines |
+| [workflow](docs/mcp-servers/workflow.md) | 28 | Core workflow tools |
 
 See [MCP Server Architecture](docs/architecture/README.md) for implementation details.
 
