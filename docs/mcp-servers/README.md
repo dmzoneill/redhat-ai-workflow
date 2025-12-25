@@ -17,7 +17,7 @@ MCP servers are **tool modules** that provide specific capabilities. Each server
 | [kibana](./kibana.md) | 9 | Log search |
 | [google-calendar](./google-calendar.md) | 6 | Calendar & meetings |
 | [gmail](./gmail.md) | 6 | Email processing |
-| [slack](./slack.md) | 13 | Slack integration |
+| [slack](./slack.md) | 15 | Slack integration |
 | [konflux](./konflux.md) | 40 | Build pipelines |
 | [appinterface](./appinterface.md) | 6 | GitOps config |
 | [workflow](./workflow.md) | 28 | Core workflow tools |

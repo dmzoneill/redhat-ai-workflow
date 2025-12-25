@@ -166,7 +166,7 @@ Skills are reusable workflows. See [full skills reference](docs/skills/README.md
 | [kibana](docs/mcp-servers/kibana.md) | 9 | Log search |
 | [google-calendar](docs/mcp-servers/google-calendar.md) | 6 | Calendar & meetings |
 | [gmail](docs/mcp-servers/gmail.md) | 6 | Email processing |
-| [slack](docs/mcp-servers/slack.md) | 13 | Slack integration |
+| [slack](docs/mcp-servers/slack.md) | 15 | Slack integration |
 | [konflux](docs/mcp-servers/konflux.md) | 40 | Build pipelines |
 | [workflow](docs/mcp-servers/workflow.md) | 28 | Core workflow tools |
 
