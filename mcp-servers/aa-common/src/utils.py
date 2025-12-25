@@ -1,0 +1,395 @@
+"""Shared utilities for MCP servers.
+
+This module provides common functions used across multiple MCP servers,
+eliminating code duplication and ensuring consistent behavior.
+"""
+
+import asyncio
+import json
+import logging
+import os
+import subprocess
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# ==================== Config Loading ====================
+
+_config_cache: dict | None = None
+
+
+def get_project_root() -> Path:
+    """Get the project root directory (redhat-ai-workflow)."""
+    # This file is at: mcp-servers/aa-common/src/utils.py
+    # Project root is 3 levels up
+    return Path(__file__).parent.parent.parent.parent
+
+
+def load_config(reload: bool = False) -> dict:
+    """Load config.json from project root.
+    
+    Args:
+        reload: Force reload from disk (default: use cache)
+    
+    Returns:
+        Parsed config dictionary
+    """
+    global _config_cache
+    
+    if _config_cache is not None and not reload:
+        return _config_cache
+    
+    config_path = get_project_root() / "config.json"
+    try:
+        if config_path.exists():
+            with open(config_path) as f:
+                _config_cache = json.load(f)
+                return _config_cache
+    except Exception as e:
+        logger.warning(f"Failed to load config.json: {e}")
+    
+    return {}
+
+
+def get_section_config(section: str, default: dict | None = None) -> dict:
+    """Get a specific section from config.json.
+    
+    Args:
+        section: Config section name (e.g., 'bonfire', 'prometheus')
+        default: Default value if section not found
+    
+    Returns:
+        Config section dictionary
+    """
+    config = load_config()
+    return config.get(section, default or {})
+
+
+# ==================== Kubeconfig Handling ====================
+
+KUBE_BASE = Path.home() / ".kube"
+
+# Environment to kubeconfig suffix mapping
+KUBECONFIG_MAP = {
+    # Stage
+    "stage": "s", "s": "s",
+    # Production
+    "production": "p", "prod": "p", "p": "p",
+    # Ephemeral
+    "ephemeral": "e", "eph": "e", "e": "e",
+    # App-SRE SaaS pipelines
+    "appsre-pipelines": "ap", "ap": "ap", "saas": "ap",
+    # Konflux
+    "konflux": "k", "k": "k",
+}
+
+
+def get_kubeconfig(environment: str, namespace: str = "") -> str:
+    """Get kubeconfig path for environment.
+    
+    Args:
+        environment: Environment name (stage, production, ephemeral, etc.)
+        namespace: Optional namespace (not used currently, for future)
+    
+    Returns:
+        Full path to kubeconfig file
+    """
+    # Try config.json first for custom paths
+    config = load_config()
+    
+    # Check namespaces section
+    namespaces = config.get("namespaces", {})
+    env_lower = environment.lower()
+    if env_lower in namespaces:
+        kubeconfig = namespaces[env_lower].get("kubeconfig")
+        if kubeconfig:
+            return os.path.expanduser(kubeconfig)
+    
+    # Check kubernetes.environments section
+    k8s_envs = config.get("kubernetes", {}).get("environments", {})
+    if env_lower in k8s_envs:
+        kubeconfig = k8s_envs[env_lower].get("kubeconfig")
+        if kubeconfig:
+            return os.path.expanduser(kubeconfig)
+    
+    # Fall back to standard mapping
+    suffix = KUBECONFIG_MAP.get(env_lower, env_lower)
+    return str(KUBE_BASE / f"config.{suffix}")
+
+
+def get_env_config(environment: str, service: str) -> dict:
+    """Get environment-specific config for a service.
+    
+    Args:
+        environment: Environment name (stage, production)
+        service: Service name (prometheus, alertmanager, kibana)
+    
+    Returns:
+        Environment config dictionary with url, kubeconfig, namespace, etc.
+    """
+    config = load_config()
+    service_config = config.get(service, {})
+    environments = service_config.get("environments", {})
+    
+    # Normalize environment name
+    env_key = environment.lower()
+    if env_key == "prod":
+        env_key = "production"
+    
+    env_config = environments.get(env_key, {})
+    
+    # Ensure kubeconfig is resolved
+    if "kubeconfig" in env_config:
+        env_config["kubeconfig"] = os.path.expanduser(env_config["kubeconfig"])
+    else:
+        env_config["kubeconfig"] = get_kubeconfig(environment)
+    
+    return env_config
+
+
+# ==================== Repository Handling ====================
+
+def resolve_repo_path(repo: str) -> str:
+    """Resolve repository name to full path.
+    
+    Checks:
+    1. If repo is already a valid path
+    2. config.json repositories section
+    3. Common source directories (~src, ~repos, ~projects)
+    
+    Args:
+        repo: Repository name or path
+    
+    Returns:
+        Full path to repository
+    """
+    # Already a valid path?
+    if os.path.isdir(repo):
+        return repo
+    
+    # Expand user path
+    expanded = os.path.expanduser(repo)
+    if os.path.isdir(expanded):
+        return expanded
+    
+    # Check config.json repositories
+    config = load_config()
+    repositories = config.get("repositories", {})
+    if repo in repositories:
+        path = repositories[repo].get("path")
+        if path:
+            expanded_path = os.path.expanduser(path)
+            if os.path.isdir(expanded_path):
+                return expanded_path
+    
+    # Try common source directories
+    for base in [Path.home() / "src", Path.home() / "repos", Path.home() / "projects"]:
+        candidate = base / repo
+        if candidate.exists():
+            return str(candidate)
+    
+    # Return as-is (may fail downstream, but that's expected)
+    return repo
+
+
+def get_repo_config(repo: str) -> dict:
+    """Get configuration for a repository.
+    
+    Args:
+        repo: Repository name or path
+    
+    Returns:
+        Repository config from config.json, or empty dict
+    """
+    config = load_config()
+    repositories = config.get("repositories", {})
+    
+    # Try exact match
+    if repo in repositories:
+        return repositories[repo]
+    
+    # Try matching by path
+    for name, repo_config in repositories.items():
+        if repo_config.get("path", "").endswith(repo):
+            return repo_config
+    
+    return {}
+
+
+# ==================== Command Execution ====================
+
+async def run_cmd(
+    cmd: list[str],
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    timeout: int = 60,
+    check: bool = False,
+) -> tuple[bool, str]:
+    """Run a command asynchronously (simple 2-tuple return).
+    
+    Args:
+        cmd: Command and arguments as list
+        cwd: Working directory
+        env: Environment variables (merged with current)
+        timeout: Timeout in seconds
+        check: Raise exception on non-zero exit
+    
+    Returns:
+        Tuple of (success, output) - stderr is merged with stdout on failure
+    """
+    try:
+        # Merge environment
+        run_env = os.environ.copy()
+        if env:
+            run_env.update(env)
+        
+        result = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+            env=run_env,
+        )
+        
+        output = result.stdout
+        if result.returncode != 0:
+            output = result.stderr or result.stdout or "Command failed"
+            if check:
+                raise subprocess.CalledProcessError(result.returncode, cmd, output)
+            return False, output
+        
+        return True, output
+    except subprocess.TimeoutExpired:
+        return False, f"Command timed out after {timeout}s"
+    except FileNotFoundError:
+        return False, f"Command not found: {cmd[0]}"
+    except subprocess.CalledProcessError:
+        raise
+    except Exception as e:
+        return False, str(e)
+
+
+async def run_cmd_full(
+    cmd: list[str],
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    timeout: int = 300,
+) -> tuple[bool, str, str]:
+    """Run a command asynchronously (full 3-tuple return with separate stderr).
+    
+    Args:
+        cmd: Command and arguments as list
+        cwd: Working directory
+        env: Environment variables (merged with current)
+        timeout: Timeout in seconds
+    
+    Returns:
+        Tuple of (success, stdout, stderr)
+    """
+    try:
+        # Merge environment
+        run_env = os.environ.copy()
+        if env:
+            run_env.update(env)
+        
+        result = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+            env=run_env,
+        )
+        
+        return result.returncode == 0, result.stdout, result.stderr
+    except subprocess.TimeoutExpired:
+        return False, "", f"Command timed out after {timeout}s"
+    except FileNotFoundError:
+        return False, "", f"Command not found: {cmd[0]}"
+    except Exception as e:
+        return False, "", str(e)
+
+
+async def run_kubectl(
+    args: list[str],
+    kubeconfig: str | None = None,
+    namespace: str | None = None,
+    timeout: int = 60,
+    environment: str | None = None,
+) -> tuple[bool, str]:
+    """Run kubectl command with proper kubeconfig.
+    
+    Args:
+        args: kubectl arguments (e.g., ["get", "pods"])
+        kubeconfig: Explicit kubeconfig path (preferred)
+        namespace: Kubernetes namespace
+        timeout: Timeout in seconds
+        environment: Environment name (used if kubeconfig not provided)
+    
+    Returns:
+        Tuple of (success, output)
+    """
+    # Resolve kubeconfig
+    if not kubeconfig and environment:
+        kubeconfig = get_kubeconfig(environment, namespace or "")
+    elif not kubeconfig:
+        kubeconfig = get_kubeconfig("stage", namespace or "")
+    
+    cmd = ["kubectl", f"--kubeconfig={kubeconfig}"]
+    cmd.extend(args)
+    if namespace:
+        cmd.extend(["-n", namespace])
+    
+    return await run_cmd(cmd, timeout=timeout)
+
+
+async def run_oc(
+    args: list[str],
+    environment: str = "stage",
+    namespace: str | None = None,
+    timeout: int = 60,
+) -> tuple[bool, str]:
+    """Run oc command with proper kubeconfig.
+    
+    Args:
+        args: oc arguments
+        environment: Environment for kubeconfig selection
+        namespace: Kubernetes namespace
+        timeout: Timeout in seconds
+    
+    Returns:
+        Tuple of (success, output)
+    """
+    kubeconfig = get_kubeconfig(environment, namespace or "")
+    cmd = ["oc", f"--kubeconfig={kubeconfig}"]
+    cmd.extend(args)
+    if namespace:
+        cmd.extend(["-n", namespace])
+    
+    return await run_cmd(cmd, timeout=timeout)
+
+
+# ==================== User Config ====================
+
+def get_user_config() -> dict:
+    """Get user configuration from config.json.
+    
+    Returns:
+        User config with username, email, timezone, etc.
+    """
+    return get_section_config("user", {
+        "username": os.getenv("USER", "unknown"),
+        "email": "",
+        "timezone": "UTC",
+    })
+
+
+def get_username() -> str:
+    """Get the current user's username."""
+    user_config = get_user_config()
+    return user_config.get("username", os.getenv("USER", "unknown"))
+

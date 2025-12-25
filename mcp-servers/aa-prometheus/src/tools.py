@@ -7,25 +7,23 @@ import asyncio
 import logging
 import os
 import subprocess
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-logger = logging.getLogger(__name__)
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-# Create the MCP server
+from src.utils import get_kubeconfig, get_env_config, load_config
+
+logger = logging.getLogger(__name__)
 
 
 # ==================== Configuration ====================
-
-def get_kubeconfig(environment: str) -> str:
-    """Get kubeconfig path for environment."""
-    kube_base = Path.home() / ".kube"
-    env_map = {"production": "p", "prod": "p", "stage": "s"}
-    cluster = env_map.get(environment.lower(), "s")
-    return str(kube_base / f"config.{cluster}")
 
 
 def get_prometheus_url(environment: str) -> str:

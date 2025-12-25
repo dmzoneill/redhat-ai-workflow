@@ -8,9 +8,16 @@ import asyncio
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+
+from src.utils import resolve_repo_path, run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -22,42 +29,7 @@ async def run_git(
 ) -> tuple[bool, str]:
     """Run git command and return (success, output)."""
     cmd = ["git"] + args
-    
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd,
-        )
-        
-        output = result.stdout
-        if result.returncode != 0:
-            output = result.stderr or result.stdout or "Command failed"
-            return False, output
-        
-        return True, output
-    except subprocess.TimeoutExpired:
-        return False, f"Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "git not found"
-    except Exception as e:
-        return False, str(e)
-
-
-def resolve_repo_path(repo: str) -> str:
-    """Resolve repository name to path."""
-    if os.path.isdir(repo):
-        return repo
-    
-    for base in [Path.home() / "src", Path.home() / "repos", Path.home() / "projects"]:
-        candidate = base / repo
-        if candidate.exists():
-            return str(candidate)
-    
-    return repo
+    return await run_cmd(cmd, cwd=cwd, timeout=timeout)
 
 
 def register_tools(server: FastMCP) -> int:

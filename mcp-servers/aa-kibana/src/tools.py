@@ -6,6 +6,7 @@ Provides 9 tools for searching and analyzing logs via Kibana.
 import logging
 import os
 import subprocess
+import sys
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -14,8 +15,13 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-logger = logging.getLogger(__name__)
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
+from src.utils import load_config, get_kubeconfig
+
+logger = logging.getLogger(__name__)
 
 
 # ==================== Configuration ====================
@@ -31,16 +37,8 @@ class KibanaEnvironment:
 
 def _load_kibana_config() -> dict:
     """Load Kibana config from config.json."""
-    try:
-        # Path: tools.py -> src -> aa-kibana -> mcp-servers -> redhat-ai-workflow
-        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
-        if config_path.exists():
-            import json
-            with open(config_path) as f:
-                return json.load(f).get("kibana", {}).get("environments", {})
-    except Exception:
-        pass
-    return {}
+    config = load_config()
+    return config.get("kibana", {}).get("environments", {})
 
 
 def get_kibana_environment(environment: str) -> "KibanaEnvironment":
