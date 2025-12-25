@@ -1523,12 +1523,15 @@ def register_tools(server: "FastMCP") -> int:
             except ImportError:
                 ZoneInfo = None
             
+            # Add project root to sys.path for 'from scripts.common.X' imports
+            PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+            if str(PROJECT_ROOT) not in sys.path:
+                sys.path.insert(0, str(PROJECT_ROOT))
+            
             # Try to import parsers and config_loader
             try:
-                SCRIPTS_DIR = Path(__file__).parent.parent.parent.parent / "scripts"
-                sys.path.insert(0, str(SCRIPTS_DIR))
-                from common import parsers
-                from common.config_loader import load_config as load_skill_config, get_timezone
+                from scripts.common import parsers
+                from scripts.common.config_loader import load_config as load_skill_config, get_timezone
             except ImportError:
                 parsers = None
                 load_skill_config = None
@@ -1576,6 +1579,16 @@ def register_tools(server: "FastMCP") -> int:
                     # String/repr
                     "repr": repr,
                     "print": print,
+                    "dir": dir,
+                    "vars": vars,
+                    # Exceptions
+                    "Exception": Exception,
+                    "ValueError": ValueError,
+                    "TypeError": TypeError,
+                    "KeyError": KeyError,
+                    "AttributeError": AttributeError,
+                    "IndexError": IndexError,
+                    "ImportError": ImportError,
                     # Constants
                     "True": True,
                     "False": False,
