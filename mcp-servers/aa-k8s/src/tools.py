@@ -7,60 +7,16 @@ Authentication: Uses kubeconfig files in ~/.kube/
   - config.ap = App-SRE SaaS pipelines
 """
 
-import asyncio
-import os
-import subprocess
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-KUBE_BASE = Path.home() / ".kube"
-
-# Environment to kubeconfig mapping
-KUBECONFIG_MAP = {
-    "stage": "config.s", "s": "config.s",
-    "production": "config.p", "prod": "config.p", "p": "config.p",
-    "ephemeral": "config.e", "e": "config.e",
-    "appsre-pipelines": "config.ap", "ap": "config.ap", "saas": "config.ap",
-}
-
-
-def get_kubeconfig(env: str, namespace: str = "") -> str:
-    """Get kubeconfig path for environment."""
-    config_name = KUBECONFIG_MAP.get(env.lower(), f"config.{env}")
-    return str(KUBE_BASE / config_name)
-
-
-async def run_kubectl(
-    args: list[str], kubeconfig: str | None = None, namespace: str | None = None, timeout: int = 60
-) -> tuple[bool, str]:
-    """Run kubectl command and return (success, output).
-    
-    Uses --kubeconfig= flag for explicit config selection.
-    """
-    cmd = ["kubectl"]
-    if kubeconfig:
-        cmd.append(f"--kubeconfig={kubeconfig}")
-    cmd.extend(args)
-    if namespace:
-        cmd.extend(["-n", namespace])
-    
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, timeout=timeout
-        )
-        output = result.stdout
-        if result.returncode != 0:
-            output = result.stderr or result.stdout or "Command failed"
-            return False, output
-        return True, output
-    except subprocess.TimeoutExpired:
-        return False, f"Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "kubectl not found"
-    except Exception as e:
-        return False, str(e)
+from src.utils import get_kubeconfig, run_kubectl
 
 
 # ==================== PODS ====================

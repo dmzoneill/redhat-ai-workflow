@@ -9,31 +9,31 @@ import logging
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
+
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+
+from src.utils import load_config, get_section_config, get_kubeconfig as get_kubeconfig_base
 
 logger = logging.getLogger(__name__)
 
 
 def load_bonfire_config() -> dict:
     """Load bonfire configuration from config.json."""
-    try:
-        # Path: tools.py -> src -> aa-bonfire -> mcp-servers -> redhat-ai-workflow
-        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
-        if config_path.exists():
-            with open(config_path) as f:
-                return json.load(f).get("bonfire", {})
-    except Exception as e:
-        logger.warning(f"Failed to load bonfire config: {e}")
-    return {}
+    return get_section_config("bonfire", {})
 
 
 def get_kubeconfig() -> str:
     """Get kubeconfig path for ephemeral cluster."""
     config = load_bonfire_config()
-    return config.get("kubeconfig", str(Path.home() / ".kube/config.e"))
+    kubeconfig = config.get("kubeconfig", str(Path.home() / ".kube/config.e"))
+    return os.path.expanduser(kubeconfig)
 
 
 def get_app_config(app_name: str = "", billing: bool = False) -> dict:
