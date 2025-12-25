@@ -505,6 +505,24 @@ steps:
       status: "In Review"
     on_error: continue
 
+  # ==================== SLACK NOTIFICATION ====================
+
+  - name: notify_team_slack
+    description: "Post MR to team channel asking for review"
+    condition: "mr and not inputs.draft"
+    tool: slack_post_team
+    args:
+      text: |
+        🔀 *New MR Ready for Review*
+        
+        📋 *Jira:* <{{ resolved_repo.jira_url }}/browse/{{ inputs.issue_key }}|{{ inputs.issue_key }}> - {{ issue.summary[:60] if issue else 'Update' }}
+        🔗 *MR:* <{{ mr.web_url }}|!{{ mr.iid }}>
+        📁 *Repo:* {{ resolved_repo.gitlab_project.split('/')[-1] if resolved_repo.gitlab_project else 'unknown' }}
+        
+        Please review when you have a moment 🙏
+    output: slack_notification
+    on_error: continue
+
   - name: emit_mr_created_hook
     description: "Notify team channel about new MR"
     condition: "mr and not inputs.draft"
