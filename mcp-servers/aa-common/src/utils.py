@@ -373,10 +373,22 @@ async def run_cmd_shell(
     home = Path.home()
     env["HOME"] = str(home)
     env["USER"] = home.name
-    # Ensure user's bin is in PATH
+    
+    # CRITICAL: Clear virtualenv variables from MCP server's venv
+    # This allows commands like rh-issue (which use pipenv) to work properly
+    # Without this, pipenv gets confused by VIRTUAL_ENV from our project's venv
+    for var in ["VIRTUAL_ENV", "PIPENV_ACTIVE", "PYTHONHOME"]:
+        env.pop(var, None)
+    
+    # Ensure user's bin is in PATH (and remove project venv paths)
     user_bin = str(home / "bin")
-    if user_bin not in env.get("PATH", ""):
-        env["PATH"] = f"{user_bin}:{env.get('PATH', '')}"
+    # Filter out project venv paths from PATH
+    path_parts = env.get("PATH", "").split(":")
+    path_parts = [p for p in path_parts if ".venv" not in p]
+    if user_bin not in path_parts:
+        path_parts.insert(0, user_bin)
+    env["PATH"] = ":".join(path_parts)
+    
     # Pass through DISPLAY/XAUTHORITY for GUI apps
     for var in ["DISPLAY", "XAUTHORITY"]:
         if var in os.environ:
