@@ -666,7 +666,7 @@ steps:
         lines.append("")
       
       # Open PRs to review
-      lines.append(f"**Open PRs to Review:** {all_open_prs.count('!') if all_open_prs else 0} total")
+      lines.append(f"**Open PRs to Review:** {all_open_prs_raw.count('!') if all_open_prs_raw else 0} total")
       lines.append("")
       
       # Jira
