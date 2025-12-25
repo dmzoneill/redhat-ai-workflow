@@ -293,6 +293,120 @@ def register_tools(server: FastMCP) -> int:
             return json.dumps({"error": str(e), "success": False})
     
     @server.tool()
+    async def slack_get_channels() -> str:
+        """
+        Get configured Slack channels from config.json.
+        
+        Returns channel IDs for:
+        - team: Main team channel for notifications
+        - standup: Channel for standup summaries
+        - alert channels: Stage/prod alert channels
+        
+        Use the returned channel IDs with slack_send_message to post to these channels.
+        
+        Returns:
+            JSON with configured channels and their IDs
+        """
+        try:
+            config = _get_slack_config()
+            
+            # Get named channels
+            channels_config = config.get("channels", {})
+            channels = {}
+            for name, info in channels_config.items():
+                if isinstance(info, dict):
+                    channels[name] = {
+                        "id": info.get("id", ""),
+                        "name": info.get("name", name),
+                        "description": info.get("description", ""),
+                    }
+                elif isinstance(info, str):
+                    # Legacy format: just channel ID
+                    channels[name] = {"id": info, "name": name, "description": ""}
+            
+            # Get alert channels
+            listener_config = config.get("listener", {})
+            alert_channels = listener_config.get("alert_channels", {})
+            alerts = {}
+            for channel_id, info in alert_channels.items():
+                alerts[info.get("name", channel_id)] = {
+                    "id": channel_id,
+                    "environment": info.get("environment", ""),
+                    "severity": info.get("severity", ""),
+                    "auto_investigate": info.get("auto_investigate", False),
+                }
+            
+            # Get watched channels
+            watched = listener_config.get("watched_channels", [])
+            
+            return json.dumps({
+                "channels": channels,
+                "alert_channels": alerts,
+                "watched_channels": watched,
+                "team_channel_id": channels.get("team", {}).get("id", ""),
+            }, indent=2)
+            
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+    
+    @server.tool()
+    async def slack_post_team(
+        text: str,
+        thread_ts: str = "",
+    ) -> str:
+        """
+        Post a message to the team channel.
+        
+        Convenience wrapper that automatically uses the team channel from config.
+        Use this for team notifications, updates, and announcements.
+        
+        Args:
+            text: Message text (supports Slack markdown)
+            thread_ts: Optional thread timestamp to reply in a thread
+        
+        Returns:
+            JSON with success status and message timestamp
+        """
+        try:
+            config = _get_slack_config()
+            channels_config = config.get("channels", {})
+            
+            # Get team channel ID
+            team_info = channels_config.get("team", {})
+            if isinstance(team_info, dict):
+                team_channel = team_info.get("id", "")
+            else:
+                team_channel = team_info  # Legacy string format
+            
+            if not team_channel:
+                return json.dumps({
+                    "error": "Team channel not configured in config.json under slack.channels.team",
+                    "success": False
+                })
+            
+            # Use the send_message function
+            manager = await get_manager()
+            await manager.initialize()
+            
+            result = await manager.session.send_message(
+                channel_id=team_channel,
+                text=text,
+                thread_ts=thread_ts if thread_ts else None,
+                typing_delay=True,
+            )
+            
+            return json.dumps({
+                "success": True,
+                "channel": team_channel,
+                "channel_name": team_info.get("name", "team") if isinstance(team_info, dict) else "team",
+                "timestamp": result.get("ts", ""),
+                "message": "Message posted to team channel",
+            })
+            
+        except Exception as e:
+            return json.dumps({"error": str(e), "success": False})
+    
+    @server.tool()
     async def slack_get_user(user_id: str) -> str:
         """
         Get information about a Slack user.
