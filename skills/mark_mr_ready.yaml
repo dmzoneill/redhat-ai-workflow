@@ -1,0 +1,161 @@
+# Skill: Mark MR as Ready for Review
+# Removes draft status and notifies team on Slack
+
+name: mark_mr_ready
+description: |
+  Mark a draft merge request as ready for review.
+  - Removes draft status from the MR
+  - Posts to team Slack channel asking for review
+  - Optionally updates Jira status to "In Review"
+
+version: "1.0"
+
+inputs:
+  - name: mr_id
+    type: string
+    required: true
+    description: "MR ID (e.g., '1459' or '!1459')"
+
+  - name: project
+    type: string
+    required: false
+    default: "automation-analytics/automation-analytics-backend"
+    description: "GitLab project path"
+
+  - name: issue_key
+    type: string
+    required: false
+    description: "Jira issue key to update status (e.g., AAP-12345)"
+
+  - name: update_jira
+    type: boolean
+    required: false
+    default: true
+    description: "Update Jira status to In Review"
+
+steps:
+  # Step 1: Load config
+  - name: load_config
+    compute: |
+      from scripts.common.config_loader import load_config
+      
+      config = load_config()
+      jira_url = config.get("jira", {}).get("url", "https://issues.redhat.com")
+      gitlab_url = config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
+      
+      # Clean MR ID
+      mr_id = str(inputs.mr_id).lstrip("!").strip()
+      
+      result = {
+          "jira_url": jira_url,
+          "gitlab_url": gitlab_url,
+          "mr_id": mr_id,
+      }
+    output: cfg
+
+  # Step 2: Get MR details first
+  - name: get_mr_details
+    description: "Get current MR details"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ cfg.mr_id }}"
+    output: mr_details
+    on_error: continue
+
+  # Step 3: Parse MR info
+  - name: parse_mr
+    compute: |
+      from scripts.common.parsers import extract_jira_key
+      
+      details = str(mr_details) if mr_details else ""
+      
+      # Extract title
+      title = ""
+      for line in details.split("\n"):
+          if line.strip() and not line.startswith("!"):
+              title = line.strip()[:80]
+              break
+      
+      # Try to find Jira key in title or branch
+      jira_key = inputs.issue_key if inputs.issue_key else extract_jira_key(details)
+      
+      # Extract web URL
+      web_url = ""
+      for line in details.split("\n"):
+          if "https://" in line and "merge_requests" in line:
+              import re
+              match = re.search(r'(https://\S+)', line)
+              if match:
+                  web_url = match.group(1)
+                  break
+      
+      if not web_url:
+          web_url = f"{cfg['gitlab_url']}/{inputs.project}/-/merge_requests/{cfg['mr_id']}"
+      
+      result = {
+          "title": title,
+          "jira_key": jira_key,
+          "web_url": web_url,
+      }
+    output: mr_info
+
+  # Step 4: Mark as ready (remove draft)
+  - name: mark_ready
+    description: "Remove draft status from MR"
+    tool: gitlab_mr_update
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ cfg.mr_id }}"
+      draft: false
+    output: update_result
+
+  # Step 5: Post to Slack
+  - name: notify_team_slack
+    description: "Post to team channel asking for review"
+    condition: "'Updated' in str(update_result) or 'success' in str(update_result).lower()"
+    tool: slack_post_team
+    args:
+      text: |
+        🔀 *MR Ready for Review*
+        
+        {% if mr_info.jira_key %}📋 *Jira:* <{{ cfg.jira_url }}/browse/{{ mr_info.jira_key }}|{{ mr_info.jira_key }}>{% endif %}
+        🔗 *MR:* <{{ mr_info.web_url }}|!{{ cfg.mr_id }}> {{ mr_info.title }}
+        📁 *Repo:* {{ inputs.project.split('/')[-1] }}
+        
+        Please review when you have a moment 🙏
+    output: slack_result
+    on_error: continue
+
+  # Step 6: Update Jira status
+  - name: update_jira_status
+    description: "Move Jira to In Review"
+    condition: "inputs.update_jira and mr_info.jira_key"
+    tool: jira_set_status
+    args:
+      issue_key: "{{ mr_info.jira_key }}"
+      status: "In Review"
+    output: jira_result
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## {{ "✅" if "Updated" in str(update_result) else "❌" }} MR !{{ cfg.mr_id }} Marked Ready
+      
+      | Step | Result |
+      |------|--------|
+      | Remove draft | {{ "✅ Done" if "Updated" in str(update_result) else "❌ Failed" }} |
+      | Slack notification | {{ "✅ Posted" if slack_result else "⏭️ Skipped" }} |
+      {% if mr_info.jira_key %}| Jira status | {{ "✅ Updated" if jira_result else "⏭️ Skipped" }} |{% endif %}
+      
+      **MR:** {{ mr_info.web_url }}
+      {% if mr_info.jira_key %}**Jira:** {{ cfg.jira_url }}/browse/{{ mr_info.jira_key }}{% endif %}
+
+  - name: context
+    value:
+      mr_id: "{{ cfg.mr_id }}"
+      mr_url: "{{ mr_info.web_url }}"
+      jira_key: "{{ mr_info.jira_key }}"
+      slack_posted: "{{ true if slack_result else false }}"
+
