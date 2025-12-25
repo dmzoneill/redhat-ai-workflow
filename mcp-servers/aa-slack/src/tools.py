@@ -24,10 +24,22 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 # Add aa-common to path for shared utilities
+# Handle both MCP server context (aa-common in path) and standalone script context
 SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+_common_path = str(SERVERS_DIR / "aa-common")
+if _common_path not in sys.path:
+    sys.path.insert(0, _common_path)
 
-from src.utils import load_config
+try:
+    # When running as MCP server, src.utils resolves to aa-common/src/utils
+    from src.utils import load_config
+except (ImportError, ModuleNotFoundError):
+    # When running from slack_daemon.py where aa-slack/src shadows aa-common/src,
+    # import directly from aa-common/src
+    _common_src = str(SERVERS_DIR / "aa-common" / "src")
+    if _common_src not in sys.path:
+        sys.path.insert(0, _common_src)
+    from utils import load_config
 
 logger = logging.getLogger(__name__)
 
