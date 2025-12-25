@@ -423,64 +423,65 @@ steps:
   - name: check_docker
     description: "Verify docker-compose is running"
     condition: "{{ inputs.run_tests }}"
-    compute: |
-      import subprocess
-      
-      result = subprocess.run(
-        ["docker", "ps", "--filter", "name=automation-analytics-backend", "--format", "{{.Names}}"],
-        capture_output=True,
-        text=True
-      )
-      
-      containers = result.stdout.strip().split('\n') if result.stdout.strip() else []
-      
-      if not containers or containers == ['']:
-        # Try to start
-        start_result = subprocess.run(
-          ["docker-compose", "up", "-d"],
-          cwd=resolved["path"],
-          capture_output=True,
-          text=True,
-          timeout=120
-        )
-        result = f"Started docker-compose: {start_result.returncode == 0}"
-      else:
-        result = f"Running containers: {', '.join(containers)}"
-    output: docker_status
+    tool: docker_compose_status
+    args:
+      repo: "{{ resolved.path }}"
+      filter_name: "automation-analytics"
+    output: docker_status_raw
     on_error: continue
 
-  # Step 11: Run migrations and data setup
-  - name: run_setup
-    description: "Run make migrations and make data"
+  - name: start_docker_if_needed
+    description: "Start docker-compose if containers not running"
+    condition: "{{ inputs.run_tests and ('No containers' in str(docker_status_raw) or not docker_status_raw) }}"
+    tool: docker_compose_up
+    args:
+      repo: "{{ resolved.path }}"
+      detach: true
+    output: docker_start_result
+    on_error: continue
+
+  - name: set_docker_status
+    description: "Set docker status"
     condition: "{{ inputs.run_tests }}"
     compute: |
-      import subprocess
-      
-      results = []
-      
-      # Run migrations
-      mig_result = subprocess.run(
-        ["make", "migrations"],
-        cwd=resolved["path"],
-        capture_output=True,
-        text=True,
-        timeout=60
-      )
-      results.append(f"migrations: {'OK' if mig_result.returncode == 0 else 'FAILED'}")
-      
-      # Run data
-      data_result = subprocess.run(
-        ["make", "data"],
-        cwd=resolved["path"],
-        capture_output=True,
-        text=True,
-        timeout=60
-      )
-      results.append(f"data: {'OK' if data_result.returncode == 0 else 'FAILED'}")
-      
-      result = ', '.join(results)
-    output: setup_result
+      if docker_start_result:
+        result = str(docker_start_result)
+      else:
+        result = str(docker_status_raw) if docker_status_raw else "Docker status unknown"
+    output: docker_status
+
+  # Step 11: Run migrations
+  - name: run_migrations
+    description: "Run make migrations"
+    condition: "{{ inputs.run_tests }}"
+    tool: make_target
+    args:
+      repo: "{{ resolved.path }}"
+      target: "migrations"
+      timeout: 60
+    output: migrations_result
     on_error: continue
+
+  # Step 11b: Run data setup
+  - name: run_data
+    description: "Run make data"
+    condition: "{{ inputs.run_tests }}"
+    tool: make_target
+    args:
+      repo: "{{ resolved.path }}"
+      target: "data"
+      timeout: 60
+    output: data_result
+    on_error: continue
+
+  - name: summarize_setup
+    description: "Summarize setup results"
+    condition: "{{ inputs.run_tests }}"
+    compute: |
+      mig_ok = "✅" in str(migrations_result) if migrations_result else False
+      data_ok = "✅" in str(data_result) if data_result else False
+      result = f"migrations: {'OK' if mig_ok else 'FAILED'}, data: {'OK' if data_ok else 'FAILED'}"
+    output: setup_result
 
   # Step 12: Run pytest in container
   - name: run_tests

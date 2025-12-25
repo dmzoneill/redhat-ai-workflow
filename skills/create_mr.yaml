@@ -356,24 +356,30 @@ steps:
   - name: run_black
     description: "Run black formatter check"
     condition: "inputs.run_linting and (not lint_tools_check or lint_tools_check.get('available', True))"
+    tool: code_format
+    args:
+      repo: "{{ resolved_repo.path }}"
+      tool: "black"
+      check_only: "{{ not inputs.auto_fix_lint }}"
+    output: black_raw
+    on_error: continue
+
+  - name: parse_black_result
+    description: "Parse black result"
+    condition: "inputs.run_linting"
     compute: |
-      import subprocess
+      output = str(black_raw) if black_raw else ""
       
-      repo = resolved_repo["path"]
-      
-      if inputs.auto_fix_lint:
-          result = subprocess.run(["black", "."], cwd=repo, capture_output=True, text=True)
-          black_result = {"passed": result.returncode == 0, "fixed": True, "message": "Black applied"}
+      if "✅" in output:
+        if "check passed" in output.lower():
+          black_result = {"passed": True, "message": "Black check passed"}
+        else:
+          black_result = {"passed": True, "fixed": True, "message": "Black applied"}
       else:
-          result = subprocess.run(["black", "--check", "."], cwd=repo, capture_output=True, text=True)
-          if result.returncode == 0:
-              black_result = {"passed": True, "message": "Black check passed"}
-          else:
-              black_result = {"passed": False, "message": "Files need formatting. Run 'black .'"}
+        black_result = {"passed": False, "message": "Files need formatting. Run 'black .'"}
       
       result = black_result
     output: black_result
-    on_error: continue
 
   - name: run_flake8
     description: "Run flake8 linting"

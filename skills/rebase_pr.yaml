@@ -206,36 +206,55 @@ steps:
     output: fetch_result
     on_error: continue
 
+  - name: get_merge_commits
+    description: "Get merge commits on the branch"
+    tool: git_log
+    args:
+      repo: "{{ resolved_repo.path }}"
+      range_spec: "origin/{{ resolved_repo.default_branch }}..origin/{{ target_branch }}"
+      merges_only: true
+      limit: 20
+    output: merge_commits_raw
+    on_error: continue
+
+  - name: get_total_commits
+    description: "Get total commit count"
+    tool: git_log
+    args:
+      repo: "{{ resolved_repo.path }}"
+      range_spec: "origin/{{ resolved_repo.default_branch }}..origin/{{ target_branch }}"
+      count_only: true
+    output: total_commits_raw
+    on_error: continue
+
   - name: check_merge_commits
-    description: "Check if branch has merge commits"
+    description: "Parse merge commit info"
     compute: |
-      import subprocess
+      import re
       
-      base = resolved_repo["default_branch"]
-      branch = target_branch
+      # Parse merge commits from git_log output
+      merge_output = str(merge_commits_raw) if merge_commits_raw else ""
+      merge_commits = []
       
-      # Get merge commits on the branch
-      result = subprocess.run(
-        ['git', 'log', '--merges', '--oneline', f'origin/{base}..origin/{branch}'],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"]
-      )
+      if "No commits found" not in merge_output and merge_output.strip():
+        for line in merge_output.split('\n'):
+          if line.startswith('- `'):
+            match = re.search(r'`([^`]+)`', line)
+            if match:
+              merge_commits.append(match.group(1))
       
-      merge_commits = [l for l in result.stdout.strip().split('\n') if l.strip()]
-      
-      # Get total commits
-      total_result = subprocess.run(
-        ['git', 'log', '--oneline', f'origin/{base}..origin/{branch}'],
-        capture_output=True, text=True,
-        cwd=resolved_repo["path"]
-      )
-      total_commits = len([l for l in total_result.stdout.strip().split('\n') if l.strip()])
+      # Parse total count
+      total_str = str(total_commits_raw).strip() if total_commits_raw else "0"
+      try:
+        total_commits = int(total_str)
+      except:
+        total_commits = 0
       
       result = {
         'has_merge_commits': len(merge_commits) > 0,
         'merge_count': len(merge_commits),
         'total_commits': total_commits,
-        'merge_commits': merge_commits[:5]  # First 5
+        'merge_commits': merge_commits[:5]
       }
     output: merge_check
 
