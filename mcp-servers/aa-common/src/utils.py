@@ -358,11 +358,14 @@ async def run_cmd_shell(
     if cwd:
         cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
     
-    # Run through bash login shell to get user's full environment
-    # -l = login shell (sources ~/.bashrc, ~/.profile)
-    # -i = interactive (sources ~/.bashrc on some systems)
-    # -c = execute command string
-    shell_cmd = ["bash", "-l", "-i", "-c", cmd_str]
+    # Explicitly source ~/.bashrc then run the command
+    # Login shells source ~/.bash_profile, but user env vars are usually in ~/.bashrc
+    # We source both to ensure we get all environment variables
+    bashrc = Path.home() / ".bashrc"
+    if bashrc.exists():
+        cmd_str = f"source {bashrc} 2>/dev/null; {cmd_str}"
+    
+    shell_cmd = ["bash", "-c", cmd_str]
     
     # Ensure critical environment variables are passed
     # This helps when running from MCP server context
