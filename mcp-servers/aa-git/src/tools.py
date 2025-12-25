@@ -158,6 +158,10 @@ def register_tools(server: FastMCP) -> int:
         since: str = "",
         until: str = "",
         branch: str = "",
+        range_spec: str = "",
+        merges_only: bool = False,
+        no_merges: bool = False,
+        count_only: bool = False,
     ) -> str:
         """
         Show commit history with optional filters.
@@ -170,12 +174,37 @@ def register_tools(server: FastMCP) -> int:
             since: Only commits after date (e.g., "2024-01-01", "yesterday", "1 week ago")
             until: Only commits before date
             branch: Specific branch to show (default: current)
+            range_spec: Commit range (e.g., "origin/main..HEAD", "main..feature")
+            merges_only: Show only merge commits (--merges)
+            no_merges: Exclude merge commits (--no-merges)
+            count_only: Return only count of commits (for range comparisons)
             
         Returns:
-            Commit history.
+            Commit history or count.
+        
+        Examples:
+            git_log(repo, range_spec="origin/main..HEAD")  # Commits ahead of main
+            git_log(repo, merges_only=True, range_spec="main..feature")  # Merge commits only
+            git_log(repo, count_only=True, range_spec="HEAD..origin/main")  # How many behind
         """
         path = resolve_repo_path(repo)
         
+        # Count-only mode
+        if count_only:
+            args = ["rev-list", "--count"]
+            if range_spec:
+                args.append(range_spec)
+            elif branch:
+                args.append(branch)
+            else:
+                args.append("HEAD")
+            
+            success, output = await run_git(args, cwd=path)
+            if not success:
+                return f"❌ Failed to count: {output}"
+            return output.strip()
+        
+        # Regular log
         if oneline:
             args = ["log", f"-{limit}", "--oneline", "--decorate"]
         else:
@@ -187,7 +216,15 @@ def register_tools(server: FastMCP) -> int:
             args.append(f"--since={since}")
         if until:
             args.append(f"--until={until}")
-        if branch:
+        if merges_only:
+            args.append("--merges")
+        if no_merges:
+            args.append("--no-merges")
+        
+        # Range or branch comes last
+        if range_spec:
+            args.append(range_spec)
+        elif branch:
             args.append(branch)
         
         success, output = await run_git(args, cwd=path)
@@ -202,6 +239,12 @@ def register_tools(server: FastMCP) -> int:
             filters.append(f"since {since}")
         if until:
             filters.append(f"until {until}")
+        if range_spec:
+            filters.append(f"range {range_spec}")
+        if merges_only:
+            filters.append("merges only")
+        if no_merges:
+            filters.append("no merges")
         filter_str = f" ({', '.join(filters)})" if filters else ""
         
         lines = [f"## Recent Commits in `{repo}`{filter_str}", ""]
@@ -683,6 +726,197 @@ def register_tools(server: FastMCP) -> int:
         if success:
             return "✅ Merge aborted. Working tree restored."
         return f"❌ Failed to abort merge (perhaps no merge in progress?): {output}"
+    tool_count += 1
+    
+    # ==================== CODE FORMATTING ====================
+    
+    @server.tool()
+    async def code_format(
+        repo: str,
+        check_only: bool = False,
+        tool: str = "black",
+        paths: str = ".",
+    ) -> str:
+        """
+        Format code using black, isort, or ruff.
+        
+        Args:
+            repo: Repository path
+            check_only: Just check formatting, don't modify files
+            tool: Formatter to use (black, isort, ruff)
+            paths: Paths to format (default: current directory)
+        
+        Returns:
+            Formatting result.
+        """
+        path = resolve_repo_path(repo)
+        
+        if tool == "black":
+            cmd = ["black"]
+            if check_only:
+                cmd.append("--check")
+            cmd.extend(paths.split())
+        elif tool == "isort":
+            cmd = ["isort"]
+            if check_only:
+                cmd.append("--check-only")
+            cmd.extend(paths.split())
+        elif tool == "ruff":
+            cmd = ["ruff", "format"]
+            if check_only:
+                cmd.append("--check")
+            cmd.extend(paths.split())
+        else:
+            return f"❌ Unknown formatter: {tool}. Use 'black', 'isort', or 'ruff'"
+        
+        success, output = await run_cmd(cmd, cwd=path, timeout=120)
+        
+        if success:
+            if check_only:
+                return f"✅ Code formatting check passed ({tool})"
+            return f"✅ Code formatted with {tool}\n\n{output or 'All files formatted.'}"
+        
+        if check_only:
+            return f"⚠️ Formatting issues found ({tool}):\n\n{output}"
+        return f"❌ Formatting failed:\n{output}"
+    tool_count += 1
+    
+    # ==================== BUILD/MAKE ====================
+    
+    @server.tool()
+    async def make_target(
+        repo: str,
+        target: str,
+        timeout: int = 120,
+    ) -> str:
+        """
+        Run a make target in the repository.
+        
+        Args:
+            repo: Repository path
+            target: Make target to run (e.g., "test", "migrations", "data", "build")
+            timeout: Timeout in seconds
+        
+        Returns:
+            Make output.
+        """
+        path = resolve_repo_path(repo)
+        
+        cmd = ["make", target]
+        success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
+        
+        if success:
+            return f"✅ make {target} completed\n\n{output[-2000:] if len(output) > 2000 else output}"
+        return f"❌ make {target} failed:\n{output[-2000:] if len(output) > 2000 else output}"
+    tool_count += 1
+    
+    # ==================== DOCKER ====================
+    
+    @server.tool()
+    async def docker_compose_status(
+        repo: str,
+        filter_name: str = "",
+    ) -> str:
+        """
+        Check docker-compose container status.
+        
+        Args:
+            repo: Repository path (where docker-compose.yml is)
+            filter_name: Filter containers by name
+        
+        Returns:
+            Container status.
+        """
+        path = resolve_repo_path(repo)
+        
+        cmd = ["docker", "ps", "--format", "{{.Names}}|{{.Status}}|{{.Ports}}"]
+        if filter_name:
+            cmd.extend(["--filter", f"name={filter_name}"])
+        
+        success, output = await run_cmd(cmd, timeout=30)
+        
+        if not success:
+            return f"❌ Docker not running or not available: {output}"
+        
+        if not output.strip():
+            return "No containers running" + (f" matching '{filter_name}'" if filter_name else "")
+        
+        lines = ["## Docker Containers", ""]
+        for line in output.strip().split("\n"):
+            parts = line.split("|")
+            if len(parts) >= 2:
+                name, status = parts[0], parts[1]
+                ports = parts[2] if len(parts) > 2 else ""
+                icon = "🟢" if "Up" in status else "🔴"
+                lines.append(f"{icon} **{name}**: {status}")
+                if ports:
+                    lines.append(f"   Ports: {ports}")
+        
+        return "\n".join(lines)
+    tool_count += 1
+    
+    @server.tool()
+    async def docker_compose_up(
+        repo: str,
+        detach: bool = True,
+        services: str = "",
+        timeout: int = 180,
+    ) -> str:
+        """
+        Start docker-compose services.
+        
+        Args:
+            repo: Repository path (where docker-compose.yml is)
+            detach: Run in background
+            services: Specific services to start (space-separated, empty = all)
+            timeout: Timeout in seconds
+        
+        Returns:
+            Startup result.
+        """
+        path = resolve_repo_path(repo)
+        
+        cmd = ["docker-compose", "up"]
+        if detach:
+            cmd.append("-d")
+        if services:
+            cmd.extend(services.split())
+        
+        success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
+        
+        if success:
+            return f"✅ docker-compose up completed\n\n{output[-1000:] if len(output) > 1000 else output}"
+        return f"❌ docker-compose up failed:\n{output}"
+    tool_count += 1
+    
+    @server.tool()
+    async def docker_compose_down(
+        repo: str,
+        volumes: bool = False,
+        timeout: int = 60,
+    ) -> str:
+        """
+        Stop docker-compose services.
+        
+        Args:
+            repo: Repository path
+            volumes: Also remove volumes
+            timeout: Timeout in seconds
+        
+        Returns:
+            Shutdown result.
+        """
+        path = resolve_repo_path(repo)
+        
+        cmd = ["docker-compose", "down"]
+        if volumes:
+            cmd.append("-v")
+        
+        success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
+        
+        if success:
+            return f"✅ docker-compose down completed\n\n{output}"
+        return f"❌ docker-compose down failed:\n{output}"
     tool_count += 1
     
     return tool_count
