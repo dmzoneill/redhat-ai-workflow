@@ -1,0 +1,117 @@
+[project]
+name = "ai-workflow"
+version = "1.0.0"
+description = "AI-powered development workflow assistant with MCP tools"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Dave O'Neill", email = "daoneill@redhat.com"}
+]
+keywords = ["mcp", "ai", "workflow", "claude", "devops", "automation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
+
+dependencies = [
+    # MCP Server
+    "mcp>=1.0.0",
+    "fastmcp>=0.1.0",
+    
+    # Configuration & Templating
+    "pyyaml>=6.0",
+    "jinja2>=3.0.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    
+    # HTTP Client
+    "httpx>=0.25.0",
+    
+    # Async Database
+    "aiosqlite>=0.19.0",
+    
+    # D-Bus IPC (for Slack daemon control)
+    "dbus-next>=0.2.3",
+    
+    # Claude Agent
+    "anthropic>=0.18.0",
+    
+    # Google APIs
+    "google-api-python-client>=2.100.0",
+    "google-auth-httplib2>=0.1.0",
+    "google-auth-oauthlib>=1.0.0",
+    
+    # Ephemeral environment management
+    "crc-bonfire>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.0.0",
+    "flake8>=7.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.8.0",
+]
+
+slack = [
+    # Desktop notifications (requires system libnotify)
+    # "PyGObject>=3.42.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/ai-workflow"
+Documentation = "https://github.com/yourusername/ai-workflow#readme"
+Repository = "https://github.com/yourusername/ai-workflow"
+Issues = "https://github.com/yourusername/ai-workflow/issues"
+
+[project.scripts]
+aa-workflow = "mcp_servers.aa_common.src.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mcp-servers", "scripts", "agents", "skills"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.venv
+    | __pycache__
+    | build
+    | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_gitignore = true
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+
