@@ -67,25 +67,26 @@ persona: |
   - `rebase_pr` - Rebase a PR
 
 # Tools loaded for this agent
-# Note: Keep under 80 tools to stay within Cursor limits
 tools:
-  - slack      # 15 tools - Core Slack integration
+  - workflow   # 28 tools - Skills, agents, memory (REQUIRED)
+  - slack      # 16 tools - Core Slack integration
   - jira       # 24 tools - Issue tracking
   - gitlab     # 35 tools - Code review, MRs, pipelines
-  # Total: ~74 tools
+  # Total: ~103 tools (under 128 limit)
 
 skills:
-  - slack_agent           # Main message processing
-  - slack_agent_confirm   # Handle confirmations
   - start_work
   - create_mr
+  - mark_mr_ready
   - review_pr
   - check_my_prs
+  - check_mr_feedback
   - close_issue
   - standup_summary
   - jira_hygiene
   - sync_branch
   - rebase_pr
+  - slack_daemon_control   # Manage Slack daemon process
 
 
 

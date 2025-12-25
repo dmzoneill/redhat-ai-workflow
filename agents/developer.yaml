@@ -7,28 +7,27 @@ persona: agents/developer.md
 
 # Tool modules to load (from mcp-servers/aa-*)
 tools:
+  - workflow        # 28 tools - Skills, agents, memory (REQUIRED)
   - git             # 15 tools - Git operations
   - gitlab          # 35 tools - MRs, CI/CD
   - jira            # 24 tools - Issue tracking
-  - google-calendar # 6 tools - Calendar & meetings
 
-# Total: ~80 tools (at limit)
+# Total: ~102 tools (under 128 limit)
 # For ephemeral deployment, use the devops agent which has bonfire, k8s, quay
 
 skills:
-  - coffee              # ☕ Morning briefing - email, PRs, Jira, calendar
+  - coffee              # ☕ Morning briefing - PRs, Jira, calendar
   - beer                # 🍺 End of day wrap-up - wins, cleanup, standup prep
-  - start_work
+  - start_work          # Start working on a Jira issue
   - create_jira_issue   # Create Jira issue with Markdown support
-  - create_mr           # Create MR with validation, linting, conflict detection
+  - create_mr           # Create MR with validation, linting, Slack notification
+  - mark_mr_ready       # Mark draft MR as ready, notify team
   - close_issue         # Close issue with commit summary
-  - review_mr           # Review GitLab MR from URL - details, diff, pipeline
   - review_pr           # PR review workflow (auto-approves or posts feedback)
   - review_all_prs      # Batch review open PRs (excludes your own)
   - check_my_prs        # Check your PRs for reviewer feedback
   - check_mr_feedback   # Check MRs for comments needing response
   - rebase_pr           # Rebase PR onto main, handle conflicts
   - sync_branch         # Quick sync with main (daily rebase)
-  - test_mr_ephemeral   # Test in ephemeral
   - jira_hygiene        # Issue quality checks
   - standup_summary     # Generate standup summary from activity

@@ -16,9 +16,9 @@ tools:
   - prometheus    # 13 - Alerts and metrics
   
   # Orchestration (required - skills, agents, memory)
-  - workflow      # 26 - session_start, agent_load, skill_run, memory_*
+  - workflow      # 28 - session_start, agent_load, skill_run, memory_*, vpn_connect, kube_login
 
-# Total: ~104 tools ✅ UNDER LIMIT
+# Total: ~106 tools ✅ UNDER LIMIT
 
 # What's available with these tools:
 # ✅ Git operations (status, branch, commit, push)
@@ -28,6 +28,7 @@ tools:
 # ✅ Skills (start_work, create_mr, investigate_alert)
 # ✅ Agents (devops, developer, incident, release personas)
 # ✅ Memory (persistent context)
+# ✅ Infrastructure (vpn_connect, kube_login)
 
 # What's missing (load full agent for these):
 # ❌ GitLab (MRs, pipelines) - use --agent developer

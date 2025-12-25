@@ -6,15 +6,14 @@ description: Release management and deployments
 persona: agents/release.md
 
 # Tool modules to load (from mcp-servers/aa-*)
-# Reduced to stay under 80 tool limit
 tools:
+  - workflow      # 28 tools - Skills, agents, memory (REQUIRED)
   - konflux       # 40 tools - Builds, pipelines
   - quay          # 8 tools - Container images
-  - appinterface  # 6 tools - GitOps config
+  - appinterface  # 7 tools - GitOps config, user lookup
   - git           # 15 tools - App-interface changes
 
-# Total: ~69 tools (under 80 limit)
-# Note: Use tool_exec() for jira, gitlab when needed
+# Total: ~98 tools (under 128 limit)
 
 skills:
   - release_aa_backend_prod  # Production release workflow

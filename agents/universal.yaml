@@ -7,7 +7,7 @@ persona: agents/developer.md  # Defaults to developer persona, can adopt others
 
 # Tool modules to load (from mcp-servers/aa-*)
 tools:
-  - workflow      # 26 tools - Agent/skill/memory management (REQUIRED)
+  - workflow      # 28 tools - Agent/skill/memory management (REQUIRED)
   - git           # 15 tools - Git operations
   - gitlab        # 35 tools - MRs, CI/CD, pipelines
   - jira          # 24 tools - Issue tracking
@@ -15,7 +15,7 @@ tools:
   # - quay        # 8 tools - Image checks (use skopeo directly if needed)
   # - k8s         # 26 tools - Kubernetes (add if you need pod inspection)
 
-# Total: 121 tools (under 128 limit)
+# Total: ~123 tools (under 128 limit)
 # 
 # Agent switching: Tools are fixed at startup, but persona changes via agent_load().
 # When you say "load devops agent", Claude adopts the devops focus/expertise
@@ -29,8 +29,10 @@ tools:
 skills:
   - start_work
   - create_mr
+  - mark_mr_ready
   - review_pr
   - test_mr_ephemeral
   - investigate_alert
+  - investigate_slack_alert
   - debug_prod
 

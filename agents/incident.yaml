@@ -6,17 +6,17 @@ description: Production incident response and recovery
 persona: agents/incident.md
 
 # Tool modules to load (from mcp-servers/aa-*)
-# Reduced to stay under 80 tool limit
 tools:
+  - workflow      # 28 tools - Skills, agents, memory (REQUIRED)
   - k8s           # 26 tools - Kubernetes operations
   - prometheus    # 13 tools - Metrics and alerts
   - alertmanager  # 6 tools - Silence management
   - kibana        # 9 tools - Log search
   - jira          # 24 tools - Incident tracking
 
-# Total: ~78 tools (under 80 limit)
-# Note: Use tool_exec() for git, workflow when needed
+# Total: ~106 tools (under 128 limit)
 
 skills:
-  - investigate_alert
-  - debug_prod
+  - investigate_alert       # Investigate Prometheus alerts
+  - investigate_slack_alert # Investigate alerts from Slack
+  - debug_prod              # Debug production issues
