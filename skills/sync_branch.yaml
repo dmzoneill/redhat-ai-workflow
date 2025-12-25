@@ -111,15 +111,14 @@ steps:
     on_error: continue
 
   - name: parse_git_status
-    description: "Parse git status output"
+    description: "Parse git status output using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import extract_current_branch
       
       status_output = str(git_status_raw) if git_status_raw else ""
       
-      # Extract current branch
-      branch_match = re.search(r"On branch (\S+)", status_output)
-      branch = branch_match.group(1) if branch_match else None
+      # Extract current branch using shared parser
+      branch = extract_current_branch(status_output)
       
       if not branch:
           raise ValueError("Could not determine current branch")

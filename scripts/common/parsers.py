@@ -597,3 +597,199 @@ def separate_mrs_by_author(
         'to_review': to_review
     }
 
+
+def validate_jira_key(key: str) -> bool:
+    """
+    Validate that a string is a properly formatted Jira issue key.
+    
+    Args:
+        key: The string to validate (e.g., "AAP-12345")
+        
+    Returns:
+        True if valid Jira key format, False otherwise
+    """
+    if not key:
+        return False
+    return bool(re.match(r'^[A-Z]{2,10}-\d+$', str(key).strip().upper()))
+
+
+def extract_mr_id_from_url(url: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract project and MR ID from a GitLab MR URL.
+    
+    Args:
+        url: GitLab MR URL like "https://gitlab.com/group/project/-/merge_requests/123"
+        
+    Returns:
+        Dict with 'project' and 'mr_id' keys, or None if not a valid URL
+    """
+    if not url:
+        return None
+        
+    match = re.match(r'https?://[^/]+/(.+?)/-/merge_requests/(\d+)', str(url))
+    if match:
+        return {
+            "project": match.group(1),
+            "mr_id": int(match.group(2))
+        }
+    return None
+
+
+def extract_mr_id_from_text(text: str) -> Optional[int]:
+    """
+    Extract MR ID from text containing patterns like !123, IID: 123, etc.
+    
+    Args:
+        text: Text to search for MR ID
+        
+    Returns:
+        MR ID as integer, or None if not found
+    """
+    if not text:
+        return None
+        
+    # Try common patterns
+    match = re.search(r'!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)', str(text), re.IGNORECASE)
+    if match:
+        return int(match.group(1) or match.group(2) or match.group(3))
+    
+    # Fallback: find any 2-5 digit number
+    nums = re.findall(r'\b(\d{2,5})\b', str(text))
+    if nums:
+        return int(nums[0])
+    
+    return None
+
+
+def extract_branch_from_mr(mr_details: str) -> Optional[str]:
+    """
+    Extract source branch name from MR details output.
+    
+    Args:
+        mr_details: Raw output from gitlab_mr_view
+        
+    Returns:
+        Source branch name or None
+    """
+    if not mr_details:
+        return None
+    
+    # Try various patterns
+    patterns = [
+        r'[Ss]ource[_ ]?[Bb]ranch[:\s]+(\S+)',
+        r'source_branch.*?[:\s]+(\S+)',
+        r'Branch:\s*(\S+)',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, str(mr_details), re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    
+    return None
+
+
+def extract_author_from_mr(mr_details: str) -> Optional[str]:
+    """
+    Extract author username from MR details output.
+    
+    Args:
+        mr_details: Raw output from gitlab_mr_view
+        
+    Returns:
+        Author username or None
+    """
+    if not mr_details:
+        return None
+    
+    match = re.search(r'Author[:\s]+@?(\w+)', str(mr_details), re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def parse_jira_status(issue_details: str) -> Optional[str]:
+    """
+    Extract status from Jira issue details.
+    
+    Args:
+        issue_details: Raw output from jira_view_issue
+        
+    Returns:
+        Status string or None
+    """
+    if not issue_details:
+        return None
+    
+    match = re.search(r'Status[:\s]+(\S+)', str(issue_details), re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def parse_conflict_markers(content: str) -> List[Dict[str, str]]:
+    """
+    Parse git conflict markers from file content.
+    
+    Args:
+        content: File content with conflict markers
+        
+    Returns:
+        List of dicts with 'ours', 'theirs', and 'full_marker' keys
+    """
+    conflicts = []
+    if not content:
+        return conflicts
+    
+    # Pattern: <<<<<<< ... ======= ... >>>>>>>
+    pattern = r'<<<<<<<[^\n]*\n(.*?)=======\n(.*?)>>>>>>>[^\n]*'
+    matches = re.findall(pattern, str(content), re.DOTALL)
+    
+    for ours, theirs in matches:
+        conflicts.append({
+            "ours": ours.strip(),
+            "theirs": theirs.strip()
+        })
+    
+    return conflicts
+
+
+def extract_conflict_files(output: str) -> List[str]:
+    """
+    Extract list of conflicting files from rebase/merge output.
+    
+    Args:
+        output: Output from git rebase or git merge
+        
+    Returns:
+        List of file paths with conflicts
+    """
+    if not output:
+        return []
+    
+    # Pattern: "- `filename`" or "CONFLICT (content): filename"
+    files = []
+    
+    # Markdown format
+    md_files = re.findall(r'- `([^`]+)`', str(output))
+    files.extend(md_files)
+    
+    # Git conflict format
+    conflict_files = re.findall(r'CONFLICT \([^)]+\):\s*(?:Merge conflict in\s*)?(\S+)', str(output))
+    files.extend(conflict_files)
+    
+    return list(set(files))  # Deduplicate
+
+
+def extract_current_branch(git_status_output: str) -> Optional[str]:
+    """
+    Extract the current branch name from git status output.
+    
+    Args:
+        git_status_output: Raw output from git status
+        
+    Returns:
+        Current branch name or None
+    """
+    if not git_status_output:
+        return None
+    
+    match = re.search(r"On branch (\S+)", str(git_status_output))
+    return match.group(1) if match else None
+

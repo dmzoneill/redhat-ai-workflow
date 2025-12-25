@@ -52,10 +52,8 @@ steps:
   - name: resolve_repo
     description: "Determine which repo, GitLab project, and settings to use"
     compute: |
-      import json
       import os
-      import re
-      from pathlib import Path
+      from scripts.common.parsers import extract_mr_id_from_url
 
       repo_path = None
       gitlab_project = None
@@ -63,12 +61,12 @@ steps:
       fastapi_container = "automation-analytics-backend-api-fastapi-1"
       mr_id_from_url = None
 
-      # Parse URL if provided
+      # Parse URL if provided using shared parser
       if inputs.url:
-          url_match = re.match(r'https?://[^/]+/(.+?)/-/merge_requests/(\d+)', inputs.url)
-          if url_match:
-              gitlab_project = url_match.group(1)
-              mr_id_from_url = int(url_match.group(2))
+          url_info = extract_mr_id_from_url(inputs.url)
+          if url_info:
+              gitlab_project = url_info["project"]
+              mr_id_from_url = url_info["mr_id"]
 
       # Load config using shared loader
       from scripts.common.config_loader import load_config
@@ -139,9 +137,9 @@ steps:
 
   # Step 0c: Extract MR ID from search results or URL
   - name: extract_mr_id
-    description: "Extract MR ID from inputs, URL, or search results"
+    description: "Extract MR ID from inputs, URL, or search results using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import extract_mr_id_from_text
       
       resolved_mr_id = None
       
@@ -152,28 +150,11 @@ steps:
       elif resolved.get('mr_id_from_url'):
         resolved_mr_id = resolved.mr_id_from_url
       else:
-        # Parse search results to find MR ID
-        search_text = mr_search_results or ""
+        # Parse search results to find MR ID using shared parser
+        resolved_mr_id = extract_mr_id_from_text(mr_search_results or "")
         
-        # Look for MR ID patterns: !123, IID: 123, mr_id: 123
-        matches = re.findall(r'!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)', search_text, re.IGNORECASE)
-        
-        if matches:
-          # Get first match
-          for match in matches:
-            for group in match:
-              if group:
-                resolved_mr_id = int(group)
-                break
-            if resolved_mr_id:
-              break
-        else:
-          # Try to find any number that looks like an MR ID (3-5 digits)
-          nums = re.findall(r'\b(\d{2,5})\b', search_text)
-          if nums:
-            resolved_mr_id = int(nums[0])
-          else:
-            raise ValueError(f"No MR found for issue {inputs.issue_key}. Please provide mr_id directly.")
+        if not resolved_mr_id:
+          raise ValueError(f"No MR found for issue {inputs.issue_key}. Please provide mr_id directly.")
       
       result = resolved_mr_id
     output: resolved_mr_id
@@ -309,6 +290,7 @@ steps:
     compute: |
       import re
       from scripts.common.config_loader import load_config
+      from scripts.common.parsers import extract_jira_key
       
       issues = []
       
@@ -322,8 +304,8 @@ steps:
       # Extract title from MR details (first line usually)
       title_line = mr_details.split('\n')[0] if mr_details else ""
       
-      # Check for Jira key at start
-      if not re.match(r'^AAP-\d+', title_line):
+      # Check for Jira key at start using shared parser
+      if not extract_jira_key(title_line):
         issues.append("Missing Jira key at start of title")
       
       # Check for type(scope): format
@@ -364,18 +346,13 @@ steps:
 
   # Step 9a: Extract branch name
   - name: extract_branch_name
-    description: "Extract source branch from MR details"
+    description: "Extract source branch from MR details using shared parser"
     condition: "{{ inputs.run_tests }}"
     compute: |
-      import re
+      from scripts.common.parsers import extract_branch_from_mr
       
-      branch_match = re.search(r'Source branch:\s*(\S+)', mr_details)
-      if not branch_match:
-        branch_match = re.search(r'source_branch.*?[:\s]+(\S+)', mr_details, re.IGNORECASE)
-      
-      if branch_match:
-        branch = branch_match.group(1)
-      else:
+      branch = extract_branch_from_mr(mr_details)
+      if not branch:
         branch = f"mr-{mr_id}"
       
       result = branch
@@ -793,11 +770,10 @@ steps:
       
       try:
           from scripts.skill_hooks import emit_event
+          from scripts.common.parsers import extract_author_from_mr
           
-          # Extract author from MR details
-          import re
-          author_match = re.search(r'Author[:\s]+@?(\w+)', mr_details or "", re.IGNORECASE)
-          author = author_match.group(1) if author_match else ""
+          # Extract author from MR details using shared parser
+          author = extract_author_from_mr(mr_details) or ""
           
           asyncio.run(emit_event("review_approved", {
               "mr_id": str(mr_id),
@@ -822,11 +798,10 @@ steps:
       
       try:
           from scripts.skill_hooks import emit_event
+          from scripts.common.parsers import extract_author_from_mr
           
-          # Extract author from MR details
-          import re
-          author_match = re.search(r'Author[:\s]+@?(\w+)', mr_details or "", re.IGNORECASE)
-          author = author_match.group(1) if author_match else ""
+          # Extract author from MR details using shared parser
+          author = extract_author_from_mr(mr_details) or ""
           
           issue_count = len(code_issues) if code_issues else 0
           if format_issues and format_issues != ["Format OK"]:

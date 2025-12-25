@@ -136,13 +136,13 @@ steps:
 
   # Step 0b: Validate Jira issue key format
   - name: validate_issue_key
-    description: "Validate issue key format"
+    description: "Validate issue key format using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import validate_jira_key
 
       key = inputs.issue_key.upper().strip()
 
-      if not re.match(r"^[A-Z]+-\d+$", key):
+      if not validate_jira_key(key):
           raise ValueError(
               f"Invalid issue key format: {inputs.issue_key}. "
               "Expected format: AAP-12345"
@@ -191,20 +191,14 @@ steps:
     on_error: continue
 
   - name: find_issue_branch
-    description: "Find branch matching this issue key"
+    description: "Find branch matching this issue key using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import parse_git_branches
       
       issue_key = inputs.issue_key.upper()
       
-      matching = []
-      if branches_raw:
-        for line in str(branches_raw).split('\n'):
-          branch = line.strip().replace('* ', '').strip()
-          if issue_key in branch.upper():
-            clean_name = branch.replace('remotes/origin/', '')
-            if clean_name and clean_name not in matching:
-              matching.append(clean_name)
+      # Use shared parser with issue key filter
+      matching = parse_git_branches(branches_raw or "", issue_key=issue_key)
       
       if matching:
         result = {"exists": True, "branch": matching[0], "all_matches": matching}
@@ -223,10 +217,10 @@ steps:
     on_error: continue
 
   - name: find_matching_mr
-    description: "Find MR matching our issue key or branch"
+    description: "Find MR matching our issue key or branch using shared parser"
     condition: "{{ branch_check.get('exists', False) }}"
     compute: |
-      import re
+      from scripts.common.parsers import extract_mr_id_from_text
       
       issue_key = inputs.issue_key.upper()
       branch = branch_check['branch']
@@ -236,10 +230,10 @@ steps:
         for line in str(open_mrs_raw).split('\n'):
           # Check if this MR matches our issue key or branch
           if issue_key in line.upper() or (branch and branch in line):
-            # Extract MR ID (usually first number in the line)
-            match = re.search(r'!(\d+)', line)
-            if match:
-              mr_info = {"id": int(match.group(1)), "line": line.strip()}
+            # Use shared parser to extract MR ID
+            mr_id = extract_mr_id_from_text(line)
+            if mr_id:
+              mr_info = {"id": mr_id, "line": line.strip()}
               break
       
       result = mr_info
@@ -277,14 +271,10 @@ steps:
     on_error: continue
 
   - name: analyze_mr_feedback
-    description: "Analyze MR feedback for actionable items"
+    description: "Analyze MR feedback for actionable items using shared parser"
     condition: "{{ existing_mr and existing_mr.get('id') }}"
     compute: |
-      # Import shared parsers
-      import sys
-      from pathlib import Path
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
-      from common.parsers import BOT_PATTERNS, is_bot_comment
+      from scripts.common.parsers import is_bot_comment
       
       mr_id = existing_mr['id']
       details = str(mr_details_raw)[:1000] if mr_details_raw else ""
@@ -320,20 +310,20 @@ steps:
     on_error: continue
 
   - name: parse_jira_updates
-    description: "Parse Jira details for updates"
+    description: "Parse Jira details for updates using shared parser"
     condition: "{{ branch_check.get('exists', False) }}"
     compute: |
-      import re
+      from scripts.common.parsers import parse_jira_status
       
       jira_updates = {"status": "Unknown", "recent_comments": [], "has_updates": False}
       
       if jira_details_raw:
         details = str(jira_details_raw)
         
-        # Try to extract status
-        status_match = re.search(r'Status:\s*(\S+)', details)
-        if status_match:
-          jira_updates["status"] = status_match.group(1)
+        # Use shared parser to extract status
+        status = parse_jira_status(details)
+        if status:
+          jira_updates["status"] = status
         
         # Look for comments section
         if "Comment" in details or "comment" in details:

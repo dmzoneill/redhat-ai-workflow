@@ -156,27 +156,21 @@ steps:
     on_error: continue
 
   - name: extract_branch
-    description: "Extract branch name from MR or issue key"
+    description: "Extract branch name from MR or issue key using shared parsers"
     compute: |
-      import re
+      from scripts.common.parsers import extract_branch_from_mr, parse_git_branches
       
       branch = inputs.get('branch')
       
       if not branch and mr_details:
-        # Extract from MR details
-        match = re.search(r'[Ss]ource[_ ]?[Bb]ranch[:\s]+(\S+)', mr_details)
-        if match:
-          branch = match.group(1)
+        # Extract from MR details using shared parser
+        branch = extract_branch_from_mr(mr_details)
       
       if not branch and inputs.get('issue_key'):
-        # Find branch by issue key - use branches_raw from earlier step
-        issue_key = inputs.issue_key.upper()
-        if branches_raw:
-          all_branches = [b.strip().replace('* ', '').replace('remotes/origin/', '') 
-                         for b in str(branches_raw).split('\n') if b.strip()]
-          matching = [b for b in all_branches if issue_key in b.upper()]
-          if matching:
-            branch = matching[0]
+        # Find branch by issue key using shared parser
+        matching = parse_git_branches(branches_raw or "", issue_key=inputs.issue_key)
+        if matching:
+          branch = matching[0]
       
       if not branch:
         raise ValueError("Could not determine branch name. Please provide 'branch' input directly.")
@@ -217,20 +211,18 @@ steps:
     on_error: continue
 
   - name: check_merge_commits
-    description: "Parse merge commit info"
+    description: "Parse merge commit info using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import parse_git_log
       
-      # Parse merge commits from git_log output
+      # Parse merge commits using shared parser
       merge_output = str(merge_commits_raw) if merge_commits_raw else ""
-      merge_commits = []
       
       if "No commits found" not in merge_output and merge_output.strip():
-        for line in merge_output.split('\n'):
-          if line.startswith('- `'):
-            match = re.search(r'`([^`]+)`', line)
-            if match:
-              merge_commits.append(match.group(1))
+        commits = parse_git_log(merge_output)
+        merge_commits = [c.get('sha', '') or c.get('message', '')[:10] for c in commits]
+      else:
+        merge_commits = []
       
       # Parse total count
       total_str = str(total_commits_raw).strip() if total_commits_raw else "0"
@@ -340,8 +332,10 @@ steps:
     on_error: continue
 
   - name: parse_rebase_result
-    description: "Parse rebase output into structured result"
+    description: "Parse rebase output into structured result using shared parser"
     compute: |
+      from scripts.common.parsers import extract_conflict_files
+      
       rebase_output = str(rebase_raw) if rebase_raw else ""
       
       if "Successfully rebased" in rebase_output or "✅" in rebase_output:
@@ -351,9 +345,8 @@ steps:
           'message': 'Rebase completed successfully!'
         }
       elif "conflict" in rebase_output.lower() or "⚠️" in rebase_output:
-        # Extract conflict files from the output
-        import re
-        conflict_files = re.findall(r'- `([^`]+)`', rebase_output)
+        # Extract conflict files using shared parser
+        conflict_files = extract_conflict_files(rebase_output)
         rebase_status = {
           'success': False,
           'conflicts': True,
@@ -378,6 +371,7 @@ steps:
     compute: |
       import re
       import os
+      from scripts.common.parsers import parse_conflict_markers
       
       conflict_files = rebase_result.get('conflict_files', [])
       repo = resolved_repo["path"]
@@ -392,10 +386,9 @@ steps:
           with open(full_path, 'r') as f:
             content = f.read()
           
-          # Find all conflict blocks
-          # Pattern: <<<<<<< ... ======= ... >>>>>>> 
-          conflict_pattern = r'<<<<<<<[^\n]*\n(.*?)=======\n(.*?)>>>>>>>[^\n]*\n'
-          conflicts = re.findall(conflict_pattern, content, re.DOTALL)
+          # Find all conflict blocks using shared parser
+          conflict_blocks = parse_conflict_markers(content)
+          conflicts = [(c['ours'], c['theirs']) for c in conflict_blocks]
           
           if not conflicts:
             # No conflicts found, might be resolved already

@@ -82,20 +82,15 @@ steps:
     on_error: continue
 
   - name: find_branch
-    description: "Find branch matching this issue"
+    description: "Find branch matching this issue using shared parser"
     condition: "{{ not status_check.already_done }}"
     compute: |
-      import re
+      from scripts.common.parsers import parse_git_branches
       
       issue_key = inputs.issue_key.upper()
       
-      branches = []
-      if branches_raw:
-        for line in str(branches_raw).split('\n'):
-          branch = line.strip().replace('* ', '').replace('remotes/origin/', '')
-          if branch and issue_key in branch.upper():
-            if branch not in branches:
-              branches.append(branch)
+      # Use shared parser with issue key filter
+      branches = parse_git_branches(branches_raw or "", issue_key=issue_key)
       
       result = {
         "found": len(branches) > 0,
