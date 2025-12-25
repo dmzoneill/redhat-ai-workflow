@@ -252,19 +252,9 @@ steps:
   - name: parse_my_prs
     description: "Parse MR list output"
     compute: |
-      import re
+      from scripts.common.parsers import parse_mr_list
       
-      my_mrs = []
-      if my_prs_raw:
-        for line in str(my_prs_raw).split('\n'):
-          match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
-          if match:
-            my_mrs.append({
-              "id": int(match.group(1)),
-              "title": match.group(2).strip()[:60]
-            })
-      
-      result = my_mrs
+      result = parse_mr_list(my_prs_raw) if my_prs_raw else []
     output: my_prs
 
   - name: check_pr_feedback
@@ -323,18 +313,9 @@ steps:
   - name: parse_jira_activity
     description: "Parse Jira search results"
     compute: |
-      import re
+      from scripts.common.parsers import parse_jira_issues
       
-      recent_issues = []
-      if jira_activity_raw:
-        for line in str(jira_activity_raw).split('\n'):
-          # Parse: AAP-12345  Summary text or AAP-12345: Summary text
-          match = re.match(r'(AAP-\d+)[:\s]+(.+)', line)
-          if match:
-            recent_issues.append({
-              "key": match.group(1),
-              "summary": match.group(2)[:50]
-            })
+      recent_issues = parse_jira_issues(jira_activity_raw) if jira_activity_raw else []
       
       result = {
         "count": len(recent_issues),
@@ -357,18 +338,9 @@ steps:
   - name: parse_recent_merges
     description: "Parse merged MRs"
     compute: |
-      import re
+      from scripts.common.parsers import parse_mr_list
       
-      merged_mrs = []
-      if recent_merges_raw:
-        for line in str(recent_merges_raw).split('\n')[:10]:
-          match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
-          if match:
-            merged_mrs.append({
-              "id": int(match.group(1)),
-              "title": match.group(2).strip()[:50]
-            })
-      
+      merged_mrs = parse_mr_list(recent_merges_raw) if recent_merges_raw else []
       result = merged_mrs[:5]  # Last 5
     output: recent_merges
     on_error: continue
@@ -486,28 +458,9 @@ steps:
   - name: parse_ephemeral_namespaces
     description: "Parse namespace list"
     compute: |
-      import re
+      from scripts.common.parsers import parse_namespaces
       
-      namespaces = []
-      if ephemeral_namespaces_raw:
-        for line in str(ephemeral_namespaces_raw).split('\n'):
-          # Parse: ephemeral-xxxxx  expires in 2h 30m
-          match = re.search(r'(ephemeral-\w+)\s+.*?(\d+[hm].*?)(?:\s|$)', line)
-          if match:
-            namespaces.append({
-              "name": match.group(1),
-              "expires": match.group(2).strip()
-            })
-          elif 'ephemeral-' in line:
-            # Fallback: just get the namespace name
-            ns_match = re.search(r'(ephemeral-\w+)', line)
-            if ns_match:
-              namespaces.append({
-                "name": ns_match.group(1),
-                "expires": "unknown"
-              })
-      
-      result = namespaces
+      result = parse_namespaces(ephemeral_namespaces_raw) if ephemeral_namespaces_raw else []
     output: ephemeral_namespaces
     on_error: continue
 
@@ -560,18 +513,9 @@ steps:
   - name: parse_review_requests
     description: "Parse review request list"
     compute: |
-      import re
+      from scripts.common.parsers import parse_mr_list
       
-      review_requests = []
-      if review_requests_raw:
-        for line in str(review_requests_raw).split('\n'):
-          match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
-          if match:
-            review_requests.append({
-              "id": int(match.group(1)),
-              "title": match.group(2).strip()[:50]
-            })
-      
+      review_requests = parse_mr_list(review_requests_raw) if review_requests_raw else []
       result = review_requests[:5]  # Limit to 5
     output: review_requests
     on_error: continue

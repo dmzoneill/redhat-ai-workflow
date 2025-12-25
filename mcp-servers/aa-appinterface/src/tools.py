@@ -3,23 +3,36 @@
 Provides 6 tools for working with app-interface GitOps configuration.
 """
 
-import asyncio
 import logging
 import os
-import subprocess
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-logger = logging.getLogger(__name__)
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
+from src.utils import run_cmd_full as run_cmd, load_config
+
+logger = logging.getLogger(__name__)
 
 
 # ==================== Configuration ====================
 
 def find_app_interface_path() -> str:
     """Find app-interface repository path."""
+    # Try config.json first
+    config = load_config()
+    repos = config.get("repositories", {})
+    if "app-interface" in repos:
+        path = repos["app-interface"].get("path", "")
+        if path and Path(os.path.expanduser(path)).exists():
+            return os.path.expanduser(path)
+    
+    # Fallback to common paths
     candidates = [
         Path.home() / "src/app-interface",
         Path.home() / "repos/app-interface",
@@ -33,32 +46,6 @@ def find_app_interface_path() -> str:
 
 
 APP_INTERFACE_PATH = find_app_interface_path()
-
-
-# ==================== Helper Functions ====================
-
-async def run_cmd(
-    cmd: list[str],
-    cwd: str | None = None,
-    timeout: int = 300,
-) -> tuple[bool, str, str]:
-    """Run a command and return (success, stdout, stderr)."""
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd,
-        )
-        return result.returncode == 0, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        return False, "", f"Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "", f"Command not found: {cmd[0]}"
-    except Exception as e:
-        return False, "", str(e)
 
 
 # ==================== TOOLS ====================

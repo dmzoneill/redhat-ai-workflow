@@ -49,18 +49,9 @@ steps:
   - name: parse_open_mrs
     description: "Parse MR list output"
     compute: |
-      import re
+      from scripts.common.parsers import parse_mr_list
       
-      mrs = []
-      if open_mrs_raw:
-        for line in str(open_mrs_raw).split('\n'):
-          # Parse: !1452  automation-analytics/automation-analytics-backend!1452  AAP-58394 - feat(clowder)...
-          match = re.search(r'!(\d+)\s+\S+\s+(.+?)\s*\(main\)', line)
-          if match:
-            mrs.append({
-              "id": int(match.group(1)),
-              "title": match.group(2).strip()
-            })
+      mrs = parse_mr_list(open_mrs_raw) if open_mrs_raw else []
       
       # Filter to specific MRs if provided
       if inputs.get('mr_ids'):

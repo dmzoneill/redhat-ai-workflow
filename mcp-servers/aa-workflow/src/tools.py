@@ -18,29 +18,27 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+
+from src.utils import (
+    load_config,
+    resolve_repo_path,
+    run_cmd_full,
+    get_username,
+)
+
 logger = logging.getLogger(__name__)
 
 
-def load_repos_config() -> dict:
-    """Load config.json configuration."""
-    config_paths = [
-        Path.home() / "src/ai-workflow/config.json",
-        Path(__file__).parent.parent.parent.parent / "config.json",
-        Path(os.getenv("REPOS_CONFIG_PATH", "")),
-    ]
-    for p in config_paths:
-        if p.exists():
-            with open(p) as f:
-                return json.load(f)
-    return {}
-
-
-REPOS_CONFIG = load_repos_config()
+REPOS_CONFIG = load_config()
 # Repos are stored as dict: {"name": {"path": "...", ...}}
 repos_data = REPOS_CONFIG.get("repositories", {})
 if isinstance(repos_data, dict):
@@ -225,36 +223,18 @@ def format_github_issue_url(tool: str, error: str, context: str = "") -> str:
 
 # ==================== Helper Functions ====================
 
-async def run_cmd(
-    cmd: list[str],
-    cwd: str | None = None,
-    timeout: int = 300,
-) -> tuple[bool, str, str]:
-    """Run a command and return (success, stdout, stderr)."""
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd,
-        )
-        return result.returncode == 0, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        return False, "", f"Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "", f"Command not found: {cmd[0]}"
-    except Exception as e:
-        return False, "", str(e)
+# run_cmd is imported from src.utils as run_cmd_full
+run_cmd = run_cmd_full
 
 
 def resolve_path(repo: str) -> str:
     """Resolve repo name to path."""
     if repo in REPO_PATHS:
         return REPO_PATHS[repo]
-    if os.path.isdir(repo):
-        return repo
+    # Try shared resolver
+    resolved = resolve_repo_path(repo)
+    if os.path.isdir(resolved):
+        return resolved
     raise ValueError(f"Unknown repository: {repo}")
 
 

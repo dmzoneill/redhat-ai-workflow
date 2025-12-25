@@ -4,36 +4,33 @@ Konflux is a cloud-native software factory using Kubernetes and Tekton.
 Authentication: Uses ~/.kube/config.k for Konflux cluster access.
 """
 
-import asyncio
 import os
-import subprocess
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-KONFLUX_KUBECONFIG = str(Path.home() / ".kube/config.k")
-DEFAULT_NAMESPACE = os.getenv("KONFLUX_NAMESPACE", "default")  # Configure in KONFLUX_NAMESPACE env or config.json
+from src.utils import run_cmd as run_cmd_base, load_config, get_kubeconfig
+
+
+def get_konflux_config() -> dict:
+    """Get Konflux configuration."""
+    config = load_config()
+    return config.get("konflux", {})
+
+
+KONFLUX_KUBECONFIG = get_konflux_config().get("kubeconfig", str(Path.home() / ".kube/config.k"))
+DEFAULT_NAMESPACE = os.getenv("KONFLUX_NAMESPACE", "default")
 
 
 async def run_cmd(cmd: list[str], kubeconfig: str = KONFLUX_KUBECONFIG, timeout: int = 60) -> tuple[bool, str]:
     """Run command with kubeconfig."""
-    env = {**os.environ, "KUBECONFIG": kubeconfig}
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, timeout=timeout, env=env
-        )
-        output = result.stdout
-        if result.returncode != 0:
-            output = result.stderr or result.stdout or "Command failed"
-            return False, output
-        return True, output
-    except subprocess.TimeoutExpired:
-        return False, f"Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, f"Command not found: {cmd[0]}"
-    except Exception as e:
-        return False, str(e)
+    env = {"KUBECONFIG": kubeconfig}
+    return await run_cmd_base(cmd, env=env, timeout=timeout)
 
 
 # ==================== PIPELINE RUNS ====================
