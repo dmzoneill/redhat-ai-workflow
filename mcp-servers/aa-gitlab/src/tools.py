@@ -9,34 +9,26 @@ Supports:
 """
 
 import asyncio
-import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+
+from src.utils import load_config, get_section_config, run_cmd
 
 GITLAB_HOST = os.getenv("GITLAB_HOST", "gitlab.cee.redhat.com")
 
 
 def _load_repo_config() -> dict[str, dict]:
     """Load repository configuration from config.json."""
-    config_paths = [
-        Path.cwd() / "config.json",
-        # Path: tools.py -> src -> aa-gitlab -> mcp-servers -> redhat-ai-workflow
-        Path(__file__).parent.parent.parent.parent / "config.json",
-        Path.home() / "src/redhat-ai-workflow/config.json",
-    ]
-    for config_path in config_paths:
-        if config_path.exists():
-            try:
-                with open(config_path) as f:
-                    return json.load(f).get("repositories", {})
-            except Exception:
-                pass
-    return {}
+    return get_section_config("repositories", {})
 
 
 def _resolve_gitlab_to_local(gitlab_path: str) -> str | None:

@@ -19,54 +19,12 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_kubeconfig, get_env_config, load_config
+from src.utils import get_kubeconfig, load_config, get_service_url, get_bearer_token, get_env_config
 
 logger = logging.getLogger(__name__)
 
 
-def get_alertmanager_url(environment: str) -> str:
-    """Get Alertmanager URL for environment from config.json or env vars."""
-    # Try to load from config.json first
-    try:
-        # Path: tools.py -> src -> aa-alertmanager -> mcp-servers -> redhat-ai-workflow
-        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
-        if config_path.exists():
-            import json
-            with open(config_path) as f:
-                config = json.load(f)
-            env_key = "production" if environment.lower() == "prod" else environment.lower()
-            url = config.get("alertmanager", {}).get("environments", {}).get(env_key, {}).get("url")
-            if url:
-                return url
-    except Exception:
-        pass
-    # Fallback to environment variables
-    urls = {
-        "stage": os.getenv("ALERTMANAGER_STAGE_URL", ""),
-        "production": os.getenv("ALERTMANAGER_PROD_URL", ""),
-        "prod": os.getenv("ALERTMANAGER_PROD_URL", ""),
-    }
-    url = urls.get(environment.lower(), urls.get("stage", ""))
-    if not url:
-        raise ValueError(f"Alertmanager URL not configured. Set ALERTMANAGER_{environment.upper()}_URL or configure in config.json")
-    return url
-
-
-def get_alertmanager_token(kubeconfig: str) -> str:
-    """Get OpenShift token from kubeconfig."""
-    try:
-        result = subprocess.run(
-            ["kubectl", "config", "view", "--minify", "-o", 
-             "jsonpath={.users[0].user.token}"],
-            capture_output=True,
-            text=True,
-            env={"KUBECONFIG": kubeconfig},
-            timeout=10,
-        )
-        return result.stdout.strip()
-    except Exception as e:
-        logger.warning(f"Failed to get token from {kubeconfig}: {e}")
-        return ""
+# Using shared utilities: get_service_url, get_bearer_token, get_env_config
 
 
 async def alertmanager_request(
@@ -112,28 +70,15 @@ async def alertmanager_request(
         return False, str(e)
 
 
-async def get_env_config(environment: str) -> tuple[str, str | None]:
-    """Get URL and token for environment."""
-    url = get_alertmanager_url(environment)
+async def get_alertmanager_config(environment: str) -> tuple[str, str | None]:
+    """Get URL and token for Alertmanager environment.
     
-    # Try to get kubeconfig from config.json first
-    kubeconfig = None
-    try:
-        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
-        if config_path.exists():
-            import json
-            with open(config_path) as f:
-                config = json.load(f)
-            env_key = "production" if environment.lower() == "prod" else environment.lower()
-            kubeconfig = config.get("alertmanager", {}).get("environments", {}).get(env_key, {}).get("kubeconfig")
-    except Exception:
-        pass
-    
-    # Fall back to default path
-    if not kubeconfig:
-        kubeconfig = get_kubeconfig(environment)
-    
-    token = get_alertmanager_token(kubeconfig)
+    Uses shared utilities from aa-common for config loading.
+    """
+    url = get_service_url("alertmanager", environment)
+    env_config = get_env_config(environment, "alertmanager")
+    kubeconfig = env_config.get("kubeconfig", get_kubeconfig(environment))
+    token = await get_bearer_token(kubeconfig)
     return url, token
 
 
@@ -161,7 +106,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of active alerts with their details.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_alertmanager_config(environment)
 
         # Build query params
         params = []
@@ -260,7 +205,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of silences with their details.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_alertmanager_config(environment)
 
         success, result = await alertmanager_request(url, "/silences", token=token)
 
@@ -329,7 +274,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Created silence ID.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_alertmanager_config(environment)
 
         # Parse duration
         duration_map = {"m": 1, "h": 60, "d": 1440}
@@ -408,7 +353,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of deletion.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_alertmanager_config(environment)
 
         success, result = await alertmanager_request(url, f"/silence/{silence_id}", method="DELETE", token=token)
 
@@ -431,7 +376,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Alertmanager status and cluster info.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_alertmanager_config(environment)
 
         success, result = await alertmanager_request(url, "/status", token=token)
 
@@ -478,7 +423,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of receivers.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_alertmanager_config(environment)
 
         success, result = await alertmanager_request(url, "/receivers", token=token)
 

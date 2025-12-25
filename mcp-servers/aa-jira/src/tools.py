@@ -8,8 +8,16 @@ import asyncio
 import logging
 import os
 import subprocess
+import sys
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+
+# Add aa-common to path for shared utilities
+SERVERS_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+
+from src.utils import get_section_config
 
 logger = logging.getLogger(__name__)
 

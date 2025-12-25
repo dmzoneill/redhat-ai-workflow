@@ -18,62 +18,13 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_kubeconfig, get_env_config, load_config
+from src.utils import get_kubeconfig, load_config, get_service_url, get_bearer_token, get_env_config
 
 logger = logging.getLogger(__name__)
 
 
 # ==================== Configuration ====================
-
-
-def get_prometheus_url(environment: str) -> str:
-    """Get Prometheus URL for environment from config.json or env vars."""
-    # Try to load from config.json first
-    try:
-        # Path: tools.py -> src -> aa-prometheus -> mcp-servers -> redhat-ai-workflow
-        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
-        if config_path.exists():
-            import json
-            with open(config_path) as f:
-                config = json.load(f)
-            env_key = "production" if environment.lower() == "prod" else environment.lower()
-            url = config.get("prometheus", {}).get("environments", {}).get(env_key, {}).get("url")
-            if url:
-                return url
-    except Exception:
-        pass
-    # Fallback to environment variables
-    urls = {
-        "stage": os.getenv("PROMETHEUS_STAGE_URL", ""),
-        "production": os.getenv("PROMETHEUS_PROD_URL", ""),
-        "prod": os.getenv("PROMETHEUS_PROD_URL", ""),
-    }
-    url = urls.get(environment.lower(), urls.get("stage", ""))
-    if not url:
-        raise ValueError(f"Prometheus URL not configured. Set PROMETHEUS_{environment.upper()}_URL or configure in config.json")
-    return url
-
-
-async def get_prometheus_token(kubeconfig: str) -> str | None:
-    """Get bearer token from kubeconfig for Prometheus auth."""
-    try:
-        cmd = [
-            "kubectl", "--kubeconfig", kubeconfig,
-            "config", "view", "--minify", "-o",
-            "jsonpath={.users[0].user.token}"
-        ]
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except Exception as e:
-        logger.warning(f"Failed to get token from {kubeconfig}: {e}")
-    return None
+# Using shared utilities: get_service_url, get_bearer_token, get_env_config
 
 
 async def prometheus_api_request(
@@ -104,11 +55,15 @@ async def prometheus_api_request(
         return False, str(e)
 
 
-async def get_env_config(environment: str) -> tuple[str, str | None]:
-    """Get URL and token for environment."""
-    url = get_prometheus_url(environment)
-    kubeconfig = get_kubeconfig(environment)
-    token = await get_prometheus_token(kubeconfig)
+async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
+    """Get URL and token for Prometheus environment.
+    
+    Uses shared utilities from aa-common for config loading.
+    """
+    url = get_service_url("prometheus", environment)
+    env_config = get_env_config(environment, "prometheus")
+    kubeconfig = env_config.get("kubeconfig", get_kubeconfig(environment))
+    token = await get_bearer_token(kubeconfig)
     return url, token
 
 
@@ -137,7 +92,7 @@ def register_tools(server: "FastMCP") -> int:
             - rate(http_requests_total{namespace="your-app-stage"}[5m])
             - sum(container_memory_usage_bytes{namespace="your-app-stage"}) by (pod)
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         success, result = await prometheus_api_request(
             url, "/api/v1/query",
@@ -200,7 +155,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Time series data.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         now = datetime.now()
 
@@ -303,7 +258,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of alerts with details.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         success, result = await prometheus_api_request(
             url, "/api/v1/alerts",
@@ -418,7 +373,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Health status and any firing alerts.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         success, result = await prometheus_api_request(url, "/api/v1/alerts", token=token)
 
@@ -521,7 +476,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of rules.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         params = {}
         if rule_type:
@@ -585,7 +540,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of targets with health status.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         success, result = await prometheus_api_request(url, "/api/v1/targets", token=token)
 
@@ -653,7 +608,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Label names or values.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         if label:
             endpoint = f"/api/v1/label/{label}/values"
@@ -700,7 +655,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Matching time series.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         success, result = await prometheus_api_request(
             url, "/api/v1/series",
@@ -749,7 +704,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             CPU, memory, and request metrics for the namespace.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         queries = {
             "CPU Usage": f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}"}}[5m])) by (pod)',
@@ -813,7 +768,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Error rates by status code.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         query = f'''
             sum(rate(http_requests_total{{namespace="{namespace}",code=~"5.."}}[{window}])) by (code)
@@ -880,7 +835,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Pod CPU, memory, restarts, and status.
         """
-        url, token = await get_env_config(environment)
+        url, token = await get_prometheus_config(environment)
 
         lines = [f"## Pod Health: `{pod}`", f"**Namespace:** {namespace} | **Environment:** {environment}", ""]
 

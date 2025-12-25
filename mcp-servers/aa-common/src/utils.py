@@ -393,3 +393,58 @@ def get_username() -> str:
     user_config = get_user_config()
     return user_config.get("username", os.getenv("USER", "unknown"))
 
+
+# ==================== Service URL Helpers ====================
+
+def get_service_url(service: str, environment: str) -> str:
+    """Get URL for a service in an environment.
+    
+    Args:
+        service: Service name (prometheus, alertmanager, kibana)
+        environment: Environment name (stage, production)
+    
+    Returns:
+        Service URL
+    
+    Raises:
+        ValueError: If URL not configured
+    """
+    env_config = get_env_config(environment, service)
+    url = env_config.get("url", "")
+    
+    if not url:
+        # Try environment variable fallback
+        env_var = f"{service.upper()}_{environment.upper()}_URL"
+        url = os.getenv(env_var, "")
+    
+    if not url:
+        raise ValueError(
+            f"{service.capitalize()} URL not configured for {environment}. "
+            f"Set {service.upper()}_{environment.upper()}_URL or configure in config.json"
+        )
+    
+    return url
+
+
+async def get_bearer_token(kubeconfig: str) -> str | None:
+    """Get bearer token from kubeconfig for API authentication.
+    
+    Args:
+        kubeconfig: Path to kubeconfig file
+    
+    Returns:
+        Bearer token or None if not available
+    """
+    try:
+        cmd = [
+            "kubectl", "--kubeconfig", kubeconfig,
+            "config", "view", "--minify", "-o",
+            "jsonpath={.users[0].user.token}"
+        ]
+        success, output = await run_cmd(cmd, timeout=10)
+        if success and output.strip():
+            return output.strip()
+    except Exception as e:
+        logger.warning(f"Failed to get token from {kubeconfig}: {e}")
+    return None
+
