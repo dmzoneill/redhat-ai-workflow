@@ -553,15 +553,38 @@ def register_tools(server: "FastMCP") -> int:
         }
         
         lines = [f"## Logging into {cluster_names[short_cluster]} cluster...", ""]
-        lines.append("🌐 *A browser window may open for SSO authentication*")
-        lines.append("")
         
-        # Run kube through user's login shell to get:
-        # - DISPLAY/XAUTHORITY for browser auth (rhtoken opens Chrome)
-        # - Access to kube bash function from ~/.bashrc.d/01-redhatter-kubeconfig.sh
-        kube_cmd = ["kube", short_cluster]
+        kubeconfig_suffix = {
+            "s": ".s",
+            "p": ".p",
+            "k": ".k", 
+            "e": ".e",
+        }
+        kubeconfig = os.path.expanduser(f"~/.kube/config{kubeconfig_suffix[short_cluster]}")
         
         try:
+            # First, check if existing credentials are valid
+            needs_reauth = False
+            if os.path.exists(kubeconfig):
+                test_success, _, _ = await run_cmd_full(
+                    ["oc", "--kubeconfig", kubeconfig, "whoami"],
+                    timeout=10,
+                )
+                if not test_success:
+                    lines.append("⚠️ Existing credentials are stale, cleaning up...")
+                    lines.append("")
+                    needs_reauth = True
+                    # Clean up stale config so kube will force re-auth
+                    await run_cmd_shell(["kube-clean", short_cluster], timeout=30)
+            
+            lines.append("🌐 *A browser window may open for SSO authentication*")
+            lines.append("")
+            
+            # Run kube through user's login shell to get:
+            # - DISPLAY/XAUTHORITY for browser auth (rhtoken opens Chrome)
+            # - Access to kube bash function from ~/.bashrc.d/01-redhatter-kubeconfig.sh
+            kube_cmd = ["kube", short_cluster]
+            
             # Longer timeout for browser-based SSO auth
             success, stdout, stderr = await run_cmd_shell(
                 kube_cmd,
@@ -581,18 +604,6 @@ def register_tools(server: "FastMCP") -> int:
             lines.append("```")
             
             # Test the connection
-            config = load_config()
-            clusters = config.get("clusters", {})
-            
-            kubeconfig_suffix = {
-                "s": ".s",
-                "p": ".p",
-                "k": ".k", 
-                "e": ".e",
-            }
-            
-            kubeconfig = os.path.expanduser(f"~/.kube/config{kubeconfig_suffix[short_cluster]}")
-            
             if os.path.exists(kubeconfig):
                 lines.append("")
                 lines.append("### Testing connection...")
