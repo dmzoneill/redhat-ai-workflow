@@ -10,6 +10,7 @@ Skills are **reusable multi-step workflows** that chain MCP tools together with 
 | 🍺 [beer](./beer.md) | End-of-day wrap-up and standup prep | developer |
 | ⚡ [start_work](./start_work.md) | Begin working on a Jira issue | developer |
 | 🚀 [create_mr](./create_mr.md) | Create MR with validation and linting | developer |
+| ✅ [mark_mr_ready](./mark_mr_ready.md) | Mark draft MR as ready for review | developer |
 | ✅ [close_issue](./close_issue.md) | Close issue with commit summary | developer |
 | 👀 [review_pr](./review_pr.md) | Review MR with auto-approve/feedback | developer |
 | 📋 [review_all_prs](./review_all_prs.md) | Batch review open PRs | developer |
@@ -61,6 +62,7 @@ graph LR
 | [start_work](./start_work.md) | Pick up a Jira issue |
 | [sync_branch](./sync_branch.md) | Stay up to date with main |
 | [create_mr](./create_mr.md) | Ready to submit code |
+| [mark_mr_ready](./mark_mr_ready.md) | Mark draft as ready |
 | [close_issue](./close_issue.md) | Work is merged |
 
 ### 👀 Code Review

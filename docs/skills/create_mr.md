@@ -66,7 +66,8 @@ flowchart TD
     
     PUSH[Push Branch] --> CREATE[Create GitLab MR]
     CREATE --> LINK[Link to Jira]
-    LINK --> DONE([✅ MR Created])
+    LINK --> SLACK[Post to Slack]
+    SLACK --> DONE([✅ MR Created])
     
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
@@ -98,11 +99,12 @@ flowchart TD
 - `jira_view_issue` - Get issue details
 - `jira_add_comment` - Add MR link
 - `jira_set_status` - Update status
+- `slack_post_team` - Notify team channel (non-draft MRs)
 
 ## Example Output
 
 ```
-You: Create MR for my current work
+You: Create MR for AAP-12345, ready for review
 
 Claude: 🚀 Creating Merge Request
         
@@ -122,14 +124,20 @@ Claude: 🚀 Creating Merge Request
         
         ✅ Updated Jira:
         └── Added MR link to issue
-        └── Status: Code Review
+        └── Status: In Review
+        
+        ✅ Slack Notification:
+        └── Posted to #aa-api-team-test
         
         Pipeline is running... ⏳
 ```
 
+> **Note:** Slack notification only posts for non-draft MRs. Use `draft: false` to get notifications.
+
 ## Related Skills
 
 - [start_work](./start_work.md) - Begin working on issue
+- [mark_mr_ready](./mark_mr_ready.md) - Mark draft MR as ready
 - [review_pr](./review_pr.md) - Review someone's MR
 - [rebase_pr](./rebase_pr.md) - Handle merge conflicts
 

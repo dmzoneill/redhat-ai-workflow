@@ -39,6 +39,7 @@ Individual MCP tool functions that perform specific actions:
 - **150+ tools** across 14 modules
 - Each tool is a simple, focused function
 - Wrapped with `@debuggable` for self-healing
+- Shared utilities in `aa-common/src/utils.py`
 
 ### 🎭 Agents
 
@@ -59,6 +60,7 @@ Multi-step workflows that chain tools:
 - Conditional logic and branching
 - Template substitution (Jinja2)
 - Error handling
+- **42 shared parsers** in `scripts/common/parsers.py`
 
 ### 💾 Memory
 
@@ -126,6 +128,30 @@ flowchart LR
     G --> H[Retry operation]
 ```
 
+## Shared Utilities
+
+### MCP Tool Utilities (`aa-common/src/utils.py`)
+
+Common utilities shared across all MCP servers:
+
+- `load_config()` - Load config.json with caching
+- `get_kubeconfig(env)` - Get kubeconfig for environment (ephemeral/stage/prod)
+- `run_cmd()` - Execute shell commands with proper output handling
+- `get_token_from_kubeconfig()` - Extract bearer tokens for API calls
+- `resolve_repo_path()` - Resolve repository paths from config
+
+### Shared Parsers (`scripts/common/parsers.py`)
+
+**42 reusable parser functions** to avoid regex duplication in skills:
+
+| Category | Examples |
+|----------|----------|
+| MR Parsing | `parse_mr_list`, `extract_mr_id_from_url`, `analyze_mr_status` |
+| Jira | `extract_jira_key`, `parse_jira_issues`, `validate_jira_key` |
+| Git | `parse_git_log`, `parse_git_branches`, `extract_conflict_files` |
+| Kubernetes | `parse_kubectl_pods`, `parse_namespaces` |
+| Alerts | `parse_prometheus_alert`, `parse_alertmanager_output` |
+
 ## Configuration
 
 Central configuration via `config.json`:
@@ -133,7 +159,7 @@ Central configuration via `config.json`:
 - Repository paths and GitLab projects
 - Kubernetes namespaces
 - Jira settings
-- Slack channels
+- Slack channels (team, standup, alerts)
 - Google API settings
 - User preferences
 
