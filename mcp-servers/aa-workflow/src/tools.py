@@ -32,6 +32,7 @@ from src.utils import (
     load_config,
     resolve_repo_path,
     run_cmd_full,
+    run_cmd_shell,
     get_username,
 )
 
@@ -478,9 +479,10 @@ def register_tools(server: "FastMCP") -> int:
         lines = ["## Connecting to VPN...", ""]
         
         try:
-            # Run the VPN connect script
-            success, stdout, stderr = await run_cmd_full(
-                ["bash", vpn_script],
+            # Run the VPN connect script through user's login shell
+            # This ensures proper environment and any GUI prompts work
+            success, stdout, stderr = await run_cmd_shell(
+                [vpn_script],
                 timeout=120,  # VPN connection can take time
             )
             
@@ -553,10 +555,11 @@ def register_tools(server: "FastMCP") -> int:
         lines = [f"## Logging into {cluster_names[short_cluster]} cluster...", ""]
         
         # Check if kube command exists
+        # Run through user's login shell to get DISPLAY/XAUTHORITY for browser auth
         kube_cmd = ["kube", short_cluster]
         
         try:
-            success, stdout, stderr = await run_cmd_full(
+            success, stdout, stderr = await run_cmd_shell(
                 kube_cmd,
                 timeout=60,
             )

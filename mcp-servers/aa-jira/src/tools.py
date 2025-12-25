@@ -6,7 +6,7 @@ Authentication: JIRA_JPAT environment variable.
 
 import asyncio
 import logging
-import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -21,64 +21,16 @@ from src.utils import get_section_config, get_project_root
 
 logger = logging.getLogger(__name__)
 
-# Create the MCP server
-
-
-def get_jira_env() -> dict:
-    """
-    Get environment with Jira variables.
-    
-    If critical env vars are missing, try to source from user's shell profile.
-    """
-    env = os.environ.copy()
-    
-    # Default values
-    if "JIRA_AFFECTS_VERSION" not in env:
-        env["JIRA_AFFECTS_VERSION"] = "1.0"
-    
-    # Check if critical vars are missing
-    required_vars = ["JIRA_URL", "JIRA_JPAT"]
-    missing = [v for v in required_vars if not env.get(v)]
-    
-    if missing:
-        # Try to source from user's shell profile
-        try:
-            result = subprocess.run(
-                ["bash", "-l", "-c", "env"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                for line in result.stdout.split('\n'):
-                    if '=' in line:
-                        key, _, value = line.partition('=')
-                        if key in required_vars and value:
-                            env[key] = value
-        except Exception:
-            pass  # Ignore - will fail with clear error message
-    
-    return env
-
 
 async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
-    """Run rh-issue command and return (success, output)."""
-    cmd = ["rh-issue"] + args
+    """Run rh-issue command through user's login shell for proper environment."""
+    # Build the command string for bash -l -c
+    # Quote each arg properly to handle spaces
+    cmd_str = "rh-issue " + " ".join(shlex.quote(arg) for arg in args)
     
-    # Get environment with Jira variables
-    env = get_jira_env()
-    
-    # Check for missing required vars
-    if not env.get("JIRA_JPAT") and not env.get("JIRA_TOKEN"):
-        return False, (
-            "❌ Missing Jira authentication.\n\n"
-            "Set one of these environment variables:\n"
-            "  - JIRA_JPAT: Personal Access Token (recommended)\n"
-            "  - JIRA_TOKEN: API token\n\n"
-            "Or add to your ~/.bashrc:\n"
-            "  export JIRA_JPAT='your-token-here'\n"
-            "  export JIRA_URL='https://issues.redhat.com'"
-        )
+    # Run through login shell to get user's full environment
+    # This ensures JIRA_JPAT and other env vars from ~/.bashrc are available
+    cmd = ["bash", "-l", "-c", cmd_str]
     
     try:
         result = await asyncio.to_thread(
@@ -87,12 +39,20 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=env,
         )
         
         output = result.stdout
         if result.returncode != 0:
             output = result.stderr or result.stdout or "Command failed"
+            # Check for common auth issues
+            if "JIRA_JPAT" in output or "401" in output or "Unauthorized" in output:
+                return False, (
+                    f"❌ Jira authentication failed.\n\n"
+                    f"Ensure these are in your ~/.bashrc:\n"
+                    f"  export JIRA_JPAT='your-token'\n"
+                    f"  export JIRA_URL='https://issues.redhat.com'\n\n"
+                    f"Original error: {output}"
+                )
             return False, output
         
         return True, output

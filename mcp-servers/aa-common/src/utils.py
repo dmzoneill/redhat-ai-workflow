@@ -329,6 +329,56 @@ async def run_cmd_full(
         return False, "", str(e)
 
 
+async def run_cmd_shell(
+    cmd: list[str],
+    cwd: str | None = None,
+    timeout: int = 300,
+) -> tuple[bool, str, str]:
+    """Run a command through user's login shell for full environment access.
+    
+    Use this for commands that need:
+    - User's shell environment (~/.bashrc vars like JIRA_JPAT)
+    - GUI access (DISPLAY, XAUTHORITY) for browser-based auth
+    - Interactive terminal capabilities
+    
+    Args:
+        cmd: Command and arguments as list
+        cwd: Working directory
+        timeout: Timeout in seconds
+    
+    Returns:
+        Tuple of (success, stdout, stderr)
+    """
+    import shlex
+    
+    # Build the command string with proper quoting
+    cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
+    
+    # Add cd if cwd is specified
+    if cwd:
+        cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
+    
+    # Run through bash login shell to get user's full environment
+    # -l = login shell (sources ~/.bashrc, ~/.profile)
+    # -c = execute command string
+    shell_cmd = ["bash", "-l", "-c", cmd_str]
+    
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            shell_cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        
+        return result.returncode == 0, result.stdout, result.stderr
+    except subprocess.TimeoutExpired:
+        return False, "", f"Command timed out after {timeout}s"
+    except Exception as e:
+        return False, "", str(e)
+
+
 async def run_kubectl(
     args: list[str],
     kubeconfig: str | None = None,
