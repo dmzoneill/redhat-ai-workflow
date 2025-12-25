@@ -992,3 +992,341 @@ def parse_error_logs(logs: str, max_errors: int = 5) -> List[str]:
     
     return errors_found[:max_errors]
 
+
+def extract_version_suffix(text: str) -> Optional[int]:
+    """
+    Extract version number from text with -v{N} suffix.
+    
+    Args:
+        text: Text like "branch-name-v3" or "release-2024-01-15-v2"
+        
+    Returns:
+        Version number as int, or None if no version suffix
+    """
+    if not text:
+        return None
+    
+    match = re.search(r'-v(\d+)$', str(text))
+    return int(match.group(1)) if match else None
+
+
+def get_next_version(branches: List[str], base_name: str) -> int:
+    """
+    Get the next version number for a branch series.
+    
+    Args:
+        branches: List of existing branch names
+        base_name: Base name to filter by (e.g., "aa-release-2024-01-15")
+        
+    Returns:
+        Next version number (1 if no existing versions)
+    """
+    versions = [1]  # Default to 1 if no matches
+    
+    for branch in branches:
+        if base_name in branch:
+            version = extract_version_suffix(branch)
+            if version:
+                versions.append(version)
+    
+    return max(versions) + 1 if versions else 1
+
+
+def parse_deploy_clowder_ref(content: str, namespace_pattern: str = "tower-analytics-prod") -> Optional[str]:
+    """
+    Extract ref SHA from deploy-clowder.yml content.
+    
+    Args:
+        content: File content from deploy-clowder.yml
+        namespace_pattern: Pattern to match namespace file (default: tower-analytics-prod)
+        
+    Returns:
+        Git SHA reference or None
+    """
+    if not content:
+        return None
+    
+    # Pattern: $ref: .../namespace.yml followed by ref: <sha>
+    pattern = rf'\$ref:.*{namespace_pattern}\.yml\s*\n\s*ref:\s*([a-f0-9]+)'
+    match = re.search(pattern, str(content))
+    return match.group(1) if match else None
+
+
+def update_deploy_clowder_ref(
+    content: str, 
+    new_sha: str, 
+    namespace_pattern: str = "tower-analytics-prod"
+) -> tuple[str, bool]:
+    """
+    Update ref SHA in deploy-clowder.yml content.
+    
+    Args:
+        content: File content from deploy-clowder.yml
+        new_sha: New SHA to set
+        namespace_pattern: Pattern to match namespace file (default: tower-analytics-prod)
+        
+    Returns:
+        Tuple of (updated_content, success_bool)
+    """
+    if not content:
+        return content, False
+    
+    # Pattern: $ref: .../namespace.yml followed by ref: <sha>
+    pattern = rf'(\$ref:\s*/services/insights/tower-analytics/namespaces/{namespace_pattern}\.yml\s*\n\s*ref:\s*)([a-f0-9]+)'
+    
+    new_content, count = re.subn(pattern, rf'\g<1>{new_sha}', str(content))
+    return new_content, count > 0
+
+
+def extract_json_from_output(text: str) -> Optional[dict]:
+    """
+    Extract JSON object from mixed text output.
+    
+    Args:
+        text: Raw text that may contain JSON
+        
+    Returns:
+        Parsed dict or None if no valid JSON found
+    """
+    import json
+    
+    if not text:
+        return None
+    
+    json_match = re.search(r'\{.*\}', str(text), re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group())
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def parse_alertmanager_output(text: str) -> List[Dict]:
+    """
+    Parse alertmanager-style output for alert details.
+    
+    Args:
+        text: Raw alertmanager output text
+        
+    Returns:
+        List of alert dicts with name, severity, message
+    """
+    if not text:
+        return []
+    
+    alerts = []
+    current_alert = None
+    lines = str(text).split('\n')
+    
+    for line in lines:
+        if "alertname" in line.lower():
+            match = re.search(r"alertname[=:\s]+(\S+)", line, re.IGNORECASE)
+            if match:
+                if current_alert:
+                    alerts.append(current_alert)
+                current_alert = {"name": match.group(1), "severity": "warning"}
+        if current_alert and "severity" in line.lower():
+            match = re.search(r"severity[=:\s]+(\S+)", line, re.IGNORECASE)
+            if match:
+                current_alert["severity"] = match.group(1)
+        if current_alert and ("message" in line.lower() or "description" in line.lower()):
+            current_alert["message"] = line.strip()[:100]
+    
+    if current_alert:
+        alerts.append(current_alert)
+    
+    return alerts
+
+
+def extract_all_jira_keys(text: str) -> List[str]:
+    """
+    Extract all Jira issue keys from text.
+    
+    Args:
+        text: Text that may contain multiple Jira keys
+        
+    Returns:
+        List of Jira keys (e.g., ["AAP-12345", "AAP-67890"])
+    """
+    if not text:
+        return []
+    
+    return re.findall(r'([A-Z]+-\d+)', str(text))
+
+
+def find_full_conflict_marker(content: str, ours: str, theirs: str) -> Optional[str]:
+    """
+    Find the full conflict marker including commit ref for a given ours/theirs pair.
+    
+    Args:
+        content: Full file content with conflict markers
+        ours: The "ours" (HEAD) side of the conflict
+        theirs: The "theirs" (incoming) side of the conflict
+        
+    Returns:
+        Full conflict marker string if found, or None
+    """
+    if not content:
+        return None
+    
+    pattern = r'(<<<<<<<[^\n]*\n' + re.escape(ours) + r'=======\n' + re.escape(theirs) + r'>>>>>>>[^\n]*\n?)'
+    match = re.search(pattern, str(content), re.DOTALL)
+    return match.group(1) if match else None
+
+
+def split_mr_comments(text: str) -> List[tuple]:
+    """
+    Split MR comments text into structured comment blocks.
+    
+    Args:
+        text: Raw comments text in format "username commented YYYY-MM-DD HH:MM:SS...\ncomment text"
+        
+    Returns:
+        List of tuples: [(author, timestamp_str, comment_text), ...]
+    """
+    if not text:
+        return []
+    
+    # Split on comment header pattern
+    comment_blocks = re.split(r'\n(\w+) commented (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', str(text))
+    
+    comments = []
+    idx = 1
+    while idx < len(comment_blocks) - 1:
+        author = comment_blocks[idx]
+        timestamp_str = comment_blocks[idx + 1]
+        
+        # Get the comment text (next block until next comment)
+        if idx + 2 < len(comment_blocks):
+            comment_text = comment_blocks[idx + 2].split('\n\n')[0] if '\n\n' in comment_blocks[idx + 2] else comment_blocks[idx + 2]
+        else:
+            comment_text = ""
+        
+        comments.append((author, timestamp_str, comment_text.strip()))
+        idx += 3
+    
+    return comments
+
+
+def slugify_text(text: str, max_length: int = 40) -> str:
+    """
+    Convert text to a slug suitable for branch names.
+    
+    Args:
+        text: Input text to slugify
+        max_length: Maximum length of output slug
+        
+    Returns:
+        Lowercase slug with only alphanumeric and hyphens
+    """
+    if not text:
+        return ""
+    
+    slug = str(text)[:max_length].lower()
+    slug = re.sub(r'[^a-z0-9]+', '-', slug)
+    return slug.strip('-')
+
+
+def find_transition_name(transitions_text: str, target_variations: List[str] = None) -> Optional[str]:
+    """
+    Find exact transition name from available transitions text.
+    
+    Args:
+        transitions_text: Raw text of available transitions
+        target_variations: List of status variations to look for (default: Done, Close, Resolve, Complete)
+        
+    Returns:
+        Exact transition name if found, or None
+    """
+    if not transitions_text:
+        return None
+    
+    if target_variations is None:
+        target_variations = ["Done", "Close", "Resolve", "Complete"]
+    
+    for variation in target_variations:
+        if variation.lower() in transitions_text.lower():
+            # Try to extract exact transition name
+            match = re.search(rf"({variation}[^,\n]*)", transitions_text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+    
+    return None
+
+
+def analyze_review_status(details: str, reviewer_username: str, author: str = "") -> Dict:
+    """
+    Analyze MR details to determine review workflow status.
+    
+    Args:
+        details: Raw MR details text
+        reviewer_username: Username of the reviewer
+        author: Username of the MR author (optional)
+        
+    Returns:
+        Dict with review status analysis:
+        - my_feedback_exists: bool
+        - author_replied: bool  
+        - already_approved: bool
+        - recommended_action: str
+        - reason: str
+    """
+    if not details or not reviewer_username:
+        return {
+            "my_feedback_exists": False,
+            "author_replied": False,
+            "already_approved": False,
+            "recommended_action": "needs_full_review",
+            "reason": "No details available"
+        }
+    
+    # Look for reviewer's previous comments/feedback
+    my_comments = re.findall(
+        rf'({reviewer_username}).*?commented|reviewed by.*?({reviewer_username})', 
+        details, 
+        re.IGNORECASE
+    )
+    my_feedback_exists = len(my_comments) > 0
+    
+    # Look for author's replies after feedback
+    author_replied = False
+    if author:
+        author_replied = bool(re.search(
+            rf'{author}.*?commented|replied', 
+            details, 
+            re.IGNORECASE
+        ))
+    
+    # Check if already approved
+    already_approved = bool(re.search(
+        rf'approved by.*?{reviewer_username}|LGTM|Looks good', 
+        details, 
+        re.IGNORECASE
+    ))
+    
+    # Determine recommended action
+    if already_approved:
+        action = "skip"
+        reason = "Already approved"
+    elif not my_feedback_exists:
+        action = "needs_full_review"
+        reason = "No previous review from me"
+    elif my_feedback_exists and not author_replied:
+        action = "skip"
+        reason = "Waiting for author response"
+    elif my_feedback_exists and author_replied:
+        action = "needs_followup"
+        reason = "Author replied, check if issues resolved"
+    else:
+        action = "needs_full_review"
+        reason = "Unclear status"
+    
+    return {
+        "my_feedback_exists": my_feedback_exists,
+        "author_replied": author_replied,
+        "already_approved": already_approved,
+        "recommended_action": action,
+        "reason": reason
+    }
+

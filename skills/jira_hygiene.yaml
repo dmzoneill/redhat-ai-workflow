@@ -92,19 +92,16 @@ steps:
 
   # Step 2: Parse issue data
   - name: parse_issue
-    description: "Parse issue fields for validation"
+    description: "Parse issue fields for validation using shared parser"
     compute: |
-      import json
-      import re
+      from scripts.common.parsers import extract_json_from_output
       
       try:
         if isinstance(issue_raw, str):
-          # Try to extract JSON from the output
-          json_match = re.search(r'\{.*\}', issue_raw, re.DOTALL)
-          if json_match:
-            issue = json.loads(json_match.group())
-          else:
-            # Parse text output
+          # Use shared parser to extract JSON from output
+          issue = extract_json_from_output(issue_raw)
+          if not issue:
+            # No valid JSON found, use raw
             issue = {"raw": issue_raw}
         else:
           issue = issue_raw

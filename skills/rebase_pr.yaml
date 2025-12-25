@@ -369,9 +369,8 @@ steps:
     description: "Analyze conflicts and auto-resolve obvious ones"
     condition: "rebase_result.get('conflicts')"
     compute: |
-      import re
       import os
-      from scripts.common.parsers import parse_conflict_markers
+      from scripts.common.parsers import parse_conflict_markers, find_full_conflict_marker
       
       conflict_files = rebase_result.get('conflict_files', [])
       repo = resolved_repo["path"]
@@ -438,12 +437,10 @@ steps:
             new_content = content
             
             for ours, theirs in conflicts:
-              full_conflict = f'<<<<<<< HEAD\n{ours}=======\n{theirs}>>>>>>> '
-              # Find and get the full marker including commit ref
-              match = re.search(r'(<<<<<<<[^\n]*\n' + re.escape(ours) + r'=======\n' + re.escape(theirs) + r'>>>>>>>[^\n]*\n?)', content, re.DOTALL)
+              # Find and get the full marker including commit ref using shared parser
+              full_marker = find_full_conflict_marker(content, ours, theirs)
               
-              if match:
-                full_marker = match.group(1)
+              if full_marker:
                 
                 if resolution_strategy in ['accept_theirs', 'subset_merge']:
                   # Keep theirs

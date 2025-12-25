@@ -164,7 +164,7 @@ steps:
     description: "Parse git status for issues"
     compute: |
       import os
-      import re
+      from scripts.common.parsers import extract_current_branch
       
       repo = resolved_repo["path"]
       status_output = str(git_status_raw) if git_status_raw else ""
@@ -180,9 +180,8 @@ steps:
       if "Changes not staged" in status_output or "Changes to be committed" in status_output:
           raise ValueError("Uncommitted changes detected. Please commit or stash before creating MR.")
       
-      # Extract current branch
-      branch_match = re.search(r"On branch (\S+)", status_output)
-      branch = branch_match.group(1) if branch_match else None
+      # Extract current branch using shared parser
+      branch = extract_current_branch(status_output)
       
       if not branch or branch == "HEAD":
           raise ValueError("Detached HEAD state. Checkout a branch first.")
@@ -304,9 +303,9 @@ steps:
     on_error: continue
 
   - name: detect_duplicate_mr
-    description: "Parse MRs to find duplicate"
+    description: "Parse MRs to find duplicate using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import extract_mr_id_from_text
       
       branch = current_branch["name"]
       existing_mrs_text = str(existing_mrs_raw) if existing_mrs_raw else ""
@@ -314,9 +313,9 @@ steps:
       duplicate = None
       for line in existing_mrs_text.split("\n"):
           if branch.lower() in line.lower():
-              match = re.search(r"!(\d+)", line)
-              if match:
-                  duplicate = {"iid": match.group(1), "line": line.strip()[:80]}
+              mr_id = extract_mr_id_from_text(line)
+              if mr_id:
+                  duplicate = {"iid": mr_id, "line": line.strip()[:80]}
                   break
       
       if duplicate:

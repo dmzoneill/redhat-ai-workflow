@@ -228,9 +228,9 @@ steps:
 
   # Step 5: Parse result
   - name: parse_create_result
-    description: "Parse the create issue result"
+    description: "Parse the create issue result using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import extract_jira_key
       
       output = str(create_result_raw) if 'create_result_raw' in dir() and create_result_raw else ""
       
@@ -243,9 +243,8 @@ steps:
           "url": None,
         }
       else:
-        # Look for issue key pattern (e.g., AAP-12345)
-        match = re.search(r'([A-Z]+-\d+)', output)
-        issue_key = match.group(1) if match else None
+        # Use shared parser to extract issue key
+        issue_key = extract_jira_key(output)
         
         result = {
           "success": True,

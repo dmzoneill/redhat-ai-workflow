@@ -198,8 +198,6 @@ steps:
   - name: process_mrs
     description: "Analyze each MR for review status"
     compute: |
-      import re
-      
       results = []
       mrs_to_review = parsed_mrs.get('to_review', [])
       
@@ -256,11 +254,10 @@ steps:
 
   # Step 6: Analyze first MR's review status
   - name: analyze_first_mr
-    description: "Check if first MR needs action using shared parser"
+    description: "Check if first MR needs action using shared parsers"
     condition: "len(mr_analysis) > 0 and first_mr_details"
     compute: |
-      import re
-      from scripts.common.parsers import analyze_mr_status
+      from scripts.common.parsers import analyze_mr_status, analyze_review_status
       
       mr = mr_analysis[0]
       details = first_mr_details or ""
@@ -268,39 +265,21 @@ steps:
       # Get base analysis from shared parser
       analysis = analyze_mr_status(details, my_username)
       
-      # Additional review-specific checks
-      username = my_username
-      
-      # Look for my previous comments/feedback
-      my_comments = re.findall(rf'({username}).*?commented|reviewed by.*?({username})', details, re.IGNORECASE)
-      my_feedback_exists = len(my_comments) > 0
-      
-      # Look for author's replies after my feedback
+      # Get review-specific analysis from shared parser
       author = mr.get('author', '')
-      author_replied = author and re.search(rf'{author}.*?commented|replied', details, re.IGNORECASE)
+      review_status = analyze_review_status(details, my_username, author)
       
-      # Look if I already approved
-      already_approved = re.search(rf'approved by.*?{username}|LGTM|Looks good', details, re.IGNORECASE)
-      
-      # Determine action based on review workflow
-      if already_approved:
-        action = "skip"
-        reason = "Already approved"
-      elif not my_feedback_exists:
-        action = "needs_full_review"
-        reason = "No previous review from me"
-      elif my_feedback_exists and not author_replied:
-        action = "skip"
-        reason = "Waiting for author response"
-      elif my_feedback_exists and author_replied and analysis['unresolved']:
-        action = "needs_followup"
-        reason = "Author replied but unresolved issues"
-      elif my_feedback_exists and author_replied and not analysis['unresolved']:
-        action = "can_approve"
-        reason = "Author addressed feedback"
+      # Enhance with unresolved issues check
+      if review_status['my_feedback_exists'] and review_status['author_replied']:
+        if analysis['unresolved']:
+          action = "needs_followup"
+          reason = "Author replied but unresolved issues"
+        else:
+          action = "can_approve"
+          reason = "Author addressed feedback"
       else:
-        action = "needs_full_review"
-        reason = "Unclear status"
+        action = review_status['recommended_action']
+        reason = review_status['reason']
       
       mr['action'] = action
       mr['reason'] = reason

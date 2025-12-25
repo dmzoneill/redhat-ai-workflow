@@ -123,24 +123,16 @@ steps:
 
   # Step 4: Analyze all comments
   - name: check_comments
-    description: "Analyze comments from all MRs"
+    description: "Analyze comments from all MRs using shared parsers"
     compute: |
-      import re
       import os
-      import sys
       from datetime import datetime
-      from pathlib import Path
       from scripts.common.config_loader import load_config
+      from scripts.common.parsers import is_bot_comment, split_mr_comments
       
       # Load config using shared loader
       cfg = load_config()
       current_user = cfg.get("user", {}).get("username") or os.getenv("USER", "unknown")
-      
-      # Add scripts path for parsers
-      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
-      if scripts_path not in sys.path:
-          sys.path.insert(0, scripts_path)
-      from common.parsers import is_bot_comment
       
       # Meeting keywords
       meeting_keywords = [
@@ -173,23 +165,12 @@ steps:
         # Get MR info from our data
         mr_info = mr_data.get('info', {}).get(mr_id, {})
         
-        # Parse comments
-        # Format: "username commented YYYY-MM-DD HH:MM:SS.xxx +0000 UTC\ncomment text"
-        comment_blocks = re.split(r'\n(\w+) commented (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', comments_text)
+        # Parse comments using shared parser
+        parsed_comments = split_mr_comments(comments_text)
         
         human_comments = []
         
-        idx = 1
-        while idx < len(comment_blocks) - 1:
-          author = comment_blocks[idx]
-          timestamp_str = comment_blocks[idx + 1]
-          
-          # Get the comment text (next block until next comment)
-          if idx + 2 < len(comment_blocks):
-            comment_text = comment_blocks[idx + 2].split('\n\n')[0] if '\n\n' in comment_blocks[idx + 2] else comment_blocks[idx + 2]
-          else:
-            comment_text = ""
-          
+        for author, timestamp_str, comment_text in parsed_comments:
           # Skip bot comments using shared utility
           if not is_bot_comment(comment_text, author) and author.lower() != current_user.lower():
             # Check for meeting request

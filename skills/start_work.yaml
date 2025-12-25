@@ -337,12 +337,12 @@ steps:
   - name: create_branch_name
     condition: "{{ not branch_check.get('exists', False) }}"
     compute: |
-      import re
+      from scripts.common.parsers import slugify_text
+      
       key = inputs.issue_key.upper()
-      # Extract summary from issue output
+      # Extract summary from issue output and slugify using shared parser
       issue_text = str(issue)
-      summary = issue_text[:40].lower()
-      summary = re.sub(r'[^a-z0-9]+', '-', summary).strip('-')
+      summary = slugify_text(issue_text, max_length=40)
       branch_name = f"{key}-{summary}"
     output: new_branch_name
 

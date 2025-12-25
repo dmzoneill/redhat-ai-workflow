@@ -238,32 +238,24 @@ steps:
 
   # Step 10: Validate and select transition
   - name: select_transition
-    description: "Select the transition to Done"
+    description: "Select the transition to Done using shared parser"
     condition: "{{ not status_check.already_done }}"
     compute: |
-      import re
+      from scripts.common.parsers import find_transition_name
       
       target_status = cfg["done_status"]
       transitions_text = str(available_transitions) if available_transitions else ""
       
       # Look for Done transition in available transitions
-      done_available = False
+      done_available = target_status.lower() in transitions_text.lower()
       transition_name = target_status
       
-      # Parse available transitions
-      # Format varies but usually contains "Done" or the target status
-      if target_status.lower() in transitions_text.lower():
-          done_available = True
-      
-      # Also check for common variations
-      for variation in ["Done", "Close", "Resolve", "Complete"]:
-          if variation.lower() in transitions_text.lower():
+      # Use shared parser to find exact transition name
+      if not done_available:
+          found_name = find_transition_name(transitions_text)
+          if found_name:
               done_available = True
-              # Try to extract exact transition name
-              match = re.search(rf"({variation}[^,\n]*)", transitions_text, re.IGNORECASE)
-              if match:
-                  transition_name = match.group(1).strip()
-              break
+              transition_name = found_name
       
       if not done_available and available_transitions:
           # List what's available

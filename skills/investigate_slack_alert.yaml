@@ -237,14 +237,13 @@ steps:
   - name: analyze_existing_issues
     description: "Determine if we have a matching issue or need to create one using shared parsers"
     compute: |
-      from scripts.common.parsers import extract_jira_key, extract_billing_event_number
-      import re
+      from scripts.common.parsers import extract_all_jira_keys, extract_billing_event_number
       
       existing = str(existing_issues) if existing_issues else ""
       billing = str(billing_issues) if billing_issues else ""
       
-      # Find all Jira keys in existing issues
-      issue_matches = re.findall(r'(AAP-\d+)', existing)
+      # Find all Jira keys in existing issues using shared parser
+      issue_matches = extract_all_jira_keys(existing)
       matching_issue = issue_matches[0] if issue_matches else None
       
       # For billing alerts, get the next billing event number using shared parser

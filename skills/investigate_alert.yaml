@@ -102,32 +102,12 @@ steps:
     on_error: continue
 
   - name: parse_alerts
-    description: "Parse alert data"
+    description: "Parse alert data using shared parser"
     compute: |
-      alerts = []
-      if alerts_raw:
-          # Parse alert data - format varies by tool
-          import re
-
-          lines = str(alerts_raw).split("\n")
-          current_alert = {}
-
-          for line in lines:
-              if "alertname" in line.lower():
-                  match = re.search(r"alertname[=:\s]+(\S+)", line, re.IGNORECASE)
-                  if match:
-                      if current_alert:
-                          alerts.append(current_alert)
-                      current_alert = {"name": match.group(1), "severity": "warning"}
-              if "severity" in line.lower():
-                  match = re.search(r"severity[=:\s]+(\S+)", line, re.IGNORECASE)
-                  if match:
-                      current_alert["severity"] = match.group(1)
-              if "message" in line.lower() or "description" in line.lower():
-                  current_alert["message"] = line.strip()[:100]
-
-          if current_alert:
-              alerts.append(current_alert)
+      from scripts.common.parsers import parse_alertmanager_output
+      
+      # Use shared parser for alert data
+      alerts = parse_alertmanager_output(str(alerts_raw) if alerts_raw else "")
 
       # Check if specific alert is in the list
       if inputs.alert_name:

@@ -214,35 +214,14 @@ steps:
     on_error: continue
 
   - name: parse_jira_issues
-    description: "Parse Jira issues"
+    description: "Parse Jira issues using shared parser"
     condition: "inputs.include_jira"
     compute: |
-      import re
+      from scripts.common.parsers import parse_jira_issues
 
-      in_progress = []
-      done = []
-
-      # Parse in-progress issues
-      if jira_in_progress:
-          lines = str(jira_in_progress).split("\n")
-          for line in lines:
-              match = re.search(r"(AAP-\d+)[:\s]+(.+)", line)
-              if match:
-                  in_progress.append({
-                      "key": match.group(1),
-                      "summary": match.group(2)[:60],
-                  })
-
-      # Parse done issues
-      if jira_done:
-          lines = str(jira_done).split("\n")
-          for line in lines:
-              match = re.search(r"(AAP-\d+)[:\s]+(.+)", line)
-              if match:
-                  done.append({
-                      "key": match.group(1),
-                      "summary": match.group(2)[:60],
-                  })
+      # Use shared parser for Jira issues
+      in_progress = parse_jira_issues(str(jira_in_progress) if jira_in_progress else "")
+      done = parse_jira_issues(str(jira_done) if jira_done else "")
 
       result = {
           "in_progress": in_progress[:10],
@@ -276,38 +255,14 @@ steps:
     on_error: continue
 
   - name: parse_gitlab_activity
-    description: "Parse GitLab MR activity"
+    description: "Parse GitLab MR activity using shared parser"
     condition: "inputs.include_gitlab"
     compute: |
-      import re
-      from datetime import datetime, timedelta
+      from scripts.common.parsers import parse_mr_list
 
-      cutoff = datetime.now() - timedelta(days=inputs.days)
-
-      my_mrs = []
-      reviewed = []
-
-      # Parse my MRs
-      if my_mrs_raw:
-          lines = str(my_mrs_raw).split("\n")
-          for line in lines[:10]:
-              match = re.search(r"!(\d+)[:\s]+(.+)", line)
-              if match:
-                  my_mrs.append({
-                      "iid": match.group(1),
-                      "title": match.group(2)[:60],
-                  })
-
-      # Parse reviewed MRs
-      if reviewed_mrs_raw:
-          lines = str(reviewed_mrs_raw).split("\n")
-          for line in lines[:10]:
-              match = re.search(r"!(\d+)[:\s]+(.+)", line)
-              if match:
-                  reviewed.append({
-                      "iid": match.group(1),
-                      "title": match.group(2)[:60],
-                  })
+      # Use shared parser for MR lists
+      my_mrs = parse_mr_list(str(my_mrs_raw) if my_mrs_raw else "")
+      reviewed = parse_mr_list(str(reviewed_mrs_raw) if reviewed_mrs_raw else "")
 
       result = {
           "my_mrs": my_mrs[:5],
