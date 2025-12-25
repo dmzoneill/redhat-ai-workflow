@@ -122,36 +122,51 @@ steps:
   - name: check_uncommitted
     description: "Check for uncommitted work"
     compute: |
-      import subprocess
-      import os
-      
-      repos_to_check = [
-        os.path.expanduser("~/src/automation-analytics-backend"),
-        os.path.expanduser("~/src/redhat-ai-workflow"),
-      ]
-      
+      # Will be populated by subsequent tool calls
+      result = []
+    output: uncommitted_init
+
+  - name: check_backend_status
+    description: "Check backend repo for uncommitted changes"
+    tool: git_status
+    args:
+      repo: "automation-analytics-backend"
+    output: backend_status_raw
+    on_error: continue
+
+  - name: check_workflow_status
+    description: "Check workflow repo for uncommitted changes"
+    tool: git_status
+    args:
+      repo: "redhat-ai-workflow"
+    output: workflow_status_raw
+    on_error: continue
+
+  - name: parse_uncommitted
+    description: "Parse uncommitted changes from both repos"
+    compute: |
       uncommitted = []
       
-      for repo_path in repos_to_check:
-        if os.path.exists(repo_path):
-          result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            cwd=repo_path
-          )
-          if result.stdout.strip():
-            lines = result.stdout.strip().split('\n')
-            repo_name = os.path.basename(repo_path)
+      for repo_name, status_raw in [
+        ("automation-analytics-backend", backend_status_raw if 'backend_status_raw' in dir() else None),
+        ("redhat-ai-workflow", workflow_status_raw if 'workflow_status_raw' in dir() else None),
+      ]:
+        if not status_raw:
+          continue
+        status_text = str(status_raw)
+        # Look for modified/added/deleted files in the output
+        if "modified:" in status_text or "new file:" in status_text or "deleted:" in status_text:
+          # Count changes
+          lines = [l.strip() for l in status_text.split('\n') if 'modified:' in l or 'new file:' in l or 'deleted:' in l]
+          if lines:
             uncommitted.append({
               "repo": repo_name,
               "files": len(lines),
-              "changes": lines[:5]  # First 5 changes
+              "changes": lines[:5]
             })
       
       result = uncommitted
     output: uncommitted_changes
-    on_error: continue
 
   # ==================== TODAY'S MERGED PRs ====================
   
@@ -285,32 +300,34 @@ steps:
 
   # ==================== STALE BRANCHES ====================
   
-  - name: check_stale_branches
-    description: "Check for merged branches that can be deleted"
+  - name: get_merged_branches
+    description: "Get branches merged into main"
+    tool: git_branch_list
+    args:
+      repo: "automation-analytics-backend"
+      merged: "main"
+    output: merged_branches_raw
+    on_error: continue
+
+  - name: parse_stale_branches
+    description: "Extract stale branches (merged but not main/master)"
     compute: |
-      import subprocess
-      import os
-      
-      repo_path = os.path.expanduser("~/src/automation-analytics-backend")
       stale_branches = []
+      raw = str(merged_branches_raw) if 'merged_branches_raw' in dir() and merged_branches_raw else ""
       
-      if os.path.exists(repo_path):
-        # Get local branches
-        result = subprocess.run(
-          ["git", "branch", "--merged", "main"],
-          capture_output=True,
-          text=True,
-          cwd=repo_path
-        )
-        
-        for line in result.stdout.strip().split('\n'):
-          branch = line.strip().replace('* ', '')
-          if branch and branch not in ['main', 'master']:
-            stale_branches.append(branch)
+      for line in raw.split('\n'):
+        # Parse branch name from output
+        if '`' in line:
+          # Format: → `branch-name` or   `branch-name`
+          import re
+          match = re.search(r'`([^`]+)`', line)
+          if match:
+            branch = match.group(1)
+            if branch and branch not in ['main', 'master', 'HEAD']:
+              stale_branches.append(branch)
       
       result = stale_branches[:5]  # Top 5
     output: stale_branches
-    on_error: continue
 
   # ==================== GENERATE STANDUP ====================
   
@@ -350,52 +367,64 @@ steps:
 
   # ==================== WEEKLY STATS ====================
   
-  - name: get_weekly_stats
-    description: "Get this week's activity stats"
+  - name: get_weekly_commits
+    description: "Get commits from the past week"
+    tool: git_log
+    args:
+      repo: "automation-analytics-backend"
+      since: "1 week ago"
+      author: "{{ ctx.config.user.username }}"
+      limit: 100
+      oneline: true
+    output: weekly_commits_raw
+    on_error: continue
+
+  - name: get_weekly_numstat
+    description: "Get line change stats for the week"
+    tool: git_log
+    args:
+      repo: "automation-analytics-backend"
+      since: "1 week ago"
+      author: "{{ ctx.config.user.username }}"
+      limit: 100
+      numstat: true
+    output: weekly_numstat_raw
+    on_error: continue
+
+  - name: parse_weekly_stats
+    description: "Parse weekly activity stats"
     compute: |
-      import subprocess
-      import os
-      from datetime import datetime, timedelta
-      
-      repo_path = os.path.expanduser("~/src/automation-analytics-backend")
       stats = {
         "commits_this_week": 0,
         "lines_added": 0,
         "lines_removed": 0,
       }
       
-      if os.path.exists(repo_path):
-        # Get week's commits
-        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-        username = ctx.get('config', {}).get('user', {}).get('username', 'daoneill')
-        
-        result = subprocess.run(
-          ["git", "log", f"--since={week_ago}", f"--author={username}", "--oneline"],
-          capture_output=True,
-          text=True,
-          cwd=repo_path
-        )
-        stats["commits_this_week"] = len([l for l in result.stdout.strip().split('\n') if l])
-        
-        # Get line stats
-        result = subprocess.run(
-          ["git", "log", f"--since={week_ago}", f"--author={username}", "--numstat", "--pretty="],
-          capture_output=True,
-          text=True,
-          cwd=repo_path
-        )
-        for line in result.stdout.strip().split('\n'):
-          parts = line.split('\t')
-          if len(parts) >= 2:
-            try:
-              stats["lines_added"] += int(parts[0]) if parts[0] != '-' else 0
-              stats["lines_removed"] += int(parts[1]) if parts[1] != '-' else 0
-            except:
-              pass
+      # Count commits
+      commits_raw = str(weekly_commits_raw) if 'weekly_commits_raw' in dir() and weekly_commits_raw else ""
+      if commits_raw:
+        # Count lines that look like commits (short SHA followed by message)
+        import re
+        commit_lines = [l for l in commits_raw.split('\n') if re.match(r'^[a-f0-9]{7,}', l.strip())]
+        stats["commits_this_week"] = len(commit_lines)
+      
+      # Parse numstat
+      numstat_raw = str(weekly_numstat_raw) if 'weekly_numstat_raw' in dir() and weekly_numstat_raw else ""
+      for line in numstat_raw.split('\n'):
+        parts = line.split('\t')
+        if len(parts) >= 2:
+          try:
+            added = parts[0].strip()
+            removed = parts[1].strip()
+            if added.isdigit():
+              stats["lines_added"] += int(added)
+            if removed.isdigit():
+              stats["lines_removed"] += int(removed)
+          except:
+            pass
       
       result = stats
     output: weekly_stats
-    on_error: continue
 
   # ==================== FORMAT BRIEFING ====================
   

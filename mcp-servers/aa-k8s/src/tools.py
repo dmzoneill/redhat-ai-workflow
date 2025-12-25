@@ -49,13 +49,37 @@ def register_tools(server: "FastMCP") -> int:
 
     @server.tool()
     async def kubectl_logs(
-        pod_name: str, namespace: str, environment: str = "stage", container: str = "", tail: int = 100, previous: bool = False
+        pod_name: str,
+        namespace: str,
+        environment: str = "stage",
+        container: str = "",
+        tail: int = 100,
+        previous: bool = False,
+        since: str = "",
     ) -> str:
-        """Get logs from a pod."""
+        """
+        Get logs from a pod.
+        
+        Args:
+            pod_name: Name of the pod
+            namespace: Kubernetes namespace
+            environment: Target environment (stage, production, ephemeral)
+            container: Specific container name (for multi-container pods)
+            tail: Number of lines to show from the end
+            previous: Get logs from previous instance (after crash)
+            since: Only show logs since duration (e.g., "1h", "30m", "24h")
+        
+        Returns:
+            Pod logs.
+        """
         kubeconfig = get_kubeconfig(environment, namespace)
         args = ["logs", pod_name, f"--tail={tail}"]
-        if container: args.extend(["-c", container])
-        if previous: args.append("--previous")
+        if container:
+            args.extend(["-c", container])
+        if previous:
+            args.append("--previous")
+        if since:
+            args.append(f"--since={since}")
         success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace, timeout=120)
         return f"## Logs: {pod_name}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
@@ -204,15 +228,127 @@ def register_tools(server: "FastMCP") -> int:
 
 
     @server.tool()
-    async def kubectl_exec(pod_name: str, command: str, namespace: str, environment: str = "stage", container: str = "") -> str:
-        """Execute a command in a pod."""
+    async def kubectl_exec(
+        pod_name: str,
+        command: str,
+        namespace: str,
+        environment: str = "stage",
+        container: str = "",
+        timeout: int = 30,
+    ) -> str:
+        """
+        Execute a command in a pod.
+        
+        Args:
+            pod_name: Name of the pod
+            namespace: Kubernetes namespace
+            environment: Target environment (stage, production, ephemeral)
+            container: Specific container name (for multi-container pods)
+            command: Command to execute (space-separated)
+            timeout: Timeout in seconds
+        
+        Returns:
+            Command output.
+        """
         kubeconfig = get_kubeconfig(environment, namespace)
         args = ["exec", pod_name]
-        if container: args.extend(["-c", container])
+        if container:
+            args.extend(["-c", container])
         args.append("--")
         args.extend(command.split())
-        success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace, timeout=30)
+        success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace, timeout=timeout)
         return f"## Exec: {command}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+
+    @server.tool()
+    async def kubectl_cp(
+        source: str,
+        destination: str,
+        namespace: str,
+        environment: str = "stage",
+        container: str = "",
+        to_pod: bool = True,
+    ) -> str:
+        """
+        Copy files to/from a pod.
+        
+        Args:
+            source: Source path (local file or pod:path)
+            destination: Destination path (pod:path or local file)
+            namespace: Kubernetes namespace
+            environment: Target environment (stage, production, ephemeral)
+            container: Specific container name (for multi-container pods)
+            to_pod: If True, copy from local to pod. If False, copy from pod to local.
+        
+        Returns:
+            Copy result.
+        
+        Examples:
+            kubectl_cp("/tmp/script.sh", "pod-name:/tmp/script.sh", "ns", to_pod=True)
+            kubectl_cp("pod-name:/tmp/output.log", "/tmp/output.log", "ns", to_pod=False)
+        """
+        kubeconfig = get_kubeconfig(environment, namespace)
+        
+        # Build source and destination with namespace prefix for pod paths
+        if to_pod:
+            # source is local, destination is pod
+            dest_with_ns = f"{namespace}/{destination}"
+            args = ["cp", source, dest_with_ns]
+        else:
+            # source is pod, destination is local
+            src_with_ns = f"{namespace}/{source}"
+            args = ["cp", src_with_ns, destination]
+        
+        if container:
+            args.extend(["-c", container])
+        
+        success, output = await run_kubectl(args, kubeconfig=kubeconfig, timeout=60)
+        
+        if success:
+            direction = "to pod" if to_pod else "from pod"
+            return f"✅ Copied {direction}: {source} → {destination}"
+        return f"❌ Copy failed: {output}"
+
+    @server.tool()
+    async def kubectl_get_secret_value(
+        secret_name: str,
+        key: str,
+        namespace: str,
+        environment: str = "stage",
+        decode: bool = True,
+    ) -> str:
+        """
+        Get a specific key from a Kubernetes secret.
+        
+        Args:
+            secret_name: Name of the secret
+            key: Key within the secret to retrieve
+            namespace: Kubernetes namespace
+            environment: Target environment
+            decode: Base64 decode the value (default: True)
+        
+        Returns:
+            Secret value (decoded if requested).
+        """
+        kubeconfig = get_kubeconfig(environment, namespace)
+        
+        # Get the secret value using jsonpath
+        jsonpath = f"{{.data.{key}}}"
+        args = ["get", "secret", secret_name, "-o", f"jsonpath={jsonpath}"]
+        
+        success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace)
+        
+        if not success:
+            return f"❌ Failed to get secret {secret_name}/{key}: {output}"
+        
+        if decode and output:
+            import base64
+            try:
+                decoded = base64.b64decode(output).decode('utf-8')
+                return decoded
+            except Exception as e:
+                return f"❌ Failed to decode: {e}"
+        
+        return output
 
 
     # ==================== SAAS PIPELINES ====================

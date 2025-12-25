@@ -347,3 +347,103 @@ def wrap_all_tools(server, tools_module) -> int:
     
     return count
 
+
+def wrap_server_tools_runtime(server) -> int:
+    """
+    Wrap all registered server tools with debug hint functionality at runtime.
+    
+    This patches the server's tool handlers so that any tool returning ❌
+    automatically includes the debug hint. No need to modify individual tools.
+    
+    Call this AFTER all tools have been registered with the server.
+    
+    Returns:
+        Number of tools wrapped.
+    """
+    count = 0
+    
+    # Access the server's internal tool registry
+    # FastMCP stores tools in _tool_manager or similar
+    if not hasattr(server, '_tool_manager'):
+        logger.warning("Server has no _tool_manager, cannot wrap tools")
+        return 0
+    
+    tool_manager = server._tool_manager
+    
+    # Get all registered tools
+    if not hasattr(tool_manager, '_tools'):
+        logger.warning("Tool manager has no _tools dict")
+        return 0
+    
+    tools = tool_manager._tools
+    
+    for tool_name, tool_info in tools.items():
+        if tool_name.startswith('_') or tool_name == 'debug_tool':
+            continue
+        
+        # Get the original handler
+        original_handler = tool_info.fn if hasattr(tool_info, 'fn') else None
+        
+        if not original_handler:
+            continue
+        
+        # Create wrapped handler
+        wrapped = _create_debug_wrapper(tool_name, original_handler)
+        
+        # Replace the handler
+        if hasattr(tool_info, 'fn'):
+            tool_info.fn = wrapped
+            count += 1
+            logger.debug(f"Wrapped tool: {tool_name}")
+    
+    logger.info(f"Wrapped {count} tools with debug hints")
+    return count
+
+
+def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
+    """Create a wrapper that adds debug hints on failure."""
+    # Capture tool_name and original_fn in closure defaults to avoid late binding
+    @functools.wraps(original_fn)
+    async def wrapper(*args, _orig=original_fn, _name=tool_name, **kwargs):
+        try:
+            result = await _orig(*args, **kwargs)
+
+            # Check if result indicates failure
+            if isinstance(result, list) and result:
+                first = result[0]
+                text = first.text if hasattr(first, 'text') else str(first)
+
+                if text.startswith("❌"):
+                    error_line = text.split('\n')[0][:80]
+                    debug_hint = TextContent(
+                        type="text",
+                        text=f"\n---\n💡 Auto-fix: `debug_tool('{_name}')`"
+                    )
+                    result.append(debug_hint)
+                    logger.warning(f"Tool {_name} failed: {error_line}")
+
+            elif isinstance(result, str) and result.startswith("❌"):
+                error_line = result.split('\n')[0][:80]
+                result = f"{result}\n\n---\n💡 Auto-fix: `debug_tool('{_name}')`"
+                logger.warning(f"Tool {_name} failed: {error_line}")
+
+            return result
+
+        except Exception as e:
+            error_msg = str(e)[:80]
+            logger.exception(f"Tool {_name} crashed")
+
+            info = TOOL_REGISTRY.get(_name, {})
+            source = info.get("source_file", "unknown")
+            line = info.get("start_line", 0)
+
+            return f"""❌ **{_name}** crashed
+
+**Error:** `{error_msg}`
+**Source:** `{source}:{line}`
+
+---
+💡 Auto-fix: `debug_tool('{_name}', '{error_msg}')`"""
+
+    return wrapper
+

@@ -290,7 +290,6 @@ steps:
   - name: process_mrs
     description: "Analyze each MR for review status"
     compute: |
-      import subprocess
       import re
       
       results = []

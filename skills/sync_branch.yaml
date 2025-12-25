@@ -171,27 +171,38 @@ steps:
 
   - name: get_commits_behind
     description: "Check how many commits behind"
+    tool: git_log
+    args:
+      repo: "{{ resolved_repo.path }}"
+      range_spec: "HEAD..origin/{{ resolved_repo.default_branch }}"
+      count_only: true
+    output: behind_count_raw
+
+  - name: get_commits_ahead
+    description: "Check how many commits ahead"
+    tool: git_log
+    args:
+      repo: "{{ resolved_repo.path }}"
+      range_spec: "origin/{{ resolved_repo.default_branch }}..HEAD"
+      count_only: true
+    output: ahead_count_raw
+
+  - name: parse_commit_status
+    description: "Parse commit counts"
     compute: |
-      import subprocess
+      # Parse the count from tool outputs
+      def parse_count(raw):
+        if raw is None:
+          return 0
+        text = str(raw).strip()
+        # Extract just the number
+        for word in text.split():
+          if word.isdigit():
+            return int(word)
+        return 0
       
-      repo = resolved_repo["path"]
-      base = resolved_repo["default_branch"]
-      
-      result = subprocess.run(
-          ["git", "rev-list", "--count", f"HEAD..origin/{base}"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-      behind = int(result.stdout.strip()) if result.returncode == 0 else 0
-      
-      result = subprocess.run(
-          ["git", "rev-list", "--count", f"origin/{base}..HEAD"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-      ahead = int(result.stdout.strip()) if result.returncode == 0 else 0
+      behind = parse_count(behind_count_raw)
+      ahead = parse_count(ahead_count_raw)
       
       result = {"behind": behind, "ahead": ahead}
     output: commit_status
@@ -201,51 +212,57 @@ steps:
   - name: rebase
     description: "Rebase onto base branch"
     condition: "commit_status.behind > 0"
+    tool: git_rebase
+    args:
+      repo: "{{ resolved_repo.path }}"
+      onto: "origin/{{ resolved_repo.default_branch }}"
+    output: rebase_raw
+    on_error: continue
+
+  - name: check_conflicts
+    description: "Check for conflicts after rebase"
+    condition: "commit_status.behind > 0 and rebase_raw and 'conflict' in str(rebase_raw).lower()"
+    tool: git_status
+    args:
+      repo: "{{ resolved_repo.path }}"
+    output: conflict_status_raw
+    on_error: continue
+
+  - name: parse_rebase_result
+    description: "Parse rebase result"
+    condition: "commit_status.behind > 0"
     compute: |
-      import subprocess
+      rebase_text = str(rebase_raw) if 'rebase_raw' in dir() and rebase_raw else ""
+      conflict_text = str(conflict_status_raw) if 'conflict_status_raw' in dir() and conflict_status_raw else ""
       
-      repo = resolved_repo["path"]
-      base = resolved_repo["default_branch"]
-      
-      result = subprocess.run(
-          ["git", "rebase", f"origin/{base}"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-      
-      if result.returncode == 0:
-          rebase_result = {
-              "success": True,
-              "conflicts": False,
-              "message": f"Rebased onto origin/{base}",
-          }
+      if 'success' in rebase_text.lower() or ('conflict' not in rebase_text.lower() and 'error' not in rebase_text.lower() and 'failed' not in rebase_text.lower()):
+        rebase_result = {
+          "success": True,
+          "conflicts": False,
+          "message": f"Rebased onto origin/{resolved_repo['default_branch']}",
+        }
       else:
-          status = subprocess.run(
-              ["git", "status", "--porcelain"],
-              cwd=repo,
-              capture_output=True,
-              text=True,
-          )
-          
-          conflict_files = [
-              ln[3:] for ln in status.stdout.split("\n")
-              if ln.startswith("UU") or ln.startswith("AA")
-          ]
-          
-          if conflict_files:
-              rebase_result = {
-                  "success": False,
-                  "conflicts": True,
-                  "conflict_files": conflict_files[:5],
-                  "message": f"{len(conflict_files)} file(s) have conflicts",
-              }
-          else:
-              rebase_result = {
-                  "success": False,
-                  "conflicts": False,
-                  "message": result.stderr[:200],
-              }
+        # Parse conflict files from status
+        conflict_files = []
+        for ln in conflict_text.split("\n"):
+          if "both modified" in ln.lower() or "UU" in ln[:3] if len(ln) >= 3 else False:
+            parts = ln.split()
+            if parts:
+              conflict_files.append(parts[-1])
+        
+        if conflict_files:
+          rebase_result = {
+            "success": False,
+            "conflicts": True,
+            "conflict_files": conflict_files[:5],
+            "message": f"{len(conflict_files)} file(s) have conflicts",
+          }
+        else:
+          rebase_result = {
+            "success": False,
+            "conflicts": False,
+            "message": rebase_text[:200] if rebase_text else "Unknown error",
+          }
       
       result = rebase_result
     output: rebase_result

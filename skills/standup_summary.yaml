@@ -128,34 +128,40 @@ steps:
 
   # ==================== GET AUTHOR ====================
 
-  - name: get_author
+  - name: get_author_email
     description: "Get git author email"
+    condition: "not inputs.author"
+    tool: git_config_get
+    args:
+      repo: "{{ resolved_repo.path }}"
+      key: "user.email"
+    output: author_email_raw
+    on_error: continue
+
+  - name: get_author_name
+    description: "Get git author name"
+    tool: git_config_get
+    args:
+      repo: "{{ resolved_repo.path }}"
+      key: "user.name"
+    output: author_name_raw
+    on_error: continue
+
+  - name: parse_author
+    description: "Parse author info"
     compute: |
-      import subprocess
-      import os
-
-      repo = resolved_repo["path"]
-
       if inputs.author:
-          author = inputs.author
+        author = inputs.author
       else:
-          result = subprocess.run(
-              ["git", "config", "user.email"],
-              cwd=repo,
-              capture_output=True,
-              text=True,
-          )
-          author = result.stdout.strip() if result.returncode == 0 else ""
-
-      # Also get username
-      result = subprocess.run(
-          ["git", "config", "user.name"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-      name = result.stdout.strip() if result.returncode == 0 else ""
-
+        author = str(author_email_raw).strip() if 'author_email_raw' in dir() and author_email_raw else ""
+        # Remove error prefix if present
+        if author.startswith("❌"):
+          author = ""
+      
+      name = str(author_name_raw).strip() if 'author_name_raw' in dir() and author_name_raw else ""
+      if name.startswith("❌"):
+        name = ""
+      
       result = {"email": author, "name": name}
     output: author_info
 

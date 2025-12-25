@@ -265,21 +265,28 @@ steps:
   # ==================== AUTO-DETECT CLOWDAPP ====================
   # Determine if we should deploy billing or main ClowdApp
   
-  # Step 3a: Get commit message and extract Jira issue key
-  - name: get_commit_info
-    description: "Get commit message to extract Jira issue key"
+  # Step 3a: Get commit message using git_show
+  - name: get_commit_message
+    description: "Get commit message for Jira key extraction"
+    tool: git_show
+    args:
+      repo: "{{ resolved_repo.path }}"
+      commit: "{{ commit_sha }}"
+      format: "%s%n%b"
+    output: commit_message_raw
+    on_error: continue
+
+  # Step 3b: Parse commit info
+  - name: parse_commit_info
+    description: "Extract Jira key and billing keywords from commit"
     compute: |
-      import subprocess
       import re
       
-      # Get commit message
-      result_msg = subprocess.run(
-        ["git", "log", "-1", "--format=%s%n%b", commit_sha],
-        capture_output=True,
-        text=True
-      )
+      commit_message = str(commit_message_raw).strip() if 'commit_message_raw' in dir() and commit_message_raw else ""
       
-      commit_message = result_msg.stdout.strip() if result_msg.returncode == 0 else ""
+      # Remove error prefix if present
+      if commit_message.startswith("❌"):
+        commit_message = ""
       
       # Extract Jira issue key (AAP-XXXXX pattern)
       jira_match = re.search(r'(AAP-\d+)', commit_message, re.IGNORECASE)
@@ -337,20 +344,28 @@ steps:
       }
     output: jira_billing_check
   
-  # Step 3d: Check commit diff for billing file changes
-  - name: check_commit_diff
+  # Step 3d: Get files changed in commit
+  - name: get_changed_files
+    description: "Get list of files changed in this commit"
+    tool: git_diff_tree
+    args:
+      repo: "{{ resolved_repo.path }}"
+      commit: "{{ commit_sha }}"
+      name_only: true
+    output: changed_files_raw
+    on_error: continue
+
+  # Step 3e: Check for billing file changes
+  - name: check_billing_files
     description: "Check if commit modifies billing-related files"
     compute: |
-      import subprocess
+      changed_files_text = str(changed_files_raw) if 'changed_files_raw' in dir() and changed_files_raw else ""
       
-      # Get list of files changed in this commit
-      diff_result = subprocess.run(
-        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha],
-        capture_output=True,
-        text=True
-      )
-      
-      changed_files = diff_result.stdout.strip().split('\n') if diff_result.returncode == 0 else []
+      # Skip if error
+      if changed_files_text.startswith("❌"):
+        changed_files = []
+      else:
+        changed_files = [f.strip() for f in changed_files_text.strip().split('\n') if f.strip()]
       
       # Billing-related paths
       billing_paths = [
@@ -544,66 +559,89 @@ steps:
   # ==================== GET DB CREDENTIALS ====================
 
   # Step 11: Get postgres connection info from automation-analytics-db secret
-  # The secret contains base64-encoded values that must be decoded
-  - name: get_db_credentials
-    description: "Get PostgreSQL connection details from automation-analytics-db secret"
+  # Using individual tool calls for each secret key
+  
+  - name: get_db_host
+    description: "Get DB host from secret"
+    condition: "{{ namespace_name and inputs.run_tests }}"
+    tool: kubectl_get_secret_value
+    args:
+      secret_name: "automation-analytics-db"
+      key: "db.host"
+      namespace: "{{ namespace_name }}"
+      environment: "ephemeral"
+      decode: true
+    output: db_host_raw
+    on_error: continue
+
+  - name: get_db_port
+    description: "Get DB port from secret"
+    condition: "{{ namespace_name and inputs.run_tests }}"
+    tool: kubectl_get_secret_value
+    args:
+      secret_name: "automation-analytics-db"
+      key: "db.port"
+      namespace: "{{ namespace_name }}"
+      environment: "ephemeral"
+      decode: true
+    output: db_port_raw
+    on_error: continue
+
+  - name: get_db_user
+    description: "Get DB user from secret"
+    condition: "{{ namespace_name and inputs.run_tests }}"
+    tool: kubectl_get_secret_value
+    args:
+      secret_name: "automation-analytics-db"
+      key: "db.user"
+      namespace: "{{ namespace_name }}"
+      environment: "ephemeral"
+      decode: true
+    output: db_user_raw
+    on_error: continue
+
+  - name: get_db_password
+    description: "Get DB password from secret"
+    condition: "{{ namespace_name and inputs.run_tests }}"
+    tool: kubectl_get_secret_value
+    args:
+      secret_name: "automation-analytics-db"
+      key: "db.password"
+      namespace: "{{ namespace_name }}"
+      environment: "ephemeral"
+      decode: true
+    output: db_password_raw
+    on_error: continue
+
+  - name: get_db_name
+    description: "Get DB name from secret"
+    condition: "{{ namespace_name and inputs.run_tests }}"
+    tool: kubectl_get_secret_value
+    args:
+      secret_name: "automation-analytics-db"
+      key: "db.name"
+      namespace: "{{ namespace_name }}"
+      environment: "ephemeral"
+      decode: true
+    output: db_name_raw
+    on_error: continue
+
+  - name: build_db_credentials
+    description: "Build DB credentials object from secret values"
     condition: "{{ namespace_name and inputs.run_tests }}"
     compute: |
-      import subprocess
-      import json
-      import base64
-      import os
+      def clean_value(raw, default=""):
+        if not raw or str(raw).startswith("❌"):
+          return default
+        return str(raw).strip()
+      
+      db_host = clean_value(db_host_raw if 'db_host_raw' in dir() else None)
+      db_port = clean_value(db_port_raw if 'db_port_raw' in dir() else None, "5432")
+      db_user = clean_value(db_user_raw if 'db_user_raw' in dir() else None)
+      db_password = clean_value(db_password_raw if 'db_password_raw' in dir() else None)
+      db_name = clean_value(db_name_raw if 'db_name_raw' in dir() else None)
       
       ns = namespace_name
-      kubeconfig = cfg.get("ephemeral_kubeconfig", os.path.expanduser("~/.kube/config.e"))
-      
-      # Get the automation-analytics-db secret directly
-      # Secret keys: db.host, db.name, db.password, db.port, db.user
-      secret_result = subprocess.run(
-        ["kubectl", f"--kubeconfig={kubeconfig}", "get", "secret", 
-         "automation-analytics-db", "-n", ns, "-ojson"],
-        capture_output=True,
-        text=True
-      )
-      
-      db_host = None
-      db_port = "5432"
-      db_user = None
-      db_password = None
-      db_name = None
-      
-      if secret_result.returncode == 0:
-        try:
-          secret = json.loads(secret_result.stdout)
-          data = secret.get("data", {})
-          
-          # Decode base64 values
-          if "db.host" in data:
-            db_host = base64.b64decode(data["db.host"]).decode("utf-8")
-          elif "hostname" in data:
-            db_host = base64.b64decode(data["hostname"]).decode("utf-8")
-          
-          if "db.port" in data:
-            db_port = base64.b64decode(data["db.port"]).decode("utf-8")
-          elif "port" in data:
-            db_port = base64.b64decode(data["port"]).decode("utf-8")
-          
-          if "db.user" in data:
-            db_user = base64.b64decode(data["db.user"]).decode("utf-8")
-          elif "username" in data:
-            db_user = base64.b64decode(data["username"]).decode("utf-8")
-          
-          if "db.password" in data:
-            db_password = base64.b64decode(data["db.password"]).decode("utf-8")
-          elif "password" in data:
-            db_password = base64.b64decode(data["password"]).decode("utf-8")
-          
-          if "db.name" in data:
-            db_name = base64.b64decode(data["db.name"]).decode("utf-8")
-          elif "name" in data:
-            db_name = base64.b64decode(data["name"]).decode("utf-8")
-        except Exception as e:
-          pass
       
       result = {
         "host": db_host or f"automation-analytics-db.{ns}.svc",
@@ -615,7 +653,6 @@ steps:
         "connection_string": f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}" if all([db_user, db_password, db_host, db_name]) else None
       }
     output: db_creds
-    on_error: continue
 
   # Step 12: Check pod status
   - name: check_pods
@@ -629,41 +666,38 @@ steps:
     on_error: continue
 
   # Step 13: Get FastAPI pod name
-  # Note: Label selector app=automation-analytics-api-fastapi-v2 doesn't work,
-  # so we find the pod by name pattern from pod listing
-  - name: get_fastapi_pod
-    description: "Find the FastAPI pod for running tests"
+  # Using kubectl_get_pods tool and then parsing for fastapi pattern
+  - name: get_all_pods
+    description: "Get all pods in namespace"
     condition: "{{ namespace_name and inputs.run_tests }}"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ namespace_name }}"
+      environment: "ephemeral"
+    output: all_pods_raw
+    on_error: continue
+
+  - name: find_fastapi_pod
+    description: "Find the FastAPI pod from pod listing"
+    condition: "{{ namespace_name and inputs.run_tests and all_pods_raw }}"
     compute: |
-      import subprocess
-      import os
-      
-      ns = namespace_name
-      kubeconfig = cfg.get("ephemeral_kubeconfig", os.path.expanduser("~/.kube/config.e"))
-      
-      # Get pods and find fastapi by name pattern (more reliable than labels)
-      result_pods = subprocess.run(
-        ["kubectl", f"--kubeconfig={kubeconfig}", "get", "pods", "-n", ns, 
-         "-o", "jsonpath={.items[*].metadata.name}"],
-        capture_output=True,
-        text=True
-      )
+      pods_text = str(all_pods_raw) if 'all_pods_raw' in dir() else ""
       
       fastapi_pod = None
-      if result_pods.returncode == 0:
-        pods = result_pods.stdout.split()
-        for pod in pods:
-          if 'fastapi' in pod.lower():
-            # Verify it's running
-            status_check = subprocess.run(
-              ["kubectl", f"--kubeconfig={kubeconfig}", "get", "pod", pod, "-n", ns,
-               "-o", "jsonpath={.status.phase}"],
-              capture_output=True,
-              text=True
-            )
-            if status_check.stdout.strip() == "Running":
-              fastapi_pod = pod
-              break
+      for line in pods_text.split('\n'):
+        # Skip header and empty lines
+        if not line.strip() or 'NAME' in line:
+          continue
+        
+        parts = line.split()
+        if len(parts) >= 3:
+          pod_name = parts[0]
+          status = parts[2] if len(parts) > 2 else ""
+          
+          # Find fastapi pod that's Running
+          if 'fastapi' in pod_name.lower() and 'Running' in status:
+            fastapi_pod = pod_name
+            break
       
       result = fastapi_pod
     output: fastapi_pod
@@ -676,17 +710,16 @@ steps:
   # - DATABASE_PREFIX is required by test helpers
   # - Full test suite takes ~90 minutes - only run smoke tests inline
   # - Test directories: test/test_*.py, test/v1/, test/processor/ (no test/restapi/)
-  - name: run_pytest
-    description: "Run smoke tests in FastAPI pod (full suite = 90min, run separately)"
+  # Step 14a: Create test script locally
+  - name: create_test_script
+    description: "Create smoke test script with DB credentials"
     condition: "{{ fastapi_pod and db_creds }}"
     compute: |
-      import subprocess
       import os
       import textwrap
       
-      pod = fastapi_pod
-      ns = namespace_name
       db = db_creds
+      ns = namespace_name
       
       # Extract credentials
       db_host = db.get('host', f'automation-analytics-db.{ns}.svc')
@@ -700,7 +733,6 @@ steps:
       database_url = f"{database_prefix}/{db_name}"
       
       # Create smoke test script
-      # IMPORTANT: unset LOG_LEVEL to avoid int/string conflict in app code
       test_script = textwrap.dedent(f"""
           #!/bin/bash
           
@@ -718,8 +750,7 @@ steps:
           # App settings
           export SECRET_KEY="test-secret-key-12345"
           
-          # CRITICAL: Unset LOG_LEVEL - app has conflicting code that expects
-          # both int and string values, causing ValueError
+          # CRITICAL: Unset LOG_LEVEL - app has conflicting code
           unset LOG_LEVEL
           
           cd /opt/app-root/src
@@ -728,14 +759,11 @@ steps:
           echo "DB: {db_host}:{db_port}/{db_name}"
           echo ""
           
-          # Run quick smoke tests only (DB, config, basic functionality)
-          # These complete in ~10 seconds
+          # Run quick smoke tests only
           pytest test/test_hello.py test/test_db.py test/test_configurator.py test/test_liveness_check.py -v --tb=short 2>&1
           
           echo ""
           echo "=== Smoke tests complete ==="
-          echo "To run full suite (90 min), exec into pod and run:"
-          echo "  pytest test/ -v --tb=short"
       """).strip()
       
       # Write script to temp file
@@ -744,30 +772,50 @@ steps:
         f.write(test_script)
       os.chmod(script_path, 0o755)
       
-      kubeconfig = cfg.get("ephemeral_kubeconfig", os.path.expanduser("~/.kube/config.e"))
+      result = script_path
+    output: test_script_path
+
+  # Step 14b: Copy test script to pod
+  - name: copy_test_script
+    description: "Copy smoke test script to FastAPI pod"
+    condition: "{{ fastapi_pod and test_script_path }}"
+    tool: kubectl_cp
+    args:
+      source: "{{ test_script_path }}"
+      destination: "{{ fastapi_pod }}:/tmp/smoke_test.sh"
+      namespace: "{{ namespace_name }}"
+      environment: "ephemeral"
+      container: "automation-analytics-api-fastapi-v2"
+      to_pod: true
+    output: copy_result
+    on_error: continue
+
+  # Step 14c: Execute smoke tests
+  - name: run_smoke_tests
+    description: "Execute smoke tests in FastAPI pod"
+    condition: "{{ fastapi_pod and copy_result }}"
+    tool: kubectl_exec
+    args:
+      pod_name: "{{ fastapi_pod }}"
+      command: "bash /tmp/smoke_test.sh"
+      namespace: "{{ namespace_name }}"
+      environment: "ephemeral"
+      container: "automation-analytics-api-fastapi-v2"
+      timeout: 120
+    output: test_exec_result
+    on_error: continue
+
+  # Step 14d: Parse test results
+  - name: parse_test_results
+    description: "Parse smoke test output"
+    compute: |
+      output = str(test_exec_result) if 'test_exec_result' in dir() and test_exec_result else ""
       
-      # Copy to pod (use -c to specify container in multi-container pod)
-      subprocess.run(
-        ["kubectl", f"--kubeconfig={kubeconfig}", "cp", script_path, 
-         f"{ns}/{pod}:/tmp/smoke_test.sh", "-c", "automation-analytics-api-fastapi-v2"],
-        capture_output=True
-      )
-      
-      # Execute with timeout (smoke tests should complete in <30s)
-      test_result = subprocess.run(
-        ["kubectl", f"--kubeconfig={kubeconfig}", "exec", "-n", ns, pod,
-         "-c", "automation-analytics-api-fastapi-v2", "--", "bash", "/tmp/smoke_test.sh"],
-        capture_output=True,
-        text=True,
-        timeout=120  # 2 min timeout for smoke tests
-      )
-      
-      output = test_result.stdout + test_result.stderr
       if len(output) > 3000:
         output = output[-3000:]
       
       # Check for pytest success indicators
-      passed = test_result.returncode == 0 or "passed" in output.lower()
+      passed = "passed" in output.lower() and "failed" not in output.lower()
       
       result = {
         "passed": passed,
@@ -776,7 +824,6 @@ steps:
         "full_suite_time": "~90 minutes"
       }
     output: test_result
-    on_error: continue
 
   # ==================== CLEANUP ====================
 

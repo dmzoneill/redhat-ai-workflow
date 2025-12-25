@@ -266,35 +266,43 @@ steps:
       }
     output: commit_validation
 
-  # Step 4: Check for merge conflicts
-  - name: check_mergeable
-    description: "Check if branch can merge cleanly"
+  # Step 4: Test merge to check for conflicts
+  - name: test_merge
+    description: "Test if branch can merge cleanly"
+    tool: git_merge
+    args:
+      repo: "{{ resolved_repo.path }}"
+      target: "origin/{{ resolved_repo.default_branch }}"
+      no_commit: true
+      no_ff: true
+    output: merge_test_raw
+    on_error: continue
+
+  # Abort the test merge
+  - name: abort_test_merge
+    description: "Abort the test merge"
+    tool: git_merge_abort
+    args:
+      repo: "{{ resolved_repo.path }}"
+    output: abort_result
+    on_error: continue
+
+  # Parse merge result
+  - name: parse_merge_result
+    description: "Determine if branch is mergeable"
     compute: |
-      import subprocess
+      merge_text = str(merge_test_raw) if 'merge_test_raw' in dir() and merge_test_raw else ""
+      target = resolved_repo.get("default_branch", "main")
       
-      repo = resolved_repo["path"]
-      target = resolved_repo["default_branch"]
-      
-      # Try merge --no-commit --no-ff to check for conflicts
-      result = subprocess.run(
-          ["git", "merge", "--no-commit", "--no-ff", f"origin/{target}"],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-      
-      has_conflicts = result.returncode != 0
-      
-      # Abort the merge attempt
-      subprocess.run(["git", "merge", "--abort"], cwd=repo, capture_output=True)
+      has_conflicts = "conflict" in merge_text.lower() or "❌" in merge_text
       
       if has_conflicts:
-          result = {
-              "mergeable": False,
-              "message": f"Branch has conflicts with {target}. Rebase needed.",
-          }
+        result = {
+          "mergeable": False,
+          "message": f"Branch has conflicts with {target}. Rebase needed.",
+        }
       else:
-          result = {"mergeable": True, "message": "Branch can merge cleanly"}
+        result = {"mergeable": True, "message": "Branch can merge cleanly"}
     output: merge_check
 
   # Step 5: Check for existing MR using MCP tool
@@ -383,29 +391,32 @@ steps:
 
   - name: run_flake8
     description: "Run flake8 linting"
+    condition: "inputs.run_linting and (not lint_tools_check or lint_tools_check.get('available', True))"
+    tool: code_lint
+    args:
+      repo: "{{ resolved_repo.path }}"
+      tool: "flake8"
+      max_line_length: 100
+      ignore: "E501,W503,E203"
+      exclude: ".git,__pycache__,migrations,venv,.venv"
+    output: flake8_raw
+    on_error: continue
+
+  - name: parse_flake8
+    description: "Parse flake8 result"
     condition: "inputs.run_linting"
     compute: |
-      import subprocess
+      raw = str(flake8_raw) if 'flake8_raw' in dir() and flake8_raw else ""
       
-      repo = resolved_repo["path"]
-      
-      result = subprocess.run(
-          ["flake8", "--max-line-length=100", "--ignore=E501,W503,E203",
-           "--exclude=.git,__pycache__,migrations,venv,.venv", "."],
-          cwd=repo,
-          capture_output=True,
-          text=True,
-      )
-      
-      if result.returncode == 0:
-          flake8_result = {"passed": True, "message": "Flake8 passed", "issues": []}
+      if 'passed' in raw.lower() or 'no issues' in raw.lower() or not raw:
+        flake8_result = {"passed": True, "message": "Flake8 passed", "issues": []}
       else:
-          issues = result.stdout.strip().split("\n")[:10]
-          flake8_result = {"passed": False, "message": f"{len(issues)} flake8 issue(s)", "issues": issues}
+        # Extract issues from output
+        issues = [l.strip() for l in raw.split('\n') if ':' in l and l.strip()][:10]
+        flake8_result = {"passed": False, "message": f"{len(issues)} flake8 issue(s)", "issues": issues}
       
       result = flake8_result
     output: flake8_result
-    on_error: continue
 
   # ==================== JIRA INTEGRATION ====================
 
