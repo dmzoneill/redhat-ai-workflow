@@ -178,7 +178,7 @@ steps:
     condition: "{{ inputs.mr_id and not inputs.commit_sha }}"
     compute: |
       import json
-      import re
+      from scripts.common.parsers import extract_git_sha, extract_branch_from_mr
       
       mr_text = str(mr_view_raw) if mr_view_raw else ""
       short_sha = None
@@ -190,13 +190,9 @@ steps:
         short_sha = mr_data.get("sha", "")
         source_branch = mr_data.get("source_branch", "")
       except:
-        # Parse from markdown output
-        sha_match = re.search(r'SHA[:\s]+`?([a-f0-9]{7,40})`?', mr_text, re.IGNORECASE)
-        branch_match = re.search(r'Source[:\s]+`?([^`\s]+)`?', mr_text, re.IGNORECASE)
-        if sha_match:
-          short_sha = sha_match.group(1)
-        if branch_match:
-          source_branch = branch_match.group(1)
+        # Parse from markdown output using shared parsers
+        short_sha = extract_git_sha(mr_text)
+        source_branch = extract_branch_from_mr(mr_text)
       
       if not short_sha:
         raise ValueError(f"Could not get SHA for MR {inputs.mr_id}")
@@ -268,9 +264,9 @@ steps:
 
   # Step 3b: Parse commit info
   - name: parse_commit_info
-    description: "Extract Jira key and billing keywords from commit"
+    description: "Extract Jira key and billing keywords from commit using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import extract_jira_key
       
       commit_message = str(commit_message_raw).strip() if 'commit_message_raw' in dir() and commit_message_raw else ""
       
@@ -278,9 +274,10 @@ steps:
       if commit_message.startswith("❌"):
         commit_message = ""
       
-      # Extract Jira issue key (AAP-XXXXX pattern)
-      jira_match = re.search(r'(AAP-\d+)', commit_message, re.IGNORECASE)
-      jira_key = jira_match.group(1).upper() if jira_match else None
+      # Extract Jira issue key using shared parser
+      jira_key = extract_jira_key(commit_message)
+      if jira_key:
+        jira_key = jira_key.upper()
       
       # Check for billing keywords in commit message itself
       billing_keywords = ['billing', 'subscription', 'vcpu', 'host_count', 'infra_usage']
@@ -451,23 +448,19 @@ steps:
   # Step 6: Validate image availability and extract sha256 digest
   - name: validate_image
     compute: |
-      import re
+      from scripts.common.parsers import parse_quay_manifest
       
       quay_output = str(quay_result) if quay_result else ""
       
-      if quay_output and 'not found' not in quay_output.lower():
-        # Extract the sha256 digest from Manifest Digest line
-        # Format: **Manifest Digest:** `sha256:abc123...`
-        digest_match = re.search(r'sha256:([a-f0-9]{64})', quay_output)
-        if digest_match:
-          sha256_digest = digest_match.group(1)  # Just the 64-char hex part
-          result = {
-            "available": True, 
-            "status": "Image ready in Quay",
-            "sha256_digest": sha256_digest
-          }
-        else:
-          result = {"available": False, "status": "Could not extract sha256 digest from Quay response"}
+      # Use shared parser to extract digest
+      manifest = parse_quay_manifest(quay_output)
+      
+      if manifest:
+        result = {
+          "available": True, 
+          "status": "Image ready in Quay",
+          "sha256_digest": manifest["digest"]
+        }
       else:
         result = {"available": False, "status": "Image not found - build may be in progress"}
     output: image_status
@@ -508,14 +501,9 @@ steps:
   - name: get_namespace_name
     condition: "{{ image_status.get('available', False) and not image_check.get('error', True) }}"
     compute: |
-      import re
+      from scripts.common.parsers import extract_ephemeral_namespace
       
-      ns_output = str(namespace_result)
-      match = re.search(r'(ephemeral-[a-z0-9]+)', ns_output.lower())
-      if match:
-        result = match.group(1)
-      else:
-        result = None
+      result = extract_ephemeral_namespace(str(namespace_result))
     output: namespace_name
 
   # ==================== DEPLOY ====================

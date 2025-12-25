@@ -91,60 +91,24 @@ steps:
   # ==================== PARSE ALERT ====================
   
   - name: parse_alert_message
-    description: "Extract alert details from Slack message"
+    description: "Extract alert details from Slack message using shared parser"
     compute: |
-      import re
-      import html
+      from scripts.common.parsers import parse_prometheus_alert
       
-      msg = inputs.message_text or ""
+      # Use shared parser for alert parsing
+      parsed = parse_prometheus_alert(inputs.message_text or "")
       
-      # Unescape HTML entities
-      msg = html.unescape(msg)
-      
-      # Extract alert name (pattern: Alert: NAME [FIRING:N])
-      alert_name_match = re.search(r'Alert:\s*([^\[]+)', msg, re.IGNORECASE)
-      alert_name = alert_name_match.group(1).strip() if alert_name_match else "Unknown Alert"
-      
-      # Extract firing count
-      firing_match = re.search(r'\[FIRING:(\d+)\]', msg)
-      firing_count = int(firing_match.group(1)) if firing_match else 1
-      
-      # Extract description (text after alert name)
-      desc_match = re.search(r'\[FIRING:\d+\]\s*(.+?)(?:<|$)', msg, re.DOTALL)
-      description = desc_match.group(1).strip() if desc_match else ""
-      
-      # Extract links
-      links = {}
-      link_patterns = {
-          "alertmanager": r'href="(https://alertmanager[^"]+)"',
-          "grafana": r'href="(https://grafana[^"]+)"',
-          "prometheus": r'href="(https://prometheus[^"]+)"',
-          "runbook": r'href="(https://gitlab[^"]+\.rst)"',
-          "console": r'href="(https://console-openshift[^"]+)"',
-          "silence": r'href="(https://alertmanager[^"]+silences[^"]+)"'
-      }
-      for name, pattern in link_patterns.items():
-          match = re.search(pattern, msg)
-          if match:
-              links[name] = match.group(1)
-      
-      # Check if billing-related
-      billing_keywords = ['billing', 'subscription', 'vcpu', 'host_count', 
-                          'infra_usage', 'metering', 'swatch', 'rhsm']
-      is_billing = any(kw in msg.lower() for kw in billing_keywords)
-      
-      # Extract namespace from links or message
-      ns_match = re.search(r'namespace[=:]([a-z0-9-]+)', msg, re.IGNORECASE)
-      namespace = ns_match.group(1) if ns_match else cfg.get("namespace")
+      # Use namespace from parser or fall back to config
+      namespace = parsed["namespace"] or cfg.get("namespace")
       
       result = {
-          "alert_name": alert_name,
-          "firing_count": firing_count,
-          "description": description[:500],
-          "links": links,
-          "is_billing": is_billing,
+          "alert_name": parsed["alert_name"],
+          "firing_count": parsed["firing_count"],
+          "description": parsed["description"],
+          "links": parsed["links"],
+          "is_billing": parsed["is_billing"],
           "namespace": namespace,
-          "severity": "high" if is_billing or cfg.get("environment") == "production" else "medium"
+          "severity": "high" if parsed["is_billing"] or cfg.get("environment") == "production" else "medium"
       }
     output: alert_info
 
@@ -234,29 +198,17 @@ steps:
     on_error: continue
 
   - name: extract_error_patterns
-    description: "Extract error patterns from logs"
+    description: "Extract error patterns from logs using shared parser"
     compute: |
+      from scripts.common.parsers import parse_error_logs
+      
       logs = str(recent_logs) if recent_logs else ""
       
-      # Common error patterns
-      error_patterns = [
-          r'(Error|ERROR|Exception|EXCEPTION):\s*(.+?)(?:\n|$)',
-          r'(Failed|FAILED):\s*(.+?)(?:\n|$)',
-          r'(Traceback|traceback)(.+?)(?:\n\n|\Z)',
-      ]
-      
-      import re
-      errors_found = []
-      
-      for pattern in error_patterns:
-          matches = re.findall(pattern, logs, re.MULTILINE | re.DOTALL)
-          for match in matches[:3]:  # Limit to 3 per pattern
-              error_text = match[1] if isinstance(match, tuple) else match
-              if len(error_text) > 20:  # Filter noise
-                  errors_found.append(error_text[:200])
+      # Use shared parser for error extraction
+      errors_found = parse_error_logs(logs, max_errors=5)
       
       result = {
-          "errors": errors_found[:5],
+          "errors": errors_found,
           "has_errors": len(errors_found) > 0
       }
     output: error_analysis
@@ -283,28 +235,22 @@ steps:
     on_error: continue
 
   - name: analyze_existing_issues
-    description: "Determine if we have a matching issue or need to create one"
+    description: "Determine if we have a matching issue or need to create one using shared parsers"
     compute: |
+      from scripts.common.parsers import extract_jira_key, extract_billing_event_number
       import re
       
       existing = str(existing_issues) if existing_issues else ""
       billing = str(billing_issues) if billing_issues else ""
       
-      # Check for exact or close match
-      matching_issue = None
+      # Find all Jira keys in existing issues
       issue_matches = re.findall(r'(AAP-\d+)', existing)
+      matching_issue = issue_matches[0] if issue_matches else None
       
-      if issue_matches:
-          # First issue is likely the best match
-          matching_issue = issue_matches[0]
-      
-      # For billing alerts, get the highest billing event number
+      # For billing alerts, get the next billing event number using shared parser
       next_billing_number = 1
       if alert_info.get("is_billing"):
-          billing_numbers = re.findall(r'BillingEvent\s*(\d+)', billing)
-          if billing_numbers:
-              highest = max(int(n) for n in billing_numbers)
-              next_billing_number = highest + 1
+          next_billing_number = extract_billing_event_number(billing)
       
       result = {
           "has_existing": matching_issue is not None,
