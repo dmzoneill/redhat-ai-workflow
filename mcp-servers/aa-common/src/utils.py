@@ -358,19 +358,29 @@ async def run_cmd_shell(
     if cwd:
         cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
     
-    # Explicitly source ~/.bashrc then run the command
-    # Login shells source ~/.bash_profile, but user env vars are usually in ~/.bashrc
-    # We source both to ensure we get all environment variables
-    bashrc = Path.home() / ".bashrc"
+    # Explicitly source shell config files to get all environment variables
+    # 1. ~/.bashrc for basic shell setup
+    # 2. ~/.bashrc.d/00-loader.sh loads additional configs (JIRA, etc.)
+    home = Path.home()
+    sources = []
+    
+    bashrc = home / ".bashrc"
     if bashrc.exists():
-        cmd_str = f"source {bashrc} 2>/dev/null; {cmd_str}"
+        sources.append(f"source {bashrc} 2>/dev/null")
+    
+    # Source the bashrc.d loader which loads all scripts.d/*.sh files
+    bashrc_d_loader = home / ".bashrc.d" / "00-loader.sh"
+    if bashrc_d_loader.exists():
+        sources.append(f"source {bashrc_d_loader} 2>/dev/null")
+    
+    if sources:
+        cmd_str = f"{'; '.join(sources)}; {cmd_str}"
     
     shell_cmd = ["bash", "-c", cmd_str]
     
     # Ensure critical environment variables are passed
     # This helps when running from MCP server context
     env = os.environ.copy()
-    home = Path.home()
     env["HOME"] = str(home)
     env["USER"] = home.name
     
