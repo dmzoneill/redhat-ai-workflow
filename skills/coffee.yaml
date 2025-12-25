@@ -618,6 +618,15 @@ steps:
       # GitLab: https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{id}
       # Jira: https://issues.redhat.com/browse/{key}
       
+      def linkify_jira_keys(text):
+        """Replace Jira keys like AAP-12345 with markdown links."""
+        # Match AAP-XXXXX pattern
+        jira_pattern = re.compile(r'\b(AAP-\d+)\b')
+        def replace_jira(match):
+          key = match.group(1)
+          return f"[{key}](https://issues.redhat.com/browse/{key})"
+        return jira_pattern.sub(replace_jira, text)
+      
       # Header
       lines.append(f"# ☕ {ctx['greeting']}, {first_name}!")
       lines.append(f"")
@@ -662,7 +671,8 @@ steps:
       lines.append(f"**Open PRs:** {len(my_prs) if my_prs else 0}")
       if my_prs:
         for pr in my_prs[:5]:
-          lines.append(f"- [!{pr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{pr['id']}) - {pr['title']}")
+          title_with_links = linkify_jira_keys(pr['title'])
+          lines.append(f"- [!{pr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{pr['id']}) - {title_with_links}")
       lines.append("")
       
       if pr_feedback:
@@ -685,7 +695,8 @@ steps:
       if review_requests:
         lines.append(f"**Assigned to you:** {len(review_requests)}")
         for rr in review_requests:
-          lines.append(f"- [!{rr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{rr['id']}) - {rr['title']}")
+          title_with_links = linkify_jira_keys(rr['title'])
+          lines.append(f"- [!{rr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{rr['id']}) - {title_with_links}")
       else:
         lines.append("✅ No PRs waiting for your review")
       lines.append("")
@@ -704,7 +715,8 @@ steps:
       lines.append("## 🚀 Recent Merges")
       if recent_merges:
         for mr in recent_merges:
-          lines.append(f"- [!{mr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{mr['id']}) - {mr['title']}")
+          title_with_links = linkify_jira_keys(mr['title'])
+          lines.append(f"- [!{mr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{mr['id']}) - {title_with_links}")
       else:
         lines.append("- No recent merges")
       lines.append("")
