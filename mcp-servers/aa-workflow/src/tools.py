@@ -1622,6 +1622,8 @@ def register_tools(server: "FastMCP") -> int:
                     "True": True,
                     "False": False,
                     "None": None,
+                    # I/O
+                    "open": open,
                     # Allow imports for flexibility
                     "__import__": __import__,
                 },
