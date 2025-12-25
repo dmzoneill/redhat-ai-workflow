@@ -458,11 +458,10 @@ def _get_remediation_hints(error_text: str, tool_name: str) -> list[str]:
         "403 forbidden",
         "authentication required",
         "invalid token",
-        "glab auth login",
     ]
     
     if any(pattern in error_lower for pattern in gitlab_auth_patterns):
-        hints.append("🦊 GitLab auth may be stale. Try: `glab auth login`")
+        hints.append("🦊 GitLab token may be expired. Check GITLAB_TOKEN env var or ~/.config/glab-cli/config.yml")
     
     # Slack auth issues
     slack_auth_patterns = [
