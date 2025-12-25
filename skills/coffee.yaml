@@ -614,23 +614,9 @@ steps:
       full_name = ctx.get('config', {}).get('user', {}).get('full_name', 'there')
       first_name = full_name.split()[0] if full_name else 'there'
       
-      # GitLab and Jira base URLs for hyperlinks
-      GITLAB_MR_BASE = "https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests"
-      JIRA_BASE = "https://issues.redhat.com/browse"
-      
-      def mr_link(mr_id, title=""):
-        """Create a markdown hyperlink for an MR."""
-        url = f"{GITLAB_MR_BASE}/{mr_id}"
-        if title:
-          return f"[!{mr_id}]({url}) - {title}"
-        return f"[!{mr_id}]({url})"
-      
-      def jira_link(key, summary=""):
-        """Create a markdown hyperlink for a Jira issue."""
-        url = f"{JIRA_BASE}/{key}"
-        if summary:
-          return f"[{key}]({url}) - {summary}"
-        return f"[{key}]({url})"
+      # Base URLs for hyperlinks (inlined to avoid closure issues in sandbox)
+      # GitLab: https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{id}
+      # Jira: https://issues.redhat.com/browse/{key}
       
       # Header
       lines.append(f"# ☕ {ctx['greeting']}, {first_name}!")
@@ -676,13 +662,13 @@ steps:
       lines.append(f"**Open PRs:** {len(my_prs) if my_prs else 0}")
       if my_prs:
         for pr in my_prs[:5]:
-          lines.append(f"- {mr_link(pr['id'], pr['title'])}")
+          lines.append(f"- [!{pr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{pr['id']}) - {pr['title']}")
       lines.append("")
       
       if pr_feedback:
         lines.append(f"**⚠️ Feedback Waiting ({len(pr_feedback)}):**")
         for fb in pr_feedback:
-          lines.append(f"- {mr_link(fb['mr_id'])} - Comment from **{fb['author']}**")
+          lines.append(f"- [!{fb['mr_id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fb['mr_id']}) - Comment from **{fb['author']}**")
       else:
         lines.append("✅ No pending feedback on your PRs")
       lines.append("")
@@ -691,7 +677,7 @@ steps:
       if failed_pipelines:
         lines.append(f"**🔴 Failed Pipelines ({len(failed_pipelines)}):**")
         for fp in failed_pipelines:
-          lines.append(f"- {mr_link(fp['mr_id'])} - {fp['status'].upper()}")
+          lines.append(f"- [!{fp['mr_id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fp['mr_id']}) - {fp['status'].upper()}")
         lines.append("")
       
       # Review requests - PRs assigned to YOU for review
@@ -699,7 +685,7 @@ steps:
       if review_requests:
         lines.append(f"**Assigned to you:** {len(review_requests)}")
         for rr in review_requests:
-          lines.append(f"- {mr_link(rr['id'], rr['title'])}")
+          lines.append(f"- [!{rr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{rr['id']}) - {rr['title']}")
       else:
         lines.append("✅ No PRs waiting for your review")
       lines.append("")
@@ -709,7 +695,7 @@ steps:
       if jira_activity and jira_activity.get('count', 0) > 0:
         lines.append(f"**{jira_activity.get('count', 0)}** issues updated in last {inputs.get('days_back', 1)} day(s)")
         for issue in jira_activity.get('issues', [])[:5]:
-          lines.append(f"- {jira_link(issue['key'], issue['summary'])}")
+          lines.append(f"- [{issue['key']}](https://issues.redhat.com/browse/{issue['key']}) - {issue['summary']}")
       else:
         lines.append("- No Jira activity in the last day")
       lines.append("")
@@ -718,7 +704,7 @@ steps:
       lines.append("## 🚀 Recent Merges")
       if recent_merges:
         for mr in recent_merges:
-          lines.append(f"- {mr_link(mr['id'], mr['title'])}")
+          lines.append(f"- [!{mr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{mr['id']}) - {mr['title']}")
       else:
         lines.append("- No recent merges")
       lines.append("")
