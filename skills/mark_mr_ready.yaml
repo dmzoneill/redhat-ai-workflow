@@ -68,6 +68,8 @@ steps:
     compute: |
       from scripts.common.parsers import extract_jira_key
       
+      from scripts.common.parsers import extract_mr_url
+      
       details = str(mr_details) if mr_details else ""
       
       # Extract title
@@ -80,15 +82,8 @@ steps:
       # Try to find Jira key in title or branch
       jira_key = inputs.issue_key if inputs.issue_key else extract_jira_key(details)
       
-      # Extract web URL
-      web_url = ""
-      for line in details.split("\n"):
-          if "https://" in line and "merge_requests" in line:
-              import re
-              match = re.search(r'(https://\S+)', line)
-              if match:
-                  web_url = match.group(1)
-                  break
+      # Extract web URL using shared parser
+      web_url = extract_mr_url(details)
       
       if not web_url:
           web_url = f"{cfg['gitlab_url']}/{inputs.project}/-/merge_requests/{cfg['mr_id']}"

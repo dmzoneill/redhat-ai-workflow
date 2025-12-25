@@ -823,19 +823,12 @@ steps:
   - name: extract_mr_author
     description: "Extract MR author GitLab username for Slack notification"
     compute: |
-      from scripts.common.parsers import extract_author_from_mr
+      from scripts.common.parsers import extract_author_from_mr, extract_mr_url
       
       author = extract_author_from_mr(mr_details) or ""
       
-      # Get MR URL for the notification
-      mr_url = ""
-      for line in str(mr_details).split("\n"):
-          if "web_url" in line.lower() or "url:" in line.lower():
-              import re
-              url_match = re.search(r'https://[^\s"\']+merge_requests/\d+', line)
-              if url_match:
-                  mr_url = url_match.group(0)
-                  break
+      # Get MR URL for the notification using shared parser
+      mr_url = extract_mr_url(str(mr_details))
       
       if not mr_url:
           # Construct URL from project and mr_id
