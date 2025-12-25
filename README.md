@@ -45,11 +45,17 @@ AI Workflow is a **comprehensive MCP (Model Context Protocol) server** that give
 git clone https://github.com/yourusername/ai-workflow.git ~/src/ai-workflow
 cd ~/src/ai-workflow
 
-# Create virtual environment
+# Option 1: Using UV (recommended - fast!)
+uv venv
+uv pip install -e .
+
+# Option 2: Traditional pip
 python3 -m venv .venv
 source .venv/bin/activate
-pip install mcp fastmcp httpx pyyaml google-api-python-client crc-bonfire
+pip install -e .
 ```
+
+> **Don't have UV?** Install it: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
 ### 2️⃣ Add to Your Project
 
