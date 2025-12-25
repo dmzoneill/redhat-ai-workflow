@@ -1513,9 +1513,39 @@ def register_tools(server: "FastMCP") -> int:
             local_vars["inputs"] = self.inputs
             local_vars["config"] = self.config  # Make config available
             
-            # Add safe built-ins
+            # Import commonly needed modules for compute blocks
+            import re
+            import os
+            from pathlib import Path
+            from datetime import datetime, timedelta
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                ZoneInfo = None
+            
+            # Try to import parsers and config_loader
+            try:
+                SCRIPTS_DIR = Path(__file__).parent.parent.parent.parent / "scripts"
+                sys.path.insert(0, str(SCRIPTS_DIR))
+                from common import parsers
+                from common.config_loader import load_config as load_skill_config, get_timezone
+            except ImportError:
+                parsers = None
+                load_skill_config = None
+                get_timezone = None
+            
+            # Try to import Google API modules
+            try:
+                from google.oauth2.credentials import Credentials as GoogleCredentials
+                from googleapiclient.discovery import build as google_build
+            except ImportError:
+                GoogleCredentials = None
+                google_build = None
+            
+            # Add safe built-ins with __import__ for flexibility
             safe_globals = {
                 "__builtins__": {
+                    # Core types
                     "len": len,
                     "str": str,
                     "int": int,
@@ -1523,19 +1553,50 @@ def register_tools(server: "FastMCP") -> int:
                     "list": list,
                     "dict": dict,
                     "bool": bool,
+                    "tuple": tuple,
+                    "set": set,
+                    # Iteration
                     "range": range,
                     "enumerate": enumerate,
                     "zip": zip,
+                    "map": map,
+                    "filter": filter,
+                    # Aggregation
                     "sorted": sorted,
                     "min": min,
                     "max": max,
                     "sum": sum,
                     "any": any,
                     "all": all,
+                    # Type checking
+                    "isinstance": isinstance,
+                    "type": type,
+                    "hasattr": hasattr,
+                    "getattr": getattr,
+                    # String/repr
+                    "repr": repr,
+                    "print": print,
+                    # Constants
                     "True": True,
                     "False": False,
                     "None": None,
-                }
+                    # Allow imports for flexibility
+                    "__import__": __import__,
+                },
+                # Pre-imported modules
+                "re": re,
+                "os": os,
+                "Path": Path,
+                "datetime": datetime,
+                "timedelta": timedelta,
+                "ZoneInfo": ZoneInfo,
+                # Parsers module
+                "parsers": parsers,
+                "load_config": load_skill_config,
+                "get_timezone": get_timezone,
+                # Google API
+                "GoogleCredentials": GoogleCredentials,
+                "google_build": google_build,
             }
             
             try:
