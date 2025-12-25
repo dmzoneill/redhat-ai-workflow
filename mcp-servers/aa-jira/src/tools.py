@@ -4,10 +4,7 @@ Uses the rh-issue CLI for Red Hat Jira operations.
 Authentication: JIRA_JPAT environment variable.
 """
 
-import asyncio
 import logging
-import shlex
-import subprocess
 import sys
 from pathlib import Path
 
@@ -17,65 +14,46 @@ from mcp.server.fastmcp import FastMCP
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_section_config, get_project_root
+from src.utils import get_section_config, get_project_root, run_cmd_shell
 
 logger = logging.getLogger(__name__)
 
 
 async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
-    """Run rh-issue command through user's login shell for proper environment."""
-    import os
+    """Run rh-issue command through user's login shell for proper environment.
     
-    # Build the command string for bash -l -c
-    # Quote each arg properly to handle spaces
-    cmd_str = "rh-issue " + " ".join(shlex.quote(arg) for arg in args)
+    Uses shared run_cmd_shell to ensure proper environment including:
+    - JIRA_JPAT and other env vars from ~/.bashrc
+    - pipenv virtualenv access (needs HOME)
+    - User's PATH with ~/bin
+    """
+    # Use shared run_cmd_shell for proper environment
+    success, stdout, stderr = await run_cmd_shell(
+        ["rh-issue"] + args,
+        timeout=timeout,
+    )
     
-    # Run through login shell to get user's full environment
-    # This ensures JIRA_JPAT and other env vars from ~/.bashrc are available
-    cmd = ["bash", "-l", "-c", cmd_str]
+    output = stdout or stderr
     
-    # Ensure critical environment variables are passed through
-    # pipenv needs HOME to find its virtualenvs
-    env = os.environ.copy()
-    home = Path.home()
-    env["HOME"] = str(home)
-    env["USER"] = home.name
-    # Make sure PATH includes user's bin directory
-    user_bin = str(home / "bin")
-    if user_bin not in env.get("PATH", ""):
-        env["PATH"] = f"{user_bin}:{env.get('PATH', '')}"
+    if not success:
+        # Check for common auth issues
+        if "JIRA_JPAT" in output or "401" in output or "Unauthorized" in output:
+            return False, (
+                f"❌ Jira authentication failed.\n\n"
+                f"Ensure these are in your ~/.bashrc:\n"
+                f"  export JIRA_JPAT='your-token'\n"
+                f"  export JIRA_URL='https://issues.redhat.com'\n\n"
+                f"Original error: {output}"
+            )
+        if "No module named" in output:
+            return False, (
+                f"❌ rh-issue dependency missing.\n\n"
+                f"Run: cd ~/src/jira-creator && pipenv install\n\n"
+                f"Original error: {output}"
+            )
+        return False, output
     
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-        )
-        
-        output = result.stdout
-        if result.returncode != 0:
-            output = result.stderr or result.stdout or "Command failed"
-            # Check for common auth issues
-            if "JIRA_JPAT" in output or "401" in output or "Unauthorized" in output:
-                return False, (
-                    f"❌ Jira authentication failed.\n\n"
-                    f"Ensure these are in your ~/.bashrc:\n"
-                    f"  export JIRA_JPAT='your-token'\n"
-                    f"  export JIRA_URL='https://issues.redhat.com'\n\n"
-                    f"Original error: {output}"
-                )
-            return False, output
-        
-        return True, output
-    except subprocess.TimeoutExpired:
-        return False, f"Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "rh-issue CLI not found. Install with: pip install rh-issue"
-    except Exception as e:
-        return False, str(e)
+    return True, stdout
 
 
 # ==================== READ OPERATIONS ====================

@@ -360,8 +360,24 @@ async def run_cmd_shell(
     
     # Run through bash login shell to get user's full environment
     # -l = login shell (sources ~/.bashrc, ~/.profile)
+    # -i = interactive (sources ~/.bashrc on some systems)
     # -c = execute command string
-    shell_cmd = ["bash", "-l", "-c", cmd_str]
+    shell_cmd = ["bash", "-l", "-i", "-c", cmd_str]
+    
+    # Ensure critical environment variables are passed
+    # This helps when running from MCP server context
+    env = os.environ.copy()
+    home = Path.home()
+    env["HOME"] = str(home)
+    env["USER"] = home.name
+    # Ensure user's bin is in PATH
+    user_bin = str(home / "bin")
+    if user_bin not in env.get("PATH", ""):
+        env["PATH"] = f"{user_bin}:{env.get('PATH', '')}"
+    # Pass through DISPLAY/XAUTHORITY for GUI apps
+    for var in ["DISPLAY", "XAUTHORITY"]:
+        if var in os.environ:
+            env[var] = os.environ[var]
     
     try:
         result = await asyncio.to_thread(
@@ -370,6 +386,7 @@ async def run_cmd_shell(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
         
         return result.returncode == 0, result.stdout, result.stderr
