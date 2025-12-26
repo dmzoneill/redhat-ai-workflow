@@ -142,23 +142,74 @@ steps:
       result = events_today
     output: calendar_events
 
-  # ==================== EMAIL (Gmail) ====================
+  # ==================== EMAIL (Gmail) with Smart Triage ====================
   
   - name: get_email_summary
-    description: "Fetch and summarize unread emails"
+    description: "Fetch, analyze, and optionally triage unread emails"
     compute: |
       from pathlib import Path
       
       CONFIG_DIR = Path.home() / ".config" / "google-calendar"
       TOKEN_FILE = CONFIG_DIR / "token.json"
       
+      # Get user info for "directed at me" detection
+      user_email = ctx.get('config', {}).get('user', {}).get('email', '')
+      user_name = ctx.get('config', {}).get('user', {}).get('full_name', '')
+      first_name = user_name.split()[0].lower() if user_name else ''
+      
+      # Should we auto-archive?
+      do_archive = inputs.get('auto_archive_email', False)
+      
       email_summary = {
         "unread_count": 0,
-        "important": [],
+        "needs_attention": [],      # Emails directed at me
+        "archived": [],             # Emails we auto-archived
         "newsletters": 0,
         "notifications": 0,
+        "cc_only": 0,
         "error": None,
       }
+      
+      def is_directed_at_me(headers, user_email, first_name):
+        """Determine if email is specifically directed at the user."""
+        to_field = headers.get('To', '').lower()
+        cc_field = headers.get('Cc', '').lower()
+        from_field = headers.get('From', '').lower()
+        subject = headers.get('Subject', '').lower()
+        
+        # Check if I'm in TO (not just CC)
+        in_to = user_email.lower() in to_field if user_email else False
+        in_cc_only = not in_to and (user_email.lower() in cc_field if user_email else False)
+        
+        # Automated sender patterns
+        auto_senders = ['noreply', 'no-reply', 'notifications@', 'system@', 
+                        'mailer-daemon', 'postmaster', 'donotreply', 'automated']
+        is_automated = any(pattern in from_field for pattern in auto_senders)
+        
+        # Newsletter patterns
+        newsletter_patterns = ['newsletter', 'digest', 'weekly', 'daily update',
+                               'unsubscribe', 'mailing list', 'marketing']
+        is_newsletter = any(pattern in from_field or pattern in subject 
+                           for pattern in newsletter_patterns)
+        
+        # Jira notifications - keep ones assigned to me
+        is_jira = 'jira' in from_field
+        jira_assigned = is_jira and ('assigned' in subject or first_name in subject)
+        
+        # GitLab notifications - keep ones mentioning me or my MRs
+        is_gitlab = 'gitlab' in from_field
+        gitlab_important = is_gitlab and (first_name in subject or 'mentioned' in subject 
+                                          or 'assigned' in subject or 'approved' in subject)
+        
+        # Decision logic
+        if is_newsletter:
+          return False, "newsletter"
+        elif is_automated and not jira_assigned and not gitlab_important:
+          return False, "notification"
+        elif in_cc_only and not (first_name and first_name in subject):
+          return False, "cc_only"
+        else:
+          return True, "direct"
       
       if TOKEN_FILE.exists():
         try:
@@ -166,13 +217,10 @@ steps:
           from google.auth.transport.requests import Request
           from googleapiclient.discovery import build
           
-          # Load token with its original scopes (don't override)
           creds = Credentials.from_authorized_user_file(str(TOKEN_FILE))
           
-          # Refresh if expired
           if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            # Save refreshed token
             with open(TOKEN_FILE, 'w') as f:
               f.write(creds.to_json())
           
@@ -181,40 +229,60 @@ steps:
           # Get unread messages
           results = service.users().messages().list(
             userId='me',
-            q='is:unread',
+            q='is:unread in:inbox',
             maxResults=50
           ).execute()
           
           messages = results.get('messages', [])
           email_summary["unread_count"] = len(messages)
           
-          # Categorize messages
-          for msg in messages[:20]:  # Process first 20
+          # Process each message
+          for msg in messages[:30]:  # Process up to 30
             msg_data = service.users().messages().get(
               userId='me',
               id=msg['id'],
               format='metadata',
-              metadataHeaders=['Subject', 'From']
+              metadataHeaders=['Subject', 'From', 'To', 'Cc', 'List-Unsubscribe']
             ).execute()
             
             headers = {h['name']: h['value'] for h in msg_data.get('payload', {}).get('headers', [])}
             subject = headers.get('Subject', 'No subject')
             sender = headers.get('From', 'Unknown')
+            msg_id = msg['id']
             
-            # Categorize
-            sender_lower = sender.lower()
-            subject_lower = subject.lower()
+            # Check if email is directed at me
+            is_important, category = is_directed_at_me(headers, user_email, first_name)
             
-            if 'newsletter' in sender_lower or 'digest' in subject_lower:
-              email_summary["newsletters"] += 1
-            elif 'notification' in sender_lower or 'noreply' in sender_lower:
-              email_summary["notifications"] += 1
+            email_info = {
+              "id": msg_id,
+              "subject": subject[:60],
+              "from": sender.split('<')[0].strip()[:30],
+              "category": category,
+            }
+            
+            if is_important:
+              email_summary["needs_attention"].append(email_info)
             else:
-              # Important - from people
-              email_summary["important"].append({
-                "subject": subject[:60],
-                "from": sender.split('<')[0].strip()[:30],
-              })
+              # Track by category
+              if category == "newsletter":
+                email_summary["newsletters"] += 1
+              elif category == "notification":
+                email_summary["notifications"] += 1
+              elif category == "cc_only":
+                email_summary["cc_only"] += 1
+              
+              # Auto-archive if enabled
+              if do_archive:
+                try:
+                  # Mark as read and archive (remove INBOX label)
+                  service.users().messages().modify(
+                    userId='me',
+                    id=msg_id,
+                    body={'removeLabelIds': ['UNREAD', 'INBOX']}
+                  ).execute()
+                  email_summary["archived"].append(email_info)
+                except Exception:
+                  pass  # Skip if archive fails
           
         except Exception as e:
           error_str = str(e)
@@ -648,22 +716,62 @@ steps:
         lines.append("- ⚠️ Calendar not accessible")
       lines.append("")
       
-      # Email
-      lines.append("## 📧 Email Summary")
+      # Email with smart triage
+      lines.append("## 📧 Email")
       if email_summary and not email_summary.get('error'):
-        lines.append(f"- **{email_summary['unread_count']}** unread emails")
-        if email_summary['important']:
-          lines.append(f"- **{len(email_summary['important'])}** from people:")
-          for email in email_summary['important'][:5]:
-            lines.append(f"  - {email['from']}: *{email['subject']}*")
-        if email_summary['newsletters']:
-          lines.append(f"- {email_summary['newsletters']} newsletters")
-        if email_summary['notifications']:
-          lines.append(f"- {email_summary['notifications']} notifications")
+        needs_attention = email_summary.get('needs_attention', [])
+        archived = email_summary.get('archived', [])
+        newsletters = email_summary.get('newsletters', 0)
+        notifications = email_summary.get('notifications', 0)
+        cc_only = email_summary.get('cc_only', 0)
+        
+        # Show emails needing attention
+        if needs_attention:
+          lines.append(f"### ⚠️ Needs Your Attention ({len(needs_attention)})")
+          for email in needs_attention[:8]:
+            lines.append(f"- **{email['from']}**: *{email['subject']}*")
+          if len(needs_attention) > 8:
+            lines.append(f"- *...and {len(needs_attention) - 8} more*")
+          lines.append("")
+        
+        # Show what was archived (if auto-archive was enabled)
+        if archived:
+          lines.append(f"### ✅ Auto-Archived ({len(archived)})")
+          # Group by category
+          by_cat = {}
+          for email in archived:
+            cat = email.get('category', 'other')
+            if cat not in by_cat:
+              by_cat[cat] = []
+            by_cat[cat].append(email)
+          
+          for cat, emails in by_cat.items():
+            cat_name = {'newsletter': '📰 Newsletters', 'notification': '🔔 Notifications', 
+                        'cc_only': '📋 CC-only'}.get(cat, cat)
+            lines.append(f"- {cat_name}: {len(emails)}")
+          lines.append("")
+        
+        # Show what WOULD be archived (if not auto-archiving)
+        if not archived and (newsletters or notifications or cc_only):
+          skippable = newsletters + notifications + cc_only
+          lines.append(f"### 💡 Could Auto-Archive ({skippable})")
+          if newsletters:
+            lines.append(f"- 📰 Newsletters: {newsletters}")
+          if notifications:
+            lines.append(f"- 🔔 Notifications: {notifications}")
+          if cc_only:
+            lines.append(f"- 📋 CC-only: {cc_only}")
+          lines.append("")
+          lines.append("*Tip: Run with `auto_archive_email: true` to clean these up*")
+          lines.append("")
+        
+        if not needs_attention and not archived and not newsletters:
+          lines.append("✨ Inbox is clean!")
+          lines.append("")
       else:
         error = email_summary.get('error', 'Unknown') if email_summary else 'Not configured'
         lines.append(f"- ⚠️ {error}")
-      lines.append("")
+        lines.append("")
       
       # PRs needing attention
       lines.append("## 🔀 Your PRs")
@@ -767,8 +875,20 @@ steps:
         actions.append(f"- Fix {len(failed_pipelines)} failed pipeline(s)")
       if review_requests:
         actions.append(f"- Review {len(review_requests)} PR(s) assigned to you")
-      if email_summary and email_summary.get('important'):
-        actions.append(f"- Review {len(email_summary['important'])} important emails")
+      
+      # Email actions
+      needs_attention = email_summary.get('needs_attention', []) if email_summary else []
+      if needs_attention:
+        actions.append(f"- Review {len(needs_attention)} email(s) needing attention")
+      
+      # Suggest auto-archive if there's cleanup potential
+      newsletters = email_summary.get('newsletters', 0) if email_summary else 0
+      notifications = email_summary.get('notifications', 0) if email_summary else 0
+      cc_only = email_summary.get('cc_only', 0) if email_summary else 0
+      skippable = newsletters + notifications + cc_only
+      if skippable >= 5 and not email_summary.get('archived'):
+        actions.append(f"- 💡 Run `/coffee` with `auto_archive_email: true` to clean up {skippable} emails")
+      
       if ephemeral_namespaces:
         expiring = [ns for ns in ephemeral_namespaces if 'h' in str(ns.get('expires', '')) and int(re.search(r'(\d+)h', str(ns.get('expires', '0h'))).group(1) if re.search(r'(\d+)h', str(ns.get('expires', ''))) else 99) < 2]
         if expiring:
