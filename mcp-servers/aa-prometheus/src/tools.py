@@ -430,7 +430,7 @@ def register_tools(server: "FastMCP") -> int:
         namespace = ""
         try:
             # Path: tools.py -> src -> aa-prometheus -> mcp-servers -> redhat-ai-workflow
-        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
+            config_path = Path(__file__).parent.parent.parent.parent / "config.json"
             if config_path.exists():
                 import json
                 with open(config_path) as f:
