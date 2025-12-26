@@ -499,7 +499,9 @@ async def run_kubectl(
         namespace: Kubernetes namespace
         timeout: Timeout in seconds
         environment: Environment name (used if kubeconfig not provided)
-        auto_retry_auth: If True, attempt to re-auth on failure (not implemented yet)
+        auto_retry_auth: If True, attempt to re-auth on failure.
+                        SAFETY: Only enabled for ephemeral cluster to prevent
+                        account lockouts from retry loops on prod/stage.
     
     Returns:
         Tuple of (success, output)
@@ -531,10 +533,30 @@ async def run_kubectl(
     
     success, output = await run_cmd(cmd, timeout=timeout)
     
-    # Add auth hint if authentication failed
+    # Handle auth failures
     if not success and is_auth_error(output) and resolved_env:
-        hint = get_auth_hint(resolved_env)
-        output = f"{output}\n\n{hint}"
+        # SAFETY: Only auto-retry for ephemeral to prevent account lockouts
+        is_ephemeral = resolved_env in ("ephemeral", "eph", "e")
+        
+        if auto_retry_auth and is_ephemeral:
+            # Try to re-authenticate for ephemeral cluster
+            logger.info("Auth failed on ephemeral, attempting auto-login...")
+            try:
+                auth_success, _, auth_stderr = await run_cmd_shell(["kube", "e"], timeout=120)
+                if auth_success:
+                    # Retry the original command
+                    success, output = await run_cmd(cmd, timeout=timeout)
+                    if success:
+                        output = f"🔄 Auto-reauthenticated to ephemeral cluster\n\n{output}"
+                else:
+                    output = f"{output}\n\n⚠️ Auto-login failed: {auth_stderr[:100]}"
+            except Exception as e:
+                output = f"{output}\n\n⚠️ Auto-login error: {e}"
+        
+        # Always add hint (even if auto-retry failed or wasn't attempted)
+        if not success:
+            hint = get_auth_hint(resolved_env)
+            output = f"{output}\n\n{hint}"
     
     return success, output
 
