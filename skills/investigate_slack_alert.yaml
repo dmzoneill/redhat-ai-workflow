@@ -293,20 +293,15 @@ steps:
       ts = inputs.message_ts.replace(".", "")
       slack_link = f"https://redhat-internal.slack.com/archives/{channel}/p{ts}"
       
-      description = f"""
-## Alert Details
-
-**Alert:** {alert.get('alert_name', 'Unknown')}
-**Environment:** {cfg.get('environment', 'unknown')}
-**Namespace:** {alert.get('namespace', 'unknown')}
-**Firing Count:** {alert.get('firing_count', 1)}
-**Severity:** {alert.get('severity', 'medium')}
-**Detected:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-## Links
-
-- [Slack Thread]({slack_link})
-"""
+      description = "## Alert Details\n\n"
+      description += f"**Alert:** {alert.get('alert_name', 'Unknown')}\n"
+      description += f"**Environment:** {cfg.get('environment', 'unknown')}\n"
+      description += f"**Namespace:** {alert.get('namespace', 'unknown')}\n"
+      description += f"**Firing Count:** {alert.get('firing_count', 1)}\n"
+      description += f"**Severity:** {alert.get('severity', 'medium')}\n"
+      description += f"**Detected:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+      description += "## Links\n\n"
+      description += f"- [Slack Thread]({slack_link})\n"
       
       # Add alert links
       links = alert.get('links', {})
