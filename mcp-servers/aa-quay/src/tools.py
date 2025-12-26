@@ -241,7 +241,7 @@ def register_tools(server: "FastMCP") -> int:
         success, tags = await skopeo_list_tags(image_ref)
         
         if not success:
-            return [TextContent(type="text", text=f"❌ Failed to list tags. Ensure you're logged in: `podman login quay.io`")]
+            return [TextContent(type="text", text=f"❌ Failed to list tags. Ensure you're logged in:\n  `podman login quay.io` or `docker login quay.io`")]
         
         if not tags:
             return [TextContent(type="text", text=f"No tags found for `{full_path}`")]
@@ -292,7 +292,7 @@ def register_tools(server: "FastMCP") -> int:
         if not success:
             if "manifest unknown" in str(data).lower():
                 return [TextContent(type="text", text=f"❌ Tag `{tag}` not found in `{full_path}`")]
-            return [TextContent(type="text", text=f"❌ Failed to get tag: {data}\n\nEnsure you're logged in: `podman login quay.io`")]
+            return [TextContent(type="text", text=f"❌ Failed to get tag: {data}\n\nEnsure you're logged in:\n  `podman login quay.io` or `docker login quay.io`")]
         
         digest = data.get("Digest", "N/A")
         created = data.get("Created", "N/A")
@@ -354,7 +354,7 @@ def register_tools(server: "FastMCP") -> int:
 
 The Konflux build may still be in progress, or the tag doesn't exist.
 
-**Check with:** `podman login quay.io` then retry.""")]
+**Check with:** `podman login quay.io` (or `docker login quay.io`) then retry.""")]
             return [TextContent(type="text", text=f"❌ Error checking image: {data}")]
         
         digest = data.get("Digest", "N/A")
@@ -546,7 +546,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
                     "",
                     "The Konflux build may still be in progress.",
                     "",
-                    "Ensure you're logged in: `podman login quay.io`",
+                    "Ensure you're logged in: `podman login quay.io` (or `docker login quay.io`)",
                 ]
                 return [TextContent(type="text", text="\n".join(lines))]
             return [TextContent(type="text", text=f"❌ Error: {data}")]
@@ -594,7 +594,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         success, tags = await skopeo_list_tags(image_ref)
         
         if not success:
-            return [TextContent(type="text", text="❌ Failed to list AA tags.\n\nEnsure you're logged in: `podman login quay.io`")]
+            return [TextContent(type="text", text="❌ Failed to list AA tags.\n\nEnsure you're logged in:\n  `podman login quay.io` or `docker login quay.io`")]
         
         if not tags:
             return [TextContent(type="text", text="No tags found for AA repository")]

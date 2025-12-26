@@ -433,12 +433,63 @@ async def run_cmd_shell(
         return False, "", str(e)
 
 
+def is_auth_error(output: str) -> bool:
+    """Check if kubectl/oc error indicates auth failure.
+    
+    Args:
+        output: Error output from kubectl/oc
+    
+    Returns:
+        True if this is an authentication error
+    """
+    auth_patterns = [
+        "provide credentials",
+        "unauthorized",
+        "token expired",
+        "token has expired",
+        "login required",
+        "must be logged in",
+        "No valid authentication",
+        "401",
+        "403 forbidden",
+    ]
+    output_lower = output.lower()
+    return any(pattern.lower() in output_lower for pattern in auth_patterns)
+
+
+def get_auth_hint(environment: str) -> str:
+    """Get auth hint for an environment.
+    
+    Args:
+        environment: Environment name (stage, production, ephemeral, konflux)
+    
+    Returns:
+        Hint message for fixing auth
+    """
+    env_lower = environment.lower()
+    cluster_map = {
+        "stage": "s",
+        "s": "s",
+        "production": "p",
+        "prod": "p",
+        "p": "p",
+        "ephemeral": "e",
+        "eph": "e",
+        "e": "e",
+        "konflux": "k",
+        "k": "k",
+    }
+    cluster = cluster_map.get(env_lower, env_lower)
+    return f"🔑 Run: `kube_login('{cluster}')` to refresh authentication"
+
+
 async def run_kubectl(
     args: list[str],
     kubeconfig: str | None = None,
     namespace: str | None = None,
     timeout: int = 60,
     environment: str | None = None,
+    auto_retry_auth: bool = False,
 ) -> tuple[bool, str]:
     """Run kubectl command with proper kubeconfig.
     
@@ -448,22 +499,44 @@ async def run_kubectl(
         namespace: Kubernetes namespace
         timeout: Timeout in seconds
         environment: Environment name (used if kubeconfig not provided)
+        auto_retry_auth: If True, attempt to re-auth on failure (not implemented yet)
     
     Returns:
         Tuple of (success, output)
     """
-    # Resolve kubeconfig
+    # Resolve kubeconfig and environment
+    resolved_env = environment
     if not kubeconfig and environment:
         kubeconfig = get_kubeconfig(environment, namespace or "")
+        resolved_env = environment
     elif not kubeconfig:
         kubeconfig = get_kubeconfig("stage", namespace or "")
+        resolved_env = "stage"
+    else:
+        # Try to determine environment from kubeconfig path
+        kc_path = Path(kubeconfig).name
+        if kc_path.endswith(".s"):
+            resolved_env = "stage"
+        elif kc_path.endswith(".p"):
+            resolved_env = "production"
+        elif kc_path.endswith(".e"):
+            resolved_env = "ephemeral"
+        elif kc_path.endswith(".k"):
+            resolved_env = "konflux"
     
     cmd = ["kubectl", f"--kubeconfig={kubeconfig}"]
     cmd.extend(args)
     if namespace:
         cmd.extend(["-n", namespace])
     
-    return await run_cmd(cmd, timeout=timeout)
+    success, output = await run_cmd(cmd, timeout=timeout)
+    
+    # Add auth hint if authentication failed
+    if not success and is_auth_error(output) and resolved_env:
+        hint = get_auth_hint(resolved_env)
+        output = f"{output}\n\n{hint}"
+    
+    return success, output
 
 
 async def run_oc(
