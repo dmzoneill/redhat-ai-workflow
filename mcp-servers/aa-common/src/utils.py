@@ -643,12 +643,17 @@ def get_service_url(service: str, environment: str) -> str:
 async def get_bearer_token(kubeconfig: str) -> str | None:
     """Get bearer token from kubeconfig for API authentication.
     
+    Tries multiple methods:
+    1. Extract from kubeconfig file directly (older clusters)
+    2. Use 'oc whoami --show-token' (modern OpenShift SSO)
+    
     Args:
         kubeconfig: Path to kubeconfig file
     
     Returns:
         Bearer token or None if not available
     """
+    # Method 1: Try extracting from kubeconfig file
     try:
         cmd = [
             "kubectl", "--kubeconfig", kubeconfig,
@@ -659,6 +664,16 @@ async def get_bearer_token(kubeconfig: str) -> str | None:
         if success and output.strip():
             return output.strip()
     except Exception as e:
-        logger.warning(f"Failed to get token from {kubeconfig}: {e}")
+        logger.debug(f"Token not in kubeconfig: {e}")
+    
+    # Method 2: Use oc whoami --show-token (works with SSO sessions)
+    try:
+        cmd = ["oc", "--kubeconfig", kubeconfig, "whoami", "--show-token"]
+        success, output = await run_cmd(cmd, timeout=10)
+        if success and output.strip():
+            return output.strip()
+    except Exception as e:
+        logger.warning(f"Failed to get token via oc whoami: {e}")
+    
     return None
 
