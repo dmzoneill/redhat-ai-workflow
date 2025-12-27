@@ -8,7 +8,7 @@ Includes:
 """
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 def markdown_to_jira(text: str) -> str:

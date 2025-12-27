@@ -16,18 +16,12 @@ D-Bus Path: /com/aiworkflow/SlackAgent
 import asyncio
 import json
 import logging
-import os
-import signal
-import sys
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 # Check for dbus availability
 try:
-    from dbus_next import DBusError, Variant
     from dbus_next.aio import MessageBus
     from dbus_next.service import ServiceInterface, dbus_property, method
     from dbus_next.service import signal as dbus_signal

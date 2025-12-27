@@ -29,16 +29,12 @@ Configuration:
 
 import argparse
 import asyncio
-import json
 import logging
 import os
-import re
 import signal
-import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -953,7 +949,7 @@ class SlackDaemon:
         self._dbus_handler = None
         if enable_dbus:
             try:
-                from slack_dbus import MessageHistory, MessageRecord, SlackDaemonWithDBus
+                from slack_dbus import MessageHistory, SlackDaemonWithDBus
 
                 self._dbus_handler = SlackDaemonWithDBus()
                 self._dbus_handler.history = MessageHistory()

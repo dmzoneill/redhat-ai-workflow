@@ -17,13 +17,11 @@ import argparse
 import asyncio
 import importlib
 import json
-import os
 import sys
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -457,10 +455,10 @@ class IntegrationTestRunner:
         """Attempt to auto-fix a failing tool."""
         try:
             # Import debug infrastructure
-            from debuggable import TOOL_REGISTRY, debug_tool
+            from debuggable import debug_tool
 
             # Get debug info
-            debug_info = await debug_tool(tool_name, error)
+            await debug_tool(tool_name, error)
 
             # Analyze and propose fix
             # This would integrate with Claude for actual fixes
@@ -496,7 +494,6 @@ class IntegrationTestRunner:
                 print(f"\n  📁 Module: {module_name}")
 
                 # Get tools that match this module
-                module_prefix = module_name.replace("-", "_") + "_"
                 for tool_name, params in TOOL_TEST_PARAMS.items():
                     # Check if tool belongs to this module (by prefix convention)
                     tool_module = tool_name.split("_")[0]

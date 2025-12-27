@@ -19,9 +19,9 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 # Add parent to path for config imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -1341,7 +1341,6 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
 
             # Add user classification for tone adjustment
             user_category = context.get("user_category", "unknown")
-            response_style = context.get("response_style", "professional")
             include_emojis = context.get("include_emojis", True)
 
             if user_category == "concerned":
