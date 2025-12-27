@@ -27,6 +27,8 @@ per-file-ignores =
     scripts/slack_dbus.py: F821
     # Test files may have longer lines for assertions
     tests/*.py: E501
+    # HTML templates have long CSS lines
+    mcp-servers/aa-common/src/web/app.py: E501
 
 # McCabe complexity
 max-complexity = 15

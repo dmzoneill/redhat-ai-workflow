@@ -302,7 +302,7 @@ If the tool exists but isn't registered, it may not have the @debuggable decorat
                 "   - `old_string`: The exact code to replace",
                 "   - `new_string`: The fixed code",
                 "4. **Ask user to confirm** before applying",
-                "5. After fix is applied, **commit** with message: `fix({tool_name}): <description>`",
+                f"5. After fix is applied, **commit**: `fix({tool_name}): <description>`",
                 "",
                 "Common issues to check:",
                 "- Missing CLI flags (--force, --yes, etc. for non-interactive)",
@@ -480,7 +480,8 @@ def _get_remediation_hints(error_text: str, tool_name: str) -> list[str]:
 
     if any(pattern in error_lower for pattern in gitlab_auth_patterns):
         hints.append(
-            "🦊 GitLab token may be expired. Check GITLAB_TOKEN env var or ~/.config/glab-cli/config.yml"
+            "🦊 GitLab token may be expired. "
+            "Check GITLAB_TOKEN env var or ~/.config/glab-cli/config.yml"
         )
 
     # Slack auth issues

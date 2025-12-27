@@ -82,7 +82,8 @@ def get_app_config(app_name: str = "", billing: bool = False) -> dict:
         "component": component,
         "image_base": app_config.get(
             "image_base",
-            "quay.io/redhat-user-workloads/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main",
+            "quay.io/redhat-user-workloads/aap-aa-tenant/"
+            "aap-aa-main/automation-analytics-backend-main",
         ),
         "ref_env": config.get("ref_env", "insights-production"),
     }
@@ -787,19 +788,14 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
         # VALIDATE template_ref: Must be FULL 40-char git commit SHA
         if len(template_ref) != 40:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"""❌ **Invalid template_ref: `{template_ref}` ({len(template_ref)} chars)**
-
-template_ref must be a FULL 40-character git commit SHA.
-
-**Fix:** Get the full SHA:
-```bash
-git rev-parse {template_ref}
-```""",
-                )
-            ]
+            err_msg = (
+                f"❌ **Invalid template_ref: `{template_ref}` "
+                f"({len(template_ref)} chars)**\n\n"
+                f"template_ref must be a FULL 40-character git commit SHA.\n\n"
+                f"**Fix:** Get the full SHA:\n"
+                f"```bash\ngit rev-parse {template_ref}\n```"
+            )
+            return [TextContent(type="text", text=err_msg)]
 
         # Strip sha256: prefix if present
         digest = image_tag
@@ -1166,7 +1162,8 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
         if not success:
             lines.append(f"❌ Deployment failed:\n```\n{output[-2000:]}\n```")
             lines.append(
-                f"\n⚠️ Namespace `{namespace}` still reserved. Release with: `bonfire_namespace_release(namespace='{namespace}')`"
+                f"\n⚠️ Namespace `{namespace}` still reserved. "
+                f"Release with: `bonfire_namespace_release(namespace='{namespace}')`"
             )
             return [TextContent(type="text", text="\n".join(lines))]
 
@@ -1207,7 +1204,8 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
             f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`"
         )
         lines.append(
-            f"- Get logs: `kubectl_logs(pod_name='...', namespace='{namespace}', environment='ephemeral')`"
+            f"- Get logs: `kubectl_logs(pod_name='...', "
+            f"namespace='{namespace}', environment='ephemeral')`"
         )
         lines.append(
             f"- Extend time: `bonfire_namespace_extend(namespace='{namespace}', duration='1h')`"
@@ -1282,7 +1280,10 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
                 return [
                     TextContent(
                         type="text",
-                        text=f"❌ Invalid template_ref from snapshot: `{template_ref}` ({len(template_ref)} chars, need 40)",
+                        text=(
+                            f"❌ Invalid template_ref from snapshot: "
+                            f"`{template_ref}` ({len(template_ref)} chars, need 40)"
+                        ),
                     )
                 ]
 
@@ -1290,7 +1291,10 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
                 return [
                     TextContent(
                         type="text",
-                        text=f"❌ Invalid image digest from snapshot: `{image_digest}` ({len(image_digest)} chars, need 64)",
+                        text=(
+                            f"❌ Invalid image digest from snapshot: "
+                            f"`{image_digest}` ({len(image_digest)} chars, need 64)"
+                        ),
                     )
                 ]
 
