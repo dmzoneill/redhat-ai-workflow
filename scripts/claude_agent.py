@@ -1437,9 +1437,7 @@ async def ask_claude(message: str, context: dict | None = None) -> str:
 
 
 if __name__ == "__main__":
-    # Test the agent
-    import asyncio
-
+    # Test the agent (asyncio already imported at top of file)
     async def test():
         agent = ClaudeAgent()
 

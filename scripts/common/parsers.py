@@ -608,7 +608,7 @@ def extract_web_url(text: str, pattern: str = None) -> Optional[str]:
     Examples:
         >>> extract_web_url("Check out https://example.com/page")
         'https://example.com/page'
-        >>> extract_web_url("MR at https://gitlab.com/org/repo/-/merge_requests/123", r'merge_requests/\d+')
+        >>> extract_web_url("MR at https://gitlab.com/org/repo/-/merge_requests/123", r'merge_requests/\\d+')
         'https://gitlab.com/org/repo/-/merge_requests/123'
     """
     if not text:

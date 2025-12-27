@@ -464,8 +464,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
             "```",
             "",
             "**Check status:**",
-            f"- Pods: `kubectl_get_pods(namespace='...', environment='ephemeral')`",
-            f"- Logs: `kubectl_logs(pod_name='...', namespace='...', environment='ephemeral')`",
+            "- Pods: `kubectl_get_pods(namespace='...', environment='ephemeral')`",
+            "- Logs: `kubectl_logs(pod_name='...', namespace='...', environment='ephemeral')`",
         ]
 
         return [TextContent(type="text", text="\n".join(lines))]
@@ -889,7 +889,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
             logger.warning("skopeo not found, skipping image check")
             # Continue without check if skopeo not installed
 
-        logger.info(f"Image verified, proceeding with deploy")
+        logger.info("Image verified, proceeding with deploy")
 
         # Build the exact command matching ITS pattern
         # Example:
@@ -921,7 +921,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
             component,
             "--no-remove-resources",
             "all",
-            f"--set-template-ref",
+            "--set-template-ref",
             f"{component}={template_ref}",
             "--set-parameter",
             f"{component}/IMAGE={image_base}@sha256",

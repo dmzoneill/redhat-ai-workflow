@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# flake8: noqa: F821
+# Note: F821 disabled because D-Bus type annotations like "s", "i", "b"
+# are valid dbus-next signatures but flake8 misinterprets them as undefined names.
 """
 D-Bus Interface for Slack Daemon
 
