@@ -13,7 +13,6 @@ import asyncio
 import logging
 import os
 import random
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable

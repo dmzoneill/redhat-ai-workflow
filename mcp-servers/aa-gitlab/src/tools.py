@@ -21,7 +21,7 @@ from mcp.server.fastmcp import FastMCP
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_section_config, load_config, run_cmd
+from src.utils import get_section_config
 
 GITLAB_HOST = os.getenv("GITLAB_HOST", "gitlab.cee.redhat.com")
 

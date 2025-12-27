@@ -17,7 +17,6 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -29,7 +28,6 @@ SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
 from src.utils import (
-    get_username,
     load_config,
     resolve_repo_path,
     run_cmd_full,
@@ -261,7 +259,6 @@ def register_tools(server: "FastMCP") -> int:
         issue_key = issue_key.upper()
 
         # Generate branch name
-        slug = issue_key.lower().replace("-", "")
         branch_name = f"{issue_key}-feature"
 
         result = f"""# Starting Work on {issue_key}
@@ -575,7 +572,6 @@ def register_tools(server: "FastMCP") -> int:
 
         try:
             # First, check if existing credentials are valid
-            needs_reauth = False
             if os.path.exists(kubeconfig):
                 test_success, _, _ = await run_cmd_full(
                     ["oc", "--kubeconfig", kubeconfig, "whoami"],
@@ -584,7 +580,6 @@ def register_tools(server: "FastMCP") -> int:
                 if not test_success:
                     lines.append("⚠️ Existing credentials are stale, cleaning up...")
                     lines.append("")
-                    needs_reauth = True
                     # Clean up stale config so kube will force re-auth
                     await run_cmd_shell(["kube-clean", short_cluster], timeout=30)
 
@@ -2668,8 +2663,6 @@ def register_tools(server: "FastMCP") -> int:
         if _tools_loaded:
             return
 
-        import importlib.util
-
         tool_modules = {
             "git": "aa-git",
             "jira": "aa-jira",
@@ -2692,8 +2685,6 @@ def register_tools(server: "FastMCP") -> int:
                 continue
 
             try:
-                # Read the file and extract tool functions
-                content = tools_file.read_text()
                 # Store module info for dynamic execution
                 _tool_registry[module_name] = {
                     "path": str(tools_file),
@@ -3174,8 +3165,6 @@ Be constructive, specific, and kind. Suggest alternatives, don't just criticize.
     @server.resource("memory://state/current_work")
     async def resource_current_work() -> str:
         """Current work state - active issues, branches, MRs."""
-        import yaml
-
         work_file = MEMORY_DIR / "state" / "current_work.yaml"
         if work_file.exists():
             return work_file.read_text()

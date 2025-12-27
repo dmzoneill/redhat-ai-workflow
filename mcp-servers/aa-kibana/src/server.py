@@ -13,7 +13,7 @@ sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
 import asyncio
 
-from src.server import create_mcp_server, run_mcp_server, run_web_server, setup_logging
+from src.server import create_mcp_server, run_mcp_server, setup_logging
 
 
 def main():

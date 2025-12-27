@@ -15,12 +15,10 @@ Setup:
 3. Run the server once to complete OAuth flow and save token.json
 """
 
-import json
 import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP

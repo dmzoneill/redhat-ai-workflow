@@ -19,13 +19,11 @@ Usage:
 
 import argparse
 import asyncio
-import importlib
 import logging
 
 # Base directory for tool modules
 import sys
 from pathlib import Path
-from typing import Callable
 
 from mcp.server.fastmcp import FastMCP
 
@@ -158,7 +156,7 @@ def create_mcp_server(
             spec.loader.exec_module(module)
 
             if hasattr(module, "register_tools"):
-                count = module.register_tools(server)
+                module.register_tools(server)
                 loaded_modules.append(tool_name)
                 logger.info(f"Loaded {tool_name} tools")
             else:
@@ -298,8 +296,6 @@ Examples:
     logger = setup_logging(web_mode=args.web)
 
     # Determine tools to load
-    dynamic_mode = False
-
     if args.agent:
         # Load from agent config
         tools = load_agent_config(args.agent)
@@ -321,7 +317,6 @@ Examples:
         # Default: start with workflow tools only (dynamic mode)
         tools = ["workflow"]
         server_name = args.name or "aa-workflow"
-        dynamic_mode = True
         logger.info("Starting in dynamic mode - use agent_load() to switch agents")
 
     try:

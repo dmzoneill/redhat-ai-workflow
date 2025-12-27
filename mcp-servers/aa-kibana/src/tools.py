@@ -5,7 +5,6 @@ Provides 9 tools for searching and analyzing logs via Kibana.
 
 import logging
 import os
-import subprocess
 import sys
 import urllib.parse
 from dataclasses import dataclass
@@ -232,7 +231,6 @@ def register_tools(server: "FastMCP") -> int:
         ns = namespace or env_config.namespace
 
         # Parse time range
-        time_map = {"m": "minutes", "h": "hours", "d": "days"}
         unit = time_range[-1]
         value = int(time_range[:-1])
 

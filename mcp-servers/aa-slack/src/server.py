@@ -25,7 +25,6 @@ import logging
 import os
 import signal
 import sys
-from pathlib import Path
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP

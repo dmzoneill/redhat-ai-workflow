@@ -3,10 +3,8 @@
 Provides 14 tools for Prometheus queries, alerts, targets, and metrics.
 """
 
-import asyncio
 import logging
 import os
-import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,7 +16,7 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url, load_config
+from src.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
 
 logger = logging.getLogger(__name__)
 

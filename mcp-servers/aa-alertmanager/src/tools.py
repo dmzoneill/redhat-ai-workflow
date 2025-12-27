@@ -3,12 +3,9 @@
 Provides 5 tools for Alertmanager silences and status.
 """
 
-import asyncio
 import logging
 import os
-import subprocess
 import sys
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -19,7 +16,7 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url, load_config
+from src.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +166,7 @@ def register_tools(server: "FastMCP") -> int:
         for a in alerts[:20]:
             labels = a.get("labels", {})
             annotations = a.get("annotations", {})
-            status = a.get("status", {})
+            _status = a.get("status", {})  # noqa: F841
 
             alertname = labels.get("alertname", "Unknown")
             severity = labels.get("severity", "unknown")
@@ -178,7 +175,7 @@ def register_tools(server: "FastMCP") -> int:
             severity_icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(severity, "⚪")
 
             summary = annotations.get("summary", "")[:80]
-            description = annotations.get("description", "")[:100]
+            _description = annotations.get("description", "")[:100]  # noqa: F841
 
             starts_at = a.get("startsAt", "")[:19]
 

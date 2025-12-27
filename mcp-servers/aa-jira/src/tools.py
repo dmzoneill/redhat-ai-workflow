@@ -14,7 +14,7 @@ from mcp.server.fastmcp import FastMCP
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_project_root, get_section_config, run_cmd_shell
+from src.utils import get_project_root, run_cmd_shell
 
 logger = logging.getLogger(__name__)
 
@@ -413,7 +413,6 @@ def register_tools(server: "FastMCP") -> int:
         """
         import re
         import sys
-        from pathlib import Path
 
         # Normalize issue type to lowercase
         valid_types = {"bug", "story", "task", "epic", "spike", "subtask"}

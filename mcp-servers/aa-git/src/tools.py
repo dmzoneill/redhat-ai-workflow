@@ -4,10 +4,8 @@ This module provides the tool registration function that can be called
 by the shared server infrastructure.
 """
 
-import asyncio
 import logging
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -1174,7 +1172,7 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Container status.
         """
-        path = resolve_repo_path(repo)
+        _path = resolve_repo_path(repo)  # noqa: F841 - may be used for validation
 
         cmd = ["docker", "ps", "--format", "{{.Names}}|{{.Status}}|{{.Ports}}"]
         if filter_name:

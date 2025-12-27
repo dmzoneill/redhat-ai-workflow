@@ -4,7 +4,6 @@ Provides 21 tools for managing ephemeral namespaces and deploying apps.
 """
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -19,7 +18,7 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_kubeconfig, get_section_config, load_config
+from src.utils import get_kubeconfig, get_section_config
 
 logger = logging.getLogger(__name__)
 
