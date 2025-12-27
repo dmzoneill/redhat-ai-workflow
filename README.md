@@ -14,6 +14,7 @@
 **Transform Claude into your personal DevOps engineer, developer assistant, and incident responder.**
 
 [Getting Started](#-quick-start) •
+[Commands](docs/commands/README.md) •
 [Skills](docs/skills/README.md) •
 [Agents](docs/agents/README.md) •
 [MCP Servers](docs/mcp-servers/README.md) •
@@ -150,6 +151,35 @@ Skills are reusable workflows. See [full skills reference](docs/skills/README.md
 
 ---
 
+## 🎯 Cursor Commands
+
+35 slash commands for quick access. See [full commands reference](docs/commands/README.md).
+
+| Category | Commands |
+|----------|----------|
+| ☀️ **Daily** | `/coffee` `/beer` `/standup` |
+| 🔧 **Development** | `/start-work` `/create-mr` `/mark-ready` `/close-issue` `/sync-branch` |
+| 👀 **Review** | `/review-mr` `/review-all-open` `/check-feedback` |
+| 🧪 **Testing** | `/deploy-ephemeral` `/check-namespaces` `/run-local-tests` |
+| 🚨 **Operations** | `/investigate-alert` `/debug-prod` `/release-prod` `/vpn` |
+| 🔍 **Discovery** | `/tools` `/agents` `/list-skills` `/smoke-tools` |
+
+### Example Workflow
+
+```bash
+/coffee                    # Morning briefing
+/start-work AAP-12345      # Begin work on issue
+# ... code ...
+/create-mr                 # Create merge request
+/deploy-ephemeral          # Test in ephemeral
+/mark-ready                # Remove draft, notify team
+# ... review cycle ...
+/close-issue AAP-12345     # Wrap up
+/beer                      # End of day summary
+```
+
+---
+
 ## 🔧 Tool Modules
 
 150+ tools across 15 modules. See [full MCP server reference](docs/mcp-servers/README.md).
@@ -203,6 +233,7 @@ ai-workflow/
 ├── memory/              # Persistent context
 ├── mcp-servers/         # Tool modules (aa-git/, aa-jira/, etc.)
 ├── docs/                # Documentation
+│   ├── commands/        # Cursor command reference
 │   ├── skills/          # Skill reference docs
 │   ├── agents/          # Agent persona docs
 │   ├── mcp-servers/     # MCP tool module docs
@@ -218,6 +249,7 @@ ai-workflow/
 
 | Document | Description |
 |----------|-------------|
+| [Commands Reference](docs/commands/README.md) | 35 Cursor slash commands |
 | [Skills Reference](docs/skills/README.md) | All 21 available skills |
 | [Agents Reference](docs/agents/README.md) | 5 specialized agent personas |
 | [MCP Servers Reference](docs/mcp-servers/README.md) | 15 tool modules |
