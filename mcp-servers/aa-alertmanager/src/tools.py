@@ -61,7 +61,7 @@ async def alertmanager_request(
 
             try:
                 return True, response.json()
-            except:
+            except (ValueError, TypeError):
                 return True, response.text
     except Exception as e:
         return False, str(e)
@@ -286,7 +286,7 @@ def register_tools(server: "FastMCP") -> int:
             unit = duration[-1]
             amount = int(duration[:-1])
             minutes = amount * duration_map.get(unit, 60)
-        except:
+        except (ValueError, IndexError, TypeError):
             minutes = 120
 
         now = datetime.utcnow()
