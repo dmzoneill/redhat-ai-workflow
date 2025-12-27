@@ -16,7 +16,7 @@ import yaml
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-from .constants import SKILLS_DIR
+from constants import SKILLS_DIR
 
 if TYPE_CHECKING:
     pass

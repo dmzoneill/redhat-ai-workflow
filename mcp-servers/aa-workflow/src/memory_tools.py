@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import yaml
 from mcp.types import TextContent
 
-from .constants import MEMORY_DIR
+from constants import MEMORY_DIR
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
