@@ -88,7 +88,7 @@ build-backend = "hatchling.build"
 packages = ["mcp-servers", "scripts", "agents", "skills"]
 
 [tool.black]
-line-length = 100
+line-length = 120
 target-version = ["py310", "py311", "py312"]
 include = '\.pyi?$'
 exclude = '''
@@ -103,7 +103,7 @@ exclude = '''
 
 [tool.isort]
 profile = "black"
-line_length = 100
+line_length = 120
 skip_gitignore = true
 
 [tool.mypy]

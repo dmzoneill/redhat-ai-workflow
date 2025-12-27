@@ -1102,7 +1102,10 @@ def update_deploy_clowder_ref(
         return content, False
 
     # Pattern: $ref: .../namespace.yml followed by ref: <sha>
-    pattern = rf"(\$ref:\s*/services/insights/tower-analytics/namespaces/{namespace_pattern}\.yml\s*\n\s*ref:\s*)([a-f0-9]+)"
+    pattern = (
+        rf"(\$ref:\s*/services/insights/tower-analytics/namespaces/"
+        rf"{namespace_pattern}\.yml\s*\n\s*ref:\s*)([a-f0-9]+)"
+    )
 
     new_content, count = re.subn(pattern, rf"\g<1>{new_sha}", str(content))
     return new_content, count > 0
