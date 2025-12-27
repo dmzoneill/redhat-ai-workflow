@@ -284,14 +284,14 @@ def register_tools(server: "FastMCP") -> int:
                                         resources = doc.get("resourceTemplates", []) or doc.get(
                                             "resources", []
                                         )
-                                            for r in resources[:10]:
-                                                if isinstance(r, dict):
-                                                    name = r.get("name", "unnamed")
-                                                    lines.append(f"  - `{name}`")
-                                    except (KeyError, TypeError):
-                                        pass
-                            except (KeyError, TypeError):
+                                        for r in resources[:10]:
+                                            if isinstance(r, dict):
+                                                name = r.get("name", "unnamed")
+                                                lines.append(f"  - `{name}`")
+                            except (yaml.YAMLError, KeyError, TypeError):
                                 pass
+                    except (OSError, IOError):
+                        pass
         else:
             lines.append(f"No files found mentioning `{namespace}`")
 
