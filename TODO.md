@@ -97,18 +97,23 @@ $ flake8 mcp-servers/ scripts/
 - [x] `scripts/common/parsers.py` - Output parsing (38 tests)
 - [x] `mcp-servers/aa-common/src/agent_loader.py` - Agent loading (16 tests)
 
-### Refactoring Opportunities
-Split `mcp-servers/aa-workflow/src/tools.py` (3,005 lines) into:
-- [ ] `skill_engine.py` - Skill execution logic (~600 lines)
-- [x] `memory_tools.py` - Memory operations (277 lines, 5 tools)
-- [x] `agent_tools.py` - Agent management (169 lines, 2 tools)
-- [x] `session_tools.py` - Session management (274 lines, 1 tool + 3 prompts)
-- [x] `resources.py` - MCP resources (102 lines, 5 resources)
-- [x] `constants.py` - Shared paths (18 lines)
-- [ ] `workflow_tools.py` - Workflow tools (~500 lines)
-- [ ] `lint_tools.py` - Linting/testing tools (~400 lines)
-- [ ] `infra_tools.py` - VPN/kube tools (~200 lines)
-- [ ] `meta_tools.py` - Dynamic tool execution (~400 lines)
+### Refactoring - COMPLETED ✅
+Split `mcp-servers/aa-workflow/src/tools.py` into 10 modules:
+
+| Module | Lines | Contents |
+|--------|-------|----------|
+| `constants.py` | 17 | Shared paths |
+| `memory_tools.py` | 273 | 5 memory tools |
+| `agent_tools.py` | 162 | 2 agent tools |
+| `session_tools.py` | 259 | 1 tool + 3 prompts |
+| `resources.py` | 101 | 5 MCP resources |
+| `skill_engine.py` | 677 | SkillExecutor + 2 tools |
+| `infra_tools.py` | 241 | VPN + kube_login |
+| `lint_tools.py` | 483 | 7 lint/test tools |
+| `meta_tools.py` | 381 | tool_list + tool_exec |
+| `tools.py` | 3,241 | Main (still has workflow_*) |
+
+**Total new modular code: 2,594 lines**
 
 ---
 
