@@ -19,7 +19,7 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_kubeconfig, load_config, get_service_url, get_bearer_token, get_env_config
+from src.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +37,14 @@ async def alertmanager_request(
 ) -> tuple[bool, dict | str]:
     """Make a request to Alertmanager API."""
     import httpx
-    
+
     base_url = url.rstrip("/")
     full_url = f"{base_url}/api/v2{endpoint}"
-    
+
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    
+
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             if method == "GET":
@@ -55,13 +55,13 @@ async def alertmanager_request(
                 response = await client.delete(full_url, headers=headers)
             else:
                 return False, f"Unsupported method: {method}"
-            
+
             if response.status_code == 401:
                 return False, "Authentication required"
-            
+
             if response.status_code >= 400:
                 return False, f"HTTP {response.status_code}: {response.text[:200]}"
-            
+
             try:
                 return True, response.json()
             except:
@@ -72,7 +72,7 @@ async def alertmanager_request(
 
 async def get_alertmanager_config(environment: str) -> tuple[str, str | None]:
     """Get URL and token for Alertmanager environment.
-    
+
     Uses shared utilities from aa-common for config loading.
     """
     url = get_service_url("alertmanager", environment)
@@ -84,9 +84,10 @@ async def get_alertmanager_config(environment: str) -> tuple[str, str | None]:
 
 # ==================== TOOLS ====================
 
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
-    
+
     @server.tool()
     async def alertmanager_alerts(
         environment: str = "stage",
@@ -119,7 +120,7 @@ def register_tools(server: "FastMCP") -> int:
         else:
             params.append("inhibited=false")
         params.append("active=true")
-        
+
         endpoint = "/alerts?" + "&".join(params)
         success, result = await alertmanager_request(url, endpoint, token=token)
 
@@ -130,7 +131,7 @@ def register_tools(server: "FastMCP") -> int:
             return [TextContent(type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}")]
 
         alerts = result
-        
+
         # Filter by name if specified
         if filter_name:
             filter_lower = filter_name.lower()
@@ -138,22 +139,30 @@ def register_tools(server: "FastMCP") -> int:
             for a in alerts:
                 labels = a.get("labels", {})
                 annotations = a.get("annotations", {})
-                
+
                 # Check alertname, namespace, and common labels/annotations
-                searchable = " ".join([
-                    str(labels.get("alertname", "")),
-                    str(labels.get("namespace", "")),
-                    str(labels.get("service", "")),
-                    str(annotations.get("summary", "")),
-                    str(annotations.get("description", "")),
-                ]).lower()
-                
+                searchable = " ".join(
+                    [
+                        str(labels.get("alertname", "")),
+                        str(labels.get("namespace", "")),
+                        str(labels.get("service", "")),
+                        str(annotations.get("summary", "")),
+                        str(annotations.get("description", "")),
+                    ]
+                ).lower()
+
                 if filter_lower in searchable:
                     filtered.append(a)
             alerts = filtered
 
         if not alerts:
-            return [TextContent(type="text", text=f"✅ No active alerts in {environment}" + (f" matching '{filter_name}'" if filter_name else ""))]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"✅ No active alerts in {environment}"
+                    + (f" matching '{filter_name}'" if filter_name else ""),
+                )
+            ]
 
         lines = [f"## 🚨 Active Alerts in {environment}", f"**Count:** {len(alerts)}", ""]
 
@@ -161,34 +170,33 @@ def register_tools(server: "FastMCP") -> int:
             labels = a.get("labels", {})
             annotations = a.get("annotations", {})
             status = a.get("status", {})
-            
+
             alertname = labels.get("alertname", "Unknown")
             severity = labels.get("severity", "unknown")
             namespace = labels.get("namespace", "")
-            
+
             severity_icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(severity, "⚪")
-            
+
             summary = annotations.get("summary", "")[:80]
             description = annotations.get("description", "")[:100]
-            
+
             starts_at = a.get("startsAt", "")[:19]
-            
+
             lines.append(f"{severity_icon} **{alertname}** ({severity})")
             if namespace:
                 lines.append(f"   Namespace: `{namespace}`")
             if summary:
                 lines.append(f"   {summary}")
             lines.append(f"   Started: {starts_at}")
-            
+
             # Add runbook link if available
             runbook = annotations.get("runbook_url", "")
             if runbook:
                 lines.append(f"   [Runbook]({runbook})")
-            
+
             lines.append("")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def alertmanager_silences(
@@ -254,7 +262,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def alertmanager_create_silence(
         matchers: str,
@@ -293,23 +300,32 @@ def register_tools(server: "FastMCP") -> int:
         for m in matchers.split(","):
             if "=~" in m:
                 name, value = m.split("=~", 1)
-                parsed_matchers.append({
-                    "name": name.strip(),
-                    "value": value.strip(),
-                    "isRegex": True,
-                    "isEqual": True,
-                })
+                parsed_matchers.append(
+                    {
+                        "name": name.strip(),
+                        "value": value.strip(),
+                        "isRegex": True,
+                        "isEqual": True,
+                    }
+                )
             elif "=" in m:
                 name, value = m.split("=", 1)
-                parsed_matchers.append({
-                    "name": name.strip(),
-                    "value": value.strip(),
-                    "isRegex": False,
-                    "isEqual": True,
-                })
+                parsed_matchers.append(
+                    {
+                        "name": name.strip(),
+                        "value": value.strip(),
+                        "isRegex": False,
+                        "isEqual": True,
+                    }
+                )
 
         if not parsed_matchers:
-            return [TextContent(type="text", text="❌ Invalid matchers format. Use: alertname=MyAlert,namespace=myns")]
+            return [
+                TextContent(
+                    type="text",
+                    text="❌ Invalid matchers format. Use: alertname=MyAlert,namespace=myns",
+                )
+            ]
 
         data = {
             "matchers": parsed_matchers,
@@ -319,7 +335,9 @@ def register_tools(server: "FastMCP") -> int:
             "comment": comment,
         }
 
-        success, result = await alertmanager_request(url, "/silences", method="POST", data=data, token=token)
+        success, result = await alertmanager_request(
+            url, "/silences", method="POST", data=data, token=token
+        )
 
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to create silence: {result}")]
@@ -336,7 +354,6 @@ def register_tools(server: "FastMCP") -> int:
         ]
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def alertmanager_delete_silence(
@@ -355,13 +372,14 @@ def register_tools(server: "FastMCP") -> int:
         """
         url, token = await get_alertmanager_config(environment)
 
-        success, result = await alertmanager_request(url, f"/silence/{silence_id}", method="DELETE", token=token)
+        success, result = await alertmanager_request(
+            url, f"/silence/{silence_id}", method="DELETE", token=token
+        )
 
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to delete silence: {result}")]
 
         return [TextContent(type="text", text=f"✅ Silence `{silence_id}` deleted")]
-
 
     @server.tool()
     async def alertmanager_status(
@@ -409,7 +427,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def alertmanager_receivers(
         environment: str = "stage",
@@ -441,7 +458,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def prometheus_grafana_link(
         dashboard: str = "overview",
@@ -465,16 +481,24 @@ def register_tools(server: "FastMCP") -> int:
             config_path = Path(__file__).parent.parent.parent.parent / "config.json"
             if config_path.exists():
                 import json
+
                 with open(config_path) as f:
                     config = json.load(f)
                 env_key = "production" if environment.lower() == "prod" else environment.lower()
-                prom_url = config.get("prometheus", {}).get("environments", {}).get(env_key, {}).get("url", "")
+                prom_url = (
+                    config.get("prometheus", {})
+                    .get("environments", {})
+                    .get(env_key, {})
+                    .get("url", "")
+                )
         except Exception:
             pass
         if not prom_url:
             prom_url = os.getenv(f"PROMETHEUS_{environment.upper()}_URL", "")
         if not prom_url:
-            return [TextContent(type="text", text=f"❌ Prometheus URL not configured for {environment}")]
+            return [
+                TextContent(type="text", text=f"❌ Prometheus URL not configured for {environment}")
+            ]
         grafana_url = prom_url.replace("prometheus", "grafana")
 
         params = []
@@ -485,9 +509,13 @@ def register_tools(server: "FastMCP") -> int:
         if params:
             url += "?" + "&".join(params)
 
-        return [TextContent(type="text", text=f"## Grafana Dashboard\n\n**URL:** {url}\n\n[Open Dashboard]({url})")]
-
+        return [
+            TextContent(
+                type="text",
+                text=f"## Grafana Dashboard\n\n**URL:** {url}\n\n[Open Dashboard]({url})",
+            )
+        ]
 
     # ==================== ENTRY POINT ====================
-    
-    return len([m for m in dir() if not m.startswith('_')])  # Approximate count
+
+    return len([m for m in dir() if not m.startswith("_")])  # Approximate count

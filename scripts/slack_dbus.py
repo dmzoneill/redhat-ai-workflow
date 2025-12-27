@@ -20,16 +20,17 @@ import os
 import signal
 import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 # Check for dbus availability
 try:
+    from dbus_next import DBusError, Variant
     from dbus_next.aio import MessageBus
-    from dbus_next.service import ServiceInterface, method, signal as dbus_signal, dbus_property
-    from dbus_next import Variant, DBusError
+    from dbus_next.service import ServiceInterface, dbus_property, method
+    from dbus_next.service import signal as dbus_signal
 
     DBUS_AVAILABLE = True
 except ImportError:
@@ -512,7 +513,3 @@ class SlackAgentClient:
         interface = self._get_interface()
         result = await interface.call_shutdown()
         return json.loads(result)
-
-
-
-

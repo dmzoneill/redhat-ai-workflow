@@ -7,6 +7,7 @@ Skills should import from this module instead of reimplementing config loading.
 All config loading delegates to the canonical implementation in:
 mcp-servers/aa-common/src/utils.py
 """
+
 import json
 import os
 import sys
@@ -22,15 +23,16 @@ if str(_SERVERS_DIR) not in sys.path:
 def load_config() -> Dict[str, Any]:
     """
     Load config.json using canonical implementation.
-    
+
     Delegates to mcp-servers/aa-common/src/utils.py:load_config()
     for consistent behavior across skills and MCP tools.
-    
+
     Returns:
         Config dict, or empty dict if not found
     """
     try:
         from src.utils import load_config as utils_load_config
+
         return utils_load_config()
     except ImportError:
         # Fallback if utils not available
@@ -44,11 +46,11 @@ def load_config() -> Dict[str, Any]:
 def get_config_section(section: str, default: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Get a specific section from config.json.
-    
+
     Args:
         section: Top-level key in config (e.g., 'jira', 'gitlab', 'repositories')
         default: Default value if section not found
-        
+
     Returns:
         Section dict or default
     """
@@ -59,7 +61,7 @@ def get_config_section(section: str, default: Optional[Dict] = None) -> Dict[str
 def get_user_config() -> Dict[str, Any]:
     """
     Get user configuration from config.json.
-    
+
     Returns:
         User config with keys like 'username', 'email', 'timezone'
     """
@@ -70,7 +72,7 @@ def get_user_config() -> Dict[str, Any]:
 def get_username() -> str:
     """
     Get the configured username.
-    
+
     Falls back to OS user if not configured.
     """
     user_config = get_user_config()
@@ -80,7 +82,7 @@ def get_username() -> str:
 def get_jira_url() -> str:
     """
     Get the Jira instance URL.
-    
+
     Falls back to default Red Hat Jira if not configured.
     """
     config = load_config()
@@ -90,7 +92,7 @@ def get_jira_url() -> str:
 def get_timezone() -> str:
     """
     Get the configured timezone.
-    
+
     Falls back to Europe/Dublin if not configured.
     """
     user_config = get_user_config()
@@ -100,10 +102,10 @@ def get_timezone() -> str:
 def get_repo_config(repo_name: str) -> Dict[str, Any]:
     """
     Get configuration for a specific repository.
-    
+
     Args:
         repo_name: Repository name (key in repositories section)
-        
+
     Returns:
         Repository config dict or empty dict
     """
@@ -118,24 +120,24 @@ def resolve_repo(
 ) -> Dict[str, Any]:
     """
     Resolve repository configuration from various inputs.
-    
+
     Priority:
     1. repo_name if provided
     2. Match by issue_key prefix (e.g., AAP-12345 -> AAP project)
     3. Match by current working directory
     4. Fall back to first configured repo
-    
+
     Args:
         repo_name: Explicit repository name
         issue_key: Jira issue key to match by project
         cwd: Current working directory
-        
+
     Returns:
         Dict with 'name', 'path', 'gitlab', 'jira_project', etc.
     """
     config = load_config()
     repos = config.get("repositories", {})
-    
+
     result = {
         "name": None,
         "path": cwd or os.getcwd(),
@@ -143,54 +145,60 @@ def resolve_repo(
         "jira_project": None,
         "jira_url": get_jira_url(),
     }
-    
+
     # 1. Explicit repo name
     if repo_name and repo_name in repos:
         repo = repos[repo_name]
-        result.update({
-            "name": repo_name,
-            "path": repo.get("path", result["path"]),
-            "gitlab": repo.get("gitlab"),
-            "jira_project": repo.get("jira_project"),
-        })
+        result.update(
+            {
+                "name": repo_name,
+                "path": repo.get("path", result["path"]),
+                "gitlab": repo.get("gitlab"),
+                "jira_project": repo.get("jira_project"),
+            }
+        )
         return result
-    
+
     # 2. Match by issue key prefix
     if issue_key:
         project_prefix = issue_key.split("-")[0].upper()
         for name, repo in repos.items():
             if repo.get("jira_project") == project_prefix:
-                result.update({
-                    "name": name,
-                    "path": repo.get("path", result["path"]),
-                    "gitlab": repo.get("gitlab"),
-                    "jira_project": repo.get("jira_project"),
-                })
+                result.update(
+                    {
+                        "name": name,
+                        "path": repo.get("path", result["path"]),
+                        "gitlab": repo.get("gitlab"),
+                        "jira_project": repo.get("jira_project"),
+                    }
+                )
                 return result
-    
+
     # 3. Match by current working directory
     check_cwd = cwd or os.getcwd()
     for name, repo in repos.items():
         if repo.get("path") == check_cwd:
-            result.update({
-                "name": name,
-                "path": repo.get("path"),
-                "gitlab": repo.get("gitlab"),
-                "jira_project": repo.get("jira_project"),
-            })
+            result.update(
+                {
+                    "name": name,
+                    "path": repo.get("path"),
+                    "gitlab": repo.get("gitlab"),
+                    "jira_project": repo.get("jira_project"),
+                }
+            )
             return result
-    
+
     # 4. Fall back to first configured repo
     if repos:
         first_name = next(iter(repos))
         first_repo = repos[first_name]
-        result.update({
-            "name": first_name,
-            "path": first_repo.get("path", result["path"]),
-            "gitlab": first_repo.get("gitlab"),
-            "jira_project": first_repo.get("jira_project"),
-        })
-    
+        result.update(
+            {
+                "name": first_name,
+                "path": first_repo.get("path", result["path"]),
+                "gitlab": first_repo.get("gitlab"),
+                "jira_project": first_repo.get("jira_project"),
+            }
+        )
+
     return result
-
-

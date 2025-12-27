@@ -11,10 +11,10 @@ Can run standalone or be loaded as a plugin via aa-common.
 Usage:
     # Standalone mode
     python -m src.server
-    
+
     # With auto-start listener
     python -m src.server --auto-start
-    
+
     # As systemd/pm2 durable process
     python -m src.server --auto-start --persist
 """
@@ -30,7 +30,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
-from .tools import register_tools, get_manager
+from .tools import get_manager, register_tools
 
 # Load environment variables
 load_dotenv()
@@ -41,15 +41,13 @@ logger = logging.getLogger(__name__)
 def setup_logging(debug: bool = False):
     """Configure logging."""
     level = logging.DEBUG if debug else logging.INFO
-    
+
     # In MCP mode, log to stderr (stdout is for JSON-RPC)
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
-    
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+
     logging.basicConfig(level=level, handlers=[handler])
-    
+
     # Reduce noise from httpx
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -58,14 +56,14 @@ def setup_logging(debug: bool = False):
 class SlackMCPServer:
     """
     Production-grade Slack MCP Server with lifecycle management.
-    
+
     Features:
     - Background listener with auto-start option
     - Graceful shutdown handling
     - State persistence across restarts
     - MCP notification support (when available)
     """
-    
+
     def __init__(
         self,
         auto_start_listener: bool = False,
@@ -73,32 +71,32 @@ class SlackMCPServer:
     ):
         """
         Initialize the server.
-        
+
         Args:
             auto_start_listener: Start the background listener automatically
             persist_state: Use persistent SQLite state (vs in-memory)
         """
         self.auto_start_listener = auto_start_listener
         self.persist_state = persist_state
-        
+
         self.server = FastMCP("aa-slack")
         self._manager = None
         self._shutdown_event = asyncio.Event()
-    
+
     async def setup(self):
         """Set up the server components."""
         # Register tools
         tool_count = register_tools(self.server)
         logger.info(f"Registered {tool_count} Slack tools")
-        
+
         # Initialize manager
         self._manager = await get_manager()
-        
+
         # Validate environment
         try:
             xoxc = os.getenv("SLACK_XOXC_TOKEN", "")
             d_cookie = os.getenv("SLACK_D_COOKIE", "")
-            
+
             if not xoxc or not d_cookie:
                 logger.warning(
                     "SLACK_XOXC_TOKEN and SLACK_D_COOKIE not set. "
@@ -106,10 +104,10 @@ class SlackMCPServer:
                 )
             else:
                 logger.info("Slack credentials found in environment")
-                
+
         except Exception as e:
             logger.warning(f"Environment validation: {e}")
-        
+
         # Auto-start listener if configured
         if self.auto_start_listener:
             try:
@@ -117,46 +115,47 @@ class SlackMCPServer:
                 logger.info("Background listener started automatically")
             except Exception as e:
                 logger.error(f"Failed to start listener: {e}")
-    
+
     async def shutdown(self):
         """Clean shutdown of all components."""
         logger.info("Shutting down Slack MCP server...")
-        
+
         if self._manager:
             await self._manager.stop()
-        
+
         logger.info("Shutdown complete")
-    
+
     def setup_signal_handlers(self):
         """Set up graceful shutdown signal handlers."""
+
         def signal_handler(signum, frame):
             logger.info(f"Received signal {signum}, initiating shutdown...")
             self._shutdown_event.set()
-        
+
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
-    
+
     async def run_stdio(self):
         """Run in MCP stdio mode (for AI integrations)."""
         await self.setup()
-        
+
         try:
             await self.server.run_stdio_async()
         finally:
             await self.shutdown()
-    
+
     async def run_durable(self):
         """
         Run as a durable background process.
-        
+
         This mode is for running the listener continuously
         (e.g., via systemd or pm2) with the MCP server available.
         """
         await self.setup()
         self.setup_signal_handlers()
-        
+
         logger.info("Running in durable mode - waiting for shutdown signal")
-        
+
         try:
             # Wait for shutdown signal
             await self._shutdown_event.wait()
@@ -190,7 +189,7 @@ Examples:
   python -m src.server --durable --auto-start
         """,
     )
-    
+
     parser.add_argument(
         "--auto-start",
         action="store_true",
@@ -206,15 +205,15 @@ Examples:
         action="store_true",
         help="Enable debug logging",
     )
-    
+
     args = parser.parse_args()
-    
+
     setup_logging(debug=args.debug)
-    
+
     server = SlackMCPServer(
         auto_start_listener=args.auto_start,
     )
-    
+
     try:
         if args.durable:
             asyncio.run(server.run_durable())
@@ -229,8 +228,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-
-
-
-
-

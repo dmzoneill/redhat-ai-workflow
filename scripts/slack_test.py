@@ -26,33 +26,33 @@ async def main():
     config = load_config()
     slack_config = config.get("slack", {})
     auth = slack_config.get("auth", {})
-    
+
     # Check required config
     xoxc_token = auth.get("xoxc_token", "")
     d_cookie = auth.get("d_cookie", "")
     workspace_id = auth.get("workspace_id", "")
     self_user_id = slack_config.get("listener", {}).get("self_user_id", "")
-    
+
     if not xoxc_token or not d_cookie:
         print("❌ Missing xoxc_token or d_cookie in config.json")
         sys.exit(1)
-    
+
     if not self_user_id:
         print("❌ Missing self_user_id in config.json")
         sys.exit(1)
-    
+
     print("🔧 Creating Slack session...")
     print(f"   Workspace: {workspace_id}")
     print(f"   User ID: {self_user_id}")
     print(f"   Token: {xoxc_token[:20]}...")
     print()
-    
+
     session = SlackSession(
         xoxc_token=xoxc_token,
         d_cookie=d_cookie,
         workspace_id=workspace_id,
     )
-    
+
     try:
         # Test 1: Validate session
         print("📋 Test 1: Validating session...")
@@ -63,7 +63,7 @@ async def main():
             print("   ❌ Session is invalid - check your tokens")
             sys.exit(1)
         print()
-        
+
         # Test 2: Get user info
         print("📋 Test 2: Getting your user info...")
         try:
@@ -80,7 +80,7 @@ async def main():
             print(f"   ⚠️  Exception: {e}")
             print(f"      (This is OK - we can still try sending messages)")
         print()
-        
+
         # Test 3: Open DM and send message to self
         print("📋 Test 3: Opening DM channel to yourself...")
         try:
@@ -89,7 +89,7 @@ async def main():
         except Exception as e:
             print(f"   ❌ Failed to open DM: {e}")
             return
-        
+
         print("📋 Test 4: Sending test message...")
         message = "🤖 *Smoke Test* - Your AI Workflow Slack integration is working! 🎉"
         result = await session.send_message(
@@ -97,7 +97,7 @@ async def main():
             text=message,
             typing_delay=False,  # Skip delay for test
         )
-        
+
         if result.get("ok"):
             print("   ✅ Message sent successfully!")
             print(f"      Channel: {result.get('channel')}")
@@ -110,7 +110,7 @@ async def main():
                 print("      → Your tokens may have expired. Get fresh ones from browser.")
             elif result.get("error") == "channel_not_found":
                 print("      → Could not open DM. Try sending to a channel instead.")
-        
+
     finally:
         await session.close()
 
@@ -121,4 +121,3 @@ if __name__ == "__main__":
     print("=" * 60)
     print()
     asyncio.run(main())
-

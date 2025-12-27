@@ -6,13 +6,13 @@ Tools are loaded as plugins and registered with the shared server instance.
 Usage:
     # Run with specific tools:
     python -m src.server --tools git,jira,gitlab
-    
+
     # Run all tools (may exceed tool limits!):
     python -m src.server --all
-    
+
     # Run with an agent config (recommended - stays under tool limits):
     python -m src.server --agent devops
-    
+
     # Run with web UI:
     python -m src.server --tools git,jira --web --port 8765
 """
@@ -21,21 +21,21 @@ import argparse
 import asyncio
 import importlib
 import logging
-import sys
-from typing import Callable
-
-from mcp.server.fastmcp import FastMCP
 
 # Base directory for tool modules
 import sys
 from pathlib import Path
+from typing import Callable
+
+from mcp.server.fastmcp import FastMCP
+
 SERVERS_DIR = Path(__file__).parent.parent.parent
 PROJECT_DIR = SERVERS_DIR.parent  # ai-workflow root
 
 # Available tool modules - we'll load them dynamically
 TOOL_MODULES = {
     "git": 15,
-    "jira": 24, 
+    "jira": 24,
     "gitlab": 35,
     "k8s": 26,
     "prometheus": 13,
@@ -49,14 +49,16 @@ TOOL_MODULES = {
     "slack": 16,  # +1 for slack_dm_gitlab_user
 }
 
+
 def load_agent_config(agent_name: str) -> list[str] | None:
     """Load tool modules from an agent config file."""
     agent_file = PROJECT_DIR / "agents" / f"{agent_name}.yaml"
     if not agent_file.exists():
         return None
-    
+
     try:
         import yaml
+
         with open(agent_file) as f:
             config = yaml.safe_load(f)
         return config.get("tools", [])
@@ -69,14 +71,15 @@ def get_tool_module(name: str):
     module_dir = SERVERS_DIR / f"aa-{name}"
     if not module_dir.exists():
         return None
-    
+
     # Add to path if needed
     src_path = str(module_dir)
     if src_path not in sys.path:
         sys.path.insert(0, src_path)
-    
+
     # Import the tools module
     from importlib import import_module
+
     try:
         return import_module("src.tools")
     except ImportError:
@@ -105,70 +108,71 @@ def create_mcp_server(
 ) -> FastMCP:
     """
     Create and configure an MCP server with the specified tools.
-    
+
     Args:
         name: Server name for identification
         tools: List of tool module names to load (e.g., ["git", "jira"])
                If None, loads all available tools
-    
+
     Returns:
         Configured FastMCP server instance
     """
     logger = logging.getLogger(__name__)
     server = FastMCP(name)
-    
+
     # Determine which tools to load
     if tools is None:
         tools = list(TOOL_MODULES.keys())
-    
+
     # Calculate estimated tool count
     estimated = sum(TOOL_MODULES.get(t, 0) for t in tools)
     if estimated > 128:
         logger.warning(f"Loading ~{estimated} tools, may exceed Cursor's limit of 128!")
-    
+
     loaded_modules = []
-    
+
     for tool_name in tools:
         if tool_name not in TOOL_MODULES:
-            logger.warning(f"Unknown tool module: {tool_name}. Available: {list(TOOL_MODULES.keys())}")
+            logger.warning(
+                f"Unknown tool module: {tool_name}. Available: {list(TOOL_MODULES.keys())}"
+            )
             continue
-        
+
         try:
             # Load the module using importlib.util.spec_from_file_location
             module_dir = SERVERS_DIR / f"aa-{tool_name}"
             tools_file = module_dir / "src" / "tools.py"
-            
+
             if not tools_file.exists():
                 logger.warning(f"Tools file not found: {tools_file}")
                 continue
-            
+
             import importlib.util
-            spec = importlib.util.spec_from_file_location(
-                f"aa_{tool_name}_tools",
-                tools_file
-            )
+
+            spec = importlib.util.spec_from_file_location(f"aa_{tool_name}_tools", tools_file)
             if spec is None or spec.loader is None:
                 logger.warning(f"Could not create spec for {tool_name}")
                 continue
-            
+
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            
+
             if hasattr(module, "register_tools"):
                 count = module.register_tools(server)
                 loaded_modules.append(tool_name)
                 logger.info(f"Loaded {tool_name} tools")
             else:
                 logger.warning(f"Module aa-{tool_name} has no register_tools function")
-                
+
         except Exception as e:
             logger.error(f"Error loading {tool_name}: {e}")
-    
+
     # Register debug_tool and wrap all tools with auto-fix hints
     try:
         from .debuggable import register_debug_tool, wrap_all_tools, wrap_server_tools_runtime
+
         register_debug_tool(server)
-        
+
         # Register all loaded tools in the debug registry (for source lookup)
         for tool_name in loaded_modules:
             module_dir = SERVERS_DIR / f"aa-{tool_name}"
@@ -176,30 +180,31 @@ def create_mcp_server(
             if tools_file.exists():
                 # Import and register in debug registry
                 import importlib.util
+
                 spec = importlib.util.spec_from_file_location(
-                    f"aa_{tool_name}_tools_debug",
-                    tools_file
+                    f"aa_{tool_name}_tools_debug", tools_file
                 )
                 if spec and spec.loader:
                     module = importlib.util.module_from_spec(spec)
                     wrap_all_tools(server, module)
-        
+
         # Wrap all tools at runtime to add debug hints on failure
         wrapped_count = wrap_server_tools_runtime(server)
-        
+
         logger.info(f"Registered debug_tool and wrapped {wrapped_count} tools for auto-fixing")
     except Exception as e:
         logger.warning(f"Could not register debug_tool: {e}")
-    
+
     # Initialize dynamic agent loader
     try:
         from .agent_loader import init_loader
+
         loader = init_loader(server)
         loader.loaded_modules = set(loaded_modules)
         logger.info("Initialized dynamic agent loader")
     except Exception as e:
         logger.warning(f"Could not initialize agent loader: {e}")
-    
+
     logger.info(f"Server ready with tools from {len(loaded_modules)} modules: {loaded_modules}")
     return server
 
@@ -214,14 +219,15 @@ async def run_mcp_server(server: FastMCP):
 def run_web_server(server: FastMCP, host: str = "127.0.0.1", port: int = 8765):
     """Run the web UI server for configuration and testing."""
     import uvicorn
+
     from .web import create_app
-    
+
     logger = logging.getLogger(__name__)
-    
+
     app = create_app(server)
-    
+
     logger.info(f"Starting Web UI at http://{host}:{port}")
-    
+
     uvicorn.run(
         app,
         host=host,
@@ -287,13 +293,13 @@ Examples:
         default="",
         help="Server name (default: based on agent or 'aa-workflow')",
     )
-    
+
     args = parser.parse_args()
     logger = setup_logging(web_mode=args.web)
-    
+
     # Determine tools to load
     dynamic_mode = False
-    
+
     if args.agent:
         # Load from agent config
         tools = load_agent_config(args.agent)
@@ -317,10 +323,10 @@ Examples:
         server_name = args.name or "aa-workflow"
         dynamic_mode = True
         logger.info("Starting in dynamic mode - use agent_load() to switch agents")
-    
+
     try:
         server = create_mcp_server(name=server_name, tools=tools)
-        
+
         if args.web:
             run_web_server(server, host=args.host, port=args.port)
         else:
@@ -334,4 +340,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-

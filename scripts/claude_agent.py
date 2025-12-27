@@ -39,6 +39,7 @@ except ImportError:
 
 try:
     from config.context_resolver import ContextResolver, ResolvedContext
+
     RESOLVER_AVAILABLE = True
 except ImportError:
     RESOLVER_AVAILABLE = False
@@ -47,6 +48,7 @@ except ImportError:
 
 try:
     from scripts.skill_hooks import SkillHooks
+
     HOOKS_AVAILABLE = True
 except ImportError:
     HOOKS_AVAILABLE = False
@@ -520,7 +522,7 @@ Works for both open and merged MRs.""",
 class ToolExecutor:
     """
     Executes tools by calling the appropriate CLI commands or MCP tools.
-    
+
     Uses ContextResolver to determine repo paths from URLs and issue keys.
     Uses SkillHooks to emit event notifications (DMs to PR authors, team updates).
     """
@@ -528,7 +530,7 @@ class ToolExecutor:
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.rh_issue = os.getenv("RH_ISSUE_CLI", "rh-issue")
-        
+
         # Initialize context resolver for repo path lookups
         self.resolver: Optional[ContextResolver] = None
         if RESOLVER_AVAILABLE:
@@ -537,7 +539,7 @@ class ToolExecutor:
                 logger.info(f"Context resolver loaded with {len(self.resolver.repos)} repositories")
             except Exception as e:
                 logger.warning(f"Failed to load context resolver: {e}")
-        
+
         # Initialize skill hooks for event notifications
         self.hooks: Optional[SkillHooks] = None
         if HOOKS_AVAILABLE:
@@ -571,9 +573,13 @@ class ToolExecutor:
                 return f"Unknown tool: {tool_name}"
         except Exception as e:
             logger.error(f"Tool execution error for {tool_name}: {e}", exc_info=True)
-            return f"The {tool_name} tool is currently unavailable. Please try a different approach."
+            return (
+                f"The {tool_name} tool is currently unavailable. Please try a different approach."
+            )
 
-    async def _run_command(self, cmd: list[str], cwd: str | None = None, env: dict | None = None) -> str:
+    async def _run_command(
+        self, cmd: list[str], cwd: str | None = None, env: dict | None = None
+    ) -> str:
         """Run a shell command and return output."""
         try:
             run_env = os.environ.copy()
@@ -617,22 +623,22 @@ class ToolExecutor:
     async def _execute_gitlab(self, tool_name: str, args: dict) -> str:
         """
         Execute GitLab tools.
-        
+
         Uses ContextResolver to:
         - Parse GitLab URLs to extract project and MR ID
         - Resolve GitLab project paths to local directories
         - Run glab from the correct local repo directory
-        
+
         This ensures glab has proper git remote context.
         """
         import re
-        
+
         # Get URL or MR input
         mr_input = args.get("mr_id", "") or args.get("url", "")
         project = args.get("repo", args.get("project", ""))
         mr_id = ""
         local_repo_path = None
-        
+
         # Use context resolver if available
         if self.resolver and mr_input:
             ctx = self.resolver.from_message(mr_input)
@@ -643,23 +649,23 @@ class ToolExecutor:
             if ctx.repo_path:
                 local_repo_path = ctx.repo_path
                 logger.info(f"Resolved GitLab project to local path: {local_repo_path}")
-        
+
         # Fallback: manual URL parsing
         if not project or not mr_id:
-            url_match = re.match(r'https?://[^/]+/(.+?)/-/merge_requests/(\d+)', mr_input)
+            url_match = re.match(r"https?://[^/]+/(.+?)/-/merge_requests/(\d+)", mr_input)
             if url_match:
                 project = project or url_match.group(1)
                 mr_id = mr_id or url_match.group(2)
             else:
                 mr_id = mr_id or mr_input.lstrip("!").strip()
-        
+
         # Try to resolve local path from project if we don't have it yet
         if not local_repo_path and project and self.resolver:
             local_repo_path = self.resolver.get_repo_path(project)
-        
+
         if not project:
             return "Project/repo is required. Provide a full GitLab URL or specify the project."
-        
+
         # Determine how to run glab
         if local_repo_path and Path(local_repo_path).exists():
             # Run from local repo directory (preferred - uses git remotes)
@@ -671,7 +677,7 @@ class ToolExecutor:
             run_cwd = None
             use_repo_flag = True
             logger.info(f"Running glab with --repo flag: {project}")
-        
+
         if tool_name == "gitlab_mr_view":
             if not mr_id:
                 return "MR ID is required for gitlab_mr_view"
@@ -679,7 +685,7 @@ class ToolExecutor:
             if use_repo_flag:
                 cmd.extend(["--repo", project])
             return await self._run_command(cmd, cwd=run_cwd)
-        
+
         elif tool_name == "gitlab_mr_list":
             cmd = ["glab", "mr", "list"]
             if args.get("author"):
@@ -688,13 +694,13 @@ class ToolExecutor:
             if use_repo_flag:
                 cmd.extend(["--repo", project])
             return await self._run_command(cmd, cwd=run_cwd)
-        
+
         elif tool_name == "gitlab_pipeline_status":
             cmd = ["glab", "ci", "status"]
             if use_repo_flag:
                 cmd.extend(["--repo", project])
             return await self._run_command(cmd, cwd=run_cwd)
-        
+
         elif tool_name == "gitlab_mr_approve":
             if not mr_id:
                 return "MR ID is required for gitlab_mr_approve"
@@ -702,17 +708,20 @@ class ToolExecutor:
             if use_repo_flag:
                 cmd.extend(["--repo", project])
             result = await self._run_command(cmd, cwd=run_cwd)
-            
+
             # Emit approval event
             if self.hooks and "error" not in result.lower():
-                await self.hooks.emit("review_approved", {
-                    "mr_id": mr_id,
-                    "author": args.get("author", ""),
-                    "project": project,
-                    "target_branch": args.get("target_branch", "main")
-                })
+                await self.hooks.emit(
+                    "review_approved",
+                    {
+                        "mr_id": mr_id,
+                        "author": args.get("author", ""),
+                        "project": project,
+                        "target_branch": args.get("target_branch", "main"),
+                    },
+                )
             return result
-        
+
         elif tool_name == "gitlab_mr_comment":
             if not mr_id:
                 return "MR ID is required for gitlab_mr_comment"
@@ -723,16 +732,15 @@ class ToolExecutor:
             if use_repo_flag:
                 cmd.extend(["--repo", project])
             result = await self._run_command(cmd, cwd=run_cwd)
-            
+
             # Emit comment event
             if self.hooks and "error" not in result.lower():
-                await self.hooks.emit("review_comment", {
-                    "mr_id": mr_id,
-                    "author": args.get("author", ""),
-                    "project": project
-                })
+                await self.hooks.emit(
+                    "review_comment",
+                    {"mr_id": mr_id, "author": args.get("author", ""), "project": project},
+                )
             return result
-        
+
         elif tool_name == "gitlab_mr_merge":
             if not mr_id:
                 return "MR ID is required for gitlab_mr_merge"
@@ -742,27 +750,30 @@ class ToolExecutor:
             if use_repo_flag:
                 cmd.extend(["--repo", project])
             result = await self._run_command(cmd, cwd=run_cwd)
-            
+
             # Emit merge event
             if self.hooks and "error" not in result.lower():
-                await self.hooks.emit("mr_merged", {
-                    "mr_id": mr_id,
-                    "author": args.get("author", ""),
-                    "project": project,
-                    "target_branch": args.get("target_branch", "main")
-                })
+                await self.hooks.emit(
+                    "mr_merged",
+                    {
+                        "mr_id": mr_id,
+                        "author": args.get("author", ""),
+                        "project": project,
+                        "target_branch": args.get("target_branch", "main"),
+                    },
+                )
             return result
-        
+
         return f"Unknown GitLab tool: {tool_name}"
 
     async def _execute_git(self, tool_name: str, args: dict) -> str:
         """
         Execute Git tools.
-        
+
         Uses ContextResolver to resolve repo paths from issue keys or repo names.
         """
         repo_path = args.get("repo_path", "")
-        
+
         # Try to resolve repo path from context if not provided
         if not repo_path and self.resolver:
             # Check for issue key in args that might hint at repo
@@ -772,18 +783,18 @@ class ToolExecutor:
                 if ctx.repo_path:
                     repo_path = ctx.repo_path
                     logger.info(f"Resolved git repo from issue key: {repo_path}")
-            
+
             # Check for repo name
             repo_name = args.get("repo_name", "")
             if repo_name and not repo_path:
                 ctx = self.resolver.from_repo_name(repo_name)
                 if ctx.repo_path:
                     repo_path = ctx.repo_path
-        
+
         # Default to project root if still no path
         if not repo_path:
             repo_path = str(self.project_root)
-        
+
         # Validate path exists
         if not Path(repo_path).exists():
             return f"Repository path not found: {repo_path}"
@@ -798,10 +809,15 @@ class ToolExecutor:
     def _get_kubeconfig(self, environment: str) -> str:
         """Get kubeconfig path for environment."""
         env_map = {
-            "stage": "config.s", "s": "config.s",
-            "production": "config.p", "prod": "config.p", "p": "config.p",
-            "ephemeral": "config.e", "e": "config.e",
-            "appsre-pipelines": "config.ap", "ap": "config.ap",
+            "stage": "config.s",
+            "s": "config.s",
+            "production": "config.p",
+            "prod": "config.p",
+            "p": "config.p",
+            "ephemeral": "config.e",
+            "e": "config.e",
+            "appsre-pipelines": "config.ap",
+            "ap": "config.ap",
         }
         config_name = env_map.get(environment.lower(), f"config.{environment}")
         return str(Path.home() / ".kube" / config_name)
@@ -810,11 +826,11 @@ class ToolExecutor:
         """Execute Kubernetes tools via kubectl."""
         namespace = args.get("namespace", "")
         environment = args.get("environment", "stage")
-        
+
         # Detect ephemeral namespace
         if namespace.startswith("ephemeral-") or namespace.startswith("tower-analytics-pr-"):
             environment = "ephemeral"
-        
+
         kubeconfig = self._get_kubeconfig(environment)
         env = {"KUBECONFIG": kubeconfig}
 
@@ -842,79 +858,86 @@ class ToolExecutor:
     async def _execute_bonfire(self, tool_name: str, args: dict) -> str:
         """
         Execute bonfire tools for ephemeral namespace management.
-        
+
         ALWAYS uses KUBECONFIG=~/.kube/config.e for ephemeral cluster.
         Uses the exact ITS deploy pattern for AA deployments.
         """
         env = self._get_bonfire_env()
-        
+
         if tool_name == "bonfire_namespace_reserve":
             duration = args.get("duration", "2h")
             cmd = [
-                "bonfire", "namespace", "reserve",
-                "--duration", duration,
-                "--pool", "default",
-                "--timeout", "600",
+                "bonfire",
+                "namespace",
+                "reserve",
+                "--duration",
+                duration,
+                "--pool",
+                "default",
+                "--timeout",
+                "600",
                 "--force",
             ]
             return await self._run_command(cmd, env=env)
-        
+
         elif tool_name == "bonfire_namespace_list":
             mine_only = args.get("mine_only", True)
             cmd = ["bonfire", "namespace", "list"]
             if mine_only:
                 cmd.append("--mine")
             return await self._run_command(cmd, env=env)
-        
+
         elif tool_name == "bonfire_namespace_release":
             namespace = args.get("namespace", "")
             if not namespace:
                 return "Error: namespace is required"
-            
+
             # Safety: verify ownership first
             check_cmd = ["bonfire", "namespace", "list", "--mine"]
             check_result = await self._run_command(check_cmd, env=env)
-            
+
             if namespace not in check_result:
                 return f"Cannot release namespace '{namespace}' - not in your namespaces:\n{check_result}"
-            
+
             cmd = ["bonfire", "namespace", "release", namespace]
             return await self._run_command(cmd, env=env)
-        
+
         elif tool_name == "bonfire_deploy_aa":
             namespace = args.get("namespace", "")
             template_ref = args.get("template_ref", "")
             image_tag = args.get("image_tag", "")
             billing = args.get("billing", False)
-            
+
             # Validate required args
             if not all([namespace, template_ref, image_tag]):
                 return "Error: namespace, template_ref, and image_tag are all required"
-            
+
             # Validate template_ref is 40 chars
             if len(template_ref) != 40:
                 return f"Error: template_ref must be 40-char git SHA, got {len(template_ref)} chars"
-            
+
             # Strip sha256: prefix if present
             digest = image_tag
             if digest.startswith("sha256:"):
                 digest = digest[7:]
-            
+
             # Validate image_tag is 64 chars
             if len(digest) != 64:
                 return f"Error: image_tag must be 64-char sha256 digest, got {len(digest)} chars. Use quay_get_tag to get the digest."
-            
+
             # Select component and image
-            component = "tower-analytics-billing-clowdapp" if billing else "tower-analytics-clowdapp"
+            component = (
+                "tower-analytics-billing-clowdapp" if billing else "tower-analytics-clowdapp"
+            )
             image_base = "quay.io/redhat-user-workloads/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
             repository = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
-            
+
             # HARD STOP: Check if image exists in Quay before deploying
             logger.info(f"Checking if image exists: {image_base}:{template_ref}")
             image_ref = f"docker://quay.io/redhat-user-workloads/{repository}:{template_ref}"
             check_cmd = ["skopeo", "inspect", "--raw", image_ref]
             check_result = await self._run_command(check_cmd)
-            
+
             if "manifest unknown" in check_result.lower() or "error" in check_result.lower():
                 return f"""❌ **STOP: Image not found in Quay**
 
@@ -946,27 +969,38 @@ Got unexpected response when checking image:
 Please verify the image exists before proceeding."""
 
             logger.info(f"Image verified: {image_base}:{template_ref}")
-            
+
             # Build exact ITS command
             cmd = [
-                "bonfire", "deploy",
+                "bonfire",
+                "deploy",
                 "--source=appsre",
-                "--ref-env", "insights-production",
-                "--namespace", namespace,
-                "--timeout", "900",
-                "--optional-deps-method", "hybrid",
-                "--frontends", "false",
-                "--component", component,
-                "--no-remove-resources", "all",
-                "--set-template-ref", f"{component}={template_ref}",
-                "--set-parameter", f"{component}/IMAGE={image_base}@sha256",
-                "--set-parameter", f"{component}/IMAGE_TAG={digest}",
+                "--ref-env",
+                "insights-production",
+                "--namespace",
+                namespace,
+                "--timeout",
+                "900",
+                "--optional-deps-method",
+                "hybrid",
+                "--frontends",
+                "false",
+                "--component",
+                component,
+                "--no-remove-resources",
+                "all",
+                "--set-template-ref",
+                f"{component}={template_ref}",
+                "--set-parameter",
+                f"{component}/IMAGE={image_base}@sha256",
+                "--set-parameter",
+                f"{component}/IMAGE_TAG={digest}",
                 "tower-analytics",
             ]
-            
+
             logger.info(f"Bonfire deploy command: KUBECONFIG={env['KUBECONFIG']} {' '.join(cmd)}")
             return await self._run_command(cmd, env=env)
-        
+
         return f"Unknown bonfire tool: {tool_name}"
 
     async def _execute_quay(self, tool_name: str, args: dict) -> str:
@@ -974,44 +1008,45 @@ Please verify the image exists before proceeding."""
         if tool_name == "quay_get_tag":
             repository = args.get("repository", "")
             tag = args.get("tag", "")
-            
+
             if not repository or not tag:
                 return "Error: repository and tag are required"
-            
+
             # Use skopeo to inspect the image
             image_ref = f"docker://quay.io/redhat-user-workloads/{repository}:{tag}"
             cmd = ["skopeo", "inspect", image_ref]
-            
+
             result = await self._run_command(cmd)
-            
+
             if "manifest unknown" in result.lower() or "error" in result.lower():
                 return f"Image not found: {repository}:{tag}\n\nThe image may not be built yet. Check Konflux build status."
-            
+
             # Extract digest from result
             try:
                 import re
+
                 digest_match = re.search(r'"Digest":\s*"sha256:([a-f0-9]{64})"', result)
                 if digest_match:
                     digest = digest_match.group(1)
                     return f"Image found!\n\n**Tag:** {tag}\n**Manifest Digest:** sha256:{digest}\n\nUse the 64-char digest (without 'sha256:' prefix) as image_tag for bonfire_deploy_aa."
             except Exception:
                 pass
-            
+
             return f"Image exists but could not parse digest:\n{result[:500]}"
-        
+
         return f"Unknown Quay tool: {tool_name}"
 
     async def _execute_skill(self, args: dict) -> str:
         """
         Execute a workflow skill from YAML.
-        
+
         This is a simplified executor - it handles common skills inline
         using the available tools. For full skill YAML execution with
         all steps, use the aa-workflow MCP server.
         """
         skill_name = args.get("skill_name", "")
         inputs = args.get("inputs", {})
-        
+
         # Available skills and their descriptions
         available_skills = {
             "test_mr_ephemeral": "Deploy MR to ephemeral for testing",
@@ -1029,7 +1064,7 @@ Please verify the image exists before proceeding."""
             "review_all_prs": "Review all open PRs",
             "release_aa_backend_prod": "Release AA backend to prod",
         }
-        
+
         if skill_name not in available_skills:
             return f"Unknown skill: {skill_name}\n\nAvailable skills:\n" + "\n".join(
                 f"- {name}: {desc}" for name, desc in available_skills.items()
@@ -1038,11 +1073,11 @@ Please verify the image exists before proceeding."""
         # ===== test_mr_ephemeral =====
         if skill_name == "test_mr_ephemeral":
             return await self._skill_test_mr_ephemeral(inputs)
-        
+
         # ===== For other skills, provide guidance on what they need =====
         # These skills exist as YAML but need the full skill runner
         skill_file = f"skills/{skill_name}.yaml"
-        
+
         return f"""Skill `{skill_name}` exists but requires the full skill runner.
 
 **What it does:** {available_skills.get(skill_name, 'Unknown')}
@@ -1062,34 +1097,34 @@ Please verify the image exists before proceeding."""
         commit_sha = inputs.get("commit_sha")
         billing = inputs.get("billing", False)
         duration = inputs.get("duration", "2h")
-        
+
         if not mr_id and not commit_sha:
             return "Error: need either mr_id or commit_sha"
-        
+
         # Step 1: Get commit SHA from MR if needed
         if mr_id and not commit_sha:
             mr_cmd = ["glab", "api", f"projects/:id/merge_requests/{mr_id}"]
             mr_result = await self._run_command(mr_cmd)
-            
+
             try:
                 mr_data = json.loads(mr_result)
                 commit_sha = mr_data.get("sha", "")
                 mr_state = mr_data.get("state", "")
-                
+
                 # If MR is merged, use the merge commit SHA
                 if mr_state == "merged":
                     merge_sha = mr_data.get("merge_commit_sha", "")
                     if merge_sha:
                         commit_sha = merge_sha
                         logger.info(f"MR {mr_id} is merged, using merge commit: {commit_sha[:12]}")
-                
+
             except Exception as e:
-                sha_match = re.search(r'[a-f0-9]{40}', mr_result)
+                sha_match = re.search(r"[a-f0-9]{40}", mr_result)
                 if sha_match:
                     commit_sha = sha_match.group(0)
                 else:
                     return f"Could not get commit SHA from MR {mr_id}: {e}"
-        
+
         # Validate/expand commit_sha
         if len(commit_sha) != 40:
             expand_result = await self._run_command(["git", "rev-parse", commit_sha])
@@ -1097,46 +1132,55 @@ Please verify the image exists before proceeding."""
                 commit_sha = expand_result.strip()
             else:
                 return f"Invalid commit SHA: {commit_sha}. Need 40-char SHA."
-        
+
         # Step 2: Check if image exists in Quay
-        quay_result = await self._execute_quay("quay_get_tag", {
-            "repository": "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main",
-            "tag": commit_sha,
-        })
-        
+        quay_result = await self._execute_quay(
+            "quay_get_tag",
+            {
+                "repository": "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main",
+                "tag": commit_sha,
+            },
+        )
+
         if "not found" in quay_result.lower() or "error" in quay_result.lower():
             return f"""❌ Image not ready for commit {commit_sha[:12]}.
 
 The Konflux build may still be in progress. Check back in a few minutes.
 
 {quay_result}"""
-        
+
         # Extract digest
-        digest_match = re.search(r'sha256:([a-f0-9]{64})', quay_result)
+        digest_match = re.search(r"sha256:([a-f0-9]{64})", quay_result)
         if not digest_match:
             return f"Could not extract sha256 digest from Quay:\n{quay_result[:500]}"
-        
+
         image_digest = digest_match.group(1)
-        
+
         # Step 3: Reserve namespace
-        reserve_result = await self._execute_bonfire("bonfire_namespace_reserve", {
-            "duration": duration,
-        })
-        
-        ns_match = re.search(r'(ephemeral-[a-z0-9]+)', reserve_result.lower())
+        reserve_result = await self._execute_bonfire(
+            "bonfire_namespace_reserve",
+            {
+                "duration": duration,
+            },
+        )
+
+        ns_match = re.search(r"(ephemeral-[a-z0-9]+)", reserve_result.lower())
         if not ns_match:
             return f"Could not reserve namespace:\n{reserve_result}"
-        
+
         namespace = ns_match.group(1)
-        
+
         # Step 4: Deploy
-        deploy_result = await self._execute_bonfire("bonfire_deploy_aa", {
-            "namespace": namespace,
-            "template_ref": commit_sha,
-            "image_tag": image_digest,
-            "billing": billing,
-        })
-        
+        deploy_result = await self._execute_bonfire(
+            "bonfire_deploy_aa",
+            {
+                "namespace": namespace,
+                "template_ref": commit_sha,
+                "image_tag": image_digest,
+                "billing": billing,
+            },
+        )
+
         component = "billing" if billing else "main"
         return f"""## ✅ Ephemeral Deployment Complete
 
@@ -1198,7 +1242,9 @@ class ClaudeAgent:
             self.use_vertex = True
             # Use Vertex-compatible model name
             self.model = vertex_model
-            logger.info(f"Using Vertex AI: project={vertex_project}, region={vertex_region}, model={self.model}")
+            logger.info(
+                f"Using Vertex AI: project={vertex_project}, region={vertex_region}, model={self.model}"
+            )
         else:
             # Fall back to direct API
             api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -1276,7 +1322,7 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
         5. Return final response
         """
         messages = [{"role": "user", "content": message}]
-        
+
         # Extract repository context from the message
         resolved_ctx = None
         if RESOLVER_AVAILABLE:
@@ -1289,28 +1335,36 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
         # Build context string for Claude
         context_parts = []
         if context:
-            context_parts.append(f"User: {context.get('user_name', 'unknown')} in #{context.get('channel_name', 'unknown')}")
-            
+            context_parts.append(
+                f"User: {context.get('user_name', 'unknown')} in #{context.get('channel_name', 'unknown')}"
+            )
+
             # Add user classification for tone adjustment
-            user_category = context.get('user_category', 'unknown')
-            response_style = context.get('response_style', 'professional')
-            include_emojis = context.get('include_emojis', True)
-            
-            if user_category == 'concerned':
+            user_category = context.get("user_category", "unknown")
+            response_style = context.get("response_style", "professional")
+            include_emojis = context.get("include_emojis", True)
+
+            if user_category == "concerned":
                 # Manager/stakeholder - be formal and careful
-                context_parts.append("TONE: formal - this is a manager/stakeholder. be professional, clear, no typos, no casual slang. skip emojis.")
-            elif user_category == 'safe':
+                context_parts.append(
+                    "TONE: formal - this is a manager/stakeholder. be professional, clear, no typos, no casual slang. skip emojis."
+                )
+            elif user_category == "safe":
                 # Teammate - full casual mode
-                context_parts.append("TONE: casual - teammate, full irish dev mode, typos ok, emojis ok")
+                context_parts.append(
+                    "TONE: casual - teammate, full irish dev mode, typos ok, emojis ok"
+                )
             else:
                 # Unknown - balanced professional
                 emoji_note = "emojis ok" if include_emojis else "skip emojis"
                 context_parts.append(f"TONE: professional - clear and helpful, {emoji_note}")
-        
+
         # Add resolved repo context so Claude knows what repo we're dealing with
         if resolved_ctx and resolved_ctx.is_valid():
             if resolved_ctx.repo_path:
-                context_parts.append(f"Repository: {resolved_ctx.repo_name} at {resolved_ctx.repo_path}")
+                context_parts.append(
+                    f"Repository: {resolved_ctx.repo_name} at {resolved_ctx.repo_path}"
+                )
             if resolved_ctx.gitlab_project:
                 context_parts.append(f"GitLab: {resolved_ctx.gitlab_project}")
             if resolved_ctx.issue_key:
@@ -1321,7 +1375,7 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
             # Multiple repos match - tell Claude to ask
             repos = ", ".join(a["name"] for a in resolved_ctx.alternatives)
             context_parts.append(f"Ambiguous repo - matches: {repos}. Ask user which one.")
-        
+
         if context_parts:
             context_text = "Context: " + " | ".join(context_parts)
             messages[0]["content"] = f"{context_text}\n\nMessage: {message}"

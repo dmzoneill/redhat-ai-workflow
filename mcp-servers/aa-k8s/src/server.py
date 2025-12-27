@@ -11,8 +11,9 @@ from pathlib import Path
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.server import create_mcp_server, run_mcp_server, run_web_server, setup_logging
 import asyncio
+
+from src.server import create_mcp_server, run_mcp_server, run_web_server, setup_logging
 
 
 def main():

@@ -28,18 +28,18 @@ def get_project_root() -> Path:
 
 def load_config(reload: bool = False) -> dict:
     """Load config.json from project root.
-    
+
     Args:
         reload: Force reload from disk (default: use cache)
-    
+
     Returns:
         Parsed config dictionary
     """
     global _config_cache
-    
+
     if _config_cache is not None and not reload:
         return _config_cache
-    
+
     config_path = get_project_root() / "config.json"
     try:
         if config_path.exists():
@@ -48,17 +48,17 @@ def load_config(reload: bool = False) -> dict:
                 return _config_cache
     except Exception as e:
         logger.warning(f"Failed to load config.json: {e}")
-    
+
     return {}
 
 
 def get_section_config(section: str, default: dict | None = None) -> dict:
     """Get a specific section from config.json.
-    
+
     Args:
         section: Config section name (e.g., 'bonfire', 'prometheus')
         default: Default value if section not found
-    
+
     Returns:
         Config section dictionary
     """
@@ -67,6 +67,7 @@ def get_section_config(section: str, default: dict | None = None) -> dict:
 
 
 # ==================== Kubeconfig Handling ====================
+
 
 def _get_kube_base() -> Path:
     """Get kube config base directory from config.json or default."""
@@ -81,31 +82,39 @@ def _get_kube_base() -> Path:
 # Environment to kubeconfig suffix mapping
 KUBECONFIG_MAP = {
     # Stage
-    "stage": "s", "s": "s",
+    "stage": "s",
+    "s": "s",
     # Production
-    "production": "p", "prod": "p", "p": "p",
+    "production": "p",
+    "prod": "p",
+    "p": "p",
     # Ephemeral
-    "ephemeral": "e", "eph": "e", "e": "e",
+    "ephemeral": "e",
+    "eph": "e",
+    "e": "e",
     # App-SRE SaaS pipelines
-    "appsre-pipelines": "ap", "ap": "ap", "saas": "ap",
+    "appsre-pipelines": "ap",
+    "ap": "ap",
+    "saas": "ap",
     # Konflux
-    "konflux": "k", "k": "k",
+    "konflux": "k",
+    "k": "k",
 }
 
 
 def get_kubeconfig(environment: str, namespace: str = "") -> str:
     """Get kubeconfig path for environment.
-    
+
     Args:
         environment: Environment name (stage, production, ephemeral, etc.)
         namespace: Optional namespace (not used currently, for future)
-    
+
     Returns:
         Full path to kubeconfig file
     """
     # Try config.json first for custom paths
     config = load_config()
-    
+
     # Check namespaces section
     namespaces = config.get("namespaces", {})
     env_lower = environment.lower()
@@ -113,14 +122,14 @@ def get_kubeconfig(environment: str, namespace: str = "") -> str:
         kubeconfig = namespaces[env_lower].get("kubeconfig")
         if kubeconfig:
             return os.path.expanduser(kubeconfig)
-    
+
     # Check kubernetes.environments section
     k8s_envs = config.get("kubernetes", {}).get("environments", {})
     if env_lower in k8s_envs:
         kubeconfig = k8s_envs[env_lower].get("kubeconfig")
         if kubeconfig:
             return os.path.expanduser(kubeconfig)
-    
+
     # Fall back to standard mapping using kube_base from config
     kube_base = _get_kube_base()
     suffix = KUBECONFIG_MAP.get(env_lower, env_lower)
@@ -129,59 +138,60 @@ def get_kubeconfig(environment: str, namespace: str = "") -> str:
 
 def get_env_config(environment: str, service: str) -> dict:
     """Get environment-specific config for a service.
-    
+
     Args:
         environment: Environment name (stage, production)
         service: Service name (prometheus, alertmanager, kibana)
-    
+
     Returns:
         Environment config dictionary with url, kubeconfig, namespace, etc.
     """
     config = load_config()
     service_config = config.get(service, {})
     environments = service_config.get("environments", {})
-    
+
     # Normalize environment name
     env_key = environment.lower()
     if env_key == "prod":
         env_key = "production"
-    
+
     env_config = environments.get(env_key, {})
-    
+
     # Ensure kubeconfig is resolved
     if "kubeconfig" in env_config:
         env_config["kubeconfig"] = os.path.expanduser(env_config["kubeconfig"])
     else:
         env_config["kubeconfig"] = get_kubeconfig(environment)
-    
+
     return env_config
 
 
 # ==================== Repository Handling ====================
 
+
 def resolve_repo_path(repo: str) -> str:
     """Resolve repository name to full path.
-    
+
     Checks:
     1. If repo is already a valid path
     2. config.json repositories section
     3. Common source directories (~src, ~repos, ~projects)
-    
+
     Args:
         repo: Repository name or path
-    
+
     Returns:
         Full path to repository
     """
     # Already a valid path?
     if os.path.isdir(repo):
         return repo
-    
+
     # Expand user path
     expanded = os.path.expanduser(repo)
     if os.path.isdir(expanded):
         return expanded
-    
+
     # Check config.json repositories
     config = load_config()
     repositories = config.get("repositories", {})
@@ -191,48 +201,52 @@ def resolve_repo_path(repo: str) -> str:
             expanded_path = os.path.expanduser(path)
             if os.path.isdir(expanded_path):
                 return expanded_path
-    
+
     # Try workspace roots from config, then fall back to common directories
     paths_config = config.get("paths", {})
-    workspace_roots = paths_config.get("workspace_roots", [
-        str(Path.home() / "src"),
-        str(Path.home() / "repos"),
-        str(Path.home() / "projects"),
-    ])
+    workspace_roots = paths_config.get(
+        "workspace_roots",
+        [
+            str(Path.home() / "src"),
+            str(Path.home() / "repos"),
+            str(Path.home() / "projects"),
+        ],
+    )
     for base_path in workspace_roots:
         candidate = Path(os.path.expanduser(base_path)) / repo
         if candidate.exists():
             return str(candidate)
-    
+
     # Return as-is (may fail downstream, but that's expected)
     return repo
 
 
 def get_repo_config(repo: str) -> dict:
     """Get configuration for a repository.
-    
+
     Args:
         repo: Repository name or path
-    
+
     Returns:
         Repository config from config.json, or empty dict
     """
     config = load_config()
     repositories = config.get("repositories", {})
-    
+
     # Try exact match
     if repo in repositories:
         return repositories[repo]
-    
+
     # Try matching by path
     for name, repo_config in repositories.items():
         if repo_config.get("path", "").endswith(repo):
             return repo_config
-    
+
     return {}
 
 
 # ==================== Command Execution ====================
+
 
 async def run_cmd(
     cmd: list[str],
@@ -242,14 +256,14 @@ async def run_cmd(
     check: bool = False,
 ) -> tuple[bool, str]:
     """Run a command asynchronously (simple 2-tuple return).
-    
+
     Args:
         cmd: Command and arguments as list
         cwd: Working directory
         env: Environment variables (merged with current)
         timeout: Timeout in seconds
         check: Raise exception on non-zero exit
-    
+
     Returns:
         Tuple of (success, output) - stderr is merged with stdout on failure
     """
@@ -258,7 +272,7 @@ async def run_cmd(
         run_env = os.environ.copy()
         if env:
             run_env.update(env)
-        
+
         result = await asyncio.to_thread(
             subprocess.run,
             cmd,
@@ -268,14 +282,14 @@ async def run_cmd(
             cwd=cwd,
             env=run_env,
         )
-        
+
         output = result.stdout
         if result.returncode != 0:
             output = result.stderr or result.stdout or "Command failed"
             if check:
                 raise subprocess.CalledProcessError(result.returncode, cmd, output)
             return False, output
-        
+
         return True, output
     except subprocess.TimeoutExpired:
         return False, f"Command timed out after {timeout}s"
@@ -294,13 +308,13 @@ async def run_cmd_full(
     timeout: int = 300,
 ) -> tuple[bool, str, str]:
     """Run a command asynchronously (full 3-tuple return with separate stderr).
-    
+
     Args:
         cmd: Command and arguments as list
         cwd: Working directory
         env: Environment variables (merged with current)
         timeout: Timeout in seconds
-    
+
     Returns:
         Tuple of (success, stdout, stderr)
     """
@@ -309,7 +323,7 @@ async def run_cmd_full(
         run_env = os.environ.copy()
         if env:
             run_env.update(env)
-        
+
         result = await asyncio.to_thread(
             subprocess.run,
             cmd,
@@ -319,7 +333,7 @@ async def run_cmd_full(
             cwd=cwd,
             env=run_env,
         )
-        
+
         return result.returncode == 0, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
         return False, "", f"Command timed out after {timeout}s"
@@ -335,29 +349,29 @@ async def run_cmd_shell(
     timeout: int = 300,
 ) -> tuple[bool, str, str]:
     """Run a command through user's login shell for full environment access.
-    
+
     Use this for commands that need:
     - User's shell environment (~/.bashrc vars like JIRA_JPAT)
     - GUI access (DISPLAY, XAUTHORITY) for browser-based auth
     - Interactive terminal capabilities
-    
+
     Args:
         cmd: Command and arguments as list
         cwd: Working directory
         timeout: Timeout in seconds
-    
+
     Returns:
         Tuple of (success, stdout, stderr)
     """
     import shlex
-    
+
     # Build the command string with proper quoting
     cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
-    
+
     # Add cd if cwd is specified
     if cwd:
         cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
-    
+
     # Explicitly source shell config files to get all environment variables
     # and functions (like 'kube' for k8s auth)
     #
@@ -365,16 +379,16 @@ async def run_cmd_shell(
     # when running from MCP server, so we source bashrc.d scripts directly.
     home = Path.home()
     sources = []
-    
+
     bashrc = home / ".bashrc"
     if bashrc.exists():
         sources.append(f"source {bashrc} 2>/dev/null")
-    
+
     # Source the bashrc.d loader which loads all scripts.d/*.sh files
     bashrc_d_loader = home / ".bashrc.d" / "00-loader.sh"
     if bashrc_d_loader.exists():
         sources.append(f"source {bashrc_d_loader} 2>/dev/null")
-    
+
     # IMPORTANT: Also source all .sh files in bashrc.d root directly
     # These define functions like 'kube' for kubernetes auth
     # .bashrc conditionally loads these only for interactive+desktop sessions,
@@ -384,24 +398,24 @@ async def run_cmd_shell(
         for script in sorted(bashrc_d.glob("*.sh")):
             if script.name != "00-loader.sh":  # Already sourced above
                 sources.append(f"source {script} 2>/dev/null")
-    
+
     if sources:
         cmd_str = f"{'; '.join(sources)}; {cmd_str}"
-    
+
     shell_cmd = ["bash", "-c", cmd_str]
-    
+
     # Ensure critical environment variables are passed
     # This helps when running from MCP server context
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["USER"] = home.name
-    
+
     # CRITICAL: Clear virtualenv variables from MCP server's venv
     # This allows commands like rh-issue (which use pipenv) to work properly
     # Without this, pipenv gets confused by VIRTUAL_ENV from our project's venv
     for var in ["VIRTUAL_ENV", "PIPENV_ACTIVE", "PYTHONHOME"]:
         env.pop(var, None)
-    
+
     # Ensure user's bin is in PATH (and remove project venv paths)
     user_bin = str(home / "bin")
     # Filter out project venv paths from PATH
@@ -410,12 +424,12 @@ async def run_cmd_shell(
     if user_bin not in path_parts:
         path_parts.insert(0, user_bin)
     env["PATH"] = ":".join(path_parts)
-    
+
     # Pass through DISPLAY/XAUTHORITY for GUI apps
     for var in ["DISPLAY", "XAUTHORITY"]:
         if var in os.environ:
             env[var] = os.environ[var]
-    
+
     try:
         result = await asyncio.to_thread(
             subprocess.run,
@@ -425,7 +439,7 @@ async def run_cmd_shell(
             timeout=timeout,
             env=env,
         )
-        
+
         return result.returncode == 0, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
         return False, "", f"Command timed out after {timeout}s"
@@ -435,10 +449,10 @@ async def run_cmd_shell(
 
 def is_auth_error(output: str) -> bool:
     """Check if kubectl/oc error indicates auth failure.
-    
+
     Args:
         output: Error output from kubectl/oc
-    
+
     Returns:
         True if this is an authentication error
     """
@@ -459,10 +473,10 @@ def is_auth_error(output: str) -> bool:
 
 def get_auth_hint(environment: str) -> str:
     """Get auth hint for an environment.
-    
+
     Args:
         environment: Environment name (stage, production, ephemeral, konflux)
-    
+
     Returns:
         Hint message for fixing auth
     """
@@ -492,7 +506,7 @@ async def run_kubectl(
     auto_retry_auth: bool = False,
 ) -> tuple[bool, str]:
     """Run kubectl command with proper kubeconfig.
-    
+
     Args:
         args: kubectl arguments (e.g., ["get", "pods"])
         kubeconfig: Explicit kubeconfig path (preferred)
@@ -502,7 +516,7 @@ async def run_kubectl(
         auto_retry_auth: If True, attempt to re-auth on failure.
                         SAFETY: Only enabled for ephemeral cluster to prevent
                         account lockouts from retry loops on prod/stage.
-    
+
     Returns:
         Tuple of (success, output)
     """
@@ -525,19 +539,19 @@ async def run_kubectl(
             resolved_env = "ephemeral"
         elif kc_path.endswith(".k"):
             resolved_env = "konflux"
-    
+
     cmd = ["kubectl", f"--kubeconfig={kubeconfig}"]
     cmd.extend(args)
     if namespace:
         cmd.extend(["-n", namespace])
-    
+
     success, output = await run_cmd(cmd, timeout=timeout)
-    
+
     # Handle auth failures
     if not success and is_auth_error(output) and resolved_env:
         # SAFETY: Only auto-retry for ephemeral to prevent account lockouts
         is_ephemeral = resolved_env in ("ephemeral", "eph", "e")
-        
+
         if auto_retry_auth and is_ephemeral:
             # Try to re-authenticate for ephemeral cluster
             logger.info("Auth failed on ephemeral, attempting auto-login...")
@@ -552,12 +566,12 @@ async def run_kubectl(
                     output = f"{output}\n\n⚠️ Auto-login failed: {auth_stderr[:100]}"
             except Exception as e:
                 output = f"{output}\n\n⚠️ Auto-login error: {e}"
-        
+
         # Always add hint (even if auto-retry failed or wasn't attempted)
         if not success:
             hint = get_auth_hint(resolved_env)
             output = f"{output}\n\n{hint}"
-    
+
     return success, output
 
 
@@ -568,13 +582,13 @@ async def run_oc(
     timeout: int = 60,
 ) -> tuple[bool, str]:
     """Run oc command with proper kubeconfig.
-    
+
     Args:
         args: oc arguments
         environment: Environment for kubeconfig selection
         namespace: Kubernetes namespace
         timeout: Timeout in seconds
-    
+
     Returns:
         Tuple of (success, output)
     """
@@ -583,23 +597,27 @@ async def run_oc(
     cmd.extend(args)
     if namespace:
         cmd.extend(["-n", namespace])
-    
+
     return await run_cmd(cmd, timeout=timeout)
 
 
 # ==================== User Config ====================
 
+
 def get_user_config() -> dict:
     """Get user configuration from config.json.
-    
+
     Returns:
         User config with username, email, timezone, etc.
     """
-    return get_section_config("user", {
-        "username": os.getenv("USER", "unknown"),
-        "email": "",
-        "timezone": "UTC",
-    })
+    return get_section_config(
+        "user",
+        {
+            "username": os.getenv("USER", "unknown"),
+            "email": "",
+            "timezone": "UTC",
+        },
+    )
 
 
 def get_username() -> str:
@@ -610,62 +628,68 @@ def get_username() -> str:
 
 # ==================== Service URL Helpers ====================
 
+
 def get_service_url(service: str, environment: str) -> str:
     """Get URL for a service in an environment.
-    
+
     Args:
         service: Service name (prometheus, alertmanager, kibana)
         environment: Environment name (stage, production)
-    
+
     Returns:
         Service URL
-    
+
     Raises:
         ValueError: If URL not configured
     """
     env_config = get_env_config(environment, service)
     url = env_config.get("url", "")
-    
+
     if not url:
         # Try environment variable fallback
         env_var = f"{service.upper()}_{environment.upper()}_URL"
         url = os.getenv(env_var, "")
-    
+
     if not url:
         raise ValueError(
             f"{service.capitalize()} URL not configured for {environment}. "
             f"Set {service.upper()}_{environment.upper()}_URL or configure in config.json"
         )
-    
+
     return url
 
 
 async def get_bearer_token(kubeconfig: str) -> str | None:
     """Get bearer token from kubeconfig for API authentication.
-    
+
     Tries multiple methods:
     1. Extract from kubeconfig file directly (older clusters)
     2. Use 'oc whoami --show-token' (modern OpenShift SSO)
-    
+
     Args:
         kubeconfig: Path to kubeconfig file
-    
+
     Returns:
         Bearer token or None if not available
     """
     # Method 1: Try extracting from kubeconfig file
     try:
         cmd = [
-            "kubectl", "--kubeconfig", kubeconfig,
-            "config", "view", "--minify", "-o",
-            "jsonpath={.users[0].user.token}"
+            "kubectl",
+            "--kubeconfig",
+            kubeconfig,
+            "config",
+            "view",
+            "--minify",
+            "-o",
+            "jsonpath={.users[0].user.token}",
         ]
         success, output = await run_cmd(cmd, timeout=10)
         if success and output.strip():
             return output.strip()
     except Exception as e:
         logger.debug(f"Token not in kubeconfig: {e}")
-    
+
     # Method 2: Use oc whoami --show-token (works with SSO sessions)
     try:
         cmd = ["oc", "--kubeconfig", kubeconfig, "whoami", "--show-token"]
@@ -674,6 +698,5 @@ async def get_bearer_token(kubeconfig: str) -> str | None:
             return output.strip()
     except Exception as e:
         logger.warning(f"Failed to get token via oc whoami: {e}")
-    
-    return None
 
+    return None

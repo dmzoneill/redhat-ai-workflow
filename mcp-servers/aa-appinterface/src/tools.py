@@ -15,31 +15,33 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import run_cmd_full as run_cmd, load_config
+from src.utils import load_config
+from src.utils import run_cmd_full as run_cmd
 
 logger = logging.getLogger(__name__)
 
 
 # ==================== Configuration ====================
 
+
 def find_app_interface_path() -> str:
     """Find app-interface repository path."""
     config = load_config()
-    
+
     # Try app_interface section first
     app_interface = config.get("app_interface", {})
     if app_interface.get("path"):
         path = os.path.expanduser(app_interface["path"])
         if Path(path).exists():
             return path
-    
+
     # Try repositories section
     repos = config.get("repositories", {})
     if "app-interface" in repos:
         path = repos["app-interface"].get("path", "")
         if path and Path(os.path.expanduser(path)).exists():
             return os.path.expanduser(path)
-    
+
     # Try workspace_roots from paths section
     paths_cfg = config.get("paths", {})
     workspace_roots = paths_cfg.get("workspace_roots", [])
@@ -47,7 +49,7 @@ def find_app_interface_path() -> str:
         candidate = Path(os.path.expanduser(root)) / "app-interface"
         if candidate.exists():
             return str(candidate)
-    
+
     # Fallback to env var and common paths
     candidates = [
         Path(os.getenv("APP_INTERFACE_PATH", "")),
@@ -64,9 +66,10 @@ APP_INTERFACE_PATH = find_app_interface_path()
 
 # ==================== TOOLS ====================
 
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
-    
+
     @server.tool()
     async def appinterface_validate(path: str = "") -> list[TextContent]:
         """
@@ -86,9 +89,7 @@ def register_tools(server: "FastMCP") -> int:
 
         if (Path(repo_path) / "Makefile").exists():
             success, stdout, stderr = await run_cmd(
-                ["make", "bundle", "validate"],
-                cwd=repo_path,
-                timeout=600
+                ["make", "bundle", "validate"], cwd=repo_path, timeout=600
             )
 
             output = stdout + stderr
@@ -105,8 +106,7 @@ def register_tools(server: "FastMCP") -> int:
             lines.append("⚠️ No Makefile found, trying qontract-validator directly...")
 
             success, stdout, stderr = await run_cmd(
-                ["qontract-validator", "--only-errors"],
-                cwd=repo_path
+                ["qontract-validator", "--only-errors"], cwd=repo_path
             )
 
             if success:
@@ -116,7 +116,6 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append(f"```\n{stderr or stdout}\n```")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def appinterface_get_saas(
@@ -151,8 +150,7 @@ def register_tools(server: "FastMCP") -> int:
 
         if not matches:
             success, stdout, stderr = await run_cmd(
-                ["grep", "-rl", service_name, str(saas_dir), "--include=*.yml"],
-                cwd=repo_path
+                ["grep", "-rl", service_name, str(saas_dir), "--include=*.yml"], cwd=repo_path
             )
             if success and stdout:
                 for line in stdout.strip().split("\n")[:5]:
@@ -185,7 +183,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def appinterface_diff(path: str = "") -> list[TextContent]:
         """
@@ -203,10 +200,7 @@ def register_tools(server: "FastMCP") -> int:
 
         lines = ["## App-Interface Changes", ""]
 
-        success, stdout, stderr = await run_cmd(
-            ["git", "diff", "--stat"],
-            cwd=repo_path
-        )
+        success, stdout, stderr = await run_cmd(["git", "diff", "--stat"], cwd=repo_path)
 
         if success and stdout.strip():
             lines.append("### Modified Files")
@@ -218,8 +212,7 @@ def register_tools(server: "FastMCP") -> int:
             return [TextContent(type="text", text="\n".join(lines))]
 
         success, stdout, stderr = await run_cmd(
-            ["git", "diff", "--", "*.yml", "*.yaml"],
-            cwd=repo_path
+            ["git", "diff", "--", "*.yml", "*.yaml"], cwd=repo_path
         )
 
         if stdout.strip():
@@ -231,7 +224,6 @@ def register_tools(server: "FastMCP") -> int:
             lines.append("```")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def appinterface_resources(
@@ -255,14 +247,12 @@ def register_tools(server: "FastMCP") -> int:
         lines = [f"## Resources for `{namespace}`", ""]
 
         success, stdout, stderr = await run_cmd(
-            ["grep", "-rl", f"name: {namespace}", repo_path, "--include=*.yml"],
-            cwd=repo_path
+            ["grep", "-rl", f"name: {namespace}", repo_path, "--include=*.yml"], cwd=repo_path
         )
 
         if not success or not stdout.strip():
             success, stdout, stderr = await run_cmd(
-                ["grep", "-rl", namespace, repo_path, "--include=*.yml"],
-                cwd=repo_path
+                ["grep", "-rl", namespace, repo_path, "--include=*.yml"], cwd=repo_path
             )
 
         if success and stdout.strip():
@@ -286,11 +276,14 @@ def register_tools(server: "FastMCP") -> int:
                             lines.append(f"\n### Resources from `{Path(f).name}`")
 
                             import yaml
+
                             try:
                                 docs = list(yaml.safe_load_all(content))
                                 for doc in docs:
                                     if isinstance(doc, dict):
-                                        resources = doc.get("resourceTemplates", []) or doc.get("resources", [])
+                                        resources = doc.get("resourceTemplates", []) or doc.get(
+                                            "resources", []
+                                        )
                                         for r in resources[:10]:
                                             if isinstance(r, dict):
                                                 name = r.get("name", "unnamed")
@@ -303,7 +296,6 @@ def register_tools(server: "FastMCP") -> int:
             lines.append(f"No files found mentioning `{namespace}`")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def appinterface_search(
@@ -329,8 +321,7 @@ def register_tools(server: "FastMCP") -> int:
         lines = [f"## Search: `{query}`", ""]
 
         success, stdout, stderr = await run_cmd(
-            ["grep", "-rn", query, repo_path, f"--include=*.{file_type}", "-l"],
-            cwd=repo_path
+            ["grep", "-rn", query, repo_path, f"--include=*.{file_type}", "-l"], cwd=repo_path
         )
 
         if not success or not stdout.strip():
@@ -353,8 +344,7 @@ def register_tools(server: "FastMCP") -> int:
         lines.append("\n### Sample Matches")
 
         success, stdout, stderr = await run_cmd(
-            ["grep", "-rn", query, repo_path, f"--include=*.{file_type}", "-m", "3"],
-            cwd=repo_path
+            ["grep", "-rn", query, repo_path, f"--include=*.{file_type}", "-m", "3"], cwd=repo_path
         )
 
         if success and stdout:
@@ -364,7 +354,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def appinterface_get_user(
         username: str,
@@ -372,71 +361,72 @@ def register_tools(server: "FastMCP") -> int:
     ) -> list[TextContent]:
         """
         Get user information from app-interface.
-        
+
         Fetches user YAML from app-interface GitLab which contains:
         - Slack username
         - GitLab username
         - Red Hat email
         - Manager info
         - Roles and permissions
-        
+
         Args:
             username: GitLab/Kerberos username (e.g., 'bthomass', 'akarve')
             team: Team directory in app-interface (default: 'insights')
-        
+
         Returns:
             User information from app-interface.
         """
-        import yaml
-        import urllib.request
         import urllib.error
-        
+        import urllib.request
+
+        import yaml
+
         config = load_config()
-        
+
         # Get URL template from config or use default
         slack_config = config.get("slack", {})
         user_mapping_config = slack_config.get("user_mapping", {})
         url_template = user_mapping_config.get(
             "app_interface_url",
-            "https://gitlab.cee.redhat.com/service/app-interface/-/raw/master/data/teams/{team}/users/{user}.yml"
+            "https://gitlab.cee.redhat.com/service/app-interface/-/raw/master/data/teams/{team}/users/{user}.yml",
         )
-        
+
         url = url_template.format(team=team, user=username)
-        
+
         lines = [f"## User: `{username}`", ""]
-        
+
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=10) as response:
                 content = response.read().decode("utf-8")
-            
+
             data = yaml.safe_load(content)
-            
+
             if isinstance(data, dict):
                 lines.append("### Profile")
-                
+
                 name = data.get("name", username)
                 lines.append(f"- **Name:** {name}")
-                
+
                 if "org_username" in data:
                     lines.append(f"- **Kerberos:** {data['org_username']}")
-                
+
                 if "slack_username" in data:
                     lines.append(f"- **Slack:** @{data['slack_username']}")
-                
+
                 if "github_username" in data:
                     lines.append(f"- **GitHub:** @{data['github_username']}")
-                
+
                 if "redhat_email" in data or "mail" in data:
                     email = data.get("redhat_email") or data.get("mail")
                     lines.append(f"- **Email:** {email}")
-                
+
                 if "manager" in data:
                     manager_ref = data["manager"]
                     if isinstance(manager_ref, dict) and "$ref" in manager_ref:
                         manager_name = manager_ref["$ref"].split("/")[-1].replace(".yml", "")
                         lines.append(f"- **Manager:** {manager_name}")
-                
+
                 lines.append("")
                 lines.append("### Raw YAML")
                 lines.append("```yaml")
@@ -444,7 +434,7 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append("```")
             else:
                 lines.append(f"```yaml\n{content[:2000]}\n```")
-                
+
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 lines.append(f"⚠️ User `{username}` not found in team `{team}`")
@@ -455,7 +445,7 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append(f"❌ HTTP Error: {e.code} {e.reason}")
         except Exception as e:
             lines.append(f"❌ Error fetching user info: {e}")
-        
+
         return [TextContent(type="text", text="\n".join(lines))]
 
     @server.tool()
@@ -488,8 +478,7 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append(f"... and {len(clusters) - 30} more")
         else:
             success, stdout, stderr = await run_cmd(
-                ["grep", "-rl", "$schema.*cluster", repo_path, "--include=*.yml"],
-                cwd=repo_path
+                ["grep", "-rl", "$schema.*cluster", repo_path, "--include=*.yml"], cwd=repo_path
             )
 
             if success and stdout:
@@ -500,7 +489,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     # ==================== ENTRY POINT ====================
-    
-    return len([m for m in dir() if not m.startswith('_')])  # Approximate count
+
+    return len([m for m in dir() if not m.startswith("_")])  # Approximate count

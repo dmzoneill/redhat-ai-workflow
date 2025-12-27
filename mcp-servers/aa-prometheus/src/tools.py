@@ -18,7 +18,7 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_kubeconfig, load_config, get_service_url, get_bearer_token, get_env_config
+from src.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +36,19 @@ async def prometheus_api_request(
 ) -> tuple[bool, dict | str]:
     """Make a request to Prometheus API."""
     import httpx
-    
+
     full_url = f"{url.rstrip('/')}{endpoint}"
     headers = {"Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    
+
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             response = await client.get(full_url, headers=headers, params=params)
-            
+
             if response.status_code == 401:
                 return False, "Authentication required. Run: kube s (or kube p) to authenticate."
-            
+
             response.raise_for_status()
             return True, response.json()
     except Exception as e:
@@ -57,7 +57,7 @@ async def prometheus_api_request(
 
 async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
     """Get URL and token for Prometheus environment.
-    
+
     Uses shared utilities from aa-common for config loading.
     """
     url = get_service_url("prometheus", environment)
@@ -69,9 +69,10 @@ async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
 
 # ==================== INSTANT QUERIES ====================
 
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
-    
+
     @server.tool()
     async def prometheus_query(
         query: str,
@@ -95,7 +96,8 @@ def register_tools(server: "FastMCP") -> int:
         url, token = await get_prometheus_config(environment)
 
         success, result = await prometheus_api_request(
-            url, "/api/v1/query",
+            url,
+            "/api/v1/query",
             params={"query": query},
             token=token,
         )
@@ -114,7 +116,12 @@ def register_tools(server: "FastMCP") -> int:
         if not results:
             return [TextContent(type="text", text=f"No results for query: `{query}`")]
 
-        lines = [f"## Query: `{query}`", f"**Environment:** {environment}", f"**Type:** {result_type}", ""]
+        lines = [
+            f"## Query: `{query}`",
+            f"**Environment:** {environment}",
+            f"**Type:** {result_type}",
+            "",
+        ]
 
         for item in results[:50]:
             metric = item.get("metric", {})
@@ -130,7 +137,6 @@ def register_tools(server: "FastMCP") -> int:
             lines.append(f"\n... and {len(results) - 50} more results")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def prometheus_query_range(
@@ -183,7 +189,8 @@ def register_tools(server: "FastMCP") -> int:
         }
 
         success, result = await prometheus_api_request(
-            url, "/api/v1/query_range",
+            url,
+            "/api/v1/query_range",
             params=params,
             token=token,
         )
@@ -236,7 +243,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     # ==================== ALERTS ====================
 
     @server.tool()
@@ -261,7 +267,8 @@ def register_tools(server: "FastMCP") -> int:
         url, token = await get_prometheus_config(environment)
 
         success, result = await prometheus_api_request(
-            url, "/api/v1/alerts",
+            url,
+            "/api/v1/alerts",
             token=token,
         )
 
@@ -296,7 +303,12 @@ def register_tools(server: "FastMCP") -> int:
             if severity:
                 filters.append(f"severity={severity}")
             filter_str = ", ".join(filters) if filters else "none"
-            return [TextContent(type="text", text=f"✅ No alerts matching filters ({filter_str}) in {environment}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"✅ No alerts matching filters ({filter_str}) in {environment}",
+                )
+            ]
 
         firing = [a for a in filtered if a.get("state") == "firing"]
         pending = [a for a in filtered if a.get("state") == "pending"]
@@ -319,7 +331,12 @@ def register_tools(server: "FastMCP") -> int:
             icon = "🔴" if state == "firing" else "🟡"
             sev_icon = {"critical": "🚨", "warning": "⚠️", "info": "ℹ️"}.get(sev, "❓")
 
-            msg = annotations.get("message") or annotations.get("summary") or annotations.get("description") or ""
+            msg = (
+                annotations.get("message")
+                or annotations.get("summary")
+                or annotations.get("description")
+                or ""
+            )
             if len(msg) > 200:
                 msg = msg[:200] + "..."
 
@@ -339,7 +356,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def prometheus_get_alerts(
         environment: str = "stage",
@@ -356,7 +372,6 @@ def register_tools(server: "FastMCP") -> int:
             List of firing alerts.
         """
         return await prometheus_alerts(environment=environment, state="firing", namespace=namespace)
-
 
     @server.tool()
     async def prometheus_check_health(
@@ -395,9 +410,18 @@ def register_tools(server: "FastMCP") -> int:
             critical_alerts.append(alert)
 
         if not critical_alerts:
-            return [TextContent(type="text", text=f"## ✅ {namespace} is healthy\n\nNo critical or warning alerts in {environment}.")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"## ✅ {namespace} is healthy\n\nNo critical or warning alerts in {environment}.",
+                )
+            ]
 
-        lines = [f"## ⚠️ {namespace} has issues", f"Found {len(critical_alerts)} alert(s) in {environment}:", ""]
+        lines = [
+            f"## ⚠️ {namespace} has issues",
+            f"Found {len(critical_alerts)} alert(s) in {environment}:",
+            "",
+        ]
 
         for alert in critical_alerts:
             labels = alert.get("labels", {})
@@ -411,7 +435,6 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append(f"  {msg[:100]}")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def prometheus_pre_deploy_check(
@@ -433,13 +456,19 @@ def register_tools(server: "FastMCP") -> int:
             config_path = Path(__file__).parent.parent.parent.parent / "config.json"
             if config_path.exists():
                 import json
+
                 with open(config_path) as f:
                     config = json.load(f)
                 env_key = "production" if environment.lower() == "prod" else environment.lower()
-                namespace = config.get("prometheus", {}).get("environments", {}).get(env_key, {}).get("namespace", "")
+                namespace = (
+                    config.get("prometheus", {})
+                    .get("environments", {})
+                    .get(env_key, {})
+                    .get("namespace", "")
+                )
         except Exception:
             pass
-        
+
         if not namespace:
             namespace = os.getenv(f"K8S_NAMESPACE_{environment.upper()}", "default")
 
@@ -455,7 +484,6 @@ def register_tools(server: "FastMCP") -> int:
             text += "\n\n⚠️ **Recommendation:** Resolve these alerts before deploying."
 
         return [TextContent(type="text", text=text)]
-
 
     # ==================== RULES ====================
 
@@ -482,7 +510,9 @@ def register_tools(server: "FastMCP") -> int:
         if rule_type:
             params["type"] = rule_type
 
-        success, result = await prometheus_api_request(url, "/api/v1/rules", params=params, token=token)
+        success, result = await prometheus_api_request(
+            url, "/api/v1/rules", params=params, token=token
+        )
 
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to get rules: {result}")]
@@ -521,7 +551,6 @@ def register_tools(server: "FastMCP") -> int:
             lines.append("")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     # ==================== TARGETS ====================
 
@@ -590,7 +619,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     # ==================== METADATA ====================
 
     @server.tool()
@@ -626,7 +654,11 @@ def register_tools(server: "FastMCP") -> int:
         data = result.get("data", [])
 
         if label:
-            lines = [f"## Values for label `{label}` in {environment}", f"**Count:** {len(data)}", ""]
+            lines = [
+                f"## Values for label `{label}` in {environment}",
+                f"**Count:** {len(data)}",
+                "",
+            ]
         else:
             lines = [f"## Labels in {environment}", f"**Count:** {len(data)}", ""]
 
@@ -636,7 +668,6 @@ def register_tools(server: "FastMCP") -> int:
             lines.append(f"... and {len(data) - 100} more")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def prometheus_series(
@@ -658,7 +689,8 @@ def register_tools(server: "FastMCP") -> int:
         url, token = await get_prometheus_config(environment)
 
         success, result = await prometheus_api_request(
-            url, "/api/v1/series",
+            url,
+            "/api/v1/series",
             params={"match[]": match},
             token=token,
         )
@@ -685,7 +717,6 @@ def register_tools(server: "FastMCP") -> int:
             lines.append(f"... and {len(data) - limit} more")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     # ==================== COMMON QUERIES ====================
 
@@ -717,7 +748,8 @@ def register_tools(server: "FastMCP") -> int:
 
         for name, query in queries.items():
             success, result = await prometheus_api_request(
-                url, "/api/v1/query",
+                url,
+                "/api/v1/query",
                 params={"query": query},
                 token=token,
             )
@@ -750,7 +782,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def prometheus_error_rate(
         namespace: str,
@@ -770,14 +801,15 @@ def register_tools(server: "FastMCP") -> int:
         """
         url, token = await get_prometheus_config(environment)
 
-        query = f'''
+        query = f"""
             sum(rate(http_requests_total{{namespace="{namespace}",code=~"5.."}}[{window}])) by (code)
             /
             sum(rate(http_requests_total{{namespace="{namespace}"}}[{window}]))
-        '''
+        """
 
         success, result = await prometheus_api_request(
-            url, "/api/v1/query",
+            url,
+            "/api/v1/query",
             params={"query": query},
             token=token,
         )
@@ -817,7 +849,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def prometheus_pod_health(
         pod: str,
@@ -837,18 +868,35 @@ def register_tools(server: "FastMCP") -> int:
         """
         url, token = await get_prometheus_config(environment)
 
-        lines = [f"## Pod Health: `{pod}`", f"**Namespace:** {namespace} | **Environment:** {environment}", ""]
+        lines = [
+            f"## Pod Health: `{pod}`",
+            f"**Namespace:** {namespace} | **Environment:** {environment}",
+            "",
+        ]
 
         queries = [
-            ("CPU Usage", f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}",pod=~"{pod}.*"}}[5m]))'),
-            ("Memory (MB)", f'sum(container_memory_usage_bytes{{namespace="{namespace}",pod=~"{pod}.*"}}) / 1024 / 1024'),
-            ("Restarts", f'sum(kube_pod_container_status_restarts_total{{namespace="{namespace}",pod=~"{pod}.*"}})'),
-            ("Ready", f'kube_pod_status_ready{{namespace="{namespace}",pod=~"{pod}.*",condition="true"}}'),
+            (
+                "CPU Usage",
+                f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}",pod=~"{pod}.*"}}[5m]))',
+            ),
+            (
+                "Memory (MB)",
+                f'sum(container_memory_usage_bytes{{namespace="{namespace}",pod=~"{pod}.*"}}) / 1024 / 1024',
+            ),
+            (
+                "Restarts",
+                f'sum(kube_pod_container_status_restarts_total{{namespace="{namespace}",pod=~"{pod}.*"}})',
+            ),
+            (
+                "Ready",
+                f'kube_pod_status_ready{{namespace="{namespace}",pod=~"{pod}.*",condition="true"}}',
+            ),
         ]
 
         for name, query in queries:
             success, result = await prometheus_api_request(
-                url, "/api/v1/query",
+                url,
+                "/api/v1/query",
                 params={"query": query},
                 token=token,
             )
@@ -870,7 +918,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     # ==================== ENTRY POINT ====================
-    
-    return len([m for m in dir() if not m.startswith('_')])  # Approximate count
+
+    return len([m for m in dir() if not m.startswith("_")])  # Approximate count

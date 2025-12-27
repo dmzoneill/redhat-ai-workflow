@@ -21,7 +21,7 @@ from mcp.server.fastmcp import FastMCP
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import load_config, get_section_config, run_cmd
+from src.utils import get_section_config, load_config, run_cmd
 
 GITLAB_HOST = os.getenv("GITLAB_HOST", "gitlab.cee.redhat.com")
 
@@ -34,10 +34,10 @@ def _load_repo_config() -> dict[str, dict]:
 def _resolve_gitlab_to_local(gitlab_path: str) -> str | None:
     """
     Resolve a GitLab project path to a local directory.
-    
+
     Args:
         gitlab_path: e.g., "automation-analytics/automation-analytics-backend"
-    
+
     Returns:
         Local directory path or None if not found.
     """
@@ -53,47 +53,44 @@ def _resolve_gitlab_to_local(gitlab_path: str) -> str | None:
 def parse_gitlab_url(url_or_id: str) -> tuple[str | None, str | None]:
     """
     Parse a GitLab URL or MR reference to extract project and MR ID.
-    
+
     Args:
         url_or_id: Full URL, "!123", or just "123"
-    
+
     Returns:
         (project_path, mr_id) - either can be None
-    
+
     Examples:
         "https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/1449"
         -> ("automation-analytics/automation-analytics-backend", "1449")
-        
+
         "!1449" -> (None, "1449")
         "1449"  -> (None, "1449")
     """
     # Full URL pattern
-    url_match = re.match(r'https?://[^/]+/(.+?)/-/merge_requests/(\d+)', url_or_id)
+    url_match = re.match(r"https?://[^/]+/(.+?)/-/merge_requests/(\d+)", url_or_id)
     if url_match:
         return url_match.group(1), url_match.group(2)
-    
+
     # Issue URL pattern
-    issue_match = re.match(r'https?://[^/]+/(.+?)/-/issues/(\d+)', url_or_id)
+    issue_match = re.match(r"https?://[^/]+/(.+?)/-/issues/(\d+)", url_or_id)
     if issue_match:
         return issue_match.group(1), issue_match.group(2)
-    
+
     # Just an ID (with or without !)
     clean_id = url_or_id.lstrip("!").strip()
     if clean_id.isdigit():
         return None, clean_id
-    
+
     return None, None
 
 
 async def run_glab(
-    args: list[str], 
-    repo: str | None = None, 
-    cwd: str | None = None,
-    timeout: int = 60
+    args: list[str], repo: str | None = None, cwd: str | None = None, timeout: int = 60
 ) -> tuple[bool, str]:
     """
     Run glab command and return (success, output).
-    
+
     Args:
         args: glab command arguments
         repo: GitLab project path (used with --repo if no cwd)
@@ -101,7 +98,7 @@ async def run_glab(
         timeout: Command timeout in seconds
     """
     cmd = ["glab"] + args
-    
+
     # If we have a local directory, run from there (glab uses git remote)
     # Otherwise, use --repo flag
     run_cwd = None
@@ -114,19 +111,19 @@ async def run_glab(
             run_cwd = local_dir
         else:
             cmd.extend(["--repo", repo])
-    
+
     env = os.environ.copy()
     env["GITLAB_HOST"] = GITLAB_HOST
-    
+
     try:
         result = await asyncio.to_thread(
-            subprocess.run, 
-            cmd, 
-            capture_output=True, 
-            text=True, 
-            timeout=timeout, 
+            subprocess.run,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
             env=env,
-            cwd=run_cwd
+            cwd=run_cwd,
         )
         output = result.stdout
         if result.returncode != 0:
@@ -143,43 +140,51 @@ async def run_glab(
 
 # ==================== MERGE REQUESTS ====================
 
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
-    
+
     @server.tool()
     async def gitlab_view_url(url: str) -> str:
         """
         View a GitLab merge request or issue from a full URL.
-        
+
         This is the preferred way to view MRs/issues when given a URL.
         Automatically resolves the project and runs from the local repo directory.
-        
+
         Args:
             url: Full GitLab URL like https://gitlab.cee.redhat.com/org/repo/-/merge_requests/123
-        
+
         Returns:
             MR or issue details.
         """
         project, item_id = parse_gitlab_url(url)
         if not project or not item_id:
             return f"Could not parse URL: {url}"
-        
+
         # Determine if it's an MR or issue
         if "/merge_requests/" in url:
             success, output = await run_glab(["mr", "view", item_id, "--web=false"], repo=project)
         elif "/issues/" in url:
-            success, output = await run_glab(["issue", "view", item_id, "--web=false"], repo=project)
+            success, output = await run_glab(
+                ["issue", "view", item_id, "--web=false"], repo=project
+            )
         else:
             return f"Unknown URL type: {url}"
-        
+
         return output if success else f"Unable to access {url}"
-    
+
     @server.tool()
     async def gitlab_mr_list(
-        project: str, state: str = "opened", author: str = "", assignee: str = "", reviewer: str = "", label: str = ""
+        project: str,
+        state: str = "opened",
+        author: str = "",
+        assignee: str = "",
+        reviewer: str = "",
+        label: str = "",
     ) -> str:
         """List merge requests for a GitLab project.
-        
+
         Args:
             project: GitLab project path
             state: Filter by state - 'opened', 'closed', 'merged', or 'all'
@@ -197,14 +202,17 @@ def register_tools(server: "FastMCP") -> int:
         elif state == "all":
             args.append("--all")
         # "opened" is the default, no flag needed
-        
-        if author: args.extend(["--author", author])
-        if assignee: args.extend(["--assignee", assignee])
-        if reviewer: args.extend(["--reviewer", reviewer])
-        if label: args.extend(["--label", label])
+
+        if author:
+            args.extend(["--author", author])
+        if assignee:
+            args.extend(["--assignee", assignee])
+        if reviewer:
+            args.extend(["--reviewer", reviewer])
+        if label:
+            args.extend(["--label", label])
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_mr_view(project: str, mr_id: int) -> str:
@@ -212,45 +220,72 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_mr_create(
-        project: str, title: str = "", description: str = "", source_branch: str = "",
-        target_branch: str = "main", draft: bool = False, labels: str = "", assignee: str = "", reviewer: str = ""
+        project: str,
+        title: str = "",
+        description: str = "",
+        source_branch: str = "",
+        target_branch: str = "main",
+        draft: bool = False,
+        labels: str = "",
+        assignee: str = "",
+        reviewer: str = "",
     ) -> str:
         """Create a new merge request."""
         args = ["mr", "create", "--target-branch", target_branch]
-        if title: args.extend(["--title", title])
-        else: args.append("--fill")
-        if description: args.extend(["--description", description])
-        if source_branch: args.extend(["--source-branch", source_branch])
-        if draft: args.append("--draft")
-        if labels: args.extend(["--label", labels])
-        if assignee: args.extend(["--assignee", assignee])
-        if reviewer: args.extend(["--reviewer", reviewer])
+        if title:
+            args.extend(["--title", title])
+        else:
+            args.append("--fill")
+        if description:
+            args.extend(["--description", description])
+        if source_branch:
+            args.extend(["--source-branch", source_branch])
+        if draft:
+            args.append("--draft")
+        if labels:
+            args.extend(["--label", labels])
+        if assignee:
+            args.extend(["--assignee", assignee])
+        if reviewer:
+            args.extend(["--reviewer", reviewer])
         args.append("--yes")
         success, output = await run_glab(args, repo=project)
         return f"✅ MR Created\n\n{output}" if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_mr_update(
-        project: str, mr_id: int, title: str = "", description: str = "",
-        add_label: str = "", remove_label: str = "", assignee: str = "", reviewer: str = "", draft: bool | None = None
+        project: str,
+        mr_id: int,
+        title: str = "",
+        description: str = "",
+        add_label: str = "",
+        remove_label: str = "",
+        assignee: str = "",
+        reviewer: str = "",
+        draft: bool | None = None,
     ) -> str:
         """Update an existing merge request."""
         args = ["mr", "update", str(mr_id)]
-        if title: args.extend(["--title", title])
-        if description: args.extend(["--description", description])
-        if add_label: args.extend(["--label", add_label])
-        if remove_label: args.extend(["--unlabel", remove_label])
-        if assignee: args.extend(["--assignee", assignee])
-        if reviewer: args.extend(["--reviewer", reviewer])
-        if draft is True: args.append("--draft")
-        elif draft is False: args.append("--ready")
+        if title:
+            args.extend(["--title", title])
+        if description:
+            args.extend(["--description", description])
+        if add_label:
+            args.extend(["--label", add_label])
+        if remove_label:
+            args.extend(["--unlabel", remove_label])
+        if assignee:
+            args.extend(["--assignee", assignee])
+        if reviewer:
+            args.extend(["--reviewer", reviewer])
+        if draft is True:
+            args.append("--draft")
+        elif draft is False:
+            args.append("--ready")
         success, output = await run_glab(args, repo=project)
         return f"✅ MR !{mr_id} Updated\n\n{output}" if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_mr_approve(project: str, mr_id: int) -> str:
@@ -258,26 +293,30 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["mr", "approve", str(mr_id)], repo=project)
         return f"✅ MR !{mr_id} Approved" if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_mr_revoke(project: str, mr_id: int) -> str:
         """Revoke approval from a merge request."""
         success, output = await run_glab(["mr", "revoke", str(mr_id)], repo=project)
         return f"✅ Approval revoked from !{mr_id}" if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_mr_merge(
-        project: str, mr_id: int, squash: bool = False, remove_source_branch: bool = True, when_pipeline_succeeds: bool = True
+        project: str,
+        mr_id: int,
+        squash: bool = False,
+        remove_source_branch: bool = True,
+        when_pipeline_succeeds: bool = True,
     ) -> str:
         """Merge a merge request."""
         args = ["mr", "merge", str(mr_id), "--yes"]
-        if squash: args.append("--squash")
-        if remove_source_branch: args.append("--remove-source-branch")
-        if when_pipeline_succeeds: args.append("--when-pipeline-succeeds")
+        if squash:
+            args.append("--squash")
+        if remove_source_branch:
+            args.append("--remove-source-branch")
+        if when_pipeline_succeeds:
+            args.append("--when-pipeline-succeeds")
         success, output = await run_glab(args, repo=project)
         return f"✅ MR !{mr_id} Merged\n\n{output}" if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_mr_close(project: str, mr_id: int) -> str:
@@ -285,20 +324,19 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["mr", "close", str(mr_id)], repo=project)
         return f"✅ MR !{mr_id} Closed" if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_mr_reopen(project: str, mr_id: int) -> str:
         """Reopen a closed merge request."""
         success, output = await run_glab(["mr", "reopen", str(mr_id)], repo=project)
         return f"✅ MR !{mr_id} Reopened" if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_mr_comment(project: str, mr_id: int, message: str) -> str:
         """Add a comment to a merge request."""
-        success, output = await run_glab(["mr", "note", str(mr_id), "--message", message], repo=project)
+        success, output = await run_glab(
+            ["mr", "note", str(mr_id), "--message", message], repo=project
+        )
         return f"✅ Comment added to !{mr_id}" if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_mr_diff(project: str, mr_id: int) -> str:
@@ -310,13 +348,11 @@ def register_tools(server: "FastMCP") -> int:
             output = output[:10000] + "\n\n... (truncated)"
         return f"## Diff for !{mr_id}\n\n```diff\n{output}\n```"
 
-
     @server.tool()
     async def gitlab_mr_rebase(project: str, mr_id: int) -> str:
         """Rebase a merge request's source branch against target."""
         success, output = await run_glab(["mr", "rebase", str(mr_id)], repo=project)
         return f"✅ MR !{mr_id} Rebased" if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_mr_checkout(project: str, mr_id: int) -> str:
@@ -324,13 +360,11 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["mr", "checkout", str(mr_id)], repo=project)
         return f"✅ Checked out MR !{mr_id}\n\n{output}" if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_mr_approvers(project: str, mr_id: int) -> str:
         """List eligible approvers for a merge request."""
         success, output = await run_glab(["mr", "approvers", str(mr_id)], repo=project)
         return output if success else f"❌ Failed: {output}"
-
 
     # ==================== CI/CD PIPELINES ====================
 
@@ -338,40 +372,40 @@ def register_tools(server: "FastMCP") -> int:
     async def gitlab_ci_list(project: str, status: str = "", page: int = 1) -> str:
         """List CI/CD pipelines for a project."""
         args = ["ci", "list", "--page", str(page)]
-        if status: args.extend(["--status", status])
+        if status:
+            args.extend(["--status", status])
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_ci_status(project: str, branch: str = "") -> str:
         """Get the status of the latest pipeline on a branch."""
         args = ["ci", "status"]
-        if branch: args.extend(["--branch", branch])
+        if branch:
+            args.extend(["--branch", branch])
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_ci_view(project: str, branch: str = "") -> str:
         """View detailed pipeline information with all jobs."""
         args = ["ci", "view"]
-        if branch: args.append(branch)
+        if branch:
+            args.append(branch)
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_ci_run(project: str, branch: str = "", variables: str = "") -> str:
         """Trigger a new pipeline run."""
         args = ["ci", "run"]
-        if branch: args.extend(["--branch", branch])
+        if branch:
+            args.extend(["--branch", branch])
         if variables:
             for var in variables.split(","):
                 args.extend(["--variables", var.strip()])
         success, output = await run_glab(args, repo=project)
         return f"✅ Pipeline Started\n\n{output}" if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_ci_retry(project: str, job_id: int) -> str:
@@ -379,15 +413,14 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["ci", "retry", str(job_id)], repo=project)
         return f"✅ Job {job_id} Retried" if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_ci_cancel(project: str, pipeline_id: int = 0) -> str:
         """Cancel a running pipeline."""
         args = ["ci", "cancel"]
-        if pipeline_id > 0: args.append(str(pipeline_id))
+        if pipeline_id > 0:
+            args.append(str(pipeline_id))
         success, output = await run_glab(args, repo=project)
         return f"✅ Pipeline Cancelled" if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_ci_trace(project: str, job_id: int) -> str:
@@ -399,13 +432,11 @@ def register_tools(server: "FastMCP") -> int:
             output = "... (truncated)\n\n" + output[-15000:]
         return f"## Job {job_id} Log\n\n```\n{output}\n```"
 
-
     @server.tool()
     async def gitlab_ci_lint(project: str) -> str:
         """Lint/validate the .gitlab-ci.yml file."""
         success, output = await run_glab(["ci", "lint"], repo=project)
         return f"✅ CI Config Valid\n\n{output}" if success else f"❌ Lint failed:\n\n{output}"
-
 
     # ==================== REPOSITORY ====================
 
@@ -415,20 +446,20 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["repo", "view", "--web=false"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_repo_clone(project: str) -> str:
         """Get clone command for a GitLab repository."""
         clone_url = f"git@{GITLAB_HOST}:{project}.git"
         return f"## Clone {project}\n\n```bash\ngit clone {clone_url}\n```"
 
-
     # ==================== ISSUES ====================
 
     @server.tool()
-    async def gitlab_issue_list(project: str, state: str = "opened", label: str = "", assignee: str = "") -> str:
+    async def gitlab_issue_list(
+        project: str, state: str = "opened", label: str = "", assignee: str = ""
+    ) -> str:
         """List GitLab issues for a project.
-        
+
         Args:
             project: GitLab project path
             state: Filter by state - 'opened', 'closed', or 'all'
@@ -444,30 +475,36 @@ def register_tools(server: "FastMCP") -> int:
         elif state == "opened":
             args.append("--opened")
         # default is opened anyway
-        
-        if label: args.extend(["--label", label])
-        if assignee: args.extend(["--assignee", assignee])
+
+        if label:
+            args.extend(["--label", label])
+        if assignee:
+            args.extend(["--assignee", assignee])
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_issue_view(project: str, issue_id: int) -> str:
         """View a GitLab issue."""
-        success, output = await run_glab(["issue", "view", str(issue_id), "--web=false"], repo=project)
+        success, output = await run_glab(
+            ["issue", "view", str(issue_id), "--web=false"], repo=project
+        )
         return output if success else f"❌ Failed: {output}"
 
-
     @server.tool()
-    async def gitlab_issue_create(project: str, title: str, description: str = "", labels: str = "", assignee: str = "") -> str:
+    async def gitlab_issue_create(
+        project: str, title: str, description: str = "", labels: str = "", assignee: str = ""
+    ) -> str:
         """Create a new GitLab issue."""
         args = ["issue", "create", "--title", title, "--yes"]
-        if description: args.extend(["--description", description])
-        if labels: args.extend(["--label", labels])
-        if assignee: args.extend(["--assignee", assignee])
+        if description:
+            args.extend(["--description", description])
+        if labels:
+            args.extend(["--label", labels])
+        if assignee:
+            args.extend(["--assignee", assignee])
         success, output = await run_glab(args, repo=project)
         return f"✅ Issue Created\n\n{output}" if success else f"❌ Failed: {output}"
-
 
     # ==================== MISC ====================
 
@@ -477,20 +514,17 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["label", "list"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_release_list(project: str) -> str:
         """List releases for a project."""
         success, output = await run_glab(["release", "list"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
-
     @server.tool()
     async def gitlab_user_info() -> str:
         """Get current authenticated GitLab user information."""
         success, output = await run_glab(["auth", "status"])
         return output if success else f"❌ Failed: {output}"
-
 
     # ==================== ADDITIONAL TOOLS (from gitlab_tools) ====================
 
@@ -520,14 +554,13 @@ def register_tools(server: "FastMCP") -> int:
         elif state == "all":
             args.append("--all")
         # "opened" is the default, no flag needed
-        
+
         if author:
             args.extend(["--author", author])
         success, output = await run_glab(args, repo=project)
         if not success:
             return f"❌ Failed: {output}"
         return f"## MRs in {project}\n\n{output}"
-
 
     @server.tool()
     async def gitlab_get_mr(project: str, mr_id: int) -> str:
@@ -543,7 +576,6 @@ def register_tools(server: "FastMCP") -> int:
         """
         success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
         return output if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_mr_comments(project: str, mr_id: int) -> str:
@@ -561,9 +593,10 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["mr", "view", str(mr_id), "--comments"], repo=project)
         if not success:
             # Fallback to basic view
-            success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
+            success, output = await run_glab(
+                ["mr", "view", str(mr_id), "--web=false"], repo=project
+            )
         return f"## Comments on !{mr_id}\n\n{output}" if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_pipeline_status(project: str, mr_id: int = 0, branch: str = "") -> str:
@@ -580,7 +613,9 @@ def register_tools(server: "FastMCP") -> int:
         """
         if mr_id > 0:
             # Get MR pipeline
-            success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
+            success, output = await run_glab(
+                ["mr", "view", str(mr_id), "--web=false"], repo=project
+            )
             if not success:
                 return f"❌ Failed: {output}"
             # Extract pipeline info from MR view
@@ -592,7 +627,6 @@ def register_tools(server: "FastMCP") -> int:
                 args.append(branch)
             success, output = await run_glab(args, repo=project)
             return f"## Pipeline Status\n\n{output}" if success else f"❌ Failed: {output}"
-
 
     @server.tool()
     async def gitlab_search_mrs_by_issue(
@@ -610,11 +644,13 @@ def register_tools(server: "FastMCP") -> int:
             List of MRs mentioning the issue key.
         """
         # Search in MR titles/descriptions for the issue key (--all instead of --state all)
-        success, output = await run_glab(["mr", "list", "--all", "--search", issue_key], repo=project)
+        success, output = await run_glab(
+            ["mr", "list", "--all", "--search", issue_key], repo=project
+        )
         if not success:
             return f"❌ Failed: {output}"
         if not output.strip() or "no merge requests" in output.lower():
             return f"No MRs found for {issue_key} in {project}"
         return f"## MRs for {issue_key}\n\n{output}"
 
-    return len([m for m in dir() if not m.startswith('_')])  # Approximate count
+    return len([m for m in dir() if not m.startswith("_")])  # Approximate count

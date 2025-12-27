@@ -154,10 +154,11 @@ class SingleInstance:
 load_dotenv(PROJECT_ROOT / "mcp-servers" / "aa-slack" / ".env")
 load_dotenv()
 
+from src.listener import ListenerConfig, SlackListener
+from src.persistence import PendingMessage, SlackStateDB
+
 # Import Slack components
 from src.slack_client import SlackSession
-from src.persistence import SlackStateDB, PendingMessage
-from src.listener import SlackListener, ListenerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -297,21 +298,21 @@ class UserClassifier:
 class AlertDetector:
     """
     Detects Prometheus alert messages from app-sre-alerts bot.
-    
+
     Alert messages come from the app-sre-alerts bot in specific channels
     (stage/prod alerts) and contain Prometheus alert information with
     links to Grafana, AlertManager, Runbook, etc.
     """
-    
+
     def __init__(self):
         self.config = SLACK_CONFIG.get("listener", {})
         self.alert_channels = self.config.get("alert_channels", {})
         self.alert_bot_names = ["app-sre-alerts", "alertmanager"]
-        
+
     def is_alert_message(self, channel_id: str, user_name: str, text: str) -> bool:
         """
         Check if this message is a Prometheus alert.
-        
+
         An alert message is:
         1. In an alert channel (C01CPSKFG0P or C01L1K82AP5)
         2. From the app-sre-alerts bot
@@ -320,27 +321,30 @@ class AlertDetector:
         # Check if it's an alert channel
         if channel_id not in self.alert_channels:
             return False
-        
+
         # Check if from alert bot
         user_lower = (user_name or "").lower()
         is_from_alert_bot = any(bot in user_lower for bot in self.alert_bot_names)
-        
+
         # Check for alert indicators in text
         text_lower = (text or "").lower()
         alert_indicators = ["firing", "resolved", "alert:", "alertmanager", "prometheus"]
         has_alert_indicator = any(ind in text_lower for ind in alert_indicators)
-        
+
         return is_from_alert_bot or (channel_id in self.alert_channels and has_alert_indicator)
-    
+
     def get_alert_info(self, channel_id: str) -> dict:
         """Get the channel's alert configuration."""
-        return self.alert_channels.get(channel_id, {
-            "environment": "unknown",
-            "namespace": "tower-analytics-stage",
-            "severity": "medium",
-            "auto_investigate": False
-        })
-    
+        return self.alert_channels.get(
+            channel_id,
+            {
+                "environment": "unknown",
+                "namespace": "tower-analytics-stage",
+                "severity": "medium",
+                "auto_investigate": False,
+            },
+        )
+
     def should_auto_investigate(self, channel_id: str) -> bool:
         """Check if this channel has auto-investigate enabled."""
         info = self.get_alert_info(channel_id)
@@ -745,7 +749,7 @@ class TerminalUI:
 
 # =============================================================================
 # NOTE: IntentDetector and ToolExecutor classes have been REMOVED.
-# 
+#
 # All message understanding and tool execution now goes through ClaudeAgent,
 # which routes to MCP servers (aa-jira, aa-gitlab, aa-k8s, aa-bonfire, etc.)
 #
@@ -760,7 +764,7 @@ class TerminalUI:
 
 # Try to import Claude agent
 try:
-    from claude_agent import ClaudeAgent, ANTHROPIC_AVAILABLE
+    from claude_agent import ANTHROPIC_AVAILABLE, ClaudeAgent
 except ImportError:
     ANTHROPIC_AVAILABLE = False
     ClaudeAgent = None
@@ -769,10 +773,10 @@ except ImportError:
 class ResponseGenerator:
     """
     Generates responses for messages using Claude.
-    
+
     All message understanding and tool execution goes through ClaudeAgent,
     which routes to MCP servers (aa-jira, aa-gitlab, aa-k8s, etc.)
-    
+
     The Slack daemon is just a Slack interface - all intelligence is in Claude.
     """
 
@@ -832,7 +836,7 @@ class ResponseGenerator:
     ) -> str:
         """
         Light post-processing of Claude's response.
-        
+
         Note: Claude now handles tone adjustment directly based on user classification
         passed in context. This just handles truncation and safety-net formatting.
         """
@@ -867,7 +871,7 @@ class ResponseGenerator:
             should_send is False if user classification requires review
         """
         self.notifier.skill_activated("claude_agent", "Processing with Claude...")
-        
+
         try:
             context = {
                 "user_name": message.user_name,
@@ -904,7 +908,7 @@ class ResponseGenerator:
 class SlackDaemon:
     """
     Main autonomous Slack agent daemon.
-    
+
     All message understanding and tool execution goes through ClaudeAgent.
     The daemon is just a Slack interface - all intelligence is in Claude.
     """
@@ -927,11 +931,11 @@ class SlackDaemon:
 
         self.ui = TerminalUI(verbose=verbose)
         self.notifier = DesktopNotifier(enabled=enable_notify)
-        
+
         # Initialize Claude-based response generator (REQUIRED)
         # Will raise RuntimeError if Claude is not available
         self.response_generator = ResponseGenerator(notifier=self.notifier)
-        
+
         self.user_classifier = UserClassifier()
         self.channel_permissions = ChannelPermissions()
         self.alert_detector = AlertDetector()
@@ -949,7 +953,7 @@ class SlackDaemon:
         self._dbus_handler = None
         if enable_dbus:
             try:
-                from slack_dbus import SlackDaemonWithDBus, MessageHistory, MessageRecord
+                from slack_dbus import MessageHistory, MessageRecord, SlackDaemonWithDBus
 
                 self._dbus_handler = SlackDaemonWithDBus()
                 self._dbus_handler.history = MessageHistory()
@@ -1036,7 +1040,7 @@ class SlackDaemon:
         print(f"✅ Keywords: {', '.join(config.watched_keywords) or 'none'}")
         if self_dm_channel:
             print(f"✅ Self-DM testing enabled: {self_dm_channel}")
-        
+
         # Show alert channels
         alert_channels = self.alert_detector.alert_channels
         if alert_channels:
@@ -1110,11 +1114,13 @@ class SlackDaemon:
             try:
                 loop_count += 1
                 stats = self.listener.stats
-                
+
                 # Debug: print stats every 10 loops
                 if loop_count % 10 == 1:
-                    logger.debug(f"Loop {loop_count}: polls={stats.get('polls', 0)}, seen={stats.get('messages_seen', 0)}")
-                
+                    logger.debug(
+                        f"Loop {loop_count}: polls={stats.get('polls', 0)}, seen={stats.get('messages_seen', 0)}"
+                    )
+
                 # Update status display
                 self.ui.print_status(stats)
 
@@ -1136,7 +1142,7 @@ class SlackDaemon:
     async def _handle_alert_message(self, msg: PendingMessage, alert_info: dict):
         """
         Handle a Prometheus alert message by running the investigate_slack_alert skill.
-        
+
         This method:
         1. Immediately acknowledges the alert in the thread
         2. Invokes Claude to run the investigation skill
@@ -1145,9 +1151,9 @@ class SlackDaemon:
         try:
             env = alert_info.get("environment", "unknown")
             namespace = alert_info.get("namespace", "unknown")
-            
+
             self.ui.print_status(f"🚨 Alert detected in {env} ({namespace})")
-            
+
             # Build context for Claude to run the skill
             alert_context = f"""
 This is a Prometheus alert from the {env} environment that needs investigation.
@@ -1170,7 +1176,7 @@ The skill will:
 3. Search for or create a Jira issue
 4. Reply with findings
 """
-            
+
             # Use Claude to handle the investigation
             if self.response_generator.claude_agent:
                 response = await self.response_generator.claude_agent.process_message(
@@ -1181,9 +1187,9 @@ The skill will:
                         "namespace": namespace,
                         "channel_id": msg.channel_id,
                         "message_ts": msg.ts,
-                    }
+                    },
                 )
-                
+
                 if response:
                     self.ui.print_status(f"✅ Alert investigation complete")
                 else:
@@ -1191,7 +1197,7 @@ The skill will:
             else:
                 # Fallback: just acknowledge the alert
                 logger.warning("Claude agent not available for alert investigation")
-                
+
         except Exception as e:
             logger.error(f"Error handling alert: {e}")
             self.ui.print_error(f"Alert handling failed: {e}")
@@ -1205,17 +1211,21 @@ The skill will:
         # Check if this is a Prometheus alert that should be auto-investigated
         if self.alert_detector.is_alert_message(msg.channel_id, msg.user_name, msg.text):
             alert_info = self.alert_detector.get_alert_info(msg.channel_id)
-            
+
             if self.alert_detector.should_auto_investigate(msg.channel_id):
-                logger.info(f"🚨 Alert detected in {alert_info.get('environment', 'unknown')}: auto-investigating")
+                logger.info(
+                    f"🚨 Alert detected in {alert_info.get('environment', 'unknown')}: auto-investigating"
+                )
                 await self._handle_alert_message(msg, alert_info)
                 await self.state_db.mark_message_processed(msg.id)
                 return
             else:
-                logger.debug(f"Alert detected but auto-investigate disabled for channel {msg.channel_id}")
+                logger.debug(
+                    f"Alert detected but auto-investigate disabled for channel {msg.channel_id}"
+                )
 
         # ==================== NORMAL MESSAGE PROCESSING ====================
-        
+
         # Check response rules - should we respond to this message?
         can_respond, permission_reason = self.channel_permissions.should_respond(
             channel_id=msg.channel_id,

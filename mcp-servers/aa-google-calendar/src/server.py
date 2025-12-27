@@ -12,11 +12,11 @@ CONSTRAINTS:
 from mcp.server.fastmcp import FastMCP
 
 from .tools import (
-    google_calendar_schedule_meeting,
-    google_calendar_quick_meeting,
     google_calendar_check_mutual_availability,
     google_calendar_find_meeting,
     google_calendar_list_events,
+    google_calendar_quick_meeting,
+    google_calendar_schedule_meeting,
     google_calendar_status,
 )
 

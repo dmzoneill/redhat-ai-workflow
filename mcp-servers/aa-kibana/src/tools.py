@@ -19,17 +19,19 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import load_config, get_kubeconfig
 from src.config import get_token_from_kubeconfig
+from src.utils import get_kubeconfig, load_config
 
 logger = logging.getLogger(__name__)
 
 
 # ==================== Configuration ====================
 
+
 @dataclass
 class KibanaEnvironment:
     """Kibana environment configuration."""
+
     url: str
     kubeconfig: str
     index_pattern: str = "app-logs-*"  # Configure in config.json
@@ -45,7 +47,7 @@ def _load_kibana_config() -> dict:
 def get_kibana_environment(environment: str) -> "KibanaEnvironment":
     """Get Kibana environment config from config.json or env vars."""
     env_key = "production" if environment.lower() == "prod" else environment.lower()
-    
+
     # Try config.json first
     config = _load_kibana_config()
     if env_key in config:
@@ -62,12 +64,14 @@ def get_kibana_environment(environment: str) -> "KibanaEnvironment":
             index_pattern=env_config.get("index_pattern", "app-logs-*"),
             namespace=env_config.get("namespace", "default"),
         )
-    
+
     # Fallback to environment variables
     url = os.getenv(f"KIBANA_{env_key.upper()}_URL", "")
     if not url:
-        raise ValueError(f"Kibana URL not configured. Set KIBANA_{env_key.upper()}_URL or configure in config.json")
-    
+        raise ValueError(
+            f"Kibana URL not configured. Set KIBANA_{env_key.upper()}_URL or configure in config.json"
+        )
+
     return KibanaEnvironment(
         url=url,
         kubeconfig=get_kubeconfig(env_key),  # Use centralized kubeconfig resolution
@@ -82,7 +86,7 @@ _KIBANA_ENV_CACHE: dict = {}
 
 def get_cached_kibana_config(environment: str) -> "KibanaEnvironment | None":
     """Get Kibana environment config, with caching.
-    
+
     Note: Named to avoid confusion with utils.get_env_config() which
     retrieves service config from config.json.
     """
@@ -101,7 +105,7 @@ KIBANA_ENVIRONMENTS = _KIBANA_ENV_CACHE
 
 def get_token(kubeconfig: str) -> str:
     """Get OpenShift token from kubeconfig.
-    
+
     Delegates to shared get_token_from_kubeconfig() which:
     - Tries oc whoami -t first (active sessions)
     - Falls back to kubectl config view
@@ -121,35 +125,41 @@ async def kibana_request(
 ) -> tuple[bool, dict | str]:
     """Make authenticated request to Kibana."""
     import httpx
-    
+
     env_config = get_cached_kibana_config(environment)
     if not env_config:
-        return False, f"Unknown environment: {environment}. Configure in config.json or set KIBANA_{environment.upper()}_URL"
-    
+        return (
+            False,
+            f"Unknown environment: {environment}. Configure in config.json or set KIBANA_{environment.upper()}_URL",
+        )
+
     token = get_token(env_config.kubeconfig)
-    
+
     if not token:
-        return False, f"No auth token. Run 'kube {env_config.kubeconfig.split('.')[-1]}' to authenticate"
-    
+        return (
+            False,
+            f"No auth token. Run 'kube {env_config.kubeconfig.split('.')[-1]}' to authenticate",
+        )
+
     url = f"{env_config.url}{endpoint}"
     headers = {
         "Authorization": f"Bearer {token}",
         "kbn-xsrf": "true",
         "Content-Type": "application/json",
     }
-    
+
     try:
         async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
             if method == "GET":
                 response = await client.get(url, headers=headers)
             else:
                 response = await client.post(url, headers=headers, json=data)
-            
+
             if response.status_code == 401:
                 return False, "Unauthorized - run 'kube s' or 'kube p' to authenticate"
             elif response.status_code >= 400:
                 return False, f"Error {response.status_code}: {response.text[:500]}"
-            
+
             try:
                 return True, response.json()
             except:
@@ -169,30 +179,31 @@ def build_kibana_url(
     env_config = get_cached_kibana_config(environment)
     if not env_config:
         return ""
-    
+
     base_url = env_config.url
     ns = namespace or env_config.namespace
-    
+
     if ns and query == "*":
         full_query = f'kubernetes.namespace_name:"{ns}"'
     elif ns:
         full_query = f'kubernetes.namespace_name:"{ns}" AND ({query})'
     else:
         full_query = query
-    
+
     params = {
         "_g": f"(time:(from:'{time_from}',to:'{time_to}'))",
         "_a": f"(query:(language:lucene,query:'{full_query}'))",
     }
-    
+
     return f"{base_url}/app/discover#/?{urllib.parse.urlencode(params)}"
 
 
 # ==================== SEARCH TOOLS ====================
 
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
-    
+
     @server.tool()
     async def kibana_search_logs(
         environment: str,
@@ -241,7 +252,11 @@ def register_tools(server: "FastMCP") -> int:
                 "bool": {
                     "must": [
                         {"query_string": {"query": query}},
-                        {"range": {"@timestamp": {"gte": from_time.isoformat(), "lte": now.isoformat()}}},
+                        {
+                            "range": {
+                                "@timestamp": {"gte": from_time.isoformat(), "lte": now.isoformat()}
+                            }
+                        },
                     ]
                 }
             },
@@ -250,9 +265,7 @@ def register_tools(server: "FastMCP") -> int:
         }
 
         if ns:
-            es_query["query"]["bool"]["must"].append(
-                {"match": {"kubernetes.namespace_name": ns}}
-            )
+            es_query["query"]["bool"]["must"].append({"match": {"kubernetes.namespace_name": ns}})
 
         success, result = await kibana_request(
             environment,
@@ -263,7 +276,12 @@ def register_tools(server: "FastMCP") -> int:
 
         if not success:
             link = build_kibana_url(environment, query, ns, f"now-{time_range}", "now")
-            return [TextContent(type="text", text=f"❌ Direct search failed: {result}\n\n**Open in Kibana:** {link}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Direct search failed: {result}\n\n**Open in Kibana:** {link}",
+                )
+            ]
 
         hits = result.get("hits", {}).get("hits", [])
         total = result.get("hits", {}).get("total", {})
@@ -300,7 +318,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def kibana_get_errors(
         environment: str,
@@ -328,7 +345,6 @@ def register_tools(server: "FastMCP") -> int:
             time_range=time_range,
             size=size,
         )
-
 
     @server.tool()
     async def kibana_get_pod_logs(
@@ -360,7 +376,6 @@ def register_tools(server: "FastMCP") -> int:
             size=size,
         )
 
-
     @server.tool()
     async def kibana_trace_request(
         environment: str,
@@ -388,7 +403,6 @@ def register_tools(server: "FastMCP") -> int:
             time_range=time_range,
             size=500,
         )
-
 
     # ==================== LINK TOOLS ====================
 
@@ -432,7 +446,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     @server.tool()
     async def kibana_error_link(
         environment: str,
@@ -452,7 +465,6 @@ def register_tools(server: "FastMCP") -> int:
         """
         query = "level:error OR level:ERROR"
         return await kibana_get_link(environment, query, namespace, time_range)
-
 
     # ==================== STATUS TOOLS ====================
 
@@ -482,7 +494,9 @@ def register_tools(server: "FastMCP") -> int:
             token = get_token(env_config.kubeconfig)
 
             if not token:
-                lines.append(f"**{env}:** ⚠️ Not authenticated - run `kube {env_config.kubeconfig.split('.')[-1]}`")
+                lines.append(
+                    f"**{env}:** ⚠️ Not authenticated - run `kube {env_config.kubeconfig.split('.')[-1]}`"
+                )
                 continue
 
             success, result = await kibana_request(env, "/api/status")
@@ -496,7 +510,6 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append(f"**{env}:** ❌ {result}")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def kibana_index_patterns(
@@ -534,7 +547,6 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append(f"| `{title}` | {attrs.get('name', title)} |")
 
         return [TextContent(type="text", text="\n".join(lines))]
-
 
     @server.tool()
     async def kibana_list_dashboards(
@@ -576,7 +588,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-
     # ==================== ENTRY POINT ====================
-    
-    return len([m for m in dir() if not m.startswith('_')])  # Approximate count
+
+    return len([m for m in dir() if not m.startswith("_")])  # Approximate count

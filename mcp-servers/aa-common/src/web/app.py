@@ -11,15 +11,15 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
-
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 
 class ToolRequest(BaseModel):
     """Request to execute a tool."""
+
     tool_name: str
     arguments: dict[str, Any] = {}
 
@@ -31,52 +31,58 @@ MAX_ACTIVITY = 100
 
 def log_activity(action: str, details: str, status: str = "success"):
     """Log an activity."""
-    activity_log.insert(0, {
-        "timestamp": datetime.now().isoformat(),
-        "action": action,
-        "details": details[:100] if details else "",
-        "status": status,
-    })
+    activity_log.insert(
+        0,
+        {
+            "timestamp": datetime.now().isoformat(),
+            "action": action,
+            "details": details[:100] if details else "",
+            "status": status,
+        },
+    )
     if len(activity_log) > MAX_ACTIVITY:
         activity_log.pop()
 
 
 def create_app(mcp_server: FastMCP) -> FastAPI:
     """Create FastAPI application using the configured MCP server."""
-    
+
     app = FastAPI(
         title="AA Workflow MCP Server",
         description="Modular MCP Server Web Interface",
         version="2.0.0",
     )
-    
+
     # Store server reference
     app.state.mcp_server = mcp_server
-    
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard():
         """Simple dashboard page."""
         # Get tool count from MCP server
         tools = await mcp_server.list_tools()
-        tool_count = len(tools) if hasattr(tools, '__len__') else 0
-        
+        tool_count = len(tools) if hasattr(tools, "__len__") else 0
+
         # Group tools by category (inferred from name prefix)
         categories = {}
         for tool in tools:
-            name = tool.name if hasattr(tool, 'name') else str(tool)
-            prefix = name.split('_')[0] if '_' in name else 'other'
+            name = tool.name if hasattr(tool, "name") else str(tool)
+            prefix = name.split("_")[0] if "_" in name else "other"
             categories[prefix] = categories.get(prefix, 0) + 1
-        
+
         categories_html = "\n".join(
-            f'<li><strong>{cat}</strong>: {count} tools</li>'
+            f"<li><strong>{cat}</strong>: {count} tools</li>"
             for cat, count in sorted(categories.items())
         )
-        
-        recent_activity = "\n".join(
-            f'<li class="{a["status"]}">[{a["timestamp"][:19]}] {a["action"]}: {a["details"]}</li>'
-            for a in activity_log[:10]
-        ) or "<li>No recent activity</li>"
-        
+
+        recent_activity = (
+            "\n".join(
+                f'<li class="{a["status"]}">[{a["timestamp"][:19]}] {a["action"]}: {a["details"]}</li>'
+                for a in activity_log[:10]
+            )
+            or "<li>No recent activity</li>"
+        )
+
         return f"""
 <!DOCTYPE html>
 <html>
@@ -142,61 +148,62 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
 </body>
 </html>
 """
-    
+
     @app.get("/api/health")
     async def health():
         """Health check endpoint."""
         tools = await mcp_server.list_tools()
         return {
             "status": "healthy",
-            "tool_count": len(tools) if hasattr(tools, '__len__') else 0,
+            "tool_count": len(tools) if hasattr(tools, "__len__") else 0,
             "server_name": mcp_server.name,
         }
-    
+
     @app.get("/api/tools")
     async def list_tools():
         """List all registered tools with their schemas."""
         tools = await mcp_server.list_tools()
         result = []
         for tool in tools:
-            result.append({
-                "name": tool.name,
-                "description": tool.description or "",
-                "parameters": tool.inputSchema if hasattr(tool, 'inputSchema') else {},
-            })
+            result.append(
+                {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "parameters": tool.inputSchema if hasattr(tool, "inputSchema") else {},
+                }
+            )
         return {"tools": result, "count": len(result)}
-    
+
     @app.post("/api/tools/execute")
     async def execute_tool(request: ToolRequest):
         """Execute a tool via the MCP server."""
         log_activity(f"Execute: {request.tool_name}", json.dumps(request.arguments))
-        
+
         try:
             # Use FastMCP's call_tool method
             result = await mcp_server.call_tool(request.tool_name, request.arguments)
-            
+
             # Format result
-            if hasattr(result, 'content'):
+            if hasattr(result, "content"):
                 # MCP result format
                 content = result.content
                 if isinstance(content, list) and len(content) > 0:
-                    text = content[0].text if hasattr(content[0], 'text') else str(content[0])
+                    text = content[0].text if hasattr(content[0], "text") else str(content[0])
                 else:
                     text = str(content)
             else:
                 text = str(result)
-            
+
             log_activity(f"Result: {request.tool_name}", "Success", "success")
             return {"success": True, "result": text}
-            
+
         except Exception as e:
             log_activity(f"Error: {request.tool_name}", str(e), "error")
             raise HTTPException(status_code=500, detail=str(e))
-    
+
     @app.get("/api/activity")
     async def get_activity(limit: int = 20):
         """Get recent activity."""
         return {"activity": activity_log[:limit]}
-    
-    return app
 
+    return app

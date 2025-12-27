@@ -14,14 +14,14 @@ from mcp.server.fastmcp import FastMCP
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_section_config, get_project_root, run_cmd_shell
+from src.utils import get_project_root, get_section_config, run_cmd_shell
 
 logger = logging.getLogger(__name__)
 
 
 async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
     """Run rh-issue command through user's login shell for proper environment.
-    
+
     Uses shared run_cmd_shell to ensure proper environment including:
     - JIRA_JPAT and other env vars from ~/.bashrc
     - pipenv virtualenv access (needs HOME)
@@ -32,9 +32,9 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
         ["rh-issue"] + args,
         timeout=timeout,
     )
-    
+
     output = stdout or stderr
-    
+
     if not success:
         # Check for common auth issues
         if "JIRA_JPAT" in output or "401" in output or "Unauthorized" in output:
@@ -52,15 +52,16 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
                 f"Original error: {output}"
             )
         return False, output
-    
+
     return True, stdout
 
 
 # ==================== READ OPERATIONS ====================
 
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
-    
+
     @server.tool()
     async def jira_view_issue(issue_key: str) -> str:
         """
@@ -79,7 +80,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return output
 
-
     @server.tool()
     async def jira_view_issue_json(issue_key: str) -> str:
         """
@@ -97,7 +97,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed to get issue: {output}"
 
         return output
-
 
     @server.tool()
     async def jira_search(jql: str, max_results: int = 20) -> str:
@@ -120,7 +119,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Search failed: {output}"
 
         return output
-
 
     @server.tool()
     async def jira_list_issues(
@@ -152,7 +150,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return output
 
-
     @server.tool()
     async def jira_my_issues(status: str = "") -> str:
         """
@@ -178,7 +175,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return output
 
-
     @server.tool()
     async def jira_list_blocked() -> str:
         """
@@ -193,7 +189,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed to list blocked: {output}"
 
         return output
-
 
     @server.tool()
     async def jira_lint(issue_key: str, fix: bool = False) -> str:
@@ -216,7 +211,6 @@ def register_tools(server: "FastMCP") -> int:
         # Lint may return non-zero if issues found, but still useful output
         return output
 
-
     # ==================== WRITE OPERATIONS ====================
 
     @server.tool()
@@ -238,7 +232,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} status changed to **{status}**\n\n{output}"
 
-
     @server.tool()
     async def jira_assign(issue_key: str, assignee: str) -> str:
         """
@@ -258,7 +251,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} assigned to **@{assignee}**\n\n{output}"
 
-
     @server.tool()
     async def jira_unassign(issue_key: str) -> str:
         """
@@ -276,7 +268,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed to unassign: {output}"
 
         return f"✅ {issue_key} unassigned\n\n{output}"
-
 
     @server.tool()
     async def jira_add_comment(issue_key: str, comment: str) -> str:
@@ -296,7 +287,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed to add comment: {output}"
 
         return f"✅ Comment added to {issue_key}\n\n{output}"
-
 
     @server.tool()
     async def jira_block(issue_key: str, blocked_by: str, reason: str = "") -> str:
@@ -322,7 +312,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"🚧 {issue_key} blocked by {blocked_by}\n\n{output}"
 
-
     @server.tool()
     async def jira_unblock(issue_key: str, blocked_by: str) -> str:
         """
@@ -341,7 +330,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed to unblock: {output}"
 
         return f"✅ {issue_key} unblocked from {blocked_by}\n\n{output}"
-
 
     @server.tool()
     async def jira_add_to_sprint(issue_key: str, sprint_id: str = "") -> str:
@@ -366,7 +354,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} added to sprint\n\n{output}"
 
-
     @server.tool()
     async def jira_remove_sprint(issue_key: str) -> str:
         """
@@ -385,7 +372,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} removed from sprint\n\n{output}"
 
-
     @server.tool()
     async def jira_create_issue(
         issue_type: str,
@@ -399,7 +385,7 @@ def register_tools(server: "FastMCP") -> int:
     ) -> str:
         """
         Create a new Jira issue.
-        
+
         Accepts Markdown in description and auto-converts to Jira wiki markup.
         Issue type is case-insensitive (Story, story, STORY all work).
 
@@ -415,7 +401,7 @@ def register_tools(server: "FastMCP") -> int:
 
         Returns:
             The created issue key and details.
-            
+
         Example:
             jira_create_issue(
                 issue_type="story",
@@ -428,14 +414,14 @@ def register_tools(server: "FastMCP") -> int:
         import re
         import sys
         from pathlib import Path
-        
+
         # Normalize issue type to lowercase
-        valid_types = {'bug', 'story', 'task', 'epic', 'spike', 'subtask'}
+        valid_types = {"bug", "story", "task", "epic", "spike", "subtask"}
         issue_type_normalized = issue_type.lower().strip()
-        
+
         if issue_type_normalized not in valid_types:
             return f"❌ Invalid issue type: '{issue_type}'. Valid types: {', '.join(sorted(valid_types))}"
-        
+
         # Convert Markdown to Jira if needed
         if convert_markdown and description:
             try:
@@ -443,25 +429,26 @@ def register_tools(server: "FastMCP") -> int:
                 if scripts_path not in sys.path:
                     sys.path.insert(0, scripts_path)
                 from common.jira_utils import markdown_to_jira
+
                 description = markdown_to_jira(description)
             except ImportError:
                 # Fallback: basic conversion
-                description = description.replace('**', '*').replace('`', '{{')
-        
+                description = description.replace("**", "*").replace("`", "{{")
+
         args = ["create-issue", issue_type_normalized, summary, "--project", project]
-        
+
         if description:
             args.extend(["--description", description])
-        
+
         if story_points > 0:
             args.extend(["--story-points", str(story_points)])
-        
+
         if labels:
             for label in labels.split(","):
                 label = label.strip()
                 if label:
                     args.extend(["--label", label])
-        
+
         if components:
             for comp in components.split(","):
                 comp = comp.strip()
@@ -474,14 +461,13 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed to create issue: {output}\n\n💡 Tip: If env vars are missing, use the create_jira_issue skill instead which runs via CLI with your shell environment."
 
         # Extract issue key from output
-        issue_key_match = re.search(r'([A-Z]+-\d+)', output)
+        issue_key_match = re.search(r"([A-Z]+-\d+)", output)
         if issue_key_match:
             issue_key = issue_key_match.group(1)
             url = f"https://issues.redhat.com/browse/{issue_key}"
             return f"✅ Issue created: [{issue_key}]({url})\n\n{output}"
-        
-        return f"✅ Issue created\n\n{output}"
 
+        return f"✅ Issue created\n\n{output}"
 
     @server.tool()
     async def jira_clone_issue(issue_key: str, new_summary: str = "") -> str:
@@ -505,7 +491,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed to clone issue: {output}"
 
         return f"✅ Issue cloned\n\n{output}"
-
 
     @server.tool()
     async def jira_add_link(
@@ -531,7 +516,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"🔗 {from_issue} {link_type} {to_issue}\n\n{output}"
 
-
     @server.tool()
     async def jira_add_flag(issue_key: str) -> str:
         """
@@ -549,7 +533,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed to add flag: {output}"
 
         return f"🚩 Flag added to {issue_key}\n\n{output}"
-
 
     @server.tool()
     async def jira_remove_flag(issue_key: str) -> str:
@@ -569,7 +552,6 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Flag removed from {issue_key}\n\n{output}"
 
-
     @server.tool()
     async def jira_open_browser(issue_key: str) -> str:
         """
@@ -587,7 +569,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed to open browser: {output}"
 
         return f"🌐 Opened {issue_key} in browser"
-
 
     # ==================== ADDITIONAL TOOLS (from jira_tools) ====================
 
@@ -607,7 +588,6 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed: {output}"
         return output
 
-
     @server.tool()
     async def jira_transition(issue_key: str, status: str) -> str:
         """
@@ -624,7 +604,6 @@ def register_tools(server: "FastMCP") -> int:
         if not success:
             return f"❌ Failed: {output}"
         return f"✅ {issue_key} transitioned to '{status}'"
-
 
     @server.tool()
     async def jira_ai_helper(issue_key: str, action: str = "summarize") -> str:
@@ -645,6 +624,7 @@ def register_tools(server: "FastMCP") -> int:
 
         try:
             import json
+
             issue = json.loads(output)
         except:
             return f"❌ Failed to parse issue data"
@@ -669,9 +649,17 @@ def register_tools(server: "FastMCP") -> int:
         elif action == "next_steps":
             steps = []
             if status == "Open" or status == "New":
-                steps = ["1. Review requirements", "2. Create feature branch", "3. Start implementation"]
+                steps = [
+                    "1. Review requirements",
+                    "2. Create feature branch",
+                    "3. Start implementation",
+                ]
             elif status == "In Progress":
-                steps = ["1. Continue implementation", "2. Run local tests", "3. Create MR when ready"]
+                steps = [
+                    "1. Continue implementation",
+                    "2. Run local tests",
+                    "3. Create MR when ready",
+                ]
             elif status == "In Review" or status == "Review":
                 steps = ["1. Address review feedback", "2. Update MR", "3. Get approval"]
             else:
@@ -695,12 +683,11 @@ Use `jira_view_issue({issue_key})` for full details including linked issues.
         else:
             return f"Unknown action: {action}. Use: summarize, next_steps, blockers"
 
-
     @server.tool()
     async def jira_show_template(issue_type: str = "story") -> str:
         """
         Show the expected YAML template for creating Jira issues.
-        
+
         This helps understand the exact field names and format expected
         by the rh-issue CLI's --input-file option.
 
@@ -711,9 +698,9 @@ Use `jira_view_issue({issue_key})` for full details including linked issues.
             YAML template with all supported fields.
         """
         issue_type = issue_type.lower().strip()
-        
+
         templates = {
-            "story": '''# YAML Template for Story
+            "story": """# YAML Template for Story
 # Save this to a file and use with: rh-issue create-issue story "Summary" --input-file story.yaml
 
 Summary: "Add feature X to improve Y"
@@ -758,8 +745,8 @@ Components:
 "Story Points": 5
 
 "Epic Link": AAP-12345
-''',
-            "bug": '''# YAML Template for Bug
+""",
+            "bug": """# YAML Template for Bug
 # Save this to a file and use with: rh-issue create-issue bug "Summary" --input-file bug.yaml
 
 Summary: "API returns 500 on empty request body"
@@ -796,8 +783,8 @@ Components:
   - Automation Analytics
 
 Priority: High
-''',
-            "task": '''# YAML Template for Task
+""",
+            "task": """# YAML Template for Task
 # Save this to a file and use with: rh-issue create-issue task "Summary" --input-file task.yaml
 
 Summary: "Update dependencies to latest versions"
@@ -820,11 +807,11 @@ Labels:
 
 Components:
   - Automation Analytics
-''',
+""",
         }
-        
+
         template = templates.get(issue_type, templates["story"])
-        
+
         return f"""## Jira YAML Template: {issue_type.capitalize()}
 
 {template}
@@ -851,5 +838,4 @@ skill_run("create_jira_issue", '{{"summary": "...", "description": "## Markdown 
 ```
 """
 
-
-    return len([m for m in dir() if not m.startswith('_')])  # Approximate count
+    return len([m for m in dir() if not m.startswith("_")])  # Approximate count
