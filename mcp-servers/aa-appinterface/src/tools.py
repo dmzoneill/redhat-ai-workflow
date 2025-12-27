@@ -284,14 +284,14 @@ def register_tools(server: "FastMCP") -> int:
                                         resources = doc.get("resourceTemplates", []) or doc.get(
                                             "resources", []
                                         )
-                                        for r in resources[:10]:
-                                            if isinstance(r, dict):
-                                                name = r.get("name", "unnamed")
-                                                lines.append(f"  - `{name}`")
-                            except:
+                                            for r in resources[:10]:
+                                                if isinstance(r, dict):
+                                                    name = r.get("name", "unnamed")
+                                                    lines.append(f"  - `{name}`")
+                                    except (KeyError, TypeError):
+                                        pass
+                            except (KeyError, TypeError):
                                 pass
-                    except:
-                        pass
         else:
             lines.append(f"No files found mentioning `{namespace}`")
 
@@ -335,7 +335,7 @@ def register_tools(server: "FastMCP") -> int:
             try:
                 rel_path = Path(f).relative_to(repo_path)
                 lines.append(f"- `{rel_path}`")
-            except:
+            except ValueError:
                 lines.append(f"- `{f}`")
 
         if len(files) > 15:

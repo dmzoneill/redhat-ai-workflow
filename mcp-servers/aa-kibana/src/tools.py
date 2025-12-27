@@ -161,7 +161,7 @@ async def kibana_request(
 
             try:
                 return True, response.json()
-            except:
+            except (ValueError, TypeError):
                 return True, response.text
     except Exception as e:
         return False, str(e)

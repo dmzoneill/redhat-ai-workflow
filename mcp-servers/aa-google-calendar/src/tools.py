@@ -339,7 +339,7 @@ def find_existing_meeting(
                     when = dt.strftime("%A %Y-%m-%d %H:%M")
                 else:
                     when = start
-            except:
+            except (ValueError, TypeError, KeyError):
                 when = start
 
             return {
@@ -956,7 +956,7 @@ async def google_calendar_list_events(
                     time_str = dt.strftime("%a %Y-%m-%d %H:%M")
                 else:
                     time_str = start
-            except:
+            except (ValueError, TypeError, KeyError):
                 time_str = start
 
             # Check for Meet link

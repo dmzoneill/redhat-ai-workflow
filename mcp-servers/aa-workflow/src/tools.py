@@ -1022,7 +1022,7 @@ def register_tools(server: "FastMCP") -> int:
                     for severity, count in vulns.items():
                         if count > 0:
                             lines.append(f"  - {severity}: {count}")
-            except:
+            except (json.JSONDecodeError, ValueError, TypeError, KeyError):
                 lines.append(f"```\n{stdout[:1500]}\n```")
 
         return [TextContent(type="text", text="\n".join(lines))]
