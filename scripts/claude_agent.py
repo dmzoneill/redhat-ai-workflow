@@ -1285,6 +1285,51 @@ class ClaudeAgent:
         self.tool_registry = ToolRegistry()
         self.tool_executor = ToolExecutor(PROJECT_ROOT)
 
+        # Conversation history tracking
+        # Key: conversation_id (e.g., "channel_id:user_id" or "thread_ts")
+        # Value: list of message dicts [{"role": "user/assistant", "content": "..."}]
+        self._conversations: dict[str, list[dict]] = {}
+        self._max_history = 10  # Keep last N message pairs per conversation
+        self._history_ttl = 3600  # Clear conversations older than 1 hour
+        self._conversation_timestamps: dict[str, float] = {}
+
+    def _get_conversation_history(self, conversation_id: str) -> list[dict]:
+        """Get conversation history for a given ID, clearing stale entries."""
+        import time
+
+        now = time.time()
+
+        # Clear stale conversations
+        stale_ids = [
+            cid for cid, ts in self._conversation_timestamps.items()
+            if now - ts > self._history_ttl
+        ]
+        for cid in stale_ids:
+            self._conversations.pop(cid, None)
+            self._conversation_timestamps.pop(cid, None)
+
+        return self._conversations.get(conversation_id, [])
+
+    def _save_conversation_history(
+        self, conversation_id: str, user_msg: str, assistant_msg: str
+    ):
+        """Save a message exchange to conversation history."""
+        import time
+
+        if conversation_id not in self._conversations:
+            self._conversations[conversation_id] = []
+
+        history = self._conversations[conversation_id]
+        history.append({"role": "user", "content": user_msg})
+        history.append({"role": "assistant", "content": assistant_msg})
+
+        # Trim to max history (keep last N pairs = 2N messages)
+        max_messages = self._max_history * 2
+        if len(history) > max_messages:
+            self._conversations[conversation_id] = history[-max_messages:]
+
+        self._conversation_timestamps[conversation_id] = time.time()
+
     def _default_system_prompt(self) -> str:
         return """\
 youre a 42 year old senior software engineer from ireland. \
@@ -1337,17 +1382,30 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
         self,
         message: str,
         context: dict | None = None,
+        conversation_id: str | None = None,
     ) -> str:
         """
         Process a message using Claude.
 
         1. Extract repository context from message (URLs, issue keys)
-        2. Send message to Claude with available tools
-        3. Claude decides what to do (maybe call tools)
-        4. Execute any tool calls
-        5. Return final response
+        2. Load conversation history for context continuity
+        3. Send message to Claude with available tools
+        4. Claude decides what to do (maybe call tools)
+        5. Execute any tool calls
+        6. Save exchange to history and return response
+
+        Args:
+            message: The user's message
+            context: Additional context (user_name, channel_name, etc.)
+            conversation_id: Unique ID for conversation tracking (e.g., "C123:U456")
+                            If provided, previous messages in this conversation are included.
         """
-        messages = [{"role": "user", "content": message}]
+        # Load conversation history if we have an ID
+        history = []
+        if conversation_id:
+            history = self._get_conversation_history(conversation_id)
+
+        messages = history + [{"role": "user", "content": message}]
 
         # Extract repository context from the message
         resolved_ctx = None
@@ -1453,7 +1511,13 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
             if hasattr(block, "text"):
                 final_response += block.text
 
-        return final_response or "I processed your request but have no response."
+        result = final_response or "I processed your request but have no response."
+
+        # Save to conversation history if we have an ID
+        if conversation_id:
+            self._save_conversation_history(conversation_id, message, result)
+
+        return result
 
 
 # Convenience function
