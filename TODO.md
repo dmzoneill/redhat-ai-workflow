@@ -24,7 +24,7 @@ $ flake8 mcp-servers/ scripts/
 | Ambiguous Variables (E741) | 16 | 0 | ✅ Fixed |
 | Trailing Whitespace (W291/W293) | 37 | 0 | ✅ Fixed |
 | F-string No Placeholder (F541) | 46 | 0 | ✅ Fixed |
-| Line Too Long (E501) | 1,177 | 0 | ✅ Fixed |
+| Line Too Long (E501) | 1,177 | 0 | ✅ Fixed (120 char limit) |
 | Complexity (C901) | 22 | 0 | ✅ Configured |
 | Missing Whitespace (E226) | 3 | 0 | ✅ Fixed |
 | Test Suite | 0 | 54 tests | ✅ Added |
