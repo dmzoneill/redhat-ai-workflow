@@ -1113,7 +1113,7 @@ def register_tools(server: FastMCP) -> int:
 
         # Parse output to count issues
         lines = output.strip().split("\n") if output.strip() else []
-        issue_count = len([l for l in lines if l.strip() and ":" in l])
+        issue_count = len([ln for ln in lines if ln.strip() and ":" in ln])
 
         # Truncate if too long
         if len(output) > 3000:

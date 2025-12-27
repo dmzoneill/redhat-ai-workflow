@@ -180,10 +180,10 @@ Environment Variables:
 Examples:
   # Run as MCP server (for Cursor integration)
   python -m src.server
-  
+
   # Run with auto-start listener
   python -m src.server --auto-start
-  
+
   # Run as durable background process
   python -m src.server --durable --auto-start
         """,

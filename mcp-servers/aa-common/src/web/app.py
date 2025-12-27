@@ -89,11 +89,11 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
 <head>
     <title>AA Workflow MCP Server</title>
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                max-width: 1200px; margin: 0 auto; padding: 20px; background: #1a1a2e; color: #eee; }}
         h1 {{ color: #00d4ff; border-bottom: 2px solid #00d4ff; padding-bottom: 10px; }}
         h2 {{ color: #7b68ee; }}
-        .card {{ background: #16213e; border-radius: 8px; padding: 20px; margin: 20px 0; 
+        .card {{ background: #16213e; border-radius: 8px; padding: 20px; margin: 20px 0;
                  border: 1px solid #0f3460; }}
         .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }}
         .stat {{ background: #0f3460; padding: 20px; border-radius: 8px; text-align: center; }}
@@ -110,7 +110,7 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
 </head>
 <body>
     <h1>🚀 AA Workflow MCP Server</h1>
-    
+
     <div class="stats">
         <div class="stat">
             <div class="stat-value">{tool_count}</div>
@@ -125,17 +125,17 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
             <div class="stat-label">Activities Logged</div>
         </div>
     </div>
-    
+
     <div class="card">
         <h2>📁 Tool Categories</h2>
         <ul>{categories_html}</ul>
     </div>
-    
+
     <div class="card">
         <h2>📋 Recent Activity</h2>
         <ul>{recent_activity}</ul>
     </div>
-    
+
     <div class="card">
         <h2>🔗 API Endpoints</h2>
         <ul>

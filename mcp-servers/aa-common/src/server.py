@@ -248,7 +248,7 @@ Available agents (recommended - stays under tool limit):
 
 Examples:
   python -m src.server --agent devops              # Load DevOps agent tools
-  python -m src.server --agent developer           # Load Developer agent tools  
+  python -m src.server --agent developer           # Load Developer agent tools
   python -m src.server --tools git,jira,gitlab     # Load specific tools
   python -m src.server --all                       # Load ALL tools (may exceed limit!)
         """,

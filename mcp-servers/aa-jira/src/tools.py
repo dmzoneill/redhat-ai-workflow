@@ -706,11 +706,11 @@ Summary: "Add feature X to improve Y"
 
 Description: |
   h2. Overview
-  
+
   Brief description of the feature.
-  
+
   h3. Background
-  
+
   Why this is needed.
 
 "User Story": |
@@ -752,25 +752,25 @@ Summary: "API returns 500 on empty request body"
 
 Description: |
   h2. Bug Description
-  
+
   The API crashes when receiving an empty POST body.
-  
+
   h3. Steps to Reproduce
-  
+
   # Send POST request to /api/v1/data
   # Include empty body: {{}}
   # Observe 500 error
-  
+
   h3. Expected Behavior
-  
+
   Should return 400 Bad Request with helpful message.
-  
+
   h3. Actual Behavior
-  
+
   Returns 500 Internal Server Error.
-  
+
   h3. Environment
-  
+
   * Stage environment
   * Version: 2.1.0
 
@@ -790,11 +790,11 @@ Summary: "Update dependencies to latest versions"
 
 Description: |
   h2. Task Description
-  
+
   Update all Python dependencies to their latest compatible versions.
-  
+
   h3. Checklist
-  
+
   * Update requirements.txt
   * Run test suite
   * Check for breaking changes

@@ -128,7 +128,7 @@ class SlackStateDB:
                 channel_name TEXT,
                 updated_at REAL NOT NULL
             );
-            
+
             CREATE TABLE IF NOT EXISTS pending_messages (
                 id TEXT PRIMARY KEY,
                 channel_id TEXT NOT NULL,
@@ -136,10 +136,10 @@ class SlackStateDB:
                 created_at REAL NOT NULL,
                 processed_at REAL
             );
-            
-            CREATE INDEX IF NOT EXISTS idx_pending_unprocessed 
+
+            CREATE INDEX IF NOT EXISTS idx_pending_unprocessed
             ON pending_messages(processed_at) WHERE processed_at IS NULL;
-            
+
             CREATE TABLE IF NOT EXISTS user_cache (
                 user_id TEXT PRIMARY KEY,
                 user_name TEXT NOT NULL,
@@ -147,7 +147,7 @@ class SlackStateDB:
                 real_name TEXT,
                 updated_at REAL NOT NULL
             );
-            
+
             CREATE TABLE IF NOT EXISTS listener_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -180,7 +180,7 @@ class SlackStateDB:
             await self._connect_unlocked()
             await self._db.execute(
                 """
-                INSERT OR REPLACE INTO channel_state 
+                INSERT OR REPLACE INTO channel_state
                 (channel_id, last_processed_ts, channel_name, updated_at)
                 VALUES (?, ?, ?, ?)
                 """,
@@ -206,7 +206,7 @@ class SlackStateDB:
             await self._connect_unlocked()
             await self._db.execute(
                 """
-                INSERT OR REPLACE INTO pending_messages 
+                INSERT OR REPLACE INTO pending_messages
                 (id, channel_id, data, created_at, processed_at)
                 VALUES (?, ?, ?, ?, NULL)
                 """,
@@ -231,7 +231,7 @@ class SlackStateDB:
             if channel_id:
                 cursor = await self._db.execute(
                     """
-                    SELECT data FROM pending_messages 
+                    SELECT data FROM pending_messages
                     WHERE processed_at IS NULL AND channel_id = ?
                     ORDER BY created_at ASC LIMIT ?
                     """,
@@ -240,7 +240,7 @@ class SlackStateDB:
             else:
                 cursor = await self._db.execute(
                     """
-                    SELECT data FROM pending_messages 
+                    SELECT data FROM pending_messages
                     WHERE processed_at IS NULL
                     ORDER BY created_at ASC LIMIT ?
                     """,
@@ -305,7 +305,7 @@ class SlackStateDB:
             await self._connect_unlocked()
             await self._db.execute(
                 """
-                INSERT OR REPLACE INTO user_cache 
+                INSERT OR REPLACE INTO user_cache
                 (user_id, user_name, display_name, real_name, updated_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,

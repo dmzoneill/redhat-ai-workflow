@@ -483,7 +483,7 @@ REQUIRED:
         self.register(
             ToolDefinition(
                 name="skill_run",
-                description="""Run a workflow skill. 
+                description="""Run a workflow skill.
 
 For ephemeral deployments, USE THIS:
   skill_run("test_mr_ephemeral", {"mr_id": 1459})
@@ -1277,7 +1277,7 @@ PERSONA:
 
 TOOLS:
 - jira: view issues, search, add comments
-- gitlab: view mrs, list mrs, check pipelines  
+- gitlab: view mrs, list mrs, check pipelines
 - git: status, logs
 - k8s: pods, events, logs
 - bonfire: namespace reserve/list/release, deploy_aa for ephemeral

@@ -197,7 +197,7 @@ def format_github_issue_url(tool: str, error: str, context: str = "") -> str:
     body = f"""## Error Report
 
 **Tool:** `{tool}`
-**Error:** 
+**Error:**
 ```
 {error[:500]}
 ```

@@ -126,7 +126,7 @@ def register_tools(server: "FastMCP") -> int:
                 # Filter to running only
                 lines = output.strip().split("\n")
                 header = lines[0] if lines else ""
-                running = [l for l in lines[1:] if "Running" in l or "Unknown" in l]
+                running = [ln for ln in lines[1:] if "Running" in ln or "Unknown" in ln]
                 if not running:
                     return f"No running pipelines in {namespace}"
                 output = header + "\n" + "\n".join(running)
@@ -144,7 +144,7 @@ def register_tools(server: "FastMCP") -> int:
 
         lines = output.strip().split("\n")
         header = lines[0] if lines else ""
-        failed = [l for l in lines[1:] if "Failed" in l][:limit]
+        failed = [ln for ln in lines[1:] if "Failed" in ln][:limit]
 
         if not failed:
             return f"No failed pipelines in {namespace}"
@@ -481,7 +481,7 @@ def register_tools(server: "FastMCP") -> int:
                 ["kubectl", "get", resource, "-n", namespace, "--no-headers"]
             )
             if success:
-                count = len([l for l in output.strip().split("\n") if l.strip()])
+                count = len([ln for ln in output.strip().split("\n") if ln.strip()])
                 lines.append(f"- **{display}:** {count}")
             else:
                 lines.append(f"- **{display}:** ❌ Error")
@@ -491,10 +491,10 @@ def register_tools(server: "FastMCP") -> int:
             ["kubectl", "get", "pipelineruns", "-n", namespace, "--no-headers"]
         )
         if success:
-            pr_lines = [l for l in output.strip().split("\n") if l.strip()]
-            running = len([l for l in pr_lines if "Running" in l or "Unknown" in l])
-            succeeded = len([l for l in pr_lines if "Succeeded" in l])
-            failed = len([l for l in pr_lines if "Failed" in l])
+            pr_lines = [ln for ln in output.strip().split("\n") if ln.strip()]
+            running = len([ln for ln in pr_lines if "Running" in ln or "Unknown" in ln])
+            succeeded = len([ln for ln in pr_lines if "Succeeded" in ln])
+            failed = len([ln for ln in pr_lines if "Failed" in ln])
             lines.append("")
             lines.append("### Pipeline Runs")
             lines.append(f"- ✅ Succeeded: {succeeded}")

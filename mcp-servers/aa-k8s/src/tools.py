@@ -467,12 +467,12 @@ def register_tools(server: "FastMCP") -> int:
             ["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
         )
         if success:
-            pod_lines = [l for l in output.strip().split("\n")[1:] if l.strip()]
+            pod_lines = [ln for ln in output.strip().split("\n")[1:] if ln.strip()]
             total = len(pod_lines)
-            running = len([l for l in pod_lines if "Running" in l])
-            pending = len([l for l in pod_lines if "Pending" in l])
+            running = len([ln for ln in pod_lines if "Running" in ln])
+            pending = len([ln for ln in pod_lines if "Pending" in ln])
             failed = len(
-                [l for l in pod_lines if "Error" in l or "Failed" in l or "CrashLoop" in l]
+                [ln for ln in pod_lines if "Error" in ln or "Failed" in ln or "CrashLoop" in ln]
             )
 
             lines.append("### Pods")
@@ -488,11 +488,11 @@ def register_tools(server: "FastMCP") -> int:
             ["get", "deployments", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
         )
         if success:
-            dep_lines = [l for l in output.strip().split("\n")[1:] if l.strip()]
+            dep_lines = [ln for ln in output.strip().split("\n")[1:] if ln.strip()]
             total = len(dep_lines)
             ready = 0
-            for l in dep_lines:
-                parts = l.split()
+            for ln in dep_lines:
+                parts = ln.split()
                 if len(parts) >= 2:
                     replicas = parts[1]  # READY column like "2/2"
                     if "/" in replicas:
@@ -596,9 +596,9 @@ def register_tools(server: "FastMCP") -> int:
             )
             if success:
                 ns_list = [
-                    l.replace("namespace/", "")
-                    for l in output.strip().split("\n")
-                    if "your-app" in l or "your-app" in l
+                    ln.replace("namespace/", "")
+                    for ln in output.strip().split("\n")
+                    if "your-app" in ln
                 ]
                 lines.append(f"- Namespaces: {len(ns_list)}")
                 for ns in ns_list[:5]:
@@ -625,7 +625,7 @@ def register_tools(server: "FastMCP") -> int:
         if not success:
             return f"❌ Failed: {output}\n\nRun: `kube e` to authenticate"
 
-        namespaces = [l.replace("namespace/", "") for l in output.strip().split("\n") if l.strip()]
+        namespaces = [ln.replace("namespace/", "") for ln in output.strip().split("\n") if ln.strip()]
 
         # Filter for ephemeral-like namespaces (often have specific patterns)
         ephemeral_ns = [
