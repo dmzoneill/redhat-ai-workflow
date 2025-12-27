@@ -99,10 +99,16 @@ $ flake8 mcp-servers/ scripts/
 
 ### Refactoring Opportunities
 Split `mcp-servers/aa-workflow/src/tools.py` (3,005 lines) into:
-- [ ] `skill_engine.py` - Skill execution logic
-- [ ] `memory_tools.py` - Memory operations
-- [ ] `agent_tools.py` - Agent management
-- [ ] `session_tools.py` - Session management
+- [ ] `skill_engine.py` - Skill execution logic (~600 lines)
+- [x] `memory_tools.py` - Memory operations (277 lines, 5 tools)
+- [x] `agent_tools.py` - Agent management (169 lines, 2 tools)
+- [x] `session_tools.py` - Session management (274 lines, 1 tool + 3 prompts)
+- [x] `resources.py` - MCP resources (102 lines, 5 resources)
+- [x] `constants.py` - Shared paths (18 lines)
+- [ ] `workflow_tools.py` - Workflow tools (~500 lines)
+- [ ] `lint_tools.py` - Linting/testing tools (~400 lines)
+- [ ] `infra_tools.py` - VPN/kube tools (~200 lines)
+- [ ] `meta_tools.py` - Dynamic tool execution (~400 lines)
 
 ---
 
