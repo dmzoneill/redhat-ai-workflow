@@ -19,7 +19,8 @@ Last Updated: 2025-12-27
 | Line Too Long (E501) | 1,191 | 1,177 | 🟡 Style |
 | F-string No Placeholder (F541) | 50 | 46 | 🟡 Style |
 | Import Not at Top (E402) | 48 | 48 | ⚪ Intentional |
-| Test Coverage | 21% | - | 🔴 Pending |
+| Test Suite | 0 | 54 tests | ✅ Added |
+| Test Coverage | 0% | 4% (core: 25%) | 🟢 Started |
 
 ---
 
@@ -38,6 +39,7 @@ Last Updated: 2025-12-27
 - [x] **Duplicate import (F811)** - Fixed in claude_agent.py
 - [x] **Invalid escape sequence (W605)** - Fixed in parsers.py
 - [x] **D-Bus type annotations (F821)** - Added noqa for slack_dbus.py
+- [x] **Test suite** - Added 54 tests across 5 test modules
 - [x] Documentation structure (docs/)
 - [x] Cursor commands (35 commands)
 - [x] README comprehensive update
@@ -62,19 +64,27 @@ These are intentional - path setup requires imports after sys.path modifications
 
 ---
 
-## 🔴 Priority: Test Coverage (21% → 60%)
+## 🟢 Test Coverage Progress
 
-### Core Modules to Test
-- [ ] `mcp-servers/aa-common/src/utils.py` - Shared utilities
+### Current Coverage (54 tests)
+- **mcp-servers/aa-common/src/config.py**: 16%
+- **mcp-servers/aa-common/src/utils.py**: 25%
+- **scripts/common/jira_utils.py**: 58%
+
+### Tests by Module
+| Module | Tests | Status |
+|--------|-------|--------|
+| test_agents.py | 8 | ✅ |
+| test_config.py | 6 | ✅ |
+| test_jira_utils.py | 16 | ✅ |
+| test_skills.py | 9 | ✅ |
+| test_utils.py | 15 | ✅ |
+
+### Future: High-Value Test Targets
 - [ ] `mcp-servers/aa-workflow/src/tools.py` - Skill execution
-- [ ] `mcp-servers/aa-common/src/config.py` - Configuration
+- [ ] `mcp-servers/aa-git/src/tools.py` - Git operations
+- [ ] `scripts/common/parsers.py` - Output parsing
 - [ ] `mcp-servers/aa-common/src/agent_loader.py` - Agent loading
-
-### Test Infrastructure
-- [ ] Create `tests/` directory structure
-- [ ] Add pytest configuration
-- [ ] Add test fixtures for common scenarios
-- [ ] Add CI integration
 
 ---
 
@@ -102,6 +112,7 @@ These are intentional - path setup requires imports after sys.path modifications
 | 2025-12-27 | Fix misc flake8 issues | 4 files |
 | 2025-12-27 | Fix indentation error | 1 file |
 | 2025-12-27 | Fix trailing whitespace + E741 | 10 files |
+| 2025-12-27 | Add test suite | 7 files |
 
 ---
 
@@ -112,8 +123,11 @@ These are intentional - path setup requires imports after sys.path modifications
 cd ~/src/redhat-ai-workflow
 flake8 --exclude=.venv --statistics mcp-servers/ scripts/
 
+# Run tests
+pytest tests/ -v
+
 # Run tests with coverage
-pytest --cov=mcp-servers --cov-report=html
+pytest tests/ --cov=mcp-servers --cov=scripts --cov-report=html
 
 # Configure flake8 for longer lines (optional)
 echo "[flake8]
