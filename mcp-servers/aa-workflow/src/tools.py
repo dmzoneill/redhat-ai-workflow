@@ -68,7 +68,7 @@ def _issue_fingerprint(tool: str, error: str) -> str:
 
     # Use first 100 chars of error to group similar errors
     content = f"{tool}:{error[:100]}"
-    return hashlib.md5(content.encode()).hexdigest()[:12]
+    return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 async def create_github_issue(
