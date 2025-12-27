@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
 
-from .constants import AGENTS_DIR
+from constants import AGENTS_DIR
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP

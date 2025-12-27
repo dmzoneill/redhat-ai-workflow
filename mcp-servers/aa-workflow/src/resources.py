@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from .constants import AGENTS_DIR, MEMORY_DIR, SKILLS_DIR
+from constants import AGENTS_DIR, MEMORY_DIR, SKILLS_DIR
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
