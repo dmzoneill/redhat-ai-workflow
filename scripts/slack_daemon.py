@@ -889,7 +889,16 @@ class ResponseGenerator:
                 "response_style": classification.response_style,  # casual, formal, professional
                 "include_emojis": classification.include_emojis,
             }
-            response = await self.claude_agent.process_message(message.text, context)
+            # Build conversation ID for history tracking
+            # Use thread_ts if in a thread, otherwise channel:user
+            if message.thread_ts:
+                conversation_id = f"{message.channel_id}:{message.thread_ts}"
+            else:
+                conversation_id = f"{message.channel_id}:{message.user_id}"
+
+            response = await self.claude_agent.process_message(
+                message.text, context, conversation_id=conversation_id
+            )
             self.notifier.skill_completed("claude_agent", success=True)
         except Exception as e:
             # Log full error internally - stay completely silent to user
@@ -1185,6 +1194,8 @@ The skill will:
 
             # Use Claude to handle the investigation
             if self.response_generator.claude_agent:
+                # Use thread_ts for alert conversation tracking
+                alert_conversation_id = f"{msg.channel_id}:{msg.ts}"
                 response = await self.response_generator.claude_agent.process_message(
                     alert_context,
                     context={
@@ -1194,6 +1205,7 @@ The skill will:
                         "channel_id": msg.channel_id,
                         "message_ts": msg.ts,
                     },
+                    conversation_id=alert_conversation_id,
                 )
 
                 if response:
