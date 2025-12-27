@@ -1,6 +1,6 @@
 [flake8]
 # Line length - match Black's default
-max-line-length = 100
+max-line-length = 120
 
 # Exclude directories
 exclude =
@@ -27,20 +27,6 @@ ignore =
 per-file-ignores =
     # D-Bus type annotations are valid but misinterpreted
     scripts/slack_dbus.py: F821
-    # Test files may have longer lines for assertions
-    tests/*.py: E501
-    # HTML templates have long CSS lines
-    mcp-servers/aa-common/src/web/app.py: E501
-    # Large files with complex output formatting - line length relaxed
-    scripts/claude_agent.py: E501
-    scripts/slack_daemon.py: E501
-    scripts/slack_control.py: E501
-    scripts/integration_test.py: E501
-    scripts/skill_test_runner.py: E501
-    mcp-servers/aa-prometheus/src/tools.py: E501
-    mcp-servers/aa-workflow/src/tools.py: E501
-    mcp-servers/aa-slack/src/*.py: E501
-    scripts/common/parsers.py: E501
 
 # McCabe complexity
 max-complexity = 15

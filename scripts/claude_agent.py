@@ -105,7 +105,10 @@ class ToolRegistry:
         self.register(
             ToolDefinition(
                 name="jira_view",
-                description="View a Jira issue by key (e.g., AAP-12345). Returns issue details including summary, status, assignee, and description.",
+                description=(
+                    "View a Jira issue by key (e.g., AAP-12345). "
+                    "Returns issue details including summary, status, assignee, and description."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
@@ -163,7 +166,10 @@ class ToolRegistry:
                     "properties": {
                         "url": {
                             "type": "string",
-                            "description": "Full GitLab URL (e.g., https://gitlab.cee.redhat.com/org/repo/-/merge_requests/1449)",
+                            "description": (
+                                "Full GitLab URL "
+                                "(e.g., https://gitlab.cee.redhat.com/org/repo/-/merge_requests/1449)"
+                            ),
                         },
                     },
                     "required": ["url"],
@@ -467,7 +473,10 @@ REQUIRED:
                     "properties": {
                         "repository": {
                             "type": "string",
-                            "description": "Repository path (e.g., 'aap-aa-tenant/aap-aa-main/automation-analytics-backend-main')",
+                            "description": (
+                                "Repository path "
+                                "(e.g., 'aap-aa-tenant/aap-aa-main/automation-analytics-backend-main')"
+                            ),
                         },
                         "tag": {
                             "type": "string",
@@ -923,7 +932,10 @@ class ToolExecutor:
 
             # Validate image_tag is 64 chars
             if len(digest) != 64:
-                return f"Error: image_tag must be 64-char sha256 digest, got {len(digest)} chars. Use quay_get_tag to get the digest."
+                return (
+                    f"Error: image_tag must be 64-char sha256 digest, got {len(digest)} chars. "
+                    "Use quay_get_tag to get the digest."
+                )
 
             # Select component and image
             component = (
@@ -1019,7 +1031,10 @@ Please verify the image exists before proceeding."""
             result = await self._run_command(cmd)
 
             if "manifest unknown" in result.lower() or "error" in result.lower():
-                return f"Image not found: {repository}:{tag}\n\nThe image may not be built yet. Check Konflux build status."
+                return (
+                    f"Image not found: {repository}:{tag}\n\n"
+                    "The image may not be built yet. Check Konflux build status."
+                )
 
             # Extract digest from result
             try:
@@ -1028,7 +1043,10 @@ Please verify the image exists before proceeding."""
                 digest_match = re.search(r'"Digest":\s*"sha256:([a-f0-9]{64})"', result)
                 if digest_match:
                     digest = digest_match.group(1)
-                    return f"Image found!\n\n**Tag:** {tag}\n**Manifest Digest:** sha256:{digest}\n\nUse the 64-char digest (without 'sha256:' prefix) as image_tag for bonfire_deploy_aa."
+                    return (
+                        f"Image found!\n\n**Tag:** {tag}\n**Manifest Digest:** sha256:{digest}\n\n"
+                        "Use the 64-char digest (without 'sha256:' prefix) as image_tag for bonfire_deploy_aa."
+                    )
             except Exception:
                 pass
 
@@ -1262,7 +1280,9 @@ class ClaudeAgent:
         self.tool_executor = ToolExecutor(PROJECT_ROOT)
 
     def _default_system_prompt(self) -> str:
-        return """youre a 42 year old senior software engineer from ireland. 20 years in the game. typing on your phone while grabbing a coffee.
+        return """\
+youre a 42 year old senior software engineer from ireland. \
+20 years in the game. typing on your phone while grabbing a coffee.
 
 PERSONA:
 - all lowercase. no caps ever
@@ -1346,7 +1366,8 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
             if user_category == "concerned":
                 # Manager/stakeholder - be formal and careful
                 context_parts.append(
-                    "TONE: formal - this is a manager/stakeholder. be professional, clear, no typos, no casual slang. skip emojis."
+                    "TONE: formal - this is a manager/stakeholder. "
+                    "be professional, clear, no typos, no casual slang. skip emojis."
                 )
             elif user_category == "safe":
                 # Teammate - full casual mode

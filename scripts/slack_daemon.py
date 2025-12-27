@@ -647,14 +647,17 @@ class TerminalUI:
 
     def print_header(self):
         """Print startup header."""
+        cyan = self.COLORS['cyan']
+        bold = self.COLORS['bold']
+        reset = self.COLORS['reset']
         print(
             f"""
-{self.COLORS['cyan']}╔══════════════════════════════════════════════════════════════════╗
-║  {self.COLORS['bold']}🤖 AI Workflow - Autonomous Slack Agent{self.COLORS['reset']}{self.COLORS['cyan']}                          ║
+{cyan}╔══════════════════════════════════════════════════════════════════╗
+║  {bold}🤖 AI Workflow - Autonomous Slack Agent{reset}{cyan}                          ║
 ║                                                                    ║
 ║  Monitoring Slack channels for messages...                         ║
 ║  Press Ctrl+C to stop                                              ║
-╚══════════════════════════════════════════════════════════════════╝{self.COLORS['reset']}
+╚══════════════════════════════════════════════════════════════════╝{reset}
 """
         )
 
