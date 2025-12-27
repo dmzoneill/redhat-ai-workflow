@@ -304,7 +304,7 @@ def cmd_start(args):
         os.kill(process.pid, 0)
         print_success(f"Daemon started (PID: {process.pid})")
         print(f"  Logs: {log_file}")
-        print(f"  Stop: slack_control.py stop")
+        print("  Stop: slack_control.py stop")
     except OSError:
         print_error("Daemon failed to start. Check logs:")
         print(f"  tail -f {log_file}")

@@ -75,10 +75,10 @@ async def main():
                 print(f"      Email: {user.get('profile', {}).get('email', 'N/A')}")
             else:
                 print(f"   ⚠️  API returned: {user_info.get('error', 'no error field')}")
-                print(f"      (This is OK - we can still send messages)")
+                print("      (This is OK - we can still send messages)")
         except Exception as e:
             print(f"   ⚠️  Exception: {e}")
-            print(f"      (This is OK - we can still try sending messages)")
+            print("      (This is OK - we can still try sending messages)")
         print()
 
         # Test 3: Open DM and send message to self

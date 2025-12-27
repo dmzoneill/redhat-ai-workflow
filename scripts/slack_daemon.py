@@ -1058,18 +1058,18 @@ class SlackDaemon:
 
         # Show response rules
         rules = self.channel_permissions
-        print(f"✅ Response rules:")
+        print("✅ Response rules:")
         if rules.dm_enabled:
-            print(f"   • DMs: Always respond")
+            print("   • DMs: Always respond")
         else:
-            print(f"   • DMs: Disabled")
+            print("   • DMs: Disabled")
 
         if rules.mention_enabled:
             triggers = list(rules.trigger_mentions)[:3]
             trigger_str = ", ".join(triggers) if triggers else "(bot mention)"
             print(f"   • Channels: Only when mentioned ({trigger_str})")
         else:
-            print(f"   • Channels: All messages")
+            print("   • Channels: All messages")
 
         if rules.blocked_channels:
             print(f"   • Blocked: {len(rules.blocked_channels)} channels")
@@ -1187,9 +1187,9 @@ The skill will:
                 )
 
                 if response:
-                    self.ui.print_status(f"✅ Alert investigation complete")
+                    self.ui.print_status("✅ Alert investigation complete")
                 else:
-                    self.ui.print_status(f"⚠️ Alert investigation returned no response")
+                    self.ui.print_status("⚠️ Alert investigation returned no response")
             else:
                 # Fallback: just acknowledge the alert
                 logger.warning("Claude agent not available for alert investigation")

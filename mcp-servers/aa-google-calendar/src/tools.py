@@ -413,7 +413,7 @@ async def google_calendar_find_meeting(
 
     if result is None:
         lines = [
-            f"✅ **No existing meeting found**",
+            "✅ **No existing meeting found**",
             "",
             f"Search terms: {', '.join(search_terms)}",
         ]
@@ -427,7 +427,7 @@ async def google_calendar_find_meeting(
         return f"❌ Error searching calendar: {result['error']}"
 
     lines = [
-        f"📅 **Meeting Already Exists**",
+        "📅 **Meeting Already Exists**",
         "",
         f"**Title:** {result['title']}",
         f"**When:** {result['when']} Irish time",
@@ -491,8 +491,8 @@ async def google_calendar_check_mutual_availability(
 
     lines = [
         f"# Mutual Availability with {attendee_email}",
-        f"",
-        f"📍 **Timezone:** Irish time (Europe/Dublin)",
+        "",
+        "📍 **Timezone:** Irish time (Europe/Dublin)",
         f"⏰ **Meeting window:** {MEETING_START_HOUR}:00 - {MEETING_END_HOUR}:00",
         f"⏱️ **Duration needed:** {duration_minutes} minutes",
         "",
@@ -559,13 +559,13 @@ async def google_calendar_check_mutual_availability(
         lines.append("")
         lines.append("**To schedule the first available slot:**")
         first_slot = all_slots[0]
-        lines.append(f"```")
-        lines.append(f"google_calendar_schedule_meeting(")
-        lines.append(f'    title="Your Meeting Title",')
+        lines.append("```")
+        lines.append("google_calendar_schedule_meeting(")
+        lines.append('    title="Your Meeting Title",')
         lines.append(f'    attendee_email="{attendee_email}",')
         lines.append(f'    start_time="{first_slot["start"]}"')
-        lines.append(f")")
-        lines.append(f"```")
+        lines.append(")")
+        lines.append("```")
 
     return "\n".join(lines)
 
@@ -727,13 +727,13 @@ async def google_calendar_schedule_meeting(
 
     # Validate weekend
     if start_dt.weekday() >= 5:
-        return f"❌ Cannot schedule meetings on weekends. Please choose a weekday."
+        return "❌ Cannot schedule meetings on weekends. Please choose a weekday."
 
     try:
         # Build event
         event = {
             "summary": title,
-            "description": description or f"Meeting scheduled via AI Workflow assistant.",
+            "description": description or "Meeting scheduled via AI Workflow assistant.",
             "start": {
                 "dateTime": start_dt.isoformat(),
                 "timeZone": TIMEZONE,
@@ -776,13 +776,13 @@ async def google_calendar_schedule_meeting(
         event_link = created_event.get("htmlLink", "")
 
         result = [
-            f"✅ **Meeting Scheduled**",
-            f"",
+            "✅ **Meeting Scheduled**",
+            "",
             f"**Title:** {title}",
             f"**When:** {start_dt.strftime('%A %Y-%m-%d %H:%M')} Irish time",
             f"**Duration:** {duration_minutes} minutes",
             f"**Attendee:** {attendee_email} (invite sent ✉️)",
-            f"",
+            "",
             f"**Calendar Link:** {event_link}",
         ]
 
@@ -940,7 +940,7 @@ async def google_calendar_list_events(
 
         lines = [
             f"📅 **Upcoming Events** (next {days} days)",
-            f"📍 Times shown in Irish time (Europe/Dublin)",
+            "📍 Times shown in Irish time (Europe/Dublin)",
             "",
         ]
 
@@ -964,7 +964,7 @@ async def google_calendar_list_events(
             if event.get("conferenceData", {}).get("entryPoints"):
                 for entry in event["conferenceData"]["entryPoints"]:
                     if entry.get("entryPointType") == "video":
-                        meet_link = f" 📹"
+                        meet_link = " 📹"
                         break
 
             lines.append(f"- **{time_str}** - {summary}{meet_link}")

@@ -602,7 +602,7 @@ def register_tools(server: "FastMCP") -> int:
             if success:
                 lines.append(f"✅ Logged into {cluster_names[short_cluster]} cluster")
             else:
-                lines.append(f"⚠️ Login may have issues")
+                lines.append("⚠️ Login may have issues")
 
             lines.append("")
             lines.append("```")
@@ -1118,9 +1118,9 @@ def register_tools(server: "FastMCP") -> int:
             ["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path
         )
         if stdout.strip():
-            lines.append(f"\n### Existing branch found:")
+            lines.append("\n### Existing branch found:")
             lines.append(f"```\n{stdout.strip()}\n```")
-            lines.append(f"\nTo switch to it: `git checkout <branch-name>`")
+            lines.append("\nTo switch to it: `git checkout <branch-name>`")
             return [TextContent(type="text", text="\n".join(lines))]
 
         # 3. Checkout main and pull
@@ -1166,7 +1166,7 @@ def register_tools(server: "FastMCP") -> int:
             ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path
         )
         if not success:
-            return [TextContent(type="text", text=f"❌ Failed to get branch")]
+            return [TextContent(type="text", text="❌ Failed to get branch")]
         current_branch = stdout.strip()
         lines.append(f"**Branch:** `{current_branch}`")
 
@@ -1186,11 +1186,11 @@ def register_tools(server: "FastMCP") -> int:
         # 3. Provide glab command
         lines.append("\n### 2. Create MR with glab:")
         draft_flag = "--draft" if draft else ""
-        lines.append(f"```bash")
+        lines.append("```bash")
         lines.append(f'glab mr create --title "{issue_key}: Description" {draft_flag} --yes')
-        lines.append(f"```")
+        lines.append("```")
 
-        lines.append(f"\n### Or use the gitlab_mr_create tool")
+        lines.append("\n### Or use the gitlab_mr_create tool")
 
         return [TextContent(type="text", text="\n".join(lines))]
 
@@ -1874,7 +1874,7 @@ def register_tools(server: "FastMCP") -> int:
 
                 # Handle 'then' blocks (conditional execution)
                 if "then" in step:
-                    self._debug(f"Processing 'then' block")
+                    self._debug("Processing 'then' block")
                     for then_item in step["then"]:
                         if "return" in then_item:
                             # Early return
@@ -1958,12 +1958,12 @@ def register_tools(server: "FastMCP") -> int:
                                     f"\n   🐛 **Issue created:** {issue_result['issue_url']}"
                                 )
                             elif issue_result["issue_url"]:
-                                output_lines.append(f"\n   💡 **Report this error:**")
+                                output_lines.append("\n   💡 **Report this error:**")
                                 output_lines.append(
                                     f"   📝 [Create GitHub Issue]({issue_result['issue_url']})"
                                 )
                                 if "dedup" in issue_result.get("message", ""):
-                                    output_lines.append(f"   *(Similar issue recently reported)*")
+                                    output_lines.append("   *(Similar issue recently reported)*")
                         except Exception as e:
                             self._debug(f"Failed to create issue: {e}")
 
@@ -1971,7 +1971,7 @@ def register_tools(server: "FastMCP") -> int:
                         on_error = step.get("on_error", "fail")
                         if on_error == "continue":
                             output_lines.append(
-                                f"   *Continuing despite error (on_error: continue)*\n"
+                                "   *Continuing despite error (on_error: continue)*\n"
                             )
                             self.step_results.append(
                                 {

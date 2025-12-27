@@ -249,7 +249,7 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Failed to list tags. Ensure you're logged in:\n  `podman login quay.io` or `docker login quay.io`",
+                    text="❌ Failed to list tags. Ensure you're logged in:\n  `podman login quay.io` or `docker login quay.io`",
                 )
             ]
 
@@ -388,9 +388,9 @@ The Konflux build may still be in progress, or the tag doesn't exist.
             "Image is ready for deployment!",
             "",
             "**For bonfire:**",
-            f"```",
+            "```",
             f"IMAGE_TAG={digest_hash}",
-            f"```",
+            "```",
         ]
 
         return [TextContent(type="text", text="\n".join(lines))]

@@ -420,7 +420,7 @@ def register_tools(server: "FastMCP") -> int:
         if pipeline_id > 0:
             args.append(str(pipeline_id))
         success, output = await run_glab(args, repo=project)
-        return f"✅ Pipeline Cancelled" if success else f"❌ Failed: {output}"
+        return "✅ Pipeline Cancelled" if success else f"❌ Failed: {output}"
 
     @server.tool()
     async def gitlab_ci_trace(project: str, job_id: int) -> str:

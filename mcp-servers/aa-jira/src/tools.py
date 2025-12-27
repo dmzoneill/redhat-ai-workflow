@@ -626,7 +626,7 @@ def register_tools(server: "FastMCP") -> int:
 
             issue = json.loads(output)
         except (json.JSONDecodeError, ValueError, TypeError):
-            return f"❌ Failed to parse issue data"
+            return "❌ Failed to parse issue data"
 
         summary = issue.get("summary", "No summary")
         status = issue.get("status", "Unknown")

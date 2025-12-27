@@ -430,7 +430,7 @@ class IntegrationTestRunner:
             self.report.add_todo(
                 category="enhancement",
                 title=f"Improve auth handling in {tool_name}",
-                description=f"Auth error encountered. Consider better error messages or credential checking.",
+                description="Auth error encountered. Consider better error messages or credential checking.",
                 source=f"{agent_name}/{tool_name}",
                 priority="medium",
             )
@@ -438,7 +438,7 @@ class IntegrationTestRunner:
             self.report.add_todo(
                 category="optimization",
                 title=f"Add timeout handling to {tool_name}",
-                description=f"Tool timed out. Consider adding configurable timeouts.",
+                description="Tool timed out. Consider adding configurable timeouts.",
                 source=f"{agent_name}/{tool_name}",
                 priority="medium",
             )
@@ -539,7 +539,7 @@ class IntegrationTestRunner:
         # Show exclusions
         excluded_skills = self.exclusions.get("excluded_skills", [])
         excluded_tools = self.exclusions.get("excluded_tools", [])
-        print(f"\n  📋 Exclusions loaded:")
+        print("\n  📋 Exclusions loaded:")
         print(f"     • {len(excluded_skills)} skills excluded (production-impacting)")
         print(f"     • {len(excluded_tools)} tools excluded (destructive)")
 
@@ -704,8 +704,8 @@ class IntegrationTestRunner:
         lines.append("")
         lines.append("## Summary")
         lines.append("")
-        lines.append(f"| Category | Count |")
-        lines.append(f"|----------|-------|")
+        lines.append("| Category | Count |")
+        lines.append("|----------|-------|")
         for cat in category_order:
             if cat in by_category:
                 lines.append(f"| {cat.title()} | {len(by_category[cat])} |")
