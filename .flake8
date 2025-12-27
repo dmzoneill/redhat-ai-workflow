@@ -1,0 +1,42 @@
+[flake8]
+# Line length - match Black's default
+max-line-length = 100
+
+# Exclude directories
+exclude =
+    .venv,
+    .git,
+    __pycache__,
+    .pytest_cache,
+    *.egg-info,
+    build,
+    dist
+
+# Ignore specific errors
+ignore =
+    # E402: module level import not at top - intentional for path setup
+    E402,
+    # W503: line break before binary operator - conflicts with Black
+    W503,
+    # E203: whitespace before ':' - conflicts with Black
+    E203
+
+# Per-file ignores
+per-file-ignores =
+    # D-Bus type annotations are valid but misinterpreted
+    scripts/slack_dbus.py: F821
+    # Test files may have longer lines for assertions
+    tests/*.py: E501
+
+# McCabe complexity
+max-complexity = 15
+
+# Show source code for errors
+show-source = true
+
+# Count errors
+count = true
+
+# Statistics
+statistics = true
+
