@@ -594,6 +594,12 @@ class ToolExecutor:
             run_env = os.environ.copy()
             if env:
                 run_env.update(env)
+
+            # CRITICAL: Clear virtualenv variables to allow pipenv commands (like rh-issue) to work
+            # Without this, pipenv detects our venv and uses it instead of jira-creator's venv
+            for var in ["VIRTUAL_ENV", "PIPENV_ACTIVE", "PYTHONHOME"]:
+                run_env.pop(var, None)
+            run_env["PIPENV_IGNORE_VIRTUALENVS"] = "1"
             result = subprocess.run(
                 cmd,
                 capture_output=True,
