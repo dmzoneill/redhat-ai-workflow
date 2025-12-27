@@ -625,7 +625,8 @@ def register_tools(server: "FastMCP") -> int:
         if not success:
             return f"❌ Failed: {output}\n\nRun: `kube e` to authenticate"
 
-        namespaces = [ln.replace("namespace/", "") for ln in output.strip().split("\n") if ln.strip()]
+        lines = output.strip().split("\n")
+        namespaces = [ln.replace("namespace/", "") for ln in lines if ln.strip()]
 
         # Filter for ephemeral-like namespaces (often have specific patterns)
         ephemeral_ns = [

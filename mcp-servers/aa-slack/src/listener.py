@@ -218,7 +218,7 @@ class SlackListener:
         for i, channel_id in enumerate(self.config.watched_channels):
             try:
                 logger.debug(
-                    f"Polling channel {i+1}/{len(self.config.watched_channels)}: {channel_id}"
+                    f"Polling channel {i + 1}/{len(self.config.watched_channels)}: {channel_id}"
                 )
                 await self._poll_channel(channel_id)
                 logger.debug(f"Done polling {channel_id}")
