@@ -478,9 +478,9 @@ class IntegrationTestRunner:
 
         start = time.time()
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"🎭 Testing Agent: {agent_name}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         result = AgentTestResult(agent_name=agent_name)
 

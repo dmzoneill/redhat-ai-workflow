@@ -1231,7 +1231,8 @@ def register_tools(server: FastMCP) -> int:
         success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
 
         if success:
-            return f"✅ docker-compose up completed\n\n{output[-1000:] if len(output) > 1000 else output}"
+            truncated = output[-1000:] if len(output) > 1000 else output
+            return f"✅ docker-compose up completed\n\n{truncated}"
         return f"❌ docker-compose up failed:\n{output}"
 
     tool_count += 1

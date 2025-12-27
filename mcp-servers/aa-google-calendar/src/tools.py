@@ -83,7 +83,8 @@ def get_calendar_service():
     except ImportError:
         return (
             None,
-            "Google API libraries not installed. Run: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib",
+            "Google API libraries not installed. Run: "
+            "pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib",
         )
 
     creds = None
@@ -713,7 +714,8 @@ async def google_calendar_schedule_meeting(
     if start_dt.hour < MEETING_START_HOUR or start_dt.hour >= MEETING_END_HOUR:
         return (
             f"❌ Meeting time {start_dt.strftime('%H:%M')} is outside allowed window.\n"
-            f"📍 Meetings must be between {MEETING_START_HOUR}:00 and {MEETING_END_HOUR}:00 Irish time.\n\n"
+            f"📍 Meetings must be between {MEETING_START_HOUR}:00 "
+            f"and {MEETING_END_HOUR}:00 Irish time.\n\n"
             f"Use `google_calendar_check_mutual_availability` to find valid slots."
         )
 
@@ -721,7 +723,8 @@ async def google_calendar_schedule_meeting(
     end_dt = start_dt + timedelta(minutes=duration_minutes)
     if end_dt.hour > MEETING_END_HOUR or (end_dt.hour == MEETING_END_HOUR and end_dt.minute > 0):
         return (
-            f"❌ Meeting would end at {end_dt.strftime('%H:%M')}, past the {MEETING_END_HOUR}:00 cutoff.\n"
+            f"❌ Meeting would end at {end_dt.strftime('%H:%M')}, "
+            f"past the {MEETING_END_HOUR}:00 cutoff.\n"
             f"Consider a shorter duration or earlier start time."
         )
 

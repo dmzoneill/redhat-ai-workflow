@@ -419,7 +419,8 @@ def register_tools(server: "FastMCP") -> int:
         issue_type_normalized = issue_type.lower().strip()
 
         if issue_type_normalized not in valid_types:
-            return f"❌ Invalid issue type: '{issue_type}'. Valid types: {', '.join(sorted(valid_types))}"
+            types_str = ', '.join(sorted(valid_types))
+            return f"❌ Invalid issue type: '{issue_type}'. Valid types: {types_str}"
 
         # Convert Markdown to Jira if needed
         if convert_markdown and description:
@@ -457,7 +458,11 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_rh_issue(args, timeout=60)
 
         if not success:
-            return f"❌ Failed to create issue: {output}\n\n💡 Tip: If env vars are missing, use the create_jira_issue skill instead which runs via CLI with your shell environment."
+            return (
+                f"❌ Failed to create issue: {output}\n\n"
+                "💡 Tip: If env vars are missing, use the create_jira_issue skill "
+                "instead which runs via CLI with your shell environment."
+            )
 
         # Extract issue key from output
         issue_key_match = re.search(r"([A-Z]+-\d+)", output)
