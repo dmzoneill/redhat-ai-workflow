@@ -415,6 +415,10 @@ async def run_cmd_shell(
     for var in ["VIRTUAL_ENV", "PIPENV_ACTIVE", "PYTHONHOME"]:
         env.pop(var, None)
 
+    # CRITICAL: Tell pipenv to ignore any detected virtualenv and use its own
+    # This is needed because pipenv detects venvs even after we clear VIRTUAL_ENV
+    env["PIPENV_IGNORE_VIRTUALENVS"] = "1"
+
     # Ensure user's bin is in PATH (and remove project venv paths)
     user_bin = str(home / "bin")
     # Filter out project venv paths from PATH

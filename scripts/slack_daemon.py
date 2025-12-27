@@ -150,6 +150,16 @@ class SingleInstance:
 load_dotenv(PROJECT_ROOT / "mcp-servers" / "aa-slack" / ".env")
 load_dotenv()
 
+# Import load_config from aa-common using importlib to avoid module cache conflicts
+# (all MCP servers use 'src' as package name, which causes import conflicts)
+import importlib.util
+
+_utils_path = PROJECT_ROOT / "mcp-servers" / "aa-common" / "src" / "utils.py"
+_spec = importlib.util.spec_from_file_location("aa_common_utils", _utils_path)
+_utils_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_utils_module)
+load_config = _utils_module.load_config
+
 from src.listener import ListenerConfig, SlackListener
 from src.persistence import PendingMessage, SlackStateDB
 
@@ -162,9 +172,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-
-# Use shared config loader from aa-common (avoids duplicate load_config implementation)
-from src.utils import load_config
 
 CONFIG = load_config()
 SLACK_CONFIG = CONFIG.get("slack", {})
