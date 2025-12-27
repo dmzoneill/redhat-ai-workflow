@@ -386,10 +386,11 @@ def register_tools(server: "FastMCP") -> int:
         # Get URL template from config or use default
         slack_config = config.get("slack", {})
         user_mapping_config = slack_config.get("user_mapping", {})
-        url_template = user_mapping_config.get(
-            "app_interface_url",
-            "https://gitlab.cee.redhat.com/service/app-interface/-/raw/master/data/teams/{team}/users/{user}.yml",
+        default_url = (
+            "https://gitlab.cee.redhat.com/service/app-interface/"
+            "-/raw/master/data/teams/{team}/users/{user}.yml"
         )
+        url_template = user_mapping_config.get("app_interface_url", default_url)
 
         url = url_template.format(team=team, user=username)
 

@@ -249,7 +249,10 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text="❌ Failed to list tags. Ensure you're logged in:\n  `podman login quay.io` or `docker login quay.io`",
+                    text=(
+                        "❌ Failed to list tags. Ensure you're logged in:\n"
+                        "  `podman login quay.io` or `docker login quay.io`"
+                    ),
                 )
             ]
 
@@ -304,7 +307,11 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Failed to get tag: {data}\n\nEnsure you're logged in:\n  `podman login quay.io` or `docker login quay.io`",
+                    text=(
+                        f"❌ Failed to get tag: {data}\n\n"
+                        "Ensure you're logged in:\n"
+                        "  `podman login quay.io` or `docker login quay.io`"
+                    ),
                 )
             ]
 
@@ -427,7 +434,10 @@ The Konflux build may still be in progress, or the tag doesn't exist.
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Failed to get vulnerabilities: {data}\n\nNote: Security scans require QUAY_TOKEN environment variable.",
+                    text=(
+                        f"❌ Failed to get vulnerabilities: {data}\n\n"
+                        "Note: Security scans require QUAY_TOKEN environment variable."
+                    ),
                 )
             ]
 
@@ -620,7 +630,11 @@ The Konflux build may still be in progress, or the tag doesn't exist.
             return [
                 TextContent(
                     type="text",
-                    text="❌ Failed to list AA tags.\n\nEnsure you're logged in:\n  `podman login quay.io` or `docker login quay.io`",
+                    text=(
+                        "❌ Failed to list AA tags.\n\n"
+                        "Ensure you're logged in:\n"
+                        "  `podman login quay.io` or `docker login quay.io`"
+                    ),
                 )
             ]
 

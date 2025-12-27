@@ -68,7 +68,8 @@ def get_kibana_environment(environment: str) -> "KibanaEnvironment":
     url = os.getenv(f"KIBANA_{env_key.upper()}_URL", "")
     if not url:
         raise ValueError(
-            f"Kibana URL not configured. Set KIBANA_{env_key.upper()}_URL or configure in config.json"
+            f"Kibana URL not configured. "
+            f"Set KIBANA_{env_key.upper()}_URL or configure in config.json"
         )
 
     return KibanaEnvironment(
@@ -129,7 +130,8 @@ async def kibana_request(
     if not env_config:
         return (
             False,
-            f"Unknown environment: {environment}. Configure in config.json or set KIBANA_{environment.upper()}_URL",
+            f"Unknown environment: {environment}. "
+            f"Configure in config.json or set KIBANA_{environment.upper()}_URL",
         )
 
     token = get_token(env_config.kubeconfig)
@@ -393,7 +395,10 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             All log entries for this request.
         """
-        query = f'"{request_id}" OR request_id:"{request_id}" OR trace_id:"{request_id}" OR correlation_id:"{request_id}"'
+        query = (
+            f'"{request_id}" OR request_id:"{request_id}" '
+            f'OR trace_id:"{request_id}" OR correlation_id:"{request_id}"'
+        )
         return await kibana_search_logs(
             environment=environment,
             query=query,
@@ -492,8 +497,9 @@ def register_tools(server: "FastMCP") -> int:
             token = get_token(env_config.kubeconfig)
 
             if not token:
+                kube_suffix = env_config.kubeconfig.split('.')[-1]
                 lines.append(
-                    f"**{env}:** ⚠️ Not authenticated - run `kube {env_config.kubeconfig.split('.')[-1]}`"
+                    f"**{env}:** ⚠️ Not authenticated - run `kube {kube_suffix}`"
                 )
                 continue
 
