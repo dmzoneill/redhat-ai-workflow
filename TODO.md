@@ -1,182 +1,178 @@
-# 📋 Code Quality TODO
+# 📋 Code Quality Audit
 
-Generated: 2025-12-27
-Last Updated: 2025-12-27
+**Generated:** 2025-12-27
+**Last Audit:** 2025-12-27
 
-## 🎉 All Flake8 Checks Pass!
+---
 
-```bash
-$ flake8 mcp-servers/ scripts/
-0  # No issues!
+## 🎯 Current Status
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| **Flake8 Issues** | 0 | ✅ |
+| **Test Suite** | 108 tests | ✅ |
+| **Tests Passing** | 100% | ✅ |
+| **Bandit High Severity** | 0 | ✅ |
+| **Line Length** | 120 chars | ✅ |
+
+---
+
+## 📊 Codebase Statistics
+
+| Area | Files | Lines |
+|------|-------|-------|
+| MCP Servers | 62 | 20,744 |
+| Scripts | 12 | 7,645 |
+| Tests | 9 | 985 |
+| **Total** | **83** | **29,374** |
+
+---
+
+## 🧪 Test Coverage
+
+### Summary
+```
+scripts/common/         30.82% (649 statements, 427 missed)
 ```
 
----
+### By Module
+| File | Coverage | Notes |
+|------|----------|-------|
+| `scripts/common/__init__.py` | 100% | Empty |
+| `scripts/common/config_loader.py` | 0% | Needs tests |
+| `scripts/common/jira_utils.py` | 49% | Partial |
+| `scripts/common/parsers.py` | 31% | 38 tests added |
 
-## Summary
-
-| Category | Before | After | Status |
-|----------|--------|-------|--------|
-| Formatting (Black/isort) | ~30 files | 0 | ✅ Fixed |
-| Unused Imports (F401) | 65 | 0 | ✅ Fixed |
-| Unused Variables (F841) | 12 | 0 | ✅ Fixed |
-| Bare Except (E722) | 10 | 0 | ✅ Fixed |
-| Syntax Errors (E999) | 1 | 0 | ✅ Fixed |
-| Ambiguous Variables (E741) | 16 | 0 | ✅ Fixed |
-| Trailing Whitespace (W291/W293) | 37 | 0 | ✅ Fixed |
-| F-string No Placeholder (F541) | 46 | 0 | ✅ Fixed |
-| Line Too Long (E501) | 1,177 | 0 | ✅ Fixed (120 char limit) |
-| Complexity (C901) | 22 | 0 | ✅ Configured |
-| Missing Whitespace (E226) | 3 | 0 | ✅ Fixed |
-| Test Suite | 0 | 108 tests | ✅ Added |
-| Security Scan (Bandit) | 1 High | 0 High | ✅ Fixed |
-| .flake8 Config | - | ✅ | ✅ Added |
-| pyproject.toml | - | ✅ | ✅ Enhanced |
+### Test Modules (108 tests)
+| Module | Tests |
+|--------|-------|
+| test_parsers.py | 38 |
+| test_agent_loader.py | 16 |
+| test_jira_utils.py | 16 |
+| test_utils.py | 15 |
+| test_skills.py | 9 |
+| test_agents.py | 8 |
+| test_config.py | 6 |
 
 ---
 
-## ✅ Completed
+## 🔒 Security (Bandit)
 
-### 2025-12-27
+| Severity | Count | Notes |
+|----------|-------|-------|
+| High | 0 | ✅ All fixed |
+| Medium | 11 | Expected (exec, eval, urlopen) |
+| Low | 40+ | Expected (subprocess, /tmp) |
 
-- [x] **Black formatting** - Applied to all 68 files
-- [x] **isort imports** - All imports sorted correctly
-- [x] **Unused imports (F401)** - Removed 65 instances
-- [x] **Unused variables (F841)** - Removed 12 instances
-- [x] **Bare except handlers (E722)** - All 10 replaced with specific types
-- [x] **Syntax errors (E999)** - Fixed indentation in appinterface
-- [x] **Ambiguous variables (E741)** - Renamed `l` → `ln` in 16 places
-- [x] **Trailing whitespace (W291/W293)** - Removed from all files
-- [x] **F-string placeholders (F541)** - Fixed 46 instances
-- [x] **Line too long (E501)** - Fixed 82→0 (with per-file configs)
-- [x] **Complexity (C901)** - Added to ignores (by design)
-- [x] **Missing whitespace (E226)** - Fixed 3 instances
-- [x] **Duplicate import (F811)** - Fixed in claude_agent.py
-- [x] **Invalid escape sequence (W605)** - Fixed in parsers.py
-- [x] **D-Bus type annotations (F821)** - Added noqa for slack_dbus.py
-- [x] **Test suite** - Added 108 tests across 7 test modules
-- [x] **parsers.py tests** - Added 38 tests for output parsing
-- [x] **agent_loader.py tests** - Added 16 tests for agent loading
-- [x] **Security scan (Bandit)** - Fixed high severity MD5 issue
-- [x] **.flake8 configuration** - Comprehensive setup
-- [x] **pyproject.toml** - Added pytest-cov, bandit, coverage config
-- [x] Documentation structure (docs/)
-- [x] Cursor commands (35 commands)
-- [x] README comprehensive update
+### Medium Findings (Acceptable)
+- `B310` urlopen - Required for API calls
+- `B307` eval - Used in skill engine for conditions
+- `B102` exec - Used in skill engine for compute blocks
+- `B108` /tmp - Daemon lock files
 
 ---
 
-## 🟢 Test Coverage
+## ✅ Completed Work
 
-### Current Coverage (108 tests)
-| File | Coverage |
-|------|----------|
-| `mcp-servers/aa-common/src/config.py` | 16% |
-| `mcp-servers/aa-common/src/utils.py` | 25% |
-| `mcp-servers/aa-common/src/agent_loader.py` | 45% |
-| `scripts/common/jira_utils.py` | 58% |
-| `scripts/common/parsers.py` | 35% |
+### Code Quality (2025-12-27)
+- [x] Black formatting - All 74 files
+- [x] isort imports - All files sorted
+- [x] Flake8 issues - 0 remaining
+- [x] Line length - 120 char limit
+- [x] Security scan - 0 high severity
 
-### Test Modules
-| Module | Tests | Status |
-|--------|-------|--------|
-| test_agents.py | 8 | ✅ |
-| test_agent_loader.py | 16 | ✅ |
-| test_config.py | 6 | ✅ |
-| test_jira_utils.py | 16 | ✅ |
-| test_parsers.py | 38 | ✅ |
-| test_skills.py | 9 | ✅ |
-| test_utils.py | 15 | ✅ |
+### Refactoring (2025-12-27)
+Split `tools.py` (3,005→3,241 lines) into 10 modules:
+
+| Module | Lines | Tools |
+|--------|-------|-------|
+| constants.py | 17 | Shared paths |
+| memory_tools.py | 273 | 5 tools |
+| agent_tools.py | 162 | 2 tools |
+| session_tools.py | 259 | 1 tool + 3 prompts |
+| resources.py | 101 | 5 resources |
+| skill_engine.py | 677 | SkillExecutor + 2 tools |
+| infra_tools.py | 241 | 2 tools |
+| lint_tools.py | 483 | 7 tools |
+| meta_tools.py | 381 | 2 tools |
+
+**New modular code: 2,594 lines**
+
+### Testing (2025-12-27)
+- [x] Test suite created - 108 tests
+- [x] pytest configuration
+- [x] Coverage reporting
+- [x] All tests passing
 
 ---
 
 ## 🔮 Future Improvements
 
-### High-Value Test Targets
-- [ ] `mcp-servers/aa-workflow/src/tools.py` - Skill execution
-- [ ] `mcp-servers/aa-git/src/tools.py` - Git operations
-- [x] `scripts/common/parsers.py` - Output parsing (38 tests)
-- [x] `mcp-servers/aa-common/src/agent_loader.py` - Agent loading (16 tests)
+### High Priority
+- [ ] Increase test coverage for `scripts/common/config_loader.py` (0%)
+- [ ] Increase test coverage for `scripts/common/parsers.py` (31%)
+- [ ] Wire new modules into main `tools.py`
 
-### Refactoring - COMPLETED ✅
-Split `mcp-servers/aa-workflow/src/tools.py` into 10 modules:
+### Medium Priority
+- [ ] Add integration tests for MCP tools
+- [ ] Extract remaining workflow_* functions from tools.py
+- [ ] Add type hints to legacy code
 
-| Module | Lines | Contents |
-|--------|-------|----------|
-| `constants.py` | 17 | Shared paths |
-| `memory_tools.py` | 273 | 5 memory tools |
-| `agent_tools.py` | 162 | 2 agent tools |
-| `session_tools.py` | 259 | 1 tool + 3 prompts |
-| `resources.py` | 101 | 5 MCP resources |
-| `skill_engine.py` | 677 | SkillExecutor + 2 tools |
-| `infra_tools.py` | 241 | VPN + kube_login |
-| `lint_tools.py` | 483 | 7 lint/test tools |
-| `meta_tools.py` | 381 | tool_list + tool_exec |
-| `tools.py` | 3,241 | Main (still has workflow_*) |
-
-**Total new modular code: 2,594 lines**
+### Low Priority
+- [ ] Refactor large functions (C901 complexity)
+- [ ] Add documentation for all modules
+- [ ] Create development guide
 
 ---
 
-## Progress Tracking
+## 📈 Progress Tracking
 
-| Date | Action | Files Changed |
-|------|--------|---------------|
-| 2025-12-27 | Initial analysis | - |
-| 2025-12-27 | Black + isort formatting | 68 files |
-| 2025-12-27 | Fix unused imports | 33 files |
-| 2025-12-27 | Fix bare except handlers | 6 files |
-| 2025-12-27 | Fix misc flake8 issues | 4 files |
-| 2025-12-27 | Fix indentation error | 1 file |
-| 2025-12-27 | Fix trailing whitespace + E741 | 10 files |
-| 2025-12-27 | Add test suite | 7 files |
-| 2025-12-27 | Add .flake8 config | 1 file |
-| 2025-12-27 | Fix F541 f-strings | 9 files |
-| 2025-12-27 | Enhance pyproject.toml | 1 file |
-| 2025-12-27 | Fix E501 long lines | 6 files |
-| 2025-12-27 | Complete all flake8 fixes | 7 files |
-| 2025-12-27 | Add parsers.py tests | 1 file |
-| 2025-12-27 | Add agent_loader.py tests | 1 file |
-| 2025-12-27 | Fix Bandit high severity | 1 file |
+| Date | Action | Impact |
+|------|--------|--------|
+| 2025-12-27 | Initial audit | 1,177 issues found |
+| 2025-12-27 | Black + isort | 68 files formatted |
+| 2025-12-27 | Fix all flake8 | 0 issues remaining |
+| 2025-12-27 | Add test suite | 108 tests |
+| 2025-12-27 | Security scan | 0 high severity |
+| 2025-12-27 | Refactor tools.py | 10 modules extracted |
 
 ---
 
-## 🔒 Security Scan (Bandit)
+## 🛠️ Quick Commands
 
 ```bash
-$ bandit -r mcp-servers/ scripts/ --severity high
-0 High severity issues!
-```
-
-| Severity | Before | After |
-|----------|--------|-------|
-| High | 1 | 0 ✅ |
-| Medium | 8 | 8 (acceptable) |
-| Low | 37 | 37 (acceptable) |
-
-Medium/Low findings are mostly:
-- subprocess imports (B404) - expected for CLI tool
-- subprocess without shell=True (B603) - intentional security practice
-- urlopen audit (B310) - needed for API calls
-- try/except/pass (B110) - cleanup code
-- hardcoded /tmp (B108) - daemon lock files
-
----
-
-## Quick Commands
-
-```bash
-# Check current status (should be 0!)
+# Lint check
 flake8 mcp-servers/ scripts/
 
 # Run tests
 pytest tests/ -v
 
 # Run tests with coverage
-pytest tests/ --cov=mcp-servers --cov=scripts --cov-report=html
+pytest tests/ --cov=scripts/common --cov-report=term-missing
 
-# Apply black + isort
+# Format code
 black mcp-servers/ scripts/ && isort mcp-servers/ scripts/
 
 # Security scan
-bandit -r mcp-servers/ scripts/ -c pyproject.toml
+bandit -r mcp-servers/ scripts/ --severity high
+```
+
+---
+
+## 📁 File Structure (New Modules)
+
+```
+mcp-servers/aa-workflow/src/
+├── __init__.py
+├── constants.py       ← Shared path constants
+├── memory_tools.py    ← 5 memory tools
+├── agent_tools.py     ← 2 agent tools
+├── session_tools.py   ← session_start + prompts
+├── resources.py       ← 5 MCP resources
+├── skill_engine.py    ← SkillExecutor + skills
+├── infra_tools.py     ← VPN + kube auth
+├── lint_tools.py      ← 7 lint/test tools
+├── meta_tools.py      ← tool_list + tool_exec
+├── server.py
+└── tools.py           ← Main entry (workflow_*)
 ```
