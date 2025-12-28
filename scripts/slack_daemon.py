@@ -682,8 +682,15 @@ class TerminalUI:
         status += f"✅ Processed: {self.messages_processed} | "
         status += f"💬 Responded: {self.messages_responded}"
 
-        if self.errors > 0:
-            status += f" | {self.COLORS['red']}❌ Errors: {self.errors}{self.COLORS['reset']}"
+        # Show consecutive errors from listener stats (resets on successful poll)
+        consecutive_errors = listener_stats.get("consecutive_errors", 0)
+        total_errors = listener_stats.get("errors", 0) + self.errors
+
+        if consecutive_errors > 0:
+            status += f" | {self.COLORS['red']}❌ Errors: {consecutive_errors}{self.COLORS['reset']}"
+        elif total_errors > 0:
+            # Show total errors dimmed if no recent errors
+            status += f" | {self.COLORS['dim']}({total_errors} total errors){self.COLORS['reset']}"
 
         self.clear_line()
         print(status, end="", flush=True)
@@ -739,12 +746,15 @@ class TerminalUI:
         print(f"\n{self.COLORS['red']}❌ Error: {error}{self.COLORS['reset']}")
         self.errors += 1
 
-    def print_shutdown(self):
+    def print_shutdown(self, listener_stats: dict | None = None):
         """Print shutdown message."""
         print(f"\n\n{self.COLORS['cyan']}Shutting down gracefully...{self.COLORS['reset']}")
         print(f"   📊 Total processed: {self.messages_processed}")
         print(f"   💬 Total responded: {self.messages_responded}")
-        print(f"   ❌ Total errors: {self.errors}")
+        # Combine listener errors with daemon errors
+        listener_errors = listener_stats.get("errors", 0) if listener_stats else 0
+        total_errors = self.errors + listener_errors
+        print(f"   ❌ Total errors: {total_errors}")
         print(f"{self.COLORS['green']}Goodbye! 👋{self.COLORS['reset']}\n")
 
 
@@ -1493,7 +1503,9 @@ The skill will:
         if self.state_db:
             await self.state_db.close()
 
-        self.ui.print_shutdown()
+        # Get final listener stats for shutdown summary
+        listener_stats = self.listener.stats if self.listener else {}
+        self.ui.print_shutdown(listener_stats)
 
     def setup_signal_handlers(self):
         """Set up signal handlers for graceful shutdown."""

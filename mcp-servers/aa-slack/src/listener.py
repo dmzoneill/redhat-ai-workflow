@@ -118,6 +118,8 @@ class SlackListener:
             "messages_seen": 0,
             "messages_queued": 0,
             "errors": 0,
+            "consecutive_errors": 0,  # Reset on success
+            "last_error": "",
             "started_at": 0.0,
         }
 
@@ -198,23 +200,37 @@ class SlackListener:
         while self._running:
             try:
                 logger.debug(f"Polling {len(self.config.watched_channels)} channels...")
-                await self._poll_all_channels()
+                poll_had_errors = await self._poll_all_channels()
                 self._stats["polls"] += 1
+
+                # Reset consecutive errors on a fully successful poll
+                if not poll_had_errors:
+                    self._stats["consecutive_errors"] = 0
+
                 logger.debug(f"Poll complete. Total polls: {self._stats['polls']}")
             except asyncio.CancelledError:
                 logger.info("Poll loop cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in poll loop: {e}", exc_info=True)
+                # Don't log full traceback for transient errors
+                error_type = type(e).__name__
                 self._stats["errors"] += 1
+                self._stats["consecutive_errors"] += 1
+                self._stats["last_error"] = f"{error_type}: {str(e)[:100]}"
+                logger.debug(f"Poll loop error: {error_type}: {e}")
 
             # Wait for next poll interval (randomized for natural feel)
             interval = random.uniform(self.config.poll_interval_min, self.config.poll_interval_max)
             await asyncio.sleep(interval)
         logger.info("Poll loop exiting")
 
-    async def _poll_all_channels(self):
-        """Poll all watched channels for new messages."""
+    async def _poll_all_channels(self) -> bool:
+        """Poll all watched channels for new messages.
+
+        Returns:
+            True if any errors occurred during polling, False if all successful.
+        """
+        had_errors = False
         for i, channel_id in enumerate(self.config.watched_channels):
             try:
                 logger.debug(
@@ -223,8 +239,14 @@ class SlackListener:
                 await self._poll_channel(channel_id)
                 logger.debug(f"Done polling {channel_id}")
             except Exception as e:
-                logger.error(f"Error polling channel {channel_id}: {e}", exc_info=True)
+                # Don't log full traceback - just record the error type
+                error_type = type(e).__name__
                 self._stats["errors"] += 1
+                self._stats["consecutive_errors"] += 1
+                self._stats["last_error"] = f"{error_type}: {str(e)[:100]}"
+                logger.debug(f"Error polling channel {channel_id}: {error_type}")
+                had_errors = True
+        return had_errors
 
     async def _poll_channel(self, channel_id: str):
         """Poll a single channel for new messages."""
