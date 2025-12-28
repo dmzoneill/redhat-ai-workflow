@@ -3,22 +3,48 @@
 import pytest
 
 from common.parsers import (
+    analyze_mr_status,
+    analyze_review_status,
     extract_all_jira_keys,
+    extract_author_from_mr,
+    extract_billing_event_number,
     extract_branch_from_mr,
+    extract_conflict_files,
     extract_current_branch,
+    extract_ephemeral_namespace,
     extract_git_sha,
     extract_jira_key,
+    extract_json_from_output,
     extract_mr_id_from_text,
     extract_mr_id_from_url,
+    extract_mr_url,
+    extract_version_suffix,
+    extract_web_url,
     filter_human_comments,
+    find_transition_name,
+    get_next_version,
     is_bot_comment,
+    parse_alertmanager_output,
+    parse_conflict_markers,
+    parse_deploy_clowder_ref,
+    parse_error_logs,
     parse_git_branches,
+    parse_git_conflicts,
     parse_git_log,
     parse_jira_issues,
+    parse_jira_status,
     parse_kubectl_pods,
+    parse_mr_comments,
     parse_mr_list,
     parse_namespaces,
+    parse_pipeline_status,
+    parse_prometheus_alert,
+    parse_quay_manifest,
+    parse_stale_branches,
+    separate_mrs_by_author,
     slugify_text,
+    split_mr_comments,
+    update_deploy_clowder_ref,
     validate_jira_key,
 )
 
@@ -310,4 +336,447 @@ class TestSlugifyText:
     def test_empty_string(self):
         """Empty string should return empty string."""
         assert slugify_text("") == ""
+
+
+class TestParseStaleBranches:
+    """Tests for parse_stale_branches function."""
+
+    def test_empty_output(self):
+        """Empty output should return empty list."""
+        assert parse_stale_branches("") == []
+
+    def test_filters_main_branches(self):
+        """Should filter out main/master/develop branches."""
+        output = """  feature/aap-12345
+  main
+  develop
+  feature/old-feature"""
+        result = parse_stale_branches(output)
+        assert "main" not in result
+        assert "develop" not in result
+
+
+class TestParseGitConflicts:
+    """Tests for parse_git_conflicts function."""
+
+    def test_empty_output(self):
+        """Empty output should return empty list."""
+        assert parse_git_conflicts("") == []
+
+    def test_porcelain_format(self):
+        """Should parse porcelain format conflicts."""
+        output = """UU file1.py
+AA file2.py"""
+        result = parse_git_conflicts(output)
+        assert len(result) == 2
+        assert result[0]["file"] == "file1.py"
+        assert result[0]["type"] == "both modified"
+        assert result[1]["file"] == "file2.py"
+        assert result[1]["type"] == "both added"
+
+    def test_human_readable_format(self):
+        """Should parse human-readable format conflicts."""
+        output = "both modified: src/main.py"
+        result = parse_git_conflicts(output)
+        assert len(result) == 1
+        assert result[0]["file"] == "src/main.py"
+
+
+class TestParsePipelineStatus:
+    """Tests for parse_pipeline_status function."""
+
+    def test_empty_output(self):
+        """Empty output should return default status."""
+        result = parse_pipeline_status("")
+        assert result["status"] == "unknown"
+
+    def test_passed_status(self):
+        """Should detect passed status."""
+        result = parse_pipeline_status("Pipeline passed successfully")
+        assert result["status"] == "passed"
+
+    def test_failed_status(self):
+        """Should detect failed status."""
+        result = parse_pipeline_status("Pipeline failed at job xyz")
+        assert result["status"] == "failed"
+
+    def test_running_status(self):
+        """Should detect running status."""
+        result = parse_pipeline_status("Pipeline is running...")
+        assert result["status"] == "running"
+
+    def test_extract_url(self):
+        """Should extract pipeline URL."""
+        output = "View at https://gitlab.com/org/repo/-/pipelines/12345"
+        result = parse_pipeline_status(output)
+        assert result["url"] == "https://gitlab.com/org/repo/-/pipelines/12345"
+
+
+class TestParseMrComments:
+    """Tests for parse_mr_comments function."""
+
+    def test_empty_output(self):
+        """Empty output should return empty list."""
+        assert parse_mr_comments("") == []
+
+    def test_json_format(self):
+        """Should parse JSON format comments."""
+        import json
+        comments = [{"author": "user1", "text": "LGTM", "date": "2024-01-01"}]
+        result = parse_mr_comments(json.dumps(comments))
+        assert len(result) == 1
+        assert result[0]["author"] == "user1"
+
+    def test_text_format(self):
+        """Should parse text format comments."""
+        output = "@jdoe commented 2 days ago\nLooks good to me!"
+        result = parse_mr_comments(output)
+        assert len(result) >= 1
+
+
+class TestAnalyzeMrStatus:
+    """Tests for analyze_mr_status function."""
+
+    def test_empty_details(self):
+        """Empty details should return awaiting_review status."""
+        result = analyze_mr_status("")
+        assert result["status"] == "awaiting_review"
+
+    def test_approved_status(self):
+        """Should detect approved MR."""
+        details = "This MR has been approved by reviewer"
+        result = analyze_mr_status(details)
+        assert result["is_approved"] is True
+
+    def test_conflict_detected(self):
+        """Should detect merge conflicts."""
+        details = "This MR has conflicts and cannot be merged"
+        result = analyze_mr_status(details)
+        assert result["has_conflicts"] is True
+        assert result["status"] == "needs_rebase"
+
+    def test_pipeline_failed(self):
+        """Should detect pipeline failure."""
+        details = "Pipeline failed for this MR"
+        result = analyze_mr_status(details)
+        assert result["pipeline_failed"] is True
+
+
+class TestSeparateMrsByAuthor:
+    """Tests for separate_mrs_by_author function."""
+
+    def test_empty_list(self):
+        """Empty list should return empty result."""
+        result = separate_mrs_by_author([], "myuser")
+        assert result["my_mrs"] == []
+        assert result["to_review"] == []
+
+    def test_separate_own_and_others(self):
+        """Should separate own MRs from others."""
+        mrs = [
+            {"iid": 1, "author": "myuser", "title": "My MR"},
+            {"iid": 2, "author": "other", "title": "Review this"},
+        ]
+        result = separate_mrs_by_author(mrs, "myuser")
+        assert len(result["my_mrs"]) == 1
+        assert len(result["to_review"]) == 1
+        assert result["my_mrs"][0]["iid"] == 1
+
+
+class TestExtractWebUrl:
+    """Tests for extract_web_url function."""
+
+    def test_extract_basic_url(self):
+        """Should extract basic HTTPS URL."""
+        text = "Check out https://example.com/page for more info"
+        result = extract_web_url(text)
+        assert result == "https://example.com/page"
+
+    def test_with_pattern(self):
+        """Should extract URL matching pattern."""
+        text = "MR at https://gitlab.com/org/repo/-/merge_requests/123"
+        result = extract_web_url(text, r"merge_requests/\d+")
+        assert "merge_requests/123" in result
+
+    def test_no_url(self):
+        """Should return None when no URL found."""
+        assert extract_web_url("No URL here") is None
+        assert extract_web_url("") is None
+
+
+class TestExtractMrUrl:
+    """Tests for extract_mr_url function."""
+
+    def test_extract_mr_url(self):
+        """Should extract MR URL."""
+        text = "See https://gitlab.com/group/project/-/merge_requests/456"
+        result = extract_mr_url(text)
+        assert "merge_requests/456" in result
+
+
+class TestExtractAuthorFromMr:
+    """Tests for extract_author_from_mr function."""
+
+    def test_extract_author(self):
+        """Should extract author from MR details."""
+        details = "Author: @jdoe"
+        result = extract_author_from_mr(details)
+        assert result == "jdoe"
+
+    def test_no_author(self):
+        """Should return None when no author found."""
+        assert extract_author_from_mr("Title: Some MR title") is None
+
+
+class TestParseJiraStatus:
+    """Tests for parse_jira_status function."""
+
+    def test_extract_status(self):
+        """Should extract status from issue details."""
+        details = "Status: In Progress"
+        result = parse_jira_status(details)
+        assert result == "In"  # Matches \S+ pattern
+
+    def test_no_status(self):
+        """Should return None when no status found."""
+        assert parse_jira_status("Title: Some issue title") is None
+
+
+class TestParseConflictMarkers:
+    """Tests for parse_conflict_markers function."""
+
+    def test_empty_content(self):
+        """Empty content should return empty list."""
+        assert parse_conflict_markers("") == []
+
+    def test_parse_markers(self):
+        """Should parse conflict markers."""
+        content = """<<<<<<< HEAD
+our code
+=======
+their code
+>>>>>>> branch"""
+        result = parse_conflict_markers(content)
+        assert len(result) == 1
+        assert result[0]["ours"] == "our code"
+        assert result[0]["theirs"] == "their code"
+
+
+class TestExtractConflictFiles:
+    """Tests for extract_conflict_files function."""
+
+    def test_empty_output(self):
+        """Empty output should return empty list."""
+        assert extract_conflict_files("") == []
+
+    def test_markdown_format(self):
+        """Should extract files in markdown format."""
+        output = "- `src/main.py`\n- `src/utils.py`"
+        result = extract_conflict_files(output)
+        assert "src/main.py" in result
+        assert "src/utils.py" in result
+
+    def test_git_conflict_format(self):
+        """Should extract files in git conflict format."""
+        output = "CONFLICT (content): Merge conflict in src/main.py"
+        result = extract_conflict_files(output)
+        assert "src/main.py" in result
+
+
+class TestParsePrometheusAlert:
+    """Tests for parse_prometheus_alert function."""
+
+    def test_empty_message(self):
+        """Empty message should return defaults."""
+        result = parse_prometheus_alert("")
+        assert result["alert_name"] == "Unknown Alert"
+
+    def test_extract_alert_info(self):
+        """Should extract alert name and firing count."""
+        message = "Alert: HighCPUUsage [FIRING:3] Server is overloaded"
+        result = parse_prometheus_alert(message)
+        assert result["alert_name"] == "HighCPUUsage"
+        assert result["firing_count"] == 3
+
+    def test_detect_billing_alert(self):
+        """Should detect billing-related alerts."""
+        message = "Alert: SubscriptionIssue [FIRING:1] billing problem"
+        result = parse_prometheus_alert(message)
+        assert result["is_billing"] is True
+
+
+class TestExtractBillingEventNumber:
+    """Tests for extract_billing_event_number function."""
+
+    def test_empty_output(self):
+        """Empty output should return 1."""
+        assert extract_billing_event_number("") == 1
+
+    def test_extract_highest_number(self):
+        """Should return highest number + 1."""
+        output = "BillingEvent 1\nBillingEvent 3\nBillingEvent 2"
+        result = extract_billing_event_number(output)
+        assert result == 4
+
+
+class TestParseQuayManifest:
+    """Tests for parse_quay_manifest function."""
+
+    def test_empty_output(self):
+        """Empty output should return None."""
+        assert parse_quay_manifest("") is None
+
+    def test_not_found(self):
+        """Should return None for not found."""
+        assert parse_quay_manifest("Image not found") is None
+
+    def test_extract_digest(self):
+        """Should extract SHA256 digest."""
+        output = "Manifest Digest: sha256:" + "a" * 64
+        result = parse_quay_manifest(output)
+        assert result is not None
+        assert len(result["digest"]) == 64
+
+
+class TestExtractEphemeralNamespace:
+    """Tests for extract_ephemeral_namespace function."""
+
+    def test_empty_output(self):
+        """Empty output should return None."""
+        assert extract_ephemeral_namespace("") is None
+
+    def test_extract_namespace(self):
+        """Should extract ephemeral namespace name."""
+        output = "Reserved namespace: ephemeral-abc123"
+        result = extract_ephemeral_namespace(output)
+        assert result == "ephemeral-abc123"
+
+
+class TestParseErrorLogs:
+    """Tests for parse_error_logs function."""
+
+    def test_empty_logs(self):
+        """Empty logs should return empty list."""
+        assert parse_error_logs("") == []
+
+    def test_extract_errors(self):
+        """Should extract error messages."""
+        logs = "ERROR: Connection refused to database server\nFailed: Could not connect to remote host"
+        result = parse_error_logs(logs)
+        assert len(result) >= 1
+
+
+class TestExtractVersionSuffix:
+    """Tests for extract_version_suffix function."""
+
+    def test_extract_version(self):
+        """Should extract version suffix."""
+        assert extract_version_suffix("branch-name-v3") == 3
+        assert extract_version_suffix("release-v10") == 10
+
+    def test_no_version(self):
+        """Should return None when no version suffix."""
+        assert extract_version_suffix("branch-name") is None
+        assert extract_version_suffix("") is None
+
+
+class TestGetNextVersion:
+    """Tests for get_next_version function."""
+
+    def test_no_existing_versions(self):
+        """Should return 2 when no existing versions."""
+        branches = ["other-branch"]
+        result = get_next_version(branches, "my-branch")
+        assert result == 2
+
+    def test_existing_versions(self):
+        """Should return highest + 1."""
+        branches = ["my-branch-v1", "my-branch-v3", "other-branch"]
+        result = get_next_version(branches, "my-branch")
+        assert result == 4
+
+
+class TestParseDeployClowderRef:
+    """Tests for parse_deploy_clowder_ref function."""
+
+    def test_empty_content(self):
+        """Empty content should return None."""
+        assert parse_deploy_clowder_ref("") is None
+
+
+class TestUpdateDeployClowderRef:
+    """Tests for update_deploy_clowder_ref function."""
+
+    def test_empty_content(self):
+        """Empty content should return unchanged."""
+        result, success = update_deploy_clowder_ref("", "abc123")
+        assert result == ""
+        assert success is False
+
+
+class TestExtractJsonFromOutput:
+    """Tests for extract_json_from_output function."""
+
+    def test_empty_text(self):
+        """Empty text should return None."""
+        assert extract_json_from_output("") is None
+
+    def test_extract_json(self):
+        """Should extract JSON from mixed text."""
+        text = 'Some prefix {"key": "value"} some suffix'
+        result = extract_json_from_output(text)
+        assert result is not None
+        assert result["key"] == "value"
+
+
+class TestParseAlertmanagerOutput:
+    """Tests for parse_alertmanager_output function."""
+
+    def test_empty_output(self):
+        """Empty output should return empty list."""
+        assert parse_alertmanager_output("") == []
+
+    def test_extract_alert(self):
+        """Should extract alert details."""
+        output = "alertname=TestAlert\nseverity=warning"
+        result = parse_alertmanager_output(output)
+        assert len(result) >= 1
+
+
+class TestSplitMrComments:
+    """Tests for split_mr_comments function."""
+
+    def test_empty_text(self):
+        """Empty text should return empty list."""
+        assert split_mr_comments("") == []
+
+
+class TestFindTransitionName:
+    """Tests for find_transition_name function."""
+
+    def test_empty_text(self):
+        """Empty text should return None."""
+        assert find_transition_name("") is None
+
+    def test_find_done_transition(self):
+        """Should find Done transition."""
+        text = "Available: Done, Reopen, Cancel"
+        result = find_transition_name(text)
+        assert "Done" in result
+
+
+class TestAnalyzeReviewStatus:
+    """Tests for analyze_review_status function."""
+
+    def test_empty_details(self):
+        """Empty details should return needs_full_review."""
+        result = analyze_review_status("", "reviewer")
+        assert result["recommended_action"] == "needs_full_review"
+
+    def test_already_approved(self):
+        """Should detect if already approved by reviewer."""
+        details = "approved by reviewer"
+        result = analyze_review_status(details, "reviewer")
+        assert result["already_approved"] is True
+        assert result["recommended_action"] == "skip"
 

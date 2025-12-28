@@ -16,7 +16,13 @@ import yaml
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-from constants import SKILLS_DIR
+# Support both package import and direct loading
+try:
+    from .constants import SKILLS_DIR
+except ImportError:
+    SERVERS_DIR_LOCAL = Path(__file__).parent.parent.parent
+    PROJECT_DIR = SERVERS_DIR_LOCAL.parent
+    SKILLS_DIR = PROJECT_DIR / "skills"
 
 if TYPE_CHECKING:
     pass

@@ -9,12 +9,19 @@ Provides tools for reading, writing, and managing persistent memory:
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
 from mcp.types import TextContent
 
-from constants import MEMORY_DIR
+# Support both package import and direct loading
+try:
+    from .constants import MEMORY_DIR
+except ImportError:
+    SERVERS_DIR = Path(__file__).parent.parent.parent
+    PROJECT_DIR = SERVERS_DIR.parent
+    MEMORY_DIR = PROJECT_DIR / "memory"
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
