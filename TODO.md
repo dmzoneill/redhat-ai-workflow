@@ -10,12 +10,13 @@
 | Metric | Value | Status |
 |--------|-------|--------|
 | **Flake8 Issues** | 0 | ✅ |
-| **Test Suite** | 256 tests | ✅ |
+| **Test Suite** | 260 tests | ✅ |
 | **Tests Passing** | 100% | ✅ |
 | **Bandit High Severity** | 0 | ✅ |
 | **Line Length** | 120 chars | ✅ |
 | **Mypy (scripts/, config/)** | 0 | ✅ |
-| **Overall Coverage** | 83.90% | ✅ |
+| **Pre-commit hooks** | 11 checks | ✅ |
+| **tools.py Lines** | 299 (was 3303) | ✅ |
 
 ---
 
@@ -23,10 +24,10 @@
 
 | Area | Files | Lines |
 |------|-------|-------|
-| MCP Servers | 62 | 22,438 |
+| MCP Servers | 62 | 19,500 |
 | Scripts | 12 | 7,645 |
-| Tests | 9 | 1,200+ |
-| **Total** | **83** | **31,283** |
+| Tests | 9 | 1,300+ |
+| **Total** | **83** | **28,445** |
 
 ---
 
@@ -45,7 +46,7 @@ scripts/common/         83.90% (664 statements, 84 missed)
 | `scripts/common/jira_utils.py` | 97.73% | ✅ Excellent coverage |
 | `scripts/common/parsers.py` | 81.29% | ✅ Tests added |
 
-### Test Modules (256 tests)
+### Test Modules (260 tests)
 | Module | Tests |
 |--------|-------|
 | test_parsers.py | 109 |
@@ -123,12 +124,8 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 
 ## 🔮 Future Improvements
 
-### Medium Priority
-- [ ] Wire extracted modules into tools.py (remove duplicates)
-
 ### Low Priority
 - [ ] Increase parsers.py coverage (81.29% → 90%+)
-- [ ] Add mypy to pre-commit hooks
 - [ ] Add type hints to remaining MCP server modules
 
 ---
@@ -158,6 +155,9 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 | 2025-12-28 | Add __init__.py | config/ and scripts/ for proper modules |
 | 2025-12-28 | Boost parsers.py | 76% → 81.29% coverage, +12 tests |
 | 2025-12-28 | Final test count | 256 tests, 83.90% coverage |
+| 2025-12-28 | Wire extracted modules | tools.py 3303→299 lines (90% reduction) |
+| 2025-12-28 | Add pre-commit hooks | 11 checks (black, isort, flake8, mypy, yamllint) |
+| 2025-12-28 | Fix all pre-commit issues | 260 tests passing |
 
 ---
 
@@ -201,5 +201,5 @@ mcp-servers/aa-workflow/src/
 ├── meta_tools.py      ← tool_list + tool_exec
 ├── workflow_tools.py  ← 9 workflow_* tools
 ├── server.py
-└── tools.py           ← Main entry (inline tools still active)
+└── tools.py           ← Main entry (289 lines, delegates to modules)
 ```
