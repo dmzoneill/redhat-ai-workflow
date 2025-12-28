@@ -19,9 +19,10 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 # Add parent to path for config imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -65,8 +66,8 @@ class ToolDefinition:
 
     name: str
     description: str
-    parameters: dict
-    handler: callable | None = None
+    parameters: dict[str, Any]
+    handler: Optional[Callable[..., Any]] = field(default=None)
 
 
 @dataclass
@@ -75,7 +76,7 @@ class ToolCall:
 
     id: str
     name: str
-    arguments: dict
+    arguments: dict[str, Any]
 
 
 @dataclass
@@ -84,7 +85,7 @@ class ToolResult:
 
     tool_use_id: str
     content: str
-    is_error: bool = False
+    is_error: bool = field(default=False)
 
 
 class ToolRegistry:
@@ -94,11 +95,11 @@ class ToolRegistry:
     Maps tool names to their definitions and handlers.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.tools: dict[str, ToolDefinition] = {}
         self._register_builtin_tools()
 
-    def _register_builtin_tools(self):
+    def _register_builtin_tools(self) -> None:
         """Register built-in tools that map to our MCP tools."""
 
         # Jira tools
@@ -512,15 +513,15 @@ Works for both open and merged MRs.""",
             )
         )
 
-    def register(self, tool: ToolDefinition):
+    def register(self, tool: ToolDefinition) -> None:
         """Register a tool."""
         self.tools[tool.name] = tool
 
-    def get(self, name: str) -> ToolDefinition | None:
+    def get(self, name: str) -> Optional[ToolDefinition]:
         """Get a tool by name."""
         return self.tools.get(name)
 
-    def list_tools(self) -> list[dict]:
+    def list_tools(self) -> list[dict[str, Any]]:
         """Get all tools in Anthropic API format."""
         return [
             {"name": tool.name, "description": tool.description, "input_schema": tool.parameters}
@@ -536,12 +537,12 @@ class ToolExecutor:
     Uses SkillHooks to emit event notifications (DMs to PR authors, team updates).
     """
 
-    def __init__(self, project_root: Path):
-        self.project_root = project_root
-        self.rh_issue = os.getenv("RH_ISSUE_CLI", "rh-issue")
+    def __init__(self, project_root: Path) -> None:
+        self.project_root: Path = project_root
+        self.rh_issue: str = os.getenv("RH_ISSUE_CLI", "rh-issue")
 
         # Initialize context resolver for repo path lookups
-        self.resolver: Optional[ContextResolver] = None
+        self.resolver: Optional[Any] = None  # Type is ContextResolver when available
         if RESOLVER_AVAILABLE:
             try:
                 self.resolver = ContextResolver()
@@ -550,7 +551,7 @@ class ToolExecutor:
                 logger.warning(f"Failed to load context resolver: {e}")
 
         # Initialize skill hooks for event notifications
-        self.hooks: Optional[SkillHooks] = None
+        self.hooks: Optional[Any] = None  # Type is SkillHooks when available
         if HOOKS_AVAILABLE:
             try:
                 self.hooks = SkillHooks.from_config()
@@ -558,7 +559,7 @@ class ToolExecutor:
             except Exception as e:
                 logger.warning(f"Failed to load skill hooks: {e}")
 
-    async def execute(self, tool_name: str, arguments: dict) -> str:
+    async def execute(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Execute a tool and return the result."""
         logger.info(f"Executing tool: {tool_name} with {arguments}")
 
@@ -587,7 +588,7 @@ class ToolExecutor:
             )
 
     async def _run_command(
-        self, cmd: list[str], cwd: str | None = None, env: dict | None = None
+        self, cmd: list[str], cwd: Optional[str] = None, env: Optional[dict[str, str]] = None
     ) -> str:
         """Run a shell command and return output."""
         try:
@@ -618,7 +619,7 @@ class ToolExecutor:
             logger.error(f"Command execution failed: {e}", exc_info=True)
             return "Unable to execute that command right now."
 
-    async def _execute_jira(self, tool_name: str, args: dict) -> str:
+    async def _execute_jira(self, tool_name: str, args: dict[str, Any]) -> str:
         """Execute Jira tools via rh-issue CLI."""
         if tool_name == "jira_view":
             key = args.get("issue_key", "")
@@ -635,7 +636,7 @@ class ToolExecutor:
             return await self._run_command([self.rh_issue, "comment", key, comment])
         return f"Unknown Jira tool: {tool_name}"
 
-    async def _execute_gitlab(self, tool_name: str, args: dict) -> str:
+    async def _execute_gitlab(self, tool_name: str, args: dict[str, Any]) -> str:
         """
         Execute GitLab tools.
 
@@ -781,7 +782,7 @@ class ToolExecutor:
 
         return f"Unknown GitLab tool: {tool_name}"
 
-    async def _execute_git(self, tool_name: str, args: dict) -> str:
+    async def _execute_git(self, tool_name: str, args: dict[str, Any]) -> str:
         """
         Execute Git tools.
 
@@ -837,7 +838,7 @@ class ToolExecutor:
         config_name = env_map.get(environment.lower(), f"config.{environment}")
         return str(Path.home() / ".kube" / config_name)
 
-    async def _execute_k8s(self, tool_name: str, args: dict) -> str:
+    async def _execute_k8s(self, tool_name: str, args: dict[str, Any]) -> str:
         """Execute Kubernetes tools via kubectl."""
         namespace = args.get("namespace", "")
         environment = args.get("environment", "stage")
@@ -863,14 +864,14 @@ class ToolExecutor:
             )
         return f"Unknown K8s tool: {tool_name}"
 
-    def _get_bonfire_env(self) -> dict:
+    def _get_bonfire_env(self) -> dict[str, str]:
         """Get environment for bonfire commands (ephemeral cluster)."""
         env = os.environ.copy()
         kubeconfig = Path.home() / ".kube" / "config.e"
         env["KUBECONFIG"] = str(kubeconfig)
         return env
 
-    async def _execute_bonfire(self, tool_name: str, args: dict) -> str:
+    async def _execute_bonfire(self, tool_name: str, args: dict[str, Any]) -> str:
         """
         Execute bonfire tools for ephemeral namespace management.
 
@@ -1021,7 +1022,7 @@ Please verify the image exists before proceeding."""
 
         return f"Unknown bonfire tool: {tool_name}"
 
-    async def _execute_quay(self, tool_name: str, args: dict) -> str:
+    async def _execute_quay(self, tool_name: str, args: dict[str, Any]) -> str:
         """Execute Quay tools to check images."""
         if tool_name == "quay_get_tag":
             repository = args.get("repository", "")
@@ -1060,7 +1061,7 @@ Please verify the image exists before proceeding."""
 
         return f"Unknown Quay tool: {tool_name}"
 
-    async def _execute_skill(self, args: dict) -> str:
+    async def _execute_skill(self, args: dict[str, Any]) -> str:
         """
         Execute a workflow skill from YAML.
 
@@ -1115,7 +1116,7 @@ Please verify the image exists before proceeding."""
 **Example inputs for {skill_name}:**
 {json.dumps(inputs, indent=2) if inputs else "{}"}"""
 
-    async def _skill_test_mr_ephemeral(self, inputs: dict) -> str:
+    async def _skill_test_mr_ephemeral(self, inputs: dict[str, Any]) -> str:
         """Execute test_mr_ephemeral skill inline using bonfire tools."""
         mr_id = inputs.get("mr_id")
         commit_sha = inputs.get("commit_sha")
@@ -1238,8 +1239,8 @@ class ClaudeAgent:
         model: str = "claude-sonnet-4-20250514",
         vertex_model: str = "claude-3-5-sonnet-v2@20241022",
         max_tokens: int = 4096,
-        system_prompt: str | None = None,
-    ):
+        system_prompt: Optional[str] = None,
+    ) -> None:
         if not ANTHROPIC_AVAILABLE:
             raise ImportError(
                 "anthropic package not installed. Install with: pip install anthropic"
@@ -1282,21 +1283,19 @@ class ClaudeAgent:
             self.model = model
             logger.info(f"Using direct Anthropic API with model={self.model}")
 
-        self.tool_registry = ToolRegistry()
-        self.tool_executor = ToolExecutor(PROJECT_ROOT)
+        self.tool_registry: ToolRegistry = ToolRegistry()
+        self.tool_executor: ToolExecutor = ToolExecutor(PROJECT_ROOT)
 
         # Conversation history tracking
         # Key: conversation_id (e.g., "channel_id:user_id" or "thread_ts")
         # Value: list of message dicts [{"role": "user/assistant", "content": "..."}]
-        self._conversations: dict[str, list[dict]] = {}
-        self._max_history = 10  # Keep last N message pairs per conversation
-        self._history_ttl = 3600  # Clear conversations older than 1 hour
+        self._conversations: dict[str, list[dict[str, str]]] = {}
+        self._max_history: int = 10  # Keep last N message pairs per conversation
+        self._history_ttl: int = 3600  # Clear conversations older than 1 hour
         self._conversation_timestamps: dict[str, float] = {}
 
-    def _get_conversation_history(self, conversation_id: str) -> list[dict]:
+    def _get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]:
         """Get conversation history for a given ID, clearing stale entries."""
-        import time
-
         now = time.time()
 
         # Clear stale conversations
@@ -1312,10 +1311,8 @@ class ClaudeAgent:
 
     def _save_conversation_history(
         self, conversation_id: str, user_msg: str, assistant_msg: str
-    ):
+    ) -> None:
         """Save a message exchange to conversation history."""
-        import time
-
         if conversation_id not in self._conversations:
             self._conversations[conversation_id] = []
 
@@ -1381,8 +1378,8 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
     async def process_message(
         self,
         message: str,
-        context: dict | None = None,
-        conversation_id: str | None = None,
+        context: Optional[dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
     ) -> str:
         """
         Process a message using Claude.
@@ -1521,7 +1518,7 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
 
 
 # Convenience function
-async def ask_claude(message: str, context: dict | None = None) -> str:
+async def ask_claude(message: str, context: Optional[dict[str, Any]] = None) -> str:
     """Quick way to ask Claude something."""
     agent = ClaudeAgent()
     return await agent.process_message(message, context)
