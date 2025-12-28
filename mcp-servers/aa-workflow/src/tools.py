@@ -3250,6 +3250,7 @@ Be constructive, specific, and kind. Suggest alternatives, don't just criticize.
         from .infra_tools import register_infra_tools
         from .lint_tools import register_lint_tools
         from .meta_tools import register_meta_tools
+        from .workflow_tools import register_workflow_tools
 
         # Note: Some modules may have overlapping tools with the inline ones above.
         # The extracted modules are the canonical source going forward.
@@ -3265,6 +3266,7 @@ Be constructive, specific, and kind. Suggest alternatives, don't just criticize.
         # tool_count += register_infra_tools(server)  # Inline version exists
         # tool_count += register_lint_tools(server)  # Inline version exists
         # tool_count += register_meta_tools(server, create_github_issue)  # Inline version exists
+        # tool_count += register_workflow_tools(server)  # Inline version exists
 
         logger.debug("Extracted modules imported successfully (not yet wired in)")
     except ImportError as e:

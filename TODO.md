@@ -115,8 +115,8 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 - [x] Wire new modules into main `tools.py`
 
 ### Medium Priority
-- [x] Add integration tests for MCP tools (18 tests)
-- [ ] Extract remaining 9 workflow_* functions from tools.py
+- [x] Add integration tests for MCP tools (19 tests)
+- [x] Extract remaining 9 workflow_* functions from tools.py
 - [ ] Add type hints to legacy code
 
 ### Low Priority
@@ -140,6 +140,8 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 | 2025-12-28 | Wire extracted modules | All modules importable |
 | 2025-12-28 | Add integration tests | 18 MCP integration tests |
 | 2025-12-28 | Total tests | 212 passing |
+| 2025-12-28 | Extract workflow_tools | 9 workflow functions extracted |
+| 2025-12-28 | Final test count | 213 passing |
 
 ---
 
@@ -178,6 +180,7 @@ mcp-servers/aa-workflow/src/
 ├── infra_tools.py     ← VPN + kube auth
 ├── lint_tools.py      ← 7 lint/test tools
 ├── meta_tools.py      ← tool_list + tool_exec
+├── workflow_tools.py  ← 9 workflow_* tools (NEW)
 ├── server.py
-└── tools.py           ← Main entry (workflow_*)
+└── tools.py           ← Main entry + imports
 ```

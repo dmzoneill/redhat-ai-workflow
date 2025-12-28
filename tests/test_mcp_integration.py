@@ -175,6 +175,20 @@ class TestWorkflowExtractedModules:
         assert hasattr(module, "register_infra_tools")
         assert callable(module.register_infra_tools)
 
+    def test_workflow_tools_loadable(self):
+        """Workflow tools module should be loadable."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "workflow_tools",
+            SERVERS_DIR / "aa-workflow" / "src" / "workflow_tools.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        assert hasattr(module, "register_workflow_tools")
+        assert callable(module.register_workflow_tools)
+
 
 class TestConfigLoading:
     """Test configuration loading functionality."""
