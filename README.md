@@ -255,6 +255,7 @@ ai-workflow/
 | [MCP Servers Reference](docs/mcp-servers/README.md) | 15 tool modules |
 | [Architecture Overview](docs/architecture/README.md) | High-level design |
 | [MCP Server Implementation](docs/architecture/mcp-implementation.md) | Server code details |
+| [Development Guide](docs/DEVELOPMENT.md) | Contributing and development setup |
 
 ---
 

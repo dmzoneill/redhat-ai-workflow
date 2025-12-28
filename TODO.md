@@ -117,12 +117,12 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 ### Medium Priority
 - [x] Add integration tests for MCP tools (19 tests)
 - [x] Extract remaining 9 workflow_* functions from tools.py
-- [ ] Add type hints to legacy code
+- [x] Add type hints to legacy code (claude_agent.py, parsers.py, jira_utils.py)
 
 ### Low Priority
 - [x] Refactor large functions (C901 complexity) - None found!
-- [x] Add documentation for all modules (MODULES.md)
-- [ ] Create development guide
+- [x] Add documentation for all modules (docs/architecture/workflow-modules.md)
+- [x] Create development guide (docs/DEVELOPMENT.md)
 
 ---
 
@@ -142,8 +142,9 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 | 2025-12-28 | Total tests | 212 passing |
 | 2025-12-28 | Extract workflow_tools | 9 workflow functions extracted |
 | 2025-12-28 | Final test count | 213 passing |
-| 2025-12-28 | Add type hints | parsers.py, jira_utils.py |
-| 2025-12-28 | Add module docs | MODULES.md |
+| 2025-12-28 | Add type hints | parsers.py, jira_utils.py, claude_agent.py |
+| 2025-12-28 | Add module docs | docs/architecture/workflow-modules.md |
+| 2025-12-28 | Create dev guide | docs/DEVELOPMENT.md |
 
 ---
 
