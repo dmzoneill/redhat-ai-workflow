@@ -22,11 +22,19 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 # Add parent to path for config imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Type checking imports
+if TYPE_CHECKING:
+    import anthropic
+    from anthropic import Anthropic, AnthropicVertex
+    from config.context_resolver import ContextResolver, ResolvedContext
+    from scripts.skill_hooks import SkillHooks
+
+# Runtime imports with fallbacks
 try:
     import anthropic
     from anthropic import AnthropicVertex
@@ -36,7 +44,8 @@ try:
 except ImportError:
     ANTHROPIC_AVAILABLE = False
     VERTEX_AVAILABLE = False
-    AnthropicVertex = None
+    anthropic = None  # type: ignore[assignment]
+    AnthropicVertex = None  # type: ignore[assignment, misc]
 
 try:
     from config.context_resolver import ContextResolver, ResolvedContext
@@ -44,8 +53,8 @@ try:
     RESOLVER_AVAILABLE = True
 except ImportError:
     RESOLVER_AVAILABLE = False
-    ContextResolver = None
-    ResolvedContext = None
+    ContextResolver = None  # type: ignore[assignment, misc]
+    ResolvedContext = None  # type: ignore[assignment, misc]
 
 try:
     from scripts.skill_hooks import SkillHooks
@@ -53,7 +62,7 @@ try:
     HOOKS_AVAILABLE = True
 except ImportError:
     HOOKS_AVAILABLE = False
-    SkillHooks = None
+    SkillHooks = None  # type: ignore[assignment, misc]
 
 logger = logging.getLogger(__name__)
 
@@ -1119,7 +1128,7 @@ Please verify the image exists before proceeding."""
     async def _skill_test_mr_ephemeral(self, inputs: dict[str, Any]) -> str:
         """Execute test_mr_ephemeral skill inline using bonfire tools."""
         mr_id = inputs.get("mr_id")
-        commit_sha = inputs.get("commit_sha")
+        commit_sha: str = str(inputs.get("commit_sha") or "")
         billing = inputs.get("billing", False)
         duration = inputs.get("duration", "2h")
 
@@ -1255,6 +1264,10 @@ class ClaudeAgent:
         vertex_project = os.getenv("ANTHROPIC_VERTEX_PROJECT_ID")
         vertex_region = os.getenv("ANTHROPIC_VERTEX_REGION", "us-east5")
 
+        # Client can be either AnthropicVertex or Anthropic
+        self.client: Any = None  # Will be set below
+        self.model: str = model
+
         if use_vertex and vertex_project:
             if not VERTEX_AVAILABLE:
                 raise ImportError(
@@ -1279,7 +1292,7 @@ class ClaudeAgent:
                     "  - CLAUDE_CODE_USE_VERTEX=1 + ANTHROPIC_VERTEX_PROJECT_ID (for Vertex)\n"
                     "  - ANTHROPIC_API_KEY (for direct API)"
                 )
-            self.client = anthropic.Anthropic(api_key=api_key)
+            self.client = anthropic.Anthropic(api_key=api_key)  # type: ignore[union-attr]
             self.model = model
             logger.info(f"Using direct Anthropic API with model={self.model}")
 
@@ -1469,8 +1482,8 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
             model=self.model,
             max_tokens=self.max_tokens,
             system=self.system_prompt,
-            tools=tools,
-            messages=messages,
+            tools=tools,  # type: ignore[arg-type]
+            messages=messages,  # type: ignore[arg-type]
         )
 
         # Process response - may need multiple rounds if Claude calls tools
@@ -1491,15 +1504,15 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
                 )
 
             # Continue conversation with tool results
-            messages.append({"role": "assistant", "content": response.content})
-            messages.append({"role": "user", "content": tool_results})
+            messages.append({"role": "assistant", "content": response.content})  # type: ignore[dict-item]
+            messages.append({"role": "user", "content": tool_results})  # type: ignore[dict-item]
 
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=self.system_prompt,
-                tools=tools,
-                messages=messages,
+                tools=tools,  # type: ignore[arg-type]
+                messages=messages,  # type: ignore[arg-type]
             )
 
         # Extract final text response
