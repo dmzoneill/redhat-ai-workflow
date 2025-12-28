@@ -10,12 +10,12 @@
 | Metric | Value | Status |
 |--------|-------|--------|
 | **Flake8 Issues** | 0 | ✅ |
-| **Test Suite** | 244 tests | ✅ |
+| **Test Suite** | 256 tests | ✅ |
 | **Tests Passing** | 100% | ✅ |
 | **Bandit High Severity** | 0 | ✅ |
 | **Line Length** | 120 chars | ✅ |
-| **Mypy (scripts/common)** | 0 | ✅ |
-| **Overall Coverage** | 80.30% | ✅ |
+| **Mypy (scripts/, config/)** | 0 | ✅ |
+| **Overall Coverage** | 83.90% | ✅ |
 
 ---
 
@@ -34,21 +34,21 @@
 
 ### Summary
 ```
-scripts/common/         80.30% (664 statements, 103 missed)
+scripts/common/         83.90% (664 statements, 84 missed)
 ```
 
 ### By Module
 | File | Coverage | Notes |
 |------|----------|-------|
 | `scripts/common/__init__.py` | 100% | Empty |
-| `scripts/common/config_loader.py` | 84.62% | ✅ Tests added |
+| `scripts/common/config_loader.py` | 86.02% | ✅ Tests added |
 | `scripts/common/jira_utils.py` | 97.73% | ✅ Excellent coverage |
-| `scripts/common/parsers.py` | 76.65% | ✅ Tests added |
+| `scripts/common/parsers.py` | 81.29% | ✅ Tests added |
 
-### Test Modules (244 tests)
+### Test Modules (256 tests)
 | Module | Tests |
 |--------|-------|
-| test_parsers.py | 97 |
+| test_parsers.py | 109 |
 | test_jira_utils.py | 47 |
 | test_config_loader.py | 27 |
 | test_mcp_integration.py | 18 |
@@ -125,11 +125,9 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 
 ### Medium Priority
 - [ ] Wire extracted modules into tools.py (remove duplicates)
-- [ ] Fix mypy errors in config/context_resolver.py
-- [ ] Fix mypy errors in scripts/skill_hooks.py
 
 ### Low Priority
-- [ ] Increase parsers.py coverage (76.65% → 90%+)
+- [ ] Increase parsers.py coverage (81.29% → 90%+)
 - [ ] Add mypy to pre-commit hooks
 - [ ] Add type hints to remaining MCP server modules
 
@@ -155,7 +153,11 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 | 2025-12-28 | Code rescan | Fixed 36 mypy errors |
 | 2025-12-28 | Fix mypy errors | scripts/common/ and claude_agent.py |
 | 2025-12-28 | Boost jira_utils | 48% → 97.73% coverage, +31 tests |
-| 2025-12-28 | Final test count | 244 tests, 80.30% coverage |
+| 2025-12-28 | Fix context_resolver | mypy errors fixed |
+| 2025-12-28 | Fix skill_hooks | mypy errors fixed |
+| 2025-12-28 | Add __init__.py | config/ and scripts/ for proper modules |
+| 2025-12-28 | Boost parsers.py | 76% → 81.29% coverage, +12 tests |
+| 2025-12-28 | Final test count | 256 tests, 83.90% coverage |
 
 ---
 
