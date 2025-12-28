@@ -12,7 +12,13 @@ from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
 
-from constants import AGENTS_DIR
+# Support both package import and direct loading
+try:
+    from .constants import AGENTS_DIR
+except ImportError:
+    SERVERS_DIR = Path(__file__).parent.parent.parent
+    PROJECT_DIR = SERVERS_DIR.parent
+    AGENTS_DIR = PROJECT_DIR / "agents"
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
