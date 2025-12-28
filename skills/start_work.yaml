@@ -4,16 +4,16 @@
 name: start_work
 description: |
   Begin or resume working on a Jira issue.
-  
+
   If 'repo' is not provided, automatically resolves the repository from the
   issue key prefix (e.g., AAP → automation-analytics-backend) using config.json.
-  
+
   Features:
   - Gets issue context from Jira
   - Creates or checks out feature branch
   - Shows MR feedback if exists
   - Updates Jira status
-  
+
   Uses MCP tools: jira_view_issue, git_fetch, git_branch_list, git_checkout,
                   git_branch_create, git_pull, gitlab_mr_list, gitlab_mr_view,
                   gitlab_mr_comments, gitlab_ci_status, jira_set_status
@@ -43,7 +43,7 @@ steps:
     compute: |
       import os
       from scripts.common.config_loader import load_config, resolve_repo
-      
+
       # Explicit repo path takes priority
       if inputs.repo and inputs.repo != "" and inputs.repo != ".":
           repo_path = inputs.repo
@@ -64,13 +64,13 @@ steps:
           config = load_config()
           repos = config.get("repositories", {})
           project_prefix = inputs.issue_key.split("-")[0].upper()
-          
+
           # Find repos matching this Jira project
           matching = []
           for name, cfg in repos.items():
               if cfg.get("jira_project") == project_prefix:
                   matching.append({"name": name, "path": cfg.get("path"), "gitlab": cfg.get("gitlab")})
-          
+
           if len(matching) == 0:
               # Fall back to cwd if we're in a git repo
               cwd = os.getcwd()
@@ -95,10 +95,10 @@ steps:
                   f"Multiple repositories match {project_prefix} issues: {names}. "
                   "Please specify 'repo_name' to choose one."
               )
-      
+
       if not repo_path or not os.path.exists(repo_path):
           raise ValueError(f"Repository path not found: {repo_path}")
-      
+
       result = {"path": repo_path, "source": repo_source, "gitlab": gitlab_project or ""}
     output: resolved_repo
 
@@ -117,20 +117,20 @@ steps:
     description: "Check if git status indicates any issues"
     compute: |
       import os
-      
+
       repo = resolved_repo["path"]
       git_dir = os.path.join(repo, ".git")
-      
+
       # Check for rebase/merge in progress
       issues = []
       if os.path.exists(os.path.join(git_dir, "rebase-merge")):
           issues.append("rebase in progress - run 'git rebase --continue' or '--abort'")
       if os.path.exists(os.path.join(git_dir, "MERGE_HEAD")):
           issues.append("merge in progress - run 'git merge --continue' or '--abort'")
-      
+
       if issues:
           raise ValueError(f"Git operation in progress: {issues[0]}")
-      
+
       result = {"valid": True, "repo": repo}
     output: git_validation
 
@@ -194,12 +194,12 @@ steps:
     description: "Find branch matching this issue key using shared parser"
     compute: |
       from scripts.common.parsers import parse_git_branches
-      
+
       issue_key = inputs.issue_key.upper()
-      
+
       # Use shared parser with issue key filter
       matching = parse_git_branches(branches_raw or "", issue_key=issue_key)
-      
+
       if matching:
         result = {"exists": True, "branch": matching[0], "all_matches": matching}
       else:
@@ -221,10 +221,10 @@ steps:
     condition: "{{ branch_check.get('exists', False) }}"
     compute: |
       from scripts.common.parsers import extract_mr_id_from_text
-      
+
       issue_key = inputs.issue_key.upper()
       branch = branch_check['branch']
-      
+
       mr_info = None
       if open_mrs_raw:
         for line in str(open_mrs_raw).split('\n'):
@@ -235,7 +235,7 @@ steps:
             if mr_id:
               mr_info = {"id": mr_id, "line": line.strip()}
               break
-      
+
       result = mr_info
     output: existing_mr
 
@@ -275,12 +275,12 @@ steps:
     condition: "{{ existing_mr and existing_mr.get('id') }}"
     compute: |
       from scripts.common.parsers import is_bot_comment
-      
+
       mr_id = existing_mr['id']
       details = str(mr_details_raw)[:1000] if mr_details_raw else ""
       comments = str(mr_comments_raw)[:1500] if mr_comments_raw else ""
       pipeline = str(pipeline_status_raw)[:200] if pipeline_status_raw else "unknown"
-      
+
       # Check if there's actionable feedback (filter out bot comments)
       has_feedback = False
       if comments and "No notes found" not in comments:
@@ -288,7 +288,7 @@ steps:
           if line.strip() and not is_bot_comment(line, ""):
             has_feedback = True
             break
-      
+
       result = {
         "mr_id": mr_id,
         "details": details,
@@ -314,21 +314,21 @@ steps:
     condition: "{{ branch_check.get('exists', False) }}"
     compute: |
       from scripts.common.parsers import parse_jira_status
-      
+
       jira_updates = {"status": "Unknown", "recent_comments": [], "has_updates": False}
-      
+
       if jira_details_raw:
         details = str(jira_details_raw)
-        
+
         # Use shared parser to extract status
         status = parse_jira_status(details)
         if status:
           jira_updates["status"] = status
-        
+
         # Look for comments section
         if "Comment" in details or "comment" in details:
           jira_updates["has_updates"] = True
-      
+
       result = jira_updates
     output: jira_updates
     on_error: continue
@@ -338,7 +338,7 @@ steps:
     condition: "{{ not branch_check.get('exists', False) }}"
     compute: |
       from scripts.common.parsers import slugify_text
-      
+
       key = inputs.issue_key.upper()
       # Extract summary from issue output and slugify using shared parser
       issue_text = str(issue)
@@ -421,61 +421,61 @@ outputs:
   - name: summary
     value: |
       ## {{ "📂 Resuming" if branch_check.exists else "✨ Starting" }} Work on {{ inputs.issue_key }}
-      
+
       **Issue:** {{ issue }}
       **Branch:** `{{ final_branch }}`
       {% if branch_check.exists %}
-      
+
       ---
       {% if mr_feedback and mr_feedback.has_feedback %}
-      
+
       ### 💬 MR Feedback ({{ mr_feedback.mr_id }})
-      
+
       There are review comments on your MR:
-      
+
       ```
       {{ mr_feedback.comments[:800] }}
       ```
-      
+
       **Pipeline:** {{ mr_feedback.pipeline }}
-      
+
       {% endif %}
       {% if jira_updates and jira_updates.has_updates %}
-      
+
       ### 📋 Recent Jira Updates
-      
+
       **Status:** {{ jira_updates.status }}
-      
+
       {% endif %}
       {% if (mr_feedback and mr_feedback.has_feedback) or (jira_updates and jira_updates.has_updates) %}
-      
+
       ---
-      
+
       ### 🤔 What would you like to do?
-      
+
       1. **Address MR feedback** - I can help review the comments and suggest fixes
       2. **Check full MR details** - `gitlab_mr_view`
       3. **View full Jira context** - `jira_view_issue`
       4. **Continue coding** - Just start working
-      
+
       {% else %}
-      
+
       ✅ No pending feedback - you're good to continue!
-      
+
       **What would you like to do next?**
-      
+
       {% endif %}
       {% else %}
-      
+
       ✨ *Created new branch*
-      
+
       ### Next Steps
       1. Make your changes
       2. Commit: `git commit -m "{{ inputs.issue_key }} - feat: description"`
       3. When ready: `skill_run("create_mr", '{"issue_key": "{{ inputs.issue_key }}", "repo": "{{ resolved_repo.path }}"}')`
-      
+
       {% endif %}
-  
+
   - name: context
     value:
       issue: "{{ issue }}"

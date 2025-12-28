@@ -37,17 +37,17 @@ skill_run("create_mr", '{"issue_key": "AAP-12345", "auto_fix_lint": true}')
 flowchart TD
     START([Start]) --> RESOLVE[Resolve Repository]
     RESOLVE --> BRANCH{On Feature Branch?}
-    
+
     BRANCH -->|No| ERROR1[❌ Not on feature branch]
     BRANCH -->|Yes| CLEAN{Clean Working Tree?}
-    
+
     CLEAN -->|No| ERROR2[❌ Uncommitted changes]
     CLEAN -->|Yes| VALIDATE[Validate Commits]
-    
+
     VALIDATE --> LINT{Run Linting?}
     LINT -->|Yes| BLACK[Run Black]
     LINT -->|No| MERGE_CHECK
-    
+
     BLACK --> FLAKE8[Run Flake8]
     FLAKE8 -->|Issues| AUTOFIX{Auto-fix?}
     AUTOFIX -->|Yes| FIX[Apply Black Fixes]
@@ -55,20 +55,20 @@ flowchart TD
     FIX --> MERGE_CHECK
     WARN --> MERGE_CHECK
     FLAKE8 -->|Clean| MERGE_CHECK
-    
+
     MERGE_CHECK[Check Mergeable] --> CONFLICT{Conflicts?}
     CONFLICT -->|Yes| REBASE[⚠️ Suggest rebase_pr]
     CONFLICT -->|No| JIRA_CHECK{Check Jira?}
-    
+
     JIRA_CHECK -->|Yes| HYGIENE[Run jira_hygiene]
     JIRA_CHECK -->|No| PUSH
     HYGIENE --> PUSH
-    
+
     PUSH[Push Branch] --> CREATE[Create GitLab MR]
     CREATE --> LINK[Link to Jira]
     LINK --> SLACK[Post to Slack]
     SLACK --> DONE([✅ MR Created])
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style ERROR1 fill:#ef4444,stroke:#dc2626,color:#fff
@@ -107,7 +107,7 @@ flowchart TD
 You: Create MR for AAP-12345, ready for review
 
 Claude: 🚀 Creating Merge Request
-        
+
         ✅ Pre-flight Checks:
         ├── Branch: aap-12345-implement-api
         ├── Working tree: clean
@@ -115,20 +115,20 @@ Claude: 🚀 Creating Merge Request
         ├── Black: passed
         ├── Flake8: passed
         └── Merge check: can merge cleanly
-        
+
         ✅ Jira Hygiene:
         └── Issue AAP-12345: All fields valid
-        
+
         ✅ Created MR:
         └── !456: AAP-12345 - feat(api): Implement new endpoint
-        
+
         ✅ Updated Jira:
         └── Added MR link to issue
         └── Status: In Review
-        
+
         ✅ Slack Notification:
         └── Posted to #aa-api-team-test
-        
+
         Pipeline is running... ⏳
 ```
 
@@ -140,5 +140,3 @@ Claude: 🚀 Creating Merge Request
 - [mark_mr_ready](./mark_mr_ready.md) - Mark draft MR as ready
 - [review_pr](./review_pr.md) - Review someone's MR
 - [rebase_pr](./rebase_pr.md) - Handle merge conflicts
-
-

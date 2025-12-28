@@ -53,4 +53,3 @@ Creating MRs as drafts lets you:
 - Self-review your changes
 - Fix linting/test issues
 - Polish before asking for review time
-

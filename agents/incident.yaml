@@ -1,4 +1,4 @@
-# Incident Agent Configuration  
+# Incident Agent Configuration
 # Specifies which MCP tool modules this agent needs
 
 name: incident

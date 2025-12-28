@@ -159,4 +159,3 @@ Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
 - `project:conventions` - Code style and patterns
 - `project:common_issues` - Frequently encountered issues
 - `teammate:*:preferences` - Review preferences by person
-

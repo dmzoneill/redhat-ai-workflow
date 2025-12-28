@@ -87,7 +87,3 @@ skills:
   - sync_branch
   - rebase_pr
   - slack_daemon_control   # Manage Slack daemon process
-
-
-
-

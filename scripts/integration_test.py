@@ -82,9 +82,7 @@ class TestReport:
     feature_todos: list = field(default_factory=list)  # Discovered improvements
     excluded_skills: list = field(default_factory=list)  # Skills we skipped
 
-    def add_todo(
-        self, category: str, title: str, description: str, source: str, priority: str = "medium"
-    ):
+    def add_todo(self, category: str, title: str, description: str, source: str, priority: str = "medium"):
         """Add a feature todo discovered during testing."""
         self.feature_todos.append(
             FeatureTodo(
@@ -107,9 +105,7 @@ class TestReport:
                 "fixed": self.total_fixed,
                 "skipped": self.total_skipped,
                 "pass_rate": (
-                    f"{(self.total_passed / self.total_tools * 100):.1f}%"
-                    if self.total_tools > 0
-                    else "N/A"
+                    f"{(self.total_passed / self.total_tools * 100):.1f}%" if self.total_tools > 0 else "N/A"
                 ),
             },
             "agents": [
@@ -494,7 +490,7 @@ class IntegrationTestRunner:
                 print(f"\n  📁 Module: {module_name}")
 
                 # Get tools that match this module
-                for tool_name, params in TOOL_TEST_PARAMS.items():
+                for tool_name, _params in TOOL_TEST_PARAMS.items():
                     # Check if tool belongs to this module (by prefix convention)
                     tool_module = tool_name.split("_")[0]
                     if tool_module == module_name.replace("-", "_") or tool_module in module_name:
@@ -634,11 +630,7 @@ class IntegrationTestRunner:
     def save_report(self, path: str | None = None):
         """Save test report to JSON."""
         if path is None:
-            path = (
-                self.project_root
-                / "test-results"
-                / f"integration-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
-            )
+            path = self.project_root / "test-results" / f"integration-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
 
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -689,9 +681,7 @@ class IntegrationTestRunner:
             todos.sort(key=lambda t: priority_order.get(t.priority, 1))
 
             for todo in todos:
-                priority_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(
-                    todo.priority, "⚪"
-                )
+                priority_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(todo.priority, "⚪")
                 lines.append(f"### {priority_badge} {todo.title}")
                 lines.append("")
                 lines.append(f"- **Source:** `{todo.source}`")

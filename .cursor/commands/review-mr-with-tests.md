@@ -13,7 +13,7 @@ skill_run("review_pr", '{"mr_id": $MR_ID, "run_tests": true}')
 This will:
 1. **Static Analysis** (same as /review-mr)
    - Fetch MR details, validate format, check pipelines
-   
+
 2. **Local Testing**
    - `git fetch origin && git checkout <branch>`
    - Check if docker-compose is running (start if not)
@@ -38,6 +38,3 @@ skill_run("review_pr", '{"mr_id": 1450, "run_tests": true}')
 ```
 
 ⚠️ **Note:** This takes longer (~5-10 min) as it runs the full test suite.
-
-
-

@@ -37,22 +37,22 @@ Load the release agent
 You: Release abc123def456 to production
 
 Claude: 📦 Preparing production release...
-        
+
         ✅ Commit verified
         ✅ Image found in Quay
-        
+
         ## Release Summary
-        
+
         From: def789abc123... (current prod)
         To: abc123def456...
-        
+
         Commits included (5):
         - AAP-61214: feat(api): Add validation
         - AAP-61220: fix(db): Handle nulls
-        
+
         ✅ Created Jira: AAP-61250
         ✅ Created app-interface MR: !789
-        
+
         Next: Get team approval on MR !789
 ```
 
@@ -62,7 +62,7 @@ Claude: 📦 Preparing production release...
 You: Check build status for main branch
 
 Claude: 🔄 Konflux Build Status:
-        
+
         | Pipeline | Status | Duration |
         |----------|--------|----------|
         | aa-backend-main | Succeeded ✅ | 8m |
@@ -75,7 +75,7 @@ Claude: 🔄 Konflux Build Status:
 You: Check if abc123 image exists in Quay
 
 Claude: 📦 Image Check:
-        
+
         Tag: abc123def456789...
         Status: ✅ Found
         Digest: sha256:20a4c976...
@@ -97,7 +97,7 @@ flowchart TD
     BRANCH --> UPDATE[Update deploy-clowder.yml]
     UPDATE --> MR[Create GitLab MR]
     MR --> AWAIT([Await team approval])
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style AWAIT fill:#f59e0b,stroke:#d97706,color:#fff
 ```
@@ -141,6 +141,3 @@ Switch to **DevOps** agent when you need to:
 
 - [🔧 DevOps Agent](./devops.md)
 - [release_aa_backend_prod Skill](../skills/release_aa_backend_prod.md)
-
-
-

@@ -67,10 +67,7 @@ def get_kibana_environment(environment: str) -> "KibanaEnvironment":
     # Fallback to environment variables
     url = os.getenv(f"KIBANA_{env_key.upper()}_URL", "")
     if not url:
-        raise ValueError(
-            f"Kibana URL not configured. "
-            f"Set KIBANA_{env_key.upper()}_URL or configure in config.json"
-        )
+        raise ValueError(f"Kibana URL not configured. " f"Set KIBANA_{env_key.upper()}_URL or configure in config.json")
 
     return KibanaEnvironment(
         url=url,
@@ -130,8 +127,7 @@ async def kibana_request(
     if not env_config:
         return (
             False,
-            f"Unknown environment: {environment}. "
-            f"Configure in config.json or set KIBANA_{environment.upper()}_URL",
+            f"Unknown environment: {environment}. " f"Configure in config.json or set KIBANA_{environment.upper()}_URL",
         )
 
     token = get_token(env_config.kubeconfig)
@@ -252,11 +248,7 @@ def register_tools(server: "FastMCP") -> int:
                 "bool": {
                     "must": [
                         {"query_string": {"query": query}},
-                        {
-                            "range": {
-                                "@timestamp": {"gte": from_time.isoformat(), "lte": now.isoformat()}
-                            }
-                        },
+                        {"range": {"@timestamp": {"gte": from_time.isoformat(), "lte": now.isoformat()}}},
                     ]
                 }
             },
@@ -497,10 +489,8 @@ def register_tools(server: "FastMCP") -> int:
             token = get_token(env_config.kubeconfig)
 
             if not token:
-                kube_suffix = env_config.kubeconfig.split('.')[-1]
-                lines.append(
-                    f"**{env}:** ⚠️ Not authenticated - run `kube {kube_suffix}`"
-                )
+                kube_suffix = env_config.kubeconfig.split(".")[-1]
+                lines.append(f"**{env}:** ⚠️ Not authenticated - run `kube {kube_suffix}`")
                 continue
 
             success, result = await kibana_request(env, "/api/status")

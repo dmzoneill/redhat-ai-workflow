@@ -1,9 +1,6 @@
 """Tests for configuration loading and validation."""
 
 import json
-from pathlib import Path
-
-import pytest
 
 from src.config import load_config
 
@@ -56,4 +53,3 @@ class TestConfigFile:
                 # They may or may not be present, just check structure
                 if key in data:
                     assert isinstance(data[key], dict)
-

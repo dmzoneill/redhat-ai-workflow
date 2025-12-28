@@ -72,4 +72,3 @@ session_start(agent="devops")
 
 - `/tools` - See what tools are available
 - `/list-skills` - See available skills
-

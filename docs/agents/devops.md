@@ -39,13 +39,13 @@ Load the devops agent
 You: Deploy MR 1450 to ephemeral
 
 Claude: 🧪 Deploying MR !1450...
-        
+
         ✅ Commit: 1244ec49e602...
         ✅ Image found in Quay
         ✅ Reserved: ephemeral-nx6n2s
         ✅ Deployed tower-analytics-clowdapp
         ⏳ Waiting for pods... (3/3 ready)
-        
+
         Namespace ready for testing!
 ```
 
@@ -55,7 +55,7 @@ Claude: 🧪 Deploying MR !1450...
 You: List my ephemeral namespaces
 
 Claude: 📦 Your Ephemeral Namespaces:
-        
+
         | Namespace | Status | Expires |
         |-----------|--------|---------|
         | ephemeral-nx6n2s | Ready | 1h 45m |
@@ -68,7 +68,7 @@ Claude: 📦 Your Ephemeral Namespaces:
 You: Check pods in ephemeral-nx6n2s
 
 Claude: ☸️ Pods in ephemeral-nx6n2s:
-        
+
         | Pod | Status | Restarts |
         |-----|--------|----------|
         | analytics-api-xxx | Running ✅ | 0 |
@@ -128,6 +128,3 @@ Switch to **Incident** agent when you need to:
 - [👨‍💻 Developer Agent](./developer.md)
 - [🚨 Incident Agent](./incident.md)
 - [test_mr_ephemeral Skill](../skills/test_mr_ephemeral.md)
-
-
-

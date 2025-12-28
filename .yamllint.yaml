@@ -1,0 +1,46 @@
+# YAMLlint configuration
+# https://yamllint.readthedocs.io/en/stable/configuration.html
+
+extends: default
+
+rules:
+  # Allow long lines (skills contain templates with long lines)
+  line-length:
+    max: 250
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+
+  # Don't require document start markers
+  document-start: disable
+
+  # Allow multiple documents in a file
+  document-end: disable
+
+  # Allow truthy values like 'yes', 'no', 'on', 'off'
+  truthy:
+    allowed-values: ["true", "false", "yes", "no", "on", "off"]
+
+  # Indentation
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+
+  # Comments
+  comments:
+    min-spaces-from-content: 1
+
+  # Braces/brackets
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 0
+
+# Ignore specific paths
+ignore: |
+  .git/
+  node_modules/
+  __pycache__/
+  .venv/
+  venv/

@@ -26,6 +26,3 @@ I will:
 - Uses `KUBECONFIG=~/.kube/config.e` (never copies kubeconfig!)
 - Image tag must be 64-char SHA256 digest
 - Template ref must be 40-char git SHA
-
-
-

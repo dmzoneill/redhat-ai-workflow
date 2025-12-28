@@ -31,7 +31,7 @@ if _common_path not in sys.path:
 try:
     # When running as MCP server, src.utils resolves to aa-common/src/utils
     from src.utils import load_config
-except (ImportError, ModuleNotFoundError):
+except ImportError:
     # When running from slack_daemon.py where aa-slack/src shadows aa-common/src,
     # import directly from aa-common/src
     _common_src = str(SERVERS_DIR / "aa-common" / "src")
@@ -179,9 +179,7 @@ def register_tools(server: FastMCP) -> int:
                         replies = await manager.session.get_thread_replies(channel_id, thread_ts)
                         for reply in replies[1:]:  # Skip first (parent)
                             reply_user = reply.get("user", "")
-                            reply_name = (
-                                await manager.state_db.get_user_name(reply_user) or reply_user
-                            )
+                            reply_name = await manager.state_db.get_user_name(reply_user) or reply_user
                             result.append(
                                 {
                                     "ts": reply.get("ts", ""),
@@ -421,9 +419,7 @@ def register_tools(server: FastMCP) -> int:
                 {
                     "success": True,
                     "channel": team_channel,
-                    "channel_name": (
-                        team_info.get("name", "team") if isinstance(team_info, dict) else "team"
-                    ),
+                    "channel_name": (team_info.get("name", "team") if isinstance(team_info, dict) else "team"),
                     "timestamp": result.get("ts", ""),
                     "message": "Message posted to team channel",
                 }

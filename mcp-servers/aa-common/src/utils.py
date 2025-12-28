@@ -237,7 +237,7 @@ def get_repo_config(repo: str) -> dict:
         return repositories[repo]
 
     # Try matching by path
-    for name, repo_config in repositories.items():
+    for _name, repo_config in repositories.items():
         if repo_config.get("path", "").endswith(repo):
             return repo_config
 

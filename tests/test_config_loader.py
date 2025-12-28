@@ -2,10 +2,7 @@
 
 import json
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 
 class TestLoadConfig:
@@ -22,10 +19,10 @@ class TestLoadConfig:
         """load_config should delegate to utils.load_config when available."""
         with patch("scripts.common.config_loader.load_config") as mock:
             mock.return_value = {"test": "value"}
-            from scripts.common import config_loader
-
             # Force reimport to get fresh module
             import importlib
+
+            from scripts.common import config_loader
 
             importlib.reload(config_loader)
             result = config_loader.load_config()
@@ -95,9 +92,7 @@ class TestGetUserConfig:
     @patch("scripts.common.config_loader.load_config")
     def test_get_user_config_from_config(self, mock_load):
         """get_user_config should return user section from config."""
-        mock_load.return_value = {
-            "user": {"username": "testuser", "email": "test@example.com"}
-        }
+        mock_load.return_value = {"user": {"username": "testuser", "email": "test@example.com"}}
 
         from scripts.common.config_loader import get_user_config
 
@@ -207,11 +202,7 @@ class TestGetRepoConfig:
     @patch("scripts.common.config_loader.load_config")
     def test_get_repo_config_existing(self, mock_load):
         """get_repo_config should return config for existing repo."""
-        mock_load.return_value = {
-            "repositories": {
-                "backend": {"path": "/home/user/backend", "gitlab": "org/backend"}
-            }
-        }
+        mock_load.return_value = {"repositories": {"backend": {"path": "/home/user/backend", "gitlab": "org/backend"}}}
 
         from scripts.common.config_loader import get_repo_config
 
@@ -334,9 +325,7 @@ class TestResolveRepo:
         """resolve_repo should use explicit cwd parameter."""
         mock_load.return_value = {
             "jira": {"url": "https://jira.example.com"},
-            "repositories": {
-                "myrepo": {"path": "/explicit/path", "gitlab": "org/myrepo"}
-            },
+            "repositories": {"myrepo": {"path": "/explicit/path", "gitlab": "org/myrepo"}},
         }
 
         from scripts.common.config_loader import resolve_repo
@@ -349,9 +338,7 @@ class TestResolveRepo:
         """resolve_repo should handle lowercase issue keys."""
         mock_load.return_value = {
             "jira": {"url": "https://jira.example.com"},
-            "repositories": {
-                "backend": {"path": "/path", "gitlab": "org/b", "jira_project": "AAP"}
-            },
+            "repositories": {"backend": {"path": "/path", "gitlab": "org/b", "jira_project": "AAP"}},
         }
 
         from scripts.common.config_loader import resolve_repo
@@ -371,4 +358,3 @@ class TestResolveRepo:
 
         result = resolve_repo()
         assert result["jira_url"] == "https://custom-jira.example.com"
-

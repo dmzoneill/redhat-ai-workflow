@@ -4,16 +4,16 @@
 name: review_pr
 description: |
   Review a colleague's PR/MR.
-  
+
   Resolves repository from issue_key, repo_name, or current directory.
-  
+
   Accepts EITHER:
   - mr_id: GitLab MR number (e.g., 123)
   - issue_key: Jira issue key (e.g., AAP-61214) - will find the MR
-  
+
   Checks MR description, commit format, pipelines, Jira context,
   runs local tests, and provides brief focused feedback.
-  
+
   Automatically approves or posts feedback based on findings.
 version: "1.2"
 
@@ -22,22 +22,22 @@ inputs:
     type: integer
     required: false
     description: "GitLab MR ID (e.g., 1234)"
-  
+
   - name: url
     type: string
     required: false
     description: "Full GitLab MR URL (e.g., https://gitlab.cee.redhat.com/org/repo/-/merge_requests/123)"
-  
+
   - name: issue_key
     type: string
     required: false
     description: "Jira issue key (e.g., AAP-61214) - will search for associated MR"
-  
+
   - name: repo_name
     type: string
     required: false
     description: "Repository name from config (e.g., 'automation-analytics-backend')"
-  
+
   - name: run_tests
     type: boolean
     required: false
@@ -48,7 +48,7 @@ inputs:
 
 steps:
   # ==================== RESOLVE REPOSITORY ====================
-  
+
   - name: resolve_repo
     description: "Determine which repo, GitLab project, and settings to use"
     compute: |
@@ -110,14 +110,14 @@ steps:
       }
     output: resolved
   # ==================== RESOLVE MR ID ====================
-  
+
   # Step 0a: Validate we have either mr_id, url, or issue_key
   - name: validate_input
     description: "Ensure we have mr_id, url, or issue_key"
     compute: |
       has_mr_id = inputs.get('mr_id') or resolved.get('mr_id_from_url')
       has_issue_key = inputs.get('issue_key')
-      
+
       if not has_mr_id and not has_issue_key:
         raise ValueError("Must provide 'mr_id', 'url', or 'issue_key'")
       result = "OK"
@@ -140,9 +140,9 @@ steps:
     description: "Extract MR ID from inputs, URL, or search results using shared parser"
     compute: |
       from scripts.common.parsers import extract_mr_id_from_text
-      
+
       resolved_mr_id = None
-      
+
       # Priority 1: Explicit mr_id input
       if inputs.get('mr_id'):
         resolved_mr_id = inputs.mr_id
@@ -152,10 +152,10 @@ steps:
       else:
         # Parse search results to find MR ID using shared parser
         resolved_mr_id = extract_mr_id_from_text(mr_search_results or "")
-        
+
         if not resolved_mr_id:
           raise ValueError(f"No MR found for issue {inputs.issue_key}. Please provide mr_id directly.")
-      
+
       result = resolved_mr_id
     output: resolved_mr_id
 
@@ -186,13 +186,13 @@ steps:
     compute: |
       import sys
       from pathlib import Path
-      
+
       # Add scripts path for shared parsers
       scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
       if scripts_path not in sys.path:
           sys.path.insert(0, scripts_path)
       from common.parsers import extract_jira_key as parse_jira_key
-      
+
       # Use shared parser
       jira_key = parse_jira_key(mr_details) or "NOT_FOUND"
       result = jira_key
@@ -223,12 +223,12 @@ steps:
     compute: |
       diff_text = str(mr_diff_raw) if mr_diff_raw else ""
       lines = diff_text.split("\n")
-      
+
       MAX_LINES = 3000
       MAX_CHARS = 100000
-      
+
       is_large = len(lines) > MAX_LINES or len(diff_text) > MAX_CHARS
-      
+
       if is_large:
           # Truncate and add warning
           if len(lines) > MAX_LINES:
@@ -237,7 +237,7 @@ steps:
           else:
               truncated = diff_text[:MAX_CHARS]
               truncated += f"\n\n... [TRUNCATED: {len(diff_text) - MAX_CHARS} more chars] ..."
-          
+
           diff_info = {
               "text": truncated,
               "is_large": True,
@@ -253,7 +253,7 @@ steps:
               "total_chars": len(diff_text),
               "warning": None,
           }
-      
+
       result = diff_info
     output: diff_size_check
 
@@ -291,23 +291,23 @@ steps:
       import re
       from scripts.common.config_loader import load_config
       from scripts.common.parsers import extract_jira_key
-      
+
       issues = []
-      
+
       # Load commit_format from config.json
       config = load_config()
       commit_cfg = config.get("commit_format", {})
-      
+
       # Get valid types from config, with fallback
       valid_types = commit_cfg.get("types", ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build', 'revert'])
-      
+
       # Extract title from MR details (first line usually)
       title_line = mr_details.split('\n')[0] if mr_details else ""
-      
+
       # Check for Jira key at start using shared parser
       if not extract_jira_key(title_line):
         issues.append("Missing Jira key at start of title")
-      
+
       # Check for type(scope): format
       type_match = re.search(r'- (\w+)(?:\([^)]+\))?\s*:', title_line)
       if type_match:
@@ -316,7 +316,7 @@ steps:
           issues.append(f"Invalid commit type '{commit_type}' - expected one of: {', '.join(valid_types)}")
       else:
         issues.append("Missing conventional commit format: type(scope): description")
-      
+
       result = issues if issues else ["Format OK"]
     output: format_issues
 
@@ -325,20 +325,20 @@ steps:
     description: "Verify MR has adequate description"
     compute: |
       issues = []
-      
+
       # Look for empty or minimal descriptions
       desc_lines = [l for l in mr_details.split('\n') if l.strip() and not l.startswith('#')]
-      
+
       if len(desc_lines) < 3:
         issues.append("MR description is minimal - consider adding context")
-      
+
       # Check for Jira link
       jira_url = resolved.get("jira_url", "https://issues.redhat.com")
       jira_domain = jira_url.replace("https://", "").replace("http://", "").split("/")[0]
       if jira_domain not in mr_details and 'jira' not in mr_details.lower():
         if jira_key != 'NOT_FOUND':
           issues.append(f"Missing Jira link - add: {jira_url}/browse/{jira_key}")
-      
+
       result = issues if issues else ["Description OK"]
     output: description_issues
 
@@ -350,11 +350,11 @@ steps:
     condition: "{{ inputs.run_tests }}"
     compute: |
       from scripts.common.parsers import extract_branch_from_mr
-      
+
       branch = extract_branch_from_mr(mr_details)
       if not branch:
         branch = f"mr-{mr_id}"
-      
+
       result = branch
     output: source_branch
 
@@ -474,7 +474,7 @@ steps:
     compute: |
       import tempfile
       import os
-      
+
       # Create test script
       test_script = (
           "#!/bin/bash\n"
@@ -487,13 +487,13 @@ steps:
           "export DATABASE_PREFIX=\"postgresql://${POSTGRESQL_USER}:${POSTGRESQL_PASSWORD}@localhost\"\n"
           "pytest -vv --tb=short -q 2>&1 | tail -50\n"
       )
-      
+
       # Write to temp file
       script_path = "/tmp/pr_review_test.sh"
       with open(script_path, 'w') as f:
         f.write(test_script)
       os.chmod(script_path, 0o755)
-      
+
       # Store container name and script path for tool calls
       result = {
         "container": resolved["fastapi_container"],
@@ -530,17 +530,17 @@ steps:
     description: "Parse test execution results"
     compute: |
       output = str(test_exec_raw) if 'test_exec_raw' in dir() and test_exec_raw else ""
-      
+
       if len(output) > 2000:
         output = output[-2000:]
-      
+
       if "passed" in output.lower() and "failed" not in output.lower():
         test_result = f"✅ Tests passed\n{output}"
       elif "❌" in output:
         test_result = f"❌ Tests failed\n{output}"
       else:
         test_result = f"⚠️ Test status unclear\n{output}"
-      
+
       result = test_result
     output: test_result
 
@@ -551,10 +551,10 @@ steps:
     description: "Static analysis for security, memory, race conditions"
     compute: |
       import re
-      
+
       diff_text = mr_diff if mr_diff else ""
       issues = []
-      
+
       # Security checks
       security_patterns = [
         (r'eval\s*\(', "Potential code injection via eval()"),
@@ -566,41 +566,41 @@ steps:
         (r'shell\s*=\s*True', "Shell injection risk with shell=True"),
         (r'pickle\.loads?\s*\(', "Unsafe deserialization with pickle"),
       ]
-      
+
       for pattern, msg in security_patterns:
         if re.search(pattern, diff_text, re.IGNORECASE):
           issues.append(f"🔐 Security: {msg}")
-      
+
       # Memory leak patterns
       memory_patterns = [
         (r'global\s+\w+\s*=\s*\[\]', "Global mutable default - potential memory leak"),
         (r'\.append\([^)]+\)\s*$(?!.*\.clear\(\))', "List append without clear - check for leak"),
         (r'cache\s*=\s*\{\}', "Unbounded cache dict - consider LRU"),
       ]
-      
+
       for pattern, msg in memory_patterns:
         if re.search(pattern, diff_text):
           issues.append(f"💾 Memory: {msg}")
-      
+
       # Race condition patterns
       race_patterns = [
         (r'threading\.Thread\(', "Threading used - verify thread safety"),
         (r'asyncio\.create_task\((?!.*await)', "Task created without await - potential race"),
         (r'shared_state|global_state', "Shared state - verify synchronization"),
       ]
-      
+
       for pattern, msg in race_patterns:
         if re.search(pattern, diff_text):
           issues.append(f"🏃 Race: {msg}")
-      
+
       # Check for test coverage
       new_files = re.findall(r'\+\+\+ b/(\S+\.py)', diff_text)
       new_files = [f for f in new_files if not f.startswith('tests/') and not f.endswith('test.py')]
       test_files = re.findall(r'\+\+\+ b/(tests/\S+\.py)', diff_text)
-      
+
       if new_files and not test_files:
         issues.append(f"📝 Tests: New code in {len(new_files)} files but no test updates")
-      
+
       result = issues if issues else []
     output: code_issues
 
@@ -613,34 +613,34 @@ steps:
       lines.append(f"**MR:** !{mr_id}")
       lines.append(f"**Jira:** {jira_key}")
       lines.append("")
-      
+
       # Format validation
       if format_issues and format_issues != ["Format OK"]:
         lines.append("### ❌ Commit Format")
         for issue in format_issues[:3]:
           lines.append(f"- {issue}")
         lines.append("")
-      
+
       # Description validation
       if description_issues and description_issues != ["Description OK"]:
         lines.append("### ⚠️ Description")
         for issue in description_issues[:2]:
           lines.append(f"- {issue}")
         lines.append("")
-      
+
       # Pipeline status
       if 'Failed' in str(gitlab_pipeline) or 'failed' in str(konflux_pipelines):
         lines.append("### ❌ Pipelines")
         lines.append("- CI/CD pipelines have failures - check before approving")
         lines.append("")
-      
+
       # Code issues
       if code_issues:
         lines.append("### 🔍 Code Review")
         for issue in code_issues[:5]:
           lines.append(f"- {issue}")
         lines.append("")
-      
+
       # Test results
       if inputs.run_tests:
         lines.append("### 🧪 Tests")
@@ -652,7 +652,7 @@ steps:
         else:
           lines.append("- Could not run tests")
         lines.append("")
-      
+
       # Determine overall status
       has_blockers = (
         (format_issues and format_issues != ["Format OK"]) or
@@ -660,12 +660,12 @@ steps:
         (code_issues and any('Security' in str(i) for i in code_issues)) or
         (inputs.run_tests and test_result and '❌' in str(test_result))
       )
-      
+
       if has_blockers:
         lines.append("### 🚫 Recommendation: Request Changes")
       else:
         lines.append("### ✅ Recommendation: Approve")
-      
+
       result = '\n'.join(lines)
     output: review_summary
 
@@ -680,7 +680,7 @@ steps:
       has_format_issues = format_issues and format_issues != ["Format OK"]
       has_test_failures = inputs.run_tests and test_result and '❌' in str(test_result)
       has_pipeline_failures = 'Failed' in str(gitlab_pipeline) or 'failed' in str(konflux_pipelines).lower()
-      
+
       # Determine action
       if has_security_issues:
         action = "request_changes"
@@ -700,7 +700,7 @@ steps:
       else:
         action = "approve"
         reason = "No blocking issues found"
-      
+
       result = {"action": action, "reason": reason}
     output: review_action
 
@@ -711,27 +711,27 @@ steps:
     compute: |
       lines = [f"## Code Review Feedback for {jira_key}"]
       lines.append("")
-      
+
       if format_issues and format_issues != ["Format OK"]:
         lines.append("### Commit Format")
         for issue in format_issues[:3]:
           lines.append(f"- {issue}")
         lines.append("")
-      
+
       if code_issues:
         lines.append("### Code Issues")
         for issue in code_issues[:5]:
           lines.append(f"- {issue}")
         lines.append("")
-      
+
       if inputs.run_tests and test_result and '❌' in str(test_result):
         lines.append("### Tests")
         lines.append("- Local tests are failing. Please investigate.")
         lines.append("")
-      
+
       lines.append("---")
       lines.append("*Automated review by AI Workflow*")
-      
+
       result = '\n'.join(lines)
     output: feedback_message
 
@@ -767,14 +767,14 @@ steps:
       import sys
       from pathlib import Path
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-      
+
       try:
           from scripts.skill_hooks import emit_event
           from scripts.common.parsers import extract_author_from_mr
-          
+
           # Extract author from MR details using shared parser
           author = extract_author_from_mr(mr_details) or ""
-          
+
           asyncio.run(emit_event("review_approved", {
               "mr_id": str(mr_id),
               "author": author,
@@ -795,18 +795,18 @@ steps:
       import sys
       from pathlib import Path
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-      
+
       try:
           from scripts.skill_hooks import emit_event
           from scripts.common.parsers import extract_author_from_mr
-          
+
           # Extract author from MR details using shared parser
           author = extract_author_from_mr(mr_details) or ""
-          
+
           issue_count = len(code_issues) if code_issues else 0
           if format_issues and format_issues != ["Format OK"]:
               issue_count += len(format_issues)
-          
+
           asyncio.run(emit_event("review_comment", {
               "mr_id": str(mr_id),
               "author": author,
@@ -824,16 +824,16 @@ steps:
     description: "Extract MR author GitLab username for Slack notification"
     compute: |
       from scripts.common.parsers import extract_author_from_mr, extract_mr_url
-      
+
       author = extract_author_from_mr(mr_details) or ""
-      
+
       # Get MR URL for the notification using shared parser
       mr_url = extract_mr_url(str(mr_details))
-      
+
       if not mr_url:
           # Construct URL from project and mr_id
           mr_url = f"https://gitlab.cee.redhat.com/{resolved.get('gitlab_project', '')}/-/merge_requests/{mr_id}"
-      
+
       result = {
           "author": author,
           "mr_url": mr_url
@@ -850,12 +850,12 @@ steps:
       notification_type: "approval"
       text: |
         Your MR has been *approved*! 🎉
-        
+
         📋 *MR:* <{{ author_info.get('mr_url', '') }}|!{{ mr_id }}>
         {% if jira_key != 'NOT_FOUND' %}
         🎫 *Jira:* {{ jira_key }}
         {% endif %}
-        
+
         Ready to merge when you are.
     output: slack_approval_result
     on_error: continue
@@ -870,13 +870,13 @@ steps:
       notification_type: "feedback"
       text: |
         I've left some feedback on your MR.
-        
+
         📋 *MR:* <{{ author_info.get('mr_url', '') }}|!{{ mr_id }}>
         {% if jira_key != 'NOT_FOUND' %}
         🎫 *Jira:* {{ jira_key }}
         {% endif %}
         📝 *Issues found:* {{ (code_issues|length if code_issues else 0) + (format_issues|length if format_issues and format_issues != ['Format OK'] else 0) }}
-        
+
         Please take a look when you get a chance.
     output: slack_feedback_result
     on_error: continue
@@ -901,38 +901,38 @@ outputs:
   - name: summary
     value: |
       {{ review_summary }}
-      
+
       ---
-      
+
       ## Action Taken
-      
+
       **Decision:** {{ review_action.get('action', 'unknown') | upper }}
       **Reason:** {{ review_action.get('reason', '') }}
-      
+
       {% if review_action.get('action') == 'approve' %}
       ✅ MR has been approved on GitLab.
       {% else %}
       📝 Feedback has been posted to the MR.
       {% endif %}
-      
+
       {% if jira_key != 'NOT_FOUND' %}
       📋 Jira issue {{ jira_key }} updated with review note.
       {% endif %}
-      
+
       {% if not inputs.run_tests %}
       ---
-      
+
       ## 🧪 Want to Run Local Tests?
-      
+
       This review was **static analysis only**. To also checkout the branch and run tests:
-      
+
       ```
       skill_run("review_pr", '{"mr_id": {{ mr_id }}, "run_tests": true}')
       ```
-      
+
       Or just say: "Also run the tests for this MR"
       {% endif %}
-  
+
   - name: context
     value:
       mr_id: "{{ mr_id }}"
@@ -942,4 +942,3 @@ outputs:
       format_ok: "{{ format_issues == ['Format OK'] }}"
       tests_ran: "{{ inputs.run_tests }}"
       tests_passed: "{{ '✅' in str(test_result) if test_result else 'not_run' }}"
-

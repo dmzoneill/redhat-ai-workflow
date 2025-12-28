@@ -419,7 +419,7 @@ def register_tools(server: "FastMCP") -> int:
         issue_type_normalized = issue_type.lower().strip()
 
         if issue_type_normalized not in valid_types:
-            types_str = ', '.join(sorted(valid_types))
+            types_str = ", ".join(sorted(valid_types))
             return f"❌ Invalid issue type: '{issue_type}'. Valid types: {types_str}"
 
         # Convert Markdown to Jira if needed

@@ -1,24 +1,13 @@
 """Tests for agent_loader module."""
 
-import os
+# Adjust import path to work with tests
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
-# Adjust import path to work with tests
-import sys
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "mcp-servers" / "aa-common" / "src"))
 
-from agent_loader import (
-    AGENTS_DIR,
-    CORE_TOOLS,
-    PROJECT_DIR,
-    SERVERS_DIR,
-    TOOL_MODULES,
-    AgentLoader,
-)
+from agent_loader import AGENTS_DIR, CORE_TOOLS, PROJECT_DIR, SERVERS_DIR, TOOL_MODULES, AgentLoader
 
 
 class TestPaths:
@@ -144,9 +133,7 @@ class TestAgentFiles:
 
             tools = config.get("tools", [])
             for tool in tools:
-                assert tool in TOOL_MODULES, (
-                    f"Agent {agent_file.stem} references unknown module: {tool}"
-                )
+                assert tool in TOOL_MODULES, f"Agent {agent_file.stem} references unknown module: {tool}"
 
 
 class TestGlobalLoader:
@@ -173,4 +160,3 @@ class TestGlobalLoader:
 
         # Global should now be set
         assert get_loader() == loader
-

@@ -1,7 +1,5 @@
 """Tests for skill YAML definitions."""
 
-from pathlib import Path
-
 import pytest
 import yaml
 
@@ -76,4 +74,3 @@ class TestCoreSkills:
         """The create_mr skill should exist."""
         create_mr = skills_dir / "create_mr.yaml"
         assert create_mr.exists(), "create_mr.yaml not found"
-

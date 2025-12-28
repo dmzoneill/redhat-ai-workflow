@@ -164,4 +164,3 @@ print('Server created with 30+ tools')
 
 - [Workflow Tools](../mcp-servers/workflow.md) - User-facing documentation
 - [MCP Implementation](mcp-implementation.md) - Overall MCP architecture
-

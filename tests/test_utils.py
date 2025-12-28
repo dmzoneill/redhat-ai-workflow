@@ -2,16 +2,7 @@
 
 from pathlib import Path
 
-import pytest
-
-from src.utils import (
-    get_kubeconfig,
-    get_project_root,
-    get_section_config,
-    get_username,
-    load_config,
-    resolve_repo_path,
-)
+from src.utils import get_kubeconfig, get_project_root, get_section_config, get_username, load_config, resolve_repo_path
 
 
 class TestLoadConfig:
@@ -114,4 +105,3 @@ class TestResolveRepoPath:
         result = resolve_repo_path(".")
         result_path = Path(result) if isinstance(result, str) else result
         assert result_path.exists()
-

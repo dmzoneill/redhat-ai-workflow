@@ -42,7 +42,7 @@ def _resolve_gitlab_to_local(gitlab_path: str) -> str | None:
         Local directory path or None if not found.
     """
     repos = _load_repo_config()
-    for repo_name, repo_config in repos.items():
+    for _repo_name, repo_config in repos.items():
         if repo_config.get("gitlab") == gitlab_path:
             local_path = repo_config.get("path")
             if local_path and Path(local_path).exists():
@@ -166,9 +166,7 @@ def register_tools(server: "FastMCP") -> int:
         if "/merge_requests/" in url:
             success, output = await run_glab(["mr", "view", item_id, "--web=false"], repo=project)
         elif "/issues/" in url:
-            success, output = await run_glab(
-                ["issue", "view", item_id, "--web=false"], repo=project
-            )
+            success, output = await run_glab(["issue", "view", item_id, "--web=false"], repo=project)
         else:
             return f"Unknown URL type: {url}"
 
@@ -333,9 +331,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def gitlab_mr_comment(project: str, mr_id: int, message: str) -> str:
         """Add a comment to a merge request."""
-        success, output = await run_glab(
-            ["mr", "note", str(mr_id), "--message", message], repo=project
-        )
+        success, output = await run_glab(["mr", "note", str(mr_id), "--message", message], repo=project)
         return f"✅ Comment added to !{mr_id}" if success else f"❌ Failed: {output}"
 
     @server.tool()
@@ -455,9 +451,7 @@ def register_tools(server: "FastMCP") -> int:
     # ==================== ISSUES ====================
 
     @server.tool()
-    async def gitlab_issue_list(
-        project: str, state: str = "opened", label: str = "", assignee: str = ""
-    ) -> str:
+    async def gitlab_issue_list(project: str, state: str = "opened", label: str = "", assignee: str = "") -> str:
         """List GitLab issues for a project.
 
         Args:
@@ -486,9 +480,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def gitlab_issue_view(project: str, issue_id: int) -> str:
         """View a GitLab issue."""
-        success, output = await run_glab(
-            ["issue", "view", str(issue_id), "--web=false"], repo=project
-        )
+        success, output = await run_glab(["issue", "view", str(issue_id), "--web=false"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
     @server.tool()
@@ -593,9 +585,7 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["mr", "view", str(mr_id), "--comments"], repo=project)
         if not success:
             # Fallback to basic view
-            success, output = await run_glab(
-                ["mr", "view", str(mr_id), "--web=false"], repo=project
-            )
+            success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
         return f"## Comments on !{mr_id}\n\n{output}" if success else f"❌ Failed: {output}"
 
     @server.tool()
@@ -613,9 +603,7 @@ def register_tools(server: "FastMCP") -> int:
         """
         if mr_id > 0:
             # Get MR pipeline
-            success, output = await run_glab(
-                ["mr", "view", str(mr_id), "--web=false"], repo=project
-            )
+            success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
             if not success:
                 return f"❌ Failed: {output}"
             # Extract pipeline info from MR view
@@ -644,9 +632,7 @@ def register_tools(server: "FastMCP") -> int:
             List of MRs mentioning the issue key.
         """
         # Search in MR titles/descriptions for the issue key (--all instead of --state all)
-        success, output = await run_glab(
-            ["mr", "list", "--all", "--search", issue_key], repo=project
-        )
+        success, output = await run_glab(["mr", "list", "--all", "--search", issue_key], repo=project)
         if not success:
             return f"❌ Failed: {output}"
         if not output.strip() or "no merge requests" in output.lower():

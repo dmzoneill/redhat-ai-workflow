@@ -26,30 +26,30 @@ dependencies = [
     # MCP Server
     "mcp>=1.0.0",
     "fastmcp>=0.1.0",
-    
+
     # Configuration & Templating
     "pyyaml>=6.0",
     "jinja2>=3.0.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
-    
+
     # HTTP Client
     "httpx>=0.25.0",
-    
+
     # Async Database
     "aiosqlite>=0.19.0",
-    
+
     # D-Bus IPC (for Slack daemon control)
     "dbus-next>=0.2.3",
-    
+
     # Claude Agent
     "anthropic>=0.18.0",
-    
+
     # Google APIs
     "google-api-python-client>=2.100.0",
     "google-auth-httplib2>=0.1.0",
     "google-auth-oauthlib>=1.0.0",
-    
+
     # Ephemeral environment management
     "crc-bonfire>=5.0.0",
 ]
@@ -145,6 +145,3 @@ precision = 2
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
 skips = ["B101"]  # Allow assert statements
-
-
-

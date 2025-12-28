@@ -38,14 +38,14 @@ steps:
   - name: load_config
     compute: |
       from scripts.common.config_loader import load_config
-      
+
       config = load_config()
       jira_url = config.get("jira", {}).get("url", "https://issues.redhat.com")
       gitlab_url = config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
-      
+
       # Clean MR ID
       mr_id = str(inputs.mr_id).lstrip("!").strip()
-      
+
       result = {
           "jira_url": jira_url,
           "gitlab_url": gitlab_url,
@@ -67,27 +67,27 @@ steps:
   - name: parse_mr
     compute: |
       from scripts.common.parsers import extract_jira_key
-      
+
       from scripts.common.parsers import extract_mr_url
-      
+
       details = str(mr_details) if mr_details else ""
-      
+
       # Extract title
       title = ""
       for line in details.split("\n"):
           if line.strip() and not line.startswith("!"):
               title = line.strip()[:80]
               break
-      
+
       # Try to find Jira key in title or branch
       jira_key = inputs.issue_key if inputs.issue_key else extract_jira_key(details)
-      
+
       # Extract web URL using shared parser
       web_url = extract_mr_url(details)
-      
+
       if not web_url:
           web_url = f"{cfg['gitlab_url']}/{inputs.project}/-/merge_requests/{cfg['mr_id']}"
-      
+
       result = {
           "title": title,
           "jira_key": jira_key,
@@ -113,11 +113,11 @@ steps:
     args:
       text: |
         🔀 *MR Ready for Review*
-        
+
         {% if mr_info.jira_key %}📋 *Jira:* <{{ cfg.jira_url }}/browse/{{ mr_info.jira_key }}|{{ mr_info.jira_key }}>{% endif %}
         🔗 *MR:* <{{ mr_info.web_url }}|!{{ cfg.mr_id }}> {{ mr_info.title }}
         📁 *Repo:* {{ inputs.project.split('/')[-1] }}
-        
+
         Please review when you have a moment 🙏
     output: slack_result
     on_error: continue
@@ -137,13 +137,13 @@ outputs:
   - name: summary
     value: |
       ## {{ "✅" if "Updated" in str(update_result) else "❌" }} MR !{{ cfg.mr_id }} Marked Ready
-      
+
       | Step | Result |
       |------|--------|
       | Remove draft | {{ "✅ Done" if "Updated" in str(update_result) else "❌ Failed" }} |
       | Slack notification | {{ "✅ Posted" if slack_result else "⏭️ Skipped" }} |
       {% if mr_info.jira_key %}| Jira status | {{ "✅ Updated" if jira_result else "⏭️ Skipped" }} |{% endif %}
-      
+
       **MR:** {{ mr_info.web_url }}
       {% if mr_info.jira_key %}**Jira:** {{ cfg.jira_url }}/browse/{{ mr_info.jira_key }}{% endif %}
 
@@ -153,4 +153,3 @@ outputs:
       mr_url: "{{ mr_info.web_url }}"
       jira_key: "{{ mr_info.jira_key }}"
       slack_posted: "{{ true if slack_result else false }}"
-

@@ -35,32 +35,32 @@ flowchart TD
     DESC --> AC[Check Acceptance Criteria]
     AC --> PRIORITY[Check Priority]
     PRIORITY --> LABELS[Check Labels/Components]
-    
+
     LABELS --> TYPE{Issue Type?}
     TYPE -->|Story| EPIC[Check Epic Link]
     TYPE -->|Bug/Task| SKIP_EPIC[Skip Epic Check]
-    
+
     EPIC --> VERSION
     SKIP_EPIC --> VERSION
-    
+
     VERSION[Check Fix Version] --> STATUS{In Progress?}
     STATUS -->|Yes| POINTS[Check Story Points]
     STATUS -->|No| MARKUP
     POINTS --> MARKUP
-    
+
     MARKUP[Check Jira Markup] --> COMPILE[Compile Issues]
-    
+
     COMPILE --> FIX{Auto-fix?}
     FIX -->|Yes| APPLY[Apply Fixes]
     FIX -->|No| REPORT[Report Only]
-    
+
     APPLY --> TRANSITION{New + Complete?}
     REPORT --> TRANSITION
-    
+
     TRANSITION -->|Yes| MOVE[→ Refinement]
     TRANSITION -->|No| DONE
     MOVE --> DONE([📋 Done])
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style APPLY fill:#10b981,stroke:#059669,color:#fff
@@ -92,14 +92,14 @@ flowchart TD
 You: Check hygiene for AAP-12345
 
 Claude: 📋 Jira Hygiene Check: AAP-12345
-        
+
         Issue: "Implement new REST API endpoint"
         Type: Story | Status: New
-        
+
         ────────────────────────────────
-        
+
         ## Checks
-        
+
         | Field | Status | Issue |
         |-------|--------|-------|
         | Description | ✅ | - |
@@ -109,17 +109,17 @@ Claude: 📋 Jira Hygiene Check: AAP-12345
         | Components | ✅ | Backend |
         | Epic Link | ❌ | Missing |
         | Fix Version | ⚠️ | Not set |
-        
+
         ────────────────────────────────
-        
+
         ## Summary
-        
+
         - ✅ 4 checks passed
         - ⚠️ 2 warnings (fixable)
         - ❌ 1 error (needs manual fix)
-        
+
         **Auto-fixable:** Priority (→ Medium)
-        
+
         **Needs manual fix:**
         - Epic Link: Add to appropriate epic
 ```
@@ -128,6 +128,3 @@ Claude: 📋 Jira Hygiene Check: AAP-12345
 
 - [create_mr](./create_mr.md) - Runs hygiene before MR
 - [start_work](./start_work.md) - Check when starting
-
-
-

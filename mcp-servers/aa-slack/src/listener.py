@@ -55,17 +55,11 @@ class ListenerConfig:
         return cls(
             poll_interval_min=float(os.getenv("SLACK_POLL_INTERVAL_MIN", "5")),
             poll_interval_max=float(os.getenv("SLACK_POLL_INTERVAL_MAX", "15")),
-            watched_channels=[
-                c.strip() for c in os.getenv("SLACK_WATCHED_CHANNELS", "").split(",") if c.strip()
-            ],
+            watched_channels=[c.strip() for c in os.getenv("SLACK_WATCHED_CHANNELS", "").split(",") if c.strip()],
             watched_keywords=[
-                k.strip().lower()
-                for k in os.getenv("SLACK_WATCHED_KEYWORDS", "").split(",")
-                if k.strip()
+                k.strip().lower() for k in os.getenv("SLACK_WATCHED_KEYWORDS", "").split(",") if k.strip()
             ],
-            watched_users=[
-                u.strip() for u in os.getenv("SLACK_WATCHED_USERS", "").split(",") if u.strip()
-            ],
+            watched_users=[u.strip() for u in os.getenv("SLACK_WATCHED_USERS", "").split(",") if u.strip()],
             self_user_id=os.getenv("SLACK_SELF_USER_ID", ""),
             self_dm_channel=os.getenv("SLACK_SELF_DM_CHANNEL", ""),
             debug=os.getenv("SLACK_DEBUG", "").lower() in ("true", "1", "yes"),
@@ -233,9 +227,7 @@ class SlackListener:
         had_errors = False
         for i, channel_id in enumerate(self.config.watched_channels):
             try:
-                logger.debug(
-                    f"Polling channel {i + 1}/{len(self.config.watched_channels)}: {channel_id}"
-                )
+                logger.debug(f"Polling channel {i + 1}/{len(self.config.watched_channels)}: {channel_id}")
                 await self._poll_channel(channel_id)
                 logger.debug(f"Done polling {channel_id}")
             except Exception as e:
@@ -257,9 +249,7 @@ class SlackListener:
 
         # First run: just get the latest message to set our baseline
         if last_ts is None:
-            logger.info(
-                f"First poll of {channel_id} - setting baseline (not processing historical)"
-            )
+            logger.info(f"First poll of {channel_id} - setting baseline (not processing historical)")
             messages = await self.session.get_channel_history(
                 channel_id=channel_id,
                 limit=1,  # Just get the latest to set timestamp
@@ -428,8 +418,7 @@ class SlackListener:
         self._stats["messages_queued"] += 1
 
         logger.info(
-            f"Queued message from {user_name} in #{channel_name}: "
-            f"{text[:50]}{'...' if len(text) > 50 else ''}"
+            f"Queued message from {user_name} in #{channel_name}: " f"{text[:50]}{'...' if len(text) > 50 else ''}"
         )
 
         # Trigger callbacks

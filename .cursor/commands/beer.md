@@ -81,6 +81,3 @@ Start your day with `/coffee`, end it with `/beer`:
 |---------|------|---------|
 | `/coffee` | Morning | What needs attention today |
 | `/beer` | Evening | What you accomplished, prep for tomorrow |
-
-
-

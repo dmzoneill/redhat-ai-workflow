@@ -85,6 +85,3 @@ URLs and kubeconfig paths are defined in `config.json`:
 
 - [investigate_alert](../skills/investigate_alert.md) - Quick triage
 - [coffee](../skills/coffee.md) - Morning alert check
-
-
-

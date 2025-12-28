@@ -1,5 +1,5 @@
 # Integration Test Exclusions
-# 
+#
 # Skills and tools listed here will be SKIPPED during integration testing
 # to prevent production impact or resource consumption.
 #
@@ -14,7 +14,7 @@ excluded_skills:
   - name: release_aa_backend_prod
     reason: "Creates app-interface MR for production deployment"
     risk: critical
-    
+
   - name: test_mr_ephemeral
     reason: "Reserves ephemeral namespace and deploys - uses real cluster resources"
     risk: high
@@ -23,19 +23,19 @@ excluded_skills:
   - name: create_mr
     reason: "Creates real GitLab merge requests"
     risk: high
-    
+
   - name: review_pr
     reason: "Posts comments/approvals to real MRs"
     risk: high
-    
+
   - name: review_all_prs
     reason: "Batch reviews - high volume of real MR modifications"
     risk: high
-    
+
   - name: rebase_pr
     reason: "Modifies git history on real branches"
     risk: medium
-    
+
   - name: close_issue
     reason: "Closes real Jira issues"
     risk: medium
@@ -58,7 +58,7 @@ excluded_tools:
   - git_clean
   - git_merge
   - git_rebase
-  
+
   # ========== JIRA WRITES ==========
   - jira_set_status
   - jira_add_comment
@@ -69,26 +69,26 @@ excluded_tools:
   - jira_remove_flag
   - jira_block
   - jira_unblock
-  
+
   # ========== GITLAB WRITES ==========
   - gitlab_mr_create
   - gitlab_mr_merge
   - gitlab_mr_approve
   - gitlab_mr_close
-  
+
   # ========== K8S DESTRUCTIVE ==========
   - kubectl_delete_pod
   - kubectl_rollout_restart
   - kubectl_scale
   - kubectl_exec
-  
+
   # ========== BONFIRE RESOURCE OPS ==========
   - bonfire_namespace_reserve
   - bonfire_namespace_release
   - bonfire_namespace_extend
   - bonfire_deploy_aa
   - bonfire_deploy_aa_local
-  
+
   # ========== SLACK WRITES ==========
   - slack_send_message
   - slack_respond_and_mark
@@ -117,33 +117,33 @@ safe_tool_tests:
       args: { repo: ".", limit: 1 }
     - tool: git_remote
       args: { repo: "." }
-      
+
   gitlab:
     - tool: gitlab_mr_list
       args: { limit: 1 }
     - tool: gitlab_project_info
       args: {}
-      
+
   jira:
     - tool: jira_search
       args: { jql: "project=AAP AND created >= -1d", max_results: 3 }
-      
+
   k8s:
     - tool: kubectl_get_pods
       args: { namespace: "tower-analytics-stage", environment: "stage" }
     - tool: kubectl_get_deployments
       args: { namespace: "tower-analytics-stage", environment: "stage" }
-      
+
   bonfire:
     - tool: bonfire_namespace_list
       args: { mine_only: true }
     - tool: bonfire_apps_list
       args: {}
-      
+
   quay:
     - tool: quay_list_tags
       args: { limit: 1 }
-      
+
   workflow:
     - tool: agent_list
       args: {}
@@ -151,4 +151,3 @@ safe_tool_tests:
       args: {}
     - tool: skill_list
       args: {}
-

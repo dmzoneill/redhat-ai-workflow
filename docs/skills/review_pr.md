@@ -41,44 +41,44 @@ skill_run("review_pr", '{"mr_id": 1234, "run_tests": true}')
 ```mermaid
 flowchart TD
     START([Start]) --> INPUT{Input Type?}
-    
+
     INPUT -->|URL| PARSE[Parse URL for MR ID]
     INPUT -->|MR ID| DIRECT[Use MR ID]
     INPUT -->|Issue Key| SEARCH[Search for MR]
-    
+
     PARSE --> GET_MR
     DIRECT --> GET_MR
     SEARCH --> GET_MR
-    
+
     GET_MR[Get MR Details] --> JIRA[Get Jira Context]
     JIRA --> PIPELINE[Check Pipeline Status]
     PIPELINE --> COMMITS[Validate Commit Format]
-    
+
     COMMITS --> ANALYSIS[Static Analysis]
     ANALYSIS --> SECURITY[Security Scan]
     SECURITY --> MEMORY[Memory/Race Conditions]
     MEMORY --> PATTERNS[Check for Anti-patterns]
-    
+
     PATTERNS --> TESTS{Run Tests?}
-    
+
     TESTS -->|Yes| CHECKOUT[Checkout Branch]
     CHECKOUT --> DOCKER[Start Docker]
     DOCKER --> PYTEST[Run Pytest]
     PYTEST --> RESULTS[Collect Results]
-    
+
     TESTS -->|No| DECIDE
     RESULTS --> DECIDE
-    
+
     DECIDE{Issues Found?}
-    
+
     DECIDE -->|Yes| FEEDBACK[Post Feedback to MR]
     DECIDE -->|No| APPROVE[Approve MR]
-    
+
     FEEDBACK --> UPDATE_JIRA[Update Jira]
     APPROVE --> UPDATE_JIRA
-    
+
     UPDATE_JIRA --> DONE([✅ Review Complete])
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style APPROVE fill:#10b981,stroke:#059669,color:#fff
@@ -122,27 +122,27 @@ flowchart TD
 You: Review MR 1234
 
 Claude: 👀 Reviewing MR !1234...
-        
+
         📋 MR Details:
         ├── Title: AAP-61214 - feat(api): Add validation
         ├── Author: jsmith
         ├── Branch: aap-61214-add-validation
         └── Target: main
-        
+
         ✅ Pipeline Status: Passed
         ✅ Commit Format: Valid
         ✅ Jira Issue: Found (Story, In Progress)
-        
+
         🔍 Static Analysis:
         ├── Security: No issues
         ├── Memory: No issues
         └── Patterns: 1 suggestion
-        
+
         📝 Suggestions:
         └── Line 45: Consider using constants for magic numbers
-        
+
         ✅ **Approved** - Minor suggestion posted as comment
-        
+
         Updated Jira AAP-61214 with review status.
 ```
 
@@ -152,17 +152,17 @@ Claude: 👀 Reviewing MR !1234...
 You: Review MR 1234 with tests
 
 Claude: 👀 Reviewing MR !1234 with local testing...
-        
+
         [Previous checks...]
-        
+
         🧪 Local Testing:
         ├── Checked out branch
         ├── Started docker-compose
         ├── Ran migrations
         └── Running pytest...
-        
+
         ✅ Tests: 156 passed, 0 failed
-        
+
         ✅ **Approved** - All checks pass
 ```
 
@@ -171,6 +171,3 @@ Claude: 👀 Reviewing MR !1234 with local testing...
 - [review_all_prs](./review_all_prs.md) - Batch review multiple PRs
 - [check_my_prs](./check_my_prs.md) - Check your own PRs
 - [create_mr](./create_mr.md) - Create an MR
-
-
-

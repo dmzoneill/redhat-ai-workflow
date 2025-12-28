@@ -67,7 +67,7 @@ Load the developer agent
 You: /coffee
 
 Claude: ☕ Good Morning, Dave!
-        
+
         📅 3 meetings today
         📧 5 unread emails
         🔀 2 open PRs (!456, !458)
@@ -112,6 +112,3 @@ Switch to **Incident** agent when you need to:
 
 - [🔧 DevOps Agent](./devops.md)
 - [🚨 Incident Agent](./incident.md)
-
-
-

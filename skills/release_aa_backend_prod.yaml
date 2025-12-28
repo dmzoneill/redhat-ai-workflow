@@ -6,7 +6,7 @@ description: |
   Release Automation Analytics backend to production.
   This skill guides you through the promotion process from stage to production
   by updating the commit SHA in app-interface and creating a PR for approval.
-  
+
   Resolves paths and Quay images from config.json.
 version: "1.1"
 
@@ -15,13 +15,13 @@ inputs:
     type: string
     required: true
     description: "Full SHA1 commit to release (must exist in automation-analytics-backend repo and have image in Quay)"
-  
+
   - name: release_date
     type: string
     required: false
     default: "{{ today }}"
     description: "Release date for Jira title (YYYY-MM-DD format, defaults to today)"
-  
+
   - name: include_billing
     type: boolean
     required: false
@@ -38,18 +38,18 @@ steps:
     compute: |
       import os
       from scripts.common.config_loader import load_config
-      
+
       config = load_config()
       repos = config.get("repositories", {})
       ai_config = config.get("app_interface", {})
       quay_config = config.get("quay", {})
       ns_config = config.get("namespaces", {}).get("production", {})
       paths_cfg = config.get("paths", {})
-      
+
       # Get repo paths
       backend_cfg = repos.get("automation-analytics-backend", {})
       ai_cfg = repos.get("app-interface", {})
-      
+
       # Use workspace_roots as fallback
       workspace_roots = paths_cfg.get("workspace_roots", [])
       default_backend = ""
@@ -59,7 +59,7 @@ steps:
               default_backend = os.path.join(os.path.expanduser(root), "automation-analytics-backend")
           if os.path.exists(os.path.join(os.path.expanduser(root), "app-interface")):
               default_ai = os.path.join(os.path.expanduser(root), "app-interface")
-      
+
       result = {
           "backend_repo": backend_cfg.get("path", default_backend),
           "appinterface_repo": ai_cfg.get("path") or ai_config.get("path", default_ai),
@@ -73,7 +73,7 @@ steps:
       }
     output: cfg
   # ==================== VERIFICATION ====================
-  
+
   # Step 1: Verify commit exists in backend repo
   - name: verify_commit_exists
     description: "Verify the commit SHA exists in automation-analytics-backend"
@@ -108,17 +108,17 @@ steps:
     description: "Read current production SHA from app-interface using shared parser"
     compute: |
       from scripts.common.parsers import parse_deploy_clowder_ref
-      
+
       deploy_path = f"{cfg["appinterface_repo"]}/{cfg["deploy_file"]}"
       with open(deploy_path, 'r') as f:
         content = f.read()
-      
+
       # Use shared parser to extract ref
       current_sha = parse_deploy_clowder_ref(content, "tower-analytics-prod")
-      
+
       if not current_sha:
         raise Exception("Could not find production ref in deploy-clowder.yml")
-      
+
       return current_sha
     output: current_prod_sha
 
@@ -132,21 +132,21 @@ steps:
       oneline: true
     output: changelog_raw
     on_error: continue
-  
+
   - name: format_changelog
     description: "Format changelog output"
     compute: |
       import sys
       from pathlib import Path
-      
+
       # Add scripts path for shared parsers
       scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
       if scripts_path not in sys.path:
           sys.path.insert(0, scripts_path)
       from common.parsers import parse_git_log
-      
+
       commits_str = str(changelog_raw) if changelog_raw else ""
-      
+
       if not commits_str.strip() or "error" in commits_str.lower():
         result = "No new commits (same SHA as current production)"
       else:
@@ -198,7 +198,7 @@ steps:
       repo: "{{ cfg.appinterface_repo }}"
       remote: "upstream"
     on_error: continue
-  
+
   - name: rebase_upstream
     description: "Rebase on upstream master"
     tool: git_rebase
@@ -217,18 +217,18 @@ steps:
       pattern: "aa-release-{{ inputs.release_date }}"
     output: existing_branches_raw
     on_error: continue
-  
+
   - name: create_branch_name
     description: "Determine branch name (handle existing versions)"
     compute: |
       from scripts.common.parsers import parse_git_branches, get_next_version
-      
+
       base_name = f"aa-release-{inputs.release_date}"
-      
+
       # Parse existing branches
       existing = parse_git_branches(str(existing_branches_raw) if existing_branches_raw else "")
       matching = [b for b in existing if base_name in b]
-      
+
       if not matching:
           branch_name = base_name
           version = 1
@@ -236,7 +236,7 @@ steps:
           # Use shared function to get next version
           version = get_next_version(matching, base_name)
           branch_name = f"{base_name}-v{version}"
-      
+
       result = {"name": branch_name, "version": version, "existing": len(matching)}
     output: branch_info
 
@@ -261,21 +261,21 @@ steps:
     description: "Update production namespace ref to new SHA using shared parser"
     compute: |
       from scripts.common.parsers import update_deploy_clowder_ref
-      
+
       deploy_path = f"{cfg["appinterface_repo"]}/{cfg["deploy_file"]}"
-      
+
       with open(deploy_path, 'r') as f:
         content = f.read()
-      
+
       # Use shared function to update ref
       new_content, success = update_deploy_clowder_ref(content, inputs.commit_sha, "tower-analytics-prod")
-      
+
       if not success:
         raise Exception("Could not find production ref pattern in deploy-clowder.yml")
-      
+
       with open(deploy_path, 'w') as f:
         f.write(new_content)
-      
+
       return f"Updated tower-analytics-prod ref: {current_prod_sha[:12]} → {inputs.commit_sha[:12]}"
     output: prod_update_result
 
@@ -285,21 +285,21 @@ steps:
     condition: "{{ inputs.include_billing }}"
     compute: |
       from scripts.common.parsers import update_deploy_clowder_ref
-      
+
       deploy_path = f"{cfg["appinterface_repo"]}/{cfg["deploy_file"]}"
-      
+
       with open(deploy_path, 'r') as f:
         content = f.read()
-      
+
       # Use shared function to update billing ref
       new_content, success = update_deploy_clowder_ref(content, inputs.commit_sha, "tower-analytics-prod-billing")
-      
+
       if not success:
         raise Exception("Could not find billing production ref pattern")
-      
+
       with open(deploy_path, 'w') as f:
         f.write(new_content)
-      
+
       return f"Updated tower-analytics-prod-billing ref to {inputs.commit_sha[:12]}"
     output: billing_update_result
 
@@ -321,7 +321,7 @@ steps:
         commit_msg += " (including billing)"
       result = commit_msg
     output: commit_message
-  
+
   - name: commit_changes
     description: "Commit the release changes"
     tool: git_commit
@@ -348,20 +348,20 @@ steps:
       title: "tower-analytics: release {{ inputs.commit_sha[:12] }} to production"
       description: |
         ## Release: {{ inputs.release_date }} Analytics HCC Service
-        
+
         **Commit SHA:** `{{ inputs.commit_sha }}`
         **Jira:** {{ jira_issue.key if jira_issue else 'N/A' }}
-        
+
         ### Changes Included
         {{ changelog }}
-        
+
         ### Components Updated
         - [x] tower-analytics-prod (main)
         {% if inputs.include_billing %}- [x] tower-analytics-prod-billing{% endif %}
-        
+
         ### Quay Image
         `{{ cfg.quay_image }}:{{ inputs.commit_sha }}`
-        
+
         ### Checklist
         - [ ] Verified image exists in Quay
         - [ ] Reviewed changelog
@@ -383,7 +383,7 @@ steps:
       issue_key: "{{ jira_issue.key }}"
       comment: |
         App-Interface MR created: {{ mr_result.web_url }}
-        
+
         Releasing commit: {{ inputs.commit_sha }}
         {{ changelog }}
     on_error: continue
@@ -397,16 +397,16 @@ steps:
       import sys
       from pathlib import Path
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-      
+
       try:
           from scripts.skill_hooks import emit_event
-          
+
           # Emit release started
           asyncio.run(emit_event("release_started", {
               "sha": inputs.commit_sha[:12],
               "environment": "production",
           }))
-          
+
           # Also emit release MR ready
           asyncio.run(emit_event("release_mr_ready", {
               "mr_url": mr_result.get('web_url', ''),
@@ -424,44 +424,44 @@ outputs:
   - name: summary
     value: |
       ## ✅ Production Release Prepared
-      
+
       **Release Date:** {{ inputs.release_date }}
       **Commit SHA:** `{{ inputs.commit_sha }}`
-      
+
       ### Jira Issue
       {{ jira_issue.key if jira_issue else '⚠️ Jira issue not created' }}
-      
+
       ### Merge Request
       {{ mr_result.web_url if mr_result else '⚠️ MR not created' }}
-      
+
       ### Changes Included
       {{ changelog }}
-      
+
       ### Components
       - ✅ tower-analytics-prod (main)
       {% if inputs.include_billing %}- ✅ tower-analytics-prod-billing{% else %}- ⏭️ tower-analytics-prod-billing (skipped){% endif %}
-      
+
       ---
-      
+
       ### Next Steps
       1. 👀 Review the MR: {{ mr_result.web_url if mr_result else 'N/A' }}
       2. ✅ Get team approval
       3. 🚀 Merge to trigger deployment
       4. 📊 Monitor deployment in ArgoCD/App-Interface
       5. ✅ Verify pods are healthy in `tower-analytics-prod`
-      
+
       ### Monitoring Commands
       ```
       kubectl_get_pods(namespace='tower-analytics-prod', environment='production')
       prometheus_query(query='up{namespace="tower-analytics-prod"}', environment='production')
       ```
-      
+
       ### Rollback (if needed)
       If issues arise, create a new release with the previous SHA:
       ```
       skill_run("release_aa_backend_prod", '{"commit_sha": "{{ current_prod_sha }}"}')
       ```
-  
+
   - name: context
     value:
       jira_key: "{{ jira_issue.key if jira_issue else null }}"
@@ -470,4 +470,3 @@ outputs:
       old_sha: "{{ current_prod_sha }}"
       new_sha: "{{ inputs.commit_sha }}"
       include_billing: "{{ inputs.include_billing }}"
-

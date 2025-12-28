@@ -156,5 +156,3 @@ Required credentials in `config.json` (from browser dev tools):
 
 - [investigate_slack_alert](../skills/investigate_slack_alert.md) - Handle alerts
 - [slack_daemon_control](../skills/slack_daemon_control.md) - Daemon management
-
-

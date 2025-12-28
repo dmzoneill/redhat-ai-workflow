@@ -32,32 +32,32 @@ Or use the Cursor command:
 flowchart TD
     START([☕ Start]) --> CONFIG[Load Configuration]
     CONFIG --> PARALLEL{Parallel Fetch}
-    
+
     PARALLEL --> CAL[📅 Calendar]
     PARALLEL --> EMAIL[📧 Gmail]
     PARALLEL --> GITLAB[🦊 GitLab]
     PARALLEL --> JIRA[📋 Jira]
     PARALLEL --> K8S[☸️ Kubernetes]
     PARALLEL --> ALERTS[🚨 Alertmanager]
-    
+
     CAL --> CAL_RESULT[Today's Meetings]
     EMAIL --> EMAIL_RESULT[Unread Emails]
     GITLAB --> MR_RESULT[Open MRs + Feedback]
     JIRA --> JIRA_RESULT[Sprint Activity]
     K8S --> K8S_RESULT[Ephemeral Envs]
     ALERTS --> ALERT_RESULT[Active Alerts]
-    
+
     CAL_RESULT --> COMPILE[Compile Briefing]
     EMAIL_RESULT --> COMPILE
     MR_RESULT --> COMPILE
     JIRA_RESULT --> COMPILE
     K8S_RESULT --> COMPILE
     ALERT_RESULT --> COMPILE
-    
+
     COMPILE --> FORMAT[Format Summary]
     FORMAT --> ACTIONS[Suggest Actions]
     ACTIONS --> DONE([Ready for the day! 🚀])
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style PARALLEL fill:#f59e0b,stroke:#d97706,color:#fff
@@ -126,6 +126,3 @@ flowchart TD
 - [beer](./beer.md) - End of day wrap-up
 - [standup_summary](./standup_summary.md) - Generate standup notes
 - [check_mr_feedback](./check_mr_feedback.md) - Check for MR comments
-
-
-

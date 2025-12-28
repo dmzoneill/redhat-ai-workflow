@@ -21,7 +21,7 @@ sequenceDiagram
     participant Claude
     participant MCP as MCP Server
     participant Cursor
-    
+
     User->>Claude: "Load devops agent"
     Claude->>MCP: agent_load("devops")
     MCP->>MCP: Unload current tools
@@ -70,7 +70,7 @@ graph TD
         D_GITLAB[gitlab]
         D_JIRA[jira]
     end
-    
+
     subgraph DevOps["🔧 DevOps"]
         O_WF[workflow]
         O_K8S[k8s]
@@ -78,7 +78,7 @@ graph TD
         O_QUAY[quay]
         O_GITLAB[gitlab]
     end
-    
+
     subgraph Incident["🚨 Incident"]
         I_WF[workflow]
         I_K8S[k8s]
@@ -87,7 +87,7 @@ graph TD
         I_KIB[kibana]
         I_JIRA[jira]
     end
-    
+
     subgraph Release["📦 Release"]
         R_WF[workflow]
         R_KON[konflux]
@@ -95,7 +95,7 @@ graph TD
         R_APP[appinterface]
         R_GIT[git]
     end
-    
+
     style Developer fill:#3b82f6,stroke:#2563eb,color:#fff
     style DevOps fill:#10b981,stroke:#059669,color:#fff
     style Incident fill:#ef4444,stroke:#dc2626,color:#fff
@@ -164,5 +164,3 @@ skills:
 
 - [MCP Servers](../mcp-servers/README.md) - Tool modules
 - [Skills](../skills/README.md) - Available workflows
-
-

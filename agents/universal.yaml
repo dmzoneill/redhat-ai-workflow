@@ -16,7 +16,7 @@ tools:
   # - k8s         # 26 tools - Kubernetes (add if you need pod inspection)
 
 # Total: ~123 tools (under 128 limit)
-# 
+#
 # Agent switching: Tools are fixed at startup, but persona changes via agent_load().
 # When you say "load devops agent", Claude adopts the devops focus/expertise
 # while keeping access to all the universal tools.
@@ -35,4 +35,3 @@ skills:
   - investigate_alert
   - investigate_slack_alert
   - debug_prod
-

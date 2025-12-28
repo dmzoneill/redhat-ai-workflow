@@ -62,6 +62,3 @@ appinterface_get_alerts(namespace="tower-analytics-prod")
 
 - [release_aa_backend_prod](../skills/release_aa_backend_prod.md) - Updates refs
 - [debug_prod](../skills/debug_prod.md) - Checks deployed version
-
-
-

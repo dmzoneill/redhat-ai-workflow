@@ -62,4 +62,3 @@ tool_exec('bonfire_namespace_list', '{"mine_only": true}')
 
 - `/agents` - Load specialized tool sets
 - `/list-skills` - See available skills
-

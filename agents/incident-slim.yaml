@@ -5,10 +5,9 @@ name: incident
 description: Production incidents (slim)
 persona: agents/incident.md
 
-# Slim tool selection - only the essentials  
+# Slim tool selection - only the essentials
 tools:
   - alertmanager  # 6 tools - Alert silencing
   - kibana        # 9 tools - Log search
 
 # Total: ~15 tools
-

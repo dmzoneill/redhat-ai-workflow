@@ -70,6 +70,3 @@ You should see your email summary in the briefing.
 ```bash
 rm ~/.config/google-calendar/token.json
 ```
-
-
-

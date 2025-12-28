@@ -70,26 +70,26 @@ from mcp.server.fastmcp import FastMCP
 
 def register_tools(server: FastMCP) -> int:
     """Register tools with the server.
-    
+
     Args:
         server: FastMCP server instance
-    
+
     Returns:
         Number of tools registered
     """
-    
+
     @server.tool()
     async def git_status(repo: str) -> str:
         """Get git status."""
         # Implementation
         return "..."
-    
+
     @server.tool()
     async def git_log(repo: str, limit: int = 10) -> str:
         """Get git log."""
-        # Implementation  
+        # Implementation
         return "..."
-    
+
     return 2  # Number of tools
 ```
 
@@ -122,7 +122,7 @@ sequenceDiagram
     participant MCP as MCP Server
     participant Loader as AgentLoader
     participant Cursor
-    
+
     User->>Claude: "Load devops agent"
     Claude->>MCP: agent_load("devops")
     MCP->>Loader: switch_agent("devops")
@@ -143,26 +143,26 @@ The `AgentLoader` class (`aa-common/src/agent_loader.py`) manages dynamic tool s
 ```python
 class AgentLoader:
     CORE_TOOLS = {"agent_load", "agent_list", "session_start", "debug_tool"}
-    
+
     async def switch_agent(self, agent_name: str, ctx: Context) -> dict:
         """Switch to a different agent, loading its tools dynamically."""
-        
+
         # 1. Read agent config (agents/devops.yaml)
         config = self.load_agent_config(agent_name)
-        
+
         # 2. Unload current tools (keep core)
         for tool_name in list(self.server._tool_manager._tools.keys()):
             if tool_name not in self.CORE_TOOLS:
                 self.server._tool_manager._tools.pop(tool_name)
-        
+
         # 3. Load new tool modules
         for module in config["tools"]:
             mod = importlib.import_module(f"aa_{module}.tools")
             mod.register_tools(self.server)
-        
+
         # 4. Notify Cursor
         await ctx.session.send_tool_list_changed()
-        
+
         return {"persona": config["persona"], "tools": len(self.server._tools)}
 ```
 
@@ -278,7 +278,7 @@ def register_tools(server: FastMCP) -> int:
     async def my_tool(arg: str) -> str:
         """Tool description."""
         return f"Result: {arg}"
-    
+
     return 1
 ```
 

@@ -35,18 +35,18 @@ skill_run("create_jira_issue", '{
 ```mermaid
 flowchart TD
     START([Start]) --> NORMALIZE[Normalize Inputs]
-    
+
     NORMALIZE --> TYPE[Normalize Issue Type]
     TYPE --> MD[Convert Markdown to Jira]
     MD --> FIELDS[Normalize Field Names]
-    
+
     FIELDS --> BUILD[Build Issue JSON]
     BUILD --> CREATE[Create via MCP Tool]
-    
+
     CREATE --> SUCCESS{Success?}
     SUCCESS -->|Yes| DONE([✅ Issue Created])
     SUCCESS -->|No| ERROR[Show Error Details]
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
 ```
@@ -76,21 +76,21 @@ The skill converts Markdown to Jira wiki markup:
 You: Create a story for implementing caching
 
 Claude: 📋 Creating Jira issue...
-        
+
         **Input:**
         - Summary: Implement Redis caching
         - Type: Story
         - Description: (converted from Markdown)
-        
+
         ✅ Created: AAP-12360
-        
+
         **Issue Details:**
         - Key: AAP-12360
         - Summary: Implement Redis caching
         - Type: Story
         - Status: New
         - Labels: backend, performance
-        
+
         View: https://issues.redhat.com/browse/AAP-12360
 ```
 
@@ -101,26 +101,26 @@ summary: "Implement Redis caching for API responses"
 issue_type: "story"
 description: |
   ## Overview
-  
+
   We need to add Redis caching to reduce database load.
-  
+
   ## Technical Details
-  
+
   - Use `redis-py` client
   - Cache TTL: 5 minutes
   - Keys: `api:v1:{endpoint}:{params_hash}`
-  
+
   ## Endpoints to Cache
-  
+
   1. `/api/reports/summary`
   2. `/api/hosts/list`
   3. `/api/metrics/overview`
-  
+
 acceptance_criteria: |
   - [ ] Redis connection established
   - [ ] Cache hit rate > 80%
   - [ ] No stale data served
-  
+
 labels: "backend,performance,caching"
 components: "Automation Analytics"
 story_points: 5
@@ -130,6 +130,3 @@ story_points: 5
 
 - [start_work](./start_work.md) - Start working on the issue
 - [jira_hygiene](./jira_hygiene.md) - Validate issue quality
-
-
-

@@ -157,9 +157,7 @@ def is_bot_comment(text: str, author: str = "") -> bool:
     return any(re.search(pattern, combined, re.IGNORECASE) for pattern in BOT_PATTERNS)
 
 
-def filter_human_comments(
-    comments: List[Dict[str, Any]], exclude_author: Optional[str] = None
-) -> List[Dict[str, Any]]:
+def filter_human_comments(comments: List[Dict[str, Any]], exclude_author: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Filter out bot comments and optionally exclude a specific author.
 
@@ -270,10 +268,7 @@ def parse_kubectl_pods(output: str) -> List[Dict[str, Any]]:
             }
 
             # Mark health status
-            pod["healthy"] = (
-                pod["status"] == "Running"
-                and pod["ready"].split("/")[0] == pod["ready"].split("/")[1]
-            )
+            pod["healthy"] = pod["status"] == "Running" and pod["ready"].split("/")[0] == pod["ready"].split("/")[1]
             pods.append(pod)
 
     return pods
@@ -480,9 +475,7 @@ def analyze_mr_status(details: str, my_username: Optional[str] = None) -> Dict[s
     }
 
     # Check approval status
-    result["is_approved"] = bool(
-        re.search(r"approved|LGTM|:white_check_mark:|✅", details, re.IGNORECASE)
-    )
+    result["is_approved"] = bool(re.search(r"approved|LGTM|:white_check_mark:|✅", details, re.IGNORECASE))
 
     # Check for merge conflicts
     result["has_conflicts"] = bool(
@@ -494,15 +487,11 @@ def analyze_mr_status(details: str, my_username: Optional[str] = None) -> Dict[s
     )
 
     # Check for merge commits (should rebase)
-    has_merge_commits = bool(
-        re.search(r"merge branch|merge.*into|merge commit", details, re.IGNORECASE)
-    )
+    has_merge_commits = bool(re.search(r"merge branch|merge.*into|merge commit", details, re.IGNORECASE))
     result["needs_rebase"] = result["has_conflicts"] or has_merge_commits
 
     # Check pipeline status
-    result["pipeline_failed"] = bool(
-        re.search(r"pipeline.*failed|CI.*failed|build.*failed", details, re.IGNORECASE)
-    )
+    result["pipeline_failed"] = bool(re.search(r"pipeline.*failed|CI.*failed|build.*failed", details, re.IGNORECASE))
 
     # Check for unresolved discussions
     result["unresolved"] = bool(
@@ -551,9 +540,7 @@ def analyze_mr_status(details: str, my_username: Optional[str] = None) -> Dict[s
     return result
 
 
-def separate_mrs_by_author(
-    mrs: List[Dict[str, Any]], my_username: str
-) -> Dict[str, List[Dict[str, Any]]]:
+def separate_mrs_by_author(mrs: List[Dict[str, Any]], my_username: str) -> Dict[str, List[Dict[str, Any]]]:
     """
     Separate MRs into own MRs and MRs to review (by others).
 
@@ -794,9 +781,7 @@ def extract_conflict_files(output: str) -> List[str]:
     files.extend(md_files)
 
     # Git conflict format
-    conflict_files = re.findall(
-        r"CONFLICT \([^)]+\):\s*(?:Merge conflict in\s*)?(\S+)", str(output)
-    )
+    conflict_files = re.findall(r"CONFLICT \([^)]+\):\s*(?:Merge conflict in\s*)?(\S+)", str(output))
     files.extend(conflict_files)
 
     return list(set(files))  # Deduplicate
@@ -1062,9 +1047,7 @@ def get_next_version(branches: List[str], base_name: str) -> int:
     return max(versions) + 1 if versions else 1
 
 
-def parse_deploy_clowder_ref(
-    content: str, namespace_pattern: str = "tower-analytics-prod"
-) -> Optional[str]:
+def parse_deploy_clowder_ref(content: str, namespace_pattern: str = "tower-analytics-prod") -> Optional[str]:
     """
     Extract ref SHA from deploy-clowder.yml content.
 
@@ -1204,13 +1187,7 @@ def find_full_conflict_marker(content: str, ours: str, theirs: str) -> Optional[
     if not content:
         return None
 
-    pattern = (
-        r"(<<<<<<<[^\n]*\n"
-        + re.escape(ours)
-        + r"=======\n"
-        + re.escape(theirs)
-        + r">>>>>>>[^\n]*\n?)"
-    )
+    pattern = r"(<<<<<<<[^\n]*\n" + re.escape(ours) + r"=======\n" + re.escape(theirs) + r">>>>>>>[^\n]*\n?)"
     match = re.search(pattern, str(content), re.DOTALL)
     return match.group(1) if match else None
 
@@ -1272,9 +1249,7 @@ def slugify_text(text: str, max_length: int = 40) -> str:
     return slug.strip("-")
 
 
-def find_transition_name(
-    transitions_text: str, target_variations: Optional[List[str]] = None
-) -> Optional[str]:
+def find_transition_name(transitions_text: str, target_variations: Optional[List[str]] = None) -> Optional[str]:
     """
     Find exact transition name from available transitions text.
 
@@ -1341,9 +1316,7 @@ def analyze_review_status(details: str, reviewer_username: str, author: str = ""
         author_replied = bool(re.search(rf"{author}.*?commented|replied", details, re.IGNORECASE))
 
     # Check if already approved
-    already_approved = bool(
-        re.search(rf"approved by.*?{reviewer_username}|LGTM|Looks good", details, re.IGNORECASE)
-    )
+    already_approved = bool(re.search(rf"approved by.*?{reviewer_username}|LGTM|Looks good", details, re.IGNORECASE))
 
     # Determine recommended action
     if already_approved:

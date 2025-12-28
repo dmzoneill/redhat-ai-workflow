@@ -13,6 +13,3 @@ This will:
 4. Report pass/fail for each skill
 
 Expected: 15 skills tested, 15 passed, 9 excluded
-
-
-

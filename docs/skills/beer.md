@@ -31,37 +31,37 @@ Or use the Cursor command:
 flowchart TD
     START([🍺 Start]) --> CONFIG[Load Configuration]
     CONFIG --> TIME{What Time?}
-    
+
     TIME -->|Before 5pm| EARLY[☀️ Wrapping up early]
     TIME -->|5-8pm| NORMAL[🍺 Cheers!]
     TIME -->|After 8pm| LATE[🌙 Burning midnight oil]
-    
+
     EARLY --> GATHER
     NORMAL --> GATHER
     LATE --> GATHER
-    
+
     GATHER[Gather Today's Activity] --> COMMITS[📝 Today's Commits]
     GATHER --> MERGED[✅ Merged PRs]
     GATHER --> CLOSED[📋 Closed Issues]
-    
+
     COMMITS --> STATS[Calculate Stats]
     MERGED --> STATS
     CLOSED --> STATS
-    
+
     STATS --> WIP[Check Work in Progress]
     WIP --> UNCOMMITTED[Uncommitted Changes?]
     WIP --> DRAFTS[Draft PRs?]
     WIP --> EXPIRING[Expiring Ephemeral?]
-    
+
     UNCOMMITTED --> TOMORROW[Tomorrow's Schedule]
     DRAFTS --> TOMORROW
     EXPIRING --> TOMORROW
-    
+
     TOMORROW --> STANDUP{Generate Standup?}
     STANDUP -->|Yes| NOTES[📝 Create Notes]
     STANDUP -->|No| DONE
     NOTES --> DONE([🌙 Done for the day!])
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style NORMAL fill:#f59e0b,stroke:#d97706,color:#fff
@@ -144,6 +144,3 @@ flowchart TD
 - [coffee](./coffee.md) - Morning briefing
 - [standup_summary](./standup_summary.md) - Detailed standup generation
 - [sync_branch](./sync_branch.md) - Quick sync before going home
-
-
-

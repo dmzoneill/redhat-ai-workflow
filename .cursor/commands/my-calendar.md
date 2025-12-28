@@ -41,6 +41,3 @@ google_calendar_check_mutual_availability(
     date="2026-01-06"
 )
 ```
-
-
-

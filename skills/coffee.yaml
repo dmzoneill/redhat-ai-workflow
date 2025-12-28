@@ -4,7 +4,7 @@
 name: coffee
 description: |
   Morning briefing - everything you need to know at the start of your work day.
-  
+
   This skill gathers and summarizes:
   - 📅 Calendar: Today's meetings with Meet links
   - 📧 Email: Unread emails categorized (people vs newsletters)
@@ -16,7 +16,7 @@ description: |
   - 📝 Yesterday: Your commits (for standup prep)
   - 🚨 Alerts: Any firing or recent alerts
   - 🎯 Actions: Suggested next steps
-  
+
   Requires: Gmail API access (same OAuth as Calendar)
 version: "1.1"
 
@@ -26,13 +26,13 @@ inputs:
     required: false
     default: false
     description: "Process all unread emails (vs just summary)"
-  
+
   - name: auto_archive_email
     type: boolean
     required: false
     default: false
     description: "Automatically archive processed emails"
-  
+
   - name: days_back
     type: integer
     required: false
@@ -41,18 +41,18 @@ inputs:
 
 steps:
   # ==================== CONFIGURATION ====================
-  
+
   - name: load_config
     description: "Load configuration using shared loader"
     compute: |
       from datetime import datetime
       from zoneinfo import ZoneInfo
       from scripts.common.config_loader import load_config, get_timezone
-      
+
       config = load_config()
       tz = ZoneInfo(get_timezone())
       now = datetime.now(tz)
-      
+
       result = {
         "config": config,
         "now": now.isoformat(),
@@ -64,43 +64,43 @@ steps:
     output: ctx
 
   # ==================== CALENDAR ====================
-  
+
   - name: get_todays_calendar
     description: "Fetch today's calendar events"
     compute: |
       from pathlib import Path
       from datetime import datetime, timedelta
       from zoneinfo import ZoneInfo
-      
+
       CONFIG_DIR = Path.home() / ".config" / "google-calendar"
       TOKEN_FILE = CONFIG_DIR / "token.json"
       TIMEZONE = "Europe/Dublin"
       tz = ZoneInfo(TIMEZONE)
-      
+
       events_today = []
-      
+
       if TOKEN_FILE.exists():
         try:
           from google.oauth2.credentials import Credentials
           from google.auth.transport.requests import Request
           from googleapiclient.discovery import build
-          
+
           # Load token with its original scopes (don't override)
           creds = Credentials.from_authorized_user_file(str(TOKEN_FILE))
-          
+
           # Refresh if expired
           if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
             # Save refreshed token
             with open(TOKEN_FILE, 'w') as f:
               f.write(creds.to_json())
-          
+
           service = build('calendar', 'v3', credentials=creds)
-          
+
           now = datetime.now(tz)
           day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
           day_end = day_start + timedelta(days=1)
-          
+
           events_result = service.events().list(
             calendarId='primary',
             timeMin=day_start.isoformat(),
@@ -109,7 +109,7 @@ steps:
             orderBy='startTime',
             timeZone=TIMEZONE,
           ).execute()
-          
+
           for event in events_result.get('items', []):
             start = event['start'].get('dateTime', event['start'].get('date'))
             try:
@@ -120,7 +120,7 @@ steps:
                 time_str = "All day"
             except:
               time_str = start
-            
+
             # Check for Meet link
             meet_link = ""
             if event.get('conferenceData', {}).get('entryPoints'):
@@ -128,7 +128,7 @@ steps:
                 if entry.get('entryPointType') == 'video':
                   meet_link = entry.get('uri', '')
                   break
-            
+
             events_today.append({
               "time": time_str,
               "title": event.get('summary', 'No title'),
@@ -138,28 +138,28 @@ steps:
           events_today = [{"error": str(e)}]
       else:
         events_today = [{"error": "Calendar not configured"}]
-      
+
       result = events_today
     output: calendar_events
 
   # ==================== EMAIL (Gmail) with Smart Triage ====================
-  
+
   - name: get_email_summary
     description: "Fetch, analyze, and optionally triage unread emails"
     compute: |
       from pathlib import Path
-      
+
       CONFIG_DIR = Path.home() / ".config" / "google-calendar"
       TOKEN_FILE = CONFIG_DIR / "token.json"
-      
+
       # Get user info for "directed at me" detection
       user_email = ctx.get('config', {}).get('user', {}).get('email', '')
       user_name = ctx.get('config', {}).get('user', {}).get('full_name', '')
       first_name = user_name.split()[0].lower() if user_name else ''
-      
+
       # Should we auto-archive?
       do_archive = inputs.get('auto_archive_email', False)
-      
+
       email_summary = {
         "unread_count": 0,
         "needs_attention": [],      # Emails directed at me
@@ -169,38 +169,38 @@ steps:
         "cc_only": 0,
         "error": None,
       }
-      
+
       def is_directed_at_me(headers, user_email, first_name):
         """Determine if email is specifically directed at the user."""
         to_field = headers.get('To', '').lower()
         cc_field = headers.get('Cc', '').lower()
         from_field = headers.get('From', '').lower()
         subject = headers.get('Subject', '').lower()
-        
+
         # Check if I'm in TO (not just CC)
         in_to = user_email.lower() in to_field if user_email else False
         in_cc_only = not in_to and (user_email.lower() in cc_field if user_email else False)
-        
+
         # Automated sender patterns
-        auto_senders = ['noreply', 'no-reply', 'notifications@', 'system@', 
+        auto_senders = ['noreply', 'no-reply', 'notifications@', 'system@',
                         'mailer-daemon', 'postmaster', 'donotreply', 'automated']
         is_automated = any(pattern in from_field for pattern in auto_senders)
-        
+
         # Newsletter patterns
         newsletter_patterns = ['newsletter', 'digest', 'weekly', 'daily update',
                                'unsubscribe', 'mailing list', 'marketing']
-        is_newsletter = any(pattern in from_field or pattern in subject 
+        is_newsletter = any(pattern in from_field or pattern in subject
                            for pattern in newsletter_patterns)
-        
+
         # Jira notifications - keep ones assigned to me
         is_jira = 'jira' in from_field
         jira_assigned = is_jira and ('assigned' in subject or first_name in subject)
-        
+
         # GitLab notifications - keep ones mentioning me or my MRs
         is_gitlab = 'gitlab' in from_field
-        gitlab_important = is_gitlab and (first_name in subject or 'mentioned' in subject 
+        gitlab_important = is_gitlab and (first_name in subject or 'mentioned' in subject
                                           or 'assigned' in subject or 'approved' in subject)
-        
+
         # Decision logic
         if is_newsletter:
           return False, "newsletter"
@@ -210,32 +210,32 @@ steps:
           return False, "cc_only"
         else:
           return True, "direct"
-      
+
       if TOKEN_FILE.exists():
         try:
           from google.oauth2.credentials import Credentials
           from google.auth.transport.requests import Request
           from googleapiclient.discovery import build
-          
+
           creds = Credentials.from_authorized_user_file(str(TOKEN_FILE))
-          
+
           if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
             with open(TOKEN_FILE, 'w') as f:
               f.write(creds.to_json())
-          
+
           service = build('gmail', 'v1', credentials=creds)
-          
+
           # Get unread messages
           results = service.users().messages().list(
             userId='me',
             q='is:unread in:inbox',
             maxResults=50
           ).execute()
-          
+
           messages = results.get('messages', [])
           email_summary["unread_count"] = len(messages)
-          
+
           # Process each message
           for msg in messages[:30]:  # Process up to 30
             msg_data = service.users().messages().get(
@@ -244,22 +244,22 @@ steps:
               format='metadata',
               metadataHeaders=['Subject', 'From', 'To', 'Cc', 'List-Unsubscribe']
             ).execute()
-            
+
             headers = {h['name']: h['value'] for h in msg_data.get('payload', {}).get('headers', [])}
             subject = headers.get('Subject', 'No subject')
             sender = headers.get('From', 'Unknown')
             msg_id = msg['id']
-            
+
             # Check if email is directed at me
             is_important, category = is_directed_at_me(headers, user_email, first_name)
-            
+
             email_info = {
               "id": msg_id,
               "subject": subject[:60],
               "from": sender.split('<')[0].strip()[:30],
               "category": category,
             }
-            
+
             if is_important:
               email_summary["needs_attention"].append(email_info)
             else:
@@ -270,7 +270,7 @@ steps:
                 email_summary["notifications"] += 1
               elif category == "cc_only":
                 email_summary["cc_only"] += 1
-              
+
               # Auto-archive if enabled
               if do_archive:
                 try:
@@ -283,7 +283,7 @@ steps:
                   email_summary["archived"].append(email_info)
                 except Exception:
                   pass  # Skip if archive fails
-          
+
         except Exception as e:
           error_str = str(e)
           if "gmail" in error_str.lower() or "scope" in error_str.lower():
@@ -292,13 +292,13 @@ steps:
             email_summary["error"] = error_str
       else:
         email_summary["error"] = "Google OAuth not configured"
-      
+
       result = email_summary
     output: email_summary
     on_error: continue
 
   # ==================== OPEN PRs (using MCP tools) ====================
-  
+
   - name: get_open_prs
     description: "Get all open PRs in the repo"
     tool: gitlab_mr_list
@@ -320,7 +320,7 @@ steps:
     description: "Parse MR list output"
     compute: |
       from scripts.common.parsers import parse_mr_list
-      
+
       result = parse_mr_list(my_prs_raw) if my_prs_raw else []
     output: my_prs
 
@@ -373,29 +373,29 @@ steps:
       import re
       import sys
       from pathlib import Path
-      
+
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
       from common.parsers import is_bot_comment
-      
+
       feedback = []
       current_user = ctx.get('config', {}).get('user', {}).get('username', os.getenv('USER', 'unknown'))
-      
+
       # Process each MR's comments
       comments_data = [
         (pr_ids_to_check[0] if pr_ids_to_check else None, pr1_comments_raw if 'pr1_comments_raw' in dir() else None),
         (pr_ids_to_check[1] if len(pr_ids_to_check) > 1 else None, pr2_comments_raw if 'pr2_comments_raw' in dir() else None),
         (pr_ids_to_check[2] if len(pr_ids_to_check) > 2 else None, pr3_comments_raw if 'pr3_comments_raw' in dir() else None),
       ]
-      
+
       # Map MR IDs back to titles
       mr_titles = {pr['id']: pr.get('title', '')[:40] for pr in (my_prs or [])}
-      
+
       for mr_id, comments_raw in comments_data:
         if not mr_id or not comments_raw:
           continue
-        
+
         comments_text = str(comments_raw)
-        
+
         # Find human comments
         for line in comments_text.split('\n'):
           if ' commented ' in line and current_user.lower() not in line.lower():
@@ -408,12 +408,12 @@ steps:
                   "title": mr_titles.get(mr_id, '')
                 })
                 break
-      
+
       result = feedback
     output: pr_feedback
 
   # ==================== JIRA ACTIVITY (using MCP tool) ====================
-  
+
   - name: build_jira_jql
     description: "Build JQL query with proper days_back value"
     compute: |
@@ -421,7 +421,7 @@ steps:
       # Use labels instead of component (component 'Automation Analytics' doesn't exist)
       result = f"project = AAP AND updated >= -{days}d AND labels = 'automation-analytics' ORDER BY updated DESC"
     output: jira_jql
-  
+
   - name: get_sprint_activity
     description: "Get Jira activity for the sprint"
     tool: jira_search
@@ -435,9 +435,9 @@ steps:
     description: "Parse Jira search results"
     compute: |
       from scripts.common.parsers import parse_jira_issues
-      
+
       recent_issues = parse_jira_issues(jira_activity_raw) if jira_activity_raw else []
-      
+
       result = {
         "count": len(recent_issues),
         "issues": recent_issues[:10]
@@ -446,7 +446,7 @@ steps:
     on_error: continue
 
   # ==================== MERGED CODE (using MCP tool) ====================
-  
+
   - name: get_recent_merges
     description: "Get recently merged MRs"
     tool: gitlab_mr_list
@@ -460,14 +460,14 @@ steps:
     description: "Parse merged MRs"
     compute: |
       from scripts.common.parsers import parse_mr_list
-      
+
       merged_mrs = parse_mr_list(recent_merges_raw) if recent_merges_raw else []
       result = merged_mrs[:5]  # Last 5
     output: recent_merges
     on_error: continue
 
   # ==================== ALERTS (using Alertmanager MCP tools) ====================
-  
+
   - name: check_alerts_stage
     description: "Check for Automation Analytics alerts in stage"
     tool: alertmanager_alerts
@@ -492,13 +492,13 @@ steps:
     description: "Parse alert results"
     compute: |
       import re
-      
+
       alerts = {
         "stage": [],
         "production": [],
         "error": None
       }
-      
+
       # Parse stage alerts
       stage_text = str(alerts_stage_raw) if alerts_stage_raw else ""
       if "No active alerts" in stage_text or not stage_text:
@@ -512,7 +512,7 @@ steps:
             match = re.search(r'\*\*(.+?)\*\*', line)
             if match:
               alerts["stage"].append(match.group(1))
-      
+
       # Parse production alerts
       prod_text = str(alerts_prod_raw) if alerts_prod_raw else ""
       if "No active alerts" in prod_text or not prod_text:
@@ -526,13 +526,13 @@ steps:
             match = re.search(r'\*\*(.+?)\*\*', line)
             if match:
               alerts["production"].append(match.group(1))
-      
+
       result = alerts
     output: alerts
     on_error: continue
 
   # ==================== FAILED PIPELINES ====================
-  
+
   # Get MR details for pipeline status (reusing pr_ids_to_check from earlier)
   - name: get_mr1_details
     description: "Get details for first MR"
@@ -568,21 +568,21 @@ steps:
     description: "Parse MR details for failed pipelines"
     compute: |
       failed_pipelines = []
-      
+
       # Map MR IDs to titles
       mr_titles = {pr['id']: pr.get('title', '')[:40] for pr in (my_prs or [])}
-      
+
       # Check each MR for failed status
       mr_details_list = [
         (pr_ids_to_check[0] if pr_ids_to_check else None, mr1_details_raw if 'mr1_details_raw' in dir() else None),
         (pr_ids_to_check[1] if len(pr_ids_to_check) > 1 else None, mr2_details_raw if 'mr2_details_raw' in dir() else None),
         (pr_ids_to_check[2] if len(pr_ids_to_check) > 2 else None, mr3_details_raw if 'mr3_details_raw' in dir() else None),
       ]
-      
+
       for mr_id, details_raw in mr_details_list:
         if not mr_id or not details_raw:
           continue
-        
+
         output = str(details_raw).lower()
         if 'failed' in output or 'canceled' in output:
           failed_pipelines.append({
@@ -590,12 +590,12 @@ steps:
             "title": mr_titles.get(mr_id, ''),
             "status": "failed" if 'failed' in output else "canceled"
           })
-      
+
       result = failed_pipelines
     output: failed_pipelines
 
   # ==================== EPHEMERAL NAMESPACES (using MCP tool) ====================
-  
+
   - name: check_ephemeral_namespaces
     description: "List your active ephemeral environments"
     tool: bonfire_namespace_list
@@ -608,13 +608,13 @@ steps:
     description: "Parse namespace list"
     compute: |
       from scripts.common.parsers import parse_namespaces
-      
+
       result = parse_namespaces(ephemeral_namespaces_raw) if ephemeral_namespaces_raw else []
     output: ephemeral_namespaces
     on_error: continue
 
   # ==================== YESTERDAY'S WORK (using MCP tool) ====================
-  
+
   - name: get_yesterdays_commits_raw
     description: "Get your commits from yesterday (for standup)"
     tool: git_log
@@ -631,10 +631,10 @@ steps:
     description: "Parse commit output"
     compute: |
       import re
-      
+
       commits = []
       raw = str(yesterdays_commits_raw) if yesterdays_commits_raw else ""
-      
+
       for line in raw.split('\n'):
         # Look for lines like "- `abc1234 commit message`"
         match = re.search(r'`([a-f0-9]{7,})\s+(.+?)`', line)
@@ -643,13 +643,13 @@ steps:
             "sha": match.group(1)[:7],
             "message": match.group(2)[:60]
           })
-      
+
       result = commits
     output: yesterdays_commits
     on_error: continue
 
   # ==================== REVIEW REQUESTS (using MCP tool) ====================
-  
+
   - name: get_review_requests
     description: "Get PRs where you're assigned as reviewer"
     tool: gitlab_mr_list
@@ -663,29 +663,29 @@ steps:
     description: "Parse review request list"
     compute: |
       from scripts.common.parsers import parse_mr_list
-      
+
       review_requests = parse_mr_list(review_requests_raw) if review_requests_raw else []
       result = review_requests[:5]  # Limit to 5
     output: review_requests
     on_error: continue
 
   # ==================== SUMMARY ====================
-  
+
   - name: format_briefing
     description: "Create the morning briefing"
     compute: |
       import re
-      
+
       lines = []
-      
+
       # Get user's first name from config
       full_name = ctx.get('config', {}).get('user', {}).get('full_name', 'there')
       first_name = full_name.split()[0] if full_name else 'there'
-      
+
       # Base URLs for hyperlinks (inlined to avoid closure issues in sandbox)
       # GitLab: https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{id}
       # Jira: https://issues.redhat.com/browse/{key}
-      
+
       def linkify_jira_keys(text):
         """Replace Jira keys like AAP-12345 with markdown links."""
         # Match AAP-XXXXX pattern
@@ -694,7 +694,7 @@ steps:
           key = match.group(1)
           return f"[{key}](https://issues.redhat.com/browse/{key})"
         return jira_pattern.sub(replace_jira, text)
-      
+
       # Header
       lines.append(f"# ☕ {ctx['greeting']}, {first_name}!")
       lines.append(f"")
@@ -702,7 +702,7 @@ steps:
       lines.append("")
       lines.append("---")
       lines.append("")
-      
+
       # Calendar
       lines.append("## 📅 Today's Calendar")
       if calendar_events and not any('error' in e for e in calendar_events):
@@ -715,7 +715,7 @@ steps:
       else:
         lines.append("- ⚠️ Calendar not accessible")
       lines.append("")
-      
+
       # Email with smart triage
       lines.append("## 📧 Email")
       if email_summary and not email_summary.get('error'):
@@ -724,7 +724,7 @@ steps:
         newsletters = email_summary.get('newsletters', 0)
         notifications = email_summary.get('notifications', 0)
         cc_only = email_summary.get('cc_only', 0)
-        
+
         # Show emails needing attention
         if needs_attention:
           lines.append(f"### ⚠️ Needs Your Attention ({len(needs_attention)})")
@@ -733,7 +733,7 @@ steps:
           if len(needs_attention) > 8:
             lines.append(f"- *...and {len(needs_attention) - 8} more*")
           lines.append("")
-        
+
         # Show what was archived (if auto-archive was enabled)
         if archived:
           lines.append(f"### ✅ Auto-Archived ({len(archived)})")
@@ -744,13 +744,13 @@ steps:
             if cat not in by_cat:
               by_cat[cat] = []
             by_cat[cat].append(email)
-          
+
           for cat, emails in by_cat.items():
-            cat_name = {'newsletter': '📰 Newsletters', 'notification': '🔔 Notifications', 
+            cat_name = {'newsletter': '📰 Newsletters', 'notification': '🔔 Notifications',
                         'cc_only': '📋 CC-only'}.get(cat, cat)
             lines.append(f"- {cat_name}: {len(emails)}")
           lines.append("")
-        
+
         # Show what WOULD be archived (if not auto-archiving)
         if not archived and (newsletters or notifications or cc_only):
           skippable = newsletters + notifications + cc_only
@@ -764,7 +764,7 @@ steps:
           lines.append("")
           lines.append("*Tip: Run with `auto_archive_email: true` to clean these up*")
           lines.append("")
-        
+
         if not needs_attention and not archived and not newsletters:
           lines.append("✨ Inbox is clean!")
           lines.append("")
@@ -772,7 +772,7 @@ steps:
         error = email_summary.get('error', 'Unknown') if email_summary else 'Not configured'
         lines.append(f"- ⚠️ {error}")
         lines.append("")
-      
+
       # PRs needing attention
       lines.append("## 🔀 Your PRs")
       lines.append(f"")
@@ -782,7 +782,7 @@ steps:
           title_with_links = linkify_jira_keys(pr['title'])
           lines.append(f"- [!{pr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{pr['id']}) - {title_with_links}")
       lines.append("")
-      
+
       if pr_feedback:
         lines.append(f"**⚠️ Feedback Waiting ({len(pr_feedback)}):**")
         for fb in pr_feedback:
@@ -790,14 +790,14 @@ steps:
       else:
         lines.append("✅ No pending feedback on your PRs")
       lines.append("")
-      
+
       # Failed pipelines
       if failed_pipelines:
         lines.append(f"**🔴 Failed Pipelines ({len(failed_pipelines)}):**")
         for fp in failed_pipelines:
           lines.append(f"- [!{fp['mr_id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fp['mr_id']}) - {fp['status'].upper()}")
         lines.append("")
-      
+
       # Review requests - PRs assigned to YOU for review
       lines.append("## 👀 Review Requests")
       if review_requests:
@@ -808,7 +808,7 @@ steps:
       else:
         lines.append("✅ No PRs waiting for your review")
       lines.append("")
-      
+
       # Jira
       lines.append("## 📋 Jira Activity")
       if jira_activity and jira_activity.get('count', 0) > 0:
@@ -818,7 +818,7 @@ steps:
       else:
         lines.append("- No Jira activity in the last day")
       lines.append("")
-      
+
       # Merges
       lines.append("## 🚀 Recent Merges")
       if recent_merges:
@@ -828,7 +828,7 @@ steps:
       else:
         lines.append("- No recent merges")
       lines.append("")
-      
+
       # Ephemeral Environments
       lines.append("## 🧪 Ephemeral Environments")
       if ephemeral_namespaces:
@@ -838,7 +838,7 @@ steps:
       else:
         lines.append("- No active ephemeral environments")
       lines.append("")
-      
+
       # Yesterday's Work (for standup)
       lines.append("## 📝 Yesterday's Work")
       if yesterdays_commits:
@@ -847,7 +847,7 @@ steps:
       else:
         lines.append("- No commits yesterday")
       lines.append("")
-      
+
       # Alerts
       lines.append("## 🚨 Alerts")
       if alerts and not alerts.get('error'):
@@ -862,25 +862,25 @@ steps:
       else:
         lines.append("- Alert check not configured")
       lines.append("")
-      
+
       # Actions
       lines.append("---")
       lines.append("")
       lines.append("## 🎯 Suggested Actions")
       actions = []
-      
+
       if pr_feedback:
         actions.append(f"- Respond to feedback on {len(pr_feedback)} PR(s)")
       if failed_pipelines:
         actions.append(f"- Fix {len(failed_pipelines)} failed pipeline(s)")
       if review_requests:
         actions.append(f"- Review {len(review_requests)} PR(s) assigned to you")
-      
+
       # Email actions
       needs_attention = email_summary.get('needs_attention', []) if email_summary else []
       if needs_attention:
         actions.append(f"- Review {len(needs_attention)} email(s) needing attention")
-      
+
       # Suggest auto-archive if there's cleanup potential
       newsletters = email_summary.get('newsletters', 0) if email_summary else 0
       notifications = email_summary.get('notifications', 0) if email_summary else 0
@@ -888,25 +888,25 @@ steps:
       skippable = newsletters + notifications + cc_only
       if skippable >= 5 and not email_summary.get('archived'):
         actions.append(f"- 💡 Run `/coffee` with `auto_archive_email: true` to clean up {skippable} emails")
-      
+
       if ephemeral_namespaces:
         expiring = [ns for ns in ephemeral_namespaces if 'h' in str(ns.get('expires', '')) and int(re.search(r'(\d+)h', str(ns.get('expires', '0h'))).group(1) if re.search(r'(\d+)h', str(ns.get('expires', ''))) else 99) < 2]
         if expiring:
           actions.append(f"- ⏰ {len(expiring)} ephemeral env(s) expiring soon!")
-      
+
       if actions:
         for a in actions:
           lines.append(a)
       else:
         lines.append("- You're all caught up! ☕")
-      
+
       result = '\n'.join(lines)
     output: briefing
 
 outputs:
   - name: summary
     value: "{{ briefing }}"
-  
+
   - name: context
     value:
       calendar_count: "{{ calendar_events | length if calendar_events else 0 }}"
@@ -919,4 +919,3 @@ outputs:
       yesterdays_commits: "{{ yesterdays_commits | length if yesterdays_commits else 0 }}"
       jira_updates: "{{ jira_activity.count if jira_activity else 0 }}"
       recent_merges: "{{ recent_merges | length if recent_merges else 0 }}"
-

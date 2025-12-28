@@ -32,9 +32,7 @@ class RateLimiter:
         """Check if we can send to this author."""
         now = time.time()
         # Clean old entries
-        self._counts[author_id] = [
-            ts for ts in self._counts[author_id] if now - ts < self.window_seconds
-        ]
+        self._counts[author_id] = [ts for ts in self._counts[author_id] if now - ts < self.window_seconds]
         return len(self._counts[author_id]) < self.max_per_author
 
     def record(self, author_id: str):
@@ -297,9 +295,7 @@ if __name__ == "__main__":
         hooks = SkillHooks.from_config()
 
         # Test event
-        await hooks.emit(
-            "review_approved", {"mr_id": "1449", "author": "daoneill", "target_branch": "main"}
-        )
+        await hooks.emit("review_approved", {"mr_id": "1449", "author": "daoneill", "target_branch": "main"})
 
         await hooks.close()
 

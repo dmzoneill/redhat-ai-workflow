@@ -188,9 +188,7 @@ def _extract_function(source: str, func_name: str) -> str:
     # Find function start
     start_idx = None
     for i, line in enumerate(lines):
-        if re.match(rf"\s*async def {func_name}\s*\(", line) or re.match(
-            rf"\s*def {func_name}\s*\(", line
-        ):
+        if re.match(rf"\s*async def {func_name}\s*\(", line) or re.match(rf"\s*def {func_name}\s*\(", line):
             start_idx = i
             break
 
@@ -479,10 +477,7 @@ def _get_remediation_hints(error_text: str, tool_name: str) -> list[str]:
     ]
 
     if any(pattern in error_lower for pattern in gitlab_auth_patterns):
-        hints.append(
-            "🦊 GitLab token may be expired. "
-            "Check GITLAB_TOKEN env var or ~/.config/glab-cli/config.yml"
-        )
+        hints.append("🦊 GitLab token may be expired. " "Check GITLAB_TOKEN env var or ~/.config/glab-cli/config.yml")
 
     # Slack auth issues
     slack_auth_patterns = [

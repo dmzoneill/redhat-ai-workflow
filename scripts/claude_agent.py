@@ -22,21 +22,14 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 # Add parent to path for config imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Type checking imports
-if TYPE_CHECKING:
-    import anthropic
-    from anthropic import Anthropic, AnthropicVertex
-    from config.context_resolver import ContextResolver, ResolvedContext
-    from scripts.skill_hooks import SkillHooks
-
 # Runtime imports with fallbacks
 try:
-    import anthropic
+    import anthropic  # noqa: F401
     from anthropic import AnthropicVertex
 
     ANTHROPIC_AVAILABLE = True
@@ -300,9 +293,7 @@ class ToolRegistry:
                 description="Get git status of a repository.",
                 parameters={
                     "type": "object",
-                    "properties": {
-                        "repo_path": {"type": "string", "description": "Path to git repository"}
-                    },
+                    "properties": {"repo_path": {"type": "string", "description": "Path to git repository"}},
                     "required": [],
                 },
             )
@@ -334,9 +325,7 @@ class ToolRegistry:
                 description="List pods in a Kubernetes namespace.",
                 parameters={
                     "type": "object",
-                    "properties": {
-                        "namespace": {"type": "string", "description": "Kubernetes namespace"}
-                    },
+                    "properties": {"namespace": {"type": "string", "description": "Kubernetes namespace"}},
                     "required": ["namespace"],
                 },
             )
@@ -348,9 +337,7 @@ class ToolRegistry:
                 description="Get recent events in a Kubernetes namespace.",
                 parameters={
                     "type": "object",
-                    "properties": {
-                        "namespace": {"type": "string", "description": "Kubernetes namespace"}
-                    },
+                    "properties": {"namespace": {"type": "string", "description": "Kubernetes namespace"}},
                     "required": ["namespace"],
                 },
             )
@@ -592,9 +579,7 @@ class ToolExecutor:
                 return f"Unknown tool: {tool_name}"
         except Exception as e:
             logger.error(f"Tool execution error for {tool_name}: {e}", exc_info=True)
-            return (
-                f"The {tool_name} tool is currently unavailable. Please try a different approach."
-            )
+            return f"The {tool_name} tool is currently unavailable. Please try a different approach."
 
     async def _run_command(
         self, cmd: list[str], cwd: Optional[str] = None, env: Optional[dict[str, str]] = None
@@ -636,9 +621,7 @@ class ToolExecutor:
         elif tool_name == "jira_search":
             jql = args.get("jql", "")
             max_results = args.get("max_results", 10)
-            return await self._run_command(
-                [self.rh_issue, "search", jql, "--max", str(max_results)]
-            )
+            return await self._run_command([self.rh_issue, "search", jql, "--max", str(max_results)])
         elif tool_name == "jira_comment":
             key = args.get("issue_key", "")
             comment = args.get("comment", "")
@@ -868,9 +851,7 @@ class ToolExecutor:
         elif tool_name == "k8s_logs":
             pod = args.get("pod", "")
             tail = args.get("tail", 100)
-            return await self._run_command(
-                ["kubectl", "logs", "-n", namespace, pod, f"--tail={tail}"], env=env
-            )
+            return await self._run_command(["kubectl", "logs", "-n", namespace, pod, f"--tail={tail}"], env=env)
         return f"Unknown K8s tool: {tool_name}"
 
     def _get_bonfire_env(self) -> dict[str, str]:
@@ -954,9 +935,7 @@ class ToolExecutor:
                 )
 
             # Select component and image
-            component = (
-                "tower-analytics-billing-clowdapp" if billing else "tower-analytics-clowdapp"
-            )
+            component = "tower-analytics-billing-clowdapp" if billing else "tower-analytics-clowdapp"
             image_base = "quay.io/redhat-user-workloads/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
             repository = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
 
@@ -1251,9 +1230,7 @@ class ClaudeAgent:
         system_prompt: Optional[str] = None,
     ) -> None:
         if not ANTHROPIC_AVAILABLE:
-            raise ImportError(
-                "anthropic package not installed. Install with: pip install anthropic"
-            )
+            raise ImportError("anthropic package not installed. Install with: pip install anthropic")
 
         self.max_tokens = max_tokens
         self.system_prompt = system_prompt or self._default_system_prompt()
@@ -1270,9 +1247,7 @@ class ClaudeAgent:
 
         if use_vertex and vertex_project:
             if not VERTEX_AVAILABLE:
-                raise ImportError(
-                    "AnthropicVertex not available. Update anthropic: pip install -U anthropic"
-                )
+                raise ImportError("AnthropicVertex not available. Update anthropic: pip install -U anthropic")
             self.client = AnthropicVertex(
                 project_id=vertex_project,
                 region=vertex_region,
@@ -1280,9 +1255,7 @@ class ClaudeAgent:
             self.use_vertex = True
             # Use Vertex-compatible model name
             self.model = vertex_model
-            logger.info(
-                f"Using Vertex AI: project={vertex_project}, region={vertex_region}, model={self.model}"
-            )
+            logger.info(f"Using Vertex AI: project={vertex_project}, region={vertex_region}, model={self.model}")
         else:
             # Fall back to direct API
             api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -1312,19 +1285,14 @@ class ClaudeAgent:
         now = time.time()
 
         # Clear stale conversations
-        stale_ids = [
-            cid for cid, ts in self._conversation_timestamps.items()
-            if now - ts > self._history_ttl
-        ]
+        stale_ids = [cid for cid, ts in self._conversation_timestamps.items() if now - ts > self._history_ttl]
         for cid in stale_ids:
             self._conversations.pop(cid, None)
             self._conversation_timestamps.pop(cid, None)
 
         return self._conversations.get(conversation_id, [])
 
-    def _save_conversation_history(
-        self, conversation_id: str, user_msg: str, assistant_msg: str
-    ) -> None:
+    def _save_conversation_history(self, conversation_id: str, user_msg: str, assistant_msg: str) -> None:
         """Save a message exchange to conversation history."""
         if conversation_id not in self._conversations:
             self._conversations[conversation_id] = []
@@ -1445,9 +1413,7 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
                 )
             elif user_category == "safe":
                 # Teammate - full casual mode
-                context_parts.append(
-                    "TONE: casual - teammate, full irish dev mode, typos ok, emojis ok"
-                )
+                context_parts.append("TONE: casual - teammate, full irish dev mode, typos ok, emojis ok")
             else:
                 # Unknown - balanced professional
                 emoji_note = "emojis ok" if include_emojis else "skip emojis"
@@ -1456,9 +1422,7 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
         # Add resolved repo context so Claude knows what repo we're dealing with
         if resolved_ctx and resolved_ctx.is_valid():
             if resolved_ctx.repo_path:
-                context_parts.append(
-                    f"Repository: {resolved_ctx.repo_name} at {resolved_ctx.repo_path}"
-                )
+                context_parts.append(f"Repository: {resolved_ctx.repo_name} at {resolved_ctx.repo_path}")
             if resolved_ctx.gitlab_project:
                 context_parts.append(f"GitLab: {resolved_ctx.gitlab_project}")
             if resolved_ctx.issue_key:

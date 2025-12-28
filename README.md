@@ -111,7 +111,7 @@ graph LR
     DEV[👨‍💻 Developer] --> |"agent_load"| DEVOPS[🔧 DevOps]
     DEVOPS --> |"agent_load"| INCIDENT[🚨 Incident]
     INCIDENT --> |"agent_load"| DEV
-    
+
     style DEV fill:#3b82f6,stroke:#2563eb,color:#fff
     style DEVOPS fill:#10b981,stroke:#059669,color:#fff
     style INCIDENT fill:#ef4444,stroke:#dc2626,color:#fff
@@ -215,10 +215,10 @@ Tool: ❌ Failed to release namespace
       💡 To auto-fix: debug_tool('bonfire_namespace_release')
 
 Claude: Found the bug - missing --force flag.
-        
+
         - args = ['namespace', 'release', namespace]
         + args = ['namespace', 'release', namespace, '--force']
-        
+
         Apply fix?
 ```
 

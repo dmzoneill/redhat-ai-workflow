@@ -89,6 +89,3 @@ google_calendar_check_mutual_availability(
 - [coffee](../skills/coffee.md) - Shows today's calendar
 - [beer](../skills/beer.md) - Shows tomorrow's schedule
 - [check_mr_feedback](../skills/check_mr_feedback.md) - Schedules review meetings
-
-
-

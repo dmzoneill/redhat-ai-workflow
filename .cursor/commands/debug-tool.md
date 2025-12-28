@@ -25,6 +25,3 @@ I will:
 - Wrong CLI syntax
 - Auth not passed correctly
 - Image tag format issues
-
-
-

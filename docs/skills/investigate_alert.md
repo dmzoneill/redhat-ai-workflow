@@ -33,40 +33,40 @@ skill_run("investigate_alert", '{"environment": "stage", "alert_name": "HighMemo
 flowchart TD
     START([🚨 Start]) --> CONFIG[Load Config]
     CONFIG --> ENV{Environment}
-    
+
     ENV -->|Stage| NS_STAGE[tower-analytics-stage]
     ENV -->|Prod| NS_PROD[tower-analytics-prod]
-    
+
     NS_STAGE --> ALERTS
     NS_PROD --> ALERTS
-    
+
     ALERTS[Get Firing Alerts] --> FILTER{Alert Name Filter?}
-    
+
     FILTER -->|Yes| SPECIFIC[Focus on Specific Alert]
     FILTER -->|No| ALL[Check All Alerts]
-    
+
     SPECIFIC --> HEALTH
     ALL --> HEALTH
-    
+
     HEALTH[Pod Health Check] --> STATUS[Get Pod Status]
     STATUS --> EVENTS[Check K8s Events]
     EVENTS --> LOGS[Sample Error Logs]
-    
+
     LOGS --> PATTERNS[Match Known Patterns]
-    
+
     PATTERNS --> SEVERITY{Severity?}
-    
+
     SEVERITY -->|Critical| ESCALATE{Auto-escalate?}
     SEVERITY -->|Warning| REPORT[Generate Report]
     SEVERITY -->|OK| CLEAR[All Clear]
-    
+
     ESCALATE -->|Yes| DEBUG[Run debug_prod]
     ESCALATE -->|No| REPORT
-    
+
     DEBUG --> DONE
     REPORT --> DONE([📋 Investigation Complete])
     CLEAR --> DONE
-    
+
     style START fill:#ef4444,stroke:#dc2626,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style DEBUG fill:#f59e0b,stroke:#d97706,color:#fff
@@ -107,42 +107,42 @@ The skill checks against learned patterns:
 You: Investigate production alerts
 
 Claude: 🚨 Investigating production...
-        
+
         ## Active Alerts (2)
-        
+
         | Alert | Severity | Duration | Affected |
         |-------|----------|----------|----------|
         | HighMemoryUsage | critical | 15m | analytics-api |
         | SlowResponses | warning | 8m | analytics-api |
-        
+
         ## Pod Health
-        
+
         | Pod | Status | Restarts | Memory |
         |-----|--------|----------|--------|
         | analytics-api-7d8f9 | Running | 3 | 95% ⚠️ |
         | analytics-worker-abc12 | Running | 0 | 45% |
         | analytics-scheduler-xyz | Running | 0 | 30% |
-        
+
         ## Recent Events
         └── OOMKilled warning for analytics-api (12m ago)
-        
+
         ## Error Logs (last 5m)
         └── OutOfMemoryError in report generation (3 occurrences)
-        
+
         ## 🔍 Analysis
-        
+
         **Root Cause:** Memory exhaustion in analytics-api
         pod causing cascading slow responses.
-        
+
         **Pattern Match:** Known issue - large report queries
         can exhaust memory when unfiltered.
-        
+
         ## 🛠️ Recommended Actions
-        
+
         1. **Immediate:** Restart analytics-api-7d8f9 pod
         2. **Investigate:** Check which report triggered this
         3. **Long-term:** Add query limits to report endpoint
-        
+
         Escalating to debug_prod for deeper analysis...
 ```
 
@@ -150,6 +150,3 @@ Claude: 🚨 Investigating production...
 
 - [debug_prod](./debug_prod.md) - Deep production debugging
 - [investigate_slack_alert](./investigate_slack_alert.md) - Handle Slack alerts
-
-
-

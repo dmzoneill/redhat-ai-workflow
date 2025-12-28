@@ -38,9 +38,7 @@ KONFLUX_KUBECONFIG = get_konflux_kubeconfig()
 DEFAULT_NAMESPACE = os.getenv("KONFLUX_NAMESPACE", "default")
 
 
-async def run_konflux_cmd(
-    cmd: list[str], kubeconfig: str | None = None, timeout: int = 60
-) -> tuple[bool, str]:
+async def run_konflux_cmd(cmd: list[str], kubeconfig: str | None = None, timeout: int = 60) -> tuple[bool, str]:
     """Run command with Konflux kubeconfig.
 
     Args:
@@ -92,9 +90,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_get_pipeline(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Get details of a specific pipeline run."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "pipelinerun", name, "-n", namespace, "-o", "yaml"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "pipelinerun", name, "-n", namespace, "-o", "yaml"])
         if not success:
             return f"❌ Failed: {output}"
 
@@ -119,9 +115,7 @@ def register_tools(server: "FastMCP") -> int:
         )
         if not success:
             # Try without field selector
-            success, output = await run_cmd(
-                ["kubectl", "get", "pipelineruns", "-n", namespace, "-o", "wide"]
-            )
+            success, output = await run_cmd(["kubectl", "get", "pipelineruns", "-n", namespace, "-o", "wide"])
             if success:
                 # Filter to running only
                 lines = output.strip().split("\n")
@@ -136,9 +130,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_failed_pipelines(namespace: str = DEFAULT_NAMESPACE, limit: int = 5) -> str:
         """Get recent failed pipelines."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "pipelineruns", "-n", namespace, "-o", "wide"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "pipelineruns", "-n", namespace, "-o", "wide"])
         if not success:
             return f"❌ Failed: {output}"
 
@@ -164,9 +156,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def tkn_list_pipelineruns(namespace: str = DEFAULT_NAMESPACE, limit: int = 10) -> str:
         """List Tekton pipeline runs."""
-        success, output = await run_cmd(
-            ["tkn", "pipelinerun", "list", "-n", namespace, "--limit", str(limit)]
-        )
+        success, output = await run_cmd(["tkn", "pipelinerun", "list", "-n", namespace, "--limit", str(limit)])
         if not success:
             return f"❌ Failed: {output}"
         return f"## Tekton Pipeline Runs\n\n```\n{output}\n```"
@@ -203,9 +193,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_list_components(namespace: str = DEFAULT_NAMESPACE) -> str:
         """List Konflux components."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "components", "-n", namespace, "-o", "wide"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "components", "-n", namespace, "-o", "wide"])
         if not success:
             return f"❌ Failed: {output}"
         return f"## Components: {namespace}\n\n```\n{output}\n```"
@@ -237,9 +225,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_get_snapshot(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Get details of a specific snapshot."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "snapshot", name, "-n", namespace, "-o", "yaml"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "snapshot", name, "-n", namespace, "-o", "yaml"])
         if not success:
             return f"❌ Failed: {output}"
         return f"## Snapshot: {name}\n\n```yaml\n{output}\n```"
@@ -249,9 +235,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_list_applications(namespace: str = DEFAULT_NAMESPACE) -> str:
         """List Konflux applications."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "applications", "-n", namespace, "-o", "wide"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "applications", "-n", namespace, "-o", "wide"])
         if not success:
             return f"❌ Failed: {output}"
         return f"## Applications: {namespace}\n\n```\n{output}\n```"
@@ -269,9 +253,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_get_application(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Get detailed information about a Konflux application."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "application", name, "-n", namespace, "-o", "yaml"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "application", name, "-n", namespace, "-o", "yaml"])
         if not success:
             return f"❌ Failed: {output}"
         if len(output) > 10000:
@@ -281,9 +263,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_get_component(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Get detailed information about a Konflux component."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "component", name, "-n", namespace, "-o", "yaml"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "component", name, "-n", namespace, "-o", "yaml"])
         if not success:
             return f"❌ Failed: {output}"
         if len(output) > 10000:
@@ -293,9 +273,7 @@ def register_tools(server: "FastMCP") -> int:
     # ==================== INTEGRATION TESTS ====================
 
     @server.tool()
-    async def konflux_list_integration_tests(
-        namespace: str = DEFAULT_NAMESPACE, application: str = ""
-    ) -> str:
+    async def konflux_list_integration_tests(namespace: str = DEFAULT_NAMESPACE, application: str = "") -> str:
         """List IntegrationTestScenarios in a namespace."""
         args = ["kubectl", "get", "integrationtestscenarios", "-n", namespace, "-o", "wide"]
         if application:
@@ -306,9 +284,7 @@ def register_tools(server: "FastMCP") -> int:
         return f"## Integration Tests: {namespace}\n\n```\n{output}\n```"
 
     @server.tool()
-    async def konflux_get_test_results(
-        namespace: str = DEFAULT_NAMESPACE, snapshot: str = "", limit: int = 10
-    ) -> str:
+    async def konflux_get_test_results(namespace: str = DEFAULT_NAMESPACE, snapshot: str = "", limit: int = 10) -> str:
         """Get integration test results from test pipelineruns."""
         args = [
             "kubectl",
@@ -370,9 +346,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_get_release(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Get detailed information about a Konflux release."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "release", name, "-n", namespace, "-o", "yaml"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "release", name, "-n", namespace, "-o", "yaml"])
         if not success:
             return f"❌ Failed: {output}"
         if len(output) > 10000:
@@ -382,9 +356,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_list_release_plans(namespace: str = DEFAULT_NAMESPACE) -> str:
         """List Konflux release plans."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "releaseplans", "-n", namespace, "-o", "wide"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "releaseplans", "-n", namespace, "-o", "wide"])
         if not success:
             return f"❌ Failed: {output}"
         return f"## Release Plans: {namespace}\n\n```\n{output}\n```"
@@ -392,9 +364,7 @@ def register_tools(server: "FastMCP") -> int:
     # ==================== BUILDS ====================
 
     @server.tool()
-    async def konflux_list_builds(
-        namespace: str = DEFAULT_NAMESPACE, component: str = "", limit: int = 10
-    ) -> str:
+    async def konflux_list_builds(namespace: str = DEFAULT_NAMESPACE, component: str = "", limit: int = 10) -> str:
         """List build PipelineRuns for components."""
         args = [
             "kubectl",
@@ -430,9 +400,7 @@ def register_tools(server: "FastMCP") -> int:
         return f"## Builds: {namespace}\n\n```\n" + "\n".join(lines) + "\n```"
 
     @server.tool()
-    async def konflux_get_build_logs(
-        build_name: str, namespace: str = DEFAULT_NAMESPACE, task: str = ""
-    ) -> str:
+    async def konflux_get_build_logs(build_name: str, namespace: str = DEFAULT_NAMESPACE, task: str = "") -> str:
         """Get logs from a build PipelineRun using tkn CLI."""
         args = ["tkn", "pipelinerun", "logs", build_name, "-n", namespace]
         if task:
@@ -452,9 +420,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def konflux_list_environments(namespace: str = DEFAULT_NAMESPACE) -> str:
         """List Konflux environments (deployment targets)."""
-        success, output = await run_cmd(
-            ["kubectl", "get", "environments", "-n", namespace, "-o", "wide"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "environments", "-n", namespace, "-o", "wide"])
         if not success:
             # Try snapshotenvironmentbindings as fallback
             success, output = await run_cmd(
@@ -477,9 +443,7 @@ def register_tools(server: "FastMCP") -> int:
             ("ReleasePlans", "releaseplans"),
         ]
         for display, resource in resources:
-            success, output = await run_cmd(
-                ["kubectl", "get", resource, "-n", namespace, "--no-headers"]
-            )
+            success, output = await run_cmd(["kubectl", "get", resource, "-n", namespace, "--no-headers"])
             if success:
                 count = len([ln for ln in output.strip().split("\n") if ln.strip()])
                 lines.append(f"- **{display}:** {count}")
@@ -487,9 +451,7 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append(f"- **{display}:** ❌ Error")
 
         # Get recent pipeline runs summary
-        success, output = await run_cmd(
-            ["kubectl", "get", "pipelineruns", "-n", namespace, "--no-headers"]
-        )
+        success, output = await run_cmd(["kubectl", "get", "pipelineruns", "-n", namespace, "--no-headers"])
         if success:
             pr_lines = [ln for ln in output.strip().split("\n") if ln.strip()]
             running = len([ln for ln in pr_lines if "Running" in ln or "Unknown" in ln])
@@ -506,9 +468,7 @@ def register_tools(server: "FastMCP") -> int:
     # ==================== TKN TOOLS (from tkn_tools) ====================
 
     @server.tool()
-    async def tkn_pipelinerun_list(
-        namespace: str = DEFAULT_NAMESPACE, limit: int = 10, label: str = ""
-    ) -> str:
+    async def tkn_pipelinerun_list(namespace: str = DEFAULT_NAMESPACE, limit: int = 10, label: str = "") -> str:
         """List pipeline runs in a namespace."""
         args = ["tkn", "pipelinerun", "list", "-n", namespace, f"--limit={limit}"]
         if label:
@@ -521,9 +481,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def tkn_pipelinerun_describe(run_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Describe a pipeline run in detail."""
-        success, output = await run_cmd(
-            ["tkn", "pipelinerun", "describe", run_name, "-n", namespace]
-        )
+        success, output = await run_cmd(["tkn", "pipelinerun", "describe", run_name, "-n", namespace])
         if not success:
             return f"❌ Failed: {output}"
         if len(output) > 10000:
@@ -559,9 +517,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def tkn_pipelinerun_delete(run_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Delete a pipeline run."""
-        success, output = await run_cmd(
-            ["tkn", "pipelinerun", "delete", run_name, "-n", namespace, "-f"]
-        )
+        success, output = await run_cmd(["tkn", "pipelinerun", "delete", run_name, "-n", namespace, "-f"])
         if not success:
             return f"❌ Failed: {output}"
         return f"✅ Pipeline run deleted: {run_name}"
@@ -569,9 +525,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def tkn_taskrun_list(namespace: str = DEFAULT_NAMESPACE, limit: int = 10) -> str:
         """List task runs in a namespace."""
-        success, output = await run_cmd(
-            ["tkn", "taskrun", "list", "-n", namespace, f"--limit={limit}"]
-        )
+        success, output = await run_cmd(["tkn", "taskrun", "list", "-n", namespace, f"--limit={limit}"])
         if not success:
             return f"❌ Failed: {output}"
         return f"## Task Runs: {namespace}\n\n```\n{output}\n```"
@@ -587,9 +541,7 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def tkn_taskrun_logs(run_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Get logs from a task run."""
-        success, output = await run_cmd(
-            ["tkn", "taskrun", "logs", run_name, "-n", namespace], timeout=120
-        )
+        success, output = await run_cmd(["tkn", "taskrun", "logs", run_name, "-n", namespace], timeout=120)
         if not success:
             return f"❌ Failed: {output}"
         if len(output) > 15000:
@@ -608,17 +560,13 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def tkn_pipeline_describe(pipeline_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Describe a pipeline definition."""
-        success, output = await run_cmd(
-            ["tkn", "pipeline", "describe", pipeline_name, "-n", namespace]
-        )
+        success, output = await run_cmd(["tkn", "pipeline", "describe", pipeline_name, "-n", namespace])
         if not success:
             return f"❌ Failed: {output}"
         return f"## Pipeline: {pipeline_name}\n\n```\n{output}\n```"
 
     @server.tool()
-    async def tkn_pipeline_start(
-        pipeline_name: str, namespace: str = DEFAULT_NAMESPACE, params: str = ""
-    ) -> str:
+    async def tkn_pipeline_start(pipeline_name: str, namespace: str = DEFAULT_NAMESPACE, params: str = "") -> str:
         """Start a pipeline run."""
         args = ["tkn", "pipeline", "start", pipeline_name, "-n", namespace]
         if params:

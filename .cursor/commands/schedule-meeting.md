@@ -57,6 +57,3 @@ google_calendar_find_meeting(
     attendee_email="bthomass@redhat.com"
 )
 ```
-
-
-

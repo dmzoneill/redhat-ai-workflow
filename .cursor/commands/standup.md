@@ -58,6 +58,3 @@ skill_run("standup_summary")
 **Quick aliases:**
 - `/standup` - Yesterday's summary (default)
 - `/standup 3` - Last 3 days (for Monday standups)
-
-
-

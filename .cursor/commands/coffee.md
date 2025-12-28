@@ -52,4 +52,3 @@ Just want the highlights without the full briefing?
 ```
 skill_run("coffee", '{"days_back": 1}')
 ```
-

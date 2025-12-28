@@ -93,9 +93,7 @@ class SlackStateDB:
             db_path: Path to SQLite database file.
                      Defaults to SLACK_STATE_DB_PATH env var or ./slack_state.db
         """
-        self.db_path = db_path or os.getenv(
-            "SLACK_STATE_DB_PATH", os.path.join(os.getcwd(), "slack_state.db")
-        )
+        self.db_path = db_path or os.getenv("SLACK_STATE_DB_PATH", os.path.join(os.getcwd(), "slack_state.db"))
         self._db: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
 
@@ -192,9 +190,7 @@ class SlackStateDB:
         """Get all channel states as dict of channel_id -> last_processed_ts."""
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute(
-                "SELECT channel_id, last_processed_ts FROM channel_state"
-            )
+            cursor = await self._db.execute("SELECT channel_id, last_processed_ts FROM channel_state")
             rows = await cursor.fetchall()
             return {row[0]: row[1] for row in rows}
 
@@ -264,9 +260,7 @@ class SlackStateDB:
         """Get count of unprocessed messages."""
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute(
-                "SELECT COUNT(*) FROM pending_messages WHERE processed_at IS NULL"
-            )
+            cursor = await self._db.execute("SELECT COUNT(*) FROM pending_messages WHERE processed_at IS NULL")
             row = await cursor.fetchone()
             return row[0] if row else 0
 
@@ -287,9 +281,7 @@ class SlackStateDB:
         """Get cached user name."""
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute(
-                "SELECT user_name FROM user_cache WHERE user_id = ?", (user_id,)
-            )
+            cursor = await self._db.execute("SELECT user_name FROM user_cache WHERE user_id = ?", (user_id,))
             row = await cursor.fetchone()
             return row[0] if row else None
 
@@ -317,9 +309,7 @@ class SlackStateDB:
         """Get all cached users."""
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute(
-                "SELECT user_id, user_name, display_name, real_name FROM user_cache"
-            )
+            cursor = await self._db.execute("SELECT user_id, user_name, display_name, real_name FROM user_cache")
             rows = await cursor.fetchall()
             return {
                 row[0]: {

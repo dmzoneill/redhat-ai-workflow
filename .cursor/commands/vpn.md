@@ -72,4 +72,3 @@ docker login quay.io
 
 - `/smoke-tools` - Test all tools including connectivity
 - `/coffee` - Morning briefing (needs VPN)
-

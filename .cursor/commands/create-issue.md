@@ -104,6 +104,3 @@ The skill outputs next steps:
 1. View issue in Jira
 2. Add to sprint
 3. Start work with `skill_run("start_work", '{"issue_key": "AAP-XXXXX"}')`
-
-
-

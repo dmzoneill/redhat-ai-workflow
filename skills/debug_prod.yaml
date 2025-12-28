@@ -6,7 +6,7 @@ description: |
   Investigate production issues in Automation Analytics.
   Gathers pod status, logs, metrics, alerts, and recent deployments.
   Suggests likely causes based on patterns and learned knowledge.
-  
+
   Resolves namespace and paths from config.json.
 version: "1.1"
 
@@ -15,17 +15,17 @@ inputs:
     type: string
     required: false
     description: "Namespace to investigate: 'main' or 'billing' (will ask if not provided)"
-  
+
   - name: alert_name
     type: string
     required: false
     description: "Prometheus alert name if triggered by an alert"
-  
+
   - name: pod_filter
     type: string
     required: false
     description: "Filter pods by name (e.g., 'fastapi', 'processor')"
-  
+
   - name: time_range
     type: string
     required: false
@@ -42,15 +42,15 @@ steps:
     compute: |
       import os
       from scripts.common.config_loader import load_config
-      
+
       config = load_config()
-      
+
       # Get namespace config
       ns_config = config.get("namespaces", {}).get("production", {})
       ai_config = config.get("app_interface", {})
       repos = config.get("repositories", {})
       paths_cfg = config.get("paths", {})
-      
+
       # Get app-interface repo path
       ai_repo_name = ai_config.get("repo", "app-interface")
       ai_repo_path = ai_config.get("path") or repos.get(ai_repo_name, {}).get("path", "")
@@ -62,10 +62,10 @@ steps:
               if os.path.exists(candidate):
                   ai_repo_path = candidate
                   break
-      
+
       # Get namespace file names from config
       ns_files = ai_config.get("namespace_files", {})
-      
+
       result = {
           "namespace_main": ns_config.get("main", "tower-analytics-prod"),
           "namespace_billing": ns_config.get("billing", "tower-analytics-prod-billing"),
@@ -99,7 +99,7 @@ steps:
         # Default to main, but note we should ask
         ns = None
         ns_short = None
-      
+
       result = {"namespace": ns, "short": ns_short}
     output: ns_info
 
@@ -123,10 +123,10 @@ steps:
       import yaml
       from pathlib import Path
       from scripts.common.config_loader import load_config
-      
+
       patterns = {}
       memory_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
-      
+
       if memory_file.exists():
         try:
           with open(memory_file) as f:
@@ -134,7 +134,7 @@ steps:
           patterns = data.get('error_patterns', [])
         except:
           patterns = []
-      
+
       result = patterns
     output: known_patterns
     on_error: continue
@@ -158,25 +158,25 @@ steps:
     compute: |
       import sys
       from pathlib import Path
-      
+
       # Add scripts path for shared parsers
       scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
       if scripts_path not in sys.path:
           sys.path.insert(0, scripts_path)
       from common.parsers import parse_kubectl_pods
-      
+
       # Use shared parser for kubectl pods
       pods = parse_kubectl_pods(str(pod_status))
-      
+
       # Analyze for issues
       issues = []
       healthy = []
-      
+
       for pod in pods:
         name = pod.get("name", "")
         status = pod.get("status", "")
         restarts = pod.get("restarts", "0")
-        
+
         if 'CrashLoopBackOff' in status:
           issues.append({"pod": name, "issue": "CrashLoopBackOff", "severity": "critical"})
         elif 'OOMKilled' in status:
@@ -191,7 +191,7 @@ steps:
           issues.append({"pod": name, "issue": f"High restarts: {restarts}", "severity": "medium"})
         elif pod.get("healthy", False):
           healthy.append(name)
-      
+
       result = {
         "issues": issues,
         "healthy_count": len(healthy),
@@ -218,13 +218,13 @@ steps:
     compute: |
       events_str = str(k8s_events)
       important = []
-      
+
       # Look for warning/error events
       for line in events_str.split('\n')[-30:]:  # Last 30 events
         line_lower = line.lower()
         if any(kw in line_lower for kw in ['warning', 'error', 'failed', 'killed', 'backoff', 'unhealthy']):
           important.append(line.strip()[:150])  # Truncate long lines
-      
+
       result = important[:10]  # Top 10 important events
     output: important_events
     on_error: continue
@@ -240,7 +240,7 @@ steps:
       pods_to_check = []
       if pod_analysis.get('issues'):
         pods_to_check = [p['pod'] for p in pod_analysis['issues'][:3]]  # Max 3 problem pods
-      
+
       result = {"pods_to_check": pods_to_check, "time_range": inputs.time_range}
     output: pods_selection
 
@@ -291,7 +291,7 @@ steps:
     description: "Extract error lines from logs"
     compute: |
       logs = []
-      
+
       for i, (pod_name, raw_logs) in enumerate([
         (pods_selection.get('pods_to_check', [None])[0] if pods_selection.get('pods_to_check') else None, pod_logs_1_raw if 'pod_logs_1_raw' in dir() else None),
         (pods_selection.get('pods_to_check', [None, None])[1] if len(pods_selection.get('pods_to_check', [])) > 1 else None, pod_logs_2_raw if 'pod_logs_2_raw' in dir() else None),
@@ -299,20 +299,20 @@ steps:
       ]):
         if not pod_name or not raw_logs:
           continue
-        
+
         log_text = str(raw_logs)
         error_lines = []
         for line in log_text.split('\n'):
           line_lower = line.lower()
           if any(kw in line_lower for kw in ['error', 'exception', 'traceback', 'warning', 'critical', 'fatal']):
             error_lines.append(line[:200])
-        
+
         if error_lines:
           logs.append({
             "pod": pod_name,
             "errors": error_lines[-20:]
           })
-      
+
       result = logs
     output: pod_logs
 
@@ -336,17 +336,17 @@ steps:
       import os
       from pathlib import Path
       from scripts.common.config_loader import load_config
-      
+
       alert_name = inputs.alert_name
       alert_def = None
-      
+
       # Determine which path based on namespace
       ai_path = Path(cfg["appinterface_path"])
       if 'billing' in ns_info.get('short', ''):
         alert_path = ai_path / cfg["alerts_billing"]
       else:
         alert_path = ai_path / cfg["alerts_main"]
-      
+
       # Search for alert in yaml files
       if alert_path.exists():
         for f in alert_path.glob('*.yaml'):
@@ -368,7 +368,7 @@ steps:
               break
           except:
             pass
-      
+
       result = alert_def
     output: alert_definition
     on_error: continue
@@ -382,13 +382,13 @@ steps:
     compute: |
       # Prepare Prometheus queries
       ns = ns_info['namespace']
-      
+
       queries = [
         f'sum(rate(http_requests_total{{namespace="{ns}",code=~"5.."}}[5m]))',
         f'sum(container_memory_working_set_bytes{{namespace="{ns}"}}) by (pod)',
         f'sum(rate(container_cpu_usage_seconds_total{{namespace="{ns}"}}[5m])) by (pod)',
       ]
-      
+
       result = {"queries_to_run": queries, "namespace": ns}
     output: metric_queries
     on_error: continue
@@ -424,13 +424,13 @@ steps:
     description: "Combine deployment and replicaset info"
     compute: |
       deployments = str(deployments_raw)[:1000] if 'deployments_raw' in dir() and deployments_raw else "Could not fetch deployments"
-      
+
       # Parse replicasets
       rs_text = str(replicasets_raw) if 'replicasets_raw' in dir() and replicasets_raw else ""
       rs_lines = rs_text.split('\n')
       # Get last 5 replicasets (plus header)
       recent_rs = rs_lines[:1] + rs_lines[-5:] if len(rs_lines) > 5 else rs_lines
-      
+
       result = {
         "deployments": deployments,
         "recent_rollouts": '\n'.join(recent_rs)[:500]
@@ -445,24 +445,24 @@ steps:
       import yaml
       from pathlib import Path
       from scripts.common.config_loader import load_config
-      
+
       cicd_file = Path(cfg["appinterface_path"]) / cfg["saas_cicd"] / "deploy-clowder.yml"
       deployed_info = {"sha": None, "namespace_config": None}
-      
+
       if cicd_file.exists():
         try:
           with open(cicd_file) as f:
             content = f.read()
-          
+
           # Parse to find the ref for this namespace
           data = yaml.safe_load(content)
-          
+
           # Target namespace file based on which we're debugging (from config)
           if 'billing' in ns_info.get('short', ''):
             target_ns = cfg.get("ns_file_billing", "tower-analytics-prod-billing.yml")
           else:
             target_ns = cfg.get("ns_file_main", "tower-analytics-prod.yml")
-          
+
           # Find the ref for this namespace in resourceTemplates
           for template in data.get('resourceTemplates', []):
             for target in template.get('targets', []):
@@ -473,7 +473,7 @@ steps:
                 break
         except Exception as e:
           deployed_info['error'] = str(e)
-      
+
       result = deployed_info
     output: deployed_sha
     on_error: continue
@@ -486,21 +486,21 @@ steps:
       import yaml
       from pathlib import Path
       from scripts.common.config_loader import load_config
-      
+
       ns_path = Path(cfg["appinterface_path"]) / cfg["saas_namespaces"]
       config_info = {}
-      
+
       # Use namespace file from config
       if 'billing' in ns_info.get('short', ''):
         ns_file = ns_path / cfg.get("ns_file_billing", "tower-analytics-prod-billing.yml")
       else:
         ns_file = ns_path / cfg.get("ns_file_main", "tower-analytics-prod.yml")
-      
+
       if ns_file.exists():
         try:
           with open(ns_file) as f:
             data = yaml.safe_load(f)
-          
+
           # Extract key config info
           config_info = {
             "name": data.get('name', ''),
@@ -509,7 +509,7 @@ steps:
           }
         except Exception as e:
           config_info['error'] = str(e)
-      
+
       result = config_info
     output: namespace_config
     on_error: continue
@@ -522,11 +522,11 @@ steps:
     condition: "{{ ns_info.namespace }}"
     compute: |
       matches = []
-      
+
       # Check pod issues against known patterns
       for pod_issue in pod_analysis.get('issues', []):
         issue_type = pod_issue.get('issue', '')
-        
+
         for pattern in (known_patterns or []):
           if isinstance(pattern, dict):
             pattern_text = pattern.get('pattern', '')
@@ -538,12 +538,12 @@ steps:
                 "fix": pattern.get('fix', ''),
                 "commands": pattern.get('commands', [])
               })
-      
+
       # Add generic suggestions for unmatched issues
       for pod_issue in pod_analysis.get('issues', []):
         issue_type = pod_issue.get('issue', '')
         matched = any(m['issue'] == issue_type for m in matches)
-        
+
         if not matched:
           if 'OOMKilled' in issue_type:
             matches.append({
@@ -569,7 +569,7 @@ steps:
               "fix": "Check image name, tag exists in Quay, registry credentials",
               "commands": ["kubectl describe pod <pod>"]
             })
-      
+
       result = matches
     output: pattern_matches
 
@@ -580,18 +580,18 @@ steps:
     condition: "{{ ns_info.namespace }}"
     compute: |
       lines = []
-      
+
       # Header
       lines.append(f"## 🔍 Production Debug: {ns_info['namespace']}")
       lines.append(f"**Time range:** {inputs.time_range}")
       if inputs.alert_name:
         lines.append(f"**Alert:** {inputs.alert_name}")
-      
+
       # Deployed SHA
       if deployed_sha and deployed_sha.get('sha'):
         lines.append(f"**Deployed SHA:** `{deployed_sha['sha'][:12]}`")
       lines.append("")
-      
+
       # === POD STATUS ===
       lines.append("### 📦 Pod Status")
       if pod_analysis['unhealthy_count'] > 0:
@@ -602,14 +602,14 @@ steps:
       else:
         lines.append(f"✅ All {pod_analysis['healthy_count']} pods healthy")
       lines.append("")
-      
+
       # === EVENTS ===
       if important_events:
         lines.append("### ⚡ Recent Events")
         for event in important_events[:5]:
           lines.append(f"- {event[:120]}")
         lines.append("")
-      
+
       # === LOGS ===
       if pod_logs:
         lines.append("### 📋 Error Logs")
@@ -620,26 +620,26 @@ steps:
             lines.append(err[:150])
           lines.append("```")
         lines.append("")
-      
+
       # === ALERTS ===
       if firing_alerts and 'No alerts' not in str(firing_alerts):
         lines.append("### 🚨 Firing Alerts")
         alerts_str = str(firing_alerts)[:500]
         lines.append(f"```\n{alerts_str}\n```")
         lines.append("")
-      
+
       # === ALERT DEFINITION ===
       if alert_definition:
         lines.append("### 📖 Alert Definition")
         lines.append(f"```yaml\n{alert_definition[:300]}\n```")
         lines.append("")
-      
+
       # === DEPLOYMENTS ===
       if deployment_info:
         lines.append("### 🚀 Recent Deployments")
         lines.append(f"```\n{deployment_info.get('recent_rollouts', 'N/A')[:400]}\n```")
         lines.append("")
-      
+
       # === PATTERN MATCHES ===
       if pattern_matches:
         lines.append("### 💡 Likely Causes")
@@ -650,13 +650,13 @@ steps:
           if match.get('commands'):
             lines.append(f"- *Commands:* `{match['commands'][0]}`")
         lines.append("")
-      
+
       # === SUGGESTED QUERIES ===
       lines.append("### 📊 Prometheus Queries")
       lines.append("Run these for more details:")
       for q in metric_queries.get('queries_to_run', [])[:3]:
         lines.append(f"```\n{q}\n```")
-      
+
       result = '\n'.join(lines)
     output: report
 
@@ -667,24 +667,24 @@ outputs:
       {{ namespace_prompt.message }}
       {% else %}
       {{ report }}
-      
+
       ---
-      
+
       ### What's Next?
-      
+
       1. **Get more logs:** `kubectl_logs(pod_name='<pod>', namespace='{{ ns_info.namespace }}', environment='production')`
       2. **Describe pod:** `kubectl_describe_pod(pod_name='<pod>', namespace='{{ ns_info.namespace }}', environment='production')`
       3. **Query metrics:** `prometheus_query(query='...', environment='production')`
       4. **Check Kibana:** `kibana_search_logs(namespace='{{ ns_info.namespace }}', query='error')`
       5. **View git history since deployment:** `git_log(repo='automation-analytics-backend', since='<deployed_sha>')`
-      
+
       {% if pattern_matches %}
       ### 📝 Remember This?
-      
+
       If the suggested fix worked (or didn't), let me know and I'll update the learned patterns.
       {% endif %}
       {% endif %}
-  
+
   - name: context
     value:
       namespace: "{{ ns_info.namespace }}"
@@ -692,4 +692,3 @@ outputs:
       unhealthy_pods: "{{ pod_analysis.unhealthy_count if pod_analysis else 0 }}"
       has_alerts: "{{ firing_alerts is not none }}"
       pattern_matches: "{{ pattern_matches | length if pattern_matches else 0 }}"
-

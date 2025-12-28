@@ -25,25 +25,25 @@ skill_run("close_issue", '{"issue_key": "AAP-12345"}')
 ```mermaid
 flowchart TD
     START([Start]) --> CHECK{Already Done?}
-    
+
     CHECK -->|Yes| SKIP[Skip - Already closed]
     CHECK -->|No| BRANCH[Find Feature Branch]
-    
+
     BRANCH --> COMMITS[Get Commits on Branch]
     COMMITS --> MR[Get MR Info]
     MR --> COMMENT[Build Closing Comment]
-    
+
     COMMENT --> TABLE["📋 Branch, MR, Commits Table"]
     TABLE --> ADD{Add Comment?}
-    
+
     ADD -->|Yes| POST[Post to Jira]
     ADD -->|No| TRANSITION
     POST --> TRANSITION
-    
+
     TRANSITION[Transition to Done] --> VERIFY[Verify Status]
     VERIFY --> DONE([✅ Issue Closed])
     SKIP --> DONE
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
 ```
@@ -82,19 +82,19 @@ flowchart TD
 You: Close issue AAP-12345
 
 Claude: ✅ Closing AAP-12345...
-        
+
         📋 Issue: "Implement new REST API endpoint"
         📁 Branch: aap-12345-implement-api
         🔀 MR: !456 (Merged)
-        
+
         📝 Commits Summary:
         ├── 3 commits
         ├── +245 lines added
         └── -89 lines removed
-        
+
         ✅ Added closing comment
         ✅ Transitioned to Done
-        
+
         Issue AAP-12345 is now closed!
 ```
 
@@ -102,6 +102,3 @@ Claude: ✅ Closing AAP-12345...
 
 - [start_work](./start_work.md) - Begin working on issue
 - [create_mr](./create_mr.md) - Create merge request
-
-
-

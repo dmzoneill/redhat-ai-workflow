@@ -129,4 +129,3 @@ Configure in `config.json`:
 - [Architecture Overview](../architecture/README.md)
 - [Agents Reference](../agents/README.md)
 - [Skills Reference](../skills/README.md)
-

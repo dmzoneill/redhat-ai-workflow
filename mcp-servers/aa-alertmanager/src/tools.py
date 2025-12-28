@@ -332,9 +332,7 @@ def register_tools(server: "FastMCP") -> int:
             "comment": comment,
         }
 
-        success, result = await alertmanager_request(
-            url, "/silences", method="POST", data=data, token=token
-        )
+        success, result = await alertmanager_request(url, "/silences", method="POST", data=data, token=token)
 
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to create silence: {result}")]
@@ -369,9 +367,7 @@ def register_tools(server: "FastMCP") -> int:
         """
         url, token = await get_alertmanager_config(environment)
 
-        success, result = await alertmanager_request(
-            url, f"/silence/{silence_id}", method="DELETE", token=token
-        )
+        success, result = await alertmanager_request(url, f"/silence/{silence_id}", method="DELETE", token=token)
 
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to delete silence: {result}")]
@@ -482,20 +478,13 @@ def register_tools(server: "FastMCP") -> int:
                 with open(config_path) as f:
                     config = json.load(f)
                 env_key = "production" if environment.lower() == "prod" else environment.lower()
-                prom_url = (
-                    config.get("prometheus", {})
-                    .get("environments", {})
-                    .get(env_key, {})
-                    .get("url", "")
-                )
+                prom_url = config.get("prometheus", {}).get("environments", {}).get(env_key, {}).get("url", "")
         except Exception:
             pass
         if not prom_url:
             prom_url = os.getenv(f"PROMETHEUS_{environment.upper()}_URL", "")
         if not prom_url:
-            return [
-                TextContent(type="text", text=f"❌ Prometheus URL not configured for {environment}")
-            ]
+            return [TextContent(type="text", text=f"❌ Prometheus URL not configured for {environment}")]
         grafana_url = prom_url.replace("prometheus", "grafana")
 
         params = []

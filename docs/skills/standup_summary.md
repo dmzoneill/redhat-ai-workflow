@@ -33,24 +33,24 @@ skill_run("standup_summary", '{"days": 2}')
 flowchart TD
     START([Start]) --> AUTHOR[Get Git Author]
     AUTHOR --> COMMITS[Get Recent Commits]
-    
+
     COMMITS --> JIRA{Include Jira?}
     JIRA -->|Yes| ISSUES[Get Active Issues]
     JIRA -->|No| GITLAB_CHECK
     ISSUES --> GITLAB_CHECK
-    
+
     GITLAB_CHECK{Include GitLab?}
     GITLAB_CHECK -->|Yes| MRS[Get Open MRs]
     GITLAB_CHECK -->|No| FORMAT
     MRS --> REVIEWS[Get Review Activity]
     REVIEWS --> FORMAT
-    
+
     FORMAT[Format Summary] --> YESTERDAY[What I Did]
     YESTERDAY --> TODAY[What I'm Doing]
     TODAY --> BLOCKERS[Any Blockers]
-    
+
     BLOCKERS --> DONE([📋 Standup Ready])
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
 ```
@@ -71,40 +71,40 @@ You: Generate my standup
 Claude: 📋 Standup Summary
         Date: 2025-01-15
         Author: Dave O'Neill
-        
+
         ────────────────────────────────
-        
+
         ## ✅ What I Did (Yesterday)
-        
+
         **Commits:** 5
         - `a1b2c3d` AAP-61214 - feat: Add user validation
         - `e4f5g6h` AAP-61214 - fix: Handle edge case
         - `i7j8k9l` AAP-61214 - test: Add unit tests
-        
+
         **Issues Closed:**
         - [AAP-61200] Fix memory leak in processor
-        
+
         **PRs Reviewed:**
         - !245: AAP-61210 - docs: Update API guide ✅
-        
+
         ────────────────────────────────
-        
+
         ## 🔄 What I'm Working On (Today)
-        
+
         **In Progress Issues:**
         - [AAP-61214] Implement user validation
         - [AAP-61220] Refactor auth module
-        
+
         **Open MRs:**
         - !248: AAP-61214 - feat: Add user validation
           └── Pipeline: Passed ✅
-        
+
         ────────────────────────────────
-        
+
         ## 🚧 Blockers
-        
+
         - None
-        
+
         ────────────────────────────────
 ```
 
@@ -122,6 +122,3 @@ The skill also provides a compact format:
 
 - [coffee](./coffee.md) - Full morning briefing
 - [beer](./beer.md) - End of day summary
-
-
-

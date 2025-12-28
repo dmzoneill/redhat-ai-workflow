@@ -60,13 +60,13 @@ quay:
 app_interface:
   # CICD deployment file
   deploy_file: data/services/insights/tower-analytics/cicd/deploy-clowder.yml
-  
+
   # Namespace configurations
   namespaces: data/services/insights/tower-analytics/namespaces
-  
+
   # CICD configurations
   cicd: data/services/insights/tower-analytics/cicd
-  
+
   # Alert definitions
   alerts:
     prod_main: resources/insights-prod/tower-analytics-prod
@@ -90,7 +90,7 @@ testing:
   containers:
     fastapi: automation-analytics-backend-api-fastapi-1
     postgres: automation-analytics-backend-db-postgres-1
-  
+
   # Pytest markers
   markers:
     smoke: smoke
@@ -102,10 +102,10 @@ testing:
 conventions:
   # Commit message pattern
   commit_pattern: "AAP-\\d+"
-  
+
   # Branch naming
   branch_pattern: "AAP-\\d+-[a-z0-9-]+"
-  
+
   # Commit types
   commit_types:
     - feat
@@ -121,11 +121,9 @@ conventions:
 timeouts:
   # Ephemeral namespace duration
   ephemeral_default: "2h"
-  
+
   # Alert investigation time range
   alert_default: "1h"
-  
+
   # Standup lookback
   standup_days: 1
-
-

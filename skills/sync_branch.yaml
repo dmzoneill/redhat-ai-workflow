@@ -4,13 +4,13 @@
 name: sync_branch
 description: |
   Quickly sync current branch with main using rebase.
-  
+
   Less aggressive than rebase_pr - good for ongoing work:
   - Fetches latest main
   - Rebases current branch onto main
   - Auto-resolves simple conflicts
   - Reports status
-  
+
   Uses MCP tools: git_status, git_fetch, git_stash, git_push
 version: "1.2"
 
@@ -57,10 +57,10 @@ steps:
     compute: |
       import os
       from scripts.common.config_loader import load_config
-      
+
       repo_path = None
       default_branch = "main"
-      
+
       # Load config using shared loader
       config = load_config()
       repos = config.get("repositories", {})
@@ -114,21 +114,21 @@ steps:
     description: "Parse git status output using shared parser"
     compute: |
       from scripts.common.parsers import extract_current_branch
-      
+
       status_output = str(git_status_raw) if git_status_raw else ""
-      
+
       # Extract current branch using shared parser
       branch = extract_current_branch(status_output)
-      
+
       if not branch:
           raise ValueError("Could not determine current branch")
-      
+
       if branch in ["main", "master"]:
           raise ValueError(f"Already on {branch}. Switch to a feature branch first.")
-      
+
       # Check for uncommitted changes
       has_changes = "Changes not staged" in status_output or "Changes to be committed" in status_output
-      
+
       result = {"branch": branch, "has_changes": has_changes}
     output: branch_status
 
@@ -189,10 +189,10 @@ steps:
           if word.isdigit():
             return int(word)
         return 0
-      
+
       behind = parse_count(behind_count_raw)
       ahead = parse_count(ahead_count_raw)
-      
+
       result = {"behind": behind, "ahead": ahead}
     output: commit_status
 
@@ -223,7 +223,7 @@ steps:
     compute: |
       rebase_text = str(rebase_raw) if 'rebase_raw' in dir() and rebase_raw else ""
       conflict_text = str(conflict_status_raw) if 'conflict_status_raw' in dir() and conflict_status_raw else ""
-      
+
       if 'success' in rebase_text.lower() or ('conflict' not in rebase_text.lower() and 'error' not in rebase_text.lower() and 'failed' not in rebase_text.lower()):
         rebase_result = {
           "success": True,
@@ -238,7 +238,7 @@ steps:
             parts = ln.split()
             if parts:
               conflict_files.append(parts[-1])
-        
+
         if conflict_files:
           rebase_result = {
             "success": False,
@@ -252,7 +252,7 @@ steps:
             "conflicts": False,
             "message": rebase_text[:200] if rebase_text else "Unknown error",
           }
-      
+
       result = rebase_result
     output: rebase_result
 
@@ -296,11 +296,11 @@ outputs:
   - name: summary
     value: |
       ## 🔄 Sync Branch: `{{ branch_status.branch }}`
-      
+
       **Repo:** {{ resolved_repo.path }}
       **Base:** `{{ resolved_repo.default_branch }}`
       **Status:** {{ commit_status.behind }} behind, {{ commit_status.ahead }} ahead
-      
+
       {% if commit_status.behind == 0 %}
       ✅ Already up to date with `{{ resolved_repo.default_branch }}`
       {% elif rebase_result.success %}
@@ -312,28 +312,28 @@ outputs:
       {% if push_result %}
       - Pushed to origin
       {% else %}
-      
+
       Ready to push:
       ```bash
       git push --force-with-lease origin {{ branch_status.branch }}
       ```
       {% endif %}
       {% else %}
-      
+
       {% if rebase_result.conflicts %}
       ⚠️ **Merge Conflicts Detected**
-      
+
       Files with conflicts:
       {% for f in rebase_result.conflict_files %}
       - `{{ f }}`
       {% endfor %}
-      
+
       **To resolve:**
       1. Edit each file (look for `<<<<<<<` markers)
       2. `git add <file>`
       3. `git rebase --continue`
       4. `git push --force-with-lease`
-      
+
       **To abort:** `git rebase --abort`
       {% else %}
       ❌ Rebase failed: {{ rebase_result.message }}

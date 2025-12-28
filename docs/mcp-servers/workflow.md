@@ -97,6 +97,3 @@ Always loaded - these are core tools.
 - [Architecture](../architecture/README.md)
 - [Agents](../agents/README.md)
 - [Skills](../skills/README.md)
-
-
-

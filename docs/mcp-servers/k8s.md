@@ -105,6 +105,3 @@ kubectl_get_events(
 - [test_mr_ephemeral](../skills/test_mr_ephemeral.md) - Uses for pod checks
 - [investigate_alert](../skills/investigate_alert.md) - Pod status checks
 - [debug_prod](../skills/debug_prod.md) - Deep debugging
-
-
-

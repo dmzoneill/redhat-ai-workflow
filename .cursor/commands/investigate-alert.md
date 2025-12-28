@@ -48,4 +48,3 @@ skill_run("investigate_alert", '{"environment": "stage", "auto_escalate": true}'
 - Checking if an alert is real or flapping
 
 For deep investigation, use `/debug-prod` directly.
-

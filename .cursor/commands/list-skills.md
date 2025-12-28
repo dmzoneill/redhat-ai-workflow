@@ -11,6 +11,3 @@ This displays:
 - Number of steps
 - Whether excluded from testing
 - Brief description
-
-
-

@@ -4,16 +4,16 @@
 name: check_mr_feedback
 description: |
   Check your open Merge Requests for feedback that needs your attention.
-  
+
   Scans for:
   - Human reviewer comments (filters out bot/CI comments)
   - Meeting requests (can trigger Google Calendar invite)
   - Code change requests
   - Questions requiring answers
   - Approval status
-  
+
   Optionally creates Google Meet invitations when meetings are requested.
-  
+
   Uses MCP tools: gitlab_mr_list, gitlab_mr_comments
 version: "1.1"
 
@@ -23,13 +23,13 @@ inputs:
     required: false
     default: "automation-analytics/automation-analytics-backend"
     description: "GitLab project path"
-  
+
   - name: create_meetings
     type: boolean
     required: false
     default: false
     description: "Automatically create Google Meet invites for meeting requests"
-  
+
   - name: mr_ids
     type: array
     required: false
@@ -50,14 +50,14 @@ steps:
     description: "Parse MR list output"
     compute: |
       from scripts.common.parsers import parse_mr_list
-      
+
       mrs = parse_mr_list(open_mrs_raw) if open_mrs_raw else []
-      
+
       # Filter to specific MRs if provided
       if inputs.get('mr_ids'):
         mr_ids = inputs.mr_ids
         mrs = [mr for mr in mrs if mr['id'] in mr_ids]
-      
+
       result = mrs
     output: open_mrs
 
@@ -129,18 +129,18 @@ steps:
       from datetime import datetime
       from scripts.common.config_loader import load_config
       from scripts.common.parsers import is_bot_comment, split_mr_comments
-      
+
       # Load config using shared loader
       cfg = load_config()
       current_user = cfg.get("user", {}).get("username") or os.getenv("USER", "unknown")
-      
+
       # Meeting keywords
       meeting_keywords = [
         'meeting', 'meet', 'call', 'discuss', 'sync', 'chat',
         'walk through', 'walkthrough', 'talk about', 'prepared to talk',
         'let\'s discuss', 'schedule a', 'set up a call'
       ]
-      
+
       # Feedback requiring response
       feedback_keywords = [
         'please', 'could you', 'can you', 'would be better',
@@ -148,9 +148,9 @@ steps:
         'why not', 'what about', 'have you considered',
         '?'  # Questions
       ]
-      
+
       feedback_results = []
-      
+
       # Build list of (mr_id, comments_text) pairs from tool outputs
       all_comments = []
       for i, var_name in enumerate(['mr1_comments', 'mr2_comments', 'mr3_comments', 'mr4_comments', 'mr5_comments']):
@@ -160,28 +160,28 @@ steps:
         comments = eval(var_name) if var_name in dir() else None
         if comments:
           all_comments.append((mr_id, str(comments)))
-      
+
       for mr_id, comments_text in all_comments:
         # Get MR info from our data
         mr_info = mr_data.get('info', {}).get(mr_id, {})
-        
+
         # Parse comments using shared parser
         parsed_comments = split_mr_comments(comments_text)
-        
+
         human_comments = []
-        
+
         for author, timestamp_str, comment_text in parsed_comments:
           # Skip bot comments using shared utility
           if not is_bot_comment(comment_text, author) and author.lower() != current_user.lower():
             # Check for meeting request
             is_meeting_request = any(kw in comment_text.lower() for kw in meeting_keywords)
-            
+
             # Check for feedback requiring response
             needs_response = any(kw in comment_text.lower() for kw in feedback_keywords)
-            
+
             # Extract email
             author_email = f"{author}@redhat.com"
-            
+
             human_comments.append({
               "author": author,
               "author_email": author_email,
@@ -190,9 +190,9 @@ steps:
               "is_meeting_request": is_meeting_request,
               "needs_response": needs_response,
             })
-          
+
           idx += 3
-        
+
         if human_comments:
           feedback_results.append({
             "mr_id": mr_id,
@@ -201,7 +201,7 @@ steps:
             "meeting_requests": [c for c in human_comments if c['is_meeting_request']],
             "needs_response": [c for c in human_comments if c['needs_response']],
           })
-      
+
       result = feedback_results
     output: feedback_analysis
 
@@ -213,16 +213,16 @@ steps:
       # For each MR with meeting requests, mark for calendar check
       for mr_feedback in feedback_analysis:
         mr_id = mr_feedback['mr_id']
-        
+
         # Mark meeting requests as already_scheduled if meeting exists
         for meeting_req in mr_feedback.get('meeting_requests', []):
           # Default to not scheduled
           meeting_req['already_scheduled'] = False
           meeting_req['existing_meeting'] = None
-        
+
         # Flag for the format_summary step to remind about checking
         mr_feedback['needs_calendar_check'] = len(mr_feedback.get('meeting_requests', [])) > 0
-      
+
       result = feedback_analysis
     output: feedback_with_calendar_check
 
@@ -233,11 +233,11 @@ steps:
     compute: |
       from datetime import datetime, timedelta
       from scripts.common.config_loader import load_config
-      
+
       # Load config using shared loader
       config = load_config()
       google_config = config.get("google_calendar", {})
-      
+
       if not google_config.get("enabled"):
         result = {
           "created": [],
@@ -246,7 +246,7 @@ steps:
       else:
         created_meetings = []
         skipped_meetings = []
-        
+
         for mr_feedback in feedback_with_calendar_check:
           for meeting_req in mr_feedback.get('meeting_requests', []):
             # Skip if already scheduled
@@ -258,7 +258,7 @@ steps:
                 "existing": meeting_req.get('existing_meeting')
               })
               continue
-            
+
             # Meeting details
             meeting_info = {
               "mr_id": mr_feedback['mr_id'],
@@ -269,7 +269,7 @@ steps:
               "status": "pending_google_calendar_tool"
             }
             created_meetings.append(meeting_info)
-        
+
         result = {
           "created": created_meetings,
           "skipped": skipped_meetings,
@@ -285,10 +285,10 @@ steps:
       lines = []
       lines.append("# MR Feedback Summary")
       lines.append("")
-      
+
       # Use feedback_with_calendar_check if available, otherwise feedback_analysis
       analysis = feedback_with_calendar_check if feedback_with_calendar_check else feedback_analysis
-      
+
       if not analysis:
         lines.append("✅ **No pending feedback found!** All your MRs are clear.")
       else:
@@ -297,40 +297,40 @@ steps:
         total_comments = sum(len(f['comments']) for f in analysis)
         meeting_requests = sum(len(f['meeting_requests']) for f in analysis)
         needs_response = sum(len(f['needs_response']) for f in analysis)
-        
+
         lines.append(f"Found feedback on **{total_mrs}** MRs ({total_comments} comments)")
         lines.append("")
-        
+
         if meeting_requests > 0:
           lines.append(f"📅 **{meeting_requests} meeting request(s)** detected")
         if needs_response > 0:
           lines.append(f"📝 **{needs_response} comment(s)** may need your response")
         lines.append("")
-        
+
         # Details per MR
         for mr_feedback in analysis:
           mr_id = mr_feedback['mr_id']
           title = mr_feedback['title'][:60]
-          
+
           lines.append(f"## MR !{mr_id}")
           lines.append(f"*{title}*")
           lines.append("")
-          
+
           for comment in mr_feedback['comments']:
             author = comment['author']
             text = comment['text'][:300]
             author_email = comment.get('author_email', f"{author}@redhat.com")
-            
+
             # Icons based on type
             icon = "💬"
             if comment['is_meeting_request']:
               icon = "📅"
             elif comment['needs_response']:
               icon = "❓"
-            
+
             lines.append(f"| {icon} | **{author}** |")
             lines.append(f"| | {text} |")
-            
+
             # Add meeting scheduling suggestion for meeting requests
             if comment['is_meeting_request']:
               lines.append("")
@@ -347,12 +347,12 @@ steps:
               lines.append(f'    when="auto"')
               lines.append(f')')
               lines.append(f"```")
-            
+
             lines.append("")
-          
+
           lines.append("---")
           lines.append("")
-      
+
       # Meeting creation results
       if meeting_results:
         if meeting_results.get('skipped'):
@@ -360,20 +360,20 @@ steps:
           for m in meeting_results['skipped']:
             lines.append(f"- MR !{m['mr_id']} with {m['requester']}: {m['reason']}")
           lines.append("")
-        
+
         if meeting_results.get('created'):
           lines.append("## 📅 Meeting Invites to Create")
           for m in meeting_results['created']:
             lines.append(f"- **{m['title']}** with {m['requester']}")
           lines.append("")
-      
+
       result = '\n'.join(lines)
     output: summary
 
 outputs:
   - name: summary
     value: "{{ summary }}"
-  
+
   - name: context
     value:
       total_mrs_with_feedback: "{{ (feedback_with_calendar_check or feedback_analysis) | length if (feedback_with_calendar_check or feedback_analysis) else 0 }}"

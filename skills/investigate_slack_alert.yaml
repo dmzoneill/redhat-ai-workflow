@@ -12,12 +12,12 @@
 name: investigate_slack_alert
 description: |
   Investigate Prometheus alerts from Slack and create/link Jira issues.
-  
+
   ## Trigger
   Called when a message from app-sre-alerts is detected in alert channels:
   - C01CPSKFG0P (stage alerts)
   - C01L1K82AP5 (prod alerts)
-  
+
   ## Behavior
   1. Immediately reply to acknowledge ("Looking into this...")
   2. Parse alert name, namespace, severity from Slack message
@@ -26,7 +26,7 @@ description: |
   5. If no match, create a new Jira issue
   6. For billing alerts: use special "BillingEvent XXXXX" format
   7. Reply with Jira link and investigation summary
-  
+
   ## Billing Alert Special Handling
   Billing alerts (containing "billing", "subscription", "vcpu", etc.) get:
   - Higher priority
@@ -39,17 +39,17 @@ inputs:
     type: string
     required: true
     description: "Slack channel ID where alert was posted"
-  
+
   - name: message_ts
     type: string
     required: true
     description: "Slack message timestamp (for threading replies)"
-  
+
   - name: message_text
     type: string
     required: true
     description: "The alert message content (HTML or text)"
-  
+
   - name: alert_url
     type: string
     required: false
@@ -57,18 +57,18 @@ inputs:
 
 steps:
   # ==================== LOAD CONFIG ====================
-  
+
   - name: load_config
     description: "Load alert channel configuration"
     compute: |
       from scripts.common.config_loader import load_config
-      
+
       config = load_config()
       slack_config = config.get("slack", {}).get("listener", {})
       alert_channels = slack_config.get("alert_channels", {})
       jira_config = config.get("jira", {})
       namespaces = config.get("namespaces", {})
-      
+
       # Get channel-specific config
       channel_info = alert_channels.get(inputs.channel_id, {
           "environment": "unknown",
@@ -76,7 +76,7 @@ steps:
           "cluster": "unknown",
           "severity": "medium"
       })
-      
+
       result = {
           "channel_info": channel_info,
           "environment": channel_info.get("environment", "stage"),
@@ -89,18 +89,18 @@ steps:
     output: cfg
 
   # ==================== PARSE ALERT ====================
-  
+
   - name: parse_alert_message
     description: "Extract alert details from Slack message using shared parser"
     compute: |
       from scripts.common.parsers import parse_prometheus_alert
-      
+
       # Use shared parser for alert parsing
       parsed = parse_prometheus_alert(inputs.message_text or "")
-      
+
       # Use namespace from parser or fall back to config
       namespace = parsed["namespace"] or cfg.get("namespace")
-      
+
       result = {
           "alert_name": parsed["alert_name"],
           "firing_count": parsed["firing_count"],
@@ -113,7 +113,7 @@ steps:
     output: alert_info
 
   # ==================== ACKNOWLEDGE ====================
-  
+
   - name: acknowledge_alert
     description: "Reply to Slack thread to acknowledge we're looking into it"
     tool: slack_reply
@@ -125,22 +125,22 @@ steps:
     on_error: continue
 
   # ==================== INVESTIGATE ====================
-  
+
   - name: get_kubeconfig
     description: "Determine correct kubeconfig for environment"
     compute: |
       import os
-      
+
       env = cfg.get("environment", "stage")
       ns_config = cfg.get("namespaces", {})
-      
+
       if env == "production":
-          kubeconfig = ns_config.get("production", {}).get("kubeconfig", 
+          kubeconfig = ns_config.get("production", {}).get("kubeconfig",
                        os.path.expanduser("~/.kube/config.p"))
       else:
           kubeconfig = ns_config.get("stage", {}).get("kubeconfig",
                        os.path.expanduser("~/.kube/config.s"))
-      
+
       result = kubeconfig
     output: kubeconfig
 
@@ -157,14 +157,14 @@ steps:
     description: "Identify unhealthy pods using shared parser"
     compute: |
       from scripts.common.parsers import parse_kubectl_pods
-      
+
       # Use shared parser to get structured pod data
       pods = parse_kubectl_pods(str(pod_status) if pod_status else "")
-      
+
       # Filter unhealthy pods
       unhealthy = []
       error_pods = []
-      
+
       for pod in pods:
           if not pod.get("healthy"):
               unhealthy.append({
@@ -172,12 +172,12 @@ steps:
                   "status": pod["status"],
                   "ready": pod.get("ready", "?/?")
               })
-          
+
           # Find pods related to alert that have errors
           if any(term in pod["name"].lower() for term in ['processor', 'api', 'rollup', 'exporter']):
               if 'error' in pod["status"].lower() or 'crash' in pod["status"].lower():
                   error_pods.append(pod["name"])
-      
+
       result = {
           "unhealthy_pods": unhealthy[:5],
           "error_pods": error_pods[:3],
@@ -201,12 +201,12 @@ steps:
     description: "Extract error patterns from logs using shared parser"
     compute: |
       from scripts.common.parsers import parse_error_logs
-      
+
       logs = str(recent_logs) if recent_logs else ""
-      
+
       # Use shared parser for error extraction
       errors_found = parse_error_logs(logs, max_errors=5)
-      
+
       result = {
           "errors": errors_found,
           "has_errors": len(errors_found) > 0
@@ -214,7 +214,7 @@ steps:
     output: error_analysis
 
   # ==================== SEARCH JIRA ====================
-  
+
   - name: search_existing_jira
     description: "Search for existing Jira issues matching this alert"
     tool: jira_search
@@ -238,19 +238,19 @@ steps:
     description: "Determine if we have a matching issue or need to create one using shared parsers"
     compute: |
       from scripts.common.parsers import extract_all_jira_keys, extract_billing_event_number
-      
+
       existing = str(existing_issues) if existing_issues else ""
       billing = str(billing_issues) if billing_issues else ""
-      
+
       # Find all Jira keys in existing issues using shared parser
       issue_matches = extract_all_jira_keys(existing)
       matching_issue = issue_matches[0] if issue_matches else None
-      
+
       # For billing alerts, get the next billing event number using shared parser
       next_billing_number = 1
       if alert_info.get("is_billing"):
           next_billing_number = extract_billing_event_number(billing)
-      
+
       result = {
           "has_existing": matching_issue is not None,
           "existing_issue": matching_issue,
@@ -260,21 +260,21 @@ steps:
     output: jira_analysis
 
   # ==================== CREATE OR LINK JIRA ====================
-  
+
   - name: build_jira_summary
     description: "Build the Jira issue summary"
     condition: "{{ not jira_analysis.has_existing }}"
     compute: |
       alert_name = alert_info.get("alert_name", "Unknown Alert")
       description = alert_info.get("description", "")[:100]
-      
+
       if alert_info.get("is_billing"):
           # Format: BillingEvent XXXXX - [Processor] Error: description
           number = jira_analysis.get("next_billing_number", 1)
           summary = f"BillingEvent {number:05d} - {alert_name}"
       else:
           summary = f"Alert: {alert_name}"
-      
+
       result = summary[:250]  # Jira summary limit
     output: jira_summary
 
@@ -283,16 +283,16 @@ steps:
     condition: "{{ not jira_analysis.has_existing }}"
     compute: |
       import datetime
-      
+
       alert = alert_info
       pods = pod_analysis
       errors = error_analysis
-      
+
       # Build Slack link
       channel = inputs.channel_id
       ts = inputs.message_ts.replace(".", "")
       slack_link = f"https://redhat-internal.slack.com/archives/{channel}/p{ts}"
-      
+
       description = "## Alert Details\n\n"
       description += f"**Alert:** {alert.get('alert_name', 'Unknown')}\n"
       description += f"**Environment:** {cfg.get('environment', 'unknown')}\n"
@@ -302,7 +302,7 @@ steps:
       description += f"**Detected:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
       description += "## Links\n\n"
       description += f"- [Slack Thread]({slack_link})\n"
-      
+
       # Add alert links
       links = alert.get('links', {})
       if links.get('grafana'):
@@ -313,22 +313,22 @@ steps:
           description += f"- [AlertManager]({links['alertmanager']})\n"
       if links.get('runbook'):
           description += f"- [Runbook]({links['runbook']})\n"
-      
+
       # Add investigation findings
       if pods.get('unhealthy_pods'):
           description += "\n## Unhealthy Pods\n"
           for pod in pods['unhealthy_pods'][:5]:
               description += f"- {pod.get('pod')}: {pod.get('status', pod.get('ready', 'unknown'))}\n"
-      
+
       if errors.get('errors'):
           description += "\n## Error Patterns Found\n"
           description += "```\n"
           for err in errors['errors'][:3]:
               description += f"{err[:150]}\n"
           description += "```\n"
-      
+
       description += f"\n---\n*Auto-created by AA Workflow Agent*"
-      
+
       result = description
     output: jira_description
 
@@ -350,7 +350,7 @@ steps:
     description: "Extract the Jira issue key using shared parser"
     compute: |
       from scripts.common.parsers import extract_jira_key
-      
+
       if jira_analysis.get("has_existing"):
           issue_key = jira_analysis.get("existing_issue")
           action = "linked"
@@ -358,7 +358,7 @@ steps:
           created = str(created_issue) if created_issue else ""
           issue_key = extract_jira_key(created)
           action = "created"
-      
+
       result = {
           "key": issue_key,
           "action": action,
@@ -367,7 +367,7 @@ steps:
     output: jira_result
 
   # ==================== REPLY TO SLACK ====================
-  
+
   - name: build_response
     description: "Build the Slack response with findings"
     compute: |
@@ -375,35 +375,35 @@ steps:
       pods = pod_analysis
       errors = error_analysis
       jira = jira_result
-      
+
       # Build response
       if alert.get("is_billing"):
           response = f"🔴 **Billing Alert Investigation**\n\n"
       else:
           response = f"🔍 **Alert Investigation**\n\n"
-      
+
       response += f"**Alert:** {alert.get('alert_name', 'Unknown')}\n"
       response += f"**Environment:** {cfg.get('environment', 'unknown')}\n"
       response += f"**Namespace:** `{alert.get('namespace', 'unknown')}`\n\n"
-      
+
       # Pod status
       if pods.get("unhealthy_pods"):
           response += f"⚠️ **{pods.get('total_issues', 0)} unhealthy pods detected**\n"
       else:
           response += "✅ All pods appear healthy\n"
-      
+
       # Errors
       if errors.get("has_errors"):
           response += f"❌ Found {len(errors.get('errors', []))} error pattern(s) in logs\n"
-      
+
       response += "\n"
-      
+
       # Jira link
       if jira.get("key"):
           response += f"📋 **Jira:** [{jira['key']}]({jira['url']}) ({jira['action']})\n"
       else:
           response += "⚠️ Could not create/find Jira issue\n"
-      
+
       # Quick links
       links = alert.get('links', {})
       if links:
@@ -412,7 +412,7 @@ steps:
               response += f"• [Dashboard]({links['grafana']})\n"
           if links.get('runbook'):
               response += f"• [Runbook]({links['runbook']})\n"
-      
+
       result = response
     output: slack_response
 
@@ -430,15 +430,15 @@ outputs:
   - name: summary
     value: |
       ## 🔍 Alert Investigation Complete
-      
+
       **Alert:** {{ alert_info.alert_name }}
       **Environment:** {{ cfg.environment }}
       **Is Billing:** {{ '🔴 Yes' if alert_info.is_billing else 'No' }}
-      
+
       ### Findings
       - Unhealthy pods: {{ pod_analysis.total_issues }}
       - Error patterns: {{ 'Yes' if error_analysis.has_errors else 'None found' }}
-      
+
       ### Jira
       {% if jira_result.key %}
       - **Issue:** [{{ jira_result.key }}]({{ jira_result.url }})
@@ -446,10 +446,10 @@ outputs:
       {% else %}
       - ⚠️ No Jira issue created/found
       {% endif %}
-      
+
       ### Slack Response
       {{ 'Sent' if reply_result else 'Failed to send' }}
-  
+
   - name: context
     value:
       alert_name: "{{ alert_info.alert_name }}"
@@ -458,4 +458,3 @@ outputs:
       is_billing: "{{ alert_info.is_billing }}"
       jira_key: "{{ jira_result.key }}"
       jira_action: "{{ jira_result.action }}"
-

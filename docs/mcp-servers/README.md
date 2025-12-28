@@ -35,7 +35,7 @@ graph TB
         LOADER[AgentLoader]
         CORE[Core Tools]
     end
-    
+
     subgraph MODULES["Tool Modules"]
         GIT[aa-git]
         GITLAB[aa-gitlab]
@@ -43,13 +43,13 @@ graph TB
         K8S[aa-k8s]
         MORE[...]
     end
-    
+
     LOADER --> |loads| GIT
     LOADER --> |loads| GITLAB
     LOADER --> |loads| JIRA
     LOADER --> |loads| K8S
     LOADER --> |loads| MORE
-    
+
     style MCP fill:#6366f1,stroke:#4f46e5,color:#fff
     style MODULES fill:#10b981,stroke:#059669,color:#fff
 ```
@@ -106,7 +106,7 @@ Claude: [AgentLoader]
         → Unloading: git, gitlab, jira, google-calendar
         → Loading: k8s, bonfire, quay, gitlab
         → Notifying Cursor of tool change
-        
+
         🔧 DevOps agent ready with 90 tools
 ```
 
@@ -134,7 +134,7 @@ def register_tools(server: FastMCP) -> int:
     async def my_tool(arg: str) -> str:
         """Tool description."""
         return f"Result: {arg}"
-    
+
     return 1  # tool count
 ```
 
@@ -156,4 +156,3 @@ tools:
 - [Architecture Overview](../architecture/README.md)
 - [Agents](../agents/README.md)
 - [MCP Implementation Details](../architecture/mcp-implementation.md)
-

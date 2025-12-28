@@ -88,9 +88,7 @@ class AgentLoader:
             return []
 
         try:
-            spec = importlib.util.spec_from_file_location(
-                f"aa_{module_name}_tools_dynamic", tools_file
-            )
+            spec = importlib.util.spec_from_file_location(f"aa_{module_name}_tools_dynamic", tools_file)
             if spec is None or spec.loader is None:
                 return []
 
@@ -125,9 +123,7 @@ class AgentLoader:
     def _unload_module_tools(self, module_name: str) -> int:
         """Remove all tools from a specific module."""
         tools_to_remove = [
-            name
-            for name, mod in self._tool_to_module.items()
-            if mod == module_name and name not in CORE_TOOLS
+            name for name, mod in self._tool_to_module.items() if mod == module_name and name not in CORE_TOOLS
         ]
 
         for tool_name in tools_to_remove:

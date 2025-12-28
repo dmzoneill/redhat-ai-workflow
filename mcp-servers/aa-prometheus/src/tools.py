@@ -329,12 +329,7 @@ def register_tools(server: "FastMCP") -> int:
             icon = "🔴" if state == "firing" else "🟡"
             sev_icon = {"critical": "🚨", "warning": "⚠️", "info": "ℹ️"}.get(sev, "❓")
 
-            msg = (
-                annotations.get("message")
-                or annotations.get("summary")
-                or annotations.get("description")
-                or ""
-            )
+            msg = annotations.get("message") or annotations.get("summary") or annotations.get("description") or ""
             if len(msg) > 200:
                 msg = msg[:200] + "..."
 
@@ -458,12 +453,7 @@ def register_tools(server: "FastMCP") -> int:
                 with open(config_path) as f:
                     config = json.load(f)
                 env_key = "production" if environment.lower() == "prod" else environment.lower()
-                namespace = (
-                    config.get("prometheus", {})
-                    .get("environments", {})
-                    .get(env_key, {})
-                    .get("namespace", "")
-                )
+                namespace = config.get("prometheus", {}).get("environments", {}).get(env_key, {}).get("namespace", "")
         except Exception:
             pass
 
@@ -508,9 +498,7 @@ def register_tools(server: "FastMCP") -> int:
         if rule_type:
             params["type"] = rule_type
 
-        success, result = await prometheus_api_request(
-            url, "/api/v1/rules", params=params, token=token
-        )
+        success, result = await prometheus_api_request(url, "/api/v1/rules", params=params, token=token)
 
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to get rules: {result}")]

@@ -88,9 +88,7 @@ def register_tools(server: "FastMCP") -> int:
         lines = ["## App-Interface Validation", ""]
 
         if (Path(repo_path) / "Makefile").exists():
-            success, stdout, stderr = await run_cmd(
-                ["make", "bundle", "validate"], cwd=repo_path, timeout=600
-            )
+            success, stdout, stderr = await run_cmd(["make", "bundle", "validate"], cwd=repo_path, timeout=600)
 
             output = stdout + stderr
 
@@ -105,9 +103,7 @@ def register_tools(server: "FastMCP") -> int:
         else:
             lines.append("⚠️ No Makefile found, trying qontract-validator directly...")
 
-            success, stdout, stderr = await run_cmd(
-                ["qontract-validator", "--only-errors"], cwd=repo_path
-            )
+            success, stdout, stderr = await run_cmd(["qontract-validator", "--only-errors"], cwd=repo_path)
 
             if success:
                 lines.append("✅ Valid")
@@ -211,9 +207,7 @@ def register_tools(server: "FastMCP") -> int:
             lines.append("No uncommitted changes")
             return [TextContent(type="text", text="\n".join(lines))]
 
-        success, stdout, stderr = await run_cmd(
-            ["git", "diff", "--", "*.yml", "*.yaml"], cwd=repo_path
-        )
+        success, stdout, stderr = await run_cmd(["git", "diff", "--", "*.yml", "*.yaml"], cwd=repo_path)
 
         if stdout.strip():
             lines.append("\n### YAML Changes")
@@ -281,16 +275,14 @@ def register_tools(server: "FastMCP") -> int:
                                 docs = list(yaml.safe_load_all(content))
                                 for doc in docs:
                                     if isinstance(doc, dict):
-                                        resources = doc.get("resourceTemplates", []) or doc.get(
-                                            "resources", []
-                                        )
+                                        resources = doc.get("resourceTemplates", []) or doc.get("resources", [])
                                         for r in resources[:10]:
                                             if isinstance(r, dict):
                                                 name = r.get("name", "unnamed")
                                                 lines.append(f"  - `{name}`")
                             except (yaml.YAMLError, KeyError, TypeError):
                                 pass
-                    except (OSError, IOError):
+                    except OSError:
                         pass
         else:
             lines.append(f"No files found mentioning `{namespace}`")
@@ -387,8 +379,7 @@ def register_tools(server: "FastMCP") -> int:
         slack_config = config.get("slack", {})
         user_mapping_config = slack_config.get("user_mapping", {})
         default_url = (
-            "https://gitlab.cee.redhat.com/service/app-interface/"
-            "-/raw/master/data/teams/{team}/users/{user}.yml"
+            "https://gitlab.cee.redhat.com/service/app-interface/" "-/raw/master/data/teams/{team}/users/{user}.yml"
         )
         url_template = user_mapping_config.get("app_interface_url", default_url)
 

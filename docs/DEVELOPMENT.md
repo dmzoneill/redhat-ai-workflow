@@ -171,10 +171,10 @@ async def my_new_tool(
     """
     # Implementation
     success, output = await run_cmd(["some", "command", required_param])
-    
+
     if not success:
         return f"❌ Failed: {output}"
-    
+
     return f"✅ Success: {output}"
 ```
 
@@ -187,10 +187,10 @@ def test_my_new_tool():
     """Test the new tool."""
     # Setup
     # ...
-    
+
     # Execute
     result = await my_new_tool("test_param")
-    
+
     # Assert
     assert "Success" in result
 ```
@@ -225,7 +225,7 @@ steps:
     tool: some_tool
     args:
       param: "{{ required_input }}"
-    
+
   - id: step_2
     tool: another_tool
     args:
@@ -287,11 +287,11 @@ modules:
 
 persona: |
   You are a specialized agent for [domain].
-  
+
   Focus on:
   - First area of expertise
   - Second area
-  
+
   Available tools: ...
 
 skills:
@@ -424,4 +424,3 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 - Check existing documentation in `docs/`
 - Review similar implementations in the codebase
 - Ask in the team Slack channel
-

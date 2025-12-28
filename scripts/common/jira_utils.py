@@ -129,9 +129,7 @@ def normalize_issue_type(issue_type: str) -> str:
     normalized = aliases.get(normalized, normalized)
 
     if normalized not in valid_types:
-        raise ValueError(
-            f"Invalid issue type: '{issue_type}'. " f"Valid types: {', '.join(sorted(valid_types))}"
-        )
+        raise ValueError(f"Invalid issue type: '{issue_type}'. " f"Valid types: {', '.join(sorted(valid_types))}")
 
     return normalized
 
@@ -281,27 +279,21 @@ def build_jira_yaml(
         data["User Story"] = markdown_to_jira(user_story) if convert_markdown else user_story
 
     if acceptance_criteria:
-        data["Acceptance Criteria"] = (
-            markdown_to_jira(acceptance_criteria) if convert_markdown else acceptance_criteria
-        )
+        data["Acceptance Criteria"] = markdown_to_jira(acceptance_criteria) if convert_markdown else acceptance_criteria
 
     if supporting_documentation:
         data["Supporting Documentation"] = (
-            markdown_to_jira(supporting_documentation)
-            if convert_markdown
-            else supporting_documentation
+            markdown_to_jira(supporting_documentation) if convert_markdown else supporting_documentation
         )
 
     if definition_of_done:
-        data["Definition of Done"] = (
-            markdown_to_jira(definition_of_done) if convert_markdown else definition_of_done
-        )
+        data["Definition of Done"] = markdown_to_jira(definition_of_done) if convert_markdown else definition_of_done
 
     if labels:
-        data["Labels"] = labels if isinstance(labels, list) else [labels]
+        data["Labels"] = labels
 
     if components:
-        data["Components"] = components if isinstance(components, list) else [components]
+        data["Components"] = components
 
     if story_points is not None:
         data["Story Points"] = story_points

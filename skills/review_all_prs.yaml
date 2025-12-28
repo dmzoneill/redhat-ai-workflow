@@ -4,19 +4,19 @@
 name: review_all_prs
 description: |
   Review all open MRs in a project.
-  
+
   Resolves project from repo_name or current directory if not explicitly provided.
-  
+
   Automatically excludes your own MRs (detected from system username).
-  
+
   For each MR (authored by others):
   - If I gave feedback and author addressed it → approve
   - If I gave feedback and author didn't respond → skip
   - If I gave feedback and author responded but issues remain → more feedback
   - If no previous review from me → run full review
-  
+
   Also shows your own MRs that have feedback from others.
-  
+
 version: "1.2"
 
 inputs:
@@ -25,36 +25,36 @@ inputs:
     required: false
     default: ""
     description: "GitLab project path (resolved from repo_name if not provided)"
-  
+
   - name: repo_name
     type: string
     required: false
     description: "Repository name from config (e.g., 'automation-analytics-backend')"
-  
+
   - name: reviewer
     type: string
     required: false
     default: ""
     description: "Filter by reviewer username (leave empty for all open MRs)"
-  
+
   - name: limit
     type: integer
     required: false
     default: 10
     description: "Maximum number of MRs to process"
-  
+
   - name: dry_run
     type: boolean
     required: false
     default: false
     description: "If true, show what would happen without taking action"
-  
+
   - name: include_my_mrs
     type: boolean
     required: false
     default: true
     description: "Show my own MRs that have feedback to respond to"
-  
+
   - name: auto_rebase
     type: boolean
     required: false
@@ -65,15 +65,15 @@ inputs:
 
 steps:
   # ==================== RESOLVE PROJECT ====================
-  
+
   - name: resolve_project
     description: "Determine which GitLab project to check"
     compute: |
       import os
       from scripts.common.config_loader import load_config
-      
+
       gitlab_project = None
-      
+
       # Load config using shared loader
       config = load_config()
       repos = config.get("repositories", {})
@@ -98,7 +98,7 @@ steps:
       result = {"gitlab_project": gitlab_project}
     output: resolved
   # ==================== GET CURRENT USER ====================
-  
+
   # Step 0: Get current system username
   - name: get_username
     description: "Get current system username to exclude own MRs"
@@ -106,15 +106,15 @@ steps:
       import getpass
       import os
       from scripts.common.config_loader import load_config
-      
+
       # Get username from config or fallback to system
       cfg = load_config()
-      
+
       # Use config if available, otherwise fallback to system user
       gitlab_username = cfg.get("user", {}).get("gitlab_username") or \
                         cfg.get("user", {}).get("username") or \
                         os.getenv('USER') or getpass.getuser()
-      
+
       result = gitlab_username
     output: my_username
 
@@ -135,13 +135,13 @@ steps:
     description: "Extract MR IDs, separate own MRs from others to review using shared parsers"
     compute: |
       from scripts.common.parsers import parse_mr_list, separate_mrs_by_author
-      
+
       # Parse all MRs with author information
       all_mrs = parse_mr_list(open_mrs or "", include_author=True)
-      
+
       # Separate into own vs others using shared function
       separated = separate_mrs_by_author(all_mrs, my_username)
-      
+
       result = {
         'to_review': separated['to_review'][:inputs.limit],
         'my_mrs': separated['my_mrs'],
@@ -168,12 +168,12 @@ steps:
     condition: "my_first_mr_details"
     compute: |
       from scripts.common.parsers import analyze_mr_status
-      
+
       mr = parsed_mrs['my_mrs'][0] if parsed_mrs.get('my_mrs') else {}
-      
+
       # Use shared MR status analyzer
       analysis = analyze_mr_status(my_first_mr_details or "")
-      
+
       result = {
         'has_conflicts': analysis['has_conflicts'],
         'needs_rebase': analysis['needs_rebase'],
@@ -200,12 +200,12 @@ steps:
     compute: |
       results = []
       mrs_to_review = parsed_mrs.get('to_review', [])
-      
+
       for mr in mrs_to_review:
         mr_id = mr.get('iid')
         if not mr_id:
           continue
-        
+
         mr_result = {
           'iid': mr_id,
           'title': mr.get('title', ''),
@@ -216,9 +216,9 @@ steps:
           'author_replied': False,
           'concerns_addressed': False
         }
-        
+
         results.append(mr_result)
-      
+
       result = results
     output: mr_analysis
 
@@ -229,7 +229,7 @@ steps:
     compute: |
       # This would ideally call gitlab_mr_comments for each MR
       # For now, we'll set up the structure and the actual tool calls happen below
-      
+
       result = {
         'needs_review': [],
         'can_approve': [],
@@ -258,17 +258,17 @@ steps:
     condition: "len(mr_analysis) > 0 and first_mr_details"
     compute: |
       from scripts.common.parsers import analyze_mr_status, analyze_review_status
-      
+
       mr = mr_analysis[0]
       details = first_mr_details or ""
-      
+
       # Get base analysis from shared parser
       analysis = analyze_mr_status(details, my_username)
-      
+
       # Get review-specific analysis from shared parser
       author = mr.get('author', '')
       review_status = analyze_review_status(details, my_username, author)
-      
+
       # Enhance with unresolved issues check
       if review_status['my_feedback_exists'] and review_status['author_replied']:
         if analysis['unresolved']:
@@ -280,10 +280,10 @@ steps:
       else:
         action = review_status['recommended_action']
         reason = review_status['reason']
-      
+
       mr['action'] = action
       mr['reason'] = reason
-      
+
       result = mr
     output: first_mr_action
 
@@ -319,11 +319,11 @@ steps:
       mr_id: "{{ first_mr_action.get('iid') }}"
       comment: |
         ## Follow-up Review
-        
+
         I see you've responded to my feedback. However, there appear to be unresolved discussions.
-        
+
         Could you please address the outstanding items so we can move forward?
-        
+
         ---
         *Automated follow-up by AI Workflow*
     output: followup_result
@@ -336,7 +336,7 @@ steps:
       my_username = parsed_mrs.get('my_username', 'unknown')
       my_mrs = parsed_mrs.get('my_mrs', [])
       mrs_to_review = parsed_mrs.get('to_review', [])
-      
+
       lines = ["## Batch PR Review Summary", ""]
       lines.append(f"**Project:** {resolved['gitlab_project']}")
       lines.append(f"**Current User:** {my_username}")
@@ -344,7 +344,7 @@ steps:
       lines.append(f"**My Open MRs:** {len(my_mrs)}")
       lines.append(f"**Dry Run:** {'Yes' if inputs.dry_run else 'No'}")
       lines.append("")
-      
+
       # Categorize actions
       actions = {
         'can_approve': [],
@@ -352,11 +352,11 @@ steps:
         'needs_followup': [],
         'skip': []
       }
-      
+
       if first_mr_action:
         action = first_mr_action.get('action', 'skip')
         actions.get(action, actions['skip']).append(first_mr_action)
-      
+
       # Summary by category
       if actions['can_approve']:
         lines.append("### ✅ Approved")
@@ -364,37 +364,37 @@ steps:
           status = "Would approve" if inputs.dry_run else "Approved"
           lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ({status})")
         lines.append("")
-      
+
       if actions['needs_full_review']:
         lines.append("### 🔍 Full Review Performed")
         for mr in actions['needs_full_review']:
           lines.append(f"- !{mr['iid']}: {mr.get('title', '')}")
         lines.append("")
-      
+
       if actions['needs_followup']:
         lines.append("### 💬 Follow-up Posted")
         for mr in actions['needs_followup']:
           status = "Would post follow-up" if inputs.dry_run else "Follow-up posted"
           lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ({status})")
         lines.append("")
-      
+
       if actions['skip']:
         lines.append("### ⏭️ Skipped (Waiting for Author)")
         for mr in actions['skip']:
           lines.append(f"- !{mr['iid']}: {mr.get('title', '')} - {mr.get('reason', 'No action needed')}")
         lines.append("")
-      
+
       # Show my own MRs that might need attention
       if my_mrs and inputs.include_my_mrs:
         lines.append("---")
         lines.append("")
         lines.append("### 📝 Your Open MRs")
-        
+
         # Check if we rebased any MR
         if my_mr_conflict_status and my_mr_conflict_status.get('needs_rebase'):
           first_mr_id = my_mr_conflict_status.get('mr_id')
           reason = my_mr_conflict_status.get('reason', 'needs rebase')
-          
+
           if rebase_result:
             lines.append(f"- !{first_mr_id}: {my_mr_conflict_status.get('title', '')} 🔄 **Rebased!**")
             lines.append(f"  - {reason}")
@@ -408,25 +408,25 @@ steps:
             lines.append(f"- !{first_mr_id}: {my_mr_conflict_status.get('title', '')} ⚠️ **Needs rebase**")
             lines.append(f"  - {reason}")
             lines.append(f"  - Run: `skill_run(\"rebase_pr\", '{{\"mr_id\": {first_mr_id}}}')`")
-        
+
         # Show remaining MRs
         for mr in my_mrs[:5]:
           if my_mr_conflict_status and mr.get('iid') == my_mr_conflict_status.get('mr_id'):
             continue  # Already shown above
           lines.append(f"- !{mr.get('iid', '?')}: {mr.get('title', '')}")
-        
+
         lines.append("")
         lines.append("*Check these for feedback from reviewers. Use:*")
         lines.append(f"*`gitlab_mr_view(project=\"{resolved['gitlab_project']}\", mr_id=<id>)` to see comments*")
         lines.append("")
-      
+
       # Remaining MRs
       remaining = len(mr_analysis) - 1
       if remaining > 0:
         lines.append(f"---")
         lines.append(f"*{remaining} more MRs not processed in this batch.*")
         lines.append(f"*Run again to continue processing.*")
-      
+
       result = '\n'.join(lines)
     output: batch_summary
 
@@ -439,15 +439,15 @@ steps:
       import sys
       from pathlib import Path
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-      
+
       try:
           from scripts.skill_hooks import emit_event
-          
+
           # Count actions taken
           approved = 1 if first_mr_action and first_mr_action.get('action') == 'can_approve' else 0
           changes = 1 if first_mr_action and first_mr_action.get('action') in ['needs_full_review', 'needs_followup'] else 0
           total = len(mr_analysis) if mr_analysis else 0
-          
+
           if total > 0:
               asyncio.run(emit_event("batch_review_completed", {
                   "count": str(total),
@@ -469,18 +469,17 @@ outputs:
   - name: summary
     value: |
       {{ batch_summary }}
-      
+
       ---
-      
+
       ## Quick Actions
-      
+
       - **Review next batch:** `skill_run("review_all_prs", '{}')`
       - **Review specific MR:** `skill_run("review_pr", '{"mr_id": 123}')`
       - **Approve specific MR:** `gitlab_mr_approve(project="...", mr_id=123)`
-  
+
   - name: stats
     value:
       total_mrs: "{{ len(mr_analysis) }}"
       processed: 1
       dry_run: "{{ inputs.dry_run }}"
-

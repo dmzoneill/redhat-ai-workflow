@@ -74,7 +74,7 @@ graph LR
         API[Gmail API]
         OAUTH[OAuth 2.0]
     end
-    
+
     subgraph aa-gmail
         LIST[list_unread]
         GET[get_details]
@@ -83,18 +83,18 @@ graph LR
         ARCHIVE[archive]
         PROCESS[process_all]
     end
-    
+
     PROCESS --> LIST
     PROCESS --> GET
     PROCESS --> SUMMARY
     PROCESS --> READ
     PROCESS --> ARCHIVE
-    
+
     LIST --> API
     GET --> API
     READ --> API
     ARCHIVE --> API
-    
+
     API --> OAUTH
 ```
 
@@ -107,6 +107,3 @@ graph LR
 
 - [Google Calendar](google-calendar.md) - Shares OAuth credentials
 - [Workflow](workflow.md) - Core workflow tools
-
-
-

@@ -15,6 +15,3 @@ Use for:
 - Check pod status
 - Reserve/release namespaces
 - Image inspection
-
-
-

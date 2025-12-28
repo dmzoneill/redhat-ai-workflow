@@ -108,9 +108,7 @@ def get_calendar_service():
     # Try service account
     if not creds and SERVICE_ACCOUNT_FILE.exists():
         try:
-            creds = service_account.Credentials.from_service_account_file(
-                str(SERVICE_ACCOUNT_FILE), scopes=SCOPES
-            )
+            creds = service_account.Credentials.from_service_account_file(str(SERVICE_ACCOUNT_FILE), scopes=SCOPES)
         except Exception:
             pass
 
@@ -195,14 +193,12 @@ def find_free_slots(
     tz = ZoneInfo(TIMEZONE)
 
     # Set up the meeting window for this date
-    window_start = date.replace(
-        hour=MEETING_START_HOUR, minute=0, second=0, microsecond=0, tzinfo=tz
-    )
+    window_start = date.replace(hour=MEETING_START_HOUR, minute=0, second=0, microsecond=0, tzinfo=tz)
     window_end = date.replace(hour=MEETING_END_HOUR, minute=0, second=0, microsecond=0, tzinfo=tz)
 
     # Collect all busy periods across all attendees
     all_busy = []
-    for email, periods in busy_periods.items():
+    for _email, periods in busy_periods.items():
         if isinstance(periods, dict) and "error" in periods:
             continue  # Skip calendars we couldn't access
 
@@ -535,9 +531,7 @@ async def google_calendar_check_mutual_availability(
             for slot in free_slots:
                 start_str = slot["start"].strftime("%H:%M")
                 end_str = slot["end"].strftime("%H:%M")
-                lines.append(
-                    f"✅ **{start_str} - {end_str}** ({slot['duration_minutes']} min available)"
-                )
+                lines.append(f"✅ **{start_str} - {end_str}** ({slot['duration_minutes']} min available)")
                 all_slots.append(
                     {
                         "date": check_date.strftime("%Y-%m-%d"),
@@ -706,9 +700,7 @@ async def google_calendar_schedule_meeting(
                 start_dt = start_dt.astimezone(tz)
 
         except ValueError:
-            return (
-                f"❌ Invalid start_time format: {start_time}. Use ISO format or 'YYYY-MM-DD HH:MM'."
-            )
+            return f"❌ Invalid start_time format: {start_time}. Use ISO format or 'YYYY-MM-DD HH:MM'."
 
     # Validate time is within allowed window
     if start_dt.hour < MEETING_START_HOUR or start_dt.hour >= MEETING_END_HOUR:
@@ -879,9 +871,7 @@ async def google_calendar_quick_meeting(
             target_date = now + timedelta(days=1)  # Default to tomorrow
 
         # Build datetime
-        start_time = target_date.replace(
-            hour=hour, minute=minute, second=0, microsecond=0, tzinfo=tz
-        )
+        start_time = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0, tzinfo=tz)
 
         return await google_calendar_schedule_meeting(
             title=title,

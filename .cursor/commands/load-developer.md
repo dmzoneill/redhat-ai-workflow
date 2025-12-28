@@ -14,6 +14,3 @@ Use for:
 - Create/review MRs
 - Check PR feedback
 - Jira hygiene
-
-
-

@@ -54,9 +54,7 @@ class SlackSession:
 
     # High-fidelity spoofing headers - updated to match current Chrome
     USER_AGENT = (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/143.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) " "AppleWebKit/537.36 (KHTML, like Gecko) " "Chrome/143.0.0.0 Safari/537.36"
     )
 
     # Enterprise Slack URLs - configurable via environment
@@ -167,14 +165,11 @@ class SlackSession:
                     self._rate_limit.retry_count += 1
 
                     # Exponential backoff with jitter
-                    backoff = min(
-                        retry_after, self.base_backoff * (2**attempt) + random.uniform(0, 1)
-                    )
+                    backoff = min(retry_after, self.base_backoff * (2**attempt) + random.uniform(0, 1))
                     self._rate_limit.backoff_until = time.time() + backoff
 
                     logger.warning(
-                        f"Rate limited (429). Attempt {attempt + 1}/{self.max_retries}. "
-                        f"Backing off {backoff:.1f}s"
+                        f"Rate limited (429). Attempt {attempt + 1}/{self.max_retries}. " f"Backing off {backoff:.1f}s"
                     )
 
                     await asyncio.sleep(backoff)
@@ -286,9 +281,7 @@ class SlackSession:
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Get replies in a thread."""
-        result = await self._request(
-            "conversations.replies", {"channel": channel_id, "ts": thread_ts, "limit": limit}
-        )
+        result = await self._request("conversations.replies", {"channel": channel_id, "ts": thread_ts, "limit": limit})
         return result.get("messages", [])
 
     # ==================== Message Methods ====================
@@ -332,9 +325,7 @@ class SlackSession:
         emoji: str,
     ) -> dict[str, Any]:
         """Add a reaction to a message."""
-        return await self._request(
-            "reactions.add", {"channel": channel_id, "timestamp": timestamp, "name": emoji}
-        )
+        return await self._request("reactions.add", {"channel": channel_id, "timestamp": timestamp, "name": emoji})
 
     # ==================== DM Methods ====================
 

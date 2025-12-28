@@ -52,4 +52,3 @@ skill_run("sync_branch", '{"repo_name": "backend"}')
 | Stashes changes | Expects clean state |
 | Interactive | More automated |
 | Ongoing work | Ready for merge |
-

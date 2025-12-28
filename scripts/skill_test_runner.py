@@ -490,9 +490,7 @@ async def main():
         for s in skills:
             excluded = "⏭️ YES" if s["excluded"] else ""
             print(f"{s['name']:<25} {s['steps']:<6} {excluded:<10} {s['description'][:40]}")
-        print(
-            f"\nTotal: {len(skills)} skills, {len([s for s in skills if s['excluded']])} excluded"
-        )
+        print(f"\nTotal: {len(skills)} skills, {len([s for s in skills if s['excluded']])} excluded")
         return
 
     await runner.run_all(skill_filter=args.skill)

@@ -1,7 +1,6 @@
 """Tests for Jira utilities."""
 
 import pytest
-
 from common.jira_utils import (
     build_jira_yaml,
     markdown_to_jira,
@@ -295,4 +294,3 @@ class TestNormalizeFieldNameExtended:
         assert normalize_field_name("epic") == "Epic Link"
         assert normalize_field_name("points") == "Story Points"
         assert normalize_field_name("supporting_docs") == "Supporting Documentation"
-

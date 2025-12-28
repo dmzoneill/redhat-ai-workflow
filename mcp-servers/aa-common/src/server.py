@@ -131,9 +131,7 @@ def create_mcp_server(
 
     for tool_name in tools:
         if tool_name not in TOOL_MODULES:
-            logger.warning(
-                f"Unknown tool module: {tool_name}. Available: {list(TOOL_MODULES.keys())}"
-            )
+            logger.warning(f"Unknown tool module: {tool_name}. Available: {list(TOOL_MODULES.keys())}")
             continue
 
         try:
@@ -179,9 +177,7 @@ def create_mcp_server(
                 # Import and register in debug registry
                 import importlib.util
 
-                spec = importlib.util.spec_from_file_location(
-                    f"aa_{tool_name}_tools_debug", tools_file
-                )
+                spec = importlib.util.spec_from_file_location(f"aa_{tool_name}_tools_debug", tools_file)
                 if spec and spec.loader:
                     module = importlib.util.module_from_spec(spec)
                     wrap_all_tools(server, module)

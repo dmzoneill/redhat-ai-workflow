@@ -51,4 +51,3 @@ skill_run("release_aa_backend_prod", '{"commit_sha": "8d23cab...", "release_date
 - [ ] Key features tested
 - [ ] Team notified
 - [ ] Rollback plan ready
-

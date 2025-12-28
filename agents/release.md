@@ -82,4 +82,3 @@ Konflux Build → Snapshot → Stage → Production
 - `release:blockers` - Known blockers
 - `deploy:stage:last` - Last stage deployment
 - `deploy:prod:last` - Last prod deployment
-

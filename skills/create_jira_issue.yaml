@@ -8,9 +8,9 @@ description: |
   - Normalizes field names (snake_case → Title Case)
   - Normalizes issue type case (Story → story)
   - Uses CLI with user's shell environment for auth
-  
+
   Supports: story, bug, task, epic
-  
+
   Example usage:
     skill_run("create_jira_issue", '{
       "summary": "Add pytest-xdist parallelization",
@@ -107,11 +107,11 @@ steps:
     description: "Load config for project defaults"
     compute: |
       from scripts.common.config_loader import load_config
-      
+
       config = load_config()
       jira_config = config.get("jira", {})
       user_config = config.get("user", {})
-      
+
       result = {
         "default_project": jira_config.get("default_project", "AAP"),
         "jira_url": jira_config.get("url", "https://issues.redhat.com"),
@@ -128,33 +128,33 @@ steps:
       import sys
       from pathlib import Path
       from scripts.common.config_loader import load_config
-      
+
       # Add our utilities to path
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
       from common.jira_utils import (
-        normalize_issue_type, 
+        normalize_issue_type,
         markdown_to_jira,
         build_jira_yaml
       )
-      
+
       # Normalize issue type
       issue_type = normalize_issue_type(inputs.get("issue_type", "story"))
-      
+
       # Get project
       project = inputs.get("project") or cfg["default_project"]
-      
+
       # Build labels list
       labels = inputs.get("labels", [])
       if isinstance(labels, str):
         labels = [l.strip() for l in labels.split(",")]
-      
+
       # Build components list
       components = inputs.get("components", [])
       if isinstance(components, str):
         components = [c.strip() for c in components.split(",")]
       if not components:
         components = [cfg["default_component"]]
-      
+
       # Build YAML content
       yaml_content = build_jira_yaml(
         summary=inputs["summary"],
@@ -170,7 +170,7 @@ steps:
         epic_link=inputs.get("epic_link", ""),
         convert_markdown=inputs.get("convert_markdown", True),
       )
-      
+
       result = {
         "issue_type": issue_type,
         "project": project,
@@ -186,27 +186,27 @@ steps:
     description: "Combine all description fields into single description"
     compute: |
       parts = []
-      
+
       # Main description
       if inputs.get("description"):
         parts.append(inputs["description"])
-      
+
       # User story
       if inputs.get("user_story"):
         parts.append(f"\n\n## User Story\n\n{inputs['user_story']}")
-      
+
       # Acceptance criteria
       if inputs.get("acceptance_criteria"):
         parts.append(f"\n\n## Acceptance Criteria\n\n{inputs['acceptance_criteria']}")
-      
+
       # Supporting documentation
       if inputs.get("supporting_documentation"):
         parts.append(f"\n\n## Supporting Documentation\n\n{inputs['supporting_documentation']}")
-      
+
       # Definition of done
       if inputs.get("definition_of_done"):
         parts.append(f"\n\n## Definition of Done\n\n{inputs['definition_of_done']}")
-      
+
       result = "".join(parts)
     output: full_description
 
@@ -231,9 +231,9 @@ steps:
     description: "Parse the create issue result using shared parser"
     compute: |
       from scripts.common.parsers import extract_jira_key
-      
+
       output = str(create_result_raw) if 'create_result_raw' in dir() and create_result_raw else ""
-      
+
       # Check for error
       if output.startswith("❌") or "error" in output.lower():
         result = {
@@ -245,7 +245,7 @@ steps:
       else:
         # Use shared parser to extract issue key
         issue_key = extract_jira_key(output)
-        
+
         result = {
           "success": True,
           "issue_key": issue_key,
@@ -268,22 +268,22 @@ outputs:
   - name: summary
     value: |
       ## {{ "✅" if create_result.success else "❌" }} Jira Issue {{ "Created" if create_result.success else "Failed" }}
-      
+
       {% if create_result.issue_key %}
       **Issue:** [{{ create_result.issue_key }}]({{ create_result.url }})
       **Summary:** {{ normalized.summary }}
       **Type:** {{ normalized.issue_type | capitalize }}
       **Project:** {{ normalized.project }}
-      
+
       {% if normalized.labels %}
       **Labels:** {{ normalized.labels | join(', ') }}
       {% endif %}
       {% if normalized.components %}
       **Components:** {{ normalized.components | join(', ') }}
       {% endif %}
-      
+
       ---
-      
+
       ### Next Steps
       1. [View issue in Jira]({{ create_result.url }})
       2. Add to sprint: `jira_add_to_sprint("{{ create_result.issue_key }}", "Sprint X")`
@@ -299,4 +299,3 @@ outputs:
       project: "{{ normalized.project }}"
       issue_type: "{{ normalized.issue_type }}"
       success: "{{ create_result.success }}"
-

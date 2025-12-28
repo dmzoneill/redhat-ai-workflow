@@ -88,4 +88,3 @@ Next: [next steps]
 - `incident:recent` - Recent incidents for pattern matching
 - `service:*:recovery_steps` - Known recovery procedures
 - `oncall:contacts` - Who to escalate to
-

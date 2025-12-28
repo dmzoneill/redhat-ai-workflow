@@ -98,7 +98,7 @@ class SingleInstance:
             PID_FILE.write_text(str(os.getpid()))
             self._acquired = True
             return True
-        except (IOError, OSError):
+        except OSError:
             # Lock is held by another process
             if self._lock_file:
                 self._lock_file.close()
@@ -132,7 +132,7 @@ class SingleInstance:
                 # Check if process is actually running
                 os.kill(pid, 0)
                 return pid
-        except (ValueError, OSError, ProcessLookupError):
+        except (ValueError, OSError):
             pass
         return None
 
@@ -654,9 +654,9 @@ class TerminalUI:
 
     def print_header(self):
         """Print startup header."""
-        cyan = self.COLORS['cyan']
-        bold = self.COLORS['bold']
-        reset = self.COLORS['reset']
+        cyan = self.COLORS["cyan"]
+        bold = self.COLORS["bold"]
+        reset = self.COLORS["reset"]
         print(
             f"""
 {cyan}╔══════════════════════════════════════════════════════════════════╗
@@ -674,9 +674,7 @@ class TerminalUI:
         hours, remainder = divmod(int(uptime), 3600)
         minutes, seconds = divmod(remainder, 60)
 
-        status = (
-            f"{self.COLORS['dim']}[{hours:02d}:{minutes:02d}:{seconds:02d}]{self.COLORS['reset']} "
-        )
+        status = f"{self.COLORS['dim']}[{hours:02d}:{minutes:02d}:{seconds:02d}]{self.COLORS['reset']} "
         status += f"📊 Polls: {listener_stats.get('polls', 0)} | "
         status += f"📬 Seen: {listener_stats.get('messages_seen', 0)} | "
         status += f"✅ Processed: {self.messages_processed} | "
@@ -703,9 +701,7 @@ class TerminalUI:
         channel_allowed: bool = True,
     ):
         """Print incoming message."""
-        print(
-            f"\n{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}"
-        )
+        print(f"\n{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}")
         print(f"{self.COLORS['bold']}📩 New Message{self.COLORS['reset']}")
 
         # Show channel with permission indicator
@@ -737,9 +733,7 @@ class TerminalUI:
         print(f"   Response: {status}")
         if self.verbose:
             print(f"   {self.COLORS['dim']}{response[:200]}...{self.COLORS['reset']}")
-        print(
-            f"{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}"
-        )
+        print(f"{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}")
 
     def print_error(self, error: str):
         """Print error message."""
@@ -906,9 +900,7 @@ class ResponseGenerator:
             else:
                 conversation_id = f"{message.channel_id}:{message.user_id}"
 
-            response = await self.claude_agent.process_message(
-                message.text, context, conversation_id=conversation_id
-            )
+            response = await self.claude_agent.process_message(message.text, context, conversation_id=conversation_id)
             self.notifier.skill_completed("claude_agent", success=True)
         except Exception as e:
             # Log full error internally - stay completely silent to user
@@ -1070,19 +1062,15 @@ class SlackDaemon:
         alert_channels = self.alert_detector.alert_channels
         if alert_channels:
             print(f"🚨 Alert channels: {len(alert_channels)} (auto-investigate enabled)")
-            for channel_id, info in alert_channels.items():
+            for _channel_id, info in alert_channels.items():
                 env = info.get("environment", "unknown")
                 ns = info.get("namespace", "unknown")
                 auto = "✓" if info.get("auto_investigate") else "✗"
                 print(f"   • {env}: {ns} [{auto}]")
 
         # Show user classification summary
-        safe_count = len(self.user_classifier.safe_user_ids) + len(
-            self.user_classifier.safe_user_names
-        )
-        concerned_count = len(self.user_classifier.concerned_user_ids) + len(
-            self.user_classifier.concerned_user_names
-        )
+        safe_count = len(self.user_classifier.safe_user_ids) + len(self.user_classifier.safe_user_names)
+        concerned_count = len(self.user_classifier.concerned_user_ids) + len(self.user_classifier.concerned_user_names)
         print(f"✅ User lists: {safe_count} safe, {concerned_count} concerned")
 
         # Show response rules
@@ -1241,16 +1229,12 @@ The skill will:
             alert_info = self.alert_detector.get_alert_info(msg.channel_id)
 
             if self.alert_detector.should_auto_investigate(msg.channel_id):
-                logger.info(
-                    f"🚨 Alert detected in {alert_info.get('environment', 'unknown')}: auto-investigating"
-                )
+                logger.info(f"🚨 Alert detected in {alert_info.get('environment', 'unknown')}: auto-investigating")
                 await self._handle_alert_message(msg, alert_info)
                 await self.state_db.mark_message_processed(msg.id)
                 return
             else:
-                logger.debug(
-                    f"Alert detected but auto-investigate disabled for channel {msg.channel_id}"
-                )
+                logger.debug(f"Alert detected but auto-investigate disabled for channel {msg.channel_id}")
 
         # ==================== NORMAL MESSAGE PROCESSING ====================
 
@@ -1300,9 +1284,7 @@ The skill will:
                     "intent": "claude",
                 }
             )
-            print(
-                f"   {self.ui.COLORS['yellow']}⏸️  QUEUED FOR REVIEW (concerned user){self.ui.COLORS['reset']}"
-            )
+            print(f"   {self.ui.COLORS['yellow']}⏸️  QUEUED FOR REVIEW (concerned user){self.ui.COLORS['reset']}")
             print(f"   Pending reviews: {len(self._pending_reviews)}")
 
             # Desktop notification - awaiting approval
@@ -1343,9 +1325,7 @@ The skill will:
 
         # Check channel permissions before sending (already computed above)
         if not can_respond:
-            print(
-                f"   {self.ui.COLORS['yellow']}🚫 NOT RESPONDING: {permission_reason}{self.ui.COLORS['reset']}"
-            )
+            print(f"   {self.ui.COLORS['yellow']}🚫 NOT RESPONDING: {permission_reason}{self.ui.COLORS['reset']}")
             # Desktop notification - ignored
             self.notifier.message_ignored(
                 user_name=msg.user_name,
@@ -1400,9 +1380,7 @@ The skill will:
                 )
                 # Update last_processed_ts to our sent message so we don't respond to ourselves
                 if sent_msg and "ts" in sent_msg:
-                    await self.state_db.set_last_processed_ts(
-                        msg.channel_id, sent_msg["ts"], msg.channel_name
-                    )
+                    await self.state_db.set_last_processed_ts(msg.channel_id, sent_msg["ts"], msg.channel_name)
                 self.ui.messages_responded += 1
                 if self._dbus_handler:
                     self._dbus_handler.messages_responded = self.ui.messages_responded

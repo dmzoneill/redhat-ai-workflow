@@ -4,16 +4,16 @@
 name: investigate_alert
 description: |
   Quick investigation of a firing Prometheus alert.
-  
+
   Steps:
   1. Get current firing alerts
   2. Quick health check (pods, deployments)
   3. Check recent events
   4. Look for known patterns
   5. Escalate to debug_prod if serious
-  
+
   Use this for quick triage. For deep investigation, use debug_prod directly.
-  
+
   Resolves namespaces and paths from config.json.
 version: "2.1"
 
@@ -49,11 +49,11 @@ steps:
     description: "Load namespace configuration"
     compute: |
       from scripts.common.config_loader import load_config
-      
+
       config = load_config()
       ns_config = config.get("namespaces", {})
       ai_config = config.get("app_interface", {})
-      
+
       result = {
           "namespace_stage": ns_config.get("stage", {}).get("main", "tower-analytics-stage"),
           "namespace_prod_main": ns_config.get("production", {}).get("main", "tower-analytics-prod"),
@@ -105,7 +105,7 @@ steps:
     description: "Parse alert data using shared parser"
     compute: |
       from scripts.common.parsers import parse_alertmanager_output
-      
+
       # Use shared parser for alert data
       alerts = parse_alertmanager_output(str(alerts_raw) if alerts_raw else "")
 
@@ -142,29 +142,29 @@ steps:
     compute: |
       import sys
       from pathlib import Path
-      
+
       # Add scripts path for shared parsers
       scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
       if scripts_path not in sys.path:
           sys.path.insert(0, scripts_path)
       from common.parsers import parse_kubectl_pods
-      
+
       # Use shared parser
       pods = parse_kubectl_pods(str(pods_raw) if pods_raw else "")
-      
+
       # Count health states
       running = sum(1 for p in pods if p.get("status") == "Running")
       not_running = sum(1 for p in pods if p.get("status") in ["CrashLoopBackOff", "Error", "Pending", "ImagePullBackOff"])
       high_restarts = sum(1 for p in pods if int(str(p.get("restarts", "0")).split()[0]) > 5)
-      
+
       healthy = not_running == 0 and high_restarts == 0
-      
+
       issues = []
       if not_running > 0:
           issues.append(f"{not_running} pod(s) not running")
       if high_restarts > 0:
           issues.append(f"{high_restarts} pod(s) with high restarts")
-      
+
       result = {
           "running": running,
           "not_running": not_running,
@@ -297,23 +297,23 @@ steps:
       from pathlib import Path
       from scripts.common.config_loader import load_config
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-      
+
       try:
           from scripts.skill_hooks import emit_event
-          
+
           # Emit critical alert if applicable
           if assessment.get("severity") == "critical":
               alert_name = inputs.alert_name or "unknown"
               if alert_info.get("alerts"):
                   alert_name = alert_info["alerts"][0].get("name", alert_name)
-              
+
               asyncio.run(emit_event("alert_critical", {
                   "alert_name": alert_name,
                   "namespace": target.get("namespace", ""),
                   "environment": target.get("environment", ""),
               }))
               result = "critical hook sent"
-          
+
           # Emit escalated if we ran debug_prod
           elif assessment.get("needs_escalation") and debug_result:
               alert_name = inputs.alert_name or "unknown"
@@ -335,12 +335,12 @@ outputs:
   - name: report
     value: |
       ## 🔍 Alert Investigation: {{ target.namespace }}
-      
+
       **Environment:** {{ target.environment }}
       **Severity:** {{ "🔴 CRITICAL" if assessment.severity == "critical" else ("🟠 HIGH" if assessment.severity == "high" else ("🟡 MEDIUM" if assessment.severity == "medium" else "🟢 LOW")) }}
-      
+
       ---
-      
+
       ### 🚨 Alerts ({{ alert_info.count }})
       {% if alert_info.count == 0 %}
       ✅ No alerts currently firing
@@ -350,7 +350,7 @@ outputs:
         {{ alert.message if alert.message else "" }}
       {% endfor %}
       {% endif %}
-      
+
       ### 🏥 Pod Health
       {{ "✅ Healthy" if pod_health.healthy else "⚠️ Issues Detected" }}
       - Running: {{ pod_health.running }} pods
@@ -360,7 +360,7 @@ outputs:
         - {{ issue }}
       {% endfor %}
       {% endif %}
-      
+
       ### ⚠️ Recent Events
       {% if recent_events %}
       {% for event in recent_events[:3] %}
@@ -369,7 +369,7 @@ outputs:
       {% else %}
       No warning events
       {% endif %}
-      
+
       {% if pattern_matches %}
       ### 💡 Known Patterns Matched
       {% for match in pattern_matches %}
@@ -378,20 +378,20 @@ outputs:
         - Fix: {{ match.fix }}
       {% endfor %}
       {% endif %}
-      
+
       ---
-      
+
       {% if debug_result %}
       ### 🔬 Deep Investigation Results
-      
+
       Escalated to `debug_prod`. See detailed results above.
       {% elif assessment.needs_escalation %}
       ### 🔬 Recommended: Deep Investigation
-      
+
       Run: `skill_run("debug_prod", '{"namespace": "{{ 'billing' if 'billing' in target.namespace else 'main' }}"}')`
       {% else %}
       ### ✅ Quick Actions
-      
+
       - View pod logs: `kubectl_logs(namespace="{{ target.namespace }}", pod="<pod-name>")`
       - Get more details: `skill_run("debug_prod", '{"namespace": "{{ 'billing' if 'billing' in target.namespace else 'main' }}"}')`
       - Check Grafana dashboards

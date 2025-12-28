@@ -8,9 +8,9 @@ description: |
   - Jira issues worked on (In Progress, In Review)
   - MRs created/reviewed
   - Issues closed
-  
+
   If 'repo' is not provided, can be resolved from 'repo_name' or 'issue_key' via config.
-  
+
   Perfect for daily standups or status updates.
 version: "1.1"
 
@@ -64,11 +64,11 @@ steps:
     compute: |
       import os
       from scripts.common.config_loader import load_config
-      
+
       repo_path = None
       gitlab_project = "automation-analytics/automation-analytics-backend"
       jira_project = "AAP"
-      
+
       # Load config using shared loader
       config = load_config()
       repos = config.get("repositories", {})
@@ -144,11 +144,11 @@ steps:
         # Remove error prefix if present
         if author.startswith("❌"):
           author = ""
-      
+
       name = str(author_name_raw).strip() if 'author_name_raw' in dir() and author_name_raw else ""
       if name.startswith("❌"):
         name = ""
-      
+
       result = {"email": author, "name": name}
     output: author_info
 
@@ -169,23 +169,23 @@ steps:
     compute: |
       import sys
       from pathlib import Path
-      
+
       # Add scripts path for shared parsers
       scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
       if scripts_path not in sys.path:
           sys.path.insert(0, scripts_path)
       from common.parsers import parse_git_log, extract_jira_key
-      
+
       # Use shared parser for git log
       commits = parse_git_log(commit_log_raw) if commit_log_raw else []
-      
+
       # Extract issue keys from commit messages using shared parser
       issue_keys = set()
       for commit in commits:
         key = extract_jira_key(commit.get("message", ""))
         if key:
           issue_keys.add(key.upper())
-      
+
       result = {
         "commits": commits[:20],
         "count": len(commits),
@@ -354,5 +354,3 @@ outputs:
       jira_project: "{{ resolved_repo.jira_project }}"
       commits: "{{ commit_info.count }}"
       issue_keys: "{{ commit_info.issue_keys }}"
-
-

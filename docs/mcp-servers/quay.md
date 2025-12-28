@@ -81,6 +81,3 @@ quay_list_tags(
 
 - [test_mr_ephemeral](../skills/test_mr_ephemeral.md) - Verifies images before deploy
 - [release_aa_backend_prod](../skills/release_aa_backend_prod.md) - Checks release images
-
-
-

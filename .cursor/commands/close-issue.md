@@ -51,4 +51,3 @@ The auto-generated comment includes:
 - List of commits
 - Files changed summary
 - Merge date
-

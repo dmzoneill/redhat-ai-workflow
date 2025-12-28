@@ -28,7 +28,7 @@ graph LR
     A[Get MR Details] --> B[Remove Draft Status]
     B --> C[Post to Slack]
     C --> D[Update Jira]
-    
+
     style B fill:#10b981,stroke:#059669,color:#fff
     style C fill:#6366f1,stroke:#4f46e5,color:#fff
 ```
@@ -96,4 +96,3 @@ Please review when you have a moment 🙏
 - `gitlab_mr_update` - Remove draft status
 - `slack_post_team` - Post to team channel
 - `jira_set_status` - Update Jira status
-

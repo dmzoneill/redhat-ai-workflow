@@ -82,8 +82,7 @@ def get_app_config(app_name: str = "", billing: bool = False) -> dict:
         "component": component,
         "image_base": app_config.get(
             "image_base",
-            "quay.io/redhat-user-workloads/aap-aa-tenant/"
-            "aap-aa-main/automation-analytics-backend-main",
+            "quay.io/redhat-user-workloads/aap-aa-tenant/" "aap-aa-main/automation-analytics-backend-main",
         ),
         "ref_env": config.get("ref_env", "insights-production"),
     }
@@ -309,18 +308,12 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         Returns:
             New expiration time.
         """
-        success, output = await run_bonfire(
-            ["namespace", "extend", namespace, "--duration", duration]
-        )
+        success, output = await run_bonfire(["namespace", "extend", namespace, "--duration", duration])
 
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to extend namespace:\n\n{output}")]
 
-        return [
-            TextContent(
-                type="text", text=f"✅ Namespace `{namespace}` extended by {duration}\n\n{output}"
-            )
-        ]
+        return [TextContent(type="text", text=f"✅ Namespace `{namespace}` extended by {duration}\n\n{output}")]
 
     @server.tool()
     async def bonfire_namespace_wait(
@@ -383,11 +376,7 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to check dependencies:\n\n{output}")]
 
-        return [
-            TextContent(
-                type="text", text=f"## Apps depending on `{component}`\n\n```\n{output}\n```"
-            )
-        ]
+        return [TextContent(type="text", text=f"## Apps depending on `{component}`\n\n```\n{output}\n```")]
 
     # ==================== DEPLOYMENT ====================
 
@@ -508,19 +497,11 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         success, output = await run_bonfire(args, timeout=timeout + 120)
 
         if not success:
-            return [
-                TextContent(
-                    type="text", text=f"❌ Deploy with reserve failed:\n\n```\n{output}\n```"
-                )
-            ]
+            return [TextContent(type="text", text=f"❌ Deploy with reserve failed:\n\n```\n{output}\n```")]
 
         display_output = output[-5000:] if len(output) > 5000 else output
 
-        return [
-            TextContent(
-                type="text", text=f"## ✅ Reserved & Deployed `{app}`\n\n```\n{display_output}\n```"
-            )
-        ]
+        return [TextContent(type="text", text=f"## ✅ Reserved & Deployed `{app}`\n\n```\n{display_output}\n```")]
 
     # ==================== PROCESS (DRY-RUN) ====================
 
@@ -572,11 +553,7 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if len(output) > 15000:
             output = output[:15000] + "\n\n... (truncated, output too large)"
 
-        return [
-            TextContent(
-                type="text", text=f"## ClowdApp Template: `{app}`\n\n```yaml\n{output}\n```"
-            )
-        ]
+        return [TextContent(type="text", text=f"## ClowdApp Template: `{app}`\n\n```yaml\n{output}\n```")]
 
     # ==================== CLOWDENV ====================
 
@@ -602,11 +579,7 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to deploy ClowdEnv:\n\n{output}")]
 
-        return [
-            TextContent(
-                type="text", text=f"✅ ClowdEnvironment deployed to `{namespace}`\n\n{output}"
-            )
-        ]
+        return [TextContent(type="text", text=f"✅ ClowdEnvironment deployed to `{namespace}`\n\n{output}")]
 
     @server.tool()
     async def bonfire_process_env(namespace: str) -> list[TextContent]:
@@ -629,11 +602,7 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if len(output) > 10000:
             output = output[:10000] + "\n\n... (truncated)"
 
-        return [
-            TextContent(
-                type="text", text=f"## ClowdEnvironment: `{namespace}`\n\n```yaml\n{output}\n```"
-            )
-        ]
+        return [TextContent(type="text", text=f"## ClowdEnvironment: `{namespace}`\n\n```yaml\n{output}\n```")]
 
     # ==================== IQE CJI ====================
 
@@ -677,11 +646,7 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to deploy IQE CJI:\n\n{output}")]
 
-        return [
-            TextContent(
-                type="text", text=f"✅ IQE CJI deployed to `{namespace}`\n\n```\n{output}\n```"
-            )
-        ]
+        return [TextContent(type="text", text=f"✅ IQE CJI deployed to `{namespace}`\n\n```\n{output}\n```")]
 
     @server.tool()
     async def bonfire_process_iqe_cji(
@@ -1187,9 +1152,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
             success, output = await run_bonfire(iqe_args, timeout=660)
 
             if not success:
-                lines.append(
-                    f"⚠️ IQE deployment failed (app is still running):\n```\n{output[-1000:]}\n```"
-                )
+                lines.append(f"⚠️ IQE deployment failed (app is still running):\n```\n{output[-1000:]}\n```")
             else:
                 lines.append("✅ IQE CJI deployed")
 
@@ -1200,16 +1163,11 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
         lines.append(f"**Duration:** {duration}")
         lines.append("")
         lines.append("**Useful commands:**")
+        lines.append(f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`")
         lines.append(
-            f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`"
+            f"- Get logs: `kubectl_logs(pod_name='...', " f"namespace='{namespace}', environment='ephemeral')`"
         )
-        lines.append(
-            f"- Get logs: `kubectl_logs(pod_name='...', "
-            f"namespace='{namespace}', environment='ephemeral')`"
-        )
-        lines.append(
-            f"- Extend time: `bonfire_namespace_extend(namespace='{namespace}', duration='1h')`"
-        )
+        lines.append(f"- Extend time: `bonfire_namespace_extend(namespace='{namespace}', duration='1h')`")
         lines.append(f"- Release: `bonfire_namespace_release(namespace='{namespace}')`")
 
         return [TextContent(type="text", text="\n".join(lines))]
@@ -1257,10 +1215,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
 
             for comp in components:
                 container_image = comp.get("containerImage", "")
-                if (
-                    "automation-analytics" in container_image
-                    or "your-app-backend" in container_image
-                ):
+                if "automation-analytics" in container_image or "your-app-backend" in container_image:
                     if "@sha256:" in container_image:
                         # Extract the 64-char sha256 digest
                         image_digest = container_image.split("@sha256:")[-1]

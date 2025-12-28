@@ -39,23 +39,23 @@ Load the incident agent
 You: Investigate production alerts
 
 Claude: 🚨 Investigating production...
-        
+
         ## Active Alerts (2)
-        
+
         | Alert | Severity | Duration |
         |-------|----------|----------|
         | HighMemoryUsage | critical | 15m |
         | SlowResponses | warning | 8m |
-        
+
         ## Pod Health
-        
+
         | Pod | Status | Memory |
         |-----|--------|--------|
         | analytics-api-xxx | Running | 95% ⚠️ |
-        
+
         ## Likely Cause
         Memory exhaustion in analytics-api
-        
+
         ## Recommended Action
         1. Restart analytics-api pod
         2. Investigate large report query
@@ -67,7 +67,7 @@ Claude: 🚨 Investigating production...
 You: Search for errors in analytics-api
 
 Claude: 📜 Log Search Results:
-        
+
         [10:15:23] ERROR OutOfMemoryError in ReportProcessor
         [10:15:24] WARN Large result set: 1.2M rows
         [10:15:25] ERROR Query timeout, retrying...
@@ -79,7 +79,7 @@ Claude: 📜 Log Search Results:
 You: Query CPU usage for the last hour
 
 Claude: 📊 CPU Usage (Last Hour):
-        
+
         | Pod | Avg | Max | Current |
         |-----|-----|-----|---------|
         | analytics-api | 45% | 72% | 48% |
@@ -128,7 +128,7 @@ flowchart TD
     DEBUG --> FIX
     FIX --> VERIFY[Verify resolution]
     VERIFY --> JIRA[Create/update Jira]
-    
+
     style ALERT fill:#ef4444,stroke:#dc2626,color:#fff
     style FIX fill:#10b981,stroke:#059669,color:#fff
 ```
@@ -148,6 +148,3 @@ Switch to **Developer** agent when you need to:
 - [🔧 DevOps Agent](./devops.md)
 - [investigate_alert Skill](../skills/investigate_alert.md)
 - [debug_prod Skill](../skills/debug_prod.md)
-
-
-

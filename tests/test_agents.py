@@ -1,7 +1,5 @@
 """Tests for agent YAML definitions."""
 
-from pathlib import Path
-
 import pytest
 import yaml
 
@@ -72,4 +70,3 @@ class TestCoreAgents:
             data = yaml.safe_load(content)
             tools = data.get("tools", [])
             assert "k8s" in tools, "DevOps should have k8s tools"
-

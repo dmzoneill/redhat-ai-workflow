@@ -78,6 +78,3 @@ git_log(
 - [start_work](../skills/start_work.md) - Creates branches
 - [sync_branch](../skills/sync_branch.md) - Syncs with main
 - [rebase_pr](../skills/rebase_pr.md) - Rebases branches
-
-
-

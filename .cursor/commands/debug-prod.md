@@ -70,4 +70,3 @@ skill_run("debug_prod", '{"namespace": "tower-analytics-stage"}')
 | ~30 seconds | ~2-5 minutes |
 | Firing alerts focus | Full system view |
 | Surface level | Logs, metrics, events |
-

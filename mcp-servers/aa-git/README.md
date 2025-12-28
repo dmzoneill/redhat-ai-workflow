@@ -52,4 +52,3 @@ aa-git
 ## Authentication
 
 Uses system Git configuration (`~/.gitconfig`, SSH keys, credential helpers).
-

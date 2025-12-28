@@ -35,26 +35,26 @@ skill_run("review_all_prs", '{"dry_run": true}')
 flowchart TD
     START([Start]) --> LIST[List Open MRs]
     LIST --> LOOP[For Each MR]
-    
+
     LOOP --> MINE{My MR?}
-    
+
     MINE -->|Yes| CONFLICT{Has Conflicts?}
     CONFLICT -->|Yes| REBASE{Auto-rebase?}
     REBASE -->|Yes| DO_REBASE[Call rebase_pr]
     REBASE -->|No| SHOW_CONFLICT[Show Conflict Notice]
     CONFLICT -->|No| STATUS[Show Status]
-    
+
     MINE -->|No| REVIEWED{My Previous Review?}
-    
+
     REVIEWED -->|No| FULL[Run Full Review]
     REVIEWED -->|Yes| RESPONSE{Author Responded?}
-    
+
     RESPONSE -->|No| SKIP[Skip - Waiting]
     RESPONSE -->|Yes| RESOLVED{Issues Resolved?}
-    
+
     RESOLVED -->|Yes| APPROVE[Approve MR]
     RESOLVED -->|No| FOLLOWUP[Post Follow-up]
-    
+
     FULL --> NEXT
     DO_REBASE --> NEXT
     SHOW_CONFLICT --> NEXT
@@ -62,13 +62,13 @@ flowchart TD
     SKIP --> NEXT
     APPROVE --> NEXT
     FOLLOWUP --> NEXT
-    
+
     NEXT{More MRs?}
     NEXT -->|Yes| LOOP
     NEXT -->|No| SUMMARY[Generate Summary]
-    
+
     SUMMARY --> DONE([📋 Batch Complete])
-    
+
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style APPROVE fill:#10b981,stroke:#059669,color:#fff
@@ -107,45 +107,45 @@ flowchart TD
 You: Review all open PRs
 
 Claude: 📋 Reviewing 6 open MRs...
-        
+
         ## PRs by Others (4)
-        
+
         ### !445: AAP-61200 - feat(api): New endpoint
         **Author:** jsmith | **Previous Review:** Yes
         **Status:** Author addressed feedback ✅
         **Action:** Approved
-        
+
         ### !447: AAP-61205 - fix(db): Handle nulls
         **Author:** mwilson | **Previous Review:** Yes
         **Status:** Waiting for author response
         **Action:** Skipped
-        
+
         ### !449: AAP-61210 - docs: Update guide
         **Author:** bthomas | **Previous Review:** No
         **Action:** Full review...
         ✅ Approved - No issues found
-        
+
         ### !451: AAP-61215 - test: Add coverage
         **Author:** sjones | **Previous Review:** No
         **Action:** Full review...
         📝 Posted feedback (minor suggestions)
-        
+
         ────────────────────────────────
-        
+
         ## Your MRs (2)
-        
+
         ### !456: AAP-12345 - feat(api): Validation
         **Status:** ⚠️ Has merge conflicts
         **Action:** Rebasing...
         ✅ Rebased successfully
-        
+
         ### !458: AAP-12348 - fix(billing): Edge case
         **Status:** Awaiting review (no feedback yet)
-        
+
         ────────────────────────────────
-        
+
         ## Summary
-        
+
         | Action | Count |
         |--------|-------|
         | Approved | 2 |
@@ -159,6 +159,3 @@ Claude: 📋 Reviewing 6 open MRs...
 - [review_pr](./review_pr.md) - Review single MR
 - [check_my_prs](./check_my_prs.md) - Focus on your PRs
 - [rebase_pr](./rebase_pr.md) - Rebase conflicts
-
-
-

@@ -1,7 +1,5 @@
 """Tests for common parsers module."""
 
-import pytest
-
 from common.parsers import (
     analyze_mr_status,
     analyze_review_status,
@@ -109,7 +107,7 @@ class TestParseNamespaces:
         """Should parse namespace output."""
         output = """ephemeral-abc123  reserved  2h
 ephemeral-def456  active    1h"""
-        result = parse_namespaces(output)
+        _ = parse_namespaces(output)
         # Result depends on exact format
 
 
@@ -157,7 +155,7 @@ class TestParseGitLog:
     def test_parse_commit(self):
         """Should parse git log output."""
         output = "abc1234 - AAP-12345 - feat: add feature"
-        result = parse_git_log(output)
+        _ = parse_git_log(output)
         # Verify structure
 
 
@@ -280,7 +278,7 @@ class TestExtractBranchFromMr:
     def test_extract_branch(self):
         """Should extract branch name from MR details."""
         details = "Source branch: feature/aap-12345-new-feature"
-        result = extract_branch_from_mr(details)
+        _ = extract_branch_from_mr(details)
         # Depends on format
 
 
@@ -422,6 +420,7 @@ class TestParseMrComments:
     def test_json_format(self):
         """Should parse JSON format comments."""
         import json
+
         comments = [{"author": "user1", "text": "LGTM", "date": "2024-01-01"}]
         result = parse_mr_comments(json.dumps(comments))
         assert len(result) == 1
@@ -814,8 +813,8 @@ Status: In Progress"""
         assert len(result) >= 0  # Parser may or may not match this format
 
 
-class TestParseErrorLogs:
-    """Tests for parse_error_logs function."""
+class TestParseErrorLogsExtended:
+    """Extended tests for parse_error_logs function."""
 
     def test_no_errors(self):
         """No errors should return empty list."""
@@ -832,8 +831,8 @@ Traceback (most recent call last)
         assert isinstance(result, list)
 
 
-class TestParseStaleBranches:
-    """Tests for parse_stale_branches function."""
+class TestParseStaleBranchesExtended:
+    """Extended tests for parse_stale_branches function."""
 
     def test_empty_input(self):
         """Empty input should return empty list."""
@@ -955,4 +954,3 @@ class TestParseAlertmanagerOutputExtended:
         result = parse_alertmanager_output(output)
         # Should return list of dicts
         assert isinstance(result, list)
-

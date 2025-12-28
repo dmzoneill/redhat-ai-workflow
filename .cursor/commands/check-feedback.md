@@ -7,7 +7,7 @@ Check your open Merge Requests for comments awaiting your response.
 Run the check_mr_feedback skill to scan your open MRs for:
 - Human reviewer comments (filters out bot/CI comments)
 - Meeting requests
-- Code change requests  
+- Code change requests
 - Questions requiring answers
 
 ```
@@ -41,6 +41,3 @@ First, check Google Calendar setup:
 ```
 google_calendar_status()
 ```
-
-
-

@@ -37,6 +37,3 @@ Summary of all reviewed MRs:
 - ✅ Approved: X MRs
 - 📝 Feedback posted: Y MRs
 - ⏭️ Skipped (yours): Z MRs
-
-
-

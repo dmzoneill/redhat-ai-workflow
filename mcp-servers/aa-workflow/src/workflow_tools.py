@@ -36,9 +36,7 @@ run_cmd = run_cmd_full
 REPOS_CONFIG = load_config()
 repos_data = REPOS_CONFIG.get("repositories", {})
 if isinstance(repos_data, dict):
-    REPO_PATHS = {
-        name: info.get("path", "") for name, info in repos_data.items() if info.get("path")
-    }
+    REPO_PATHS = {name: info.get("path", "") for name, info in repos_data.items() if info.get("path")}
 else:
     REPO_PATHS = {}
 
@@ -280,9 +278,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
         lines.append("✅ Fetched" if success else f"⚠️ {stderr[:50]}")
 
         # 2. Check for existing branch
-        success, stdout, stderr = await run_cmd(
-            ["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path
-        )
+        success, stdout, stderr = await run_cmd(["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path)
         if stdout.strip():
             lines.append("\n### Existing branch found:")
             lines.append(f"```\n{stdout.strip()}\n```")
@@ -330,9 +326,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
         lines = [f"## Preparing MR for `{issue_key}`", ""]
 
         # 1. Get current branch
-        success, stdout, stderr = await run_cmd(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path
-        )
+        success, stdout, stderr = await run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
         if not success:
             return [TextContent(type="text", text="❌ Failed to get branch")]
         current_branch = stdout.strip()
@@ -340,9 +334,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         # 2. Push branch
         lines.append("\n### 1. Pushing branch...")
-        success, stdout, stderr = await run_cmd(
-            ["git", "push", "-u", "origin", current_branch], cwd=path
-        )
+        success, stdout, stderr = await run_cmd(["git", "push", "-u", "origin", current_branch], cwd=path)
         if success:
             lines.append("✅ Pushed")
         else:
@@ -454,9 +446,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         # Get current branch
         if not branch:
-            success, stdout, _ = await run_cmd(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path
-            )
+            success, stdout, _ = await run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
             branch = stdout.strip() if success else "unknown"
         lines.append(f"**Branch:** `{branch}`")
 
@@ -499,9 +489,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
         lines = [f"## Handling Review: `{issue_key}`", ""]
 
         # Find and switch to branch
-        success, stdout, _ = await run_cmd(
-            ["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path
-        )
+        success, stdout, _ = await run_cmd(["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path)
         if stdout.strip():
             branch = stdout.strip().split("\n")[0].strip().replace("* ", "")
             lines.append(f"**Branch:** `{branch}`")

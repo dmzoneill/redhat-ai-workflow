@@ -36,9 +36,7 @@ def _get_quay_config() -> dict:
 
 _quay_cfg = _get_quay_config()
 QUAY_API_URL = _quay_cfg.get("api_url") or os.getenv("QUAY_API_URL", "https://quay.io/api/v1")
-QUAY_DEFAULT_NAMESPACE = _quay_cfg.get("default_namespace") or os.getenv(
-    "QUAY_NAMESPACE", "redhat-user-workloads"
-)
+QUAY_DEFAULT_NAMESPACE = _quay_cfg.get("default_namespace") or os.getenv("QUAY_NAMESPACE", "redhat-user-workloads")
 QUAY_REGISTRY = "quay.io"
 
 
@@ -426,9 +424,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         if not digest.startswith("sha256:"):
             digest = f"sha256:{digest}"
 
-        success, data = await quay_api_request(
-            f"/repository/{full_path}/manifest/{digest}/security"
-        )
+        success, data = await quay_api_request(f"/repository/{full_path}/manifest/{digest}/security")
 
         if not success:
             return [
@@ -448,9 +444,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         elif status == "scanning":
             return [TextContent(type="text", text="🔍 Security scan in progress...")]
         elif status == "unsupported":
-            return [
-                TextContent(type="text", text="⚠️ Security scanning not supported for this image")
-            ]
+            return [TextContent(type="text", text="⚠️ Security scanning not supported for this image")]
 
         vulns = data.get("data", {}).get("Layer", {}).get("Features", [])
 

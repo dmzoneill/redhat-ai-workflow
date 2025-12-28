@@ -95,7 +95,7 @@ Bot: 🦊 *!456*: AAP-12345 - feat: Add caching
 User: @bot help
 
 Bot: 👋 Here's what I can help with:
-     
+
      📋 *Jira* - "AAP-12345" or "what's AAP-12345"
      🦊 *MRs* - "MR 123" or "check my PRs"
      🚀 *Actions* - "start AAP-12345" or "create MR"
@@ -136,6 +136,3 @@ make slack-daemon-bg
 
 - [investigate_slack_alert Skill](../skills/investigate_slack_alert.md)
 - [slack_daemon_control Skill](../skills/slack_daemon_control.md)
-
-
-

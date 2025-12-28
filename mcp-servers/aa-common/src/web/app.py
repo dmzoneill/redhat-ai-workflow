@@ -71,8 +71,7 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
             categories[prefix] = categories.get(prefix, 0) + 1
 
         categories_html = "\n".join(
-            f"<li><strong>{cat}</strong>: {count} tools</li>"
-            for cat, count in sorted(categories.items())
+            f"<li><strong>{cat}</strong>: {count} tools</li>" for cat, count in sorted(categories.items())
         )
 
         recent_activity = (

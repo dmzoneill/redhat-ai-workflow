@@ -5,7 +5,7 @@ Run comprehensive smoke tests on ALL MCP tools by discovering and testing each m
 
 ## Instructions
 
-1. **Discover all modules** using `tool_list()` 
+1. **Discover all modules** using `tool_list()`
 2. **Authenticate to required clusters** using `kube_login()`
 3. **Test one tool from each module** using `tool_exec()`
 4. **Report results** in a summary table

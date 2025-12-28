@@ -9,7 +9,7 @@ graph TB
     subgraph IDE["🖥️ Your IDE (Cursor)"]
         YOU[👤 You] --> |natural language| CLAUDE[🤖 Claude AI]
     end
-    
+
     subgraph CORE["🧠 AI Workflow Core"]
         CLAUDE --> |MCP Protocol| MCP[📡 MCP Server]
         MCP --> AGENTS[🎭 Agents]
@@ -17,7 +17,7 @@ graph TB
         MCP --> MEMORY[💾 Memory]
         MCP --> TOOLS[🔧 Tools]
     end
-    
+
     subgraph EXTERNAL["🌐 External Services"]
         TOOLS --> JIRA[📋 Jira]
         TOOLS --> GITLAB[🦊 GitLab]
@@ -25,7 +25,7 @@ graph TB
         TOOLS --> GIT[📂 Git]
         TOOLS --> MORE[...]
     end
-    
+
     style CLAUDE fill:#6366f1,stroke:#4f46e5,color:#fff
     style MCP fill:#10b981,stroke:#059669,color:#fff
 ```
@@ -79,7 +79,7 @@ sequenceDiagram
     participant MCP as MCP Server
     participant Loader as AgentLoader
     participant Cursor
-    
+
     User->>Claude: "Load devops agent"
     Claude->>MCP: agent_load("devops")
     MCP->>Loader: switch_agent("devops")
@@ -169,4 +169,3 @@ Central configuration via `config.json`:
 - [Workflow Module Architecture](./workflow-modules.md) - aa-workflow internal structure
 - [Skills Reference](../skills/README.md) - All available skills
 - [README](../../README.md) - Getting started
-

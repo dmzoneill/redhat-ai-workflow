@@ -15,40 +15,40 @@ This skill is triggered automatically by the Slack daemon when it detects an ale
 ```mermaid
 flowchart TD
     START([🚨 Alert Message]) --> PARSE[Parse Alert Details]
-    
+
     PARSE --> EXTRACT[Extract Alert Info]
     EXTRACT --> ENV[Determine Environment]
     ENV --> NS[Determine Namespace]
-    
+
     NS --> ACK[Acknowledge in Slack]
     ACK --> INVESTIGATE[Run Investigation]
-    
+
     INVESTIGATE --> PODS[Check Pod Status]
     PODS --> LOGS[Get Error Logs]
     LOGS --> EVENTS[Check K8s Events]
-    
+
     EVENTS --> BILLING{Billing Alert?}
-    
+
     BILLING -->|Yes| BILLING_FLOW[Special Billing Flow]
     BILLING -->|No| NORMAL[Normal Flow]
-    
+
     BILLING_FLOW --> SEARCH_BILLING[Search Existing Billing Issues]
     SEARCH_BILLING --> FOUND_BILLING{Found?}
     FOUND_BILLING -->|Yes| LINK_BILLING[Link Existing Issue]
     FOUND_BILLING -->|No| CREATE_BILLING[Create New Billing Issue]
-    
+
     NORMAL --> SEARCH[Search Existing Issues]
     SEARCH --> FOUND{Found?}
     FOUND -->|Yes| LINK[Link Existing Issue]
     FOUND -->|No| CREATE[Create New Issue]
-    
+
     LINK --> RESPOND
     CREATE --> RESPOND
     LINK_BILLING --> RESPOND
     CREATE_BILLING --> RESPOND
-    
+
     RESPOND[Respond in Slack Thread] --> DONE([✅ Alert Handled])
-    
+
     style START fill:#ef4444,stroke:#dc2626,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style ACK fill:#3b82f6,stroke:#2563eb,color:#fff
@@ -118,7 +118,7 @@ In `config.json`:
         "environment": "stage"
       },
       "C07V3QQCKPV": {
-        "name": "automation-analytics-alerts", 
+        "name": "automation-analytics-alerts",
         "environment": "production"
       }
     }
@@ -130,6 +130,3 @@ In `config.json`:
 
 - [investigate_alert](./investigate_alert.md) - Manual alert triage
 - [debug_prod](./debug_prod.md) - Deep investigation
-
-
-

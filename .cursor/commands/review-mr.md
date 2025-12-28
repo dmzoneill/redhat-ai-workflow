@@ -31,6 +31,3 @@ skill_run("review_pr", '{"issue_key": "AAP-60420"}')
 # By GitLab URL
 skill_run("review_pr", '{"url": "https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/1450"}')
 ```
-
-
-

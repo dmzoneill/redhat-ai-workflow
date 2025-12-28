@@ -57,4 +57,3 @@ def setup_env():
     # Restore original environment
     os.environ.clear()
     os.environ.update(original_env)
-

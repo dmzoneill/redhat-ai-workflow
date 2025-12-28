@@ -4,9 +4,9 @@
 name: rebase_pr
 description: |
   Rebase a PR branch onto main to clean up merge commits.
-  
+
   If 'repo_path' is not provided, resolves from issue_key or repo_name via config.
-  
+
   Steps:
   1. Check for merge commits on the PR
   2. Checkout the branch locally
@@ -14,7 +14,7 @@ description: |
   4. Rebase onto main
   5. If conflicts: guide user through resolution
   6. Force push rebased branch
-  
+
   Handles merge conflicts by pausing and showing what needs to be fixed.
 
 version: "1.1"
@@ -24,34 +24,34 @@ inputs:
     type: integer
     required: false
     description: "GitLab MR ID - will find the branch"
-  
+
   - name: issue_key
     type: string
     required: false
     description: "Jira issue key - will find the branch and resolve repo"
-  
+
   - name: branch
     type: string
     required: false
     description: "Branch name directly (if known)"
-  
+
   - name: repo_path
     type: string
     required: false
     default: ""
     description: "Path to repository - if not provided, resolved from issue_key or repo_name"
-  
+
   - name: repo_name
     type: string
     required: false
     description: "Repository name from config (e.g., 'automation-analytics-backend')"
-  
+
   - name: base_branch
     type: string
     required: false
     default: ""
     description: "Branch to rebase onto (default: repo's default_branch from config)"
-  
+
   - name: force_push
     type: boolean
     required: false
@@ -62,17 +62,17 @@ inputs:
 
 steps:
   # ==================== RESOLVE REPOSITORY ====================
-  
+
   - name: resolve_repo
     description: "Determine which repo and GitLab project to use"
     compute: |
       import os
       from scripts.common.config_loader import load_config
-      
+
       repo_path = None
       gitlab_project = None
       default_branch = "main"
-      
+
       # Load config using shared loader
       config = load_config()
       repos = config.get("repositories", {})
@@ -126,7 +126,7 @@ steps:
     output: resolved_repo
 
   # ==================== RESOLVE BRANCH NAME ====================
-  
+
   - name: validate_input
     description: "Ensure we have a way to identify the branch"
     compute: |
@@ -159,27 +159,27 @@ steps:
     description: "Extract branch name from MR or issue key using shared parsers"
     compute: |
       from scripts.common.parsers import extract_branch_from_mr, parse_git_branches
-      
+
       branch = inputs.get('branch')
-      
+
       if not branch and mr_details:
         # Extract from MR details using shared parser
         branch = extract_branch_from_mr(mr_details)
-      
+
       if not branch and inputs.get('issue_key'):
         # Find branch by issue key using shared parser
         matching = parse_git_branches(branches_raw or "", issue_key=inputs.issue_key)
         if matching:
           branch = matching[0]
-      
+
       if not branch:
         raise ValueError("Could not determine branch name. Please provide 'branch' input directly.")
-      
+
       result = branch
     output: target_branch
 
   # ==================== CHECK FOR MERGE COMMITS ====================
-  
+
   - name: fetch_all
     description: "Fetch latest from all remotes"
     tool: git_fetch
@@ -214,23 +214,23 @@ steps:
     description: "Parse merge commit info using shared parser"
     compute: |
       from scripts.common.parsers import parse_git_log
-      
+
       # Parse merge commits using shared parser
       merge_output = str(merge_commits_raw) if merge_commits_raw else ""
-      
+
       if "No commits found" not in merge_output and merge_output.strip():
         commits = parse_git_log(merge_output)
         merge_commits = [c.get('sha', '') or c.get('message', '')[:10] for c in commits]
       else:
         merge_commits = []
-      
+
       # Parse total count
       total_str = str(total_commits_raw).strip() if total_commits_raw else "0"
       try:
         total_commits = int(total_str)
       except:
         total_commits = 0
-      
+
       result = {
         'has_merge_commits': len(merge_commits) > 0,
         'merge_count': len(merge_commits),
@@ -240,7 +240,7 @@ steps:
     output: merge_check
 
   # ==================== CHECKOUT AND PREPARE (using MCP tools) ====================
-  
+
   - name: check_status
     description: "Check for uncommitted changes"
     tool: git_status
@@ -312,7 +312,7 @@ steps:
     output: pull_result
 
   # ==================== PERFORM REBASE ====================
-  
+
   - name: update_base
     description: "Fetch base branch from remote"
     tool: git_fetch
@@ -335,9 +335,9 @@ steps:
     description: "Parse rebase output into structured result using shared parser"
     compute: |
       from scripts.common.parsers import extract_conflict_files
-      
+
       rebase_output = str(rebase_raw) if rebase_raw else ""
-      
+
       if "Successfully rebased" in rebase_output or "✅" in rebase_output:
         rebase_status = {
           'success': True,
@@ -359,89 +359,89 @@ steps:
           'conflicts': False,
           'message': f'Rebase failed: {rebase_output[:200]}'
         }
-      
+
       result = rebase_status
     output: rebase_result
 
   # ==================== HANDLE CONFLICTS (AUTO-RESOLVE IF POSSIBLE) ====================
-  
+
   - name: analyze_and_resolve_conflicts
     description: "Analyze conflicts and auto-resolve obvious ones"
     condition: "rebase_result.get('conflicts')"
     compute: |
       import os
       from scripts.common.parsers import parse_conflict_markers, find_full_conflict_marker
-      
+
       conflict_files = rebase_result.get('conflict_files', [])
       repo = resolved_repo["path"]
-      
+
       auto_resolved = []
       needs_human = []
-      
+
       for filepath in conflict_files:
         full_path = os.path.join(repo, filepath)
-        
+
         try:
           with open(full_path, 'r') as f:
             content = f.read()
-          
+
           # Find all conflict blocks using shared parser
           conflict_blocks = parse_conflict_markers(content)
           conflicts = [(c['ours'], c['theirs']) for c in conflict_blocks]
-          
+
           if not conflicts:
             # No conflicts found, might be resolved already
             auto_resolved.append({'file': filepath, 'action': 'no_conflicts_found'})
             continue
-          
+
           can_auto_resolve = True
           resolution_strategy = None
-          
+
           for ours, theirs in conflicts:
             ours_stripped = ours.strip()
             theirs_stripped = theirs.strip()
-            
+
             # Case 1: Identical (shouldn't happen but handle it)
             if ours_stripped == theirs_stripped:
               resolution_strategy = 'identical'
               continue
-            
+
             # Case 2: Ours is empty - accept theirs (new addition)
             if not ours_stripped and theirs_stripped:
               resolution_strategy = 'accept_theirs'
               continue
-            
+
             # Case 3: Theirs is empty - keep ours (they deleted, we modified)
             if ours_stripped and not theirs_stripped:
               resolution_strategy = 'accept_ours'
               continue
-            
+
             # Case 4: Simple whitespace/formatting difference
             if ours_stripped.replace(' ', '').replace('\t', '') == theirs_stripped.replace(' ', '').replace('\t', ''):
               resolution_strategy = 'whitespace_only'
               continue
-            
+
             # Case 5: One side just adds lines (non-overlapping)
             ours_lines = set(ours_stripped.split('\n'))
             theirs_lines = set(theirs_stripped.split('\n'))
             if ours_lines.issubset(theirs_lines) or theirs_lines.issubset(ours_lines):
               resolution_strategy = 'subset_merge'
               continue
-            
+
             # Complex conflict - needs human
             can_auto_resolve = False
             break
-          
+
           if can_auto_resolve and resolution_strategy:
             # Apply auto-resolution
             new_content = content
-            
+
             for ours, theirs in conflicts:
               # Find and get the full marker including commit ref using shared parser
               full_marker = find_full_conflict_marker(content, ours, theirs)
-              
+
               if full_marker:
-                
+
                 if resolution_strategy in ['accept_theirs', 'subset_merge']:
                   # Keep theirs
                   new_content = new_content.replace(full_marker, theirs)
@@ -451,11 +451,11 @@ steps:
                 elif resolution_strategy in ['identical', 'whitespace_only']:
                   # Keep theirs (more recent)
                   new_content = new_content.replace(full_marker, theirs)
-            
+
             # Write resolved file
             with open(full_path, 'w') as f:
               f.write(new_content)
-            
+
             # Track file for staging (will be staged in next step)
             auto_resolved.append({
               'file': filepath,
@@ -470,14 +470,14 @@ steps:
               'conflicts': conflict_count,
               'reason': 'Complex changes on both sides'
             })
-            
+
         except Exception as e:
           needs_human.append({
             'file': filepath,
             'conflicts': '?',
             'reason': f'Error reading file: {str(e)[:50]}'
           })
-      
+
       result = {
         'auto_resolved': auto_resolved,
         'needs_human': needs_human,
@@ -524,7 +524,7 @@ steps:
     compute: |
       continue_text = str(continue_raw) if 'continue_raw' in dir() and continue_raw else ""
       new_status = str(new_status_raw) if 'new_status_raw' in dir() and new_status_raw else ""
-      
+
       if 'success' in continue_text.lower() or ('conflict' not in continue_text.lower() and 'error' not in continue_text.lower()):
         continue_status = {
           'success': True,
@@ -533,7 +533,7 @@ steps:
       else:
         # Check for new conflicts
         new_conflicts = [l[3:] for l in new_status.split('\n') if 'both modified' in l.lower() or l.startswith('UU')]
-        
+
         if new_conflicts:
           continue_status = {
             'success': False,
@@ -545,7 +545,7 @@ steps:
             'success': False,
             'message': f'Rebase continue failed: {continue_text[:100]}'
           }
-      
+
       result = continue_status
     output: continue_result
 
@@ -566,7 +566,7 @@ steps:
     output: final_rebase_result
 
   # ==================== FORCE PUSH (if successful) ====================
-  
+
   - name: check_branch_protection
     description: "Dry-run to check if force push is allowed"
     condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push"
@@ -578,13 +578,13 @@ steps:
       dry_run: true
     output: dry_run_result
     on_error: continue
-  
+
   - name: analyze_protection
     description: "Check dry-run result for protection issues"
     condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push"
     compute: |
       output_text = str(dry_run_result).lower() if 'dry_run_result' in dir() else ""
-      
+
       if 'protected branch' in output_text:
         protection_check = {'allowed': False, 'reason': f"Branch '{target_branch}' is protected. Cannot force push."}
       elif 'permission denied' in output_text or '403' in output_text:
@@ -595,10 +595,10 @@ steps:
         protection_check = {'allowed': False, 'reason': output_text[:200]}
       else:
         protection_check = {'allowed': True, 'reason': 'OK'}
-      
+
       result = protection_check
     output: protection_check
-  
+
   - name: force_push
     description: "Force push rebased branch"
     condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push and (not protection_check or protection_check.get('allowed', True))"
@@ -610,7 +610,7 @@ steps:
     output: push_result
 
   # ==================== BUILD SUMMARY ====================
-  
+
   - name: build_summary
     description: "Build result summary"
     compute: |
@@ -619,34 +619,34 @@ steps:
       lines.append(f"**Base:** `{resolved_repo['default_branch']}`")
       lines.append(f"**Repository:** `{resolved_repo['path']}`")
       lines.append("")
-      
+
       # Merge commits info
       if merge_check.get('has_merge_commits'):
         lines.append(f"### ⚠️ Merge Commits Found: {merge_check['merge_count']}")
         for mc in merge_check.get('merge_commits', [])[:3]:
           lines.append(f"- `{mc}`")
         lines.append("")
-      
+
       # Use final_rebase_result if available (after auto-resolution)
       effective_result = final_rebase_result if final_rebase_result else rebase_result
-      
+
       # Show auto-resolution results
       if conflict_resolution:
         auto_resolved = conflict_resolution.get('auto_resolved', [])
         needs_human = conflict_resolution.get('needs_human', [])
-        
+
         if auto_resolved:
           lines.append(f"### 🤖 Auto-Resolved: {len(auto_resolved)} file(s)")
           for ar in auto_resolved:
             lines.append(f"- ✅ `{ar['file']}` ({ar.get('strategy', 'resolved')})")
           lines.append("")
-        
+
         if needs_human:
           lines.append(f"### 🙋 Needs Your Help: {len(needs_human)} file(s)")
           for nh in needs_human:
             lines.append(f"- ⚠️ `{nh['file']}` ({nh['conflicts']} conflict(s)) - {nh.get('reason', '')}")
           lines.append("")
-      
+
       # Final rebase result
       if effective_result.get('success'):
         lines.append("### ✅ Rebase Successful!")
@@ -668,7 +668,7 @@ steps:
       else:
         lines.append("### ❌ Rebase Failed")
         lines.append(effective_result.get('message', 'Unknown error'))
-      
+
       result = '\n'.join(lines)
     output: summary
 
@@ -680,12 +680,12 @@ steps:
       import sys
       from pathlib import Path
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-      
+
       try:
           from scripts.skill_hooks import emit_event
-          
+
           effective_result = final_rebase_result if final_rebase_result else rebase_result
-          
+
           if effective_result.get('success'):
               asyncio.run(emit_event("rebase_completed", {
                   "mr_id": str(inputs.get('mr_id', '')),
@@ -714,14 +714,14 @@ outputs:
   - name: summary
     value: |
       {{ summary }}
-      
+
       ---
-      
+
       {% if conflict_resolution and conflict_resolution.get('needs_human') %}
       ## 🛠️ Resolve Remaining Conflicts
-      
+
       I auto-resolved what I could, but some conflicts need your judgment:
-      
+
       **Step 1:** Open each file marked with ⚠️ above and resolve the conflicts
       Look for markers like:
       ```
@@ -731,79 +731,78 @@ outputs:
       incoming changes
       >>>>>>> commit
       ```
-      
+
       **Step 2:** After resolving each file, stage it:
       ```bash
       git add <filename>
       ```
-      
+
       **Step 3:** Continue the rebase:
       ```bash
       git rebase --continue
       ```
-      
+
       **Step 4:** If more conflicts, repeat steps 1-3
-      
+
       **Step 5:** When complete, force push:
       ```bash
       git push --force-with-lease origin {{ target_branch }}
       ```
-      
+
       **To abort:** `git rebase --abort`
-      
+
       ---
-      
+
       When you're done, tell me and I can verify and push.
-      
+
       {% elif (final_rebase_result and final_rebase_result.get('success') and not push_result) or (rebase_result.get('success') and not push_result) %}
       ## 🚀 Ready to Push
-      
+
       {% if conflict_resolution and conflict_resolution.get('auto_resolved') %}
       All conflicts were auto-resolved! 🤖
       {% endif %}
-      
+
       The rebase completed successfully! Would you like me to force push?
-      
+
       Say **"yes, push it"** or run:
       ```
       skill_run("rebase_pr", '{"branch": "{{ target_branch }}", "force_push": true}')
       ```
-      
+
       Or manually:
       ```bash
       git push --force-with-lease origin {{ target_branch }}
       ```
-      
+
       {% elif push_result %}
       ## ✅ Complete!
-      
+
       {% if conflict_resolution and conflict_resolution.get('auto_resolved') %}
       Conflicts were auto-resolved and the branch has been pushed! 🤖
       {% else %}
       The branch has been rebased and pushed.
       {% endif %}
-      
+
       The MR should now show a clean history.
-      
+
       {% elif rebase_result.get('conflicts') and not conflict_resolution %}
       ## 🛠️ Resolve Conflicts
-      
+
       **Step 1:** Open each conflicted file and resolve the conflicts
       **Step 2:** `git add <filename>`
       **Step 3:** `git rebase --continue`
       **Step 4:** Repeat if more conflicts
       **Step 5:** `git push --force-with-lease origin {{ target_branch }}`
-      
+
       {% else %}
       ## ❌ Action Required
-      
+
       Please check the error above and try again.
       {% endif %}
-  
+
   - name: context
     value:
       branch: "{{ target_branch }}"
       rebase_success: "{{ rebase_result.get('success', False) }}"
       has_conflicts: "{{ rebase_result.get('conflicts', False) }}"
       pushed: "{{ push_result is defined }}"
-

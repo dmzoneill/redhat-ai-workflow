@@ -49,6 +49,3 @@ AAP-61214 - feat(billing): Add invoice generation
 - [ ] Unit tests pass
 - [ ] Manual testing done
 ```
-
-
-

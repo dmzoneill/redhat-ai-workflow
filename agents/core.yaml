@@ -10,11 +10,11 @@ tools:
   # Version Control & Issues (developer, all agents)
   - git           # 15 - Git operations
   - jira          # 24 - Issue tracking
-  
+
   # Kubernetes & Monitoring (devops, incident)
-  - k8s           # 26 - Kubernetes operations  
+  - k8s           # 26 - Kubernetes operations
   - prometheus    # 13 - Alerts and metrics
-  
+
   # Orchestration (required - skills, agents, memory)
   - workflow      # 28 - session_start, agent_load, skill_run, memory_*, vpn_connect, kube_login
 
@@ -37,4 +37,3 @@ tools:
 # ❌ Bonfire (ephemeral) - use --agent devops
 # ❌ Alertmanager (silences) - use --agent incident
 # ❌ Quay (images) - use --agent release
-

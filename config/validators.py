@@ -8,8 +8,6 @@ Import and use in compute blocks:
 import os
 import shutil
 import subprocess
-from pathlib import Path
-from typing import Optional
 
 
 def validate_git_repo(repo_path: str = ".") -> dict:

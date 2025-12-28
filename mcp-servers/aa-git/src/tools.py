@@ -101,9 +101,7 @@ def register_tools(server: FastMCP) -> int:
                 if len(untracked) > 10:
                     lines.append(f"  - ... and {len(untracked) - 10} more")
 
-        success, output = await run_git(
-            ["rev-list", "--left-right", "--count", "@{u}...HEAD"], cwd=path
-        )
+        success, output = await run_git(["rev-list", "--left-right", "--count", "@{u}...HEAD"], cwd=path)
         if success and output.strip():
             parts = output.strip().split()
             if len(parts) == 2:
@@ -438,9 +436,7 @@ def register_tools(server: FastMCP) -> int:
     tool_count += 1
 
     @server.tool()
-    async def git_branch_create(
-        repo: str, branch_name: str, base: str = "", checkout: bool = True
-    ) -> str:
+    async def git_branch_create(repo: str, branch_name: str, base: str = "", checkout: bool = True) -> str:
         """Create a new branch."""
         path = resolve_repo_path(repo)
 
@@ -581,9 +577,7 @@ def register_tools(server: FastMCP) -> int:
 
         _, hash_ = await run_git(["rev-parse", "--short", "HEAD"], cwd=path)
 
-        return (
-            f"✅ Committed as `{hash_.strip()}`\n\n**Message:** `{formatted_message}`\n\n{output}"
-        )
+        return f"✅ Committed as `{hash_.strip()}`\n\n**Message:** `{formatted_message}`\n\n{output}"
 
     tool_count += 1
 
@@ -853,12 +847,7 @@ def register_tools(server: FastMCP) -> int:
         if status_ok:
             for line in status_output.split("\n"):
                 # UU = both modified, AA = both added, DU = deleted by us
-                if (
-                    line.startswith("UU")
-                    or line.startswith("AA")
-                    or line.startswith("DU")
-                    or line.startswith("UD")
-                ):
+                if line.startswith("UU") or line.startswith("AA") or line.startswith("DU") or line.startswith("UD"):
                     conflict_files.append(line[3:].strip())
 
         if conflict_files:
@@ -1148,9 +1137,7 @@ def register_tools(server: FastMCP) -> int:
         success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
 
         if success:
-            return (
-                f"✅ make {target} completed\n\n{output[-2000:] if len(output) > 2000 else output}"
-            )
+            return f"✅ make {target} completed\n\n{output[-2000:] if len(output) > 2000 else output}"
         return f"❌ make {target} failed:\n{output[-2000:] if len(output) > 2000 else output}"
 
     tool_count += 1

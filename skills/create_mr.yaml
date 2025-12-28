@@ -12,7 +12,7 @@ description: |
   - Optionally runs jira_hygiene first
   - Creates MR with proper description
   - Links to Jira and updates status
-  
+
   Uses MCP tools: git_status, git_fetch, git_log, git_push, gitlab_mr_list,
                   gitlab_mr_create, jira_view_issue, jira_add_comment, jira_set_status
 version: "2.2"
@@ -74,12 +74,12 @@ steps:
     compute: |
       import os
       from scripts.common.config_loader import load_config
-      
+
       repo_path = None
       gitlab_project = None
       default_branch = "main"
       repo_config = {}
-      
+
       # Load config using shared loader
       config = load_config()
       repos = config.get("repositories", {})
@@ -165,32 +165,32 @@ steps:
     compute: |
       import os
       from scripts.common.parsers import extract_current_branch
-      
+
       repo = resolved_repo["path"]
       status_output = str(git_status_raw) if git_status_raw else ""
-      
+
       # Check for rebase/merge in progress
       git_dir = os.path.join(repo, ".git")
       if os.path.exists(os.path.join(git_dir, "rebase-merge")):
           raise ValueError("Rebase in progress. Run 'git rebase --continue' or '--abort'")
       if os.path.exists(os.path.join(git_dir, "MERGE_HEAD")):
           raise ValueError("Merge in progress. Run 'git merge --continue' or '--abort'")
-      
+
       # Check for uncommitted changes
       if "Changes not staged" in status_output or "Changes to be committed" in status_output:
           raise ValueError("Uncommitted changes detected. Please commit or stash before creating MR.")
-      
+
       # Extract current branch using shared parser
       branch = extract_current_branch(status_output)
-      
+
       if not branch or branch == "HEAD":
           raise ValueError("Detached HEAD state. Checkout a branch first.")
-      
+
       if branch in ["main", "master"]:
           raise ValueError("Cannot create MR from main/master. Create a feature branch first.")
-      
+
       issue_key = inputs.issue_key.upper()
-      
+
       result = {
           "name": branch,
           "has_issue_key": issue_key in branch.upper(),
@@ -223,12 +223,12 @@ steps:
     description: "Check commit messages follow AAP-XXXXX convention using shared parser"
     compute: |
       from scripts.common.parsers import extract_jira_key
-      
+
       issue_key = inputs.issue_key.upper()
-      
+
       commits = []
       bad_commits = []
-      
+
       if commit_log_raw:
         for line in str(commit_log_raw).split('\n'):
           if line.strip():
@@ -236,16 +236,16 @@ steps:
             # Use shared parser to check for Jira key
             if not extract_jira_key(line):
               bad_commits.append(line)
-      
+
       if not commits:
           raise ValueError(
               f"No commits found. Make some commits first."
           )
-      
+
       warnings = []
       if bad_commits:
           warnings.append(f"⚠️ {len(bad_commits)} commit(s) missing AAP-XXXXX prefix")
-      
+
       result = {
           "count": len(commits),
           "commits": commits[:10],
@@ -281,9 +281,9 @@ steps:
     compute: |
       merge_text = str(merge_test_raw) if 'merge_test_raw' in dir() and merge_test_raw else ""
       target = resolved_repo.get("default_branch", "main")
-      
+
       has_conflicts = "conflict" in merge_text.lower() or "❌" in merge_text
-      
+
       if has_conflicts:
         result = {
           "mergeable": False,
@@ -306,10 +306,10 @@ steps:
     description: "Parse MRs to find duplicate using shared parser"
     compute: |
       from scripts.common.parsers import extract_mr_id_from_text
-      
+
       branch = current_branch["name"]
       existing_mrs_text = str(existing_mrs_raw) if existing_mrs_raw else ""
-      
+
       duplicate = None
       for line in existing_mrs_text.split("\n"):
           if branch.lower() in line.lower():
@@ -317,7 +317,7 @@ steps:
               if mr_id:
                   duplicate = {"iid": mr_id, "line": line.strip()[:80]}
                   break
-      
+
       if duplicate:
           result = {
               "exists": True,
@@ -335,13 +335,13 @@ steps:
     condition: "inputs.run_linting"
     compute: |
       import shutil
-      
+
       missing = []
       if not shutil.which("black"):
           missing.append("black")
       if not shutil.which("flake8"):
           missing.append("flake8")
-      
+
       result = {
           "available": not missing,
           "missing": missing,
@@ -365,7 +365,7 @@ steps:
     condition: "inputs.run_linting"
     compute: |
       output = str(black_raw) if black_raw else ""
-      
+
       if "✅" in output:
         if "check passed" in output.lower():
           black_result = {"passed": True, "message": "Black check passed"}
@@ -373,7 +373,7 @@ steps:
           black_result = {"passed": True, "fixed": True, "message": "Black applied"}
       else:
         black_result = {"passed": False, "message": "Files need formatting. Run 'black .'"}
-      
+
       result = black_result
     output: black_result
 
@@ -395,14 +395,14 @@ steps:
     condition: "inputs.run_linting"
     compute: |
       raw = str(flake8_raw) if 'flake8_raw' in dir() and flake8_raw else ""
-      
+
       if 'passed' in raw.lower() or 'no issues' in raw.lower() or not raw:
         flake8_result = {"passed": True, "message": "Flake8 passed", "issues": []}
       else:
         # Extract issues from output
         issues = [l.strip() for l in raw.split('\n') if ':' in l and l.strip()][:10]
         flake8_result = {"passed": False, "message": f"{len(issues)} flake8 issue(s)", "issues": issues}
-      
+
       result = flake8_result
     output: flake8_result
 
@@ -442,12 +442,12 @@ steps:
     description: "Build MR description with Jira link"
     compute: |
       import textwrap
-      
+
       jira_url = resolved_repo.get("jira_url", "https://issues.redhat.com")
       issue_key = inputs.issue_key.upper()
       issue_text = str(issue) if issue else ""
       summary_match = issue_text[:100] if issue_text else "No description"
-      
+
       description = textwrap.dedent(f"""
           ## Summary
           {summary_match}
@@ -468,7 +468,7 @@ steps:
           - [ ] Documentation updated if needed
           - [ ] No secrets or sensitive data
       """).strip()
-      
+
       result = description
     output: mr_description
 
@@ -514,11 +514,11 @@ steps:
     args:
       text: |
         🔀 *New MR Ready for Review*
-        
+
         📋 *Jira:* <{{ resolved_repo.jira_url }}/browse/{{ inputs.issue_key }}|{{ inputs.issue_key }}> - {{ issue.summary[:60] if issue else 'Update' }}
         🔗 *MR:* <{{ mr.web_url }}|!{{ mr.iid }}>
         📁 *Repo:* {{ resolved_repo.gitlab_project.split('/')[-1] if resolved_repo.gitlab_project else 'unknown' }}
-        
+
         Please review when you have a moment 🙏
     output: slack_notification
     on_error: continue
@@ -531,7 +531,7 @@ steps:
       import sys
       from pathlib import Path
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-      
+
       try:
           from scripts.skill_hooks import emit_event
           asyncio.run(emit_event("mr_created", {
@@ -549,18 +549,18 @@ outputs:
   - name: summary
     value: |
       ## {{ "✅" if mr else "❌" }} Merge Request {{ "Created" if mr else "Failed" }}
-      
+
       {% if mr %}
       **MR:** {{ mr.title }}
       **URL:** {{ mr.web_url }}
       **Status:** {{ "Draft" if inputs.draft else "Ready for Review" }}
       **Branch:** `{{ current_branch.name }}` → `{{ resolved_repo.default_branch }}`
       {% endif %}
-      
+
       ---
-      
+
       ### Pre-flight Checks
-      
+
       | Check | Status |
       |-------|--------|
       | Commits | {{ commit_validation.count }} commit(s) |
@@ -570,13 +570,13 @@ outputs:
       | Black | {{ "✅ Passed" if black_result and black_result.passed else "⚠️ " + (black_result.message if black_result else "Skipped") }} |
       | Flake8 | {{ "✅ Passed" if flake8_result and flake8_result.passed else "⚠️ " + (flake8_result.message if flake8_result else "Skipped") }} |
       {% endif %}
-      
+
       {% if not merge_check.mergeable %}
       ---
       ### ⚠️ Action Required
       {{ merge_check.message }}
       {% endif %}
-      
+
       {% if mr %}
       ---
       ### Next Steps

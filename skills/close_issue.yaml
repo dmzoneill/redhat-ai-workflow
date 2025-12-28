@@ -5,7 +5,7 @@ name: close_issue
 description: |
   Close a Jira issue by transitioning it to Done.
   Adds a comment summarizing the work from branch commits.
-  
+
   Resolves Jira statuses from config.json.
 version: "1.1"
 
@@ -14,13 +14,13 @@ inputs:
     type: string
     required: true
     description: "Jira issue key (e.g., AAP-12345)"
-  
+
   - name: repo
     type: string
     required: false
     default: "."
     description: "Repository path to look for branch/commits"
-  
+
   - name: add_comment
     type: boolean
     required: false
@@ -36,10 +36,10 @@ steps:
     description: "Load Jira status configuration"
     compute: |
       from scripts.common.config_loader import load_config
-      
+
       config = load_config()
       jira_statuses = config.get("jira", {}).get("statuses", {})
-      
+
       result = {
           "done_status": jira_statuses.get("done", "Done"),
           "pending_release_status": jira_statuses.get("pending_release", "Pending Release"),
@@ -60,7 +60,7 @@ steps:
   - name: check_status
     compute: |
       status = issue.get('status', '').lower()
-      
+
       # Already done?
       if status == 'done':
         result = {"already_done": True, "message": f"Issue {inputs.issue_key} is already Done."}
@@ -86,12 +86,12 @@ steps:
     condition: "{{ not status_check.already_done }}"
     compute: |
       from scripts.common.parsers import parse_git_branches
-      
+
       issue_key = inputs.issue_key.upper()
-      
+
       # Use shared parser with issue key filter
       branches = parse_git_branches(branches_raw or "", issue_key=issue_key)
-      
+
       result = {
         "found": len(branches) > 0,
         "branches": branches,
@@ -125,7 +125,7 @@ steps:
                 "sha": parts[0],
                 "message": parts[1]
               })
-      
+
       result = {
         "branch": branch_info['primary'],
         "base": "main",
@@ -151,7 +151,7 @@ steps:
     condition: "{{ not status_check.already_done and mr_list }}"
     compute: |
       mrs = mr_list if isinstance(mr_list, list) else []
-      
+
       relevant_mr = None
       for mr in mrs:
         if isinstance(mr, dict):
@@ -165,7 +165,7 @@ steps:
               "url": mr.get('web_url')
             }
             break
-      
+
       result = relevant_mr
     output: mr_info
     on_error: continue
@@ -179,17 +179,17 @@ steps:
       lines = []
       lines.append("h3. ✅ Issue Completed")
       lines.append("")
-      
+
       # Branch info
       if branch_info.get('found'):
         lines.append(f"*Branch:* {{code}}{branch_info['primary']}{{code}}")
-      
+
       # MR info
       if mr_info:
         status_emoji = "✅" if mr_info.get('merged') else "🔄"
         lines.append(f"*Merge Request:* [{mr_info['title']}|{mr_info['url']}] {status_emoji}")
         lines.append("")
-      
+
       # Commits
       if commit_info and commit_info.get('commits'):
         lines.append("h4. Commits")
@@ -198,18 +198,18 @@ steps:
           sha_short = c['sha'][:7]
           msg = c['message'][:60].replace('|', '\\|')
           lines.append(f"|{{monospace}}{sha_short}{{monospace}}|{msg}|")
-        
+
         if commit_info['count'] > 10:
           lines.append(f"_... and {commit_info['count'] - 10} more commits_")
       elif not branch_info.get('found'):
         lines.append("_No branch found for this issue._")
       else:
         lines.append("_No commits found on branch._")
-      
+
       lines.append("")
       lines.append("----")
       lines.append("_Closed via workflow automation_")
-      
+
       result = '\n'.join(lines)
     output: closing_comment
 
@@ -242,21 +242,21 @@ steps:
     condition: "{{ not status_check.already_done }}"
     compute: |
       from scripts.common.parsers import find_transition_name
-      
+
       target_status = cfg["done_status"]
       transitions_text = str(available_transitions) if available_transitions else ""
-      
+
       # Look for Done transition in available transitions
       done_available = target_status.lower() in transitions_text.lower()
       transition_name = target_status
-      
+
       # Use shared parser to find exact transition name
       if not done_available:
           found_name = find_transition_name(transitions_text)
           if found_name:
               done_available = True
               transition_name = found_name
-      
+
       if not done_available and available_transitions:
           # List what's available
           result = {
@@ -307,12 +307,12 @@ steps:
       from pathlib import Path
       from scripts.common.config_loader import load_config
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-      
+
       try:
           from scripts.skill_hooks import emit_event
-          
+
           commit_count = commit_info.get("count", 0) if commit_info else 0
-          
+
           asyncio.run(emit_event("issue_closed", {
               "issue_key": inputs.issue_key,
               "commit_count": str(commit_count),
@@ -330,31 +330,31 @@ outputs:
       {{ status_check.message }}
       {% else %}
       ## ✅ Issue Closed: {{ inputs.issue_key }}
-      
+
       **Status:** {{ final_issue.status if final_issue else 'Done' }}
-      
+
       {% if branch_info.found %}
       **Branch:** `{{ branch_info.primary }}`
       {% endif %}
-      
+
       {% if commit_info and commit_info.count > 0 %}
       **Commits:** {{ commit_info.count }}
       {% for c in commit_info.commits[:5] %}
       - `{{ c.sha[:7] }}` {{ c.message[:50] }}
       {% endfor %}
       {% endif %}
-      
+
       {% if mr_info %}
       **MR:** [{{ mr_info.title }}]({{ mr_info.url }}) - {{ 'Merged ✅' if mr_info.merged else mr_info.state }}
       {% endif %}
-      
+
       {% if inputs.add_comment %}
       📝 Closing comment added to Jira
       {% endif %}
-      
+
       🔗 [View Issue]({{ cfg.jira.url }}/browse/{{ inputs.issue_key }})
       {% endif %}
-  
+
   - name: context
     value:
       issue_key: "{{ inputs.issue_key }}"
@@ -362,4 +362,3 @@ outputs:
       branch: "{{ branch_info.primary if branch_info else None }}"
       commits: "{{ commit_info.count if commit_info else 0 }}"
       mr_merged: "{{ mr_info.merged if mr_info else False }}"
-

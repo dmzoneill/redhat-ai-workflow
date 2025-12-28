@@ -4,14 +4,14 @@
 name: check_my_prs
 description: |
   Check your open MRs for feedback from reviewers.
-  
+
   Shows:
   - MRs with unaddressed feedback (need your response)
   - MRs awaiting review (no feedback yet)
   - MRs ready to merge (approved)
-  
+
   Helps you respond to reviewer comments.
-  
+
   Resolves project from repo_name or issue_key if not explicitly provided.
 
 version: "1.1"
@@ -22,24 +22,24 @@ inputs:
     required: false
     default: ""
     description: "GitLab project path (resolved from repo_name if not provided)"
-  
+
   - name: repo_name
     type: string
     required: false
     description: "Repository name from config (e.g., 'automation-analytics-backend')"
-  
+
   - name: show_approved
     type: boolean
     required: false
     default: true
     description: "Include approved MRs in output"
-  
+
   - name: auto_merge
     type: boolean
     required: false
     default: false
     description: "Automatically merge approved MRs (asks first if false)"
-  
+
   - name: auto_rebase
     type: boolean
     required: false
@@ -50,15 +50,15 @@ inputs:
 
 steps:
   # ==================== RESOLVE PROJECT ====================
-  
+
   - name: resolve_project
     description: "Determine which GitLab project to check"
     compute: |
       import os
       from scripts.common.config_loader import load_config
-      
+
       gitlab_project = None
-      
+
       # Load config using shared loader
       config = load_config()
       repos = config.get("repositories", {})
@@ -83,19 +83,19 @@ steps:
       result = {"gitlab_project": gitlab_project}
     output: resolved
   # ==================== GET CURRENT USER ====================
-  
+
   - name: get_username
     description: "Get current system username"
     compute: |
       import getpass
       import os
-      
+
       username = os.getenv('USER') or os.getenv('USERNAME') or getpass.getuser()
       result = username
     output: my_username
 
   # ==================== GET MY MRs ====================
-  
+
   - name: list_my_mrs
     description: "Fetch my open MRs from GitLab"
     tool: gitlab_mr_list
@@ -109,13 +109,13 @@ steps:
     description: "Parse MR list using shared parser"
     compute: |
       from scripts.common.parsers import parse_mr_list
-      
+
       # Use shared parser - already handles deduplication and multi-format parsing
       result = parse_mr_list(my_mrs_raw or "")
     output: my_mrs
 
   # ==================== CHECK EACH MR FOR FEEDBACK ====================
-  
+
   - name: check_first_mr
     description: "Get details of first MR"
     condition: "len(my_mrs) > 0"
@@ -131,12 +131,12 @@ steps:
     condition: "len(my_mrs) > 0 and first_mr_details"
     compute: |
       from scripts.common.parsers import analyze_mr_status
-      
+
       mr = my_mrs[0]
-      
+
       # Use shared MR status analyzer
       analysis = analyze_mr_status(first_mr_details or "", my_username)
-      
+
       # Combine MR info with analysis
       result = {
         'iid': mr.get('iid'),
@@ -146,7 +146,7 @@ steps:
     output: first_mr_status
 
   # ==================== GET COMMENTS IF NEEDS RESPONSE ====================
-  
+
   - name: get_feedback_details
     description: "Get detailed comments if MR needs response"
     condition: "first_mr_status and first_mr_status.get('status') == 'needs_response'"
@@ -158,7 +158,7 @@ steps:
     on_error: continue
 
   # ==================== AUTO-REBASE IF NEEDED ====================
-  
+
   - name: auto_rebase_mr
     description: "Automatically rebase MR with conflicts"
     condition: "inputs.auto_rebase and first_mr_status and first_mr_status.get('needs_rebase')"
@@ -170,7 +170,7 @@ steps:
     on_error: continue
 
   # ==================== BUILD SUMMARY ====================
-  
+
   - name: build_summary
     description: "Compile status of all my MRs"
     compute: |
@@ -179,7 +179,7 @@ steps:
       lines.append(f"**Project:** {resolved['gitlab_project']}")
       lines.append(f"**Open MRs:** {len(my_mrs)}")
       lines.append("")
-      
+
       if not my_mrs:
         lines.append("*No open MRs found.*")
         result = '\n'.join(lines)
@@ -190,7 +190,7 @@ steps:
         approved = []
         failed = []
         needs_rebase = []
-        
+
         if first_mr_status:
           status = first_mr_status.get('status', 'unknown')
           if status == 'needs_response':
@@ -203,11 +203,11 @@ steps:
             needs_rebase.append(first_mr_status)
           else:
             awaiting.append(first_mr_status)
-        
+
         # Add remaining MRs as "awaiting" (not analyzed in detail)
         for mr in my_mrs[1:]:
           awaiting.append({'iid': mr.get('iid'), 'title': mr.get('title', ''), 'status': 'not_checked'})
-        
+
         # Show MRs needing response first (most important)
         if needs_response:
           lines.append("### 🔴 Needs Your Response")
@@ -220,7 +220,7 @@ steps:
             if mr.get('unresolved'):
               lines.append(f"  - ⚠️ Has unresolved discussions")
             lines.append("")
-        
+
         if needs_rebase:
           lines.append("### 🔄 Needs Rebase")
           for mr in needs_rebase:
@@ -231,30 +231,30 @@ steps:
               lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ⚠️ Has merge conflicts")
               lines.append(f"  - Run: `skill_run(\"rebase_pr\", '{{\"mr_id\": {mr[\"iid\"]}}}')`")
           lines.append("")
-        
+
         if failed:
           lines.append("### 🔴 Pipeline Failed")
           for mr in failed:
             lines.append(f"- !{mr['iid']}: {mr.get('title', '')} - Fix CI before review")
           lines.append("")
-        
+
         if awaiting:
           lines.append("### 🟡 Awaiting Review")
           for mr in awaiting:
             lines.append(f"- !{mr['iid']}: {mr.get('title', '')}")
           lines.append("")
-        
+
         if approved and inputs.show_approved:
           lines.append("### 🟢 Approved - Ready to Merge")
           for mr in approved:
             lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ✅")
           lines.append("")
-        
+
         result = '\n'.join(lines)
     output: summary
 
   # ==================== MERGE APPROVED MRs ====================
-  
+
   - name: merge_approved
     description: "Merge the first approved MR if auto_merge is enabled"
     condition: "inputs.auto_merge and first_mr_status and first_mr_status.get('status') == 'approved'"
@@ -279,50 +279,50 @@ outputs:
   - name: summary
     value: |
       {{ final_summary if final_summary else summary }}
-      
+
       ---
-      
+
       ## Quick Actions
-      
+
       {% if merge_result %}
       ✅ **MR !{{ first_mr_status.get('iid') }} has been merged!**
-      
+
       {% elif first_mr_status and first_mr_status.get('status') == 'needs_response' %}
       **To respond to feedback on !{{ first_mr_status.get('iid') }}:**
-      
+
       1. View the comments:
          ```
          gitlab_mr_view(project="{{ resolved.gitlab_project }}", mr_id={{ first_mr_status.get('iid') }})
          ```
-      
+
       2. After making changes, push and comment:
          ```
          gitlab_mr_comment(project="{{ resolved.gitlab_project }}", mr_id={{ first_mr_status.get('iid') }}, comment="Addressed feedback: ...")
          ```
       {% elif first_mr_status and first_mr_status.get('status') == 'approved' %}
       🎉 **!{{ first_mr_status.get('iid') }} is approved!**
-      
+
       Would you like me to merge it? Just say:
       - **"Yes, merge it"** or **"merge !{{ first_mr_status.get('iid') }}"**
-      
+
       Or run:
       ```
       skill_run("check_my_prs", '{"auto_merge": true}')
       ```
       {% elif first_mr_status and first_mr_status.get('status') == 'needs_rebase' %}
       🔄 **!{{ first_mr_status.get('iid') }} has merge conflicts!**
-      
+
       {% if rebase_result %}
       ✅ Rebase completed! Check the results above.
       {% else %}
       Would you like me to rebase it? Just say:
       - **"Yes, rebase it"** or **"rebase !{{ first_mr_status.get('iid') }}"**
-      
+
       Or run:
       ```
       skill_run("rebase_pr", '{"mr_id": {{ first_mr_status.get('iid') }}}')
       ```
-      
+
       Or auto-rebase when checking PRs:
       ```
       skill_run("check_my_prs", '{"auto_rebase": true}')
@@ -332,10 +332,9 @@ outputs:
       - View MR details: `gitlab_mr_view(project="...", mr_id=<id>)`
       - Check all MRs again: `skill_run("check_my_prs", '{}')`
       {% endif %}
-  
+
   - name: context
     value:
       username: "{{ my_username }}"
       total_mrs: "{{ len(my_mrs) }}"
       first_mr_status: "{{ first_mr_status.get('status') if first_mr_status else 'none' }}"
-

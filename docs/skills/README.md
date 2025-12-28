@@ -40,7 +40,7 @@ graph LR
     MR --> REVIEW["review_pr"]
     REVIEW --> EVENING["🌙 Evening"]
     EVENING --> BEER["beer"]
-    
+
     style COFFEE fill:#6366f1,stroke:#4f46e5,color:#fff
     style BEER fill:#f59e0b,stroke:#d97706,color:#fff
 ```
@@ -147,5 +147,3 @@ outputs:
   - name: summary
     value: "{{ step2_result | json }}"
 ```
-
-
