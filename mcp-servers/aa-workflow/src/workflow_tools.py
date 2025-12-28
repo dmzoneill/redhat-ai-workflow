@@ -581,4 +581,3 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
     tool_count += 1
 
     return tool_count
-

@@ -3239,37 +3239,17 @@ Be constructive, specific, and kind. Suggest alternatives, don't just criticize.
         16 + 2 + 2 + 5 + 1 + 2 + 2
     )  # Original + skills + agents + memory + bootstrap + dynamic + infrastructure (vpn, kube)
 
-    # Register tools from extracted modules
-    # These modules contain tools that were extracted from this file for better organization
-    try:
-        from .memory_tools import register_memory_tools
-        from .agent_tools import register_agent_tools
-        from .session_tools import register_session_tools, register_prompts
-        from .resources import register_resources
-        from .skill_engine import register_skill_tools
-        from .infra_tools import register_infra_tools
-        from .lint_tools import register_lint_tools
-        from .meta_tools import register_meta_tools
-        from .workflow_tools import register_workflow_tools
-
-        # Note: Some modules may have overlapping tools with the inline ones above.
-        # The extracted modules are the canonical source going forward.
-        # TODO: Remove duplicate inline implementations after verification
-
-        # Register each module's tools
-        # tool_count += register_memory_tools(server)  # Inline version exists
-        # tool_count += register_agent_tools(server)  # Inline version exists
-        # tool_count += register_session_tools(server)  # Inline version exists
-        # tool_count += register_prompts(server)  # Inline version exists
-        # tool_count += register_resources(server, load_config)  # Inline version exists
-        # tool_count += register_skill_tools(server, create_github_issue)  # Inline version exists
-        # tool_count += register_infra_tools(server)  # Inline version exists
-        # tool_count += register_lint_tools(server)  # Inline version exists
-        # tool_count += register_meta_tools(server, create_github_issue)  # Inline version exists
-        # tool_count += register_workflow_tools(server)  # Inline version exists
-
-        logger.debug("Extracted modules imported successfully (not yet wired in)")
-    except ImportError as e:
-        logger.warning(f"Could not import extracted modules: {e}")
+    # Note: Tools have been extracted to separate modules for better organization.
+    # The inline implementations above are still the active ones.
+    # TODO: Remove duplicate inline implementations and use the extracted modules:
+    #   - memory_tools.py (5 tools)
+    #   - agent_tools.py (2 tools)
+    #   - session_tools.py (1 tool + 3 prompts)
+    #   - resources.py (5 resources)
+    #   - skill_engine.py (2 tools)
+    #   - infra_tools.py (2 tools)
+    #   - lint_tools.py (7 tools)
+    #   - meta_tools.py (2 tools)
+    #   - workflow_tools.py (9 tools)
 
     return tool_count
