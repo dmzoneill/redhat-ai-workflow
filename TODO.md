@@ -10,11 +10,12 @@
 | Metric | Value | Status |
 |--------|-------|--------|
 | **Flake8 Issues** | 0 | ✅ |
-| **Test Suite** | 213 tests | ✅ |
+| **Test Suite** | 244 tests | ✅ |
 | **Tests Passing** | 100% | ✅ |
 | **Bandit High Severity** | 0 | ✅ |
 | **Line Length** | 120 chars | ✅ |
-| **Mypy Errors** | 36 | ⚠️ |
+| **Mypy (scripts/common)** | 0 | ✅ |
+| **Overall Coverage** | 80.30% | ✅ |
 
 ---
 
@@ -24,8 +25,8 @@
 |------|-------|-------|
 | MCP Servers | 62 | 22,438 |
 | Scripts | 12 | 7,645 |
-| Tests | 9 | 985 |
-| **Total** | **83** | **31,068** |
+| Tests | 9 | 1,200+ |
+| **Total** | **83** | **31,283** |
 
 ---
 
@@ -33,7 +34,7 @@
 
 ### Summary
 ```
-scripts/common/         73.55% (649 statements, 138 missed)
+scripts/common/         80.30% (664 statements, 103 missed)
 ```
 
 ### By Module
@@ -41,17 +42,17 @@ scripts/common/         73.55% (649 statements, 138 missed)
 |------|----------|-------|
 | `scripts/common/__init__.py` | 100% | Empty |
 | `scripts/common/config_loader.py` | 84.62% | ✅ Tests added |
-| `scripts/common/jira_utils.py` | 48.85% | Needs more tests |
-| `scripts/common/parsers.py` | 76.61% | ✅ Tests added |
+| `scripts/common/jira_utils.py` | 97.73% | ✅ Excellent coverage |
+| `scripts/common/parsers.py` | 76.65% | ✅ Tests added |
 
-### Test Modules (213 tests)
+### Test Modules (244 tests)
 | Module | Tests |
 |--------|-------|
 | test_parsers.py | 97 |
+| test_jira_utils.py | 47 |
 | test_config_loader.py | 27 |
 | test_mcp_integration.py | 18 |
 | test_agent_loader.py | 16 |
-| test_jira_utils.py | 16 |
 | test_utils.py | 15 |
 | test_skills.py | 9 |
 | test_agents.py | 8 |
@@ -72,30 +73,6 @@ scripts/common/         73.55% (649 statements, 138 missed)
 - `B307` eval - Used in skill engine for conditions
 - `B102` exec - Used in skill engine for compute blocks
 - `B108` /tmp - Daemon lock files
-
----
-
-## ⚠️ Mypy Type Errors
-
-### scripts/common/ (14 errors)
-| File | Issue | Priority |
-|------|-------|----------|
-| `jira_utils.py` | Missing yaml stubs | Low |
-| `jira_utils.py` | Type mismatches in create_jira_issue | Medium |
-| `config_loader.py` | "Returning Any" errors | Low |
-| `parsers.py` | "Returning Any" error | Low |
-
-### scripts/claude_agent.py (22 errors)
-| Issue | Priority |
-|-------|----------|
-| Cannot assign None to imported types | Medium |
-| Anthropic client type mismatches | Medium |
-| Message/tool type incompatibility | Medium |
-
-### Root Causes
-1. **Missing type stubs**: `types-PyYAML` not installed
-2. **Optional imports**: Setting imported classes to `None` on ImportError
-3. **Anthropic SDK types**: SDK has strict typing, our dicts don't match
 
 ---
 
@@ -126,11 +103,17 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 
 **New modular code: 3,177 lines**
 
-### Testing (2025-12-27)
-- [x] Test suite created - 213 tests
+### Testing (2025-12-28)
+- [x] Test suite created - 244 tests
 - [x] pytest configuration
-- [x] Coverage reporting
+- [x] Coverage reporting - 80.30%
 - [x] All tests passing
+
+### Type Hints (2025-12-28)
+- [x] Fix mypy errors in scripts/common/ (0 errors)
+- [x] Fix mypy errors in claude_agent.py (0 errors)
+- [x] Install types-PyYAML for yaml stubs
+- [x] Increase jira_utils.py coverage (48% → 97.73%)
 
 ### Documentation (2025-12-28)
 - [x] Module documentation (docs/architecture/workflow-modules.md)
@@ -140,17 +123,13 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 
 ## 🔮 Future Improvements
 
-### High Priority
-- [ ] Fix mypy errors in `jira_utils.py` (type mismatches)
-- [ ] Increase test coverage for `jira_utils.py` (48.85% → 80%+)
-
 ### Medium Priority
-- [ ] Install `types-PyYAML` for mypy stubs
-- [ ] Fix claude_agent.py type errors (Anthropic SDK compatibility)
 - [ ] Wire extracted modules into tools.py (remove duplicates)
+- [ ] Fix mypy errors in config/context_resolver.py
+- [ ] Fix mypy errors in scripts/skill_hooks.py
 
 ### Low Priority
-- [ ] Increase parsers.py coverage (76.61% → 90%+)
+- [ ] Increase parsers.py coverage (76.65% → 90%+)
 - [ ] Add mypy to pre-commit hooks
 - [ ] Add type hints to remaining MCP server modules
 
@@ -169,12 +148,14 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 | 2025-12-28 | Test coverage boost | config_loader 84%, parsers 76% |
 | 2025-12-28 | Wire extracted modules | All modules importable |
 | 2025-12-28 | Add integration tests | 18 MCP integration tests |
-| 2025-12-28 | Total tests | 213 passing |
 | 2025-12-28 | Extract workflow_tools | 9 workflow functions extracted |
 | 2025-12-28 | Add type hints | parsers.py, jira_utils.py, claude_agent.py |
 | 2025-12-28 | Add module docs | docs/architecture/workflow-modules.md |
 | 2025-12-28 | Create dev guide | docs/DEVELOPMENT.md |
-| 2025-12-28 | Code rescan | 36 mypy errors identified |
+| 2025-12-28 | Code rescan | Fixed 36 mypy errors |
+| 2025-12-28 | Fix mypy errors | scripts/common/ and claude_agent.py |
+| 2025-12-28 | Boost jira_utils | 48% → 97.73% coverage, +31 tests |
+| 2025-12-28 | Final test count | 244 tests, 80.30% coverage |
 
 ---
 
@@ -197,7 +178,7 @@ black mcp-servers/ scripts/ && isort mcp-servers/ scripts/
 bandit -r mcp-servers/ scripts/ --severity high
 
 # Type check
-mypy scripts/common/ --ignore-missing-imports
+mypy scripts/common/ scripts/claude_agent.py --ignore-missing-imports
 ```
 
 ---
