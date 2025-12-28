@@ -1111,7 +1111,7 @@ def update_deploy_clowder_ref(
     return new_content, count > 0
 
 
-def extract_json_from_output(text: str) -> Optional[dict]:
+def extract_json_from_output(text: str) -> Optional[Dict[str, Any]]:
     """
     Extract JSON object from mixed text output.
 
@@ -1129,7 +1129,8 @@ def extract_json_from_output(text: str) -> Optional[dict]:
     json_match = re.search(r"\{.*\}", str(text), re.DOTALL)
     if json_match:
         try:
-            return json.loads(json_match.group())
+            result: Dict[str, Any] = json.loads(json_match.group())
+            return result
         except json.JSONDecodeError:
             return None
     return None

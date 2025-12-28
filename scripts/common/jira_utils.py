@@ -236,7 +236,7 @@ def normalize_jira_input(data: Dict[str, Any], convert_markdown: bool = True) ->
 
 def build_jira_yaml(
     summary: str,
-    issue_type: str,
+    issue_type: str = "story",  # noqa: ARG001 - reserved for future use
     description: str = "",
     user_story: str = "",
     acceptance_criteria: str = "",
@@ -272,7 +272,7 @@ def build_jira_yaml(
     """
     import yaml
 
-    data = {"Summary": summary}
+    data: Dict[str, Any] = {"Summary": summary}
 
     if description:
         data["Description"] = markdown_to_jira(description) if convert_markdown else description
@@ -309,4 +309,5 @@ def build_jira_yaml(
     if epic_link:
         data["Epic Link"] = epic_link
 
-    return yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    result: str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return result

@@ -33,17 +33,19 @@ def load_config() -> Dict[str, Any]:
     try:
         from src.utils import load_config as utils_load_config
 
-        return utils_load_config()
+        result: Dict[str, Any] = utils_load_config()
+        return result
     except ImportError:
         # Fallback if utils not available
         config_path = Path(__file__).parent.parent.parent / "config.json"
         if config_path.exists():
             with open(config_path) as f:
-                return json.load(f)
+                loaded: Dict[str, Any] = json.load(f)
+                return loaded
         return {}
 
 
-def get_config_section(section: str, default: Optional[Dict] = None) -> Dict[str, Any]:
+def get_config_section(section: str, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Get a specific section from config.json.
 
@@ -55,7 +57,8 @@ def get_config_section(section: str, default: Optional[Dict] = None) -> Dict[str
         Section dict or default
     """
     config = load_config()
-    return config.get(section, default or {})
+    result: Dict[str, Any] = config.get(section, default or {})
+    return result
 
 
 def get_user_config() -> Dict[str, Any]:
@@ -66,7 +69,8 @@ def get_user_config() -> Dict[str, Any]:
         User config with keys like 'username', 'email', 'timezone'
     """
     config = load_config()
-    return config.get("user", {})
+    result: Dict[str, Any] = config.get("user", {})
+    return result
 
 
 def get_username() -> str:
@@ -76,7 +80,11 @@ def get_username() -> str:
     Falls back to OS user if not configured.
     """
     user_config = get_user_config()
-    return user_config.get("username") or os.getenv("USER", "unknown")
+    username = user_config.get("username")
+    if isinstance(username, str) and username:
+        return str(username)
+    env_user = os.getenv("USER")
+    return env_user if env_user else "unknown"
 
 
 def get_jira_url() -> str:
@@ -86,7 +94,9 @@ def get_jira_url() -> str:
     Falls back to default Red Hat Jira if not configured.
     """
     config = load_config()
-    return config.get("jira", {}).get("url", "https://issues.redhat.com")
+    jira_config: Dict[str, Any] = config.get("jira", {})
+    url = jira_config.get("url", "https://issues.redhat.com")
+    return str(url)
 
 
 def get_timezone() -> str:
@@ -96,7 +106,8 @@ def get_timezone() -> str:
     Falls back to Europe/Dublin if not configured.
     """
     user_config = get_user_config()
-    return user_config.get("timezone", "Europe/Dublin")
+    tz = user_config.get("timezone", "Europe/Dublin")
+    return str(tz)
 
 
 def get_repo_config(repo_name: str) -> Dict[str, Any]:
@@ -110,7 +121,9 @@ def get_repo_config(repo_name: str) -> Dict[str, Any]:
         Repository config dict or empty dict
     """
     config = load_config()
-    return config.get("repositories", {}).get(repo_name, {})
+    repos: Dict[str, Any] = config.get("repositories", {})
+    result: Dict[str, Any] = repos.get(repo_name, {})
+    return result
 
 
 def resolve_repo(
