@@ -166,6 +166,7 @@ Central configuration via `config.json`:
 ## See Also
 
 - [MCP Implementation Details](./mcp-implementation.md) - Server code & patterns
+- [Workflow Module Architecture](./workflow-modules.md) - aa-workflow internal structure
 - [Skills Reference](../skills/README.md) - All available skills
 - [README](../../README.md) - Getting started
 

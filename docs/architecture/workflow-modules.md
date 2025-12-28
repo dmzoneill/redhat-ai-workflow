@@ -1,6 +1,6 @@
-# AA-Workflow Modules
+# AA-Workflow Module Architecture
 
-This document describes the modular structure of the aa-workflow MCP server.
+> Internal module structure for developers working on the aa-workflow MCP server
 
 ## Overview
 
@@ -159,4 +159,9 @@ server = create_mcp_server(name='aa-workflow', tools=['workflow'])
 print('Server created with 30+ tools')
 "
 ```
+
+## Related
+
+- [Workflow Tools](../mcp-servers/workflow.md) - User-facing documentation
+- [MCP Implementation](mcp-implementation.md) - Overall MCP architecture
 
