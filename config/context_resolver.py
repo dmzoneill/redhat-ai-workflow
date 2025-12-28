@@ -17,7 +17,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -91,7 +91,7 @@ class ContextResolver:
         self.repos = self.config.get("repositories", {})
         self._build_indexes()
 
-    def _load_config(self, config_path: Optional[Path] = None) -> dict:
+    def _load_config(self, config_path: Optional[Path] = None) -> Dict[str, Any]:
         """Load config.json from known paths."""
         paths = [config_path] if config_path else self.CONFIG_PATHS
 
@@ -99,21 +99,22 @@ class ContextResolver:
             if path and path.exists():
                 try:
                     with open(path) as f:
-                        return json.load(f)
+                        result: Dict[str, Any] = json.load(f)
+                        return result
                 except Exception:
                     continue
         return {}
 
-    def _build_indexes(self):
+    def _build_indexes(self) -> None:
         """Build lookup indexes for fast resolution."""
         # Jira project → repo names (may be multiple)
-        self.jira_to_repos: dict[str, list[str]] = {}
+        self.jira_to_repos: Dict[str, List[str]] = {}
 
         # GitLab project path → repo name
-        self.gitlab_to_repo: dict[str, str] = {}
+        self.gitlab_to_repo: Dict[str, str] = {}
 
         # Repo name → config
-        self.repo_configs: dict[str, dict] = {}
+        self.repo_configs: Dict[str, Dict[str, Any]] = {}
 
         for repo_name, cfg in self.repos.items():
             self.repo_configs[repo_name] = cfg

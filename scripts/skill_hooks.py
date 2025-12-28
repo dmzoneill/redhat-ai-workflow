@@ -13,7 +13,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import httpx
 
@@ -137,7 +137,8 @@ class SkillHooks:
         """Map GitLab username to Slack user ID."""
         # Direct mapping
         if gitlab_username in self.user_mapping:
-            return self.user_mapping[gitlab_username]
+            result = self.user_mapping[gitlab_username]
+            return str(result) if result else None
 
         # Check if it's already a Slack ID
         if gitlab_username.startswith("U") and len(gitlab_username) == 11:
@@ -212,10 +213,12 @@ class SkillHooks:
             url = f"https://{self.workspace_host}/api/conversations.open"
 
             resp = await client.post(url, json={"users": user_id})
-            data = resp.json()
+            data: Dict[str, Any] = resp.json()
 
             if data.get("ok"):
-                return data.get("channel", {}).get("id")
+                channel = data.get("channel", {})
+                channel_id = channel.get("id") if isinstance(channel, dict) else None
+                return str(channel_id) if channel_id else None
             else:
                 logger.error(f"failed to open dm: {data.get('error')}")
                 return None
