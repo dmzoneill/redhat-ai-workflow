@@ -123,13 +123,6 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 
 ## 🔮 Future Improvements
 
-### High Priority
-- [ ] Slack bot: Show error count in status bar instead of full tracebacks
-  - Track error count per poll cycle
-  - Display as `❌ Errors: N` in status bar
-  - Clear error count on successful poll
-  - Reduces console noise from transient httpx.ReadTimeout errors
-
 ### Medium Priority
 - [ ] Wire extracted modules into tools.py (remove duplicates)
 
