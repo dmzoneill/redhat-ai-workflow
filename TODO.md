@@ -115,8 +115,8 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 - [x] Wire new modules into main `tools.py`
 
 ### Medium Priority
-- [ ] Add integration tests for MCP tools
-- [ ] Extract remaining workflow_* functions from tools.py
+- [x] Add integration tests for MCP tools (18 tests)
+- [ ] Extract remaining 9 workflow_* functions from tools.py
 - [ ] Add type hints to legacy code
 
 ### Low Priority
@@ -138,6 +138,8 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 | 2025-12-27 | Refactor tools.py | 10 modules extracted |
 | 2025-12-28 | Test coverage boost | config_loader 84%, parsers 76% |
 | 2025-12-28 | Wire extracted modules | All modules importable |
+| 2025-12-28 | Add integration tests | 18 MCP integration tests |
+| 2025-12-28 | Total tests | 212 passing |
 
 ---
 
