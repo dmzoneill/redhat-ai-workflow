@@ -120,8 +120,8 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 - [ ] Add type hints to legacy code
 
 ### Low Priority
-- [ ] Refactor large functions (C901 complexity)
-- [ ] Add documentation for all modules
+- [x] Refactor large functions (C901 complexity) - None found!
+- [x] Add documentation for all modules (MODULES.md)
 - [ ] Create development guide
 
 ---
@@ -142,6 +142,8 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 | 2025-12-28 | Total tests | 212 passing |
 | 2025-12-28 | Extract workflow_tools | 9 workflow functions extracted |
 | 2025-12-28 | Final test count | 213 passing |
+| 2025-12-28 | Add type hints | parsers.py, jira_utils.py |
+| 2025-12-28 | Add module docs | MODULES.md |
 
 ---
 
