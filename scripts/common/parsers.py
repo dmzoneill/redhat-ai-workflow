@@ -35,12 +35,12 @@ def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, A
     Returns:
         List of dicts with 'iid' (or 'id'), 'title', and optionally 'author' keys
     """
-    mrs = []
+    mrs: List[Dict[str, Any]] = []
     if not output:
         return mrs
 
     lines = str(output).split("\n")
-    current_mr = {}
+    current_mr: Dict[str, Any] = {}
 
     for line in lines:
         # Try single-line format first: "!1452  project!1452  Title (main)"
@@ -103,7 +103,7 @@ def parse_jira_issues(output: str) -> List[Dict[str, str]]:
     Returns:
         List of dicts with 'key' and 'summary' keys
     """
-    issues = []
+    issues: List[Dict[str, str]] = []
     if not output:
         return issues
 
@@ -125,7 +125,7 @@ def parse_namespaces(output: str) -> List[Dict[str, str]]:
     Returns:
         List of dicts with 'name' and 'expires' keys
     """
-    namespaces = []
+    namespaces: List[Dict[str, str]] = []
     if not output:
         return namespaces
 
@@ -188,7 +188,7 @@ def parse_git_log(output: str) -> List[Dict[str, str]]:
     Returns:
         List of dicts with 'sha' and 'message' keys
     """
-    commits = []
+    commits: List[Dict[str, str]] = []
     if not output:
         return commits
 
@@ -221,7 +221,7 @@ def parse_git_branches(output: str, issue_key: Optional[str] = None) -> List[str
     Returns:
         List of branch names (cleaned)
     """
-    branches = []
+    branches: List[str] = []
     if not output:
         return branches
 
@@ -251,7 +251,7 @@ def parse_kubectl_pods(output: str) -> List[Dict[str, Any]]:
     Returns:
         List of dicts with pod info (name, ready, status, restarts, age)
     """
-    pods = []
+    pods: List[Dict[str, Any]] = []
     if not output:
         return pods
 
@@ -261,7 +261,7 @@ def parse_kubectl_pods(output: str) -> List[Dict[str, Any]]:
 
         parts = line.split()
         if len(parts) >= 3:
-            pod = {
+            pod: Dict[str, Any] = {
                 "name": parts[0],
                 "ready": parts[1] if len(parts) > 1 else "?/?",
                 "status": parts[2] if len(parts) > 2 else "Unknown",
@@ -305,7 +305,7 @@ def parse_git_conflicts(status_output: str) -> List[Dict[str, str]]:
     Returns:
         List of dicts with 'file' and 'type' keys
     """
-    conflicts = []
+    conflicts: List[Dict[str, str]] = []
     if not status_output:
         return conflicts
 
@@ -345,7 +345,7 @@ def parse_pipeline_status(output: str) -> Dict[str, Any]:
     Returns:
         Dict with 'status', 'url', 'jobs' keys
     """
-    result = {
+    result: Dict[str, Any] = {
         "status": "unknown",
         "url": None,
         "jobs": [],
@@ -392,7 +392,7 @@ def parse_mr_comments(output: str) -> List[Dict[str, Any]]:
     Returns:
         List of dicts with 'author', 'text', 'date' keys
     """
-    comments = []
+    comments: List[Dict[str, Any]] = []
     if not output:
         return comments
 
@@ -407,7 +407,7 @@ def parse_mr_comments(output: str) -> List[Dict[str, Any]]:
         pass
 
     # Parse text format
-    current_comment = {}
+    current_comment: Dict[str, Any] = {}
     for line in str(output).split("\n"):
         # Author line: "@username commented 2 days ago"
         author_match = re.match(r"@(\w+)\s+commented\s+(.+)", line)
@@ -593,7 +593,7 @@ def validate_jira_key(key: str) -> bool:
     return bool(re.match(r"^[A-Z]{2,10}-\d+$", str(key).strip().upper()))
 
 
-def extract_web_url(text: str, pattern: str = None) -> Optional[str]:
+def extract_web_url(text: str, pattern: Optional[str] = None) -> Optional[str]:
     """
     Extract a URL from text.
 
@@ -759,7 +759,7 @@ def parse_conflict_markers(content: str) -> List[Dict[str, str]]:
     Returns:
         List of dicts with 'ours', 'theirs', and 'full_marker' keys
     """
-    conflicts = []
+    conflicts: List[Dict[str, str]] = []
     if not content:
         return conflicts
 
@@ -1272,7 +1272,7 @@ def slugify_text(text: str, max_length: int = 40) -> str:
 
 
 def find_transition_name(
-    transitions_text: str, target_variations: List[str] = None
+    transitions_text: str, target_variations: Optional[List[str]] = None
 ) -> Optional[str]:
     """
     Find exact transition name from available transitions text.

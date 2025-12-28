@@ -8,7 +8,7 @@ Includes:
 """
 
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 
 def markdown_to_jira(text: str) -> str:
@@ -242,9 +242,9 @@ def build_jira_yaml(
     acceptance_criteria: str = "",
     supporting_documentation: str = "",
     definition_of_done: str = "",
-    labels: list = None,
-    components: list = None,
-    story_points: int = None,
+    labels: Optional[List[str]] = None,
+    components: Optional[List[str]] = None,
+    story_points: Optional[int] = None,
     epic_link: str = "",
     convert_markdown: bool = True,
 ) -> str:
