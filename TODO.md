@@ -10,7 +10,7 @@
 | Metric | Value | Status |
 |--------|-------|--------|
 | **Flake8 Issues** | 0 | ✅ |
-| **Test Suite** | 108 tests | ✅ |
+| **Test Suite** | 194 tests | ✅ |
 | **Tests Passing** | 100% | ✅ |
 | **Bandit High Severity** | 0 | ✅ |
 | **Line Length** | 120 chars | ✅ |
@@ -32,21 +32,22 @@
 
 ### Summary
 ```
-scripts/common/         30.82% (649 statements, 427 missed)
+scripts/common/         73.55% (649 statements, 138 missed)
 ```
 
 ### By Module
 | File | Coverage | Notes |
 |------|----------|-------|
 | `scripts/common/__init__.py` | 100% | Empty |
-| `scripts/common/config_loader.py` | 0% | Needs tests |
-| `scripts/common/jira_utils.py` | 49% | Partial |
-| `scripts/common/parsers.py` | 31% | 38 tests added |
+| `scripts/common/config_loader.py` | 84.62% | ✅ Tests added |
+| `scripts/common/jira_utils.py` | 48.85% | Partial |
+| `scripts/common/parsers.py` | 76.61% | ✅ Tests added |
 
-### Test Modules (108 tests)
+### Test Modules (194 tests)
 | Module | Tests |
 |--------|-------|
-| test_parsers.py | 38 |
+| test_parsers.py | 97 |
+| test_config_loader.py | 27 |
 | test_agent_loader.py | 16 |
 | test_jira_utils.py | 16 |
 | test_utils.py | 15 |
@@ -109,9 +110,9 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 ## 🔮 Future Improvements
 
 ### High Priority
-- [ ] Increase test coverage for `scripts/common/config_loader.py` (0%)
-- [ ] Increase test coverage for `scripts/common/parsers.py` (31%)
-- [ ] Wire new modules into main `tools.py`
+- [x] Increase test coverage for `scripts/common/config_loader.py` (0% → 84.62%)
+- [x] Increase test coverage for `scripts/common/parsers.py` (31% → 76.61%)
+- [x] Wire new modules into main `tools.py`
 
 ### Medium Priority
 - [ ] Add integration tests for MCP tools
@@ -135,6 +136,8 @@ Split `tools.py` (3,005→3,241 lines) into 10 modules:
 | 2025-12-27 | Add test suite | 108 tests |
 | 2025-12-27 | Security scan | 0 high severity |
 | 2025-12-27 | Refactor tools.py | 10 modules extracted |
+| 2025-12-28 | Test coverage boost | config_loader 84%, parsers 76% |
+| 2025-12-28 | Wire extracted modules | All modules importable |
 
 ---
 
