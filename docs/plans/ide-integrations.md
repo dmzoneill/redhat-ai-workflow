@@ -258,33 +258,244 @@ Week 3:
 
 ---
 
-## Questions to Discuss
+## Decisions Made
 
-1. **Which phases are most valuable to you?**
-   - Status bar for quick glance?
-   - Tree view for navigation?
-   - Dashboard for overview?
+1. **Priority:** TBD - will decide later
+2. **Data source:** MCP + D-Bus (hybrid)
+3. **Distribution:** This project only (local extension)
 
-2. **Data source preference?**
-   - MCP tools (reuse existing)
-   - Direct API calls (faster)
-   - D-Bus (real-time, Linux only)
+---
 
-3. **Distribution?**
-   - Local extension (this repo)
-   - Published to marketplace
-   - Both
+## Phase 6: Skill Execution Visualizer (GitHub Actions Style)
 
-4. **Platform support?**
-   - Linux only (can use D-Bus)
-   - Cross-platform (HTTP/MCP only)
+**Goal:** Show real-time visual flowchart of skill execution
+
+### Mockup
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ SKILL: start_work                                    [Running... 5s] │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   ┌─────────────────┐                                               │
+│   │ 1. Fetch Issue  │ ✅ 0.8s                                       │
+│   │   AAP-61214     │                                               │
+│   └────────┬────────┘                                               │
+│            │                                                         │
+│            ▼                                                         │
+│   ┌─────────────────┐                                               │
+│   │ 2. Check Branch │ ✅ 0.3s                                       │
+│   │   exists: false │                                               │
+│   └────────┬────────┘                                               │
+│            │                                                         │
+│            ▼                                                         │
+│   ┌─────────────────┐                                               │
+│   │ 3. Create Branch│ ⏳ Running...                                 │
+│   │   aap-61214-... │                                               │
+│   └────────┬────────┘                                               │
+│            │                                                         │
+│            ▼                                                         │
+│   ┌─────────────────┐                                               │
+│   │ 4. Switch Branch│ ⏸️ Pending                                    │
+│   └────────┬────────┘                                               │
+│            │                                                         │
+│            ▼                                                         │
+│   ┌─────────────────┐                                               │
+│   │ 5. Show Context │ ⏸️ Pending                                    │
+│   └─────────────────┘                                               │
+│                                                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│ STEP 3 OUTPUT:                                                       │
+│ > git checkout -b aap-61214-fix-billing-calculation                 │
+│ > Switched to new branch 'aap-61214-fix-billing-calculation'        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### With Conditional Branches (Decision Tree)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ SKILL: deploy_ephemeral                              [Running... 12s]│
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   ┌─────────────────┐                                               │
+│   │ 1. Check Image  │ ✅                                            │
+│   └────────┬────────┘                                               │
+│            │                                                         │
+│            ▼                                                         │
+│   ┌─────────────────┐                                               │
+│   │ 2. Image Ready? │                                               │
+│   └───┬─────────┬───┘                                               │
+│       │         │                                                    │
+│    Yes│         │No                                                  │
+│       ▼         ▼                                                    │
+│   ┌───────┐ ┌───────────┐                                           │
+│   │ Skip  │ │ 3. Build  │ ⏳ Running...                             │
+│   │       │ │    Image  │                                           │
+│   └───┬───┘ └─────┬─────┘                                           │
+│       │           │                                                  │
+│       └─────┬─────┘                                                  │
+│             ▼                                                        │
+│   ┌─────────────────┐                                               │
+│   │ 4. Reserve NS   │ ⏸️ Pending                                    │
+│   └────────┬────────┘                                               │
+│            ▼                                                         │
+│   ┌─────────────────┐                                               │
+│   │ 5. Deploy App   │ ⏸️ Pending                                    │
+│   └─────────────────┘                                               │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Technical Implementation
+
+#### 1. Skill Engine Events
+
+Add event emission to `skill_engine.py`:
+
+```python
+class SkillExecutor:
+    def __init__(self, event_callback=None):
+        self.on_event = event_callback  # Callback for UI updates
+
+    async def run_skill(self, skill_name, inputs):
+        skill = self.load_skill(skill_name)
+
+        # Emit: skill started
+        self.emit("skill_start", {"name": skill_name, "steps": skill.steps})
+
+        for i, step in enumerate(skill.steps):
+            # Emit: step started
+            self.emit("step_start", {"index": i, "name": step.name})
+
+            try:
+                result = await self.execute_step(step)
+                # Emit: step completed
+                self.emit("step_complete", {"index": i, "result": result})
+            except Exception as e:
+                # Emit: step failed
+                self.emit("step_failed", {"index": i, "error": str(e)})
+                raise
+
+        # Emit: skill completed
+        self.emit("skill_complete", {"name": skill_name})
+```
+
+#### 2. D-Bus Interface
+
+Extend existing D-Bus interface:
+
+```python
+# In slack_daemon.py or separate daemon
+@dbus_interface("com.aiworkflow.Skills")
+class SkillInterface:
+    @signal
+    def SkillStarted(self, skill_name: str, steps_json: str):
+        pass
+
+    @signal
+    def StepStarted(self, step_index: int, step_name: str):
+        pass
+
+    @signal
+    def StepCompleted(self, step_index: int, output: str):
+        pass
+
+    @signal
+    def StepFailed(self, step_index: int, error: str):
+        pass
+```
+
+#### 3. VSCode Webview
+
+```typescript
+// Listen for D-Bus signals
+dbusConnection.on('StepStarted', (stepIndex, stepName) => {
+    updateFlowchart(stepIndex, 'running');
+});
+
+dbusConnection.on('StepCompleted', (stepIndex, output) => {
+    updateFlowchart(stepIndex, 'completed', output);
+});
+
+// Render flowchart using SVG or HTML/CSS
+function renderFlowchart(skill: Skill) {
+    const svg = buildFlowchartSVG(skill.steps);
+    webviewPanel.webview.html = wrapInHTML(svg);
+}
+```
+
+#### 4. Libraries for Flowchart Rendering
+
+| Library | Pros | Cons |
+|---------|------|------|
+| **Mermaid.js** | Simple, declarative | Limited interactivity |
+| **D3.js** | Full control | Complex |
+| **Dagre-D3** | Good for DAGs | Steeper learning curve |
+| **GoJS** | Beautiful, interactive | Commercial license |
+| **Cytoscape.js** | Good for graphs | Overkill for linear flows |
+| **Custom SVG** | Simple, no deps | More code |
+
+**Recommendation:** Start with **Mermaid.js** for simplicity, upgrade later if needed.
+
+```javascript
+// Mermaid flowchart from skill steps
+const mermaidCode = `
+flowchart TD
+    A[Fetch Issue] -->|0.8s| B[Check Branch]
+    B -->|0.3s| C{Branch Exists?}
+    C -->|No| D[Create Branch]
+    C -->|Yes| E[Switch Branch]
+    D --> E
+    E --> F[Show Context]
+
+    style A fill:#10b981
+    style B fill:#10b981
+    style C fill:#10b981
+    style D fill:#3b82f6,stroke:#fff,stroke-width:2px
+    style E fill:#6b7280
+    style F fill:#6b7280
+`;
+```
+
+### Effort Estimate
+
+| Component | Effort |
+|-----------|--------|
+| Skill engine events | 1 day |
+| D-Bus signals | 0.5 day |
+| Webview panel scaffold | 1 day |
+| Flowchart rendering (Mermaid) | 2 days |
+| Interactive features (click to expand) | 1-2 days |
+| **Total** | **5-7 days** |
+
+### Future Enhancements
+
+1. **Drill-down:** Click step to see full output
+2. **Re-run:** Button to re-run failed step
+3. **History:** View past skill executions
+4. **Compare:** Side-by-side execution comparison
+5. **Export:** Save flowchart as PNG/SVG
+
+---
+
+## Updated Phase Summary
+
+| Phase | Feature | Effort | Priority |
+|-------|---------|--------|----------|
+| 1 | Status Bar | 1-2 days | TBD |
+| 2 | Tree View Sidebar | 3-5 days | TBD |
+| 3 | Command Palette | 1 day | TBD |
+| 4 | Notifications | 1-2 days | TBD |
+| 5 | Dashboard Webview | 5-7 days | TBD |
+| **6** | **Skill Visualizer** | **5-7 days** | **High Interest** |
 
 ---
 
 ## Next Steps
 
-1. [ ] Decide on priority phases
-2. [ ] Choose technical approach
-3. [ ] Create extension scaffold
-4. [ ] Implement Phase 1
-5. [ ] Iterate based on feedback
+1. [ ] Decide on priority phases (1-6)
+2. [ ] Create VSCode extension scaffold
+3. [ ] Add skill execution events to skill_engine.py
+4. [ ] Implement D-Bus signals for real-time updates
+5. [ ] Build webview with Mermaid.js flowchart
+6. [ ] Iterate based on feedback
