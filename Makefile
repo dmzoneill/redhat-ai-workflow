@@ -18,7 +18,8 @@
         slack-send slack-watch slack-reload \
         mcp-server mcp-devops mcp-developer mcp-incident mcp-release \
         docs-serve docs-check list-skills list-tools config-validate \
-        check-env
+        check-env \
+        sync-commands sync-commands-dry sync-commands-reverse
 
 # Use bash for proper escape sequence handling
 SHELL := /bin/bash
@@ -84,6 +85,11 @@ help:
 	@printf "  \033[32mmake list-tools\033[0m         List all MCP tool modules\n"
 	@printf "  \033[32mmake docs-serve\033[0m         Serve docs locally (port 8000)\n"
 	@printf "  \033[32mmake docs-check\033[0m         Check for missing skill docs\n"
+	@printf "\n"
+	@printf "\033[1mProject Tools (ptools):\033[0m\n"
+	@printf "  \033[32mmake sync-commands\033[0m      Sync Cursor commands to Claude Code format\n"
+	@printf "  \033[32mmake sync-commands-dry\033[0m  Preview sync without making changes\n"
+	@printf "  \033[32mmake sync-commands-reverse\033[0m  Sync Claude Code to Cursor format\n"
 	@printf "\n"
 	@printf "\033[1mUtilities:\033[0m\n"
 	@printf "  \033[32mmake config-validate\033[0m    Validate config.json\n"
@@ -417,6 +423,22 @@ clean:
 	rm -f /tmp/slack-daemon.lock 2>/dev/null || true
 	rm -f $(PROJECT_ROOT)/slack_state.db 2>/dev/null || true
 	@printf "\033[32m✅ Cleaned\033[0m\n"
+
+# =============================================================================
+# PROJECT TOOLS (ptools)
+# =============================================================================
+
+sync-commands:
+	@printf "\033[36mSyncing Cursor commands to Claude Code format...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py
+
+sync-commands-dry:
+	@printf "\033[36mPreviewing command sync (dry-run)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py --dry-run
+
+sync-commands-reverse:
+	@printf "\033[36mSyncing Claude Code commands to Cursor format...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py --reverse
 
 # =============================================================================
 # QUICK START
