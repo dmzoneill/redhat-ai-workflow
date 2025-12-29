@@ -346,6 +346,161 @@ Week 3:
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+### Display Location Options
+
+Where should the visualizer appear? Here are the options:
+
+#### Option A: Webview Panel (Recommended)
+
+Opens as a tab in the editor area, like a file.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Explorer │ main.py │ 🔄 skill-execution │                   │
+├──────────┼─────────┴────────────────────────────────────────┤
+│ Files    │  ┌──────────────────────────────────────────┐   │
+│          │  │   🔄 test_mr_ephemeral                   │   │
+│          │  │   [✅ validate] → [✅ reserve] → [🔄 deploy]  │
+│          │  └──────────────────────────────────────────┘   │
+│          │                                                  │
+└──────────┴──────────────────────────────────────────────────┘
+```
+
+| Pros | Cons |
+|------|------|
+| Rich visuals, full HTML/CSS/JS | Requires extension |
+| Interactive (click, hover) | Takes editor space |
+| Can dock, split, or float | |
+| Native VSCode feel | |
+
+**Best for:** Full flowchart visualization with interaction
+
+---
+
+#### Option B: Bottom Panel
+
+Like the Terminal, Problems, Output panels.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ main.py                                                     │
+├─────────────────────────────────────────────────────────────┤
+│ Terminal │ Output │ Problems │ 🔄 Skill Execution │         │
+├─────────────────────────────────────────────────────────────┤
+│ start_work: [✅ fetch] → [✅ branch] → [🔄 checkout] → [⏸ context] │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| Pros | Cons |
+|------|------|
+| Always visible | Limited vertical space |
+| Doesn't interrupt coding | Less room for complex flows |
+| Familiar location | Compact view only |
+
+**Best for:** Compact progress indicator while coding
+
+---
+
+#### Option C: External Browser Window
+
+Opens `http://localhost:PORT/skill-viewer` in a browser.
+
+```
+┌───────────────────────────────────────────────────┐
+│ 🌐 Skill Execution Viewer - localhost:3456        │
+├───────────────────────────────────────────────────┤
+│   Full flowchart with animations...              │
+│   Can be larger than any IDE panel               │
+│   Shareable URL for team members                 │
+└───────────────────────────────────────────────────┘
+```
+
+| Pros | Cons |
+|------|------|
+| No extension needed | Context switching |
+| Unlimited size | Separate window |
+| Can be accessed remotely | Runs on port |
+| Independent of IDE | |
+
+**Best for:** Dashboard-style persistent monitoring
+
+---
+
+#### Option D: Sidebar Tree View
+
+Hierarchical view in the Explorer sidebar.
+
+```
+SKILL EXECUTION
+├── 🔄 start_work
+│   ├── ✅ 1. Fetch Issue (0.8s)
+│   │   └── AAP-61214: Fix billing
+│   ├── ✅ 2. Check Branch (0.3s)
+│   │   └── exists: false
+│   ├── 🔄 3. Create Branch...
+│   └── ⏸ 4. Switch Branch
+└── 📜 Previous Runs
+    └── test_ephemeral (2m ago) ✅
+```
+
+| Pros | Cons |
+|------|------|
+| Compact | Not visual flowchart |
+| Always visible | Limited to tree structure |
+| Native VSCode widget | No decision branches |
+| Expandable details | |
+
+**Best for:** Quick status checks, history browsing
+
+---
+
+#### Option E: Chat Response Inline (Cursor-specific)
+
+Mermaid diagrams rendered in chat using markdown.
+
+```markdown
+```mermaid
+flowchart TD
+    A[✅ Fetch Issue] --> B[✅ Check Branch]
+    B --> C{Exists?}
+    C -->|No| D[🔄 Create Branch]
+    D --> E[⏸ Switch]
+```​
+```
+
+| Pros | Cons |
+|------|------|
+| Already works today | Not real-time |
+| No additional UI | Static after render |
+| Good for post-mortem | Can't update in place |
+
+**Best for:** Post-execution review in conversation
+
+---
+
+### Recommended: Hybrid Approach
+
+Use different displays for different scenarios:
+
+| Scenario | Display | Why |
+|----------|---------|-----|
+| Quick status glance | **Status bar** | `🔄 deploy [3/5]` - minimal |
+| Active execution | **Bottom panel** | Compact progress, visible while coding |
+| Full visualization | **Webview panel** | On-demand, click from status bar |
+| Post-execution | **Chat inline** | Mermaid diagram in response |
+| History/browsing | **Sidebar tree** | Navigate past runs |
+| Team/demo | **External browser** | Shareable, persistent |
+
+```
+User clicks status bar "🔄 deploy [3/5]"
+    ↓
+Opens webview panel with full flowchart
+    ↓
+When skill completes, Mermaid diagram appears in chat
+```
+
+---
+
 ### Technical Implementation
 
 #### 1. Skill Engine Events
