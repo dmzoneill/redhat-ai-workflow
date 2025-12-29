@@ -19,6 +19,7 @@ Both credentials are extracted directly from Chrome's storage:
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -73,8 +74,8 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
     """
     Extract xoxc_token from Chrome's Local Storage.
 
-    Chrome stores Local Storage in LevelDB format. We use `strings` to extract
-    readable text and grep for xoxc tokens.
+    Chrome stores Local Storage in LevelDB format. We search files from
+    newest to oldest to get the most recent token.
     """
     chrome_base = Path.home() / ".config" / "google-chrome"
 
@@ -87,24 +88,37 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
             continue
 
         try:
-            # Use strings + grep to extract xoxc tokens from LevelDB files
-            # This is simpler than parsing LevelDB and works reliably
-            result = subprocess.run(
-                f'strings "{local_storage_dir}"/*.ldb 2>/dev/null | grep -oE "xoxc-[a-zA-Z0-9_-]{{50,}}"',
-                shell=True,
-                capture_output=True,
-                text=True,
+            # Get LevelDB files sorted by modification time (newest first)
+            ldb_files = sorted(
+                local_storage_dir.glob("*.ldb"),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,  # Newest first
             )
 
-            if result.returncode == 0 and result.stdout.strip():
-                # Get unique tokens, prefer the most recent (last in file)
-                tokens = result.stdout.strip().split("\n")
-                # Filter valid tokens (should be ~100+ chars)
-                valid_tokens = [t for t in tokens if len(t) > 80]
-                if valid_tokens:
-                    # Return the last (most recent) token
-                    token = valid_tokens[-1]
+            if not ldb_files:
+                continue
+
+            # Search each file from newest to oldest
+            for ldb_file in ldb_files:
+                result = subprocess.run(
+                    ["strings", str(ldb_file)],
+                    capture_output=True,
+                    text=True,
+                )
+
+                if result.returncode != 0:
+                    continue
+
+                # Find xoxc tokens embedded in strings
+                # Pattern: xoxc- followed by alphanumeric, hyphen, underscore (80+ chars total)
+                pattern = r"xoxc-[a-zA-Z0-9_-]{77,}"
+                matches = re.findall(pattern, result.stdout)
+
+                if matches:
+                    # Return the first (and likely only) valid token from newest file
+                    token = matches[0]
                     print(f"📁 Found xoxc_token in Chrome profile: {prof}")
+                    print(f"   (from {ldb_file.name}, modified {_format_mtime(ldb_file)})")
                     return token
 
         except Exception as e:
@@ -112,6 +126,14 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
             continue
 
     return None
+
+
+def _format_mtime(path: Path) -> str:
+    """Format file modification time."""
+    from datetime import datetime
+
+    mtime = path.stat().st_mtime
+    return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
 
 
 def load_config() -> dict:
