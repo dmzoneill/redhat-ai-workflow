@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
 """
-Extract Slack credentials from browser cookies.
+Extract Slack credentials and update config.json.
 
 Gets the xoxc_token and d_cookie needed for the Slack bot.
 
 Usage:
-    python scripts/get_slack_creds.py
-    python scripts/get_slack_creds.py --profile "Profile 1"
-    python scripts/get_slack_creds.py --browser firefox
+    python scripts/get_slack_creds.py              # Get d_cookie, prompt for xoxc
+    python scripts/get_slack_creds.py --capture    # Auto-capture both (opens browser)
+    python scripts/get_slack_creds.py --dry-run    # Show values without updating config
 
 Requirements:
-    pip install pycookiecheat browser-cookie3
+    pip install pycookiecheat
+    pip install playwright && playwright install chromium  # For --capture mode
 """
 
 import argparse
+import asyncio
+import json
 import sys
 from pathlib import Path
 from urllib.parse import unquote
 
-# Try pycookiecheat first (best for Chrome)
+# Find project root (where config.json lives)
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+CONFIG_FILE = PROJECT_ROOT / "config.json"
+
+# Slack URL
+SLACK_URL = "https://redhat.enterprise.slack.com"
+
+# Try pycookiecheat for Chrome cookie extraction
 try:
     from pycookiecheat import chrome_cookies
 
@@ -26,21 +37,20 @@ try:
 except ImportError:
     HAS_PYCOOKIECHEAT = False
 
-# Fallback to browser-cookie3
+# Try playwright for browser automation
 try:
-    import browser_cookie3
+    from playwright.async_api import async_playwright
 
-    HAS_BROWSER_COOKIE3 = True
+    HAS_PLAYWRIGHT = True
 except ImportError:
-    HAS_BROWSER_COOKIE3 = False
+    HAS_PLAYWRIGHT = False
 
 
-def get_chrome_cookies_pycookiecheat(profile: str = "") -> dict:
-    """Get Slack cookies from Chrome using pycookiecheat."""
-    cookies = {"d": None, "xoxc": None}
-
+def get_d_cookie_from_chrome(profile: str = "") -> str | None:
+    """Get the d cookie from Chrome's cookie storage."""
     if not HAS_PYCOOKIECHEAT:
-        return cookies
+        print("❌ Missing: pip install pycookiecheat")
+        return None
 
     chrome_base = Path.home() / ".config" / "google-chrome"
 
@@ -53,63 +63,168 @@ def get_chrome_cookies_pycookiecheat(profile: str = "") -> dict:
             continue
 
         try:
-            result = chrome_cookies(
-                "https://redhat.enterprise.slack.com",
-                cookie_file=str(cookie_file),
-            )
-
+            result = chrome_cookies(SLACK_URL, cookie_file=str(cookie_file))
             if "d" in result:
-                # URL-decode the cookie value
-                cookies["d"] = unquote(result["d"])
-                print(f"📁 Found cookies in Chrome profile: {prof}")
-                return cookies
+                print(f"📁 Found d_cookie in Chrome profile: {prof}")
+                return unquote(result["d"])
         except Exception as e:
             print(f"⚠️  Error reading {prof}: {e}")
             continue
 
-    return cookies
+    return None
 
 
-def get_firefox_cookies() -> dict:
-    """Get Slack cookies from Firefox."""
-    cookies = {"d": None, "xoxc": None}
+async def capture_xoxc_token_playwright() -> str | None:
+    """
+    Open browser and capture xoxc_token from Slack API requests.
 
-    if not HAS_BROWSER_COOKIE3:
-        print("❌ Missing: pip install browser-cookie3")
-        return cookies
+    Uses Chrome's user data directory so you're already logged in.
+    """
+    if not HAS_PLAYWRIGHT:
+        print("❌ Missing: pip install playwright && playwright install chromium")
+        return None
 
-    try:
-        cj = browser_cookie3.firefox(domain_name=".slack.com")
-        for cookie in cj:
-            if cookie.name == "d":
-                cookies["d"] = cookie.value
-            if cookie.name == "xoxc":
-                cookies["xoxc"] = cookie.value
-    except Exception as e:
-        print(f"⚠️  Firefox error: {e}")
+    print("🌐 Opening browser to capture xoxc_token...")
+    print("   (Slack should load with your existing login)")
 
-    return cookies
+    xoxc_token = None
+
+    async with async_playwright() as p:
+        # Launch with persistent context (uses Chrome profile)
+        chrome_user_data = Path.home() / ".config" / "google-chrome"
+
+        # Find the profile with Slack cookies
+        profile_dir = None
+        for prof in ["Profile 1", "Default", "Profile 2"]:
+            if (chrome_user_data / prof / "Cookies").exists():
+                profile_dir = prof
+                break
+
+        if not profile_dir:
+            print("❌ No Chrome profile found")
+            return None
+
+        context = await p.chromium.launch_persistent_context(
+            user_data_dir=str(chrome_user_data),
+            channel="chrome",
+            headless=False,
+            args=[f"--profile-directory={profile_dir}"],
+        )
+
+        page = context.pages[0] if context.pages else await context.new_page()
+
+        # Intercept requests to capture xoxc_token
+        async def handle_request(request):
+            nonlocal xoxc_token
+            if xoxc_token:
+                return
+
+            # Check POST requests to Slack API
+            if request.method == "POST" and "slack.com/api" in request.url:
+                try:
+                    post_data = request.post_data
+                    if post_data and "token" in post_data:
+                        # Try to parse as JSON
+                        try:
+                            data = json.loads(post_data)
+                            if isinstance(data, dict) and data.get("token", "").startswith("xoxc-"):
+                                xoxc_token = data["token"]
+                                print(f"✅ Captured xoxc_token: {xoxc_token[:30]}...")
+                        except json.JSONDecodeError:
+                            # Try form data
+                            if "token=xoxc-" in post_data:
+                                for part in post_data.split("&"):
+                                    if part.startswith("token=xoxc-"):
+                                        xoxc_token = unquote(part.split("=", 1)[1])
+                                        print(f"✅ Captured xoxc_token: {xoxc_token[:30]}...")
+                                        break
+                except Exception:
+                    pass
+
+        page.on("request", handle_request)
+
+        # Navigate to Slack
+        print(f"   Navigating to {SLACK_URL}...")
+        await page.goto(SLACK_URL, wait_until="networkidle")
+
+        # Wait for token capture or timeout
+        print("   Waiting for xoxc_token (interact with Slack if needed)...")
+        for _ in range(30):  # 30 second timeout
+            if xoxc_token:
+                break
+            await asyncio.sleep(1)
+
+        if not xoxc_token:
+            print("   ⏳ No token captured yet. Click around in Slack...")
+            for _ in range(30):  # Another 30 seconds
+                if xoxc_token:
+                    break
+                await asyncio.sleep(1)
+
+        await context.close()
+
+    return xoxc_token
 
 
-def get_slack_cookies(browser: str = "chrome", profile: str = "") -> dict:
-    """Extract Slack cookies from browser."""
-    if browser == "chrome":
-        return get_chrome_cookies_pycookiecheat(profile)
-    elif browser == "firefox":
-        return get_firefox_cookies()
+def load_config() -> dict:
+    """Load existing config.json."""
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    return {}
+
+
+def save_config(config: dict):
+    """Save config.json with proper formatting."""
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+
+
+def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = False):
+    """Update config.json with the new credentials."""
+    config = load_config()
+
+    # Ensure slack section exists
+    if "slack" not in config:
+        config["slack"] = {}
+
+    updated = False
+
+    if d_cookie:
+        if config["slack"].get("d_cookie") != d_cookie:
+            config["slack"]["d_cookie"] = d_cookie
+            updated = True
+            print("✅ Updated d_cookie in config.json")
+
+    if xoxc_token:
+        if config["slack"].get("xoxc_token") != xoxc_token:
+            config["slack"]["xoxc_token"] = xoxc_token
+            updated = True
+            print("✅ Updated xoxc_token in config.json")
+
+    if updated:
+        if dry_run:
+            print("\n🔍 DRY RUN - would update config.json with:")
+            print(f"   d_cookie: {d_cookie[:30] if d_cookie else 'None'}...")
+            print(f"   xoxc_token: {xoxc_token[:30] if xoxc_token else 'None'}...")
+        else:
+            save_config(config)
+            print(f"\n💾 Saved to {CONFIG_FILE}")
     else:
-        print(f"❌ Unsupported browser: {browser}")
-        return {"d": None, "xoxc": None}
+        print("\n✓ Config already up to date")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract Slack credentials from browser")
-    parser.add_argument(
-        "--browser",
-        "-b",
-        choices=["chrome", "firefox"],
-        default="chrome",
-        help="Browser to extract from (default: chrome)",
+    parser = argparse.ArgumentParser(
+        description="Extract Slack credentials and update config.json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python scripts/get_slack_creds.py              # Get d_cookie from Chrome
+  python scripts/get_slack_creds.py --capture    # Auto-capture both (opens browser)
+  python scripts/get_slack_creds.py --dry-run    # Show what would be updated
+        """,
     )
     parser.add_argument(
         "--profile",
@@ -118,77 +233,63 @@ def main():
         help="Chrome profile name (e.g., 'Profile 1'). Auto-detected if not specified.",
     )
     parser.add_argument(
-        "--json",
-        "-j",
+        "--capture",
+        "-c",
         action="store_true",
-        help="Output as JSON",
+        help="Open browser to auto-capture xoxc_token",
+    )
+    parser.add_argument(
+        "--dry-run",
+        "-n",
+        action="store_true",
+        help="Show values without updating config.json",
+    )
+    parser.add_argument(
+        "--xoxc",
+        "-x",
+        default="",
+        help="Manually provide xoxc_token value",
     )
     args = parser.parse_args()
 
-    # Check dependencies
-    if args.browser == "chrome" and not HAS_PYCOOKIECHEAT:
-        print("❌ Missing dependency for Chrome: pip install pycookiecheat")
+    print("🔍 Extracting Slack credentials...")
+    print()
+
+    # Step 1: Get d_cookie from Chrome
+    d_cookie = get_d_cookie_from_chrome(args.profile)
+
+    if not d_cookie:
+        print("❌ Could not find d_cookie")
+        print("   Make sure you're logged into Slack in Chrome")
         sys.exit(1)
-    if args.browser == "firefox" and not HAS_BROWSER_COOKIE3:
-        print("❌ Missing dependency for Firefox: pip install browser-cookie3")
-        sys.exit(1)
 
-    print(f"🔍 Extracting Slack cookies from {args.browser}...")
-    cookies = get_slack_cookies(args.browser, args.profile)
-
-    if args.json:
-        import json
-
-        print(json.dumps(cookies, indent=2))
-        return
-
+    print(f"   d_cookie: {d_cookie[:40]}...")
     print()
-    if cookies["d"]:
-        d_val = cookies["d"]
-        print(f"✅ d_cookie found ({len(d_val)} chars)")
-        print(f"   Preview: {d_val[:30]}...")
-        print()
-        print("=" * 60)
-        print("FULL d_cookie VALUE (copy this):")
-        print("=" * 60)
-        print(d_val)
-        print("=" * 60)
-    else:
-        print("❌ d_cookie not found")
-        print("   Make sure you're logged into Slack in your browser")
-        print("   Try: python scripts/get_slack_creds.py --profile 'Profile 1'")
 
-    print()
-    if cookies["xoxc"]:
-        print(f"✅ xoxc_token found: {cookies['xoxc'][:30]}...")
-    else:
-        print("ℹ️  xoxc_token not in cookies - get it via browser console:")
-        print()
-        print("   1. Open Slack in browser, press F12 for DevTools")
-        print("   2. Go to Console tab, paste this and press Enter:")
-        print()
-        print("   (function() {")
-        print("       const s = XMLHttpRequest.prototype.send;")
-        print("       XMLHttpRequest.prototype.send = function(b) {")
-        print("           if (b && typeof b === 'string') {")
-        print("               try {")
-        print("                   const p = JSON.parse(b);")
-        print("                   if (p.token?.startsWith('xoxc-')) {")
-        print("                       console.log('xoxc_token:', p.token);")
-        print("                       XMLHttpRequest.prototype.send = s;")
-        print("                   }")
-        print("               } catch(e) {}")
-        print("           }")
-        print("           return s.apply(this, arguments);")
-        print("       };")
-        print("       console.log('Click anything in Slack...');")
-        print("   })();")
-        print()
-        print("   3. Click anywhere in Slack to trigger the capture")
+    # Step 2: Get xoxc_token
+    xoxc_token = args.xoxc if args.xoxc else None
 
-    print()
-    print("📋 Add both values to ~/.config/aa-workflow/slack-creds.json:")
-    print('   {"d_cookie": "<value>", "xoxc_token": "<value>"}')
+    if args.capture and not xoxc_token:
+        # Auto-capture using browser
+        xoxc_token = asyncio.run(capture_xoxc_token_playwright())
+    elif not xoxc_token:
+        # Check if we already have one in config
+        config = load_config()
+        existing = config.get("slack", {}).get("xoxc_token", "")
+        if existing:
+            print(f"ℹ️  Using existing xoxc_token from config: {existing[:30]}...")
+            xoxc_token = existing
+        else:
+            print("ℹ️  No xoxc_token provided. Options:")
+            print("   1. Run with --capture to auto-capture")
+            print("   2. Run with --xoxc 'xoxc-...' to provide manually")
+            print()
+            # Still update d_cookie
+            update_config(d_cookie, None, args.dry_run)
+            return
+
+    # Step 3: Update config.json
+    update_config(d_cookie, xoxc_token, args.dry_run)
 
 
 if __name__ == "__main__":
