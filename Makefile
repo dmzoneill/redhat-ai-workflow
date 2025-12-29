@@ -19,7 +19,8 @@
         mcp-server mcp-devops mcp-developer mcp-incident mcp-release \
         docs-serve docs-check list-skills list-tools config-validate \
         check-env \
-        sync-commands sync-commands-dry sync-commands-reverse
+        sync-commands sync-commands-dry sync-commands-reverse \
+        sync-config-example sync-config-example-fix
 
 # Use bash for proper escape sequence handling
 SHELL := /bin/bash
@@ -90,6 +91,8 @@ help:
 	@printf "  \033[32mmake sync-commands\033[0m      Sync Cursor commands to Claude Code format\n"
 	@printf "  \033[32mmake sync-commands-dry\033[0m  Preview sync without making changes\n"
 	@printf "  \033[32mmake sync-commands-reverse\033[0m  Sync Claude Code to Cursor format\n"
+	@printf "  \033[32mmake sync-config-example\033[0m  Check config.json.example has all keys\n"
+	@printf "  \033[32mmake sync-config-example-fix\033[0m  Add missing keys to example\n"
 	@printf "\n"
 	@printf "\033[1mUtilities:\033[0m\n"
 	@printf "  \033[32mmake config-validate\033[0m    Validate config.json\n"
@@ -439,6 +442,14 @@ sync-commands-dry:
 sync-commands-reverse:
 	@printf "\033[36mSyncing Claude Code commands to Cursor format...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py --reverse
+
+sync-config-example:
+	@printf "\033[36mChecking config.json.example has all keys...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_config_example.py -v
+
+sync-config-example-fix:
+	@printf "\033[36mAdding missing keys to config.json.example...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_config_example.py --fix -v
 
 # =============================================================================
 # QUICK START

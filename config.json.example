@@ -11,7 +11,11 @@
       "default_branch": "main",
       "konflux_namespace": "your-tenant",
       "fastapi_container": "my-backend-api-1",
-      "scopes": ["api", "auth", "db"]
+      "scopes": [
+        "api",
+        "auth",
+        "db"
+      ]
     },
     "my-frontend": {
       "path": "/home/YOUR_USER/src/my-frontend",
@@ -21,7 +25,55 @@
       "lint_command": "npm run lint",
       "test_command": "npm test",
       "default_branch": "main",
-      "scopes": ["ui", "components"]
+      "scopes": [
+        "ui",
+        "components"
+      ]
+    },
+    "automation-analytics-backend": {
+      "path": "/path/to/something",
+      "scopes": [],
+      "default_branch": "main",
+      "fastapi_container": "YOUR_VALUE_HERE",
+      "lint_command": "black --check . && flake8 . && yamllint .",
+      "test_command": "pytest tests/ -v",
+      "jira_project": "AAP",
+      "gitlab": "automation-analytics/automation-analytics-backend",
+      "jira_component": "Automation Analytics",
+      "konflux_namespace": "example-name",
+      "test_setup": "# Test Environment Setup for automation-analytics-backend\n# 1. Start the database:\n#    podman-compose up -d postgres redis\n# 2. Set environment variables:\n#    export DATABASE_URL=postgresql://user:pass@localhost:5432/aa\n#    export REDIS_URL=redis://localhost:6379\n# 3. Run migrations:\n#    python manage.py migrate\n# 4. Now you can run tests:\n#    pytest tests/ -v"
+    },
+    "konflux-release-data": {
+      "jira_project": "KONFLUX",
+      "gitlab": "releng/konflux-release-data",
+      "scopes": [],
+      "default_branch": "main",
+      "path": "/path/to/something",
+      "test_command": "tox -e py311",
+      "lint_command": "tox"
+    },
+    "app-interface": {
+      "test_command": "",
+      "scopes": [],
+      "lint_command": "make bundle validate",
+      "path": "/path/to/something",
+      "default_branch": "master",
+      "gitlab": "service/app-interface",
+      "test_setup": "# No local tests - validation is done via 'make bundle validate'",
+      "jira_component": "AppSRE",
+      "jira_project": "APPSRE"
+    },
+    "pdf-generator": {
+      "scopes": [],
+      "jira_project": "AAP",
+      "konflux_namespace": "example-name",
+      "default_branch": "main",
+      "test_command": "npm test",
+      "test_setup": "# Test Environment Setup for pdf-generator\n# 1. Install dependencies:\n#    npm install\n# 2. Run tests:\n#    npm test",
+      "gitlab": "automation-analytics/pdf-generator",
+      "lint_command": "npm run lint",
+      "jira_component": "Automation Analytics",
+      "path": "/path/to/something"
     }
   },
   "user": {
@@ -34,7 +86,16 @@
   },
   "commit_format": {
     "pattern": "{issue_key} - {type}({scope}): {description}",
-    "types": ["feat", "fix", "refactor", "docs", "test", "chore", "style", "perf"],
+    "types": [
+      "feat",
+      "fix",
+      "refactor",
+      "docs",
+      "test",
+      "chore",
+      "style",
+      "perf"
+    ],
     "examples": [
       "PROJ-12345 - feat(api): Add new endpoint",
       "PROJ-12345 - fix(auth): Handle token expiry"
@@ -54,13 +115,20 @@
     "billing_events": {
       "summary_pattern": "BillingEvent {number:05d} - {description}",
       "search_jql": "project = PROJ AND summary ~ 'BillingEvent' ORDER BY created DESC",
-      "labels": ["billing", "alert", "auto-created"],
+      "labels": [
+        "billing",
+        "alert",
+        "auto-created"
+      ],
       "component": "My Component"
     },
     "alert_issues": {
       "summary_pattern": "Alert: {alert_name} - {description}",
       "search_jql": "project = PROJ AND summary ~ 'Alert:' AND labels = 'prometheus-alert' ORDER BY created DESC",
-      "labels": ["prometheus-alert", "auto-created"],
+      "labels": [
+        "prometheus-alert",
+        "auto-created"
+      ],
       "component": "My Component"
     }
   },
@@ -71,7 +139,9 @@
     "api_url": "https://quay.io/api/v1",
     "default_namespace": "your-namespace",
     "repositories": {
-      "my-backend": "your-org/my-backend"
+      "my-backend": "your-org/my-backend",
+      "pdf-generator": "aap-pdf-generator-tenant/pdf-generator-main/pdf-generator-main",
+      "automation-analytics": "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
     }
   },
   "konflux": {
@@ -168,17 +238,28 @@
       "production": {
         "cluster": "prod",
         "kubeconfig_pattern": "/home/YOUR_USER/.kube/config.p-{namespace}",
-        "namespaces": ["your-app-prod"]
+        "namespaces": [
+          "your-app-prod"
+        ]
       },
       "stage": {
         "cluster": "stage",
         "kubeconfig_pattern": "/home/YOUR_USER/.kube/config.s-{namespace}",
-        "namespaces": ["your-app-stage"]
+        "namespaces": [
+          "your-app-stage"
+        ]
       },
       "ephemeral": {
         "cluster": "eph",
         "kubeconfig_pattern": "/home/YOUR_USER/.kube/config.e-{namespace}",
         "namespace_pattern": "ephemeral-*"
+      },
+      "appsre-pipelines": {
+        "description": "SaaS pipelines cluster for prod/stage deployments",
+        "cluster_url": "https://example.com",
+        "cluster": "ap",
+        "namespaces": [],
+        "kubeconfig": "/home/daoneill/.kube/config.ap"
       }
     }
   },
@@ -187,7 +268,9 @@
     "kubeconfig": "/home/YOUR_USER/.kube/config.ap",
     "description": "SaaS deployment pipelines",
     "namespaces": {
-      "my-backend": "my-backend-saas"
+      "my-backend": "my-backend-saas",
+      "automation-analytics": "example-name",
+      "pdf-generator": "example-name"
     }
   },
   "bonfire": {
@@ -209,6 +292,36 @@
         },
         "image_base": "quay.io/your-org/my-app",
         "namespace_prefix": "ephemeral-"
+      },
+      "pdf-generator": {
+        "description": "PDF Generator service",
+        "components": {
+          "main": {
+            "name": "example-name",
+            "description": "PDF generator component"
+          }
+        },
+        "namespace_prefix": "example-name",
+        "image_base": "quay.io/redhat-user-workloads/aap-pdf-generator-tenant/pdf-generator-main/pdf-generator-main"
+      },
+      "tower-analytics": {
+        "requester_prefixes": {
+          "main": "aap-aa-quick-",
+          "billing": "aap-aa-billing-"
+        },
+        "image_base": "quay.io/redhat-user-workloads/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main",
+        "namespace_prefix": "example-name",
+        "components": {
+          "billing": {
+            "name": "example-name",
+            "description": "Billing-specific deployment"
+          },
+          "main": {
+            "description": "Main application (non-billing)",
+            "name": "example-name"
+          }
+        },
+        "description": "Automation Analytics backend"
       }
     },
     "workflow": {
@@ -240,12 +353,20 @@
     "credentials_extraction": {
       "description": "Settings for scripts/get_slack_creds.py",
       "chrome_user_data_dir": "~/.config/google-chrome",
-      "chrome_profiles": ["Profile 1", "Default", "Profile 2", "Profile 3"]
+      "chrome_profiles": [
+        "Profile 1",
+        "Default",
+        "Profile 2",
+        "Profile 3"
+      ]
     },
     "listener": {
       "poll_interval_min": 5,
       "poll_interval_max": 15,
-      "watched_channels": ["D_YOUR_DM_CHANNEL", "C_YOUR_TEAM_CHANNEL"],
+      "watched_channels": [
+        "D_YOUR_DM_CHANNEL",
+        "C_YOUR_TEAM_CHANNEL"
+      ],
       "alert_channels": {
         "C_STAGE_ALERTS": {
           "name": "app-stage-alerts",
@@ -262,9 +383,33 @@
           "cluster": "prod-cluster",
           "severity": "high",
           "auto_investigate": true
+        },
+        "C01L1K82AP5": {
+          "cluster": "crcp01ue1",
+          "name": "example-name",
+          "environment": "production",
+          "severity": "high",
+          "namespace": "example-name",
+          "auto_investigate": false
+        },
+        "C01CPSKFG0P": {
+          "environment": "stage",
+          "cluster": "crcs02ue1",
+          "namespace": "example-name",
+          "auto_investigate": false,
+          "name": "example-name",
+          "severity": "medium"
         }
       },
-      "watched_keywords": ["help", "question", "urgent", "review", "alert", "firing", "resolved"],
+      "watched_keywords": [
+        "help",
+        "question",
+        "urgent",
+        "review",
+        "alert",
+        "firing",
+        "resolved"
+      ],
       "self_user_id": "U_YOUR_USER_ID",
       "self_dm_channel": "D_YOUR_DM_CHANNEL"
     },
@@ -277,14 +422,20 @@
       "channel_mentions": {
         "enabled": true,
         "description": "Only respond in channels when mentioned",
-        "trigger_mentions": ["@your-bot-name", "@your-team"],
+        "trigger_mentions": [
+          "@your-bot-name",
+          "@your-team"
+        ],
         "trigger_user_ids": [],
         "trigger_group_ids": []
       },
       "channel_keywords": {
         "enabled": false,
         "description": "Respond to messages containing these keywords",
-        "keywords": ["urgent", "help needed"]
+        "keywords": [
+          "urgent",
+          "help needed"
+        ]
       },
       "ignore_unmentioned": true,
       "blocked_channels": []
@@ -357,10 +508,15 @@
           "slack_id": "U_TEAMMATE1_ID",
           "name": "Teammate One"
         }
-      }
+      },
+      "bthomass": "U015ZKVG5T2",
+      "akarve": "U018P2L0C6P",
+      "daoneill": "U023CKSHHS4"
     },
     "state_db_path": "./slack_state.db",
-    "debug": false
+    "debug": false,
+    "d_cookie": "YOUR_COOKIE_HERE",
+    "xoxc_token": "YOUR_TOKEN_HERE"
   },
   "skill_hooks": {
     "description": "Event notifications during skill execution",
@@ -436,12 +592,6 @@
         "notify_author": true,
         "notify_channel": false,
         "template": "⚠️ !{mr_id} has conflicts - manual fix needed"
-      },
-      "release_started": {
-        "description": "Release to prod initiated",
-        "notify_author": false,
-        "notify_channel": true,
-        "template": "release started - {sha} going to prod"
       },
       "release_completed": {
         "description": "Release deployed",
@@ -535,7 +685,11 @@
     "auto_create_for_meeting_requests": false,
     "user_emails": {
       "description": "Map usernames to email addresses",
-      "your_username": "you@example.com"
+      "your_username": "you@example.com",
+      "bthomass": "user@example.com",
+      "zsadeh": "user@example.com",
+      "akarve": "user@example.com",
+      "daoneill": "user@example.com"
     },
     "setup_instructions": [
       "1. Go to https://console.cloud.google.com/",
@@ -559,12 +713,25 @@
     "auto_archive": {
       "enabled": false,
       "description": "Auto-archive processed emails after briefing",
-      "exclude_labels": ["IMPORTANT", "STARRED"]
+      "exclude_labels": [
+        "IMPORTANT",
+        "STARRED"
+      ]
     },
     "categories": {
-      "newsletters": ["newsletter", "digest", "weekly"],
-      "notifications": ["noreply", "notification", "automated"],
-      "important_domains": ["your-company.com"]
+      "newsletters": [
+        "newsletter",
+        "digest",
+        "weekly"
+      ],
+      "notifications": [
+        "noreply",
+        "notification",
+        "automated"
+      ],
+      "important_domains": [
+        "your-company.com"
+      ]
     },
     "max_emails_to_process": 50,
     "setup_instructions": [
