@@ -199,6 +199,47 @@ def get_slack_config(key: str, default: Any = None, env_var: str = None) -> Any:
     return value if value is not None else default
 
 
+def refresh_slack_credentials() -> bool:
+    """
+    Run get_slack_creds.py to refresh credentials from Chrome.
+
+    Returns True if successful, False otherwise.
+    """
+    import subprocess
+
+    script_path = PROJECT_ROOT / "scripts" / "get_slack_creds.py"
+    if not script_path.exists():
+        print(f"⚠️  Credential refresh script not found: {script_path}")
+        return False
+
+    print("🔄 Attempting to refresh Slack credentials from Chrome...")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        if result.returncode == 0:
+            print("✅ Credentials refreshed from Chrome")
+            # Reload config to pick up new values
+            global CONFIG, SLACK_CONFIG
+            CONFIG = load_config()
+            SLACK_CONFIG = CONFIG.get("slack", {})
+            return True
+        else:
+            print(f"⚠️  Credential refresh failed: {result.stderr or result.stdout}")
+            return False
+
+    except subprocess.TimeoutExpired:
+        print("⚠️  Credential refresh timed out")
+        return False
+    except Exception as e:
+        print(f"⚠️  Credential refresh error: {e}")
+        return False
+
+
 # =============================================================================
 # USER CLASSIFICATION
 # =============================================================================
@@ -991,27 +1032,49 @@ class SlackDaemon:
             print("✅ D-Bus IPC enabled (com.aiworkflow.SlackAgent)")
 
         # Initialize Slack session (config.json with env override)
-        try:
-            xoxc_token = get_slack_config("auth.xoxc_token", "", "SLACK_XOXC_TOKEN")
-            d_cookie = get_slack_config("auth.d_cookie", "", "SLACK_D_COOKIE")
-            workspace_id = get_slack_config("auth.workspace_id", "", "SLACK_WORKSPACE_ID")
+        # With automatic credential refresh on failure
+        auth_success = False
+        for attempt in range(2):  # Try twice: once with current creds, once after refresh
+            try:
+                xoxc_token = get_slack_config("auth.xoxc_token", "", "SLACK_XOXC_TOKEN")
+                d_cookie = get_slack_config("auth.d_cookie", "", "SLACK_D_COOKIE")
+                workspace_id = get_slack_config("auth.workspace_id", "", "SLACK_WORKSPACE_ID")
 
-            if not xoxc_token or not d_cookie:
+                if not xoxc_token or not d_cookie:
+                    if attempt == 0:
+                        print("⚠️  Missing Slack credentials, attempting to refresh from Chrome...")
+                        if refresh_slack_credentials():
+                            continue  # Retry with refreshed credentials
+                    self.ui.print_error(
+                        "Missing Slack credentials. Set in config.json or environment:\n"
+                        "  SLACK_XOXC_TOKEN and SLACK_D_COOKIE\n"
+                        "Or run: python scripts/get_slack_creds.py"
+                    )
+                    return
+
+                self.session = SlackSession(
+                    xoxc_token=xoxc_token,
+                    d_cookie=d_cookie,
+                    workspace_id=workspace_id,
+                )
+                auth = await self.session.validate_session()
+                print(f"✅ Authenticated as: {auth.get('user', 'unknown')}")
+                auth_success = True
+                break
+
+            except Exception as e:
+                if attempt == 0:
+                    print(f"⚠️  Authentication failed: {e}")
+                    print("   Attempting to refresh credentials from Chrome...")
+                    if refresh_slack_credentials():
+                        continue  # Retry with refreshed credentials
                 self.ui.print_error(
-                    "Missing Slack credentials. Set in config.json or environment:\n"
-                    "  SLACK_XOXC_TOKEN and SLACK_D_COOKIE"
+                    f"Slack authentication failed after retry: {e}\n" "Try running: python scripts/get_slack_creds.py"
                 )
                 return
 
-            self.session = SlackSession(
-                xoxc_token=xoxc_token,
-                d_cookie=d_cookie,
-                workspace_id=workspace_id,
-            )
-            auth = await self.session.validate_session()
-            print(f"✅ Authenticated as: {auth.get('user', 'unknown')}")
-        except Exception as e:
-            self.ui.print_error(f"Slack authentication failed: {e}")
+        if not auth_success:
+            self.ui.print_error("Failed to authenticate with Slack")
             return
 
         # Initialize state database
