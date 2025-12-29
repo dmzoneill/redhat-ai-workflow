@@ -100,52 +100,46 @@ The Slack bot requires authentication tokens from your browser session.
 
 ### Getting Slack Credentials
 
-1. **Open Slack in Chrome** at `app.slack.com` (or your enterprise URL)
-2. **Open DevTools** (F12)
-3. **Get `xoxc_token`:**
-   - Go to **Network** tab
-   - Do any action in Slack (send message, click channel)
-   - Filter by `api` or `edgeapi`
-   - Click any request → **Payload** tab
-   - Find `token` field starting with `xoxc-`
+#### Method 1: Script (Recommended for Chrome)
 
-4. **Get `d_cookie`:**
-   - Go to **Application** tab
-   - Expand **Cookies** → click your Slack domain
-   - Find the `d` cookie (value starts with `xoxd-`)
+```bash
+# Install dependency
+pip install pycookiecheat
 
-> **Note:** The `d` cookie is `HttpOnly` so JavaScript cannot access it directly.
+# Run the script - auto-detects Chrome profile
+python scripts/get_slack_creds.py
+```
 
-### JavaScript Helper (Partial Automation)
+This extracts the `d_cookie` directly from Chrome's encrypted cookie storage.
 
-Paste this in Chrome DevTools Console while on Slack:
+#### Method 2: Browser Console (for xoxc_token)
+
+The `xoxc_token` must be captured from network requests:
+
+1. **Open Slack in Chrome** at your Slack URL
+2. **Open DevTools** (F12) → **Console** tab
+3. **Paste this script:**
 
 ```javascript
-// Auto-capture xoxc_token, manually get d_cookie
 (function() {
-    const origXHRSend = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.send = function(body) {
-        if (body && typeof body === 'string') {
+    const s = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function(b) {
+        if (b && typeof b === 'string') {
             try {
-                const parsed = JSON.parse(body);
-                if (parsed.token?.startsWith('xoxc-')) {
-                    console.log('═'.repeat(70));
-                    console.log('✅ xoxc_token:\n');
-                    console.log(parsed.token);
-                    console.log('\n📋 Now get d_cookie manually:');
-                    console.log('   Application tab → Cookies → d');
-                    console.log('═'.repeat(70));
-                    XMLHttpRequest.prototype.send = origXHRSend;
+                const p = JSON.parse(b);
+                if (p.token?.startsWith('xoxc-')) {
+                    console.log('xoxc_token:', p.token);
+                    XMLHttpRequest.prototype.send = s;
                 }
             } catch(e) {}
         }
-        return origXHRSend.apply(this, arguments);
+        return s.apply(this, arguments);
     };
-    console.log('👀 Click anything in Slack to capture xoxc_token...');
+    console.log('Click anything in Slack...');
 })();
 ```
 
-Then do any action in Slack - the token will print to console.
+4. **Click anywhere in Slack** - the token prints to console
 
 ### Add to config.json
 
