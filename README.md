@@ -100,46 +100,23 @@ The Slack bot requires authentication tokens from your browser session.
 
 ### Getting Slack Credentials
 
-#### Method 1: Script (Recommended for Chrome)
-
 ```bash
-# Install dependency
-pip install pycookiecheat
+# Install dependencies
+pip install pycookiecheat playwright
+playwright install chromium
 
-# Run the script - auto-detects Chrome profile
+# Option 1: Auto-capture both credentials (opens browser)
+python scripts/get_slack_creds.py --capture
+
+# Option 2: Get d_cookie only, provide xoxc manually later
 python scripts/get_slack_creds.py
+python scripts/get_slack_creds.py --xoxc "xoxc-your-token-here"
 ```
 
-This extracts the `d_cookie` directly from Chrome's encrypted cookie storage.
-
-#### Method 2: Browser Console (for xoxc_token)
-
-The `xoxc_token` must be captured from network requests:
-
-1. **Open Slack in Chrome** at your Slack URL
-2. **Open DevTools** (F12) → **Console** tab
-3. **Paste this script:**
-
-```javascript
-(function() {
-    const s = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.send = function(b) {
-        if (b && typeof b === 'string') {
-            try {
-                const p = JSON.parse(b);
-                if (p.token?.startsWith('xoxc-')) {
-                    console.log('xoxc_token:', p.token);
-                    XMLHttpRequest.prototype.send = s;
-                }
-            } catch(e) {}
-        }
-        return s.apply(this, arguments);
-    };
-    console.log('Click anything in Slack...');
-})();
-```
-
-4. **Click anywhere in Slack** - the token prints to console
+The script:
+- Extracts `d_cookie` from Chrome's encrypted cookie storage
+- Opens browser to capture `xoxc_token` from network requests (with `--capture`)
+- Updates `config.json` automatically
 
 ### Add to config.json
 
