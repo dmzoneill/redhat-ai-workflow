@@ -105,18 +105,29 @@ The Slack bot requires authentication tokens from your browser session.
 pip install pycookiecheat playwright
 playwright install chromium
 
-# Option 1: Auto-capture both credentials (opens browser)
-python scripts/get_slack_creds.py --capture
+# Step 1: Start Chrome with remote debugging (one-time)
+google-chrome --remote-debugging-port=9222
 
-# Option 2: Get d_cookie only, provide xoxc manually later
-python scripts/get_slack_creds.py
-python scripts/get_slack_creds.py --xoxc "xoxc-your-token-here"
+# Step 2: Log into Slack in that browser if not already
+
+# Step 3: Run the script to capture both credentials
+python scripts/get_slack_creds.py --capture
 ```
 
 The script:
+- Connects to your **existing** Chrome session (already logged into Slack)
 - Extracts `d_cookie` from Chrome's encrypted cookie storage
-- Opens browser to capture `xoxc_token` from network requests (with `--capture`)
+- Intercepts a Slack API request to capture `xoxc_token`
 - Updates `config.json` automatically
+
+**Alternative** (if you don't want to restart Chrome):
+```bash
+# Get d_cookie only
+python scripts/get_slack_creds.py
+
+# Manually provide xoxc_token later
+python scripts/get_slack_creds.py --xoxc "xoxc-your-token"
+```
 
 ### Add to config.json
 

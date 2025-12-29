@@ -74,94 +74,130 @@ def get_d_cookie_from_chrome(profile: str = "") -> str | None:
     return None
 
 
+def check_chrome_debugging_port() -> int | None:
+    """Check if Chrome is running with remote debugging enabled."""
+    import socket
+
+    for port in [9222, 9223, 9224]:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.5)
+                result = s.connect_ex(("127.0.0.1", port))
+                if result == 0:
+                    return port
+        except Exception:
+            pass
+    return None
+
+
 async def capture_xoxc_token_playwright() -> str | None:
     """
-    Open browser and capture xoxc_token from Slack API requests.
+    Capture xoxc_token by connecting to existing Chrome browser.
 
-    Uses Chrome's user data directory so you're already logged in.
+    Requires Chrome to be running with --remote-debugging-port=9222
     """
     if not HAS_PLAYWRIGHT:
         print("❌ Missing: pip install playwright && playwright install chromium")
         return None
 
-    print("🌐 Opening browser to capture xoxc_token...")
-    print("   (Slack should load with your existing login)")
+    # Check if Chrome has debugging enabled
+    debug_port = check_chrome_debugging_port()
+
+    if not debug_port:
+        print("❌ Chrome is not running with remote debugging enabled.")
+        print()
+        print("   To enable, restart Chrome with this flag:")
+        print()
+        print("   google-chrome --remote-debugging-port=9222")
+        print()
+        print("   Or add to your Chrome desktop shortcut/launcher.")
+        print("   Then run this script again with --capture")
+        return None
+
+    print(f"🌐 Connecting to existing Chrome on port {debug_port}...")
 
     xoxc_token = None
 
     async with async_playwright() as p:
-        # Launch with persistent context (uses Chrome profile)
-        chrome_user_data = Path.home() / ".config" / "google-chrome"
+        try:
+            # Connect to existing Chrome instance
+            browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{debug_port}")
+            print("✅ Connected to Chrome")
 
-        # Find the profile with Slack cookies
-        profile_dir = None
-        for prof in ["Profile 1", "Default", "Profile 2"]:
-            if (chrome_user_data / prof / "Cookies").exists():
-                profile_dir = prof
-                break
+            # Get existing contexts (browser windows)
+            contexts = browser.contexts
+            if not contexts:
+                print("❌ No browser windows found")
+                return None
 
-        if not profile_dir:
-            print("❌ No Chrome profile found")
-            return None
+            # Find a Slack tab or create one
+            slack_page = None
+            for context in contexts:
+                for page in context.pages:
+                    if "slack.com" in page.url:
+                        slack_page = page
+                        print(f"   Found Slack tab: {page.url[:50]}...")
+                        break
+                if slack_page:
+                    break
 
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir=str(chrome_user_data),
-            channel="chrome",
-            headless=False,
-            args=[f"--profile-directory={profile_dir}"],
-        )
+            if not slack_page:
+                # Open Slack in a new tab
+                print("   Opening Slack in new tab...")
+                slack_page = await contexts[0].new_page()
+                await slack_page.goto(SLACK_URL, wait_until="networkidle")
 
-        page = context.pages[0] if context.pages else await context.new_page()
+            # Intercept requests to capture xoxc_token
+            async def handle_request(request):
+                nonlocal xoxc_token
+                if xoxc_token:
+                    return
 
-        # Intercept requests to capture xoxc_token
-        async def handle_request(request):
-            nonlocal xoxc_token
-            if xoxc_token:
-                return
+                # Check POST requests to Slack API
+                if request.method == "POST" and "slack.com/api" in request.url:
+                    try:
+                        post_data = request.post_data
+                        if post_data and "token" in str(post_data):
+                            # Try to parse as JSON
+                            try:
+                                data = json.loads(post_data)
+                                if isinstance(data, dict) and str(data.get("token", "")).startswith("xoxc-"):
+                                    xoxc_token = data["token"]
+                                    print(f"✅ Captured xoxc_token: {xoxc_token[:30]}...")
+                            except json.JSONDecodeError:
+                                # Try form data
+                                post_str = str(post_data)
+                                if "token=xoxc-" in post_str:
+                                    for part in post_str.split("&"):
+                                        if part.startswith("token=xoxc-"):
+                                            xoxc_token = unquote(part.split("=", 1)[1])
+                                            print(f"✅ Captured xoxc_token: {xoxc_token[:30]}...")
+                                            break
+                    except Exception:
+                        pass
 
-            # Check POST requests to Slack API
-            if request.method == "POST" and "slack.com/api" in request.url:
-                try:
-                    post_data = request.post_data
-                    if post_data and "token" in post_data:
-                        # Try to parse as JSON
-                        try:
-                            data = json.loads(post_data)
-                            if isinstance(data, dict) and data.get("token", "").startswith("xoxc-"):
-                                xoxc_token = data["token"]
-                                print(f"✅ Captured xoxc_token: {xoxc_token[:30]}...")
-                        except json.JSONDecodeError:
-                            # Try form data
-                            if "token=xoxc-" in post_data:
-                                for part in post_data.split("&"):
-                                    if part.startswith("token=xoxc-"):
-                                        xoxc_token = unquote(part.split("=", 1)[1])
-                                        print(f"✅ Captured xoxc_token: {xoxc_token[:30]}...")
-                                        break
-                except Exception:
-                    pass
+            slack_page.on("request", handle_request)
 
-        page.on("request", handle_request)
+            # Trigger some activity
+            print("   Waiting for xoxc_token...")
+            print("   👆 Click something in the Slack tab to trigger an API request")
 
-        # Navigate to Slack
-        print(f"   Navigating to {SLACK_URL}...")
-        await page.goto(SLACK_URL, wait_until="networkidle")
-
-        # Wait for token capture or timeout
-        print("   Waiting for xoxc_token (interact with Slack if needed)...")
-        for _ in range(30):  # 30 second timeout
-            if xoxc_token:
-                break
-            await asyncio.sleep(1)
-
-        if not xoxc_token:
-            print("   ⏳ No token captured yet. Click around in Slack...")
-            for _ in range(30):  # Another 30 seconds
+            # Wait for token capture
+            for _ in range(60):  # 60 second timeout
                 if xoxc_token:
                     break
                 await asyncio.sleep(1)
 
-        await context.close()
+            if not xoxc_token:
+                print("   ⏳ Timeout - no token captured")
+                print("   Make sure you clicked in the Slack browser tab")
+
+            # Don't close the browser - it's the user's existing session
+            browser.close()
+
+        except Exception as e:
+            print(f"❌ Error connecting to Chrome: {e}")
+            return None
 
     return xoxc_token
 
