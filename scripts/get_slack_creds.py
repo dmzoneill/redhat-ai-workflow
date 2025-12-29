@@ -5,18 +5,21 @@ Extract Slack credentials and update config.json.
 Gets the xoxc_token and d_cookie needed for the Slack bot.
 
 Usage:
-    python scripts/get_slack_creds.py              # Get d_cookie, prompt for xoxc
-    python scripts/get_slack_creds.py --capture    # Auto-capture both (opens browser)
+    python scripts/get_slack_creds.py              # Auto-extract both credentials
     python scripts/get_slack_creds.py --dry-run    # Show values without updating config
+    python scripts/get_slack_creds.py --xoxc "..." # Manually provide xoxc_token
 
 Requirements:
     pip install pycookiecheat
-    pip install playwright && playwright install chromium  # For --capture mode
+
+Both credentials are extracted directly from Chrome's storage:
+- d_cookie: From Chrome's encrypted Cookies database
+- xoxc_token: From Chrome's Local Storage (LevelDB)
 """
 
 import argparse
-import asyncio
 import json
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import unquote
@@ -36,14 +39,6 @@ try:
     HAS_PYCOOKIECHEAT = True
 except ImportError:
     HAS_PYCOOKIECHEAT = False
-
-# Try playwright for browser automation
-try:
-    from playwright.async_api import async_playwright
-
-    HAS_PLAYWRIGHT = True
-except ImportError:
-    HAS_PLAYWRIGHT = False
 
 
 def get_d_cookie_from_chrome(profile: str = "") -> str | None:
@@ -74,132 +69,49 @@ def get_d_cookie_from_chrome(profile: str = "") -> str | None:
     return None
 
 
-def check_chrome_debugging_port() -> int | None:
-    """Check if Chrome is running with remote debugging enabled."""
-    import socket
-
-    for port in [9222, 9223, 9224]:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(0.5)
-                result = s.connect_ex(("127.0.0.1", port))
-                if result == 0:
-                    return port
-        except Exception:
-            pass
-    return None
-
-
-async def capture_xoxc_token_playwright() -> str | None:
+def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
     """
-    Capture xoxc_token by connecting to existing Chrome browser.
+    Extract xoxc_token from Chrome's Local Storage.
 
-    Requires Chrome to be running with --remote-debugging-port=9222
+    Chrome stores Local Storage in LevelDB format. We use `strings` to extract
+    readable text and grep for xoxc tokens.
     """
-    if not HAS_PLAYWRIGHT:
-        print("❌ Missing: pip install playwright && playwright install chromium")
-        return None
+    chrome_base = Path.home() / ".config" / "google-chrome"
 
-    # Check if Chrome has debugging enabled
-    debug_port = check_chrome_debugging_port()
+    # Auto-detect profile if not specified
+    profiles_to_try = [profile] if profile else ["Profile 1", "Default", "Profile 2", "Profile 3"]
 
-    if not debug_port:
-        print("❌ Chrome is not running with remote debugging enabled.")
-        print()
-        print("   To enable, restart Chrome with this flag:")
-        print()
-        print("   google-chrome --remote-debugging-port=9222")
-        print()
-        print("   Or add to your Chrome desktop shortcut/launcher.")
-        print("   Then run this script again with --capture")
-        return None
+    for prof in profiles_to_try:
+        local_storage_dir = chrome_base / prof / "Local Storage" / "leveldb"
+        if not local_storage_dir.exists():
+            continue
 
-    print(f"🌐 Connecting to existing Chrome on port {debug_port}...")
-
-    xoxc_token = None
-
-    async with async_playwright() as p:
         try:
-            # Connect to existing Chrome instance
-            browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{debug_port}")
-            print("✅ Connected to Chrome")
+            # Use strings + grep to extract xoxc tokens from LevelDB files
+            # This is simpler than parsing LevelDB and works reliably
+            result = subprocess.run(
+                f'strings "{local_storage_dir}"/*.ldb 2>/dev/null | grep -oE "xoxc-[a-zA-Z0-9_-]{{50,}}"',
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
 
-            # Get existing contexts (browser windows)
-            contexts = browser.contexts
-            if not contexts:
-                print("❌ No browser windows found")
-                return None
-
-            # Find a Slack tab or create one
-            slack_page = None
-            for context in contexts:
-                for page in context.pages:
-                    if "slack.com" in page.url:
-                        slack_page = page
-                        print(f"   Found Slack tab: {page.url[:50]}...")
-                        break
-                if slack_page:
-                    break
-
-            if not slack_page:
-                # Open Slack in a new tab
-                print("   Opening Slack in new tab...")
-                slack_page = await contexts[0].new_page()
-                await slack_page.goto(SLACK_URL, wait_until="networkidle")
-
-            # Intercept requests to capture xoxc_token
-            async def handle_request(request):
-                nonlocal xoxc_token
-                if xoxc_token:
-                    return
-
-                # Check POST requests to Slack API
-                if request.method == "POST" and "slack.com/api" in request.url:
-                    try:
-                        post_data = request.post_data
-                        if post_data and "token" in str(post_data):
-                            # Try to parse as JSON
-                            try:
-                                data = json.loads(post_data)
-                                if isinstance(data, dict) and str(data.get("token", "")).startswith("xoxc-"):
-                                    xoxc_token = data["token"]
-                                    print(f"✅ Captured xoxc_token: {xoxc_token[:30]}...")
-                            except json.JSONDecodeError:
-                                # Try form data
-                                post_str = str(post_data)
-                                if "token=xoxc-" in post_str:
-                                    for part in post_str.split("&"):
-                                        if part.startswith("token=xoxc-"):
-                                            xoxc_token = unquote(part.split("=", 1)[1])
-                                            print(f"✅ Captured xoxc_token: {xoxc_token[:30]}...")
-                                            break
-                    except Exception:
-                        pass
-
-            slack_page.on("request", handle_request)
-
-            # Trigger some activity
-            print("   Waiting for xoxc_token...")
-            print("   👆 Click something in the Slack tab to trigger an API request")
-
-            # Wait for token capture
-            for _ in range(60):  # 60 second timeout
-                if xoxc_token:
-                    break
-                await asyncio.sleep(1)
-
-            if not xoxc_token:
-                print("   ⏳ Timeout - no token captured")
-                print("   Make sure you clicked in the Slack browser tab")
-
-            # Don't close the browser - it's the user's existing session
-            browser.close()
+            if result.returncode == 0 and result.stdout.strip():
+                # Get unique tokens, prefer the most recent (last in file)
+                tokens = result.stdout.strip().split("\n")
+                # Filter valid tokens (should be ~100+ chars)
+                valid_tokens = [t for t in tokens if len(t) > 80]
+                if valid_tokens:
+                    # Return the last (most recent) token
+                    token = valid_tokens[-1]
+                    print(f"📁 Found xoxc_token in Chrome profile: {prof}")
+                    return token
 
         except Exception as e:
-            print(f"❌ Error connecting to Chrome: {e}")
-            return None
+            print(f"⚠️  Error reading Local Storage from {prof}: {e}")
+            continue
 
-    return xoxc_token
+    return None
 
 
 def load_config() -> dict:
@@ -257,9 +169,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python scripts/get_slack_creds.py              # Get d_cookie from Chrome
-  python scripts/get_slack_creds.py --capture    # Auto-capture both (opens browser)
+  python scripts/get_slack_creds.py              # Auto-extract both credentials
   python scripts/get_slack_creds.py --dry-run    # Show what would be updated
+  python scripts/get_slack_creds.py --xoxc "..." # Manually provide xoxc_token
         """,
     )
     parser.add_argument(
@@ -267,12 +179,6 @@ Examples:
         "-p",
         default="",
         help="Chrome profile name (e.g., 'Profile 1'). Auto-detected if not specified.",
-    )
-    parser.add_argument(
-        "--capture",
-        "-c",
-        action="store_true",
-        help="Open browser to auto-capture xoxc_token",
     )
     parser.add_argument(
         "--dry-run",
@@ -284,14 +190,14 @@ Examples:
         "--xoxc",
         "-x",
         default="",
-        help="Manually provide xoxc_token value",
+        help="Manually provide xoxc_token value (overrides auto-detection)",
     )
     args = parser.parse_args()
 
-    print("🔍 Extracting Slack credentials...")
+    print("🔍 Extracting Slack credentials from Chrome...")
     print()
 
-    # Step 1: Get d_cookie from Chrome
+    # Step 1: Get d_cookie from Chrome's Cookies database
     d_cookie = get_d_cookie_from_chrome(args.profile)
 
     if not d_cookie:
@@ -302,27 +208,27 @@ Examples:
     print(f"   d_cookie: {d_cookie[:40]}...")
     print()
 
-    # Step 2: Get xoxc_token
+    # Step 2: Get xoxc_token from Chrome's Local Storage or manual input
     xoxc_token = args.xoxc if args.xoxc else None
 
-    if args.capture and not xoxc_token:
-        # Auto-capture using browser
-        xoxc_token = asyncio.run(capture_xoxc_token_playwright())
-    elif not xoxc_token:
-        # Check if we already have one in config
-        config = load_config()
-        existing = config.get("slack", {}).get("xoxc_token", "")
-        if existing:
-            print(f"ℹ️  Using existing xoxc_token from config: {existing[:30]}...")
-            xoxc_token = existing
-        else:
-            print("ℹ️  No xoxc_token provided. Options:")
-            print("   1. Run with --capture to auto-capture")
-            print("   2. Run with --xoxc 'xoxc-...' to provide manually")
-            print()
-            # Still update d_cookie
-            update_config(d_cookie, None, args.dry_run)
-            return
+    if not xoxc_token:
+        # Try to extract from Chrome's Local Storage
+        xoxc_token = get_xoxc_token_from_local_storage(args.profile)
+
+    if not xoxc_token:
+        print("⚠️  Could not find xoxc_token in Local Storage")
+        print("   This can happen if you haven't used Slack recently.")
+        print()
+        print("   Options:")
+        print("   1. Open Slack in Chrome, do any action, then run this script again")
+        print("   2. Provide manually: --xoxc 'xoxc-...'")
+        print()
+        # Still update d_cookie
+        update_config(d_cookie, None, args.dry_run)
+        return
+
+    print(f"   xoxc_token: {xoxc_token[:40]}...")
+    print()
 
     # Step 3: Update config.json
     update_config(d_cookie, xoxc_token, args.dry_run)
