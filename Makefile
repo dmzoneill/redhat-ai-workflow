@@ -11,14 +11,16 @@
 #   make test              - Run tests
 # =============================================================================
 
-.PHONY: help install test lint format clean \
+.PHONY: help install install-dev test lint format clean \
+        check-env config-validate status quick-start \
         slack-daemon slack-daemon-bg slack-daemon-stop slack-daemon-logs \
-        slack-daemon-verbose slack-daemon-dry slack-daemon-llm slack-daemon-llm-verbose \
-        slack-status slack-pending slack-approve slack-approve-all slack-history \
-        slack-send slack-watch slack-reload \
-        mcp-server mcp-devops mcp-developer mcp-incident mcp-release \
-        docs-serve docs-check list-skills list-tools config-validate \
-        check-env \
+        slack-daemon-verbose slack-daemon-dry slack-daemon-dbus slack-daemon-status \
+        slack-test slack-status slack-pending slack-approve slack-approve-all \
+        slack-reject slack-history slack-send slack-watch slack-reload \
+        mcp-server mcp-developer mcp-devops mcp-incident mcp-release mcp-slack mcp-all mcp-custom \
+        integration-test integration-test-agent integration-test-fix integration-test-dry \
+        skill-test skill-test-list skill-test-dry \
+        docs-serve docs-check list-skills list-tools \
         sync-commands sync-commands-dry sync-commands-reverse \
         sync-config-example sync-config-example-fix
 
@@ -51,15 +53,16 @@ help:
 	@printf "  \033[32mmake slack-daemon-bg\033[0m    Run Slack daemon (background with D-Bus)\n"
 	@printf "  \033[32mmake slack-daemon-stop\033[0m  Stop background Slack daemon\n"
 	@printf "  \033[32mmake slack-daemon-logs\033[0m  Tail Slack daemon logs\n"
+	@printf "  \033[32mmake slack-daemon-verbose\033[0m  Run with verbose logging\n"
 	@printf "  \033[32mmake slack-daemon-dry\033[0m   Run in dry-run mode (no responses sent)\n"
-	@printf "  \033[32mmake slack-daemon-llm\033[0m   Run daemon (Claude is always enabled)\n"
-	@printf "  \033[32mmake slack-daemon-llm-verbose\033[0m  Run daemon with verbose logging\n"
+	@printf "  \033[32mmake slack-test\033[0m         Quick smoke test (validates credentials)\n"
 	@printf "\n"
 	@printf "\033[1mSlack Control (D-Bus IPC):\033[0m\n"
 	@printf "  \033[32mmake slack-status\033[0m       Get daemon status and stats\n"
 	@printf "  \033[32mmake slack-pending\033[0m      List messages awaiting approval\n"
 	@printf "  \033[32mmake slack-approve ID=xxx\033[0m  Approve a specific message\n"
 	@printf "  \033[32mmake slack-approve-all\033[0m  Approve all pending messages\n"
+	@printf "  \033[32mmake slack-reject ID=xxx\033[0m  Reject a specific message\n"
 	@printf "  \033[32mmake slack-history\033[0m      Show message history\n"
 	@printf "  \033[32mmake slack-watch\033[0m        Watch for new messages (live)\n"
 	@printf "  \033[32mmake slack-reload\033[0m       Reload daemon configuration\n"
@@ -73,13 +76,22 @@ help:
 	@printf "  \033[32mmake mcp-release\033[0m        Run release agent\n"
 	@printf "  \033[32mmake mcp-slack\033[0m          Run slack agent\n"
 	@printf "  \033[32mmake mcp-all\033[0m            Run with ALL tools (may exceed limits)\n"
+	@printf "  \033[32mmake mcp-custom TOOLS=x,y\033[0m  Run with specific tool modules\n"
 	@printf "\n"
 	@printf "\033[1mDevelopment:\033[0m\n"
 	@printf "  \033[32mmake install\033[0m            Install dependencies\n"
-	@printf "  \033[32mmake test\033[0m               Run tests\n"
+	@printf "  \033[32mmake install-dev\033[0m        Install dev dependencies (pytest, black, etc)\n"
+	@printf "  \033[32mmake test\033[0m               Run unit tests\n"
 	@printf "  \033[32mmake lint\033[0m               Run linters (flake8, black --check)\n"
 	@printf "  \033[32mmake format\033[0m             Auto-format code with black\n"
-	@printf "  \033[32mmake check-env\033[0m          Validate environment variables\n"
+	@printf "  \033[32mmake check-env\033[0m          Validate Slack configuration\n"
+	@printf "\n"
+	@printf "\033[1mTesting:\033[0m\n"
+	@printf "  \033[32mmake integration-test\033[0m   Run integration tests across agents\n"
+	@printf "  \033[32mmake integration-test-fix\033[0m  Run with auto-fix enabled\n"
+	@printf "  \033[32mmake skill-test\033[0m         Run skill tests (live execution)\n"
+	@printf "  \033[32mmake skill-test-list\033[0m    List all skills\n"
+	@printf "  \033[32mmake skill-test-dry\033[0m     Run skill tests (dry-run)\n"
 	@printf "\n"
 	@printf "\033[1mDocumentation:\033[0m\n"
 	@printf "  \033[32mmake list-skills\033[0m        List all available skills\n"
@@ -98,6 +110,7 @@ help:
 	@printf "  \033[32mmake config-validate\033[0m    Validate config.json\n"
 	@printf "  \033[32mmake clean\033[0m              Clean temporary files\n"
 	@printf "  \033[32mmake status\033[0m             Show status of running processes\n"
+	@printf "  \033[32mmake quick-start\033[0m        Show quick start guide\n"
 	@printf "\n"
 
 # =============================================================================
@@ -152,15 +165,11 @@ slack-daemon-dry: check-env
 	@printf "\033[36mStarting Slack daemon (dry-run mode)...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --dry-run --verbose
 
-# NOTE: --llm flag removed - Claude is now REQUIRED for operation
-# These targets now just run the daemon (which always uses Claude)
-slack-daemon-llm: check-env
-	@printf "\033[36mStarting Slack daemon (Claude-powered)...\033[0m\n"
-	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py
+# DEPRECATED: slack-daemon-llm targets - Claude is now always enabled
+# Kept for backwards compatibility, just run the regular daemon
+slack-daemon-llm: slack-daemon
 
-slack-daemon-llm-verbose: check-env
-	@printf "\033[36mStarting Slack daemon (Claude-powered, verbose)...\033[0m\n"
-	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --verbose
+slack-daemon-llm-verbose: slack-daemon-verbose
 
 slack-daemon-stop:
 	@# Try to kill by PID file first
