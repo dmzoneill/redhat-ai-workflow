@@ -264,7 +264,7 @@
           "auto_investigate": true
         }
       },
-      "watched_keywords": ["help", "question", "urgent", "review", "alert"],
+      "watched_keywords": ["help", "question", "urgent", "review", "alert", "firing", "resolved"],
       "self_user_id": "U_YOUR_USER_ID",
       "self_dm_channel": "D_YOUR_DM_CHANNEL"
     },
