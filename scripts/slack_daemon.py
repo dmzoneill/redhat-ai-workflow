@@ -1042,6 +1042,9 @@ class SlackDaemon:
         # Self-DM channel for testing (messages from self in this channel are processed)
         self_dm_channel = get_slack_config("listener.self_dm_channel", "", "SLACK_SELF_DM_CHANNEL")
 
+        # Alert channels (for auto-investigate - all messages in these channels are processed)
+        alert_channels = get_slack_config("listener.alert_channels", {})
+
         config = ListenerConfig(
             poll_interval_min=poll_interval_min,
             poll_interval_max=poll_interval_max,
@@ -1049,6 +1052,7 @@ class SlackDaemon:
             watched_keywords=watched_keywords,
             self_user_id=self_user_id,
             self_dm_channel=self_dm_channel,
+            alert_channels=alert_channels,
         )
 
         self.listener = SlackListener(self.session, self.state_db, config)

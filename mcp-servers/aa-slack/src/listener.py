@@ -40,6 +40,9 @@ class ListenerConfig:
     # User IDs whose messages always trigger
     watched_users: list[str] = field(default_factory=list)
 
+    # Alert channels (channel_id -> config dict) - all messages processed for auto-investigate
+    alert_channels: dict[str, dict] = field(default_factory=dict)
+
     # Our own user ID (to ignore our messages)
     self_user_id: str = ""
 
@@ -304,7 +307,8 @@ class SlackListener:
 
         Filters:
         - Ignore our own messages (unless in self-DM testing channel)
-        - Ignore bot messages (unless watched user)
+        - Ignore bot messages (unless watched user or alert channel)
+        - Process ALL messages in alert channels (for auto-investigate)
         - Process @mentions to us
         - Process messages from watched users
         - Process messages containing watched keywords
@@ -331,6 +335,12 @@ class SlackListener:
         # Ignore message subtypes (join, leave, etc.) unless it's a bot_message from watched user
         if subtype and subtype not in ("bot_message", "thread_broadcast"):
             return False
+
+        # ALWAYS process messages in alert channels (for auto-investigate)
+        # Alert channels are configured in config.json under slack.listener.alert_channels
+        if channel_id in self.config.alert_channels:
+            logger.debug(f"Alert channel message: processing from {channel_id}")
+            return True
 
         # Always process from watched users
         if user_id in self.config.watched_users:
