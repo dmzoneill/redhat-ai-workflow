@@ -6,6 +6,72 @@ Enhance the AI Workflow experience by integrating directly into Cursor/VSCode UI
 
 ---
 
+## Core Requirements
+
+### ⚠️ CRITICAL: IDE Integration is Optional
+
+**All skills, tools, and code MUST work without any IDE integration.**
+
+The IDE integration is a **convenience layer**, not a dependency. Users should be able to:
+
+1. **Run skills from CLI** - `python -m mcp_server skill_run start_work ...`
+2. **Use MCP tools via chat** - No extension required
+3. **Run daemons standalone** - `python scripts/slack_daemon.py`
+4. **Execute in headless environments** - CI/CD, servers, containers
+
+### Design Principles
+
+| Principle | Description |
+|-----------|-------------|
+| **Optional Enhancement** | IDE features add value but aren't required |
+| **Graceful Degradation** | If extension unavailable, everything still works |
+| **No Coupling** | Core code must not import IDE-specific modules |
+| **Event-Driven** | IDE listens to events; core code doesn't wait for IDE |
+| **CLI First** | Every feature must work from command line |
+
+### Architecture Pattern
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    IDE EXTENSION (Optional)                  │
+│         Status Bar │ Webview │ Notifications                │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ D-Bus / Events (subscribe)
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    CORE WORKFLOW (Required)                  │
+│         MCP Tools │ Skills │ Daemons │ CLI                  │
+│                                                              │
+│  ✅ Works standalone    ✅ Works in containers               │
+│  ✅ Works headless      ✅ Works without Cursor              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Implementation Rules
+
+1. **Core code emits events** - It doesn't know or care if anyone is listening
+2. **IDE subscribes to events** - It's just another consumer
+3. **No blocking on IDE** - Core never waits for IDE acknowledgment
+4. **Feature flags** - IDE-specific logging/events can be disabled
+
+```python
+# ✅ CORRECT: Core emits events, doesn't care about listeners
+class SkillExecutor:
+    def run_step(self, step):
+        result = step.execute()
+        self.emit_event("step_complete", result)  # Fire and forget
+        return result
+
+# ❌ WRONG: Core depends on IDE
+class SkillExecutor:
+    def run_step(self, step):
+        result = step.execute()
+        await self.ide_extension.update_ui(result)  # Blocks on IDE!
+        return result
+```
+
+---
+
 ## Current State
 
 ### What We Have
