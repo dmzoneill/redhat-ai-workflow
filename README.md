@@ -94,6 +94,84 @@ Claude: [Runs start_work skill]
 
 ---
 
+## 💬 Slack Bot Setup
+
+The Slack bot requires authentication tokens from your browser session.
+
+### Getting Slack Credentials
+
+1. **Open Slack in Chrome** at `app.slack.com` (or your enterprise URL)
+2. **Open DevTools** (F12)
+3. **Get `xoxc_token`:**
+   - Go to **Network** tab
+   - Do any action in Slack (send message, click channel)
+   - Filter by `api` or `edgeapi`
+   - Click any request → **Payload** tab
+   - Find `token` field starting with `xoxc-`
+
+4. **Get `d_cookie`:**
+   - Go to **Application** tab
+   - Expand **Cookies** → click your Slack domain
+   - Find the `d` cookie (value starts with `xoxd-`)
+
+> **Note:** The `d` cookie is `HttpOnly` so JavaScript cannot access it directly.
+
+### JavaScript Helper (Partial Automation)
+
+Paste this in Chrome DevTools Console while on Slack:
+
+```javascript
+// Auto-capture xoxc_token, manually get d_cookie
+(function() {
+    const origXHRSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function(body) {
+        if (body && typeof body === 'string') {
+            try {
+                const parsed = JSON.parse(body);
+                if (parsed.token?.startsWith('xoxc-')) {
+                    console.log('═'.repeat(70));
+                    console.log('✅ xoxc_token:\n');
+                    console.log(parsed.token);
+                    console.log('\n📋 Now get d_cookie manually:');
+                    console.log('   Application tab → Cookies → d');
+                    console.log('═'.repeat(70));
+                    XMLHttpRequest.prototype.send = origXHRSend;
+                }
+            } catch(e) {}
+        }
+        return origXHRSend.apply(this, arguments);
+    };
+    console.log('👀 Click anything in Slack to capture xoxc_token...');
+})();
+```
+
+Then do any action in Slack - the token will print to console.
+
+### Add to config.json
+
+```json
+{
+  "slack": {
+    "xoxc_token": "xoxc-...",
+    "d_cookie": "xoxd-...",
+    "channels": {
+      "team": {
+        "id": "C01234567",
+        "name": "my-team-channel"
+      }
+    }
+  }
+}
+```
+
+### Run the Slack Bot
+
+```bash
+make slack-daemon-llm
+```
+
+---
+
 ## 🎭 Agents
 
 Switch agents to get different tool sets. See [full agent reference](docs/agents/README.md).
