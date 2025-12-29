@@ -30,9 +30,6 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 
-# Slack URL
-SLACK_URL = "https://redhat.enterprise.slack.com"
-
 # Try pycookiecheat for Chrome cookie extraction
 try:
     from pycookiecheat import chrome_cookies
@@ -42,16 +39,41 @@ except ImportError:
     HAS_PYCOOKIECHEAT = False
 
 
+def get_slack_url() -> str:
+    """Get Slack URL from config or default."""
+    config = load_config()
+    host = config.get("slack", {}).get("auth", {}).get("host", "")
+    if host:
+        return f"https://{host}"
+    return "https://slack.com"
+
+
+def get_chrome_settings() -> tuple[Path, list[str]]:
+    """Get Chrome user data dir and profiles from config."""
+    config = load_config()
+    creds_config = config.get("slack", {}).get("credentials_extraction", {})
+
+    # Chrome user data directory
+    chrome_dir = creds_config.get("chrome_user_data_dir", "~/.config/google-chrome")
+    chrome_base = Path(chrome_dir).expanduser()
+
+    # Profiles to try (in order)
+    profiles = creds_config.get("chrome_profiles", ["Profile 1", "Default", "Profile 2", "Profile 3"])
+
+    return chrome_base, profiles
+
+
 def get_d_cookie_from_chrome(profile: str = "") -> str | None:
     """Get the d cookie from Chrome's cookie storage."""
     if not HAS_PYCOOKIECHEAT:
         print("❌ Missing: pip install pycookiecheat")
         return None
 
-    chrome_base = Path.home() / ".config" / "google-chrome"
+    chrome_base, default_profiles = get_chrome_settings()
+    slack_url = get_slack_url()
 
     # Auto-detect profile if not specified
-    profiles_to_try = [profile] if profile else ["Profile 1", "Default", "Profile 2", "Profile 3"]
+    profiles_to_try = [profile] if profile else default_profiles
 
     for prof in profiles_to_try:
         cookie_file = chrome_base / prof / "Cookies"
@@ -59,7 +81,7 @@ def get_d_cookie_from_chrome(profile: str = "") -> str | None:
             continue
 
         try:
-            result = chrome_cookies(SLACK_URL, cookie_file=str(cookie_file))
+            result = chrome_cookies(slack_url, cookie_file=str(cookie_file))
             if "d" in result:
                 print(f"📁 Found d_cookie in Chrome profile: {prof}")
                 return unquote(result["d"])
@@ -77,10 +99,10 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
     Chrome stores Local Storage in LevelDB format. We search files from
     newest to oldest to get the most recent token.
     """
-    chrome_base = Path.home() / ".config" / "google-chrome"
+    chrome_base, default_profiles = get_chrome_settings()
 
     # Auto-detect profile if not specified
-    profiles_to_try = [profile] if profile else ["Profile 1", "Default", "Profile 2", "Profile 3"]
+    profiles_to_try = [profile] if profile else default_profiles
 
     for prof in profiles_to_try:
         local_storage_dir = chrome_base / prof / "Local Storage" / "leveldb"
