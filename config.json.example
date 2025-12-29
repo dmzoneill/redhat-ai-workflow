@@ -237,6 +237,11 @@
       "workspace_id": "YOUR_WORKSPACE_ID",
       "host": "your-workspace.enterprise.slack.com"
     },
+    "credentials_extraction": {
+      "description": "Settings for scripts/get_slack_creds.py",
+      "chrome_user_data_dir": "~/.config/google-chrome",
+      "chrome_profiles": ["Profile 1", "Default", "Profile 2", "Profile 3"]
+    },
     "listener": {
       "poll_interval_min": 5,
       "poll_interval_max": 15,
