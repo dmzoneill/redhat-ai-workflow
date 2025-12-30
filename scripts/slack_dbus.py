@@ -232,13 +232,37 @@ if DBUS_AVAILABLE:
 
         @method()
         def SendMessage(self, channel_id: "s", text: "s", thread_ts: "s") -> "s":
-            """Send a message to Slack."""
+            """Send a message to Slack.
+
+            Note: This method schedules the send and returns immediately.
+            The actual send happens asynchronously.
+            """
+            # Schedule the coroutine on the event loop (non-blocking)
             loop = self.daemon._event_loop
-            future = asyncio.run_coroutine_threadsafe(
-                self.daemon.send_direct_message(channel_id, text, thread_ts), loop
-            )
-            result = future.result(timeout=30)
-            return json.dumps(result)
+            if not loop or not self.daemon.session:
+                return json.dumps({"success": False, "error": "Session not available"})
+
+            # Create a task to run the send (fire-and-forget for now)
+            # We return success immediately since we can't block here
+            async def do_send():
+                try:
+                    result = await self.daemon.session.send_message(
+                        channel_id=channel_id,
+                        text=text,
+                        thread_ts=thread_ts if thread_ts else None,
+                        typing_delay=True,
+                    )
+                    logger.info(f"D-Bus SendMessage completed: ts={result.get('ts', 'unknown')}")
+                    return result
+                except Exception as e:
+                    logger.error(f"D-Bus SendMessage failed: {e}")
+                    return {"success": False, "error": str(e)}
+
+            # Schedule the task
+            asyncio.run_coroutine_threadsafe(do_send(), loop)
+
+            # Return immediately - the message will be sent asynchronously
+            return json.dumps({"success": True, "message": "Message send scheduled", "async": True})
 
         @method()
         def ReloadConfig(self) -> "s":
