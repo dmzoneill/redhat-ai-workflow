@@ -351,13 +351,13 @@ skill-test-dry:
 
 lint:
 	@printf "\033[36mRunning linters...\033[0m\n"
-	cd $(PROJECT_ROOT) && flake8 scripts/ mcp-servers/ --max-line-length=100 --ignore=E501,W503,E402,C901,E203
-	cd $(PROJECT_ROOT) && black --check scripts/ mcp-servers/ --line-length=100
+	cd $(PROJECT_ROOT) && flake8 scripts/ mcp-servers/ --max-line-length=120 --ignore=E501,W503,E402,C901,E203
+	cd $(PROJECT_ROOT) && black --check scripts/ mcp-servers/ --line-length=120
 	@printf "\033[32m✅ Linting passed\033[0m\n"
 
 format:
 	@printf "\033[36mFormatting code...\033[0m\n"
-	cd $(PROJECT_ROOT) && black scripts/ mcp-servers/ --line-length=100
+	cd $(PROJECT_ROOT) && black scripts/ mcp-servers/ --line-length=120
 	@printf "\033[32m✅ Code formatted\033[0m\n"
 
 # =============================================================================
