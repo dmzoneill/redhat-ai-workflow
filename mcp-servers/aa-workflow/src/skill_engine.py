@@ -283,6 +283,7 @@ class SkillExecutor:
             "git_": "git",
             "jira_": "jira",
             "gitlab_": "gitlab",
+            "slack_": "slack",
             "kubectl_": "k8s",
             "k8s_": "k8s",
             "prometheus_": "prometheus",
