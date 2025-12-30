@@ -184,34 +184,31 @@ steps:
       issue_key = issue.get("key", "")
       jira_summary = ""
       if jira_issue:
-          jira_summary = jira_issue.get("summary", "")[:60] if isinstance(jira_issue, dict) else str(jira_issue)[:60]
+          jira_summary = jira_issue.get("summary", "")[:80] if isinstance(jira_issue, dict) else str(jira_issue)[:80]
 
-      # Format differently for reminder vs new
+      # Build message - simple and clean
+      lines = ["<!subteam^aa-api-team>"]
+
       if inputs.reminder:
-          emoji = "⏰"
-          header = "Friendly Reminder: MR Awaiting Review"
+          lines.append("⏰ *Reminder - Please review:*")
       else:
-          emoji = "🔀"
-          header = "MR Ready for Review"
-
-      # Build message
-      lines = [f"{emoji} *{header}*", ""]
-
-      if issue_key:
-          lines.append(f"📋 *Jira:* <{jira_url}/browse/{issue_key}|{issue_key}>" + (f" - {jira_summary}" if jira_summary else ""))
-
-      lines.append(f"🔗 *MR:* <{mr_web_url}|!{mr_id}> - {mr_title[:60]}")
-
-      if project:
-          repo_name = project.split("/")[-1] if "/" in project else project
-          lines.append(f"📁 *Repo:* {repo_name}")
-
-      if inputs.message:
-          lines.append("")
-          lines.append(f"💬 {inputs.message}")
+          lines.append("🔀 *Please review:*")
 
       lines.append("")
-      lines.append("Please review when you have a moment 🙏")
+
+      # Jira issue as hyperlink (if available)
+      if issue_key:
+          jira_text = f"{issue_key}: {jira_summary}" if jira_summary else issue_key
+          lines.append(f"• <{jira_url}/browse/{issue_key}|{jira_text}>")
+
+      # MR as hyperlink (ID and title)
+      mr_text = f"!{mr_id}: {mr_title[:80]}"
+      lines.append(f"• <{mr_web_url}|{mr_text}>")
+
+      # Custom message if provided
+      if inputs.message:
+          lines.append("")
+          lines.append(inputs.message)
 
       result = "\n".join(lines)
     output: slack_message
