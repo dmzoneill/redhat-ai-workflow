@@ -26,6 +26,7 @@ from pathlib import Path
 # Check for dbus availability
 try:
     from dbus_next.aio import MessageBus
+    from dbus_next.constants import PropertyAccess
     from dbus_next.service import ServiceInterface, dbus_property, method
     from dbus_next.service import signal as dbus_signal
 
@@ -159,17 +160,17 @@ if DBUS_AVAILABLE:
 
         # ==================== Properties ====================
 
-        @dbus_property()
+        @dbus_property(access=PropertyAccess.READ)
         def Running(self) -> "b":
             """Whether the daemon is running."""
             return self.daemon.is_running
 
-        @dbus_property()
+        @dbus_property(access=PropertyAccess.READ)
         def PendingCount(self) -> "i":
             """Number of messages pending approval."""
             return len(self.daemon.history.pending_approvals)
 
-        @dbus_property()
+        @dbus_property(access=PropertyAccess.READ)
         def Stats(self) -> "s":
             """JSON stats about the daemon."""
             stats = {
