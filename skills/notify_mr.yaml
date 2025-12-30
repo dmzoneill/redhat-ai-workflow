@@ -1,0 +1,243 @@
+# Skill: Notify Team About MR
+# Posts a review request to the team Slack channel for an existing MR
+
+name: notify_mr
+description: |
+  Notify the team Slack channel about an existing MR that's ready for review.
+
+  Use this when:
+  - You created a draft MR and it's now ready
+  - You want to remind the team about a pending review
+  - You marked an MR as ready after initial work
+
+  Uses MCP tools: gitlab_mr_get, jira_view_issue, slack_post_team
+
+version: "1.0"
+
+inputs:
+  - name: mr_id
+    type: string
+    required: false
+    description: "GitLab MR IID (e.g., 1459). If not provided, will try to find from current branch."
+
+  - name: project
+    type: string
+    required: false
+    default: ""
+    description: "GitLab project path (e.g., 'automation-analytics/automation-analytics-backend')"
+
+  - name: issue_key
+    type: string
+    required: false
+    default: ""
+    description: "Jira issue key for additional context"
+
+  - name: message
+    type: string
+    required: false
+    default: ""
+    description: "Custom message to include (optional)"
+
+  - name: reminder
+    type: boolean
+    required: false
+    default: false
+    description: "If true, formats as a reminder rather than new MR notification"
+
+steps:
+  # ==================== RESOLVE MR ====================
+
+  - name: load_config
+    description: "Load configuration"
+    compute: |
+      from scripts.common.config_loader import load_config
+      config = load_config()
+
+      jira_url = config.get("jira", {}).get("url", "https://issues.redhat.com")
+      gitlab_url = config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
+
+      # Default project from config if not provided
+      default_project = ""
+      repos = config.get("repositories", {})
+      for name, cfg in repos.items():
+          if cfg.get("gitlab"):
+              default_project = cfg.get("gitlab")
+              break
+
+      result = {
+          "jira_url": jira_url,
+          "gitlab_url": gitlab_url,
+          "default_project": default_project,
+      }
+    output: config
+
+  - name: resolve_mr_from_branch
+    description: "If no MR ID provided, try to find from current branch"
+    condition: "not inputs.mr_id"
+    compute: |
+      import subprocess
+      import os
+
+      # Get current branch
+      result_branch = subprocess.run(
+          ["git", "branch", "--show-current"],
+          capture_output=True, text=True, cwd=os.getcwd()
+      )
+      branch = result_branch.stdout.strip() if result_branch.returncode == 0 else ""
+
+      result = {"branch": branch}
+    output: branch_info
+    on_error: continue
+
+  - name: get_mr_by_branch
+    description: "Find MR for current branch"
+    condition: "not inputs.mr_id and branch_info and branch_info.get('branch')"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ inputs.project or config.default_project }}"
+      state: "opened"
+    output: mr_list_raw
+    on_error: continue
+
+  - name: parse_mr_from_list
+    description: "Extract MR ID from list"
+    condition: "not inputs.mr_id and mr_list_raw"
+    compute: |
+      from scripts.common.parsers import extract_mr_id_from_text
+
+      branch = branch_info.get("branch", "") if branch_info else ""
+      mr_text = str(mr_list_raw) if mr_list_raw else ""
+
+      mr_id = None
+      for line in mr_text.split("\n"):
+          if branch.lower() in line.lower():
+              mr_id = extract_mr_id_from_text(line)
+              if mr_id:
+                  break
+
+      if not mr_id:
+          raise ValueError(f"No MR found for branch '{branch}'. Please provide mr_id explicitly.")
+
+      result = {"mr_id": mr_id}
+    output: resolved_mr
+
+  - name: determine_mr_id
+    description: "Determine final MR ID to use"
+    compute: |
+      if inputs.mr_id:
+          mr_id = inputs.mr_id
+      elif resolved_mr:
+          mr_id = resolved_mr.get("mr_id")
+      else:
+          raise ValueError("Could not determine MR ID. Please provide mr_id parameter.")
+
+      result = {"mr_id": str(mr_id)}
+    output: final_mr
+
+  # ==================== FETCH MR DETAILS ====================
+
+  - name: get_mr_details
+    description: "Get MR details from GitLab"
+    tool: gitlab_mr_get
+    args:
+      project: "{{ inputs.project or config.default_project }}"
+      mr_id: "{{ final_mr.mr_id }}"
+    output: mr
+
+  - name: extract_issue_key
+    description: "Extract Jira key from MR title if not provided"
+    compute: |
+      from scripts.common.parsers import extract_jira_key
+
+      if inputs.issue_key:
+          issue_key = inputs.issue_key.upper()
+      else:
+          # Try to extract from MR title
+          mr_title = mr.get("title", "") if mr else ""
+          issue_key = extract_jira_key(mr_title)
+
+      result = {"key": issue_key or ""}
+    output: issue
+
+  - name: get_jira_details
+    description: "Get Jira issue details for context"
+    condition: "issue.key"
+    tool: jira_view_issue
+    args:
+      issue_key: "{{ issue.key }}"
+    output: jira_issue
+    on_error: continue
+
+  # ==================== POST NOTIFICATION ====================
+
+  - name: build_message
+    description: "Build Slack notification message"
+    compute: |
+      jira_url = config.get("jira_url", "https://issues.redhat.com")
+      gitlab_url = config.get("gitlab_url", "https://gitlab.cee.redhat.com")
+      project = inputs.project or config.get("default_project", "")
+
+      mr_id = final_mr.get("mr_id", "")
+      mr_title = mr.get("title", "Update") if mr else "Update"
+      mr_web_url = mr.get("web_url", f"{gitlab_url}/{project}/-/merge_requests/{mr_id}") if mr else ""
+
+      issue_key = issue.get("key", "")
+      jira_summary = ""
+      if jira_issue:
+          jira_summary = jira_issue.get("summary", "")[:60] if isinstance(jira_issue, dict) else str(jira_issue)[:60]
+
+      # Format differently for reminder vs new
+      if inputs.reminder:
+          emoji = "⏰"
+          header = "Friendly Reminder: MR Awaiting Review"
+      else:
+          emoji = "🔀"
+          header = "MR Ready for Review"
+
+      # Build message
+      lines = [f"{emoji} *{header}*", ""]
+
+      if issue_key:
+          lines.append(f"📋 *Jira:* <{jira_url}/browse/{issue_key}|{issue_key}>" + (f" - {jira_summary}" if jira_summary else ""))
+
+      lines.append(f"🔗 *MR:* <{mr_web_url}|!{mr_id}> - {mr_title[:60]}")
+
+      if project:
+          repo_name = project.split("/")[-1] if "/" in project else project
+          lines.append(f"📁 *Repo:* {repo_name}")
+
+      if inputs.message:
+          lines.append("")
+          lines.append(f"💬 {inputs.message}")
+
+      lines.append("")
+      lines.append("Please review when you have a moment 🙏")
+
+      result = "\n".join(lines)
+    output: slack_message
+
+  - name: post_to_team
+    description: "Post notification to team channel"
+    tool: slack_post_team
+    args:
+      text: "{{ slack_message }}"
+    output: slack_result
+
+outputs:
+  - name: summary
+    value: |
+      ## ✅ Team Notified
+
+      **MR:** !{{ final_mr.mr_id }}
+      **Channel:** Team channel
+      {% if issue.key %}
+      **Jira:** {{ issue.key }}
+      {% endif %}
+
+      {{ "📝 Reminder sent" if inputs.reminder else "📢 Review request posted" }}
+
+  - name: context
+    value:
+      mr_id: "{{ final_mr.mr_id }}"
+      issue_key: "{{ issue.key }}"
+      posted: true
