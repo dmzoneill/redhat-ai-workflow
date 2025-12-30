@@ -198,7 +198,7 @@ if DBUS_AVAILABLE:
         @method()
         def ApproveMessage(self, message_id: "s") -> "s":
             """Approve a pending message and send it."""
-            loop = asyncio.get_event_loop()
+            loop = self.daemon._event_loop
             future = asyncio.run_coroutine_threadsafe(self.daemon.approve_message(message_id), loop)
             result = future.result(timeout=30)
             return json.dumps(result)
@@ -214,7 +214,7 @@ if DBUS_AVAILABLE:
         @method()
         def ApproveAll(self) -> "s":
             """Approve all pending messages."""
-            loop = asyncio.get_event_loop()
+            loop = self.daemon._event_loop
             future = asyncio.run_coroutine_threadsafe(self.daemon.approve_all_pending(), loop)
             result = future.result(timeout=60)
             return json.dumps(result)
@@ -233,7 +233,7 @@ if DBUS_AVAILABLE:
         @method()
         def SendMessage(self, channel_id: "s", text: "s", thread_ts: "s") -> "s":
             """Send a message to Slack."""
-            loop = asyncio.get_event_loop()
+            loop = self.daemon._event_loop
             future = asyncio.run_coroutine_threadsafe(
                 self.daemon.send_direct_message(channel_id, text, thread_ts), loop
             )
@@ -249,7 +249,7 @@ if DBUS_AVAILABLE:
         @method()
         def Shutdown(self) -> "s":
             """Gracefully shutdown the daemon."""
-            asyncio.get_event_loop().call_soon(self.daemon.request_shutdown)
+            self.daemon._event_loop.call_soon(self.daemon.request_shutdown)
             return json.dumps({"success": True, "message": "Shutdown initiated"})
 
         # ==================== Signals ====================
@@ -298,6 +298,7 @@ class SlackDaemonWithDBus:
         self.user_classifier = None
         self.channel_permissions = None
         self.response_generator = None
+        self._event_loop = None  # Set when D-Bus starts
 
     async def start_dbus(self):
         """Start the D-Bus service."""
@@ -306,6 +307,9 @@ class SlackDaemonWithDBus:
             return
 
         try:
+            # Store the running event loop for D-Bus method handlers
+            self._event_loop = asyncio.get_running_loop()
+
             self._bus = await MessageBus().connect()
             self._dbus_interface = SlackAgentDBusInterface(self)
 
