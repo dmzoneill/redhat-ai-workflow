@@ -31,60 +31,72 @@ description: |
   - reload: Reload configuration
 
 inputs:
-  action:
+  - name: action
     description: "Action to perform: start, stop, status, pending, approve, approve_all, reject, history, send, reload"
     type: string
     required: true
-  message_id:
+
+  - name: message_id
     description: "Message ID for approve/reject actions"
     type: string
     required: false
-  target:
+
+  - name: target
     description: "Target for send action: Channel (C123), User ID (U123), or @username"
     type: string
     required: false
-  channel:
+
+  - name: channel
     description: "Alias for target (deprecated, use target instead)"
     type: string
     required: false
-  message:
+
+  - name: message
     description: "Message text for send action"
     type: string
     required: false
-  thread:
+
+  - name: thread
     description: "Thread timestamp for send action"
     type: string
     required: false
-  limit:
+
+  - name: limit
     description: "Limit for history query (default: 50)"
     type: integer
     required: false
     default: 50
-  filter_channel:
+
+  - name: filter_channel
     description: "Channel ID filter for history"
     type: string
     required: false
-  filter_user:
+
+  - name: filter_user
     description: "User ID filter for history"
     type: string
     required: false
-  filter_status:
+
+  - name: filter_status
     description: "Status filter for history (pending, sent, skipped, etc.)"
     type: string
     required: false
-  enable_llm:
+
+  - name: enable_llm
     description: "Enable LLM for start action"
     type: boolean
     required: false
     default: false
-  verbose:
+
+  - name: verbose
     description: "Enable verbose output for start action"
     type: boolean
     required: false
     default: false
 
 steps:
-  - id: validate_action
+  - name: validate_action
+    description: "Validate the action and required parameters"
     compute: |
       valid_actions = ["start", "stop", "status", "pending", "approve", "approve_all", "reject", "history", "send", "reload"]
       action = inputs.get("action", "").lower()
@@ -108,8 +120,10 @@ steps:
           raise ValueError("send action requires message parameter")
 
       result = {"action": action, "valid": True}
+    output: validation
 
-  - id: run_action
+  - name: run_action
+    description: "Execute the daemon control action"
     compute: |
       import subprocess
       import sys
@@ -234,17 +248,21 @@ steps:
 
       else:
         result = {"success": False, "error": f"Unknown action: {action}"}
+    output: action_result
 
 outputs:
-  success:
+  - name: success
     description: Whether the action succeeded
-    value: "{{ steps.run_action.result.success }}"
-  output:
+    value: "{{ action_result.success }}"
+
+  - name: output
     description: Command output
-    value: "{{ steps.run_action.result.output | default('') }}"
-  error:
+    value: "{{ action_result.output }}"
+
+  - name: error
     description: Error message if failed
-    value: "{{ steps.run_action.result.error | default('') }}"
-  pid:
+    value: "{{ action_result.error }}"
+
+  - name: pid
     description: Daemon PID (for start action)
-    value: "{{ steps.run_action.result.pid | default('') }}"
+    value: "{{ action_result.pid }}"
