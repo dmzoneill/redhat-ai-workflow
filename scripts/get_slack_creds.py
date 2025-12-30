@@ -177,23 +177,25 @@ def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = 
     """Update config.json with the new credentials."""
     config = load_config()
 
-    # Ensure slack section exists
+    # Ensure slack.auth section exists (daemon reads from slack.auth.*)
     if "slack" not in config:
         config["slack"] = {}
+    if "auth" not in config["slack"]:
+        config["slack"]["auth"] = {}
 
     updated = False
 
     if d_cookie:
-        if config["slack"].get("d_cookie") != d_cookie:
-            config["slack"]["d_cookie"] = d_cookie
+        if config["slack"]["auth"].get("d_cookie") != d_cookie:
+            config["slack"]["auth"]["d_cookie"] = d_cookie
             updated = True
-            print("✅ Updated d_cookie in config.json")
+            print("✅ Updated slack.auth.d_cookie in config.json")
 
     if xoxc_token:
-        if config["slack"].get("xoxc_token") != xoxc_token:
-            config["slack"]["xoxc_token"] = xoxc_token
+        if config["slack"]["auth"].get("xoxc_token") != xoxc_token:
+            config["slack"]["auth"]["xoxc_token"] = xoxc_token
             updated = True
-            print("✅ Updated xoxc_token in config.json")
+            print("✅ Updated slack.auth.xoxc_token in config.json")
 
     if updated:
         if dry_run:
