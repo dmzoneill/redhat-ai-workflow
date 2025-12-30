@@ -59,6 +59,11 @@ steps:
       jira_url = config.get("jira", {}).get("url", "https://issues.redhat.com")
       gitlab_url = config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
 
+      # Get team group info for @mentions
+      team_channel = config.get("slack", {}).get("channels", {}).get("team", {})
+      team_group_id = team_channel.get("group_id", "")
+      team_group_handle = team_channel.get("group_handle", "aa-api-team")
+
       # Resolve project - use input or find default from config
       project = inputs.get("project", "")
       if not project:
@@ -95,6 +100,8 @@ steps:
           "issue_key": inputs.get("issue_key", "").upper() if inputs.get("issue_key") else "",
           "custom_message": inputs.get("message", ""),
           "is_reminder": inputs.get("reminder", False),
+          "team_group_id": team_group_id,
+          "team_group_handle": team_group_handle,
       }
     output: ctx
 
@@ -188,8 +195,16 @@ steps:
       custom_message = ctx.get("custom_message", "")
       is_reminder = ctx.get("is_reminder", False)
 
+      # Build team mention using group ID from config
+      team_group_id = ctx.get("team_group_id", "")
+      team_group_handle = ctx.get("team_group_handle", "aa-api-team")
+      if team_group_id:
+          team_mention = f"<!subteam^{team_group_id}|@{team_group_handle}>"
+      else:
+          team_mention = f"@{team_group_handle}"
+
       # Build message
-      lines = ["<!subteam^aa-api-team>"]
+      lines = [team_mention]
 
       if is_reminder:
           lines.append("⏰ *Reminder - Please review:*")

@@ -488,7 +488,9 @@
       "team": {
         "id": "C_YOUR_TEAM_CHANNEL",
         "name": "your-team-channel",
-        "description": "Team channel for notifications and updates"
+        "description": "Team channel for notifications and updates",
+        "group_id": "S_YOUR_TEAM_GROUP_ID",
+        "group_handle": "your-team-handle"
       },
       "standup": {
         "id": "C_YOUR_STANDUP_CHANNEL",
@@ -628,7 +630,9 @@
       "team": {
         "id": "C_YOUR_TEAM_CHANNEL",
         "name": "your-team-channel",
-        "description": "Team channel for notifications and updates"
+        "description": "Team channel for notifications and updates",
+        "group_id": "S_YOUR_TEAM_GROUP_ID",
+        "group_handle": "your-team-handle"
       },
       "standup": {
         "id": "C_YOUR_STANDUP_CHANNEL",
