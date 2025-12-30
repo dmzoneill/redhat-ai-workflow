@@ -165,12 +165,6 @@ slack-daemon-dry: check-env
 	@printf "\033[36mStarting Slack daemon (dry-run mode)...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --dry-run --verbose
 
-# DEPRECATED: slack-daemon-llm targets - Claude is now always enabled
-# Kept for backwards compatibility, just run the regular daemon
-slack-daemon-llm: slack-daemon
-
-slack-daemon-llm-verbose: slack-daemon-verbose
-
 slack-daemon-stop:
 	@# Try to kill by PID file first
 	@if [ -f $(SLACK_PID) ]; then \
