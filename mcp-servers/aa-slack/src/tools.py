@@ -48,6 +48,30 @@ def _get_slack_config() -> dict:
     return config.get("slack", {})
 
 
+async def _send_via_dbus(channel_id: str, text: str, thread_ts: str = "") -> dict | None:
+    """
+    Try to send a message via the D-Bus daemon.
+
+    Returns the result dict if successful, None if D-Bus is not available.
+    """
+    try:
+        # Import D-Bus client
+        scripts_dir = SERVERS_DIR.parent / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+
+        from slack_dbus import SlackDBusClient
+
+        client = SlackDBusClient()
+        result = await client.send_message(channel_id, text, thread_ts)
+        logger.debug(f"D-Bus send result: {result}")
+        return result
+    except Exception as e:
+        # D-Bus not available, will fall back to direct API
+        logger.debug(f"D-Bus not available: {e}")
+        return None
+
+
 # Global manager instance (initialized on first use)
 _manager = None
 _manager_lock = asyncio.Lock()
@@ -285,7 +309,24 @@ def register_tools(server: FastMCP) -> int:
                 )
 
             else:
-                # Channel ID (C...) or DM ID (D...) - send directly
+                # Channel ID (C...) or DM ID (D...) - try D-Bus first, then direct
+                msg_type = "dm" if target.startswith("D") else "channel"
+
+                # Try D-Bus daemon first (if running with --dbus)
+                dbus_result = await _send_via_dbus(target, text, thread_ts or "")
+                if dbus_result and dbus_result.get("success"):
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "type": msg_type,
+                            "channel": dbus_result.get("channel", target),
+                            "timestamp": dbus_result.get("ts", ""),
+                            "message": "Message sent successfully (via D-Bus)",
+                            "method": "dbus",
+                        }
+                    )
+
+                # Fall back to direct API
                 result = await manager.session.send_message(
                     channel_id=target,
                     text=text,
@@ -293,14 +334,14 @@ def register_tools(server: FastMCP) -> int:
                     typing_delay=typing_delay,
                 )
 
-                msg_type = "dm" if target.startswith("D") else "channel"
                 return json.dumps(
                     {
                         "success": True,
                         "type": msg_type,
                         "channel": result.get("channel", target),
                         "timestamp": result.get("ts", ""),
-                        "message": "Message sent successfully",
+                        "message": "Message sent successfully (direct API)",
+                        "method": "direct",
                     }
                 )
 
@@ -378,6 +419,8 @@ def register_tools(server: FastMCP) -> int:
         Convenience wrapper that automatically uses the team channel from config.
         Use this for team notifications, updates, and announcements.
 
+        Tries D-Bus daemon first (if running), falls back to direct API.
+
         Args:
             text: Message text (supports Slack markdown)
             thread_ts: Optional thread timestamp to reply in a thread
@@ -404,7 +447,21 @@ def register_tools(server: FastMCP) -> int:
                     }
                 )
 
-            # Use the send_message function
+            # Try D-Bus daemon first (if running with --dbus)
+            dbus_result = await _send_via_dbus(team_channel, text, thread_ts or "")
+            if dbus_result and dbus_result.get("success"):
+                return json.dumps(
+                    {
+                        "success": True,
+                        "channel": team_channel,
+                        "channel_name": (team_info.get("name", "team") if isinstance(team_info, dict) else "team"),
+                        "timestamp": dbus_result.get("ts", ""),
+                        "message": "Message posted to team channel (via D-Bus)",
+                        "method": "dbus",
+                    }
+                )
+
+            # Fall back to direct API
             manager = await get_manager()
             await manager.initialize()
 
@@ -421,7 +478,8 @@ def register_tools(server: FastMCP) -> int:
                     "channel": team_channel,
                     "channel_name": (team_info.get("name", "team") if isinstance(team_info, dict) else "team"),
                     "timestamp": result.get("ts", ""),
-                    "message": "Message posted to team channel",
+                    "message": "Message posted to team channel (direct API)",
+                    "method": "direct",
                 }
             )
 
