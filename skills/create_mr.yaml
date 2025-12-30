@@ -141,11 +141,18 @@ steps:
 
       jira_url = config.get("jira", {}).get("url", "https://issues.redhat.com")
 
+      # Get team group info for @mentions
+      team_channel = config.get("slack", {}).get("channels", {}).get("team", {})
+      team_group_id = team_channel.get("group_id", "")
+      team_group_handle = team_channel.get("group_handle", "aa-api-team")
+
       result = {
           "path": repo_path,
           "gitlab_project": gitlab_project or "automation-analytics/automation-analytics-backend",
           "default_branch": default_branch,
           "jira_url": jira_url,
+          "team_group_id": team_group_id,
+          "team_group_handle": team_group_handle,
       }
     output: resolved_repo
 
@@ -507,19 +514,40 @@ steps:
 
   # ==================== SLACK NOTIFICATION ====================
 
+  - name: build_slack_message
+    description: "Build Slack message with proper team mention"
+    condition: "mr and not inputs.draft"
+    compute: |
+      # Build team mention
+      team_group_id = resolved_repo.get("team_group_id", "")
+      team_group_handle = resolved_repo.get("team_group_handle", "aa-api-team")
+      if team_group_id:
+          team_mention = f"<!subteam^{team_group_id}|@{team_group_handle}>"
+      else:
+          team_mention = f"@{team_group_handle}"
+
+      jira_url = resolved_repo.get("jira_url", "https://issues.redhat.com")
+      issue_key = inputs.get("issue_key", "").upper()
+      issue_summary = issue.get("summary", "Update")[:60] if issue else "Update"
+      mr_url = mr.get("web_url", "")
+      mr_iid = mr.get("iid", "")
+      mr_title = mr.get("title", "")[:60]
+      gitlab_project = resolved_repo.get("gitlab_project", "")
+      repo_name = gitlab_project.split("/")[-1] if "/" in gitlab_project else gitlab_project
+
+      lines = [team_mention, "🔀 *New MR Ready for Review*", ""]
+      lines.append(f"• <{jira_url}/browse/{issue_key}|{issue_key}: {issue_summary}>")
+      lines.append(f"• <{mr_url}|!{mr_iid}: {mr_title}>")
+
+      result = "\n".join(lines)
+    output: slack_message
+
   - name: notify_team_slack
     description: "Post MR to team channel asking for review"
-    condition: "mr and not inputs.draft"
+    condition: "slack_message"
     tool: slack_post_team
     args:
-      text: |
-        🔀 *New MR Ready for Review*
-
-        📋 *Jira:* <{{ resolved_repo.jira_url }}/browse/{{ inputs.issue_key }}|{{ inputs.issue_key }}> - {{ issue.summary[:60] if issue else 'Update' }}
-        🔗 *MR:* <{{ mr.web_url }}|!{{ mr.iid }}>
-        📁 *Repo:* {{ resolved_repo.gitlab_project.split('/')[-1] if resolved_repo.gitlab_project else 'unknown' }}
-
-        Please review when you have a moment 🙏
+      text: "{{ slack_message }}"
     output: slack_notification
     on_error: continue
 

@@ -43,13 +43,20 @@ steps:
       jira_url = config.get("jira", {}).get("url", "https://issues.redhat.com")
       gitlab_url = config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
 
+      # Get team group info for @mentions
+      team_channel = config.get("slack", {}).get("channels", {}).get("team", {})
+      team_group_id = team_channel.get("group_id", "")
+      team_group_handle = team_channel.get("group_handle", "aa-api-team")
+
       # Clean MR ID
-      mr_id = str(inputs.mr_id).lstrip("!").strip()
+      mr_id = str(inputs.get("mr_id", "")).lstrip("!").strip()
 
       result = {
           "jira_url": jira_url,
           "gitlab_url": gitlab_url,
           "mr_id": mr_id,
+          "team_group_id": team_group_id,
+          "team_group_handle": team_group_handle,
       }
     output: cfg
 
@@ -105,24 +112,48 @@ steps:
       draft: false
     output: update_result
 
-  # Step 5: Post to Slack
+  # Step 5: Build Slack message with team mention
+  - name: build_slack_message
+    description: "Build Slack message with proper team mention"
+    condition: "'Updated' in str(update_result) or 'success' in str(update_result).lower()"
+    compute: |
+      # Build team mention
+      team_group_id = cfg.get("team_group_id", "")
+      team_group_handle = cfg.get("team_group_handle", "aa-api-team")
+      if team_group_id:
+          team_mention = f"<!subteam^{team_group_id}|@{team_group_handle}>"
+      else:
+          team_mention = f"@{team_group_handle}"
+
+      jira_url = cfg.get("jira_url", "https://issues.redhat.com")
+      jira_key = mr_info.get("jira_key", "")
+      mr_id = cfg.get("mr_id", "")
+      web_url = mr_info.get("web_url", "")
+      title = mr_info.get("title", "")
+      project = inputs.get("project", "")
+      repo_name = project.split("/")[-1] if "/" in project else project
+
+      lines = [team_mention, "🔀 *MR Ready for Review*", ""]
+
+      if jira_key:
+          lines.append(f"• <{jira_url}/browse/{jira_key}|{jira_key}>")
+
+      lines.append(f"• <{web_url}|!{mr_id}: {title}>")
+
+      result = "\n".join(lines)
+    output: slack_message
+
+  # Step 6: Post to Slack
   - name: notify_team_slack
     description: "Post to team channel asking for review"
-    condition: "'Updated' in str(update_result) or 'success' in str(update_result).lower()"
+    condition: "slack_message"
     tool: slack_post_team
     args:
-      text: |
-        🔀 *MR Ready for Review*
-
-        {% if mr_info.jira_key %}📋 *Jira:* <{{ cfg.jira_url }}/browse/{{ mr_info.jira_key }}|{{ mr_info.jira_key }}>{% endif %}
-        🔗 *MR:* <{{ mr_info.web_url }}|!{{ cfg.mr_id }}> {{ mr_info.title }}
-        📁 *Repo:* {{ inputs.project.split('/')[-1] }}
-
-        Please review when you have a moment 🙏
+      text: "{{ slack_message }}"
     output: slack_result
     on_error: continue
 
-  # Step 6: Update Jira status
+  # Step 7: Update Jira status
   - name: update_jira_status
     description: "Move Jira to In Review"
     condition: "inputs.update_jira and mr_info.jira_key"
