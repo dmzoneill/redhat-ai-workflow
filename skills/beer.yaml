@@ -190,22 +190,20 @@ steps:
     on_error: continue
 
   - name: parse_my_prs
-    description: "Parse my open PRs"
+    description: "Parse my open PRs using shared parser"
     compute: |
-      import re
+      from scripts.common.parsers import parse_mr_list
 
-      prs = []
+      prs = parse_mr_list(my_prs_raw) if my_prs_raw else []
+
+      # Enrich with draft status
       raw = str(my_prs_raw) if my_prs_raw else ""
-
-      for line in raw.split('\n'):
-        match = re.search(r'!(\d+)\s+.+?\s+(.+?)\s+\(main\)', line)
-        if match:
-          is_draft = 'draft' in line.lower()
-          prs.append({
-            "id": match.group(1),
-            "title": match.group(2)[:50],
-            "draft": is_draft
-          })
+      for pr in prs:
+        pr_id = str(pr.get('id', ''))
+        for line in raw.split('\n'):
+          if f"!{pr_id}" in line:
+            pr['draft'] = 'draft' in line.lower()
+            break
 
       result = prs
     output: my_prs
@@ -428,6 +426,17 @@ steps:
       full_name = ctx.get('config', {}).get('user', {}).get('full_name', 'there')
       first_name = full_name.split()[0] if full_name else 'there'
 
+      # Base URL for GitLab MRs
+      gitlab_mr_base = "https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests"
+
+      def linkify_jira_keys(text):
+        """Replace Jira keys like AAP-12345 with markdown links."""
+        jira_pattern = re.compile(r'\b(AAP-\d+)(?=\s|$|-[a-zA-Z])')
+        def replace_jira(match):
+          key = match.group(1)
+          return f"[{key}](https://issues.redhat.com/browse/{key})"
+        return jira_pattern.sub(replace_jira, text)
+
       # Header
       lines.append(f"# {ctx['emoji']} {ctx['greeting']}, {first_name}!")
       lines.append("")
@@ -470,7 +479,8 @@ steps:
         active = [p for p in my_prs if not p.get('draft')]
         lines.append(f"**{len(active)}** active, **{len(drafts)}** draft")
         for pr in active[:3]:
-          lines.append(f"- !{pr['id']} - {pr['title']}")
+          title_with_links = linkify_jira_keys(pr.get('title', ''))
+          lines.append(f"- [!{pr['id']}]({gitlab_mr_base}/{pr['id']}) - {title_with_links}")
       else:
         lines.append("- No open PRs")
       lines.append("")
