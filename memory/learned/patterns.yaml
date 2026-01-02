@@ -1,93 +1,81 @@
-# Learned Patterns
-# Error patterns, fixes, and solutions discovered during work
-
-last_updated: null
-
-# Error patterns and their fixes
 error_patterns:
-  # Example:
-  # - pattern: "OOMKilled"
-  #   meaning: "Container exceeded memory limits"
-  #   fix: "Increase memory limits in deployment or investigate memory leak"
-  #   commands:
-  #     - "kubectl describe pod <pod> -n <namespace>"
-  #     - "kubectl top pod -n <namespace>"
-  #   related_jiras: []
+- commands:
+  - quay_check_image_exists(image='...', tag='...')
+  - kubectl describe pod <pod> -n <namespace>
+  fix: Check image name, tag exists in Quay, and registry credentials
+  meaning: Cannot pull container image from registry
+  pattern: ImagePullBackOff
+- commands:
+  - kubectl logs <pod> -n <namespace> --previous
+  - kubectl describe pod <pod>
+  fix: Check logs for startup errors, config issues, or missing deps
+  meaning: Container crashes repeatedly on startup
+  pattern: CrashLoopBackOff
+- commands:
+  - kubectl describe pod <pod>
+  - kubectl get events -n <namespace>
+  fix: Check resource availability, node taints, or PVC issues
+  meaning: Pod cannot be scheduled
+  pattern: PodPending
+- commands:
+  - kubectl describe pod <pod> -n <namespace>
+  - kubectl top pod -n <namespace>
+  fix: Increase memory limits in deployment or investigate memory leak
+  meaning: Container exceeded memory limits
+  pattern: OOMKilled
+  related_jiras: []
+- commands:
+  - kubectl describe pod <pod>
+  - kubectl logs <pod> --tail=100
+  fix: Check probe endpoints, increase timeout, or fix health endpoint
+  meaning: Readiness or liveness probe failed
+  pattern: Unhealthy
+- commands:
+  - kubectl get nodes
+  - kubectl describe pod <pod>
+  fix: Check node resources, affinity rules, or PVC availability
+  meaning: Scheduler cannot place pod on any node
+  pattern: FailedScheduling
+- commands:
+  - kubectl get endpoints <service> -n <namespace>
+  - kubectl get pods -l <selector>
+  fix: Check if target pod is running, service selector matches, network policies
+  meaning: Service endpoint not reachable
+  pattern: connection refused
+- commands:
+  - kubectl logs <pod> --tail=200
+  - prometheus_query for latency
+  fix: Check upstream service health, increase timeout, or investigate slowness
+  meaning: Request timeout to upstream service
+  pattern: deadline exceeded
+jira_cli_patterns:
+- commit: 85d96ea
+  date: '2026-01-02'
+  description: 'The rh-issue CLI for creating Jira stories requires:
 
-  - pattern: "ImagePullBackOff"
-    meaning: "Cannot pull container image from registry"
-    fix: "Check image name, tag exists in Quay, and registry credentials"
-    commands:
-      - "quay_check_image_exists(image='...', tag='...')"
-      - "kubectl describe pod <pod> -n <namespace>"
+    1. --input-file with YAML containing Title Case field names
 
-  - pattern: "CrashLoopBackOff"
-    meaning: "Container crashes repeatedly on startup"
-    fix: "Check logs for startup errors, config issues, or missing deps"
-    commands:
-      - "kubectl logs <pod> -n <namespace> --previous"
-      - "kubectl describe pod <pod>"
+    2. Required fields: User Story, Acceptance Criteria, Supporting Documentation,
+    Definition of Done
 
-  - pattern: "PodPending"
-    meaning: "Pod cannot be scheduled"
-    fix: "Check resource availability, node taints, or PVC issues"
-    commands:
-      - "kubectl describe pod <pod>"
-      - "kubectl get events -n <namespace>"
+    3. --no-ai flag for non-interactive mode
 
-  - pattern: "OOMKilled"
-    meaning: "Container exceeded memory limits"
-    fix: "Increase memory limits in deployment or investigate memory leak"
-    commands:
-      - "kubectl describe pod <pod> -n <namespace>"
-      - "kubectl top pod -n <namespace>"
-    related_jiras: []
+    4. Summary is passed as positional arg, not in YAML
 
-  - pattern: "Unhealthy"
-    meaning: "Readiness or liveness probe failed"
-    fix: "Check probe endpoints, increase timeout, or fix health endpoint"
-    commands:
-      - "kubectl describe pod <pod>"
-      - "kubectl logs <pod> --tail=100"
-
-  - pattern: "FailedScheduling"
-    meaning: "Scheduler cannot place pod on any node"
-    fix: "Check node resources, affinity rules, or PVC availability"
-    commands:
-      - "kubectl get nodes"
-      - "kubectl describe pod <pod>"
-
-  - pattern: "connection refused"
-    meaning: "Service endpoint not reachable"
-    fix: "Check if target pod is running, service selector matches, network policies"
-    commands:
-      - "kubectl get endpoints <service> -n <namespace>"
-      - "kubectl get pods -l <selector>"
-
-  - pattern: "deadline exceeded"
-    meaning: "Request timeout to upstream service"
-    fix: "Check upstream service health, increase timeout, or investigate slowness"
-    commands:
-      - "kubectl logs <pod> --tail=200"
-      - "prometheus_query for latency"
-
-# Pipeline patterns
-pipeline_patterns:
-  - pattern: "lint failed"
-    meaning: "Code style issues"
-    fix: "Run black, isort, flake8 locally"
-    commands:
-      - "lint_python(repo='.', fix=True)"
-
-  - pattern: "tests failed"
-    meaning: "Unit or integration tests failing"
-    fix: "Run tests locally to reproduce"
-    commands:
-      - "test_run(repo='.', verbose=True)"
-
-# Performance patterns
+    '
+  issue: AAP-61699
+  pattern: rh-issue create-issue requires --input-file for stories
+  solution: Build temp YAML file with proper fields, use --input-file --no-ai
+last_updated: null
 performance_patterns: []
-# Example:
-#   - observation: "API latency spikes at 2PM daily"
-#     cause: "Batch job overlapping with peak traffic"
-#     fix: "Reschedule batch to off-peak hours"
+pipeline_patterns:
+- commands:
+  - lint_python(repo='.', fix=True)
+  fix: Run black, isort, flake8 locally
+  meaning: Code style issues
+  pattern: lint failed
+- commands:
+  - test_run(repo='.', verbose=True)
+  fix: Run tests locally to reproduce
+  meaning: Unit or integration tests failing
+  pattern: tests failed

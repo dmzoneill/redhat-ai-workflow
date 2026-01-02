@@ -18,7 +18,7 @@ from mcp.types import TextContent
 SERVERS_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
 
-from src.utils import get_kubeconfig, get_section_config
+from src.utils import get_kubeconfig, get_section_config, run_cmd_shell
 
 logger = logging.getLogger(__name__)
 
@@ -91,19 +91,105 @@ def get_app_config(app_name: str = "", billing: bool = False) -> dict:
 # ==================== Helper Functions ====================
 
 
+async def check_ephemeral_auth() -> bool:
+    """Check if ephemeral cluster authentication is valid.
+
+    Returns:
+        True if auth is valid, False otherwise.
+    """
+    kubeconfig = get_ephemeral_kubeconfig()
+
+    if not os.path.exists(kubeconfig):
+        logger.info(f"Kubeconfig not found: {kubeconfig}")
+        return False
+
+    # Quick auth check using oc whoami
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ["oc", "whoami"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**os.environ, "KUBECONFIG": kubeconfig},
+        )
+        if result.returncode == 0:
+            logger.info(f"Auth valid for ephemeral: {result.stdout.strip()}")
+            return True
+        else:
+            logger.info(f"Auth check failed: {result.stderr.strip()}")
+            return False
+    except Exception as e:
+        logger.info(f"Auth check error: {e}")
+        return False
+
+
+async def refresh_ephemeral_auth() -> bool:
+    """Refresh ephemeral cluster authentication using kube-clean and kube.
+
+    This runs the user's bash functions which handle the OAuth browser flow.
+
+    Returns:
+        True if refresh succeeded, False otherwise.
+    """
+    logger.info("Refreshing ephemeral auth via kube-clean e && kube e")
+
+    # First clean stale config
+    clean_success, _, clean_stderr = await run_cmd_shell(["kube-clean", "e"], timeout=30)
+    if not clean_success:
+        logger.warning(f"kube-clean failed: {clean_stderr}")
+        # Continue anyway - kube might still work
+
+    # Run kube e to trigger OAuth flow (opens browser)
+    success, _, stderr = await run_cmd_shell(["kube", "e"], timeout=120)
+    if success:
+        logger.info("Auth refresh succeeded")
+        return True
+    else:
+        logger.error(f"Auth refresh failed: {stderr}")
+        return False
+
+
 async def run_bonfire(
     args: list[str],
     timeout: int = 300,
     env: dict | None = None,
+    auto_auth: bool = True,
 ) -> tuple[bool, str]:
-    """Run bonfire command and return (success, output)."""
+    """Run bonfire command and return (success, output).
+
+    Args:
+        args: Bonfire command arguments
+        timeout: Command timeout in seconds
+        env: Additional environment variables
+        auto_auth: If True, automatically refresh auth if expired (default: True)
+
+    Returns:
+        Tuple of (success, output)
+    """
+    kubeconfig = get_ephemeral_kubeconfig()
+
+    # Check auth before running if auto_auth is enabled
+    if auto_auth:
+        if not await check_ephemeral_auth():
+            logger.info("Auth expired, attempting refresh...")
+            if await refresh_ephemeral_auth():
+                logger.info("Auth refreshed successfully")
+            else:
+                return False, (
+                    "❌ Ephemeral cluster authentication failed.\n\n"
+                    "A browser window should have opened for SSO login.\n"
+                    "If not, manually run: `kube-clean e && kube e`\n\n"
+                    "Then retry the command."
+                )
+
     cmd = ["bonfire"] + args
 
     logger.info(f"Running: {' '.join(cmd)}")
 
     run_env = os.environ.copy()
     # Always set KUBECONFIG for ephemeral cluster
-    run_env["KUBECONFIG"] = get_ephemeral_kubeconfig()
+    run_env["KUBECONFIG"] = kubeconfig
     if env:
         run_env.update(env)
 
