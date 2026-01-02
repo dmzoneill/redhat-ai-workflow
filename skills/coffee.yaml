@@ -688,8 +688,9 @@ steps:
 
       def linkify_jira_keys(text):
         """Replace Jira keys like AAP-12345 with markdown links."""
-        # Match AAP-XXXXX pattern
-        jira_pattern = re.compile(r'\b(AAP-\d+)\b')
+        # Match AAP-XXXXX pattern - use lookahead for word boundary or dash
+        # This handles both "AAP-12345 - title" and "AAP-12345-branch-name"
+        jira_pattern = re.compile(r'\b(AAP-\d+)(?=\s|$|-[a-zA-Z])')
         def replace_jira(match):
           key = match.group(1)
           return f"[{key}](https://issues.redhat.com/browse/{key})"
