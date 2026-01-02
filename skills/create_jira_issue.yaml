@@ -127,15 +127,10 @@ steps:
     compute: |
       import sys
       from pathlib import Path
-      from scripts.common.config_loader import load_config
 
       # Add our utilities to path
       sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
-      from common.jira_utils import (
-        normalize_issue_type,
-        markdown_to_jira,
-        build_jira_yaml
-      )
+      from common.jira_utils import normalize_issue_type
 
       # Normalize issue type
       issue_type = normalize_issue_type(inputs.get("issue_type", "story"))
@@ -155,60 +150,23 @@ steps:
       if not components:
         components = [cfg["default_component"]]
 
-      # Build YAML content
-      yaml_content = build_jira_yaml(
-        summary=inputs["summary"],
-        issue_type=issue_type,
-        description=inputs.get("description", ""),
-        user_story=inputs.get("user_story", ""),
-        acceptance_criteria=inputs.get("acceptance_criteria", ""),
-        supporting_documentation=inputs.get("supporting_documentation", ""),
-        definition_of_done=inputs.get("definition_of_done", ""),
-        labels=labels,
-        components=components,
-        story_points=inputs.get("story_points"),
-        epic_link=inputs.get("epic_link", ""),
-        convert_markdown=inputs.get("convert_markdown", True),
-      )
+      # Handle story_points - only include if actually provided as a valid integer
+      story_points = inputs.get("story_points")
+      if story_points is not None:
+        try:
+          story_points = int(story_points)
+        except (ValueError, TypeError):
+          story_points = None
 
       result = {
         "issue_type": issue_type,
         "project": project,
-        "yaml_content": yaml_content,
         "summary": inputs["summary"],
         "labels": labels,
         "components": components,
+        "story_points": story_points,
       }
     output: normalized
-
-  # Step 3: Build full description with all content sections
-  - name: build_full_description
-    description: "Combine all description fields into single description"
-    compute: |
-      parts = []
-
-      # Main description
-      if inputs.get("description"):
-        parts.append(inputs["description"])
-
-      # User story
-      if inputs.get("user_story"):
-        parts.append(f"\n\n## User Story\n\n{inputs['user_story']}")
-
-      # Acceptance criteria
-      if inputs.get("acceptance_criteria"):
-        parts.append(f"\n\n## Acceptance Criteria\n\n{inputs['acceptance_criteria']}")
-
-      # Supporting documentation
-      if inputs.get("supporting_documentation"):
-        parts.append(f"\n\n## Supporting Documentation\n\n{inputs['supporting_documentation']}")
-
-      # Definition of done
-      if inputs.get("definition_of_done"):
-        parts.append(f"\n\n## Definition of Done\n\n{inputs['definition_of_done']}")
-
-      result = "".join(parts)
-    output: full_description
 
   # Step 4: Create the issue via MCP tool
   - name: create_issue
@@ -217,11 +175,14 @@ steps:
     args:
       issue_type: "{{ normalized.issue_type }}"
       summary: "{{ normalized.summary }}"
-      description: "{{ full_description }}"
+      description: "{{ inputs.description or '' }}"
+      user_story: "{{ inputs.user_story or '' }}"
+      acceptance_criteria: "{{ inputs.acceptance_criteria or '' }}"
+      supporting_documentation: "{{ inputs.supporting_documentation or '' }}"
+      definition_of_done: "{{ inputs.definition_of_done or '' }}"
       project: "{{ normalized.project }}"
       labels: "{{ ','.join(normalized.labels) if normalized.labels else '' }}"
       components: "{{ ','.join(normalized.components) if normalized.components else '' }}"
-      story_points: "{{ inputs.story_points or 0 }}"
       convert_markdown: true
     output: create_result_raw
     on_error: continue
