@@ -135,6 +135,113 @@ def get_kubeconfig(environment: str, namespace: str = "") -> str:
     return str(kube_base / f"config.{suffix}")
 
 
+def get_cluster_short_name(environment: str) -> str:
+    """Get short cluster name for kube/kube-clean commands.
+
+    Args:
+        environment: Environment name (stage, production, ephemeral, etc.)
+
+    Returns:
+        Short name (e, s, p, k)
+    """
+    return KUBECONFIG_MAP.get(environment.lower(), environment.lower())
+
+
+async def check_cluster_auth(environment: str) -> bool:
+    """Check if cluster authentication is valid.
+
+    Args:
+        environment: Environment name (stage, production, ephemeral, etc.)
+
+    Returns:
+        True if auth is valid, False otherwise.
+    """
+    kubeconfig = get_kubeconfig(environment)
+
+    if not os.path.exists(kubeconfig):
+        logger.info(f"Kubeconfig not found: {kubeconfig}")
+        return False
+
+    # Quick auth check using oc whoami
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ["oc", "whoami"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**os.environ, "KUBECONFIG": kubeconfig},
+        )
+        if result.returncode == 0:
+            logger.info(f"Auth valid for {environment}: {result.stdout.strip()}")
+            return True
+        else:
+            logger.info(f"Auth check failed for {environment}: {result.stderr.strip()}")
+            return False
+    except Exception as e:
+        logger.info(f"Auth check error for {environment}: {e}")
+        return False
+
+
+async def refresh_cluster_auth(environment: str) -> bool:
+    """Refresh cluster authentication using kube-clean and kube.
+
+    This runs the user's bash functions which handle the OAuth browser flow.
+
+    Args:
+        environment: Environment name (stage, production, ephemeral, etc.)
+
+    Returns:
+        True if refresh succeeded, False otherwise.
+    """
+    short_name = get_cluster_short_name(environment)
+    logger.info(f"Refreshing {environment} auth via kube-clean {short_name} && kube {short_name}")
+
+    # First clean stale config
+    clean_success, _, clean_stderr = await run_cmd_shell(["kube-clean", short_name], timeout=30)
+    if not clean_success:
+        logger.warning(f"kube-clean {short_name} failed: {clean_stderr}")
+        # Continue anyway - kube might still work
+
+    # Run kube to trigger OAuth flow (opens browser)
+    success, _, stderr = await run_cmd_shell(["kube", short_name], timeout=120)
+    if success:
+        logger.info(f"Auth refresh succeeded for {environment}")
+        return True
+    else:
+        logger.error(f"Auth refresh failed for {environment}: {stderr}")
+        return False
+
+
+async def ensure_cluster_auth(environment: str, auto_refresh: bool = True) -> tuple[bool, str]:
+    """Ensure cluster authentication is valid, optionally refreshing if needed.
+
+    Args:
+        environment: Environment name (stage, production, ephemeral, etc.)
+        auto_refresh: If True, automatically refresh auth if expired (default: True)
+
+    Returns:
+        Tuple of (success, error_message). error_message is empty on success.
+    """
+    if await check_cluster_auth(environment):
+        return True, ""
+
+    if not auto_refresh:
+        return False, f"Authentication expired for {environment} cluster."
+
+    logger.info(f"Auth expired for {environment}, attempting refresh...")
+    if await refresh_cluster_auth(environment):
+        return True, ""
+
+    short_name = get_cluster_short_name(environment)
+    return False, (
+        f"❌ {environment.title()} cluster authentication failed.\n\n"
+        f"A browser window should have opened for SSO login.\n"
+        f"If not, manually run: `kube-clean {short_name} && kube {short_name}`\n\n"
+        "Then retry the command."
+    )
+
+
 def get_env_config(environment: str, service: str) -> dict:
     """Get environment-specific config for a service.
 
@@ -506,7 +613,7 @@ async def run_kubectl(
     namespace: str | None = None,
     timeout: int = 60,
     environment: str | None = None,
-    auto_retry_auth: bool = False,
+    auto_auth: bool = True,
 ) -> tuple[bool, str]:
     """Run kubectl command with proper kubeconfig.
 
@@ -516,9 +623,8 @@ async def run_kubectl(
         namespace: Kubernetes namespace
         timeout: Timeout in seconds
         environment: Environment name (used if kubeconfig not provided)
-        auto_retry_auth: If True, attempt to re-auth on failure.
-                        SAFETY: Only enabled for ephemeral cluster to prevent
-                        account lockouts from retry loops on prod/stage.
+        auto_auth: If True, check and refresh auth before running (default: True)
+                   Opens browser for SSO if credentials are stale.
 
     Returns:
         Tuple of (success, output)
@@ -543,6 +649,12 @@ async def run_kubectl(
         elif kc_path.endswith(".k"):
             resolved_env = "konflux"
 
+    # Check auth before running if auto_auth is enabled
+    if auto_auth and resolved_env:
+        auth_ok, auth_error = await ensure_cluster_auth(resolved_env, auto_refresh=True)
+        if not auth_ok:
+            return False, auth_error
+
     cmd = ["kubectl", f"--kubeconfig={kubeconfig}"]
     cmd.extend(args)
     if namespace:
@@ -550,30 +662,10 @@ async def run_kubectl(
 
     success, output = await run_cmd(cmd, timeout=timeout)
 
-    # Handle auth failures
+    # Add hint on auth failures (even though we pre-checked, token could expire mid-operation)
     if not success and is_auth_error(output) and resolved_env:
-        # SAFETY: Only auto-retry for ephemeral to prevent account lockouts
-        is_ephemeral = resolved_env in ("ephemeral", "eph", "e")
-
-        if auto_retry_auth and is_ephemeral:
-            # Try to re-authenticate for ephemeral cluster
-            logger.info("Auth failed on ephemeral, attempting auto-login...")
-            try:
-                auth_success, _, auth_stderr = await run_cmd_shell(["kube", "e"], timeout=120)
-                if auth_success:
-                    # Retry the original command
-                    success, output = await run_cmd(cmd, timeout=timeout)
-                    if success:
-                        output = f"🔄 Auto-reauthenticated to ephemeral cluster\n\n{output}"
-                else:
-                    output = f"{output}\n\n⚠️ Auto-login failed: {auth_stderr[:100]}"
-            except Exception as e:
-                output = f"{output}\n\n⚠️ Auto-login error: {e}"
-
-        # Always add hint (even if auto-retry failed or wasn't attempted)
-        if not success:
-            hint = get_auth_hint(resolved_env)
-            output = f"{output}\n\n{hint}"
+        hint = get_auth_hint(resolved_env)
+        output = f"{output}\n\n{hint}"
 
     return success, output
 
@@ -662,7 +754,11 @@ def get_service_url(service: str, environment: str) -> str:
     return url
 
 
-async def get_bearer_token(kubeconfig: str) -> str | None:
+async def get_bearer_token(
+    kubeconfig: str,
+    environment: str | None = None,
+    auto_auth: bool = True,
+) -> str | None:
     """Get bearer token from kubeconfig for API authentication.
 
     Tries multiple methods:
@@ -671,10 +767,31 @@ async def get_bearer_token(kubeconfig: str) -> str | None:
 
     Args:
         kubeconfig: Path to kubeconfig file
+        environment: Environment name for auto-auth (stage, prod, ephemeral)
+        auto_auth: If True, refresh auth if token extraction fails
 
     Returns:
         Bearer token or None if not available
     """
+    # Determine environment from kubeconfig path if not provided
+    if not environment:
+        kc_path = Path(kubeconfig).name
+        if kc_path.endswith(".s"):
+            environment = "stage"
+        elif kc_path.endswith(".p"):
+            environment = "production"
+        elif kc_path.endswith(".e"):
+            environment = "ephemeral"
+        elif kc_path.endswith(".k"):
+            environment = "konflux"
+
+    # Check/refresh auth if enabled
+    if auto_auth and environment:
+        auth_ok, _ = await ensure_cluster_auth(environment, auto_refresh=True)
+        if not auth_ok:
+            logger.warning(f"Auth refresh failed for {environment}")
+            return None
+
     # Method 1: Try extracting from kubeconfig file
     try:
         cmd = [
