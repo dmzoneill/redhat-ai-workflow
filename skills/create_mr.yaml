@@ -202,11 +202,11 @@ steps:
       # Required pattern: ^aap-[0-9]{3,6} at start of branch name (case insensitive)
       import re
       branch_pattern = r"^aap-\d{3,6}"
-      if not re.match(branch_pattern, branch.lower()):
+      if not re.match(branch_pattern, branch, re.IGNORECASE):
           raise ValueError(
               f"Branch name '{branch}' does not match required CI pattern.\n"
-              f"Branch must start with lowercase 'aap-XXXXX' (e.g., 'aap-61699-description').\n"
-              f"Use 'git branch -m {issue_key.lower()}-description' to rename."
+              f"Branch must start with 'AAP-XXXXX' (e.g., 'AAP-61699-description').\n"
+              f"Use 'git branch -m {issue_key}-description' to rename."
           )
 
       result = {
