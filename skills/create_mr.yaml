@@ -198,6 +198,17 @@ steps:
 
       issue_key = inputs.issue_key.upper()
 
+      # Validate branch name format per .gitlab-ci.yml validate-mr job
+      # Required pattern: ^aap-[0-9]{3,6} at start of branch name (case insensitive)
+      import re
+      branch_pattern = r"^aap-\d{3,6}"
+      if not re.match(branch_pattern, branch.lower()):
+          raise ValueError(
+              f"Branch name '{branch}' does not match required CI pattern.\n"
+              f"Branch must start with lowercase 'aap-XXXXX' (e.g., 'aap-61699-description').\n"
+              f"Use 'git branch -m {issue_key.lower()}-description' to rename."
+          )
+
       result = {
           "name": branch,
           "has_issue_key": issue_key in branch.upper(),

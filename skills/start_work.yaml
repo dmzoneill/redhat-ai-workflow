@@ -334,15 +334,18 @@ steps:
     on_error: continue
 
   # Step 7: Generate branch name (only used if creating new)
+  # Branch name MUST start with lowercase "aap-XXXXX" per validate-mr in .gitlab-ci.yml
+  # Pattern required: ^aap-[0-9]{3,6} at start of branch name
   - name: create_branch_name
     condition: "{{ not branch_check.get('exists', False) }}"
     compute: |
       from scripts.common.parsers import slugify_text
 
-      key = inputs.issue_key.upper()
+      key = inputs.issue_key.lower()  # Must be lowercase for CI validation
       # Extract summary from issue output and slugify using shared parser
       issue_text = str(issue)
       summary = slugify_text(issue_text, max_length=40)
+      # Branch format: aap-XXXXX-description (lowercase key required by CI)
       branch_name = f"{key}-{summary}"
     output: new_branch_name
 
