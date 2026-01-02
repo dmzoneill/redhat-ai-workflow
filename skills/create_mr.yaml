@@ -547,7 +547,7 @@ steps:
     tool: gitlab_mr_create
     args:
       project: "{{ resolved_repo.gitlab_project }}"
-      title: "{{ inputs.issue_key }} - {{ issue.summary[:50] if issue else 'Update' }}"
+      title: "{{ inputs.issue_key }} - feat: {{ issue.summary[:50] if issue else 'Update' }}"
       description: "{{ mr_description }}"
       target_branch: "{{ resolved_repo.default_branch }}"
       source_branch: "{{ current_branch.name }}"
