@@ -535,10 +535,38 @@ async def run_cmd_shell(
         path_parts.insert(0, user_bin)
     env["PATH"] = ":".join(path_parts)
 
-    # Pass through DISPLAY/XAUTHORITY for GUI apps
-    for var in ["DISPLAY", "XAUTHORITY"]:
-        if var in os.environ:
-            env[var] = os.environ[var]
+    # Pass through DISPLAY/XAUTHORITY for GUI apps (browser-based OAuth)
+    # If not set in MCP server context, try common defaults
+    if "DISPLAY" in os.environ:
+        env["DISPLAY"] = os.environ["DISPLAY"]
+    elif "DISPLAY" not in env:
+        # Default to :0 for local X sessions, or :1 for Wayland with Xwayland
+        env["DISPLAY"] = ":0"
+
+    if "XAUTHORITY" in os.environ:
+        env["XAUTHORITY"] = os.environ["XAUTHORITY"]
+    elif "XAUTHORITY" not in env:
+        # Default location for Xauthority
+        xauth_path = home / ".Xauthority"
+        if xauth_path.exists():
+            env["XAUTHORITY"] = str(xauth_path)
+
+    # For Wayland sessions (Fedora 43 default), also set WAYLAND_DISPLAY
+    if "WAYLAND_DISPLAY" in os.environ:
+        env["WAYLAND_DISPLAY"] = os.environ["WAYLAND_DISPLAY"]
+    elif "WAYLAND_DISPLAY" not in env:
+        # Try common wayland socket
+        wayland_sock = Path(f"/run/user/{os.getuid()}/wayland-0")
+        if wayland_sock.exists():
+            env["WAYLAND_DISPLAY"] = "wayland-0"
+
+    # XDG_RUNTIME_DIR is needed for Wayland
+    if "XDG_RUNTIME_DIR" in os.environ:
+        env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
+    elif "XDG_RUNTIME_DIR" not in env:
+        runtime_dir = f"/run/user/{os.getuid()}"
+        if os.path.isdir(runtime_dir):
+            env["XDG_RUNTIME_DIR"] = runtime_dir
 
     try:
         result = await asyncio.to_thread(
