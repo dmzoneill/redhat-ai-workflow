@@ -57,11 +57,12 @@ async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
     """Get URL and token for Prometheus environment.
 
     Uses shared utilities from aa-common for config loading.
+    Auto-refreshes auth if credentials are stale.
     """
     url = get_service_url("prometheus", environment)
     env_config = get_env_config(environment, "prometheus")
     kubeconfig = env_config.get("kubeconfig", get_kubeconfig(environment))
-    token = await get_bearer_token(kubeconfig)
+    token = await get_bearer_token(kubeconfig, environment=environment, auto_auth=True)
     return url, token
 
 

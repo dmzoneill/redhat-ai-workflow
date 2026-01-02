@@ -71,11 +71,12 @@ async def get_alertmanager_config(environment: str) -> tuple[str, str | None]:
     """Get URL and token for Alertmanager environment.
 
     Uses shared utilities from aa-common for config loading.
+    Auto-refreshes auth if credentials are stale.
     """
     url = get_service_url("alertmanager", environment)
     env_config = get_env_config(environment, "alertmanager")
     kubeconfig = env_config.get("kubeconfig", get_kubeconfig(environment))
-    token = await get_bearer_token(kubeconfig)
+    token = await get_bearer_token(kubeconfig, environment=environment, auto_auth=True)
     return url, token
 
 
