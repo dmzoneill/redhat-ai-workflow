@@ -384,34 +384,86 @@ steps:
       result = black_result
     output: black_result
 
+  - name: get_changed_files
+    description: "Get list of Python files changed in this branch"
+    condition: "inputs.run_linting"
+    compute: |
+      import subprocess
+
+      repo = resolved_repo["path"]
+      target = resolved_repo.get("default_branch", "main")
+
+      # Get list of changed Python files compared to target branch
+      cmd = ["git", "-C", repo, "diff", "--name-only", f"origin/{target}...HEAD", "--", "*.py"]
+      try:
+          output = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+          files = [f.strip() for f in output.stdout.strip().split('\n') if f.strip()]
+          result = {"files": files, "count": len(files)}
+      except Exception as e:
+          result = {"files": [], "count": 0, "error": str(e)}
+    output: changed_files
+
   - name: run_flake8
-    description: "Run flake8 linting"
-    condition: "inputs.run_linting and (not lint_tools_check or lint_tools_check.get('available', True))"
+    description: "Run flake8 linting on changed files only"
+    condition: "inputs.run_linting and changed_files and changed_files.get('count', 0) > 0"
     tool: code_lint
     args:
       repo: "{{ resolved_repo.path }}"
       tool: "flake8"
+      files: "{{ ' '.join(changed_files.files) }}"
       max_line_length: 100
       ignore: "E501,W503,E203"
-      exclude: ".git,__pycache__,migrations,venv,.venv"
     output: flake8_raw
     on_error: continue
 
   - name: parse_flake8
-    description: "Parse flake8 result"
+    description: "Parse flake8 result and block if issues found"
     condition: "inputs.run_linting"
     compute: |
       raw = str(flake8_raw) if 'flake8_raw' in dir() and flake8_raw else ""
+      file_count = changed_files.get("count", 0) if 'changed_files' in dir() else 0
 
-      if 'passed' in raw.lower() or 'no issues' in raw.lower() or not raw:
-        flake8_result = {"passed": True, "message": "Flake8 passed", "issues": []}
+      if file_count == 0:
+        flake8_result = {"passed": True, "message": "No Python files changed", "issues": [], "blocking": False}
+      elif 'passed' in raw.lower() or 'no issues' in raw.lower() or '✅' in raw or not raw.strip():
+        flake8_result = {"passed": True, "message": f"Flake8 passed ({file_count} files)", "issues": [], "blocking": False}
       else:
-        # Extract issues from output
-        issues = [l.strip() for l in raw.split('\n') if ':' in l and l.strip()][:10]
-        flake8_result = {"passed": False, "message": f"{len(issues)} flake8 issue(s)", "issues": issues}
+        # Extract issues from output - look for typical flake8 format
+        # Common error/warning codes that indicate real issues
+        error_codes = ['F4', 'F8', 'E1', 'E2', 'E3', 'E4', 'E5', 'E7', 'E9', 'W']
+        issues = []
+        for line in raw.split('\n'):
+          line = line.strip()
+          if ':' in line and any(code in line for code in error_codes):
+            issues.append(line)
+        issues = issues[:15]
+
+        # F401 (unused import), F811 (redefinition), F821-823 (undefined) are blocking
+        blocking_codes = ['F401', 'F811', 'F821', 'F822', 'F823', 'E999']
+        has_blocking = any(any(code in issue for code in blocking_codes) for issue in issues)
+
+        flake8_result = {
+          "passed": False,
+          "message": f"{len(issues)} flake8 issue(s) in changed files",
+          "issues": issues,
+          "blocking": has_blocking,
+        }
 
       result = flake8_result
     output: flake8_result
+
+  - name: block_on_lint_errors
+    description: "Block MR creation if there are critical lint errors"
+    condition: "inputs.run_linting and flake8_result and flake8_result.get('blocking', False)"
+    compute: |
+      issues = flake8_result.get("issues", [])
+      issue_text = "\n".join(f"  - {i}" for i in issues[:10])
+
+      raise ValueError(
+        f"❌ Critical lint errors found. Fix before creating MR:\n{issue_text}\n\n"
+        "Run: pipenv run flake8 <files> to see all issues"
+      )
+    output: lint_block
 
   # ==================== JIRA INTEGRATION ====================
 
