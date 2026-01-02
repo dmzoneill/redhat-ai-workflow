@@ -377,22 +377,34 @@ def register_tools(server: "FastMCP") -> int:
         issue_type: str,
         summary: str,
         description: str = "",
-        story_points: int = 0,
+        user_story: str = "",
+        acceptance_criteria: str = "",
+        supporting_documentation: str = "",
+        definition_of_done: str = "",
+        story_points: int | None = None,
         labels: str = "",
         components: str = "",
         project: str = "AAP",
         convert_markdown: bool = True,
     ) -> str:
         """
-        Create a new Jira issue.
+        Create a new Jira issue using the rh-issue CLI with --input-file.
 
-        Accepts Markdown in description and auto-converts to Jira wiki markup.
+        Accepts Markdown in all text fields and auto-converts to Jira wiki markup.
         Issue type is case-insensitive (Story, story, STORY all work).
+
+        The CLI requires these fields for stories: User Story, Acceptance Criteria,
+        Supporting Documentation, Definition of Done. If not provided, sensible
+        defaults are used to avoid interactive prompts.
 
         Args:
             issue_type: Type of issue - "bug", "story", "task", "epic" (case insensitive)
             summary: Issue title/summary
-            description: Issue description (accepts Markdown, auto-converted to Jira markup)
+            description: Issue description (accepts Markdown)
+            user_story: User story text (accepts Markdown)
+            acceptance_criteria: Acceptance criteria (accepts Markdown)
+            supporting_documentation: Supporting documentation (accepts Markdown)
+            definition_of_done: Definition of done (accepts Markdown)
             story_points: Story points (optional, for stories)
             labels: Comma-separated labels (e.g., "testing,performance")
             components: Comma-separated components (e.g., "Automation Analytics")
@@ -406,13 +418,18 @@ def register_tools(server: "FastMCP") -> int:
             jira_create_issue(
                 issue_type="story",
                 summary="Add pytest-xdist support",
-                description="## Overview\\n\\n**Speed up** test suite with parallel execution.",
-                labels="testing,performance",
-                components="Automation Analytics"
+                description="## Overview\\n\\nSpeed up test suite with parallel execution.",
+                user_story="As a developer, I want faster test runs.",
+                acceptance_criteria="- Tests run in parallel\\n- No flaky tests",
+                labels="testing,performance"
             )
         """
         import re
         import sys
+        import tempfile
+        from pathlib import Path
+
+        import yaml
 
         # Normalize issue type to lowercase
         valid_types = {"bug", "story", "task", "epic", "spike", "subtask"}
@@ -422,47 +439,89 @@ def register_tools(server: "FastMCP") -> int:
             types_str = ", ".join(sorted(valid_types))
             return f"❌ Invalid issue type: '{issue_type}'. Valid types: {types_str}"
 
-        # Convert Markdown to Jira if needed
-        if convert_markdown and description:
+        # Import markdown converter
+        markdown_to_jira = None
+        if convert_markdown:
             try:
                 scripts_path = str(get_project_root() / "scripts")
                 if scripts_path not in sys.path:
                     sys.path.insert(0, scripts_path)
-                from common.jira_utils import markdown_to_jira
+                from common.jira_utils import markdown_to_jira as converter
 
-                description = markdown_to_jira(description)
+                markdown_to_jira = converter
             except ImportError:
                 # Fallback: basic conversion
-                description = description.replace("**", "*").replace("`", "{{")
+                def markdown_to_jira(text: str) -> str:
+                    return text.replace("**", "*").replace("`", "{{")
 
-        args = ["create-issue", issue_type_normalized, summary, "--project", project]
+        def convert(text: str) -> str:
+            """Convert markdown if enabled and converter available."""
+            if convert_markdown and markdown_to_jira and text:
+                return markdown_to_jira(text)
+            return text
+
+        # Build the YAML content with Title Case field names (required by CLI)
+        yaml_data: dict = {}
 
         if description:
-            args.extend(["--description", description])
+            yaml_data["Description"] = convert(description)
 
-        if story_points > 0:
-            args.extend(["--story-points", str(story_points)])
+        # For stories, provide defaults if required fields are empty
+        if issue_type_normalized == "story":
+            yaml_data["User Story"] = convert(user_story) if user_story else f"As a user, I want {summary.lower()}."
+            yaml_data["Acceptance Criteria"] = (
+                convert(acceptance_criteria) if acceptance_criteria else "* Functionality works as described"
+            )
+            yaml_data["Supporting Documentation"] = (
+                convert(supporting_documentation) if supporting_documentation else "N/A"
+            )
+            yaml_data["Definition of Done"] = (
+                convert(definition_of_done) if definition_of_done else "* Code reviewed and merged\n* Tests pass"
+            )
+        else:
+            # For non-stories, only include if provided
+            if user_story:
+                yaml_data["User Story"] = convert(user_story)
+            if acceptance_criteria:
+                yaml_data["Acceptance Criteria"] = convert(acceptance_criteria)
+            if supporting_documentation:
+                yaml_data["Supporting Documentation"] = convert(supporting_documentation)
+            if definition_of_done:
+                yaml_data["Definition of Done"] = convert(definition_of_done)
 
+        # Labels as list
         if labels:
-            for label in labels.split(","):
-                label = label.strip()
-                if label:
-                    args.extend(["--label", label])
+            label_list = [lbl.strip() for lbl in labels.split(",") if lbl.strip()]
+            if label_list:
+                yaml_data["Labels"] = label_list
 
+        # Components as list
         if components:
-            for comp in components.split(","):
-                comp = comp.strip()
-                if comp:
-                    args.extend(["--component", comp])
+            comp_list = [c.strip() for c in components.split(",") if c.strip()]
+            if comp_list:
+                yaml_data["Components"] = comp_list
 
-        success, output = await run_rh_issue(args, timeout=60)
+        # Write YAML to temp file
+        yaml_content = yaml.dump(yaml_data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            input_file = f.name
+
+        try:
+            # Build CLI args
+            args = ["create-issue", issue_type_normalized, summary, "--input-file", input_file, "--no-ai"]
+
+            if story_points is not None and story_points > 0:
+                args.extend(["--story-points", str(story_points)])
+
+            success, output = await run_rh_issue(args, timeout=60)
+        finally:
+            # Clean up temp file
+            Path(input_file).unlink(missing_ok=True)
 
         if not success:
-            return (
-                f"❌ Failed to create issue: {output}\n\n"
-                "💡 Tip: If env vars are missing, use the create_jira_issue skill "
-                "instead which runs via CLI with your shell environment."
-            )
+            return f"❌ Failed to create issue: {output}"
 
         # Extract issue key from output
         issue_key_match = re.search(r"([A-Z]+-\d+)", output)
