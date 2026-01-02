@@ -821,6 +821,7 @@ async def get_bearer_token(
             return None
 
     # Method 1: Try extracting from kubeconfig file
+    # Note: kubectl config view often returns "REDACTED" for SSO tokens
     try:
         cmd = [
             "kubectl",
@@ -833,8 +834,10 @@ async def get_bearer_token(
             "jsonpath={.users[0].user.token}",
         ]
         success, output = await run_cmd(cmd, timeout=10)
-        if success and output.strip():
-            return output.strip()
+        token = output.strip()
+        # "REDACTED" is returned by kubectl for security - not a real token
+        if success and token and token.upper() != "REDACTED":
+            return token
     except Exception as e:
         logger.debug(f"Token not in kubeconfig: {e}")
 
