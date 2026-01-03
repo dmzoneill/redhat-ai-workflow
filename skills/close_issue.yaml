@@ -346,42 +346,24 @@ steps:
     description: "Remove issue from active_issues in memory"
     condition: "{{ not status_check.already_done }}"
     compute: |
-      from pathlib import Path
-      import yaml
+      # Use shared memory helpers
+      issue_key = inputs.issue_key.upper()
 
-      # Read current work file
-      memory_dir = Path.home() / "src/redhat-ai-workflow/memory"
-      work_file = memory_dir / "state" / "current_work.yaml"
+      # Remove from active_issues
+      memory.remove_from_list("state/current_work", "active_issues", "key", issue_key)
 
-      if work_file.exists():
-          with open(work_file) as f:
-              work = yaml.safe_load(f) or {}
-
-          # Filter out this issue from active_issues
-          active = work.get("active_issues", [])
-          issue_key = inputs.issue_key.upper()
-          work["active_issues"] = [
-              i for i in active
-              if i.get("key", "").upper() != issue_key
+      # Also remove from open_mrs if MR was merged
+      if mr_info and mr_info.get("merged"):
+          # Find MRs related to this issue and remove them
+          data = memory.read_memory("state/current_work")
+          open_mrs = data.get("open_mrs", []) if isinstance(data.get("open_mrs"), list) else []
+          data["open_mrs"] = [
+              m for m in open_mrs
+              if m.get("issue_key", "").upper() != issue_key
           ]
+          memory.write_memory("state/current_work", data)
 
-          # Also filter from open_mrs if MR was merged
-          if mr_info and mr_info.get("merged"):
-              open_mrs = work.get("open_mrs", [])
-              work["open_mrs"] = [
-                  m for m in open_mrs
-                  if m.get("issue_key", "").upper() != issue_key
-              ]
-
-          work["last_updated"] = memory_context["timestamp"]
-
-          # Write back
-          with open(work_file, "w") as f:
-              yaml.dump(work, f, default_flow_style=False)
-
-          result = "memory updated"
-      else:
-          result = "no memory file"
+      result = "memory updated"
     output: memory_cleanup_result
     on_error: continue
 
