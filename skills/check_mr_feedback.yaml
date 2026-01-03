@@ -370,6 +370,89 @@ steps:
       result = '\n'.join(lines)
     output: summary
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: build_memory_context
+    description: "Build context for memory updates"
+    compute: |
+      from datetime import datetime
+      result = {"timestamp": datetime.now().isoformat()}
+    output: memory_context
+
+  - name: log_session_feedback_check
+    description: "Log feedback check to session"
+    tool: memory_session_log
+    args:
+      action: "Checked MR feedback"
+      details: "{{ (feedback_with_calendar_check or feedback_analysis) | length if (feedback_with_calendar_check or feedback_analysis) else 0 }} MRs with feedback"
+    on_error: continue
+
+  - name: create_followups_for_feedback
+    description: "Create follow-up tasks for MRs needing response"
+    condition: "feedback_analysis"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/current_work.yaml"
+
+      if memory_file.exists():
+          try:
+              with open(memory_file) as f:
+                  data = yaml.safe_load(f) or {}
+
+              followups = data.get("follow_ups", [])
+              existing_tasks = [fu.get("task", "") for fu in followups]
+
+              # Add follow-ups for MRs needing response
+              analysis = feedback_analysis or []
+              added = 0
+
+              for mr_feedback in analysis:
+                  mr_id = mr_feedback.get("mr_id")
+                  needs_response = mr_feedback.get("needs_response", [])
+                  meeting_requests = mr_feedback.get("meeting_requests", [])
+
+                  # Create follow-up for response needed
+                  if needs_response:
+                      task = f"Respond to feedback on MR !{mr_id}"
+                      if task not in existing_tasks:
+                          followups.append({
+                              "task": task,
+                              "priority": "high",
+                              "created": memory_context["timestamp"],
+                              "mr_id": mr_id,
+                          })
+                          added += 1
+
+                  # Create follow-up for meeting requests
+                  if meeting_requests:
+                      authors = [m.get("author", "someone") for m in meeting_requests]
+                      task = f"Schedule meeting for MR !{mr_id} with {', '.join(authors[:2])}"
+                      if task not in existing_tasks:
+                          followups.append({
+                              "task": task,
+                              "priority": "medium",
+                              "created": memory_context["timestamp"],
+                              "mr_id": mr_id,
+                          })
+                          added += 1
+
+              if added > 0:
+                  data["follow_ups"] = followups
+                  data["last_updated"] = memory_context["timestamp"]
+
+                  with open(memory_file, "w") as f:
+                      yaml.dump(data, f, default_flow_style=False)
+
+              result = f"Added {added} follow-ups"
+          except Exception as e:
+              result = f"failed: {e}"
+      else:
+          result = "no memory file"
+    output: followup_result
+    on_error: continue
+
 outputs:
   - name: summary
     value: "{{ summary }}"

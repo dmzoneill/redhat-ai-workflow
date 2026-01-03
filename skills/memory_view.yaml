@@ -1,0 +1,377 @@
+# Skill: View and Manage Memory
+# Display current work state, learned patterns, and manage follow-ups
+
+name: memory_view
+description: |
+  View and manage the persistent memory system.
+
+  Shows:
+  - Active issues you're working on
+  - Open MRs and their status
+  - Follow-up tasks
+  - Environment health summary
+  - Recent session activity
+
+  Actions:
+  - Clear completed items
+  - Add follow-up tasks
+  - View learned patterns
+
+version: "1.0"
+
+inputs:
+  - name: section
+    type: string
+    required: false
+    default: "all"
+    description: |
+      Which section to view:
+      - all: Everything
+      - work: Active issues and MRs
+      - followups: Follow-up tasks
+      - environments: Environment health
+      - patterns: Learned error patterns
+      - sessions: Recent session logs
+
+  - name: action
+    type: string
+    required: false
+    description: |
+      Optional action to perform:
+      - clear_completed: Remove completed items
+      - add_followup: Add a follow-up task (requires followup_text)
+      - clear_old_sessions: Remove sessions older than 7 days
+
+  - name: followup_text
+    type: string
+    required: false
+    description: "Text for new follow-up task (used with action=add_followup)"
+
+  - name: followup_priority
+    type: string
+    required: false
+    default: "normal"
+    description: "Priority for new follow-up: high, medium, normal"
+
+steps:
+  # ==================== LOAD MEMORY ====================
+
+  - name: load_all_memory
+    description: "Load all memory files"
+    compute: |
+      from pathlib import Path
+      import yaml
+      from datetime import datetime
+
+      memory_dir = Path.home() / "src/redhat-ai-workflow/memory"
+
+      memory = {
+          "current_work": {},
+          "environments": {},
+          "patterns": {},
+          "runbooks": {},
+          "sessions": [],
+          "errors": [],
+      }
+
+      # Load current work
+      work_file = memory_dir / "state" / "current_work.yaml"
+      if work_file.exists():
+          try:
+              with open(work_file) as f:
+                  memory["current_work"] = yaml.safe_load(f) or {}
+          except Exception as e:
+              memory["errors"].append(f"current_work: {e}")
+
+      # Load environments
+      env_file = memory_dir / "state" / "environments.yaml"
+      if env_file.exists():
+          try:
+              with open(env_file) as f:
+                  memory["environments"] = yaml.safe_load(f) or {}
+          except Exception as e:
+              memory["errors"].append(f"environments: {e}")
+
+      # Load patterns
+      patterns_file = memory_dir / "learned" / "patterns.yaml"
+      if patterns_file.exists():
+          try:
+              with open(patterns_file) as f:
+                  memory["patterns"] = yaml.safe_load(f) or {}
+          except Exception as e:
+              memory["errors"].append(f"patterns: {e}")
+
+      # Load runbooks
+      runbooks_file = memory_dir / "learned" / "runbooks.yaml"
+      if runbooks_file.exists():
+          try:
+              with open(runbooks_file) as f:
+                  memory["runbooks"] = yaml.safe_load(f) or {}
+          except Exception as e:
+              memory["errors"].append(f"runbooks: {e}")
+
+      # Load recent sessions
+      sessions_dir = memory_dir / "sessions"
+      if sessions_dir.exists():
+          session_files = sorted(sessions_dir.glob("*.yaml"), reverse=True)[:5]
+          for sf in session_files:
+              try:
+                  with open(sf) as f:
+                      session_data = yaml.safe_load(f) or {}
+                  memory["sessions"].append({
+                      "date": sf.stem,
+                      "actions": session_data.get("actions", [])[-10:],
+                  })
+              except Exception:
+                  pass
+
+      result = memory
+    output: memory_data
+
+  # ==================== PERFORM ACTION ====================
+
+  - name: perform_action
+    description: "Perform any requested action"
+    condition: "inputs.action"
+    compute: |
+      from pathlib import Path
+      import yaml
+      from datetime import datetime, timedelta
+
+      memory_dir = Path.home() / "src/redhat-ai-workflow/memory"
+      action = inputs.action
+      result_msg = ""
+
+      if action == "clear_completed":
+          # Remove closed issues from active_issues
+          work_file = memory_dir / "state" / "current_work.yaml"
+          if work_file.exists():
+              with open(work_file) as f:
+                  data = yaml.safe_load(f) or {}
+
+              # Filter out completed items
+              active = data.get("active_issues", [])
+              data["active_issues"] = [i for i in active if i.get("status", "").lower() not in ["done", "closed", "resolved"]]
+
+              # Filter out merged MRs
+              mrs = data.get("open_mrs", [])
+              data["open_mrs"] = [m for m in mrs if not m.get("merged")]
+
+              data["last_updated"] = datetime.now().isoformat()
+
+              with open(work_file, "w") as f:
+                  yaml.dump(data, f, default_flow_style=False)
+
+              result_msg = "Cleared completed items"
+
+      elif action == "add_followup":
+          if inputs.followup_text:
+              work_file = memory_dir / "state" / "current_work.yaml"
+              if work_file.exists():
+                  with open(work_file) as f:
+                      data = yaml.safe_load(f) or {}
+
+                  followups = data.get("follow_ups", [])
+                  followups.append({
+                      "task": inputs.followup_text,
+                      "priority": inputs.followup_priority or "normal",
+                      "created": datetime.now().isoformat(),
+                  })
+                  data["follow_ups"] = followups
+                  data["last_updated"] = datetime.now().isoformat()
+
+                  with open(work_file, "w") as f:
+                      yaml.dump(data, f, default_flow_style=False)
+
+                  result_msg = f"Added follow-up: {inputs.followup_text}"
+              else:
+                  result_msg = "No memory file"
+          else:
+              result_msg = "No followup_text provided"
+
+      elif action == "clear_old_sessions":
+          sessions_dir = memory_dir / "sessions"
+          if sessions_dir.exists():
+              cutoff = datetime.now() - timedelta(days=7)
+              deleted = 0
+              for sf in sessions_dir.glob("*.yaml"):
+                  try:
+                      # Parse date from filename (YYYY-MM-DD.yaml)
+                      file_date = datetime.strptime(sf.stem, "%Y-%m-%d")
+                      if file_date < cutoff:
+                          sf.unlink()
+                          deleted += 1
+                  except (ValueError, OSError):
+                      pass
+              result_msg = f"Deleted {deleted} old session files"
+
+      else:
+          result_msg = f"Unknown action: {action}"
+
+      result = result_msg
+    output: action_result
+
+  # ==================== FORMAT OUTPUT ====================
+
+  - name: format_output
+    description: "Format memory view output"
+    compute: |
+      section = inputs.section or "all"
+      lines = []
+
+      lines.append("# 🧠 Memory View")
+      lines.append("")
+
+      if action_result:
+          lines.append(f"**Action:** {action_result}")
+          lines.append("")
+          lines.append("---")
+          lines.append("")
+
+      # Current Work section
+      if section in ["all", "work"]:
+          work = memory_data.get("current_work", {})
+          lines.append("## 📋 Current Work")
+          lines.append("")
+
+          # Active Issues
+          active = work.get("active_issues", [])
+          if active:
+              lines.append(f"### Active Issues ({len(active)})")
+              for issue in active[:10]:
+                  key = issue.get("key", "Unknown")
+                  summary = issue.get("summary", "")[:50]
+                  status = issue.get("status", "unknown")
+                  branch = issue.get("branch", "")
+                  lines.append(f"- **[{key}](https://issues.redhat.com/browse/{key})** - {summary}")
+                  lines.append(f"  - Status: {status} | Branch: `{branch}`" if branch else f"  - Status: {status}")
+              lines.append("")
+          else:
+              lines.append("*No active issues tracked*")
+              lines.append("")
+
+          # Open MRs
+          mrs = work.get("open_mrs", [])
+          if mrs:
+              lines.append(f"### Open MRs ({len(mrs)})")
+              for mr in mrs[:10]:
+                  mr_id = mr.get("id", "?")
+                  title = mr.get("title", "")[:50]
+                  url = mr.get("url", "")
+                  needs_review = "👀" if mr.get("needs_review") else ""
+                  draft = "📝" if mr.get("is_draft") else ""
+                  lines.append(f"- [!{mr_id}]({url}) - {title} {needs_review}{draft}")
+              lines.append("")
+          else:
+              lines.append("*No open MRs tracked*")
+              lines.append("")
+
+      # Follow-ups section
+      if section in ["all", "followups"]:
+          work = memory_data.get("current_work", {})
+          followups = work.get("follow_ups", [])
+
+          lines.append("## 📌 Follow-ups")
+          lines.append("")
+
+          if followups:
+              for fu in followups[:10]:
+                  task = fu.get("task", "Unknown")
+                  priority = fu.get("priority", "normal")
+                  emoji = "🔴" if priority == "high" else "🟡" if priority == "medium" else "⚪"
+                  lines.append(f"- {emoji} {task}")
+              lines.append("")
+              lines.append("*Add follow-up:* `skill_run(\"memory_view\", '{\"action\": \"add_followup\", \"followup_text\": \"...\", \"followup_priority\": \"high\"}')`")
+          else:
+              lines.append("*No follow-ups*")
+          lines.append("")
+
+      # Environments section
+      if section in ["all", "environments"]:
+          envs = memory_data.get("environments", {}).get("environments", {})
+
+          lines.append("## 🌐 Environment Status")
+          lines.append("")
+
+          for env_name, env_data in envs.items():
+              status = env_data.get("status", "unknown")
+              emoji = "✅" if status == "healthy" else "⚠️" if status == "issues" else "❓"
+              last_check = env_data.get("last_check", "never")[:10] if env_data.get("last_check") else "never"
+              alerts = env_data.get("alerts", [])
+
+              lines.append(f"### {emoji} {env_name.title()}")
+              lines.append(f"- Status: {status} (checked: {last_check})")
+
+              if alerts:
+                  lines.append(f"- Alerts: {', '.join(alerts[:3])}")
+
+              # Show ephemeral namespaces
+              if env_name == "ephemeral":
+                  active_ns = env_data.get("active_namespaces", [])
+                  if active_ns:
+                      lines.append(f"- Active namespaces: {len(active_ns)}")
+                      for ns in active_ns[:5]:
+                          lines.append(f"  - `{ns.get('name')}` (MR: !{ns.get('mr_id')}, expires: {ns.get('expires', 'unknown')[:16]})")
+
+              lines.append("")
+
+      # Patterns section
+      if section in ["all", "patterns"]:
+          patterns = memory_data.get("patterns", {})
+          error_patterns = patterns.get("error_patterns", [])
+
+          lines.append("## 💡 Learned Patterns")
+          lines.append("")
+
+          if error_patterns:
+              lines.append(f"**{len(error_patterns)} error patterns known**")
+              lines.append("")
+              for p in error_patterns[:5]:
+                  lines.append(f"- **{p.get('pattern')}**: {p.get('meaning', p.get('fix', ''))[:60]}")
+              if len(error_patterns) > 5:
+                  lines.append(f"*...and {len(error_patterns) - 5} more*")
+          else:
+              lines.append("*No patterns learned yet*")
+          lines.append("")
+
+      # Sessions section
+      if section in ["all", "sessions"]:
+          sessions = memory_data.get("sessions", [])
+
+          lines.append("## 📜 Recent Sessions")
+          lines.append("")
+
+          if sessions:
+              for session in sessions[:3]:
+                  date = session.get("date", "unknown")
+                  actions = session.get("actions", [])
+                  lines.append(f"### {date}")
+                  for action in actions[-5:]:
+                      action_text = action.get("action", str(action))[:70]
+                      lines.append(f"- {action_text}")
+                  lines.append("")
+          else:
+              lines.append("*No session history*")
+          lines.append("")
+
+      # Actions hint
+      lines.append("---")
+      lines.append("")
+      lines.append("### Available Actions")
+      lines.append("- Clear completed: `skill_run(\"memory_view\", '{\"action\": \"clear_completed\"}')`")
+      lines.append("- Add follow-up: `skill_run(\"memory_view\", '{\"action\": \"add_followup\", \"followup_text\": \"...\"}')`")
+      lines.append("- Clean old sessions: `skill_run(\"memory_view\", '{\"action\": \"clear_old_sessions\"}')`")
+
+      result = "\n".join(lines)
+    output: formatted_output
+
+outputs:
+  - name: summary
+    value: "{{ formatted_output }}"
+
+  - name: context
+    value:
+      active_issues: "{{ memory_data.current_work.active_issues | length if memory_data.current_work else 0 }}"
+      open_mrs: "{{ memory_data.current_work.open_mrs | length if memory_data.current_work else 0 }}"
+      follow_ups: "{{ memory_data.current_work.follow_ups | length if memory_data.current_work else 0 }}"
+      patterns: "{{ memory_data.patterns.error_patterns | length if memory_data.patterns else 0 }}"

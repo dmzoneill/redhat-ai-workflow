@@ -84,14 +84,52 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
                     if followups:
                         lines.append("### Follow-ups")
-                        for fu in followups:
-                            lines.append(f"- {fu.get('task', '?')} " f"(priority: {fu.get('priority', 'normal')})")
+                        for fu in followups[:5]:
+                            priority = fu.get("priority", "normal")
+                            emoji = "🔴" if priority == "high" else "🟡" if priority == "medium" else "⚪"
+                            lines.append(f"- {emoji} {fu.get('task', '?')}")
+                        if len(followups) > 5:
+                            lines.append(f"*...and {len(followups) - 5} more*")
                         lines.append("")
                 else:
-                    lines.append("*No active work tracked. Use `memory_append` to track issues.*\n")
+                    lines.append("*No active work tracked. Use `start_work` skill to begin.*\n")
 
             except Exception as e:
                 lines.append(f"*Could not load work state: {e}*\n")
+
+        # Load environment status
+        env_file = MEMORY_DIR / "state" / "environments.yaml"
+        if env_file.exists():
+            try:
+                with open(env_file) as f:
+                    env_data = yaml.safe_load(f) or {}
+
+                envs = env_data.get("environments", {})
+                if envs:
+                    # Check if any environment has issues
+                    env_summary = []
+                    for env_name, env_info in envs.items():
+                        if env_name == "ephemeral":
+                            active_ns = env_info.get("active_namespaces", [])
+                            if active_ns:
+                                env_summary.append(f"🧪 {len(active_ns)} ephemeral namespace(s)")
+                        else:
+                            status = env_info.get("status", "unknown")
+                            if status == "issues":
+                                alerts = env_info.get("alerts", [])
+                                alert_count = len(alerts)
+                                env_summary.append(f"⚠️ {env_name}: {alert_count} alert(s)")
+                            elif status == "healthy":
+                                env_summary.append(f"✅ {env_name}")
+
+                    if env_summary:
+                        lines.append("## 🌐 Environments\n")
+                        for item in env_summary[:5]:
+                            lines.append(f"- {item}")
+                        lines.append("")
+
+            except Exception:
+                pass
 
         # Load today's session history
         today = datetime.now().strftime("%Y-%m-%d")
@@ -134,6 +172,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
         lines.append("- **start_work** - Begin Jira issue (creates branch, updates status)")
         lines.append("- **create_mr** - Create MR with proper formatting")
         lines.append("- **investigate_alert** - Systematic alert investigation")
+        lines.append("- **memory_view** - View/manage persistent memory")
+        lines.append("- **coffee** - Morning briefing (calendar, email, PRs)")
+        lines.append("- **beer** - End of day wrap-up")
         lines.append("")
 
         # Log session start (if function provided)

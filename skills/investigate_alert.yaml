@@ -329,6 +329,76 @@ steps:
     output: alert_hook_result
     on_error: continue
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: build_memory_context
+    description: "Build context for memory updates"
+    compute: |
+      from datetime import datetime
+
+      alert_names = [a.get("name", "unknown") for a in alert_info.get("alerts", [])[:3]]
+
+      result = {
+          "timestamp": datetime.now().isoformat(),
+          "alert_summary": ", ".join(alert_names) if alert_names else "No alerts",
+      }
+    output: memory_context
+
+  - name: log_session_investigation
+    description: "Log alert investigation to session"
+    tool: memory_session_log
+    args:
+      action: "Investigated alerts in {{ target.environment }}/{{ target.namespace }}"
+      details: "Severity: {{ assessment.severity }}, Alerts: {{ memory_context.alert_summary }}"
+    on_error: continue
+
+  - name: update_environment_status
+    description: "Update environment status in memory"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
+
+      if memory_file.exists():
+          try:
+              with open(memory_file) as f:
+                  data = yaml.safe_load(f) or {}
+
+              env_key = "stage" if target.get("environment") == "stage" else "production"
+              if env_key in data.get("environments", {}):
+                  env_data = data["environments"][env_key]
+                  env_data["status"] = "healthy" if pod_health.get("healthy") and alert_info.get("count", 0) == 0 else "issues"
+                  env_data["last_check"] = memory_context["timestamp"]
+                  env_data["alerts"] = [a.get("name", "") for a in alert_info.get("alerts", [])[:5]]
+
+                  # Add known issues if critical
+                  if assessment.get("severity") == "critical":
+                      known = env_data.get("known_issues", [])
+                      for alert in alert_info.get("alerts", []):
+                          if alert.get("severity") == "critical":
+                              issue = {
+                                  "alert": alert.get("name", ""),
+                                  "since": memory_context["timestamp"],
+                                  "status": "investigating"
+                              }
+                              if issue not in known:
+                                  known.append(issue)
+                      env_data["known_issues"] = known[:10]
+
+                  data["last_checked"] = memory_context["timestamp"]
+
+                  with open(memory_file, "w") as f:
+                      yaml.dump(data, f, default_flow_style=False)
+
+              result = "environment status updated"
+          except Exception as e:
+              result = f"failed to update: {e}"
+      else:
+          result = "no memory file"
+    output: env_update_result
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
