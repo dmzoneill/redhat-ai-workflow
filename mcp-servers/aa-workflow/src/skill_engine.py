@@ -70,6 +70,42 @@ class SkillExecutor:
             elapsed = f"[{time.time() - self.start_time:.2f}s]" if self.start_time else ""
             self.log.append(f"🔍 {elapsed} {msg}")
 
+    def _check_error_patterns(self, error: str) -> str | None:
+        """Check if error matches known patterns and return fix suggestion."""
+        try:
+            patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
+            if not patterns_file.exists():
+                return None
+
+            with open(patterns_file) as f:
+                patterns_data = yaml.safe_load(f) or {}
+
+            error_patterns = patterns_data.get("error_patterns", [])
+            error_lower = error.lower()
+
+            for pattern in error_patterns:
+                pattern_text = pattern.get("pattern", "").lower()
+                if pattern_text and pattern_text in error_lower:
+                    fix = pattern.get("fix", "")
+                    meaning = pattern.get("meaning", "")
+                    commands = pattern.get("commands", [])
+
+                    suggestion = f"\n   💡 **Known pattern: {pattern.get('pattern')}**"
+                    if meaning:
+                        suggestion += f"\n   *{meaning}*"
+                    if fix:
+                        suggestion += f"\n   **Fix:** {fix}"
+                    if commands:
+                        suggestion += "\n   **Try:**"
+                        for cmd in commands[:3]:
+                            suggestion += f"\n   - `{cmd}`"
+                    return suggestion
+
+            return None
+        except Exception as e:
+            self._debug(f"Pattern lookup failed: {e}")
+            return None
+
     def _template(self, text: str) -> str:
         """Resolve {{ variable }} templates in text."""
         import re
@@ -465,6 +501,11 @@ class SkillExecutor:
                     self.step_results.append({"step": step_name, "tool": tool, "success": True, "duration": duration})
                 else:
                     output_lines.append(f"   ❌ Error: {result['error']}")
+
+                    # Check for known error patterns
+                    pattern_hint = self._check_error_patterns(result["error"])
+                    if pattern_hint:
+                        output_lines.append(pattern_hint)
 
                     if self.create_issue_fn:
                         skill_name = self.skill.get("name", "unknown")

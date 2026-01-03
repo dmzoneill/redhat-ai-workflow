@@ -420,6 +420,72 @@ steps:
         result = new_branch_name
     output: final_branch
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  # Step 11: Log session action
+  - name: log_session
+    description: "Log work start to session log"
+    tool: memory_session_log
+    args:
+      action: "{{ 'Resumed' if branch_check.exists else 'Started' }} work on {{ inputs.issue_key }}"
+      details: "Branch: {{ final_branch }}, Repo: {{ resolved_repo.path }}"
+    on_error: continue
+
+  # Step 12: Build issue summary and timestamp for memory
+  - name: build_memory_context
+    description: "Extract issue summary and generate timestamp"
+    compute: |
+      import re
+      from datetime import datetime
+
+      issue_text = str(issue) if issue else ""
+      # Extract summary from various formats
+      summary = ""
+      if "summary:" in issue_text.lower():
+        match = re.search(r'summary:\s*(.+?)(?:\n|$)', issue_text, re.IGNORECASE)
+        if match:
+          summary = match.group(1).strip()[:80]
+      elif "|" in issue_text:
+        # Table format: | AAP-12345 | Summary here |
+        parts = issue_text.split("|")
+        if len(parts) > 2:
+          summary = parts[2].strip()[:80]
+      if not summary:
+        summary = issue_text[:80] if issue_text else "No summary"
+
+      result = {
+        "summary": summary,
+        "timestamp": datetime.now().isoformat()
+      }
+    output: memory_context
+
+  # Step 13: Update active_issues in memory (only for new work)
+  - name: update_memory_active_issues
+    description: "Add issue to active_issues in memory"
+    condition: "{{ not branch_check.get('exists', False) }}"
+    tool: memory_append
+    args:
+      key: "state/current_work"
+      list_path: "active_issues"
+      item: |
+        key: {{ inputs.issue_key }}
+        summary: "{{ memory_context.summary }}"
+        status: "In Progress"
+        branch: "{{ final_branch }}"
+        repo: "{{ resolved_repo.path }}"
+        started: "{{ memory_context.timestamp }}"
+    on_error: continue
+
+  # Step 14: Update last_updated timestamp
+  - name: update_memory_timestamp
+    description: "Update last_updated in current_work"
+    tool: memory_update
+    args:
+      key: "state/current_work"
+      path: "last_updated"
+      value: "{{ memory_context.timestamp }}"
+    on_error: continue
+
 outputs:
   - name: summary
     value: |
