@@ -339,12 +339,58 @@ steps:
       result = "\n".join(lines)
     output: standup
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: load_memory
+    description: "Load current work state from memory"
+    tool: memory_read
+    args:
+      key: "state/current_work"
+    output: memory_state_raw
+    on_error: continue
+
+  - name: enhance_with_memory
+    description: "Enhance standup with memory context"
+    compute: |
+      import yaml
+
+      lines = [standup]
+
+      # Parse memory
+      memory_state = {}
+      if memory_state_raw and isinstance(memory_state_raw, str):
+          try:
+              memory_state = yaml.safe_load(memory_state_raw) or {}
+          except:
+              pass
+
+      # Add follow-ups from memory
+      follow_ups = memory_state.get("follow_ups", [])
+      if follow_ups:
+          lines.append("")
+          lines.append("### 📋 Follow-ups (from memory)")
+          for fu in follow_ups[:5]:
+              priority = fu.get("priority", "normal")
+              emoji = "🔴" if priority == "high" else "🟡" if priority == "medium" else "⚪"
+              lines.append(f"- {emoji} {fu.get('task', 'N/A')}")
+
+      result = "\n".join(lines)
+    output: enhanced_standup
+
+  - name: log_standup
+    description: "Log standup generation to session"
+    tool: memory_session_log
+    args:
+      action: "Generated standup summary"
+      details: "{{ commit_info.count }} commits, {{ jira_issues.in_progress|length if jira_issues and jira_issues.in_progress else 0 }} issues in progress"
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
   - name: summary
     value: |
-      {{ standup }}
+      {{ enhanced_standup }}
 
   - name: context
     value:

@@ -708,6 +708,31 @@ steps:
     output: rebase_hook_result
     on_error: continue
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: log_rebase
+    description: "Log rebase to session"
+    compute: |
+      effective_result = final_rebase_result if final_rebase_result else rebase_result
+      success = effective_result.get('success', False) if effective_result else False
+      conflicts = effective_result.get('conflicts', False) if effective_result else False
+
+      result = {
+          "success": success,
+          "conflicts": conflicts,
+          "mr_id": inputs.get('mr_id', ''),
+          "branch": target_branch if target_branch else "unknown",
+      }
+    output: rebase_log_context
+
+  - name: session_log_rebase
+    description: "Log rebase to session"
+    tool: memory_session_log
+    args:
+      action: "Rebased {{ 'MR !' + rebase_log_context.mr_id|string if rebase_log_context.mr_id else rebase_log_context.branch }}"
+      details: "{{ 'Success' if rebase_log_context.success else ('Conflicts' if rebase_log_context.conflicts else 'Failed') }}"
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:

@@ -292,6 +292,16 @@ steps:
     output: push_result
     on_error: continue
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: log_sync
+    description: "Log branch sync to session"
+    tool: memory_session_log
+    args:
+      action: "Synced branch {{ branch_status.branch }}"
+      details: "{{ commit_status.behind }} commits behind, rebased: {{ rebase_result.success if rebase_result else 'skipped' }}"
+    on_error: continue
+
 outputs:
   - name: summary
     value: |

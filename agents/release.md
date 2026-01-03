@@ -77,8 +77,57 @@ Konflux Build → Snapshot → Stage → Production
 - Provide go/no-go recommendations
 - Highlight blockers clearly
 
-## Memory Keys
-- `release:current` - Current release in progress
-- `release:blockers` - Known blockers
-- `deploy:stage:last` - Last stage deployment
-- `deploy:prod:last` - Last prod deployment
+## 🧠 Memory Integration
+
+### Read Memory on Session Start
+```python
+# session_start("release") loads this automatically, or read manually:
+memory_read("state/environments")      # Stage/prod health, recent deployments
+memory_read("state/current_work")      # Open MRs that might be included
+memory_read("learned/patterns")        # Known issues to watch for
+```
+
+### During Release
+| Action | Memory Tool | What's Updated |
+|--------|-------------|----------------|
+| Deploy to ephemeral | `test_mr_ephemeral` skill | Tracks namespace in `state/environments` |
+| Check environment | `investigate_alert` skill | Updates health status |
+| Note a blocker | `memory_append` | Add to `state/current_work.follow_ups` |
+
+### Log Release Actions
+```python
+memory_session_log("Started stage deployment", "Version: v1.2.3, SHA: abc123")
+memory_session_log("Stage verification complete", "All health checks passed")
+memory_session_log("Production deployment approved", "Go-live at 14:00 UTC")
+```
+
+### Track Deployment Progress
+```python
+# Add deployment to recent list
+memory_append("state/environments", "recent_deployments", '{
+  "version": "v1.2.3",
+  "sha": "abc123def...",
+  "environment": "stage",
+  "deployed_at": "2024-01-15T14:00:00Z",
+  "status": "healthy"
+}')
+```
+
+### Check Known Issues
+Before releasing, check for known issues:
+```python
+skill_run("memory_view", '{"file": "state/environments"}')  # Environment health
+skill_run("memory_view", '{"file": "learned/patterns"}')    # Known error patterns
+```
+
+### Memory Files
+| File | Purpose |
+|------|---------|
+| `state/environments.yaml` | Stage/prod health, recent deployments |
+| `state/current_work.yaml` | Open MRs, blockers, follow-ups |
+| `learned/patterns.yaml` | Known issues to watch during rollout |
+
+### Release Summary
+```python
+skill_run("weekly_summary", '{"days": 7}')  # What's included in this release
+```

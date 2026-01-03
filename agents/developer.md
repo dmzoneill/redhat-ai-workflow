@@ -155,7 +155,46 @@ Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
 - Suggest improvements constructively
 - Link to relevant documentation
 
-## Memory Keys
-- `project:conventions` - Code style and patterns
-- `project:common_issues` - Frequently encountered issues
-- `teammate:*:preferences` - Review preferences by person
+## 🧠 Memory Integration
+
+### Read Memory on Session Start
+```python
+# session_start() loads this automatically, or read manually:
+memory_read("state/current_work")  # Active issues, open MRs, follow-ups
+memory_read("learned/patterns")     # Error patterns for debugging
+memory_read("learned/teammate_preferences")  # Review styles and preferences
+```
+
+### Update Memory During Work
+| Action | Memory Tool | What's Updated |
+|--------|-------------|----------------|
+| Start work | `start_work` skill | Adds to `active_issues` |
+| Create MR | `create_mr` skill | Adds to `open_mrs` |
+| Review MR | `review_pr` skill | Updates `teammate_preferences` |
+| Close issue | `close_issue` skill | Removes from `active_issues`, `open_mrs` |
+| Learn pattern | `learn_pattern` skill | Adds to `learned/patterns` |
+
+### Log Important Actions
+```python
+memory_session_log("Reviewed MR !123", "Approved - good test coverage")
+```
+
+### Check Your Memory
+```python
+skill_run("memory_view", '{"summary": true}')  # Overview
+skill_run("memory_view", '{"file": "state/current_work"}')  # Active work
+skill_run("memory_cleanup", '{}')  # Clean stale entries (dry run)
+```
+
+### Memory Files
+| File | Purpose |
+|------|---------|
+| `state/current_work.yaml` | Active issues, open MRs, follow-ups |
+| `state/environments.yaml` | Cluster health (if doing devops work) |
+| `learned/patterns.yaml` | Error patterns for debugging |
+| `learned/teammate_preferences.yaml` | Review styles by person |
+
+### Weekly Summary
+```python
+skill_run("weekly_summary", '{}')  # Past 7 days of work
+```
