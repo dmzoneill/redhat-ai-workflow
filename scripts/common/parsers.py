@@ -1172,6 +1172,36 @@ def extract_all_jira_keys(text: str) -> List[str]:
     return re.findall(r"([A-Z]+-\d+)", str(text))
 
 
+def linkify_jira_keys(text: str, jira_url: str = "https://issues.redhat.com") -> str:
+    """
+    Replace Jira keys in text with markdown links.
+
+    Handles patterns like:
+    - AAP-12345 (simple key)
+    - AAP-12345-description (branch-style key with suffix)
+
+    Args:
+        text: Text containing Jira keys
+        jira_url: Base URL for Jira (default: https://issues.redhat.com)
+
+    Returns:
+        Text with Jira keys converted to markdown links
+    """
+    if not text:
+        return text
+
+    # Match AAP-XXXXX pattern, capturing just the key portion
+    # This handles both "AAP-12345" and "AAP-12345-some-description"
+    jira_pattern = re.compile(r"\b(AAP-\d+)(-[\w-]+)?\b")
+
+    def replace_jira(match: re.Match) -> str:
+        key = match.group(1)  # Just the AAP-XXXXX part
+        suffix = match.group(2) or ""  # Optional -description suffix
+        return f"[{key}{suffix}]({jira_url}/browse/{key})"
+
+    return jira_pattern.sub(replace_jira, str(text))
+
+
 def find_full_conflict_marker(content: str, ours: str, theirs: str) -> Optional[str]:
     """
     Find the full conflict marker including commit ref for a given ours/theirs pair.
