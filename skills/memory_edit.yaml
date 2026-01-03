@@ -1,0 +1,255 @@
+# Skill: Memory Edit
+# Modify or remove entries from memory
+
+name: memory_edit
+description: |
+  Modify or remove entries from memory.
+
+  Actions:
+  - remove: Remove an item from a list (e.g., remove closed issue from active_issues)
+  - update: Update a field value
+
+  Use memory_view to inspect memory before editing.
+  Use memory_cleanup for automatic cleanup of stale entries.
+
+version: "1.0"
+
+inputs:
+  - name: file
+    type: string
+    required: true
+    description: "Memory file to edit (e.g., 'state/current_work', 'learned/patterns')"
+
+  - name: action
+    type: string
+    required: true
+    description: "Action: 'remove' or 'update'"
+
+  - name: list_path
+    type: string
+    required: false
+    description: "Path to list for remove action (e.g., 'active_issues', 'open_mrs')"
+
+  - name: match_key
+    type: string
+    required: false
+    description: "Key to match for remove action (e.g., 'key' for issues, 'id' for MRs)"
+
+  - name: match_value
+    type: string
+    required: false
+    description: "Value to match for remove action (e.g., 'AAP-12345', '123')"
+
+  - name: field_path
+    type: string
+    required: false
+    description: "Dot-separated path for update action (e.g., 'environments.stage.status')"
+
+  - name: new_value
+    type: string
+    required: false
+    description: "New value for update action"
+
+steps:
+  - name: validate_inputs
+    description: "Validate inputs based on action"
+    compute: |
+      action = inputs.get("action", "").lower()
+      file = inputs.get("file", "")
+
+      if not file:
+          result = {"valid": False, "error": "file is required"}
+      elif action not in ["remove", "update"]:
+          result = {"valid": False, "error": "action must be 'remove' or 'update'"}
+      elif action == "remove":
+          if not inputs.get("list_path"):
+              result = {"valid": False, "error": "list_path is required for remove action"}
+          elif not inputs.get("match_key"):
+              result = {"valid": False, "error": "match_key is required for remove action"}
+          elif not inputs.get("match_value"):
+              result = {"valid": False, "error": "match_value is required for remove action"}
+          else:
+              result = {"valid": True, "action": action}
+      elif action == "update":
+          if not inputs.get("field_path"):
+              result = {"valid": False, "error": "field_path is required for update action"}
+          elif inputs.get("new_value") is None:
+              result = {"valid": False, "error": "new_value is required for update action"}
+          else:
+              result = {"valid": True, "action": action}
+      else:
+          result = {"valid": False, "error": "Unknown validation error"}
+    output: validation
+
+  - name: perform_remove
+    description: "Remove item from list in memory"
+    condition: "validation.valid and validation.action == 'remove'"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      memory_dir = Path.home() / "src/redhat-ai-workflow/memory"
+      file_path = memory_dir / (inputs.file + ".yaml")
+
+      try:
+          if not file_path.exists():
+              result = {"success": False, "error": f"File not found: {inputs.file}"}
+          else:
+              with open(file_path) as f:
+                  data = yaml.safe_load(f) or {}
+
+              list_path = inputs.list_path
+              match_key = inputs.match_key
+              match_value = inputs.match_value
+
+              # Navigate to list
+              if list_path not in data:
+                  result = {"success": False, "error": f"List not found: {list_path}"}
+              elif not isinstance(data[list_path], list):
+                  result = {"success": False, "error": f"{list_path} is not a list"}
+              else:
+                  original_count = len(data[list_path])
+                  data[list_path] = [
+                      item for item in data[list_path]
+                      if str(item.get(match_key, "")) != str(match_value)
+                  ]
+                  removed_count = original_count - len(data[list_path])
+
+                  if removed_count > 0:
+                      data["last_updated"] = datetime.now().isoformat()
+                      with open(file_path, "w") as f:
+                          yaml.dump(data, f, default_flow_style=False)
+                      result = {"success": True, "removed": removed_count, "action": "remove"}
+                  else:
+                      result = {"success": False, "error": f"No items matched {match_key}={match_value}"}
+      except Exception as e:
+          result = {"success": False, "error": str(e)}
+    output: remove_result
+
+  - name: perform_update
+    description: "Update field in memory"
+    condition: "validation.valid and validation.action == 'update'"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      memory_dir = Path.home() / "src/redhat-ai-workflow/memory"
+      file_path = memory_dir / (inputs.file + ".yaml")
+
+      try:
+          if not file_path.exists():
+              result = {"success": False, "error": f"File not found: {inputs.file}"}
+          else:
+              with open(file_path) as f:
+                  data = yaml.safe_load(f) or {}
+
+              field_path = inputs.field_path.split(".")
+              new_value = inputs.new_value
+
+              # Try to parse as YAML/JSON if it looks structured
+              try:
+                  if new_value.startswith("{") or new_value.startswith("["):
+                      new_value = yaml.safe_load(new_value)
+                  elif new_value.lower() == "true":
+                      new_value = True
+                  elif new_value.lower() == "false":
+                      new_value = False
+                  elif new_value.isdigit():
+                      new_value = int(new_value)
+              except:
+                  pass  # Keep as string
+
+              # Navigate and update
+              obj = data
+              for i, key in enumerate(field_path[:-1]):
+                  if key not in obj:
+                      obj[key] = {}
+                  obj = obj[key]
+
+              old_value = obj.get(field_path[-1], None)
+              obj[field_path[-1]] = new_value
+
+              data["last_updated"] = datetime.now().isoformat()
+
+              with open(file_path, "w") as f:
+                  yaml.dump(data, f, default_flow_style=False)
+
+              result = {
+                  "success": True,
+                  "action": "update",
+                  "field": inputs.field_path,
+                  "old_value": str(old_value)[:50] if old_value else None,
+                  "new_value": str(new_value)[:50],
+              }
+      except Exception as e:
+          result = {"success": False, "error": str(e)}
+    output: update_result
+
+  - name: log_edit
+    description: "Log memory edit to session"
+    condition: "(remove_result and remove_result.success) or (update_result and update_result.success)"
+    tool: memory_session_log
+    args:
+      action: "Edited memory: {{ inputs.file }}"
+      details: "{{ validation.action }}: {{ inputs.list_path if validation.action == 'remove' else inputs.field_path }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {% if not validation.valid %}
+      ## ❌ Validation Failed
+
+      {{ validation.error }}
+
+      ### Usage
+
+      **Remove an item:**
+      ```
+      skill_run("memory_edit", '{
+        "file": "state/current_work",
+        "action": "remove",
+        "list_path": "active_issues",
+        "match_key": "key",
+        "match_value": "AAP-12345"
+      }')
+      ```
+
+      **Update a field:**
+      ```
+      skill_run("memory_edit", '{
+        "file": "state/environments",
+        "action": "update",
+        "field_path": "environments.stage.status",
+        "new_value": "healthy"
+      }')
+      ```
+
+      {% elif remove_result and remove_result.success %}
+      ## ✅ Removed {{ remove_result.removed }} Item(s)
+
+      **File:** `{{ inputs.file }}`
+      **List:** `{{ inputs.list_path }}`
+      **Matched:** `{{ inputs.match_key }}` = `{{ inputs.match_value }}`
+
+      {% elif update_result and update_result.success %}
+      ## ✅ Field Updated
+
+      **File:** `{{ inputs.file }}`
+      **Field:** `{{ update_result.field }}`
+      **Old Value:** {{ update_result.old_value or "(none)" }}
+      **New Value:** {{ update_result.new_value }}
+
+      {% elif remove_result %}
+      ## ❌ Remove Failed
+
+      {{ remove_result.error }}
+
+      {% elif update_result %}
+      ## ❌ Update Failed
+
+      {{ update_result.error }}
+
+      {% endif %}

@@ -1,0 +1,242 @@
+# Skill: Weekly Summary
+# Generate a summary of work from session logs
+
+name: weekly_summary
+description: |
+  Generate a summary of work from session logs.
+
+  Aggregates session logs from the past week (or specified period)
+  and provides a summary of:
+  - Issues worked on
+  - MRs created/reviewed
+  - Deployments and debugging sessions
+  - Patterns learned
+
+  Useful for weekly reports or sprint reviews.
+
+version: "1.0"
+
+inputs:
+  - name: days
+    type: integer
+    required: false
+    default: 7
+    description: "Number of days to look back (default: 7)"
+
+  - name: format
+    type: string
+    required: false
+    default: "markdown"
+    description: "Output format: 'markdown' or 'slack'"
+
+steps:
+  - name: get_session_logs
+    description: "Read session logs from memory directory"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime, timedelta
+      import yaml
+
+      days = inputs.get("days", 7)
+      cutoff = datetime.now() - timedelta(days=days)
+
+      logs_dir = Path.home() / "src/redhat-ai-workflow/memory/logs"
+      session_entries = []
+
+      if logs_dir.exists():
+          for log_file in sorted(logs_dir.glob("*.yaml"), reverse=True):
+              try:
+                  # Parse date from filename (e.g., 2024-01-15.yaml)
+                  date_str = log_file.stem
+                  log_date = datetime.strptime(date_str, "%Y-%m-%d")
+
+                  if log_date >= cutoff:
+                      with open(log_file) as f:
+                          data = yaml.safe_load(f) or {}
+
+                      for entry in data.get("entries", []):
+                          entry["date"] = date_str
+                          session_entries.append(entry)
+              except (ValueError, yaml.YAMLError) as e:
+                  continue
+
+      result = {
+          "entries": session_entries,
+          "count": len(session_entries),
+          "days_covered": days,
+      }
+    output: logs
+
+  - name: load_current_work
+    description: "Load current work state"
+    tool: memory_read
+    args:
+      key: "state/current_work"
+    output: current_work_raw
+    on_error: continue
+
+  - name: analyze_logs
+    description: "Analyze session logs for summary"
+    compute: |
+      import re
+      from collections import defaultdict
+      import yaml
+
+      entries = logs.get("entries", [])
+
+      # Categories to track
+      issues_worked = set()
+      mrs_created = set()
+      mrs_reviewed = set()
+      deployments = []
+      debug_sessions = []
+      patterns_learned = []
+      notifications_sent = []
+      other_actions = []
+
+      for entry in entries:
+          action = entry.get("action", "")
+          details = entry.get("details", "")
+          date = entry.get("date", "")
+
+          # Extract Jira issues
+          jira_matches = re.findall(r"AAP-\d+", action + " " + details)
+          issues_worked.update(jira_matches)
+
+          # Extract MR IDs
+          mr_matches = re.findall(r"!(\d+)", action)
+          for mr_id in mr_matches:
+              if "Created MR" in action or "create" in action.lower():
+                  mrs_created.add(mr_id)
+              elif "Reviewed" in action or "review" in action.lower():
+                  mrs_reviewed.add(mr_id)
+
+          # Categorize actions
+          action_lower = action.lower()
+          if "deployed" in action_lower or "ephemeral" in action_lower:
+              deployments.append({"date": date, "action": action})
+          elif "debug" in action_lower or "investigated" in action_lower:
+              debug_sessions.append({"date": date, "action": action})
+          elif "learned pattern" in action_lower:
+              patterns_learned.append({"date": date, "action": action})
+          elif "notified" in action_lower:
+              notifications_sent.append({"date": date, "action": action})
+          elif "Started work" in action or "Closed issue" in action:
+              pass  # Already captured via issues_worked
+          else:
+              other_actions.append({"date": date, "action": action})
+
+      # Parse current work for active items
+      current_work = {}
+      if current_work_raw and isinstance(current_work_raw, str):
+          try:
+              current_work = yaml.safe_load(current_work_raw) or {}
+          except:
+              pass
+
+      result = {
+          "issues_worked": list(issues_worked),
+          "mrs_created": list(mrs_created),
+          "mrs_reviewed": list(mrs_reviewed),
+          "deployments": deployments[:10],
+          "debug_sessions": debug_sessions[:10],
+          "patterns_learned": patterns_learned,
+          "notifications": notifications_sent[:10],
+          "other": other_actions[:20],
+          "active_issues": current_work.get("active_issues", []),
+          "open_mrs": current_work.get("open_mrs", []),
+          "total_entries": logs.get("count", 0),
+      }
+    output: analysis
+
+  - name: format_summary
+    description: "Format summary for output"
+    compute: |
+      lines = []
+      fmt = inputs.get("format", "markdown")
+      is_slack = fmt == "slack"
+
+      if is_slack:
+          lines.append("*📊 Weekly Summary*\n")
+      else:
+          lines.append("# 📊 Weekly Summary\n")
+          lines.append(f"*{analysis['total_entries']} session entries over {logs['days_covered']} days*\n")
+
+      # Issues worked
+      if analysis["issues_worked"]:
+          if is_slack:
+              lines.append(f"*Issues Worked:* {len(analysis['issues_worked'])}")
+              lines.append(", ".join(analysis["issues_worked"][:10]))
+          else:
+              lines.append("## 🎫 Issues Worked")
+              for issue in analysis["issues_worked"][:10]:
+                  lines.append(f"- [{issue}](https://issues.redhat.com/browse/{issue})")
+          lines.append("")
+
+      # MRs
+      if analysis["mrs_created"] or analysis["mrs_reviewed"]:
+          if is_slack:
+              lines.append(f"*MRs:* {len(analysis['mrs_created'])} created, {len(analysis['mrs_reviewed'])} reviewed")
+          else:
+              lines.append("## 🔀 Merge Requests")
+              if analysis["mrs_created"]:
+                  lines.append(f"**Created:** {', '.join(['!' + mr for mr in analysis['mrs_created'][:5]])}")
+              if analysis["mrs_reviewed"]:
+                  lines.append(f"**Reviewed:** {', '.join(['!' + mr for mr in analysis['mrs_reviewed'][:5]])}")
+          lines.append("")
+
+      # Deployments
+      if analysis["deployments"]:
+          if is_slack:
+              lines.append(f"*Deployments:* {len(analysis['deployments'])}")
+          else:
+              lines.append("## 🚀 Deployments")
+              for d in analysis["deployments"][:5]:
+                  lines.append(f"- {d['date']}: {d['action']}")
+          lines.append("")
+
+      # Debug sessions
+      if analysis["debug_sessions"]:
+          if is_slack:
+              lines.append(f"*Debug Sessions:* {len(analysis['debug_sessions'])}")
+          else:
+              lines.append("## 🔍 Debug Sessions")
+              for d in analysis["debug_sessions"][:5]:
+                  lines.append(f"- {d['date']}: {d['action']}")
+          lines.append("")
+
+      # Patterns learned
+      if analysis["patterns_learned"]:
+          if is_slack:
+              lines.append(f"*Patterns Learned:* {len(analysis['patterns_learned'])}")
+          else:
+              lines.append("## 📚 Patterns Learned")
+              for p in analysis["patterns_learned"]:
+                  lines.append(f"- {p['date']}: {p['action']}")
+          lines.append("")
+
+      # Currently active
+      if analysis["active_issues"] or analysis["open_mrs"]:
+          if not is_slack:
+              lines.append("## 🎯 Currently Active")
+              if analysis["active_issues"]:
+                  lines.append("**Active Issues:**")
+                  for issue in analysis["active_issues"][:5]:
+                      lines.append(f"- {issue.get('key', '?')}: {issue.get('summary', 'No summary')[:50]}")
+              if analysis["open_mrs"]:
+                  lines.append("**Open MRs:**")
+                  for mr in analysis["open_mrs"][:5]:
+                      lines.append(f"- !{mr.get('id', '?')}: {mr.get('title', 'No title')[:50]}")
+          lines.append("")
+
+      result = "\n".join(lines)
+    output: formatted_summary
+
+outputs:
+  - name: summary
+    value: |
+      {{ formatted_summary }}
+
+      ---
+
+      *Generated from {{ analysis.total_entries }} session log entries.*

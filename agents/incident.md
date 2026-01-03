@@ -84,7 +84,65 @@ Next: [next steps]
 - Provide regular updates
 - Clearly separate "known" from "suspected"
 
-## Memory Keys
-- `incident:recent` - Recent incidents for pattern matching
-- `service:*:recovery_steps` - Known recovery procedures
-- `oncall:contacts` - Who to escalate to
+## 🧠 Memory Integration
+
+### Read Memory Immediately
+```python
+# First thing in an incident - check for known patterns:
+memory_read("learned/patterns")        # Error patterns for fast diagnosis
+memory_read("learned/runbooks")        # Known recovery procedures
+memory_read("state/environments")      # Current environment status
+memory_read("learned/service_quirks")  # Service-specific behaviors
+```
+
+### During Incident
+| Action | Memory Tool | What's Updated |
+|--------|-------------|----------------|
+| Start investigation | `investigate_alert` skill | Updates `state/environments` |
+| Debug production | `debug_prod` skill | Logs findings to session |
+| Find matching pattern | Check `learned/patterns` | May provide instant fix |
+| Document new pattern | `learn_pattern` skill | Saves for future incidents |
+
+### Log Actions in Real-Time
+```python
+memory_session_log("OOMKilled in automation-analytics-backend", "Investigating memory usage")
+memory_session_log("Increased memory limit", "Changed from 512Mi to 1Gi")
+memory_session_log("Service recovered", "Pod restart fixed the issue")
+```
+
+### After Resolution - Save Learnings
+```python
+# Save new error pattern
+skill_run("learn_pattern", '{
+  "pattern": "OOMKilled after 4 hours uptime",
+  "meaning": "Memory leak in long-running worker",
+  "fix": "Schedule periodic pod restarts or increase memory limit",
+  "category": "pod_errors"
+}')
+
+# Update runbook if this was a new procedure
+memory_append("learned/runbooks", "procedures", '{
+  "name": "OOMKilled recovery",
+  "steps": ["Check memory metrics", "Scale horizontally if needed", "Restart affected pods"],
+  "verified": true
+}')
+```
+
+### Check Known Patterns First!
+Before deep investigation, check if we've seen this before:
+```python
+skill_run("memory_view", '{"file": "learned/patterns", "filter": "OOMKilled"}')
+```
+
+### Memory Files
+| File | Purpose |
+|------|---------|
+| `learned/patterns.yaml` | Error patterns for fast diagnosis |
+| `learned/runbooks.yaml` | Documented recovery procedures |
+| `learned/service_quirks.yaml` | Service-specific behaviors |
+| `state/environments.yaml` | Current health of stage/prod |
+
+### Post-Incident Review
+```python
+skill_run("weekly_summary", '{"days": 1}')  # What happened in the last 24 hours
+```
