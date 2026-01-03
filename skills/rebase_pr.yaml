@@ -676,35 +676,29 @@ steps:
   - name: emit_rebase_hook
     description: "Notify author about rebase result"
     compute: |
-      import asyncio
-      import sys
-      from pathlib import Path
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      # emit_event is available from skill engine safe_globals
+      effective_result = final_rebase_result if final_rebase_result else rebase_result
 
-      try:
-          from scripts.skill_hooks import emit_event
-
-          effective_result = final_rebase_result if final_rebase_result else rebase_result
-
+      if emit_event:
           if effective_result.get('success'):
-              asyncio.run(emit_event("rebase_completed", {
+              emit_event("rebase_completed", {
                   "mr_id": str(inputs.get('mr_id', '')),
                   "branch": target_branch,
                   "base_branch": resolved_repo.get("default_branch", "main"),
                   "author": "",  # self - no DM needed
-              }))
+              })
               result = "rebase_completed hook sent"
           elif effective_result.get('conflicts') and conflict_resolution and conflict_resolution.get('needs_human'):
-              asyncio.run(emit_event("rebase_conflict", {
+              emit_event("rebase_conflict", {
                   "mr_id": str(inputs.get('mr_id', '')),
                   "branch": target_branch,
                   "author": "",  # self - no DM needed
-              }))
+              })
               result = "rebase_conflict hook sent"
           else:
               result = "no hook needed"
-      except Exception as e:
-          result = f"hook skipped: {e}"
+      else:
+          result = "hook skipped: emit_event not available"
     output: rebase_hook_result
     on_error: continue
 

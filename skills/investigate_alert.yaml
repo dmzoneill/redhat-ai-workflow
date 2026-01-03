@@ -140,17 +140,9 @@ steps:
   - name: parse_pod_health
     description: "Parse pod health"
     compute: |
-      import sys
-      from pathlib import Path
-
-      # Add scripts path for shared parsers
-      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
-      if scripts_path not in sys.path:
-          sys.path.insert(0, scripts_path)
-      from common.parsers import parse_kubectl_pods
-
+      # parsers is available from skill engine safe_globals
       # Use shared parser
-      pods = parse_kubectl_pods(str(pods_raw) if pods_raw else "")
+      pods = parsers.parse_kubectl_pods(str(pods_raw) if pods_raw else "") if parsers else []
 
       # Count health states
       running = sum(1 for p in pods if p.get("status") == "Running")
@@ -283,40 +275,33 @@ steps:
   - name: emit_alert_hooks
     description: "Notify team channel about critical alerts"
     compute: |
-      import asyncio
-      import sys
-      from pathlib import Path
-      from scripts.common.config_loader import load_config
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-
-      try:
-          from scripts.skill_hooks import emit_event
-
+      # emit_event is available from skill engine safe_globals
+      if emit_event:
           # Emit critical alert if applicable
           if assessment.get("severity") == "critical":
               alert_name = inputs.alert_name or "unknown"
               if alert_info.get("alerts"):
                   alert_name = alert_info["alerts"][0].get("name", alert_name)
 
-              asyncio.run(emit_event("alert_critical", {
+              emit_event("alert_critical", {
                   "alert_name": alert_name,
                   "namespace": target.get("namespace", ""),
                   "environment": target.get("environment", ""),
-              }))
+              })
               result = "critical hook sent"
 
           # Emit escalated if we ran debug_prod
           elif assessment.get("needs_escalation") and debug_result:
               alert_name = inputs.alert_name or "unknown"
-              asyncio.run(emit_event("alert_escalated", {
+              emit_event("alert_escalated", {
                   "alert_name": alert_name,
                   "namespace": target.get("namespace", ""),
-              }))
+              })
               result = "escalated hook sent"
           else:
               result = "no hook needed"
-      except Exception as e:
-          result = f"hook skipped: {e}"
+      else:
+          result = "hook skipped: emit_event not available"
     output: alert_hook_result
     on_error: continue
 

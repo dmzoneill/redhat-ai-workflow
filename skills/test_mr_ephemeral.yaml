@@ -841,35 +841,29 @@ steps:
   - name: emit_ephemeral_hooks
     description: "Notify about ephemeral environment status"
     compute: |
-      import asyncio
-      import sys
-      from pathlib import Path
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-
-      try:
-          from scripts.skill_hooks import emit_event
-
+      # emit_event is available from skill engine safe_globals
+      if emit_event:
           # Emit ready notification when deployed
           if namespace_name and deploy_result and 'fail' not in str(deploy_result).lower():
-              asyncio.run(emit_event("ephemeral_ready", {
+              emit_event("ephemeral_ready", {
                   "namespace": namespace_name,
                   "mr_id": str(inputs.get('mr_id', '')),
                   "author": "",  # self
-              }))
+              })
               result = "ephemeral_ready hook sent"
 
           # Emit test failure notification
           if test_result and not test_result.get('passed'):
-              asyncio.run(emit_event("ephemeral_tests_failed", {
+              emit_event("ephemeral_tests_failed", {
                   "mr_id": str(inputs.get('mr_id', '')),
                   "namespace": namespace_name or "",
                   "author": "",  # self
-              }))
+              })
               result = "ephemeral_tests_failed hook sent"
           else:
               result = "no failure hook needed"
-      except Exception as e:
-          result = f"hook skipped: {e}"
+      else:
+          result = "hook skipped: emit_event not available"
     output: ephemeral_hook_result
     on_error: continue
 

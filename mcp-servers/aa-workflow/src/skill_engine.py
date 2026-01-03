@@ -207,14 +207,19 @@ class SkillExecutor:
             sys.path.insert(0, str(PROJECT_ROOT))
 
         try:
+            from scripts.common import jira_utils
             from scripts.common import memory as memory_helpers
             from scripts.common import parsers
             from scripts.common.config_loader import get_timezone
             from scripts.common.config_loader import load_config as load_skill_config
+            from scripts.skill_hooks import emit_event_sync
         except ImportError:
             parsers = None
+            jira_utils = None
             load_skill_config = None
             get_timezone = None
+            emit_event_sync = None
+            memory_helpers = None
 
         try:
             from google.oauth2.credentials import Credentials as GoogleCredentials
@@ -273,7 +278,9 @@ class SkillExecutor:
             "timedelta": timedelta,
             "ZoneInfo": ZoneInfo,
             "parsers": parsers,
+            "jira_utils": jira_utils,
             "memory": memory_helpers,
+            "emit_event": emit_event_sync,
             "load_config": load_skill_config,
             "get_timezone": get_timezone,
             "GoogleCredentials": GoogleCredentials,

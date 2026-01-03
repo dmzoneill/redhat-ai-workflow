@@ -167,22 +167,14 @@ steps:
   - name: parse_commits
     description: "Parse commit log for standup"
     compute: |
-      import sys
-      from pathlib import Path
-
-      # Add scripts path for shared parsers
-      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
-      if scripts_path not in sys.path:
-          sys.path.insert(0, scripts_path)
-      from common.parsers import parse_git_log, extract_jira_key
-
+      # parsers is available from skill engine safe_globals
       # Use shared parser for git log
-      commits = parse_git_log(commit_log_raw) if commit_log_raw else []
+      commits = parsers.parse_git_log(commit_log_raw) if parsers and commit_log_raw else []
 
       # Extract issue keys from commit messages using shared parser
       issue_keys = set()
       for commit in commits:
-        key = extract_jira_key(commit.get("message", ""))
+        key = parsers.extract_jira_key(commit.get("message", "")) if parsers else None
         if key:
           issue_keys.add(key.upper())
 

@@ -131,15 +131,9 @@ steps:
   - name: normalize_inputs
     description: "Normalize issue type and prepare data"
     compute: |
-      import sys
-      from pathlib import Path
-
-      # Add our utilities to path
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
-      from common.jira_utils import normalize_issue_type
-
+      # jira_utils is available from skill engine safe_globals
       # Normalize issue type
-      issue_type = normalize_issue_type(inputs.get("issue_type", "story"))
+      issue_type = jira_utils.normalize_issue_type(inputs.get("issue_type", "story")) if jira_utils else inputs.get("issue_type", "Story")
 
       # Get project
       project = inputs.get("project") or cfg["default_project"]

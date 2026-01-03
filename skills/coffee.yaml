@@ -394,13 +394,7 @@ steps:
   - name: parse_pr_feedback
     description: "Parse all PR comments for feedback"
     compute: |
-      import re
-      import sys
-      from pathlib import Path
-
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow/scripts"))
-      from common.parsers import is_bot_comment
-
+      # parsers is available from skill engine safe_globals
       feedback = []
       current_user = ctx.get('config', {}).get('user', {}).get('username', os.getenv('USER', 'unknown'))
 
@@ -423,7 +417,7 @@ steps:
         # Find human comments
         for line in comments_text.split('\n'):
           if ' commented ' in line and current_user.lower() not in line.lower():
-            if not is_bot_comment(line, ''):
+            if not parsers.is_bot_comment(line, ''):
               match = re.match(r'^(\w+) commented', line)
               if match:
                 feedback.append({
