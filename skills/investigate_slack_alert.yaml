@@ -431,44 +431,27 @@ steps:
   - name: update_environment_status
     description: "Update environment status after investigation"
     compute: |
-      from pathlib import Path
-      from datetime import datetime
-      import yaml
+      # Use shared memory helpers
+      env_key = cfg.get("environment", "production")
+      total_issues = pod_analysis.get("total_issues", 0) if pod_analysis else 0
+      status = "issues" if total_issues > 0 else "healthy"
 
-      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
-      now = datetime.now().isoformat()
-
-      try:
-          if memory_file.exists():
-              with open(memory_file) as f:
-                  data = yaml.safe_load(f) or {}
-          else:
-              data = {"environments": {}}
-
-          env_key = cfg.get("environment", "production")
-          if env_key not in data.get("environments", {}):
-              data["environments"] = data.get("environments", {})
-              data["environments"][env_key] = {}
-
-          env_data = data["environments"][env_key]
-          env_data["last_check"] = now
-          env_data["notes"] = f"Slack alert: {alert_info.get('alert_name', 'unknown')}"
-
-          # Update status based on findings
-          total_issues = pod_analysis.get("total_issues", 0) if pod_analysis else 0
-          if total_issues > 0:
-              env_data["status"] = "issues"
-          else:
-              env_data["status"] = "healthy"
-
-          data["last_checked"] = now
-
-          with open(memory_file, "w") as f:
-              yaml.dump(data, f, default_flow_style=False)
-
-          result = "environment updated"
-      except Exception as e:
-          result = f"failed: {e}"
+      memory.update_field(
+          "state/environments",
+          f"environments.{env_key}.status",
+          status
+      )
+      memory.update_field(
+          "state/environments",
+          f"environments.{env_key}.last_check",
+          memory.get_timestamp()
+      )
+      memory.update_field(
+          "state/environments",
+          f"environments.{env_key}.notes",
+          f"Slack alert: {alert_info.get('alert_name', 'unknown')}"
+      )
+      result = "environment updated"
     output: env_update_result
     on_error: continue
 

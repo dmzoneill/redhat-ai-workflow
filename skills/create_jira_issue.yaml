@@ -237,40 +237,14 @@ steps:
     description: "Optionally add new issue to active_issues if start_work is true"
     condition: "create_result.success and inputs.get('start_work', False)"
     compute: |
-      from pathlib import Path
-      from datetime import datetime
-      import yaml
-
-      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/current_work.yaml"
-      now = datetime.now().isoformat()
-
-      try:
-          if memory_file.exists():
-              with open(memory_file) as f:
-                  data = yaml.safe_load(f) or {}
-          else:
-              data = {"active_issues": []}
-
-          active_issues = data.get("active_issues", [])
-
-          # Add new issue
-          active_issues.append({
-              "key": create_result.get("issue_key", ""),
-              "summary": normalized.get("summary", ""),
-              "status": "Open",
-              "started": now,
-              "notes": "",
-          })
-
-          data["active_issues"] = active_issues
-          data["last_updated"] = now
-
-          with open(memory_file, "w") as f:
-              yaml.dump(data, f, default_flow_style=False)
-
-          result = "added to active issues"
-      except Exception as e:
-          result = f"failed: {e}"
+      # Use shared memory helpers
+      memory.add_active_issue(
+          issue_key=create_result.get("issue_key", ""),
+          summary=normalized.get("summary", ""),
+          status="Open",
+          notes=""
+      )
+      result = "added to active issues"
     output: memory_add_result
     on_error: continue
 

@@ -207,6 +207,7 @@ class SkillExecutor:
             sys.path.insert(0, str(PROJECT_ROOT))
 
         try:
+            from scripts.common import memory as memory_helpers
             from scripts.common import parsers
             from scripts.common.config_loader import get_timezone
             from scripts.common.config_loader import load_config as load_skill_config
@@ -272,6 +273,7 @@ class SkillExecutor:
             "timedelta": timedelta,
             "ZoneInfo": ZoneInfo,
             "parsers": parsers,
+            "memory": memory_helpers,
             "load_config": load_skill_config,
             "get_timezone": get_timezone,
             "GoogleCredentials": GoogleCredentials,
