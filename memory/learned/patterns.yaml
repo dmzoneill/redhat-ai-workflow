@@ -79,3 +79,50 @@ pipeline_patterns:
   fix: Run tests locally to reproduce
   meaning: Unit or integration tests failing
   pattern: tests failed
+- commands:
+  - konflux_list_builds(namespace='aap-aa-tenant')
+  - quay_check_image_exists(image='...', tag='<full-sha>')
+  fix: Wait for Konflux build to complete, check PipelineRun status
+  meaning: Image not yet built by Konflux
+  pattern: manifest unknown
+- commands:
+  - kube_login(cluster='e')
+  - kube_login(cluster='s')
+  fix: Run kube-clean X && kube X to refresh token
+  meaning: Kubernetes token expired
+  pattern: Unauthorized
+
+auth_patterns:
+- commands:
+  - vpn_connect()
+  fix: Connect to Red Hat VPN
+  meaning: Cannot reach internal cluster or service
+  pattern: No route to host
+- commands:
+  - kube_login(cluster='e')
+  fix: Refresh ephemeral cluster credentials
+  meaning: Kubernetes authentication expired
+  pattern: token expired
+- commands:
+  - Check DISPLAY, XAUTHORITY environment variables
+  fix: Ensure GUI environment is available for browser-based SSO
+  meaning: Cannot open browser for OAuth
+  pattern: Cannot open display
+
+bonfire_patterns:
+- commands:
+  - bonfire namespace list --mine
+  - bonfire namespace release <ns> --force
+  fix: Add --force flag for non-interactive mode
+  meaning: Bonfire prompting for confirmation in non-TTY
+  pattern: Output is not a TTY
+- commands:
+  - quay_check_image_exists(tag='<40-char-sha>')
+  fix: Use FULL 40-character commit SHA, not short 8-char SHA
+  meaning: Image tag doesn't exist in Quay registry
+  pattern: image not found
+- commands:
+  - bonfire namespace list --mine
+  fix: Only release namespaces you own
+  meaning: Cannot release namespace owned by another user
+  pattern: namespace not owned

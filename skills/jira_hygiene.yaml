@@ -382,6 +382,64 @@ steps:
       result = '\n'.join(lines)
     output: report
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: log_hygiene_check
+    description: "Log hygiene check to session"
+    tool: memory_session_log
+    args:
+      action: "Hygiene check on {{ inputs.issue_key }}"
+      details: "{{ 'Healthy' if validation.is_healthy else validation.issues|length|string + ' issues found' }}"
+    on_error: continue
+
+  - name: create_followup_if_needed
+    description: "Create follow-up task if issues need manual input"
+    condition: "validation.needs_input"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/current_work.yaml"
+      now = datetime.now().isoformat()
+
+      try:
+          if memory_file.exists():
+              with open(memory_file) as f:
+                  data = yaml.safe_load(f) or {}
+          else:
+              data = {"follow_ups": []}
+
+          follow_ups = data.get("follow_ups", [])
+
+          # Check if follow-up already exists for this issue
+          existing = any(
+              fu.get("issue_key") == inputs.issue_key and "hygiene" in fu.get("task", "").lower()
+              for fu in follow_ups
+          )
+
+          if not existing:
+              fields_needed = [item["field"] for item in validation.get("needs_input", [])]
+              follow_ups.append({
+                  "task": f"Fix hygiene issues on {inputs.issue_key}: {', '.join(fields_needed[:3])}",
+                  "priority": "low",
+                  "issue_key": inputs.issue_key,
+                  "created": now,
+              })
+              data["follow_ups"] = follow_ups
+              data["last_updated"] = now
+
+              with open(memory_file, "w") as f:
+                  yaml.dump(data, f, default_flow_style=False)
+
+              result = "follow-up created"
+          else:
+              result = "follow-up already exists"
+      except Exception as e:
+          result = f"failed: {e}"
+    output: followup_result
+    on_error: continue
+
 outputs:
   - name: summary
     value: |

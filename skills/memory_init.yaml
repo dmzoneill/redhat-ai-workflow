@@ -1,0 +1,261 @@
+# Skill: Memory Initialize
+# Initialize or reset memory files to clean state
+
+name: memory_init
+description: |
+  Initialize or reset memory files to a clean state.
+
+  Use this for:
+  - Fresh start on a new project/sprint
+  - Clearing stale data after extended absence
+  - Setting up memory on a new machine
+
+  By default, preserves learned patterns and runbooks.
+  Use reset_learned=true to also reset those.
+
+version: "1.0"
+
+inputs:
+  - name: confirm
+    type: boolean
+    required: true
+    description: "Must be true to proceed (safety check)"
+
+  - name: reset_learned
+    type: boolean
+    required: false
+    default: false
+    description: "Also reset learned patterns and runbooks (default: false)"
+
+  - name: preserve_patterns
+    type: boolean
+    required: false
+    default: true
+    description: "Keep learned patterns even if reset_learned is true"
+
+steps:
+  - name: check_confirmation
+    description: "Verify user confirmed the action"
+    compute: |
+      if not inputs.get("confirm", False):
+          result = {
+              "proceed": False,
+              "error": "Must set confirm=true to proceed. This will clear your memory state."
+          }
+      else:
+          result = {"proceed": True}
+    output: confirmation
+
+  - name: backup_patterns
+    description: "Backup patterns if preserving them"
+    condition: "confirmation.proceed and inputs.preserve_patterns"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      patterns_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
+
+      if patterns_file.exists():
+          try:
+              with open(patterns_file) as f:
+                  result = yaml.safe_load(f) or {}
+          except:
+              result = {}
+      else:
+          result = {}
+    output: patterns_backup
+
+  - name: reset_current_work
+    description: "Reset current work state"
+    condition: "confirmation.proceed"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/current_work.yaml"
+
+      template = {
+          "last_updated": datetime.now().isoformat(),
+          "active_issues": [],
+          "open_mrs": [],
+          "follow_ups": [],
+          "notes": "Memory initialized",
+      }
+
+      memory_file.parent.mkdir(parents=True, exist_ok=True)
+      with open(memory_file, "w") as f:
+          yaml.dump(template, f, default_flow_style=False)
+
+      result = "current_work reset"
+    output: work_reset
+
+  - name: reset_environments
+    description: "Reset environment state"
+    condition: "confirmation.proceed"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
+
+      template = {
+          "last_checked": datetime.now().isoformat(),
+          "environments": {
+              "stage": {
+                  "namespace": "tower-analytics-stage",
+                  "cluster": "stage-cluster",
+                  "status": "unknown",
+                  "last_check": None,
+                  "alerts": [],
+                  "notes": "",
+              },
+              "production": {
+                  "namespace": "tower-analytics-prod",
+                  "cluster": "prod-cluster",
+                  "status": "unknown",
+                  "last_check": None,
+                  "alerts": [],
+                  "notes": "",
+              },
+              "konflux": {
+                  "namespace": "aap-aa-tenant",
+                  "cluster": "konflux",
+                  "status": "unknown",
+                  "last_check": None,
+                  "notes": "",
+              },
+          },
+          "ephemeral_namespaces": [],
+          "recent_deployments": [],
+      }
+
+      memory_file.parent.mkdir(parents=True, exist_ok=True)
+      with open(memory_file, "w") as f:
+          yaml.dump(template, f, default_flow_style=False)
+
+      result = "environments reset"
+    output: env_reset
+
+  - name: reset_learned
+    description: "Reset learned memory (patterns, runbooks, etc)"
+    condition: "confirmation.proceed and inputs.reset_learned"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      learned_dir = Path.home() / "src/redhat-ai-workflow/memory/learned"
+      learned_dir.mkdir(parents=True, exist_ok=True)
+
+      # Reset patterns (unless preserving)
+      if not inputs.get("preserve_patterns", True):
+          patterns_template = {
+              "last_updated": datetime.now().isoformat(),
+              "error_patterns": [],
+              "pipeline_patterns": [],
+              "auth_patterns": [],
+              "bonfire_patterns": [],
+          }
+          with open(learned_dir / "patterns.yaml", "w") as f:
+              yaml.dump(patterns_template, f, default_flow_style=False)
+
+      # Reset runbooks
+      runbooks_template = {
+          "last_updated": datetime.now().isoformat(),
+          "runbooks": {},
+          "preferences": {
+              "commit_format": "AAP-XXXXX - type: description",
+              "branch_format": "aap-xxxxx-short-description",
+          },
+      }
+      with open(learned_dir / "runbooks.yaml", "w") as f:
+          yaml.dump(runbooks_template, f, default_flow_style=False)
+
+      # Reset teammate preferences
+      prefs_template = {
+          "last_updated": datetime.now().isoformat(),
+          "teammates": {},
+      }
+      with open(learned_dir / "teammate_preferences.yaml", "w") as f:
+          yaml.dump(prefs_template, f, default_flow_style=False)
+
+      # Reset service quirks
+      quirks_template = {
+          "last_updated": datetime.now().isoformat(),
+          "services": {},
+      }
+      with open(learned_dir / "service_quirks.yaml", "w") as f:
+          yaml.dump(quirks_template, f, default_flow_style=False)
+
+      result = "learned memory reset"
+    output: learned_reset
+
+  - name: restore_patterns
+    description: "Restore patterns from backup if preserved"
+    condition: "confirmation.proceed and inputs.reset_learned and inputs.preserve_patterns and patterns_backup"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      patterns_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
+
+      with open(patterns_file, "w") as f:
+          yaml.dump(patterns_backup, f, default_flow_style=False)
+
+      result = "patterns restored"
+    output: patterns_restored
+
+  - name: log_init
+    description: "Log initialization to session"
+    condition: "confirmation.proceed"
+    tool: memory_session_log
+    args:
+      action: "Memory initialized"
+      details: "reset_learned: {{ inputs.reset_learned }}, preserve_patterns: {{ inputs.preserve_patterns }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {% if not confirmation.proceed %}
+      ## ⚠️ Confirmation Required
+
+      {{ confirmation.error }}
+
+      To initialize memory, run:
+      ```
+      skill_run("memory_init", '{"confirm": true}')
+      ```
+
+      Options:
+      - `reset_learned: true` - Also reset learned patterns, runbooks, preferences
+      - `preserve_patterns: false` - Don't preserve error patterns when resetting learned
+
+      {% else %}
+      ## ✅ Memory Initialized
+
+      ### State Files Reset
+      - ✅ `state/current_work.yaml` - Active issues, MRs, follow-ups cleared
+      - ✅ `state/environments.yaml` - Environment status reset
+
+      {% if inputs.reset_learned %}
+      ### Learned Files Reset
+      - ✅ `learned/runbooks.yaml` - Runbooks cleared
+      - ✅ `learned/teammate_preferences.yaml` - Preferences cleared
+      - ✅ `learned/service_quirks.yaml` - Service quirks cleared
+      {% if inputs.preserve_patterns %}
+      - ℹ️ `learned/patterns.yaml` - **Preserved** (patterns kept)
+      {% else %}
+      - ✅ `learned/patterns.yaml` - Patterns cleared
+      {% endif %}
+      {% else %}
+      ### Learned Files Preserved
+      - ℹ️ Patterns, runbooks, and preferences were kept
+      {% endif %}
+
+      ---
+
+      Ready for a fresh start! Use `/coffee` to begin your day.
+      {% endif %}
