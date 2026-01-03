@@ -136,21 +136,13 @@ steps:
   - name: format_changelog
     description: "Format changelog output"
     compute: |
-      import sys
-      from pathlib import Path
-
-      # Add scripts path for shared parsers
-      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
-      if scripts_path not in sys.path:
-          sys.path.insert(0, scripts_path)
-      from common.parsers import parse_git_log
-
+      # parsers is available from skill engine safe_globals
       commits_str = str(changelog_raw) if changelog_raw else ""
 
       if not commits_str.strip() or "error" in commits_str.lower():
         result = "No new commits (same SHA as current production)"
       else:
-        commits = parse_git_log(commits_str)
+        commits = parsers.parse_git_log(commits_str) if parsers else []
         commit_count = len(commits)
         result = f"📦 {commit_count} commits to release:\n\n{commits_str.strip()}"
     output: changelog
@@ -393,28 +385,22 @@ steps:
     description: "Notify team channel about release"
     condition: "mr_result"
     compute: |
-      import asyncio
-      import sys
-      from pathlib import Path
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-
-      try:
-          from scripts.skill_hooks import emit_event
-
+      # emit_event is available from skill engine safe_globals
+      if emit_event:
           # Emit release started
-          asyncio.run(emit_event("release_started", {
+          emit_event("release_started", {
               "sha": inputs.commit_sha[:12],
               "environment": "production",
-          }))
+          })
 
           # Also emit release MR ready
-          asyncio.run(emit_event("release_mr_ready", {
+          emit_event("release_mr_ready", {
               "mr_url": mr_result.get('web_url', ''),
               "sha": inputs.commit_sha[:12],
-          }))
+          })
           result = "hooks sent"
-      except Exception as e:
-          result = f"hooks skipped: {e}"
+      else:
+          result = "hooks skipped: emit_event not available"
     output: release_hook_result
     on_error: continue
 

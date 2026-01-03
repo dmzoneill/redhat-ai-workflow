@@ -618,21 +618,16 @@ steps:
     description: "Notify team channel about new MR"
     condition: "mr and not inputs.draft"
     compute: |
-      import asyncio
-      import sys
-      from pathlib import Path
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-
-      try:
-          from scripts.skill_hooks import emit_event
-          asyncio.run(emit_event("mr_created", {
+      # emit_event is available from skill engine safe_globals
+      if emit_event:
+          emit_event("mr_created", {
               "mr_id": str(mr.get('iid', '')),
               "issue_key": inputs.issue_key,
               "project": resolved_repo.get("gitlab_project", ""),
-          }))
+          })
           result = "hook sent"
-      except Exception as e:
-          result = f"hook skipped: {e}"
+      else:
+          result = "hook skipped: emit_event not available"
     output: mr_hook_result
     on_error: continue
 

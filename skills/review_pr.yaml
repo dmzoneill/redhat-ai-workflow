@@ -184,18 +184,10 @@ steps:
   - name: extract_jira_key
     description: "Extract AAP-XXXXX from MR title"
     compute: |
-      import sys
-      from pathlib import Path
-
-      # Add scripts path for shared parsers
-      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
-      if scripts_path not in sys.path:
-          sys.path.insert(0, scripts_path)
-      from common.parsers import extract_jira_key as parse_jira_key
-
+      # parsers is available from skill engine safe_globals
       # Use shared parser
-      jira_key = parse_jira_key(mr_details) or "NOT_FOUND"
-      result = jira_key
+      jira_key = parsers.extract_jira_key(mr_details) if parsers else "NOT_FOUND"
+      result = jira_key or "NOT_FOUND"
     output: jira_key
 
   # Step 3: Get Jira issue details (if found)
@@ -763,26 +755,19 @@ steps:
     description: "Notify author that MR was approved"
     condition: "review_action.get('action') == 'approve' and approval_result"
     compute: |
-      import asyncio
-      import sys
-      from pathlib import Path
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-
-      try:
-          from scripts.skill_hooks import emit_event
-          from scripts.common.parsers import extract_author_from_mr
-
+      # emit_event and parsers are available from skill engine safe_globals
+      if emit_event and parsers:
           # Extract author from MR details using shared parser
-          author = extract_author_from_mr(mr_details) or ""
+          author = parsers.extract_author_from_mr(mr_details) or ""
 
-          asyncio.run(emit_event("review_approved", {
+          emit_event("review_approved", {
               "mr_id": str(mr_id),
               "author": author,
               "project": resolved.get("gitlab_project", ""),
-          }))
+          })
           result = "hook sent"
-      except Exception as e:
-          result = f"hook skipped: {e}"
+      else:
+          result = "hook skipped: globals not available"
     output: approval_hook_result
     on_error: continue
 
@@ -791,31 +776,24 @@ steps:
     description: "Notify author that feedback was posted"
     condition: "review_action.get('action') == 'request_changes' and feedback_posted"
     compute: |
-      import asyncio
-      import sys
-      from pathlib import Path
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
-
-      try:
-          from scripts.skill_hooks import emit_event
-          from scripts.common.parsers import extract_author_from_mr
-
+      # emit_event and parsers are available from skill engine safe_globals
+      if emit_event and parsers:
           # Extract author from MR details using shared parser
-          author = extract_author_from_mr(mr_details) or ""
+          author = parsers.extract_author_from_mr(mr_details) or ""
 
           issue_count = len(code_issues) if code_issues else 0
           if format_issues and format_issues != ["Format OK"]:
               issue_count += len(format_issues)
 
-          asyncio.run(emit_event("review_comment", {
+          emit_event("review_comment", {
               "mr_id": str(mr_id),
               "author": author,
               "project": resolved.get("gitlab_project", ""),
               "issue_count": str(issue_count),
-          }))
+          })
           result = "hook sent"
-      except Exception as e:
-          result = f"hook skipped: {e}"
+      else:
+          result = "hook skipped: globals not available"
     output: feedback_hook_result
     on_error: continue
 

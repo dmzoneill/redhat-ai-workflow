@@ -302,24 +302,17 @@ steps:
     description: "Notify team channel about closed issue"
     condition: "not status_check.already_done"
     compute: |
-      import asyncio
-      import sys
-      from pathlib import Path
-      from scripts.common.config_loader import load_config
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      # emit_event is available from skill engine safe_globals
+      commit_count = commit_info.get("count", 0) if commit_info else 0
 
-      try:
-          from scripts.skill_hooks import emit_event
-
-          commit_count = commit_info.get("count", 0) if commit_info else 0
-
-          asyncio.run(emit_event("issue_closed", {
+      if emit_event:
+          emit_event("issue_closed", {
               "issue_key": inputs.issue_key,
               "commit_count": str(commit_count),
-          }))
+          })
           result = "hook sent"
-      except Exception as e:
-          result = f"hook skipped: {e}"
+      else:
+          result = "hook skipped: emit_event not available"
     output: close_hook_result
     on_error: continue
 

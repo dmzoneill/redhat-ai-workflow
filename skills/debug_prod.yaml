@@ -146,17 +146,9 @@ steps:
     description: "Identify unhealthy pods"
     condition: "{{ ns_info.namespace }}"
     compute: |
-      import sys
-      from pathlib import Path
-
-      # Add scripts path for shared parsers
-      scripts_path = str(Path(__file__).parent.parent / "scripts") if hasattr(Path(__file__), 'parent') else str(Path.cwd() / "scripts")
-      if scripts_path not in sys.path:
-          sys.path.insert(0, scripts_path)
-      from common.parsers import parse_kubectl_pods
-
+      # parsers is available from skill engine safe_globals
       # Use shared parser for kubectl pods
-      pods = parse_kubectl_pods(str(pod_status))
+      pods = parsers.parse_kubectl_pods(str(pod_status)) if parsers else []
 
       # Analyze for issues
       issues = []

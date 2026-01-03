@@ -435,31 +435,24 @@ steps:
     description: "Notify team channel about batch review"
     condition: "not inputs.dry_run"
     compute: |
-      import asyncio
-      import sys
-      from pathlib import Path
-      sys.path.insert(0, str(Path.home() / "src/redhat-ai-workflow"))
+      # emit_event is available from skill engine safe_globals
+      # Count actions taken
+      approved = 1 if first_mr_action and first_mr_action.get('action') == 'can_approve' else 0
+      changes = 1 if first_mr_action and first_mr_action.get('action') in ['needs_full_review', 'needs_followup'] else 0
+      total = len(mr_analysis) if mr_analysis else 0
 
-      try:
-          from scripts.skill_hooks import emit_event
-
-          # Count actions taken
-          approved = 1 if first_mr_action and first_mr_action.get('action') == 'can_approve' else 0
-          changes = 1 if first_mr_action and first_mr_action.get('action') in ['needs_full_review', 'needs_followup'] else 0
-          total = len(mr_analysis) if mr_analysis else 0
-
-          if total > 0:
-              asyncio.run(emit_event("batch_review_completed", {
-                  "count": str(total),
-                  "approved": str(approved),
-                  "changes": str(changes),
-                  "project": resolved.get("gitlab_project", ""),
-              }))
-              result = "hook sent"
-          else:
-              result = "no MRs to report"
-      except Exception as e:
-          result = f"hook skipped: {e}"
+      if emit_event and total > 0:
+          emit_event("batch_review_completed", {
+              "count": str(total),
+              "approved": str(approved),
+              "changes": str(changes),
+              "project": resolved.get("gitlab_project", ""),
+          })
+          result = "hook sent"
+      elif total == 0:
+          result = "no MRs to report"
+      else:
+          result = "hook skipped: emit_event not available"
     output: batch_hook_result
     on_error: continue
 
