@@ -1,0 +1,172 @@
+# Skill: Learn Pattern
+# Save a new error pattern to memory for future recognition
+
+name: learn_pattern
+description: |
+  Save a new error pattern to memory.
+
+  When you discover a new error pattern and its fix, use this skill
+  to remember it for future debugging sessions.
+
+  The pattern is saved to memory/learned/patterns.yaml and will be
+  automatically matched during investigate_alert and debug_prod skills.
+
+version: "1.0"
+
+inputs:
+  - name: pattern
+    type: string
+    required: true
+    description: "Short name for the pattern (e.g., 'OOMKilled', 'ImagePullBackOff')"
+
+  - name: meaning
+    type: string
+    required: true
+    description: "What this error means (e.g., 'Container exceeded memory limit')"
+
+  - name: fix
+    type: string
+    required: true
+    description: "How to fix this error (e.g., 'Increase memory limits in deployment')"
+
+  - name: commands
+    type: string
+    required: false
+    description: "Comma-separated commands to run for diagnosis (e.g., 'kubectl describe pod X,kubectl logs X')"
+
+  - name: category
+    type: string
+    required: false
+    default: "general"
+    description: "Category: pod_errors, log_patterns, network, general"
+
+steps:
+  - name: validate_inputs
+    description: "Validate inputs"
+    compute: |
+      # Basic validation
+      pattern = inputs.get("pattern", "").strip()
+      meaning = inputs.get("meaning", "").strip()
+      fix = inputs.get("fix", "").strip()
+
+      if not pattern:
+          result = {"valid": False, "error": "Pattern name is required"}
+      elif not meaning:
+          result = {"valid": False, "error": "Meaning is required"}
+      elif not fix:
+          result = {"valid": False, "error": "Fix is required"}
+      else:
+          result = {"valid": True, "pattern": pattern, "meaning": meaning, "fix": fix}
+    output: validation
+
+  - name: parse_commands
+    description: "Parse comma-separated commands"
+    condition: "validation.valid"
+    compute: |
+      commands_str = inputs.get("commands", "")
+      if commands_str:
+          result = [cmd.strip() for cmd in commands_str.split(",") if cmd.strip()]
+      else:
+          result = []
+    output: command_list
+
+  - name: save_pattern
+    description: "Save pattern to memory"
+    condition: "validation.valid"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      patterns_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
+      category = inputs.get("category", "general")
+
+      try:
+          if patterns_file.exists():
+              with open(patterns_file) as f:
+                  data = yaml.safe_load(f) or {}
+          else:
+              patterns_file.parent.mkdir(parents=True, exist_ok=True)
+              data = {}
+
+          # Ensure category exists
+          if category not in data:
+              data[category] = []
+
+          # Build new pattern entry
+          new_pattern = {
+              "pattern": validation["pattern"],
+              "meaning": validation["meaning"],
+              "fix": validation["fix"],
+          }
+          if command_list:
+              new_pattern["commands"] = command_list
+
+          # Check if pattern already exists - update if so
+          existing_idx = None
+          for i, p in enumerate(data[category]):
+              if p.get("pattern") == validation["pattern"]:
+                  existing_idx = i
+                  break
+
+          if existing_idx is not None:
+              data[category][existing_idx] = new_pattern
+              action = "updated"
+          else:
+              data[category].append(new_pattern)
+              action = "added"
+
+          data["last_updated"] = datetime.now().isoformat()
+
+          with open(patterns_file, "w") as f:
+              yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+          result = {
+              "success": True,
+              "action": action,
+              "category": category,
+              "pattern": validation["pattern"],
+          }
+      except Exception as e:
+          result = {"success": False, "error": str(e)}
+    output: save_result
+
+  - name: log_session
+    description: "Log pattern learning to session"
+    condition: "save_result.success"
+    tool: memory_session_log
+    args:
+      action: "Learned pattern: {{ save_result.pattern }}"
+      details: "Category: {{ save_result.category }}, Action: {{ save_result.action }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {% if not validation.valid %}
+      ## ❌ Validation Failed
+
+      {{ validation.error }}
+
+      {% elif save_result.success %}
+      ## ✅ Pattern {{ save_result.action | title }}
+
+      **Pattern:** `{{ save_result.pattern }}`
+      **Category:** {{ save_result.category }}
+
+      **Meaning:** {{ validation.meaning }}
+      **Fix:** {{ validation.fix }}
+      {% if command_list %}
+      **Commands:**
+      {% for cmd in command_list %}
+      - `{{ cmd }}`
+      {% endfor %}
+      {% endif %}
+
+      This pattern will now be matched during `investigate_alert` and `debug_prod` skills.
+
+      {% else %}
+      ## ❌ Failed to Save
+
+      {{ save_result.error }}
+      {% endif %}
