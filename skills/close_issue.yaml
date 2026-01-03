@@ -323,6 +323,68 @@ steps:
     output: close_hook_result
     on_error: continue
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: build_memory_context
+    description: "Build timestamp for memory"
+    condition: "{{ not status_check.already_done }}"
+    compute: |
+      from datetime import datetime
+      result = {"timestamp": datetime.now().isoformat()}
+    output: memory_context
+
+  - name: log_session_issue_closed
+    description: "Log issue closure to session log"
+    condition: "{{ not status_check.already_done }}"
+    tool: memory_session_log
+    args:
+      action: "Closed issue {{ inputs.issue_key }}"
+      details: "Commits: {{ commit_info.count if commit_info else 0 }}, MR merged: {{ mr_info.merged if mr_info else 'N/A' }}"
+    on_error: continue
+
+  - name: remove_from_active_issues
+    description: "Remove issue from active_issues in memory"
+    condition: "{{ not status_check.already_done }}"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      # Read current work file
+      memory_dir = Path.home() / "src/redhat-ai-workflow/memory"
+      work_file = memory_dir / "state" / "current_work.yaml"
+
+      if work_file.exists():
+          with open(work_file) as f:
+              work = yaml.safe_load(f) or {}
+
+          # Filter out this issue from active_issues
+          active = work.get("active_issues", [])
+          issue_key = inputs.issue_key.upper()
+          work["active_issues"] = [
+              i for i in active
+              if i.get("key", "").upper() != issue_key
+          ]
+
+          # Also filter from open_mrs if MR was merged
+          if mr_info and mr_info.get("merged"):
+              open_mrs = work.get("open_mrs", [])
+              work["open_mrs"] = [
+                  m for m in open_mrs
+                  if m.get("issue_key", "").upper() != issue_key
+              ]
+
+          work["last_updated"] = memory_context["timestamp"]
+
+          # Write back
+          with open(work_file, "w") as f:
+              yaml.dump(work, f, default_flow_style=False)
+
+          result = "memory updated"
+      else:
+          result = "no memory file"
+    output: memory_cleanup_result
+    on_error: continue
+
 outputs:
   - name: summary
     value: |

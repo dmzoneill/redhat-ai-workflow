@@ -69,6 +69,30 @@ steps:
       }
     output: ctx
 
+  # ==================== MEMORY CONTEXT ====================
+
+  - name: load_current_work
+    description: "Load current work state from memory"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/current_work.yaml"
+      current_work = {"active_issues": [], "open_mrs": [], "follow_ups": []}
+
+      if memory_file.exists():
+          try:
+              with open(memory_file) as f:
+                  data = yaml.safe_load(f) or {}
+              current_work["active_issues"] = data.get("active_issues", [])
+              current_work["open_mrs"] = data.get("open_mrs", [])
+              current_work["follow_ups"] = data.get("follow_ups", [])
+          except Exception:
+              pass
+
+      result = current_work
+    output: memory_work
+
   # ==================== TODAY'S COMMITS ====================
 
   - name: get_todays_commits
@@ -522,6 +546,19 @@ steps:
           for item in cleanup_items:
             lines.append(f"- {item}")
           lines.append("")
+
+      # Follow-ups from Memory
+      follow_ups = memory_work.get('follow_ups', []) if memory_work else []
+      if follow_ups:
+        lines.append("## 📌 Follow-ups (from memory)")
+        for fu in follow_ups[:5]:
+          task = fu.get('task', 'Unknown task')
+          priority = fu.get('priority', 'normal')
+          due = fu.get('due', '')
+          emoji = "🔴" if priority == "high" else "🟡" if priority == "medium" else "⚪"
+          due_str = f" (due: {due})" if due else ""
+          lines.append(f"- {emoji} {task}{due_str}")
+        lines.append("")
 
       # Standup Notes
       if standup_notes:

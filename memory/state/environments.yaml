@@ -1,31 +1,44 @@
 # Environment State
 # Tracks health and status of stage/prod environments
-# Configure your environments here or in config.json
+# Updated automatically by skills and agents
 
 last_checked: null
 
 environments:
   stage:
-    namespace: your-app-stage   # Configure in config.json
-    cluster: stage-cluster
+    namespace: tower-analytics-stage
+    cluster: crcs02ue1
+    kubeconfig: ~/.kube/config.s
     status: unknown
     last_check: null
     alerts: []
     deployments: []
+    known_issues: []
     notes: ""
 
   production:
-    namespace: your-app-prod    # Configure in config.json
-    cluster: prod-cluster
+    namespace: tower-analytics-prod
+    cluster: crcp01ue1
+    kubeconfig: ~/.kube/config.p
     status: unknown
     last_check: null
     alerts: []
     deployments: []
+    known_issues: []
+    notes: ""
+
+  ephemeral:
+    cluster: ephemeral
+    kubeconfig: ~/.kube/config.e
+    status: unknown
+    last_check: null
+    active_namespaces: []
     notes: ""
 
   konflux:
-    namespace: your-tenant      # Configure in config.json
+    namespace: aap-aa-tenant
     cluster: konflux
+    kubeconfig: ~/.kube/config.k
     status: unknown
     last_check: null
     active_pipelines: []

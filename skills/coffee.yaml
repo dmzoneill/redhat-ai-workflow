@@ -63,6 +63,30 @@ steps:
       }
     output: ctx
 
+  # ==================== MEMORY CONTEXT ====================
+
+  - name: load_current_work
+    description: "Load current work state from memory"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/current_work.yaml"
+      current_work = {"active_issues": [], "open_mrs": [], "follow_ups": []}
+
+      if memory_file.exists():
+          try:
+              with open(memory_file) as f:
+                  data = yaml.safe_load(f) or {}
+              current_work["active_issues"] = data.get("active_issues", [])
+              current_work["open_mrs"] = data.get("open_mrs", [])
+              current_work["follow_ups"] = data.get("follow_ups", [])
+          except Exception:
+              pass
+
+      result = current_work
+    output: memory_work
+
   # ==================== CALENDAR ====================
 
   - name: get_todays_calendar
@@ -703,6 +727,30 @@ steps:
       lines.append("")
       lines.append("---")
       lines.append("")
+
+      # Current Work from Memory (if any)
+      active_issues = memory_work.get('active_issues', []) if memory_work else []
+      tracked_mrs = memory_work.get('open_mrs', []) if memory_work else []
+      follow_ups = memory_work.get('follow_ups', []) if memory_work else []
+
+      if active_issues or follow_ups:
+        lines.append("## 🎯 Current Work (from memory)")
+        if active_issues:
+          for issue in active_issues[:3]:
+            key = issue.get('key', 'Unknown')
+            summary = issue.get('summary', '')[:40]
+            branch = issue.get('branch', '')
+            lines.append(f"- **[{key}](https://issues.redhat.com/browse/{key})**: {summary}")
+            if branch:
+              lines.append(f"  - Branch: `{branch}`")
+        if follow_ups:
+          lines.append("**Follow-ups:**")
+          for fu in follow_ups[:3]:
+            task = fu.get('task', 'Unknown task')
+            priority = fu.get('priority', 'normal')
+            emoji = "🔴" if priority == "high" else "🟡" if priority == "medium" else "⚪"
+            lines.append(f"- {emoji} {task}")
+        lines.append("")
 
       # Calendar
       lines.append("## 📅 Today's Calendar")

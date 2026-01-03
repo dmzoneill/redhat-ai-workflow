@@ -53,6 +53,36 @@ def register_resources(server: "FastMCP", load_config_fn) -> int:
 
     resource_count += 1
 
+    @server.resource("memory://learned/runbooks")
+    async def resource_runbooks() -> str:
+        """Learned runbooks and operational procedures."""
+        runbooks_file = MEMORY_DIR / "learned" / "runbooks.yaml"
+        if runbooks_file.exists():
+            return runbooks_file.read_text()
+        return "# No runbooks recorded yet\nrunbooks: {}"
+
+    resource_count += 1
+
+    @server.resource("memory://learned/service_quirks")
+    async def resource_service_quirks() -> str:
+        """Service quirks and tribal knowledge."""
+        quirks_file = MEMORY_DIR / "learned" / "service_quirks.yaml"
+        if quirks_file.exists():
+            return quirks_file.read_text()
+        return "# No service quirks recorded yet\nservices: {}"
+
+    resource_count += 1
+
+    @server.resource("memory://state/environments")
+    async def resource_environments() -> str:
+        """Environment health status (stage, prod, ephemeral)."""
+        env_file = MEMORY_DIR / "state" / "environments.yaml"
+        if env_file.exists():
+            return env_file.read_text()
+        return "# No environment state\nenvironments: {}"
+
+    resource_count += 1
+
     @server.resource("config://agents")
     async def resource_agents() -> str:
         """Available agent configurations."""
