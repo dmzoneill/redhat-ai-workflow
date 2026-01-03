@@ -708,17 +708,8 @@ steps:
 
       # Base URLs for hyperlinks (inlined to avoid closure issues in sandbox)
       # GitLab: https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{id}
-      # Jira: https://issues.redhat.com/browse/{key}
-
-      def linkify_jira_keys(text):
-        """Replace Jira keys like AAP-12345 with markdown links."""
-        # Match AAP-XXXXX pattern - use lookahead for word boundary or dash
-        # This handles both "AAP-12345 - title" and "AAP-12345-branch-name"
-        jira_pattern = re.compile(r'\b(AAP-\d+)(?=\s|$|-[a-zA-Z])')
-        def replace_jira(match):
-          key = match.group(1)
-          return f"[{key}](https://issues.redhat.com/browse/{key})"
-        return jira_pattern.sub(replace_jira, text)
+      # Import shared linkify function
+      from scripts.common.parsers import linkify_jira_keys
 
       # Header
       lines.append(f"# ☕ {ctx['greeting']}, {first_name}!")
