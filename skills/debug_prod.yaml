@@ -660,6 +660,79 @@ steps:
       result = '\n'.join(lines)
     output: report
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: build_memory_context
+    description: "Build context for memory updates"
+    condition: "not namespace_prompt"
+    compute: |
+      from datetime import datetime
+
+      # Summarize findings
+      issues_found = []
+      if pod_issues and pod_issues.get("unhealthy_pods"):
+          issues_found.append(f"{len(pod_issues['unhealthy_pods'])} unhealthy pods")
+      if log_analysis and log_analysis.get("error_count", 0) > 0:
+          issues_found.append(f"{log_analysis['error_count']} errors in logs")
+      if pattern_matches:
+          issues_found.append(f"{len(pattern_matches)} pattern matches")
+
+      result = {
+          "timestamp": datetime.now().isoformat(),
+          "namespace": ns_info.get("namespace", "unknown") if ns_info else "unknown",
+          "environment": ns_info.get("environment", "production") if ns_info else "production",
+          "issues_summary": ", ".join(issues_found) if issues_found else "No major issues",
+      }
+    output: memory_context
+
+  - name: log_session_debug
+    description: "Log debug session"
+    condition: "not namespace_prompt"
+    tool: memory_session_log
+    args:
+      action: "Debugged {{ memory_context.environment }}/{{ memory_context.namespace }}"
+      details: "{{ memory_context.issues_summary }}"
+    on_error: continue
+
+  - name: update_environment_after_debug
+    description: "Update environment status after debugging"
+    condition: "not namespace_prompt"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
+
+      if memory_file.exists():
+          try:
+              with open(memory_file) as f:
+                  data = yaml.safe_load(f) or {}
+
+              env_key = "stage" if memory_context.get("environment") == "stage" else "production"
+              if env_key in data.get("environments", {}):
+                  env_data = data["environments"][env_key]
+                  env_data["last_check"] = memory_context["timestamp"]
+                  env_data["notes"] = f"Debug: {memory_context['issues_summary']}"
+
+                  # Mark as issues if we found problems
+                  if pod_issues and pod_issues.get("unhealthy_pods"):
+                      env_data["status"] = "issues"
+                  elif log_analysis and log_analysis.get("error_count", 0) > 10:
+                      env_data["status"] = "issues"
+
+                  data["last_checked"] = memory_context["timestamp"]
+
+                  with open(memory_file, "w") as f:
+                      yaml.dump(data, f, default_flow_style=False)
+
+              result = "environment updated"
+          except Exception as e:
+              result = f"failed: {e}"
+      else:
+          result = "no memory file"
+    output: env_update_result
+    on_error: continue
+
 outputs:
   - name: summary
     value: |

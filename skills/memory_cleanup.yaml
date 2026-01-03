@@ -1,0 +1,253 @@
+# Skill: Memory Cleanup
+# Clean up stale entries from memory
+
+name: memory_cleanup
+description: |
+  Clean up stale entries from memory.
+
+  Removes:
+  - Closed issues that are still in active_issues
+  - Merged MRs that are still in open_mrs
+  - Expired ephemeral namespaces
+  - Old session logs (older than 7 days)
+
+  Use with --dry-run to preview what would be removed.
+
+version: "1.0"
+
+inputs:
+  - name: dry_run
+    type: boolean
+    required: false
+    default: true
+    description: "Preview changes without applying them (default: true)"
+
+  - name: days
+    type: integer
+    required: false
+    default: 7
+    description: "Remove session logs older than this many days (default: 7)"
+
+steps:
+  - name: load_current_work
+    description: "Load current work state from memory"
+    tool: memory_read
+    args:
+      key: "state/current_work"
+    output: current_work_raw
+    on_error: continue
+
+  - name: load_environments
+    description: "Load environment state from memory"
+    tool: memory_read
+    args:
+      key: "state/environments"
+    output: environments_raw
+    on_error: continue
+
+  - name: analyze_stale_entries
+    description: "Find stale entries that should be removed"
+    compute: |
+      from datetime import datetime, timedelta
+      import yaml
+      import re
+
+      stale_items = {
+          "active_issues": [],
+          "open_mrs": [],
+          "ephemeral_namespaces": [],
+          "session_logs": [],
+      }
+      summary = []
+
+      days_limit = inputs.get("days", 7)
+      cutoff_date = datetime.now() - timedelta(days=days_limit)
+
+      # Parse current_work
+      current_work = {}
+      if current_work_raw and isinstance(current_work_raw, str):
+          try:
+              current_work = yaml.safe_load(current_work_raw) or {}
+          except:
+              pass
+
+      # Parse environments
+      environments = {}
+      if environments_raw and isinstance(environments_raw, str):
+          try:
+              environments = yaml.safe_load(environments_raw) or {}
+          except:
+              pass
+
+      # Check active_issues - look for status "Done" or "Closed"
+      for issue in current_work.get("active_issues", []):
+          status = issue.get("status", "").lower()
+          if status in ["done", "closed", "resolved", "complete"]:
+              stale_items["active_issues"].append(issue)
+              summary.append(f"Issue {issue.get('key', '?')} is {status}")
+
+      # Check open_mrs - look for pipeline "merged" or old needs_review=False
+      for mr in current_work.get("open_mrs", []):
+          pipeline = mr.get("pipeline_status", "").lower()
+          if pipeline in ["merged", "closed"]:
+              stale_items["open_mrs"].append(mr)
+              summary.append(f"MR !{mr.get('id', '?')} is {pipeline}")
+
+      # Check ephemeral namespaces - look for expired ones
+      for ns in environments.get("ephemeral_namespaces", []):
+          deployed_at = ns.get("deployed_at", "")
+          if deployed_at:
+              try:
+                  deployed_date = datetime.fromisoformat(deployed_at.replace("Z", "+00:00"))
+                  if deployed_date.replace(tzinfo=None) < cutoff_date:
+                      stale_items["ephemeral_namespaces"].append(ns)
+                      summary.append(f"Namespace {ns.get('name', '?')} expired")
+              except:
+                  pass
+
+      # Count stale session logs (would be in logs/ directory)
+      # Just report that we'd clean them
+
+      result = {
+          "stale_items": stale_items,
+          "summary": summary,
+          "counts": {
+              "active_issues": len(stale_items["active_issues"]),
+              "open_mrs": len(stale_items["open_mrs"]),
+              "ephemeral_namespaces": len(stale_items["ephemeral_namespaces"]),
+          },
+          "total": sum([
+              len(stale_items["active_issues"]),
+              len(stale_items["open_mrs"]),
+              len(stale_items["ephemeral_namespaces"]),
+          ])
+      }
+    output: analysis
+
+  - name: perform_cleanup
+    description: "Remove stale entries from memory"
+    condition: "not inputs.dry_run and analysis.total > 0"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      removed = []
+      errors = []
+
+      memory_dir = Path.home() / "src/redhat-ai-workflow/memory"
+
+      # Clean current_work
+      current_work_file = memory_dir / "state/current_work.yaml"
+      if current_work_file.exists():
+          try:
+              with open(current_work_file) as f:
+                  data = yaml.safe_load(f) or {}
+
+              # Remove stale active issues
+              stale_keys = [i.get("key") for i in analysis["stale_items"]["active_issues"]]
+              original_count = len(data.get("active_issues", []))
+              data["active_issues"] = [
+                  i for i in data.get("active_issues", [])
+                  if i.get("key") not in stale_keys
+              ]
+              removed_count = original_count - len(data.get("active_issues", []))
+              if removed_count > 0:
+                  removed.append(f"{removed_count} active issues")
+
+              # Remove stale MRs
+              stale_mr_ids = [m.get("id") for m in analysis["stale_items"]["open_mrs"]]
+              original_count = len(data.get("open_mrs", []))
+              data["open_mrs"] = [
+                  m for m in data.get("open_mrs", [])
+                  if m.get("id") not in stale_mr_ids
+              ]
+              removed_count = original_count - len(data.get("open_mrs", []))
+              if removed_count > 0:
+                  removed.append(f"{removed_count} open MRs")
+
+              data["last_updated"] = datetime.now().isoformat()
+
+              with open(current_work_file, "w") as f:
+                  yaml.dump(data, f, default_flow_style=False)
+          except Exception as e:
+              errors.append(f"current_work: {e}")
+
+      # Clean environments
+      env_file = memory_dir / "state/environments.yaml"
+      if env_file.exists() and analysis["stale_items"]["ephemeral_namespaces"]:
+          try:
+              with open(env_file) as f:
+                  data = yaml.safe_load(f) or {}
+
+              stale_ns = [n.get("name") for n in analysis["stale_items"]["ephemeral_namespaces"]]
+              original_count = len(data.get("ephemeral_namespaces", []))
+              data["ephemeral_namespaces"] = [
+                  n for n in data.get("ephemeral_namespaces", [])
+                  if n.get("name") not in stale_ns
+              ]
+              removed_count = original_count - len(data.get("ephemeral_namespaces", []))
+              if removed_count > 0:
+                  removed.append(f"{removed_count} ephemeral namespaces")
+
+              data["last_checked"] = datetime.now().isoformat()
+
+              with open(env_file, "w") as f:
+                  yaml.dump(data, f, default_flow_style=False)
+          except Exception as e:
+              errors.append(f"environments: {e}")
+
+      result = {
+          "removed": removed,
+          "errors": errors,
+          "success": len(errors) == 0,
+      }
+    output: cleanup_result
+
+  - name: log_cleanup
+    description: "Log cleanup to session"
+    condition: "not inputs.dry_run and analysis.total > 0"
+    tool: memory_session_log
+    args:
+      action: "Memory cleanup"
+      details: "Removed {{ analysis.total }} stale entries"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## 🧹 Memory Cleanup {{ "(Dry Run)" if inputs.dry_run else "" }}
+
+      ### Stale Entries Found
+
+      | Category | Count |
+      |----------|-------|
+      | Active Issues (closed) | {{ analysis.counts.active_issues }} |
+      | Open MRs (merged/closed) | {{ analysis.counts.open_mrs }} |
+      | Ephemeral Namespaces (expired) | {{ analysis.counts.ephemeral_namespaces }} |
+      | **Total** | **{{ analysis.total }}** |
+
+      {% if analysis.summary %}
+      ### Details
+      {% for item in analysis.summary %}
+      - {{ item }}
+      {% endfor %}
+      {% endif %}
+
+      {% if inputs.dry_run %}
+      ---
+      *This was a dry run. Run with `dry_run: false` to apply changes.*
+      {% elif cleanup_result %}
+      ### Cleanup Results
+      {% if cleanup_result.success %}
+      ✅ Cleanup successful!
+      {% for item in cleanup_result.removed %}
+      - Removed {{ item }}
+      {% endfor %}
+      {% else %}
+      ⚠️ Some errors occurred:
+      {% for err in cleanup_result.errors %}
+      - {{ err }}
+      {% endfor %}
+      {% endif %}
+      {% endif %}

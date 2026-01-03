@@ -246,6 +246,16 @@ steps:
     output: slack_result
     on_error: continue
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: log_notification
+    description: "Log notification to session"
+    tool: memory_session_log
+    args:
+      action: "Notified team about MR !{{ notification.mr_id }}"
+      details: "{{ 'Reminder' if inputs.reminder else 'New notification' }}, Jira: {{ notification.issue_key }}"
+    on_error: continue
+
 outputs:
   - name: summary
     value: |

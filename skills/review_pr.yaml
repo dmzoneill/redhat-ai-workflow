@@ -895,6 +895,77 @@ steps:
     output: jira_updated
     on_error: continue
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: build_memory_context
+    description: "Build context for memory updates"
+    compute: |
+      from datetime import datetime
+
+      result = {
+          "timestamp": datetime.now().isoformat(),
+          "mr_id": str(mr_id) if mr_id else "",
+          "action": review_action.get("action", "unknown") if review_action else "unknown",
+          "author": author_info.get("author", "unknown") if author_info else "unknown",
+      }
+    output: memory_context
+
+  - name: log_session_review
+    description: "Log review to session"
+    tool: memory_session_log
+    args:
+      action: "Reviewed MR !{{ memory_context.mr_id }} ({{ memory_context.action }})"
+      details: "Author: {{ memory_context.author }}, Jira: {{ jira_key }}"
+    on_error: continue
+
+  - name: track_review_given
+    description: "Track review in teammate preferences (learn reviewer patterns)"
+    condition: "memory_context.action == 'approve' or memory_context.action == 'feedback'"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      # Update teammate preferences with review history
+      prefs_file = Path.home() / "src/redhat-ai-workflow/memory/learned/teammate_preferences.yaml"
+
+      if prefs_file.exists():
+          try:
+              with open(prefs_file) as f:
+                  data = yaml.safe_load(f) or {}
+
+              teammates = data.get("teammates", {})
+              author = memory_context.get("author", "unknown")
+
+              if author != "unknown":
+                  if author not in teammates:
+                      teammates[author] = {
+                          "reviews_given": 0,
+                          "approvals": 0,
+                          "feedback_given": 0,
+                      }
+
+                  teammates[author]["reviews_given"] = teammates[author].get("reviews_given", 0) + 1
+                  if memory_context.get("action") == "approve":
+                      teammates[author]["approvals"] = teammates[author].get("approvals", 0) + 1
+                  else:
+                      teammates[author]["feedback_given"] = teammates[author].get("feedback_given", 0) + 1
+
+                  teammates[author]["last_reviewed"] = memory_context["timestamp"]
+
+                  data["teammates"] = teammates
+                  data["last_updated"] = memory_context["timestamp"]
+
+                  with open(prefs_file, "w") as f:
+                      yaml.dump(data, f, default_flow_style=False)
+
+              result = f"tracked review for {author}"
+          except Exception as e:
+              result = f"failed: {e}"
+      else:
+          result = "no prefs file"
+    output: review_tracking_result
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
