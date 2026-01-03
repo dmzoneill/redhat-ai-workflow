@@ -503,39 +503,22 @@ steps:
     description: "Update teammate preferences with review counts"
     condition: "memory_context.total > 0 and mr_analysis"
     compute: |
-      from pathlib import Path
-      from datetime import datetime
-      import yaml
+      # Use shared memory helpers
+      data = memory.read_memory("learned/teammate_preferences")
+      teammates = data.get("teammates", {}) if isinstance(data.get("teammates"), dict) else {}
 
-      prefs_file = Path.home() / "src/redhat-ai-workflow/memory/learned/teammate_preferences.yaml"
+      # Track reviews given to each author
+      for mr in (mr_analysis or []):
+          author = mr.get("author", "unknown")
+          if author and author != "unknown":
+              if author not in teammates:
+                  teammates[author] = {"reviews_received": 0}
+              teammates[author]["reviews_received"] = teammates[author].get("reviews_received", 0) + 1
+              teammates[author]["last_reviewed_at"] = memory_context["timestamp"]
 
-      try:
-          if prefs_file.exists():
-              with open(prefs_file) as f:
-                  data = yaml.safe_load(f) or {}
-          else:
-              data = {"teammates": {}}
-
-          teammates = data.get("teammates", {})
-
-          # Track reviews given to each author
-          for mr in (mr_analysis or []):
-              author = mr.get("author", "unknown")
-              if author and author != "unknown":
-                  if author not in teammates:
-                      teammates[author] = {"reviews_received": 0}
-                  teammates[author]["reviews_received"] = teammates[author].get("reviews_received", 0) + 1
-                  teammates[author]["last_reviewed_at"] = memory_context["timestamp"]
-
-          data["teammates"] = teammates
-          data["last_updated"] = memory_context["timestamp"]
-
-          with open(prefs_file, "w") as f:
-              yaml.dump(data, f, default_flow_style=False)
-
-          result = "updated"
-      except Exception as e:
-          result = f"failed: {e}"
+      data["teammates"] = teammates
+      memory.write_memory("learned/teammate_preferences", data)
+      result = "updated"
     output: prefs_update_result
     on_error: continue
 

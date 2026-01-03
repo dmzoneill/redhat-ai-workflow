@@ -120,21 +120,11 @@ steps:
     description: "Load known error patterns from memory"
     condition: "{{ ns_info.namespace }}"
     compute: |
-      import yaml
-      from pathlib import Path
       from scripts.common.config_loader import load_config
 
-      patterns = {}
-      memory_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
-
-      if memory_file.exists():
-        try:
-          with open(memory_file) as f:
-            data = yaml.safe_load(f)
-          patterns = data.get('error_patterns', [])
-        except:
-          patterns = []
-
+      # Use shared memory helpers
+      data = memory.read_memory("learned/patterns")
+      patterns = data.get('error_patterns', []) if isinstance(data.get('error_patterns'), list) else []
       result = patterns
     output: known_patterns
     on_error: continue
@@ -698,38 +688,20 @@ steps:
     description: "Update environment status after debugging"
     condition: "not namespace_prompt"
     compute: |
-      from pathlib import Path
-      import yaml
+      # Use shared memory helpers
+      env_key = "stage" if memory_context.get("environment") == "stage" else "production"
 
-      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
+      # Determine status based on findings
+      status = "healthy"
+      if pod_issues and pod_issues.get("unhealthy_pods"):
+          status = "issues"
+      elif log_analysis and log_analysis.get("error_count", 0) > 10:
+          status = "issues"
 
-      if memory_file.exists():
-          try:
-              with open(memory_file) as f:
-                  data = yaml.safe_load(f) or {}
-
-              env_key = "stage" if memory_context.get("environment") == "stage" else "production"
-              if env_key in data.get("environments", {}):
-                  env_data = data["environments"][env_key]
-                  env_data["last_check"] = memory_context["timestamp"]
-                  env_data["notes"] = f"Debug: {memory_context['issues_summary']}"
-
-                  # Mark as issues if we found problems
-                  if pod_issues and pod_issues.get("unhealthy_pods"):
-                      env_data["status"] = "issues"
-                  elif log_analysis and log_analysis.get("error_count", 0) > 10:
-                      env_data["status"] = "issues"
-
-                  data["last_checked"] = memory_context["timestamp"]
-
-                  with open(memory_file, "w") as f:
-                      yaml.dump(data, f, default_flow_style=False)
-
-              result = "environment updated"
-          except Exception as e:
-              result = f"failed: {e}"
-      else:
-          result = "no memory file"
+      memory.update_field("state/environments", f"environments.{env_key}.last_check", memory_context["timestamp"])
+      memory.update_field("state/environments", f"environments.{env_key}.notes", f"Debug: {memory_context['issues_summary']}")
+      memory.update_field("state/environments", f"environments.{env_key}.status", status)
+      result = "environment updated"
     output: env_update_result
     on_error: continue
 

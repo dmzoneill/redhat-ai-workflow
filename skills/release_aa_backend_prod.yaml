@@ -423,41 +423,25 @@ steps:
   - name: log_release
     description: "Log release to session and track deployment"
     compute: |
-      from pathlib import Path
-      from datetime import datetime
-      import yaml
-
-      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
-      now = datetime.now().isoformat()
-
-      try:
-          if memory_file.exists():
-              with open(memory_file) as f:
-                  data = yaml.safe_load(f) or {}
-          else:
-              data = {"recent_deployments": []}
-
-          # Add to recent deployments
-          deployments = data.get("recent_deployments", [])
-          deployments.insert(0, {
+      # Use shared memory helpers
+      memory.append_to_list(
+          "state/environments",
+          "recent_deployments",
+          {
               "version": inputs.release_date,
               "sha": inputs.commit_sha[:12],
               "environment": "production",
-              "deployed_at": now,
+              "deployed_at": memory.get_timestamp(),
               "mr_url": mr_result.get("web_url", "") if mr_result else "",
               "jira_key": jira_issue.get("key", "") if jira_issue else "",
-          })
-
-          # Keep only last 10
-          data["recent_deployments"] = deployments[:10]
-          data["last_checked"] = now
-
-          with open(memory_file, "w") as f:
-              yaml.dump(data, f, default_flow_style=False)
-
-          result = "deployment tracked"
-      except Exception as e:
-          result = f"failed: {e}"
+          }
+      )
+      # Trim to last 10 deployments
+      data = memory.read_memory("state/environments")
+      if len(data.get("recent_deployments", [])) > 10:
+          data["recent_deployments"] = data["recent_deployments"][:10]
+          memory.write_memory("state/environments", data)
+      result = "deployment tracked"
     output: memory_update_result
     on_error: continue
 
