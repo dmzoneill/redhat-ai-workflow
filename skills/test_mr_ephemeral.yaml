@@ -900,54 +900,43 @@ steps:
     description: "Track ephemeral namespace in environment memory"
     condition: "namespace_name"
     compute: |
-      from pathlib import Path
-      import yaml
-      from datetime import datetime, timedelta
+      # Use shared memory helpers
+      from datetime import timedelta
 
-      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
+      # Parse duration for expiry calculation
+      duration_str = inputs.get("duration", "2h")
+      hours = int(duration_str.replace("h", "")) if "h" in duration_str else 2
+      expiry = (datetime.now() + timedelta(hours=hours)).isoformat()
 
-      if memory_file.exists():
-          try:
-              with open(memory_file) as f:
-                  data = yaml.safe_load(f) or {}
+      # Read current environments
+      data = memory.read_memory("state/environments")
+      if "environments" not in data:
+          data["environments"] = {}
+      if "ephemeral" not in data["environments"]:
+          data["environments"]["ephemeral"] = {"active_namespaces": []}
 
-              # Parse duration for expiry calculation
-              duration_str = inputs.get("duration", "2h")
-              hours = int(duration_str.replace("h", "")) if "h" in duration_str else 2
-              expiry = (datetime.now() + timedelta(hours=hours)).isoformat()
+      eph = data["environments"]["ephemeral"]
+      eph["status"] = "active"
+      eph["last_check"] = memory_context["timestamp"]
 
-              # Update ephemeral section
-              if "ephemeral" not in data.get("environments", {}):
-                  data["environments"]["ephemeral"] = {"active_namespaces": []}
+      # Add this namespace to active list
+      active = eph.get("active_namespaces", [])
+      ns_entry = {
+          "name": namespace_name,
+          "mr_id": memory_context["mr_id"],
+          "commit": memory_context["commit_short"],
+          "created": memory_context["timestamp"],
+          "expires": expiry,
+          "tests_passed": test_result.get("passed") if test_result else None,
+      }
 
-              eph = data["environments"]["ephemeral"]
-              eph["status"] = "active"
-              eph["last_check"] = memory_context["timestamp"]
+      # Remove old entry for same namespace if exists
+      active = [n for n in active if n.get("name") != namespace_name]
+      active.append(ns_entry)
+      eph["active_namespaces"] = active[:20]  # Keep last 20
 
-              # Add this namespace to active list
-              active = eph.get("active_namespaces", [])
-              ns_entry = {
-                  "name": namespace_name,
-                  "mr_id": memory_context["mr_id"],
-                  "commit": memory_context["commit_short"],
-                  "created": memory_context["timestamp"],
-                  "expires": expiry,
-                  "tests_passed": test_result.get("passed") if test_result else None,
-              }
-
-              # Remove old entry for same namespace if exists
-              active = [n for n in active if n.get("name") != namespace_name]
-              active.append(ns_entry)
-              eph["active_namespaces"] = active[:20]  # Keep last 20
-
-              with open(memory_file, "w") as f:
-                  yaml.dump(data, f, default_flow_style=False)
-
-              result = "ephemeral namespace tracked"
-          except Exception as e:
-              result = f"failed to track: {e}"
-      else:
-          result = "no memory file"
+      memory.write_memory("state/environments", data)
+      result = "ephemeral namespace tracked"
     output: ephemeral_tracking_result
     on_error: continue
 

@@ -204,43 +204,34 @@ steps:
   - name: check_patterns
     description: "Match against known error patterns"
     compute: |
-      import yaml
-      from pathlib import Path
+      # Use shared memory helpers
       from scripts.common.config_loader import load_config
 
-      patterns_file = Path.home() / "src/redhat-ai-workflow/memory/learned/patterns.yaml"
+      data = memory.read_memory("learned/patterns")
+      known_patterns = data.get("error_patterns", []) if isinstance(data.get("error_patterns"), list) else []
       matches = []
 
-      if patterns_file.exists():
-          try:
-              with open(patterns_file) as f:
-                  data = yaml.safe_load(f)
+      # Check alerts against patterns
+      for alert in alert_info.get("alerts", []):
+          alert_name = alert.get("name", "").lower()
+          for pattern in known_patterns:
+              if pattern.get("pattern", "").lower() in alert_name:
+                  matches.append({
+                      "pattern": pattern.get("pattern"),
+                      "cause": pattern.get("cause"),
+                      "fix": pattern.get("fix"),
+                  })
 
-              known_patterns = data.get("error_patterns", [])
-
-              # Check alerts against patterns
-              for alert in alert_info.get("alerts", []):
-                  alert_name = alert.get("name", "").lower()
-                  for pattern in known_patterns:
-                      if pattern.get("pattern", "").lower() in alert_name:
-                          matches.append({
-                              "pattern": pattern.get("pattern"),
-                              "cause": pattern.get("cause"),
-                              "fix": pattern.get("fix"),
-                          })
-
-              # Check pod issues against patterns
-              for issue in pod_health.get("issues", []):
-                  issue_lower = issue.lower()
-                  for pattern in known_patterns:
-                      if pattern.get("pattern", "").lower() in issue_lower:
-                          matches.append({
-                              "pattern": pattern.get("pattern"),
-                              "cause": pattern.get("cause"),
-                              "fix": pattern.get("fix"),
-                          })
-          except Exception:
-              pass
+      # Check pod issues against patterns
+      for issue in pod_health.get("issues", []):
+          issue_lower = issue.lower()
+          for pattern in known_patterns:
+              if pattern.get("pattern", "").lower() in issue_lower:
+                  matches.append({
+                      "pattern": pattern.get("pattern"),
+                      "cause": pattern.get("cause"),
+                      "fix": pattern.get("fix"),
+                  })
 
       result = matches[:5]
     output: pattern_matches
@@ -355,47 +346,36 @@ steps:
   - name: update_environment_status
     description: "Update environment status in memory"
     compute: |
-      from pathlib import Path
-      import yaml
+      # Use shared memory helpers
+      data = memory.read_memory("state/environments")
+      if "environments" not in data:
+          data["environments"] = {}
 
-      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
+      env_key = "stage" if target.get("environment") == "stage" else "production"
+      if env_key not in data["environments"]:
+          data["environments"][env_key] = {}
 
-      if memory_file.exists():
-          try:
-              with open(memory_file) as f:
-                  data = yaml.safe_load(f) or {}
+      env_data = data["environments"][env_key]
+      env_data["status"] = "healthy" if pod_health.get("healthy") and alert_info.get("count", 0) == 0 else "issues"
+      env_data["last_check"] = memory_context["timestamp"]
+      env_data["alerts"] = [a.get("name", "") for a in alert_info.get("alerts", [])[:5]]
 
-              env_key = "stage" if target.get("environment") == "stage" else "production"
-              if env_key in data.get("environments", {}):
-                  env_data = data["environments"][env_key]
-                  env_data["status"] = "healthy" if pod_health.get("healthy") and alert_info.get("count", 0) == 0 else "issues"
-                  env_data["last_check"] = memory_context["timestamp"]
-                  env_data["alerts"] = [a.get("name", "") for a in alert_info.get("alerts", [])[:5]]
+      # Add known issues if critical
+      if assessment.get("severity") == "critical":
+          known = env_data.get("known_issues", [])
+          for alert in alert_info.get("alerts", []):
+              if alert.get("severity") == "critical":
+                  issue = {
+                      "alert": alert.get("name", ""),
+                      "since": memory_context["timestamp"],
+                      "status": "investigating"
+                  }
+                  if issue not in known:
+                      known.append(issue)
+          env_data["known_issues"] = known[:10]
 
-                  # Add known issues if critical
-                  if assessment.get("severity") == "critical":
-                      known = env_data.get("known_issues", [])
-                      for alert in alert_info.get("alerts", []):
-                          if alert.get("severity") == "critical":
-                              issue = {
-                                  "alert": alert.get("name", ""),
-                                  "since": memory_context["timestamp"],
-                                  "status": "investigating"
-                              }
-                              if issue not in known:
-                                  known.append(issue)
-                      env_data["known_issues"] = known[:10]
-
-                  data["last_checked"] = memory_context["timestamp"]
-
-                  with open(memory_file, "w") as f:
-                      yaml.dump(data, f, default_flow_style=False)
-
-              result = "environment status updated"
-          except Exception as e:
-              result = f"failed to update: {e}"
-      else:
-          result = "no memory file"
+      memory.write_memory("state/environments", data)
+      result = "environment status updated"
     output: env_update_result
     on_error: continue
 
