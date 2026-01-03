@@ -273,6 +273,62 @@ steps:
       result = summary + f"\n\n### ✅ Merged\n- !{merged_mr} has been merged!"
     output: final_summary
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: update_mr_status_in_memory
+    description: "Update open MRs in memory with current status"
+    condition: "mr_statuses"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/current_work.yaml"
+
+      try:
+          if memory_file.exists():
+              with open(memory_file) as f:
+                  data = yaml.safe_load(f) or {}
+          else:
+              data = {"open_mrs": []}
+
+          open_mrs = data.get("open_mrs", [])
+          now = datetime.now().isoformat()
+
+          # Update status for each checked MR
+          for mr_status in (mr_statuses or []):
+              mr_id = str(mr_status.get("iid", ""))
+              status = mr_status.get("status", "unknown")
+              pipeline = mr_status.get("pipeline_status", "unknown")
+
+              # Find and update existing MR
+              for mr in open_mrs:
+                  if str(mr.get("id", "")) == mr_id:
+                      mr["pipeline_status"] = pipeline
+                      mr["needs_review"] = status != "approved"
+                      mr["last_checked"] = now
+                      break
+
+          data["open_mrs"] = open_mrs
+          data["last_updated"] = now
+
+          with open(memory_file, "w") as f:
+              yaml.dump(data, f, default_flow_style=False)
+
+          result = f"updated {len(mr_statuses or [])} MRs"
+      except Exception as e:
+          result = f"failed: {e}"
+    output: memory_update_result
+    on_error: continue
+
+  - name: log_check_prs
+    description: "Log PR check to session"
+    tool: memory_session_log
+    args:
+      action: "Checked {{ mr_statuses|length if mr_statuses else 0 }} of my PRs"
+      details: "{{ 'Merged one' if merge_result else 'No merges' }}"
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:

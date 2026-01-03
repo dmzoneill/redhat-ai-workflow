@@ -426,6 +426,60 @@ steps:
     output: reply_result
     on_error: continue
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: update_environment_status
+    description: "Update environment status after investigation"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
+      now = datetime.now().isoformat()
+
+      try:
+          if memory_file.exists():
+              with open(memory_file) as f:
+                  data = yaml.safe_load(f) or {}
+          else:
+              data = {"environments": {}}
+
+          env_key = cfg.get("environment", "production")
+          if env_key not in data.get("environments", {}):
+              data["environments"] = data.get("environments", {})
+              data["environments"][env_key] = {}
+
+          env_data = data["environments"][env_key]
+          env_data["last_check"] = now
+          env_data["notes"] = f"Slack alert: {alert_info.get('alert_name', 'unknown')}"
+
+          # Update status based on findings
+          total_issues = pod_analysis.get("total_issues", 0) if pod_analysis else 0
+          if total_issues > 0:
+              env_data["status"] = "issues"
+          else:
+              env_data["status"] = "healthy"
+
+          data["last_checked"] = now
+
+          with open(memory_file, "w") as f:
+              yaml.dump(data, f, default_flow_style=False)
+
+          result = "environment updated"
+      except Exception as e:
+          result = f"failed: {e}"
+    output: env_update_result
+    on_error: continue
+
+  - name: log_slack_investigation
+    description: "Log Slack alert investigation to session"
+    tool: memory_session_log
+    args:
+      action: "Investigated Slack alert: {{ alert_info.alert_name if alert_info else 'unknown' }}"
+      details: "Environment: {{ cfg.environment }}, Issues: {{ pod_analysis.total_issues if pod_analysis else 0 }}"
+    on_error: continue
+
 outputs:
   - name: summary
     value: |

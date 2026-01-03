@@ -463,6 +463,82 @@ steps:
     output: batch_hook_result
     on_error: continue
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: build_memory_context
+    description: "Build context for memory updates"
+    compute: |
+      from datetime import datetime
+
+      # Count actions
+      approved = 0
+      feedback = 0
+      total = len(mr_analysis) if mr_analysis else 0
+
+      for mr in (mr_analysis or []):
+          action = mr.get("action", "")
+          if action == "can_approve":
+              approved += 1
+          elif action in ["needs_full_review", "needs_followup"]:
+              feedback += 1
+
+      result = {
+          "timestamp": datetime.now().isoformat(),
+          "total": total,
+          "approved": approved,
+          "feedback": feedback,
+      }
+    output: memory_context
+
+  - name: log_batch_review
+    description: "Log batch review to session"
+    condition: "memory_context.total > 0"
+    tool: memory_session_log
+    args:
+      action: "Batch reviewed {{ memory_context.total }} MRs"
+      details: "Approved: {{ memory_context.approved }}, Feedback: {{ memory_context.feedback }}"
+    on_error: continue
+
+  - name: update_teammate_prefs
+    description: "Update teammate preferences with review counts"
+    condition: "memory_context.total > 0 and mr_analysis"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      prefs_file = Path.home() / "src/redhat-ai-workflow/memory/learned/teammate_preferences.yaml"
+
+      try:
+          if prefs_file.exists():
+              with open(prefs_file) as f:
+                  data = yaml.safe_load(f) or {}
+          else:
+              data = {"teammates": {}}
+
+          teammates = data.get("teammates", {})
+
+          # Track reviews given to each author
+          for mr in (mr_analysis or []):
+              author = mr.get("author", "unknown")
+              if author and author != "unknown":
+                  if author not in teammates:
+                      teammates[author] = {"reviews_received": 0}
+                  teammates[author]["reviews_received"] = teammates[author].get("reviews_received", 0) + 1
+                  teammates[author]["last_reviewed_at"] = memory_context["timestamp"]
+
+          data["teammates"] = teammates
+          data["last_updated"] = memory_context["timestamp"]
+
+          with open(prefs_file, "w") as f:
+              yaml.dump(data, f, default_flow_style=False)
+
+          result = "updated"
+      except Exception as e:
+          result = f"failed: {e}"
+    output: prefs_update_result
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:

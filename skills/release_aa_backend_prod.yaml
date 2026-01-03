@@ -418,6 +418,57 @@ steps:
     output: release_hook_result
     on_error: continue
 
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: log_release
+    description: "Log release to session and track deployment"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/environments.yaml"
+      now = datetime.now().isoformat()
+
+      try:
+          if memory_file.exists():
+              with open(memory_file) as f:
+                  data = yaml.safe_load(f) or {}
+          else:
+              data = {"recent_deployments": []}
+
+          # Add to recent deployments
+          deployments = data.get("recent_deployments", [])
+          deployments.insert(0, {
+              "version": inputs.release_date,
+              "sha": inputs.commit_sha[:12],
+              "environment": "production",
+              "deployed_at": now,
+              "mr_url": mr_result.get("web_url", "") if mr_result else "",
+              "jira_key": jira_issue.get("key", "") if jira_issue else "",
+          })
+
+          # Keep only last 10
+          data["recent_deployments"] = deployments[:10]
+          data["last_checked"] = now
+
+          with open(memory_file, "w") as f:
+              yaml.dump(data, f, default_flow_style=False)
+
+          result = "deployment tracked"
+      except Exception as e:
+          result = f"failed: {e}"
+    output: memory_update_result
+    on_error: continue
+
+  - name: session_log_release
+    description: "Log release to session"
+    tool: memory_session_log
+    args:
+      action: "Prepared production release {{ inputs.release_date }}"
+      details: "SHA: {{ inputs.commit_sha[:12] }}, Jira: {{ jira_issue.key if jira_issue else 'N/A' }}"
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
