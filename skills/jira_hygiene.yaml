@@ -36,6 +36,15 @@ inputs:
 # No hardcoded constants - resolved dynamically
 
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"jira_failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # ==================== RESOLVE PROJECT/COMPONENT ====================
 
   - name: resolve_context
@@ -52,16 +61,18 @@ steps:
       config = load_config()
       repos = config.get("repositories", {})
 
-      # Extract project prefix from issue key
-      project_prefix = inputs.issue_key.split("-")[0].upper() if inputs.issue_key else ""
+      # Extract project prefix from issue key (inputs is a dict)
+      issue_key = inputs.get("issue_key", "") if isinstance(inputs, dict) else getattr(inputs, "issue_key", "")
+      project_prefix = issue_key.split("-")[0].upper() if issue_key else ""
 
       # Set jira_project from issue key
       if project_prefix:
           jira_project = project_prefix
 
       # Try to find component from repo config
-      if inputs.repo_name and inputs.repo_name in repos:
-          cfg = repos[inputs.repo_name]
+      repo_name = inputs.get("repo_name", "") if isinstance(inputs, dict) else getattr(inputs, "repo_name", "")
+      if repo_name and repo_name in repos:
+          cfg = repos[repo_name]
           if cfg.get("jira_component"):
               component = cfg["jira_component"]
       else:
@@ -94,39 +105,62 @@ steps:
   - name: parse_issue
     description: "Parse issue fields for validation using shared parser"
     compute: |
-      from scripts.common.parsers import extract_json_from_output
+      import json
+
+      # issue_raw is JSON string from jira_view_issue_json
+      issue_data = {}
 
       try:
         if isinstance(issue_raw, str):
-          # Use shared parser to extract JSON from output
-          issue = extract_json_from_output(issue_raw)
-          if not issue:
-            # No valid JSON found, use raw
-            issue = {"raw": issue_raw}
+          # Try to parse as JSON first
+          issue_data = json.loads(issue_raw)
+        elif isinstance(issue_raw, dict):
+          issue_data = issue_raw
         else:
-          issue = issue_raw
-      except:
-        issue = {"raw": str(issue_raw)}
+          issue_data = {"raw": str(issue_raw)}
+      except json.JSONDecodeError:
+        # If not valid JSON, try shared parser
+        try:
+          from scripts.common.parsers import extract_json_from_output
+          issue_data = extract_json_from_output(issue_raw) or {"raw": issue_raw}
+        except:
+          issue_data = {"raw": str(issue_raw)}
+      except Exception as e:
+        issue_data = {"raw": str(issue_raw), "error": str(e)}
 
-      # Extract key fields
-      parsed = {
-        "key": inputs.issue_key,
-        "summary": issue.get("summary", ""),
-        "status": issue.get("status", "Unknown"),
-        "issue_type": issue.get("issuetype", issue.get("type", "Story")),
-        "description": issue.get("description", ""),
-        "acceptance_criteria": issue.get("acceptance_criteria", issue.get("customfield_12313440", "")),
-        "priority": issue.get("priority", ""),
-        "labels": issue.get("labels", []),
-        "components": issue.get("components", []),
-        "epic_link": issue.get("epic_link", issue.get("customfield_12311140", issue.get("parent", ""))),
-        "fix_version": issue.get("fixVersions", issue.get("fix_version", [])),
-        "story_points": issue.get("story_points", issue.get("customfield_12310243", None)),
-        "assignee": issue.get("assignee", ""),
-        "reporter": issue.get("reporter", ""),
+      # Get issue_key from inputs (handle both dict and attribute access)
+      issue_key = inputs.get("issue_key", "") if isinstance(inputs, dict) else getattr(inputs, "issue_key", "")
+
+      # Extract key fields (handle the key names from our parsed output)
+      # Handle both string and list types for labels/components
+      labels_raw = issue_data.get("labels", [])
+      if isinstance(labels_raw, str):
+        labels = [labels_raw] if labels_raw and labels_raw != "None" else []
+      else:
+        labels = labels_raw or []
+
+      comps_raw = issue_data.get("components", issue_data.get("component_s", []))
+      if isinstance(comps_raw, str):
+        components = [comps_raw] if comps_raw and comps_raw != "None" else []
+      else:
+        components = comps_raw or []
+
+      result = {
+        "key": issue_key,
+        "summary": issue_data.get("summary", ""),
+        "status": issue_data.get("status", "Unknown"),
+        "issue_type": issue_data.get("issue_type", issue_data.get("issuetype", issue_data.get("type", "Story"))),
+        "description": issue_data.get("description", ""),
+        "acceptance_criteria": issue_data.get("acceptance_criteria", issue_data.get("customfield_12313440", "")),
+        "priority": issue_data.get("priority", ""),
+        "labels": labels,
+        "components": components,
+        "epic_link": issue_data.get("epic_link", issue_data.get("customfield_12311140", issue_data.get("parent", ""))),
+        "fix_version": issue_data.get("fixVersions", issue_data.get("fix_version", [])),
+        "story_points": issue_data.get("story_points", issue_data.get("customfield_12310243", None)),
+        "assignee": issue_data.get("assignee", ""),
+        "reporter": issue_data.get("reporter", ""),
       }
-
-      result = parsed
     output: issue
 
   # ==================== VALIDATE ISSUE ====================
@@ -144,23 +178,22 @@ steps:
 
       # === DESCRIPTION ===
       desc = issue.get("description", "")
-      if not desc or len(str(desc).strip()) < 20:
+      desc_str = str(desc) if desc else ""
+      if not desc_str or len(desc_str.strip()) < 20:
         issues_found.append("❌ Missing or too short description")
         needs_input.append({
           "field": "description",
           "issue": "Description is missing or too short (< 20 chars)",
           "action": "Please provide a description for this issue"
         })
-      else:
+      elif not any(marker in desc_str for marker in ['h1.', 'h2.', 'h3.', '*', '-', '#']):
         # Check formatting
-        desc_str = str(desc)
-        if not any(marker in desc_str for marker in ['h1.', 'h2.', 'h3.', '*', '-', '#']):
-          issues_found.append("⚠️ Description lacks proper formatting (headers, bullets)")
-          can_fix.append({
-            "field": "description_format",
-            "issue": "Description could use better Jira markup",
-            "suggestion": "Add headers (h2.), bullets (*), code blocks ({code})"
-          })
+        issues_found.append("⚠️ Description lacks proper formatting (headers, bullets)")
+        can_fix.append({
+          "field": "description_format",
+          "issue": "Description could use better Jira markup",
+          "suggestion": "Add headers (h2.), bullets (*), code blocks ({code})"
+        })
 
       # === ACCEPTANCE CRITERIA ===
       ac = issue.get("acceptance_criteria", "")
