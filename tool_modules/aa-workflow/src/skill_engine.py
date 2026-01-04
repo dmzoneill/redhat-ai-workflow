@@ -311,22 +311,31 @@ class SkillExecutor:
             templated_code = self._template(code)
             self._debug(f"  → Code: {templated_code[:100]}...")
 
-            exec(templated_code, safe_globals, local_vars)
+            # Merge globals and locals into single namespace to avoid
+            # Python scoping issues with generator expressions/comprehensions
+            # (they create their own scope and can't see separate locals)
+            namespace = {**safe_globals, **local_vars}
+            exec(templated_code, namespace)
 
-            if output_name in local_vars:
-                result = local_vars[output_name]
-            elif "result" in local_vars:
-                result = local_vars["result"]
+            if output_name in namespace:
+                result = namespace[output_name]
+            elif "result" in namespace:
+                result = namespace["result"]
             elif "return" in templated_code:
                 for line in reversed(templated_code.split("\n")):
                     if line.strip().startswith("return "):
                         expr = line.strip()[7:]
-                        result = eval(expr, safe_globals, local_vars)
+                        result = eval(expr, namespace)
                         break
                 else:
                     result = None
             else:
                 result = None
+
+            # Update context with any new variables defined in the code
+            for key in namespace:
+                if key not in safe_globals and not key.startswith("_"):
+                    local_vars[key] = namespace[key]
 
             self._debug(f"  → Result: {str(result)[:100]}")
             return result
