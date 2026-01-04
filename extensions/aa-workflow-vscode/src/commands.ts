@@ -231,10 +231,3 @@ export function registerCommands(
     })
   );
 }
-
-
-
-
-
-
-

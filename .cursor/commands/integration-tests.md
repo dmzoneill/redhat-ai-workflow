@@ -32,10 +32,3 @@ skill_run("check_integration_tests", '{}')
 # Check specific application
 skill_run("check_integration_tests", '{"application": "backend"}')
 ```
-
-
-
-
-
-
-

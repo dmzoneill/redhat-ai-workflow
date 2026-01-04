@@ -484,10 +484,3 @@ def register_tools(server: "FastMCP") -> int:
 
     logger.info(f"Registered {tool_count} lint tools")
     return tool_count
-
-
-
-
-
-
-

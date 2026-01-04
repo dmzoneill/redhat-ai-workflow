@@ -239,10 +239,3 @@ export function registerNotifications(
 
   return notificationManager;
 }
-
-
-
-
-
-
-

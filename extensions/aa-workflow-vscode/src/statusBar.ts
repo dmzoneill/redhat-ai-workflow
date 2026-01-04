@@ -228,10 +228,3 @@ export class StatusBarManager {
     this.mrItem.dispose();
   }
 }
-
-
-
-
-
-
-

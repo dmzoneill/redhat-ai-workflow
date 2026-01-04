@@ -12,32 +12,40 @@ Usage in skill compute blocks:
     )
 """
 
-import re
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 # Quick-fix patterns
 AUTH_PATTERNS = [
-    "unauthorized", "401", "forbidden", "403",
-    "token expired", "authentication required",
-    "not authorized", "permission denied"
+    "unauthorized",
+    "401",
+    "forbidden",
+    "403",
+    "token expired",
+    "authentication required",
+    "not authorized",
+    "permission denied",
 ]
 
 NETWORK_PATTERNS = [
-    "no route to host", "connection refused", "network unreachable",
-    "timeout", "dial tcp", "connection reset", "eof"
+    "no route to host",
+    "connection refused",
+    "network unreachable",
+    "timeout",
+    "dial tcp",
+    "connection reset",
+    "eof",
 ]
 
 REGISTRY_PATTERNS = [
-    "manifest unknown", "podman login", "registry authentication",
-    "image not found", "pull access denied"
+    "manifest unknown",
+    "podman login",
+    "registry authentication",
+    "image not found",
+    "pull access denied",
 ]
 
-TTY_PATTERNS = [
-    "output is not a tty", "not a terminal", "aborting",
-    "input is not a terminal"
-]
+TTY_PATTERNS = ["output is not a tty", "not a terminal", "aborting", "input is not a terminal"]
 
 
 def detect_failure(result: str, tool_name: str = "") -> dict:
@@ -64,10 +72,10 @@ def detect_failure(result: str, tool_name: str = "") -> dict:
 
     # Check for error indicators
     is_error = (
-        "❌" in result or
-        result_lower.startswith("error") or
-        "failed" in result_lower[:100] or
-        "exception" in result_lower[:100]
+        "❌" in result
+        or result_lower.startswith("error")
+        or "failed" in result_lower[:100]
+        or "exception" in result_lower[:100]
     )
 
     if not is_error:
@@ -193,13 +201,7 @@ def should_retry(failure: dict, retry_count: int = 0, max_retries: int = 2) -> b
     return failure.get("error_type") in ["auth", "network"]
 
 
-def log_failure(
-    tool_name: str,
-    error_text: str,
-    skill_name: str = "",
-    fixed: bool = False,
-    memory_helper=None
-) -> dict:
+def log_failure(tool_name: str, error_text: str, skill_name: str = "", fixed: bool = False, memory_helper=None) -> dict:
     """
     Log a failure to memory for learning.
 
@@ -223,38 +225,20 @@ def log_failure(
 
     if memory_helper:
         try:
-            memory_helper.append_to_list(
-                "learned/tool_failures",
-                "failure_history",
-                entry
-            )
+            memory_helper.append_to_list("learned/tool_failures", "failure_history", entry)
             # Update stats
-            memory_helper.increment_field(
-                "learned/tool_failures",
-                "stats.total_failures"
-            )
+            memory_helper.increment_field("learned/tool_failures", "stats.total_failures")
             if fixed:
-                memory_helper.increment_field(
-                    "learned/tool_failures",
-                    "stats.auto_fixed"
-                )
+                memory_helper.increment_field("learned/tool_failures", "stats.auto_fixed")
             else:
-                memory_helper.increment_field(
-                    "learned/tool_failures",
-                    "stats.manual_required"
-                )
+                memory_helper.increment_field("learned/tool_failures", "stats.manual_required")
         except Exception:
             pass  # Memory logging is best-effort
 
     return entry
 
 
-def build_auto_heal_block(
-    step_name: str,
-    tool_name: str,
-    output_var: str,
-    cluster_hint: str = "auto"
-) -> str:
+def build_auto_heal_block(step_name: str, tool_name: str, output_var: str, cluster_hint: str = "auto") -> str:
     """
     Generate YAML for an auto-heal block after a tool call.
 
@@ -288,7 +272,7 @@ def build_auto_heal_block(
     condition: "failure_{step_name} and failure_{step_name}.get('error_type') == 'auth'"
     tool: kube_login
     args:
-      cluster: "{cluster_hint if cluster_hint != 'auto' else '{{ failure_' + step_name + ".get('fix_args', {}).get('cluster', 'stage') }}'}"
+      cluster: "{cluster_hint if cluster_hint != 'auto' else 'stage'}"
     output: auth_fix_{step_name}
     on_error: continue
 
@@ -321,10 +305,3 @@ def build_auto_heal_block(
     on_error: continue
 """
     return yaml
-
-
-
-
-
-
-

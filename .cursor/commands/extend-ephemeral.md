@@ -37,10 +37,3 @@ skill_run("extend_ephemeral", '{"namespace": "ephemeral-abc123", "hours": 8}')
 ## Finding Your Namespace
 
 Use `/check-namespaces` to see your ephemeral namespaces.
-
-
-
-
-
-
-

@@ -1,8 +1,1 @@
 # aa-lint module
-
-
-
-
-
-
-

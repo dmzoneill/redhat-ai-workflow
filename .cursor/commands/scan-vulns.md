@@ -35,10 +35,3 @@ skill_run("scan_vulnerabilities", '{"image": "quay.io/cloudservices/automation-a
 ## Integration
 
 This is automatically run in `/release-prod` as a security gate.
-
-
-
-
-
-
-

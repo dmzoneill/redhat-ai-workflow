@@ -2,5 +2,8 @@ defaults:
   prefers_small_prs: true
   review_style: thorough
   timezone: Europe/Dublin
-last_updated: '2026-01-04T20:32:28.261965'
-teammates: {}
+last_updated: '2026-01-04T20:48:55.918263'
+teammates:
+  daoneill:
+    last_reviewed_at: '2026-01-04T20:48:55.907774'
+    reviews_received: 1

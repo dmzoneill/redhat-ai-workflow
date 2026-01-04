@@ -38,10 +38,3 @@ skill_run("scale_deployment", '{"deployment": "tower-analytics-worker", "namespa
 
 In production, scaling changes may be reverted by GitOps.
 Consider updating app-interface for permanent changes.
-
-
-
-
-
-
-

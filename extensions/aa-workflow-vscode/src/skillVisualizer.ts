@@ -624,10 +624,3 @@ export function registerSkillVisualizer(context: vscode.ExtensionContext) {
     )
   );
 }
-
-
-
-
-
-
-

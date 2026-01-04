@@ -316,10 +316,3 @@ def estimate_diff_size(base: str = "origin/main", repo_path: str = ".") -> dict:
         "total_lines": total_lines,
         "is_large": is_large,
     }
-
-
-
-
-
-
-

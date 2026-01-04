@@ -6,26 +6,25 @@ Tool modules are MCP plugins that provide specific capabilities. Each module con
 
 ## Quick Reference
 
-| Server | Tools | Description |
+| Module | Tools | Description |
 |--------|-------|-------------|
-| [common](./common.md) | 28 | Core server, agents, skills, memory |
-| [git](./git.md) | 15 | Git operations |
+| [workflow](./workflow.md) | 30 | Core server, agents, skills, memory, vpn_connect, kube_login |
+| [git](./git.md) | 19 | Git operations |
 | [gitlab](./gitlab.md) | 35 | MRs, pipelines, code review |
-| [jira](./jira.md) | 24 | Issue tracking |
+| [jira](./jira.md) | 28 | Issue tracking (including set_summary, set_priority, set_epic) |
 | [k8s](./k8s.md) | 26 | Kubernetes operations |
 | [bonfire](./bonfire.md) | 21 | Ephemeral namespaces |
 | [quay](./quay.md) | 8 | Container registry |
 | [prometheus](./prometheus.md) | 13 | Metrics queries |
-| [alertmanager](./alertmanager.md) | 6 | Alert management |
+| [alertmanager](./alertmanager.md) | 7 | Alert management |
 | [kibana](./kibana.md) | 9 | Log search |
 | [google-calendar](./google-calendar.md) | 6 | Calendar & meetings |
 | [gmail](./gmail.md) | 6 | Email processing |
 | [slack](./slack.md) | 16 | Slack integration (+slack_dm_gitlab_user) |
 | [konflux](./konflux.md) | 40 | Build pipelines |
-| [appinterface](./appinterface.md) | 7 | GitOps config (+appinterface_get_user) |
-| [workflow](./workflow.md) | 30 | Core workflow (+vpn_connect, kube_login) |
+| [appinterface](./appinterface.md) | 8 | GitOps config (+appinterface_get_user) |
 
-**Total:** ~260+ tools across 15 modules
+**Total:** ~260+ tools across 16 modules
 
 > Plus **44 shared parsers** in `scripts/common/parsers.py` for reusable output parsing (including `extract_web_url`, `extract_mr_url`)
 
@@ -97,6 +96,25 @@ graph TB
 | [konflux](./konflux.md) | Build pipelines |
 | [appinterface](./appinterface.md) | GitOps configuration |
 
+### 🔧 Core/Workflow
+
+| Module | Purpose |
+|--------|---------|
+| [workflow](./workflow.md) | Agents, skills, memory, infrastructure tools |
+
+## Infrastructure Tools
+
+The workflow module includes essential infrastructure tools for auto-healing:
+
+| Tool | Purpose |
+|------|---------|
+| `vpn_connect()` | Connect to Red Hat VPN for internal resources |
+| `kube_login(cluster)` | Refresh Kubernetes authentication |
+| `session_start(agent)` | Initialize session with context |
+| `debug_tool(tool, error)` | Analyze failing tool source code |
+
+These are used by skill auto-healing to recover from common failures.
+
 ## Module Loading
 
 Modules are loaded dynamically when you switch agents:
@@ -121,7 +139,7 @@ Claude: [AgentLoader]
 | `GITLAB_TOKEN` | gitlab | GitLab API token |
 | `KUBECONFIG` | k8s | Default kubeconfig path |
 
-> **Note:** Quay uses `skopeo` which leverages your existing `podman login` credentials - no separate token needed!
+> **Note:** Quay uses `skopeo` which leverages your existing `docker login` credentials - no separate token needed!
 
 ## Adding a New Module
 
@@ -153,8 +171,22 @@ tools:
   - {name}
 ```
 
+5. Add to `tool_modules/aa-workflow/src/meta_tools.py`:
+```python
+TOOL_REGISTRY = {
+    # ...
+    "{name}": ["my_tool", ...],
+}
+
+MODULE_PREFIXES = {
+    # ...
+    "my_": "{name}",
+}
+```
+
 ## See Also
 
 - [Architecture Overview](../architecture/README.md)
-- [Agents](../personas/README.md)
+- [Personas](../personas/README.md)
 - [MCP Implementation Details](../architecture/mcp-implementation.md)
+- [Skills Reference](../skills/README.md) - Skills that use these tools

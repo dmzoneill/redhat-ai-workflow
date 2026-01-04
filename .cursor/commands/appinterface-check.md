@@ -31,10 +31,3 @@ skill_run("appinterface_check", '{"saas_file": "tower-analytics"}')
 # Check specific environment
 skill_run("appinterface_check", '{"saas_file": "tower-analytics", "environment": "stage"}')
 ```
-
-
-
-
-
-
-

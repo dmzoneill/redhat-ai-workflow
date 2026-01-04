@@ -666,10 +666,3 @@ export function registerDashboard(
     })
   );
 }
-
-
-
-
-
-
-

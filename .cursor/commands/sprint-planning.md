@@ -33,10 +33,3 @@ skill_run("sprint_planning", '{"project": "AAP"}')
 # Plan specific sprint
 skill_run("sprint_planning", '{"project": "AAP", "sprint": "Sprint 42"}')
 ```
-
-
-
-
-
-
-

@@ -40,10 +40,3 @@ If conflicts occur, the skill will:
 1. Show conflicting files
 2. Wait for manual resolution
 3. Continue rebase after you fix conflicts
-
-
-
-
-
-
-

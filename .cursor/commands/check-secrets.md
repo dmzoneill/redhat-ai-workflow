@@ -37,10 +37,3 @@ skill_run("check_secrets", '{"namespace": "tower-analytics-stage", "deployment":
 
 This lists secret **names**, not values (for security).
 Use `kubectl_get_secret_value` directly to view a specific secret.
-
-
-
-
-
-
-

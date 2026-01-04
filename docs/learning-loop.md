@@ -2,7 +2,16 @@
 
 The Learning Loop ensures that when Claude fixes a tool error, the fix is remembered forever - preventing the same mistake from happening again.
 
-## How It Works
+## Two Levels of Auto-Heal
+
+AI Workflow implements auto-healing at two levels:
+
+| Level | Mechanism | Scope |
+|-------|-----------|-------|
+| **Tool-Level** | `@debuggable` decorator + `debug_tool()` | Fixes tool source code |
+| **Skill-Level** | Auto-heal patterns in YAML | Fixes runtime issues (VPN, auth) |
+
+## Tool-Level: The Learning Loop
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -34,6 +43,84 @@ The Learning Loop ensures that when Claude fixes a tool error, the fix is rememb
 │  After fix works: learn_tool_fix() → Saved to memory            │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+## Skill-Level: Auto-Heal Patterns
+
+All 42 production skills include automatic remediation for VPN and auth issues:
+
+```mermaid
+graph LR
+    A[Tool Call] --> B{Success?}
+    B -->|Yes| C[Continue]
+    B -->|No| D[Detect Failure]
+    D --> E{VPN Issue?}
+    E -->|Yes| F[vpn_connect]
+    E -->|No| G{Auth Issue?}
+    G -->|Yes| H[kube_login]
+    G -->|No| I[Log & Continue]
+    F --> J[Retry Tool]
+    H --> J
+    J --> C
+```
+
+### Error Detection Patterns
+
+| Error Pattern | Detection | Auto-Fix |
+|---------------|-----------|----------|
+| "No route to host" | VPN disconnected | `vpn_connect()` |
+| "Connection refused" | Network issue | `vpn_connect()` |
+| "Connection timed out" | Network issue | `vpn_connect()` |
+| "Unauthorized" / "401" | Auth expired | `kube_login(cluster)` |
+| "Forbidden" / "403" | Auth issue | `kube_login(cluster)` |
+| "Token expired" | Auth expired | `kube_login(cluster)` |
+
+### Example Auto-Heal in Skill YAML
+
+```yaml
+# Original tool call
+- name: get_pods
+  tool: kubectl_get_pods
+  args:
+    namespace: "{{ namespace }}"
+    environment: "stage"
+  output: pods_result
+  on_error: continue
+
+# Detect failure
+- name: detect_failure_pods
+  condition: "pods_result and ('❌' in str(pods_result) or 'error' in str(pods_result).lower())"
+  compute: |
+    error_text = str(pods_result)[:300].lower()
+    result = {
+      "failed": True,
+      "needs_vpn": any(x in error_text for x in ['no route', 'timeout', 'connection refused']),
+      "needs_auth": any(x in error_text for x in ['unauthorized', '401', 'forbidden', '403']),
+    }
+  output: failure_pods
+
+# Auto-fix VPN
+- name: quick_fix_vpn_pods
+  condition: "failure_pods and failure_pods.get('needs_vpn')"
+  tool: vpn_connect
+  on_error: continue
+
+# Auto-fix Auth
+- name: quick_fix_auth_pods
+  condition: "failure_pods and failure_pods.get('needs_auth')"
+  tool: kube_login
+  args:
+    cluster: "stage"
+  on_error: continue
+
+# Retry after fix
+- name: retry_get_pods
+  condition: "failure_pods"
+  tool: kubectl_get_pods
+  args:
+    namespace: "{{ namespace }}"
+    environment: "stage"
+  output: pods_retry_result
 ```
 
 ## Tools
@@ -152,18 +239,41 @@ auth_patterns:
       - vpn_connect()
 ```
 
+### memory/learned/tool_failures.yaml
+
+Tracks skill auto-heal attempts:
+
+```yaml
+failures:
+  - tool: kubectl_get_pods
+    error: "No route to host"
+    fix_attempted: "vpn_connect"
+    success: true
+    timestamp: "2026-01-04T10:30:00"
+    skill: "investigate_alert"
+
+  - tool: gitlab_mr_list
+    error: "401 Unauthorized"
+    fix_attempted: "N/A - GitLab uses tokens"
+    success: false
+    timestamp: "2026-01-04T11:00:00"
+    skill: "review_all_prs"
+```
+
 ## Integration Points
 
 The learning loop is integrated into all tool execution paths:
 
-| Path | Auto-Check | Auto-Suggest Learn |
-|------|------------|-------------------|
-| `@debuggable` decorator | ✅ On failure | ✅ In error output |
-| `SkillExecutor._exec_tool` | ✅ On failure | ✅ In error message |
-| `tool_exec` meta tool | ✅ On failure | ✅ In error output |
-| Claude Agent (Slack bot) | ✅ On failure | ✅ In error output |
+| Path | Auto-Check | Auto-Suggest Learn | Skill Auto-Heal |
+|------|------------|-------------------|-----------------|
+| `@debuggable` decorator | ✅ On failure | ✅ In error output | - |
+| `SkillExecutor._exec_tool` | ✅ On failure | ✅ In error message | ✅ VPN/Auth |
+| `tool_exec` meta tool | ✅ On failure | ✅ In error output | - |
+| Claude Agent (Slack bot) | ✅ On failure | ✅ In error output | - |
 
 ## Example Workflow
+
+### Tool-Level Fix (Code Change)
 
 1. **Tool fails:**
    ```
@@ -193,6 +303,18 @@ The learning loop is integrated into all tool execution paths:
 
 5. **Next time:** The fix appears automatically!
 
+### Skill-Level Fix (Runtime)
+
+1. **Skill calls kubectl, fails with "No route to host"**
+
+2. **Auto-detect:** `detect_failure_pods` identifies VPN issue
+
+3. **Auto-fix:** `quick_fix_vpn_pods` calls `vpn_connect()`
+
+4. **Auto-retry:** `retry_get_pods` retries the original call
+
+5. **Skill continues:** No user intervention needed
+
 ## Commands
 
 - `/debug-tool` - Debug and fix a failing tool
@@ -201,9 +323,15 @@ The learning loop is integrated into all tool execution paths:
 
 ## Agent Personas
 
-All agents include the Learning Loop in their documentation:
+All agents include both levels of auto-healing:
 
 - [Developer Persona](personas/developer.md#-learning-loop-auto-remediation--memory)
 - [DevOps Persona](personas/devops.md#-learning-loop-auto-remediation--memory)
 - [Incident Persona](personas/incident.md#-learning-loop-auto-remediation--memory)
 - [Release Persona](personas/release.md#-learning-loop-auto-remediation--memory)
+
+## See Also
+
+- [Skills Reference](skills/README.md) - All 50 skills with auto-heal
+- [Skill Auto-Heal Plan](plans/skill-auto-heal.md) - Implementation details
+- [Architecture Overview](architecture/README.md)

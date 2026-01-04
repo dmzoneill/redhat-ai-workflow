@@ -9,6 +9,7 @@
 | **Agent / Persona** | Tool configuration profile (developer, devops, incident, release). NOT a separate AI instance. |
 | **Tool Module** | Directory (`tool_modules/aa-*/`) containing MCP tool implementations. |
 | **Skill** | YAML workflow in `skills/` that chains tools. |
+| **Auto-Heal** | Automatic VPN/auth remediation patterns in skills. |
 
 > This is a **single-agent system** with dynamic tool loading. "Agents" configure which tools Claude can use.
 
@@ -49,7 +50,7 @@ Key configuration sections:
 - `jira` - Jira URL and project settings
 - `kubernetes.environments` - Kubeconfig paths
 - `slack` - Slack bot tokens and channels
-- `user` - Your username and timezone
+- `user` - Your username, email, and email aliases
 
 ### 3. Environment Variables
 
@@ -120,36 +121,38 @@ pre-commit run --all-files
 ```
 redhat-ai-workflow/
 ├── personas/                    # Agent persona definitions (YAML)
-├── skills/                    # Workflow skill definitions (YAML)
-├── memory/                    # Persistent memory storage
-├── tool_modules/               # MCP tool modules
-│   ├── server/             # Core server, shared utilities
-│   ├── aa-workflow/           # Workflow tools (30+ tools)
-│   ├── aa-git/                # Git operations
-│   ├── aa-gitlab/             # GitLab integration
-│   ├── aa-jira/               # Jira integration
-│   ├── aa-k8s/                # Kubernetes operations
-│   ├── aa-bonfire/            # Ephemeral environments
-│   ├── aa-quay/               # Container registry
-│   ├── aa-prometheus/         # Metrics queries
-│   ├── aa-alertmanager/       # Alert management
-│   ├── aa-kibana/             # Log search
-│   ├── aa-google-calendar/    # Calendar integration
-│   ├── aa-gmail/              # Email processing
-│   ├── aa-slack/              # Slack integration
-│   ├── aa-konflux/            # Build pipelines
-│   └── aa-appinterface/       # App-interface config
-├── scripts/                   # Python utilities
-│   ├── common/                # Shared modules
-│   │   ├── config_loader.py   # Configuration loading
-│   │   ├── parsers.py         # Output parsers (42 functions)
-│   │   └── jira_utils.py      # Jira utilities
-│   ├── claude_agent.py        # Slack bot AI agent
-│   └── slack_daemon.py        # Slack bot daemon
-├── tests/                     # Test suite
-├── docs/                      # Documentation
-├── config/                    # Additional config modules
-└── .cursor/commands/          # Cursor slash commands
+├── skills/                      # 50 workflow skill definitions (YAML)
+├── memory/                      # Persistent memory storage
+│   ├── state/                   # Active issues, MRs, environments
+│   └── learned/                 # Patterns, tool fixes, runbooks
+├── tool_modules/                # MCP tool modules (16 modules, 260+ tools)
+│   ├── server/                  # Core server, shared utilities
+│   ├── aa-workflow/             # Workflow tools (30 tools)
+│   ├── aa-git/                  # Git operations (19 tools)
+│   ├── aa-gitlab/               # GitLab integration (35 tools)
+│   ├── aa-jira/                 # Jira integration (28 tools)
+│   ├── aa-k8s/                  # Kubernetes operations (26 tools)
+│   ├── aa-bonfire/              # Ephemeral environments (21 tools)
+│   ├── aa-quay/                 # Container registry (8 tools)
+│   ├── aa-prometheus/           # Metrics queries (13 tools)
+│   ├── aa-alertmanager/         # Alert management (7 tools)
+│   ├── aa-kibana/               # Log search (9 tools)
+│   ├── aa-google-calendar/      # Calendar integration (6 tools)
+│   ├── aa-gmail/                # Email processing (6 tools)
+│   ├── aa-slack/                # Slack integration (16 tools)
+│   ├── aa-konflux/              # Build pipelines (40 tools)
+│   └── aa-appinterface/         # App-interface config (8 tools)
+├── scripts/                     # Python utilities
+│   ├── common/                  # Shared modules
+│   │   ├── config_loader.py     # Configuration loading
+│   │   ├── parsers.py           # Output parsers (44 functions)
+│   │   └── auto_heal.py         # Skill auto-healing utilities
+│   ├── claude_agent.py          # Slack bot AI agent
+│   └── slack_daemon.py          # Slack bot daemon
+├── tests/                       # Test suite
+├── docs/                        # Documentation
+├── config/                      # Additional config modules
+└── .cursor/commands/            # 63 Cursor slash commands
 ```
 
 ## Adding New Tools
@@ -207,7 +210,23 @@ def test_my_new_tool():
 
 ### 4. Update Documentation
 
-Add entry to the relevant docs file in `docs/tool_modules/`.
+Add entry to the relevant docs file in `docs/tool-modules/`.
+
+### 5. Register in Meta Tools
+
+Add to `tool_modules/aa-workflow/src/meta_tools.py`:
+
+```python
+TOOL_REGISTRY = {
+    # ...
+    "module_name": ["my_new_tool", ...],
+}
+
+MODULE_PREFIXES = {
+    # ...
+    "my_": "module_name",
+}
+```
 
 ## Adding New Skills
 
@@ -235,19 +254,56 @@ steps:
     tool: some_tool
     args:
       param: "{{ required_input }}"
+    on_error: continue
+
+  # ========== AUTO-HEAL PATTERN ==========
+  - id: detect_failure_step_1
+    condition: "step_1 and 'error' in str(step_1).lower()"
+    compute: |
+      error_text = str(step_1)[:300].lower()
+      result = {
+        "needs_vpn": any(x in error_text for x in ['no route', 'timeout']),
+        "needs_auth": any(x in error_text for x in ['unauthorized', '401']),
+      }
+    output: failure_step_1
+
+  - id: quick_fix_vpn
+    condition: "failure_step_1 and failure_step_1.get('needs_vpn')"
+    tool: vpn_connect
+    on_error: continue
+
+  - id: quick_fix_auth
+    condition: "failure_step_1 and failure_step_1.get('needs_auth')"
+    tool: kube_login
+    args:
+      cluster: "stage"
+    on_error: continue
+
+  - id: retry_step_1
+    condition: "failure_step_1"
+    tool: some_tool
+    args:
+      param: "{{ required_input }}"
+    output: step_1_retry
+
+  # ========== END AUTO-HEAL ==========
 
   - id: step_2
     tool: another_tool
     args:
-      data: "{{ step_1.result }}"
-    condition: "{{ step_1.success }}"
+      data: "{{ step_1 or step_1_retry }}"
+    condition: "{{ (step_1 and '❌' not in str(step_1)) or step_1_retry }}"
 
 output:
   success: "{{ step_2.success }}"
   message: "Skill completed: {{ step_2.result }}"
 ```
 
-### 2. Add Documentation
+### 2. Add Auto-Heal (Required for Production Skills)
+
+All skills that interact with external services (K8s, GitLab, Jira, etc.) should include auto-heal patterns. See [Skill Auto-Heal Plan](plans/skill-auto-heal.md) for the full pattern.
+
+### 3. Add Documentation
 
 Create `docs/skills/my_skill.md`:
 
@@ -273,9 +329,31 @@ skill_run("my_skill", {"required_input": "value"})
 1. Does this first thing
 2. Then does this
 
+## Auto-Heal
+
+This skill includes auto-healing for:
+- VPN disconnection
+- Kubernetes authentication
+
 ## Example
 
 ...
+```
+
+### 4. Add Cursor Command
+
+Create `.cursor/commands/my-skill.md`:
+
+```markdown
+# 🎯 My Skill
+
+Brief description.
+
+## Instructions
+
+Run the my_skill skill.
+
+skill_run("my_skill", '{"required_input": "value"}')
 ```
 
 ## Adding New Agents
@@ -394,6 +472,15 @@ Never copy kubeconfig files. Always use the appropriate config:
 When running tools that use `pipenv` (like `rh-issue`):
 - The code automatically sets `PIPENV_IGNORE_VIRTUALENVS=1`
 - If issues persist, ensure you're not in a nested virtualenv
+
+#### Skill Auto-Heal Debugging
+
+If a skill's auto-heal isn't working:
+
+1. Check the `on_error: continue` is set on the original tool call
+2. Verify the condition uses `.get()` for optional dictionary access
+3. Ensure the retry step outputs to a different variable
+4. Check memory logs: `memory_read("learned/tool_failures")`
 
 ## Code Style
 

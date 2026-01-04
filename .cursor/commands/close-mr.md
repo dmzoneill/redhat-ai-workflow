@@ -37,10 +37,3 @@ skill_run("close_mr", '{"mr_id": 1234, "reason": "Superseded by !1235"}')
 
 This **closes** (abandons) the MR, it does not merge it.
 Use `/review-mr` and approve to merge.
-
-
-
-
-
-
-

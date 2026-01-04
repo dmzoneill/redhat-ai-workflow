@@ -35,10 +35,3 @@ skill_run("check_ci_health", '{"project": "automation-analytics-backend"}')
 # Investigate specific pipeline
 skill_run("check_ci_health", '{"pipeline_id": 12345}')
 ```
-
-
-
-
-
-
-

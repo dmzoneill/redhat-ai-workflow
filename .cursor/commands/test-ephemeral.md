@@ -44,10 +44,3 @@ skill_run("test_mr_ephemeral", '{"mr_id": 1234, "keep_namespace": true}')
 
 - VPN connected (`/vpn`)
 - Ephemeral cluster login (`kube_login("ephemeral")`)
-
-
-
-
-
-
-

@@ -573,10 +573,3 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
     logger.info(f"Registered {tool_count} dev-workflow tools")
     return tool_count
-
-
-
-
-
-
-

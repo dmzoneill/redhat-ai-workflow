@@ -32,10 +32,3 @@ skill_run("clone_jira_issue", '{"issue_key": "AAP-61214"}')
 # Clone to different project
 skill_run("clone_jira_issue", '{"issue_key": "AAP-61214", "project": "RHCLOUD"}')
 ```
-
-
-
-
-
-
-

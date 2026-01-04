@@ -34,10 +34,3 @@ skill_run("environment_overview", '{"environment": "prod"}')
 # Specific namespace
 skill_run("environment_overview", '{"environment": "stage", "namespace": "tower-analytics-stage"}')
 ```
-
-
-
-
-
-
-
