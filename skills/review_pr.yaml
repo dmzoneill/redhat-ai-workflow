@@ -15,7 +15,7 @@ description: |
   runs local tests, and provides brief focused feedback.
 
   Automatically approves or posts feedback based on findings.
-version: "1.2"
+version: "1.3"
 
 inputs:
   - name: mr_id
@@ -200,9 +200,34 @@ steps:
     output: failure_mr
     on_error: continue
 
+  - name: quick_fix_vpn_mr
+    description: "Auto-fix VPN issues for GitLab"
+    condition: "failure_mr and failure_mr.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_mr
+    on_error: continue
+
+  - name: retry_get_mr
+    description: "Retry GitLab call after VPN fix"
+    condition: "vpn_fix_mr and failure_mr"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ resolved_repo.gitlab }}"
+      mr_id: "{{ target_mr_id }}"
+    output: mr_details_retry
+    on_error: continue
+
+  - name: merge_mr_details_result
+    description: "Use retry result if available"
+    condition: "mr_details_retry"
+    compute: |
+      result = mr_details_retry
+    output: mr_details
+
   - name: log_failure_mr
     description: "Log failure to memory for learning"
-    condition: "failure_mr and failure_mr.get('failed')"
+    condition: "failure_mr and failure_mr.get('failed') and not mr_details_retry"
     compute: |
       from scripts.common.auto_heal import log_failure
 

@@ -15,7 +15,7 @@ description: |
   Optionally creates Google Meet invitations when meetings are requested.
 
   Uses MCP tools: gitlab_mr_list, gitlab_mr_comments
-version: "1.1"
+version: "1.2"
 
 inputs:
   - name: project
@@ -58,9 +58,34 @@ steps:
     output: failure_gitlab
     on_error: continue
 
+  - name: quick_fix_vpn_gitlab
+    description: "Auto-fix VPN issues for GitLab"
+    condition: "failure_gitlab and failure_gitlab.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_gitlab
+    on_error: continue
+
+  - name: retry_get_mrs
+    description: "Retry GitLab call after VPN fix"
+    condition: "vpn_fix_gitlab and failure_gitlab"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ inputs.project }}"
+      author: "@me"
+    output: open_mrs_raw_retry
+    on_error: continue
+
+  - name: merge_mrs_result
+    description: "Use retry result if available"
+    condition: "open_mrs_raw_retry"
+    compute: |
+      result = open_mrs_raw_retry
+    output: open_mrs_raw
+
   - name: log_failure_gitlab
     description: "Log failure to memory"
-    condition: "failure_gitlab and failure_gitlab.get('failed')"
+    condition: "failure_gitlab and failure_gitlab.get('failed') and not open_mrs_raw_retry"
     compute: |
       from scripts.common.auto_heal import log_failure
       entry = log_failure(

@@ -7,7 +7,7 @@ description: |
   Adds a comment summarizing the work from branch commits.
 
   Resolves Jira statuses from config.json.
-version: "1.1"
+version: "1.2"
 
 inputs:
   - name: issue_key
@@ -63,6 +63,44 @@ steps:
     tool: jira_get_issue
     args:
       issue_key: "{{ inputs.issue_key }}"
+    output: issue
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_issue ====================
+
+  - name: detect_failure_issue
+    description: "Detect if Jira call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(issue) if 'issue' in dir() and issue else ""
+      failure = detect_failure(result_text, "jira_get_issue")
+      result = failure
+    output: failure_issue
+    on_error: continue
+
+  - name: quick_fix_vpn_issue
+    description: "Auto-fix VPN issues for Jira"
+    condition: "failure_issue and failure_issue.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_issue
+    on_error: continue
+
+  - name: retry_get_issue
+    description: "Retry Jira call after VPN fix"
+    condition: "vpn_fix_issue and failure_issue"
+    tool: jira_get_issue
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: issue_retry
+    on_error: continue
+
+  - name: merge_issue_result
+    description: "Use retry result if available"
+    condition: "issue_retry"
+    compute: |
+      result = issue_retry
     output: issue
 
   # Step 2: Check current status

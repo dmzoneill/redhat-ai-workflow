@@ -12,7 +12,7 @@ description: |
   - Validates .gitlab-ci.yml
 
   Uses: gitlab_ci_list, gitlab_ci_view, gitlab_ci_trace, gitlab_ci_lint
-version: "1.0"
+version: "1.1"
 
 inputs:
   - name: project
@@ -56,9 +56,34 @@ steps:
     output: failure_pipelines
     on_error: continue
 
+  - name: quick_fix_vpn_pipelines
+    description: "Auto-fix VPN issues for GitLab"
+    condition: "failure_pipelines and failure_pipelines.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_pipelines
+    on_error: continue
+
+  - name: retry_list_pipelines
+    description: "Retry GitLab CI list after VPN fix"
+    condition: "vpn_fix_pipelines and failure_pipelines"
+    tool: gitlab_ci_list
+    args:
+      project: "{{ inputs.project }}"
+      status: "{{ inputs.status if inputs.status != 'all' else '' }}"
+    output: pipelines_raw_retry
+    on_error: continue
+
+  - name: merge_pipelines_result
+    description: "Use retry result if available"
+    condition: "pipelines_raw_retry"
+    compute: |
+      result = pipelines_raw_retry
+    output: pipelines_raw
+
   - name: log_failure_pipelines
     description: "Log failure to memory for learning"
-    condition: "failure_pipelines and failure_pipelines.get('failed')"
+    condition: "failure_pipelines and failure_pipelines.get('failed') and not pipelines_raw_retry"
     compute: |
       from scripts.common.auto_heal import log_failure
 
