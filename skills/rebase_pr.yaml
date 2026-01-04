@@ -58,6 +58,12 @@ inputs:
     default: false
     description: "Auto force-push after successful rebase (asks if false)"
 
+  - name: run_linting
+    type: boolean
+    required: false
+    default: true
+    description: "Run linting (black/flake8) before pushing (default: true)"
+
 # No hardcoded constants - resolved dynamically
 
 steps:
@@ -565,6 +571,62 @@ steps:
         result = rebase_result  # Keep original status
     output: final_rebase_result
 
+  # ==================== RUN LINTING (before push) ====================
+
+  - name: run_flake8
+    description: "Run flake8 linting on changed files"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.get('run_linting', True)"
+    tool: lint_python
+    args:
+      repo: "{{ resolved_repo.path }}"
+      tool: "flake8"
+      fix: false
+    output: flake8_result
+    on_error: continue
+
+  - name: run_black_check
+    description: "Run black formatting check on changed files"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.get('run_linting', True)"
+    tool: lint_python
+    args:
+      repo: "{{ resolved_repo.path }}"
+      tool: "black"
+      fix: false
+    output: black_result
+    on_error: continue
+
+  - name: check_lint_results
+    description: "Check if linting passed"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.get('run_linting', True)"
+    compute: |
+      flake8_output = str(flake8_result) if 'flake8_result' in dir() and flake8_result else ""
+      black_output = str(black_result) if 'black_result' in dir() and black_result else ""
+
+      flake8_passed = not flake8_output or 'error' not in flake8_output.lower() or '0 errors' in flake8_output.lower() or flake8_output.strip() == ""
+      black_passed = not black_output or 'would reformat' not in black_output.lower() or 'All done' in black_output
+
+      # Extract actual errors for reporting
+      flake8_errors = []
+      if flake8_output and not flake8_passed:
+        for line in flake8_output.split('\n'):
+          if ':' in line and ('F' in line or 'E' in line or 'W' in line):
+            flake8_errors.append(line.strip())
+
+      black_errors = []
+      if black_output and not black_passed:
+        for line in black_output.split('\n'):
+          if 'would reformat' in line.lower():
+            black_errors.append(line.strip())
+
+      result = {
+        'passed': flake8_passed and black_passed,
+        'flake8_passed': flake8_passed,
+        'black_passed': black_passed,
+        'flake8_errors': flake8_errors[:10],  # Limit to first 10
+        'black_errors': black_errors[:10],
+      }
+    output: lint_check
+
   # ==================== FORCE PUSH (if successful) ====================
 
   - name: check_branch_protection
@@ -601,7 +663,11 @@ steps:
 
   - name: force_push
     description: "Force push rebased branch"
-    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and inputs.force_push and (not protection_check or protection_check.get('allowed', True))"
+    condition: >
+      (rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success')))
+      and inputs.force_push
+      and (not protection_check or protection_check.get('allowed', True))
+      and (not lint_check or lint_check.get('passed', True))
     tool: git_push
     args:
       repo: "{{ resolved_repo.path }}"
@@ -647,13 +713,34 @@ steps:
             lines.append(f"- ⚠️ `{nh['file']}` ({nh['conflicts']} conflict(s)) - {nh.get('reason', '')}")
           lines.append("")
 
+      # Lint results
+      if lint_check:
+        if lint_check.get('passed'):
+          lines.append("### ✅ Linting Passed")
+          lines.append("")
+        else:
+          lines.append("### ❌ Linting Failed")
+          if not lint_check.get('flake8_passed') and lint_check.get('flake8_errors'):
+            lines.append("**flake8 errors:**")
+            for err in lint_check['flake8_errors'][:5]:
+              lines.append(f"- `{err}`")
+          if not lint_check.get('black_passed') and lint_check.get('black_errors'):
+            lines.append("**black formatting issues:**")
+            for err in lint_check['black_errors'][:5]:
+              lines.append(f"- `{err}`")
+          lines.append("")
+          lines.append("⚠️ **Push blocked until lint errors are fixed.**")
+          lines.append("")
+
       # Final rebase result
       if effective_result.get('success'):
         lines.append("### ✅ Rebase Successful!")
         if effective_result.get('auto_resolved'):
           lines.append("*Conflicts were automatically resolved*")
         lines.append("")
-        if push_result:
+        if lint_check and not lint_check.get('passed'):
+          lines.append("⚠️ Fix lint errors before pushing.")
+        elif push_result:
           lines.append(f"✅ {push_result}")
         else:
           lines.append("Branch is rebased locally. Ready to force push.")
@@ -773,6 +860,19 @@ outputs:
       ---
 
       When you're done, tell me and I can verify and push.
+
+      {% elif lint_check and not lint_check.get('passed') %}
+      ## ❌ Lint Errors Must Be Fixed
+
+      The rebase succeeded but there are lint errors that must be fixed before pushing.
+
+      **Fix the errors above, then:**
+      1. Stage your fixes: `git add -u`
+      2. Amend the commit: `git commit --amend --no-edit`
+      3. Run the skill again or push manually:
+         ```bash
+         git push --force-with-lease origin {{ target_branch }}
+         ```
 
       {% elif (final_rebase_result and final_rebase_result.get('success') and not push_result) or (rebase_result.get('success') and not push_result) %}
       ## 🚀 Ready to Push
