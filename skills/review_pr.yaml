@@ -44,6 +44,12 @@ inputs:
     default: false
     description: "Checkout branch and run local tests (default: false, static analysis only)"
 
+  - name: auto_merge
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically merge if approved (default: false)"
+
 # No hardcoded constants - resolved dynamically
 
 steps:
@@ -179,6 +185,153 @@ steps:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ mr_id }}"
     output: mr_details
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_mr ====================
+
+  - name: detect_failure_mr
+    description: "Detect if GitLab call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(mr_details) if 'mr_details' in dir() and mr_details else ""
+      failure = detect_failure(result_text, "gitlab_mr_view")
+      result = failure
+    output: failure_mr
+    on_error: continue
+
+  - name: log_failure_mr
+    description: "Log failure to memory for learning"
+    condition: "failure_mr and failure_mr.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      entry = log_failure(
+          tool_name="gitlab_mr_view",
+          error_text=failure_mr.get('error_text', ''),
+          skill_name="review_pr",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_mr
+    on_error: continue
+
+  # Step 1b: Get commit history for the MR
+  - name: get_mr_commits
+    description: "Get commit history for the MR"
+    tool: gitlab_commit_list
+    args:
+      project: "{{ resolved.gitlab_project }}"
+      ref: "{{ mr_id }}"
+      limit: 20
+    output: mr_commits_raw
+    on_error: continue
+
+  - name: parse_commits
+    description: "Parse commit history"
+    compute: |
+      commits_text = str(mr_commits_raw) if 'mr_commits_raw' in dir() and mr_commits_raw else ""
+
+      commits = []
+      for line in commits_text.split("\n"):
+          if line.strip():
+              commits.append(line.strip()[:100])
+
+      # Check commit message quality
+      import re
+      good_format = 0
+      for commit in commits[:10]:
+          if re.search(r'AAP-\d+', commit, re.I):
+              good_format += 1
+
+      result = {
+          "commits": commits[:10],
+          "count": len(commits),
+          "good_format_ratio": good_format / max(len(commits[:10]), 1),
+          "all_have_jira": good_format == len(commits[:10]) and len(commits) > 0,
+      }
+    output: commit_history
+    on_error: continue
+
+  # Step 1c: Get the actual diff for the MR
+  - name: get_mr_diff
+    description: "Get the code diff for the MR"
+    tool: git_diff
+    args:
+      repo: "{{ resolved.repo_path }}"
+      ref1: "{{ resolved.default_branch }}"
+      ref2: "HEAD"
+      stat: true
+    output: mr_diff_raw
+    on_error: continue
+
+  - name: parse_diff
+    description: "Parse diff to identify changed files"
+    compute: |
+      diff_text = str(mr_diff_raw) if 'mr_diff_raw' in dir() and mr_diff_raw else ""
+
+      files_changed = []
+      additions = 0
+      deletions = 0
+
+      for line in diff_text.split("\n"):
+          if "|" in line:
+              parts = line.split("|")
+              if parts:
+                  filename = parts[0].strip()
+                  if filename and not filename.startswith("---"):
+                      files_changed.append(filename)
+          # Count +/- lines
+          if line.startswith("+") and not line.startswith("+++"):
+              additions += 1
+          elif line.startswith("-") and not line.startswith("---"):
+              deletions += 1
+
+      result = {
+          "files_changed": files_changed[:15],
+          "file_count": len(files_changed),
+          "additions": additions,
+          "deletions": deletions,
+          "diff_preview": diff_text[:600] if diff_text else "",
+      }
+    output: diff_analysis
+    on_error: continue
+
+  # Step 1d: Get blame for key changed files
+  - name: blame_key_file
+    description: "Get blame info for main changed file"
+    condition: "diff_analysis and diff_analysis.file_count > 0"
+    tool: git_blame
+    args:
+      repo: "{{ resolved.repo_path }}"
+      file: "{{ diff_analysis.files_changed[0] }}"
+    output: blame_raw
+    on_error: continue
+
+  - name: parse_blame_info
+    description: "Extract authorship info from blame"
+    compute: |
+      blame_text = str(blame_raw) if 'blame_raw' in dir() and blame_raw else ""
+
+      import re
+      authors = {}
+      for line in blame_text.split("\n"):
+          author_match = re.search(r'\(([^)]+)\s+\d{4}-\d{2}-\d{2}', line)
+          if author_match:
+              author = author_match.group(1).strip()
+              authors[author] = authors.get(author, 0) + 1
+
+      # Sort by contribution
+      sorted_authors = sorted(authors.items(), key=lambda x: x[1], reverse=True)
+
+      result = {
+          "authors": [a[0] for a in sorted_authors[:5]],
+          "main_author": sorted_authors[0][0] if sorted_authors else None,
+          "author_count": len(authors),
+      }
+    output: blame_analysis
+    on_error: continue
 
   # Step 2: Extract Jira issue key from title
   - name: extract_jira_key
@@ -262,6 +415,42 @@ steps:
     args:
       project: "{{ resolved.gitlab_project }}"
     output: gitlab_pipeline
+    on_error: continue
+
+  - name: get_pipeline_trace
+    description: "Get pipeline trace if failed"
+    condition: "gitlab_pipeline and 'failed' in str(gitlab_pipeline).lower()"
+    tool: gitlab_ci_trace
+    args:
+      project: "{{ resolved.gitlab_project }}"
+    output: pipeline_trace_raw
+    on_error: continue
+
+  - name: get_approvers
+    description: "Get MR approvers list"
+    tool: gitlab_mr_approvers
+    args:
+      project: "{{ resolved.gitlab_project }}"
+      mr_id: "{{ mr_id }}"
+    output: approvers_raw
+    on_error: continue
+
+  - name: parse_approvers
+    description: "Parse approvers list"
+    compute: |
+      approvers_text = str(approvers_raw) if 'approvers_raw' in dir() and approvers_raw else ""
+
+      approvers = []
+      for line in approvers_text.split("\n"):
+        line = line.strip()
+        if line and "@" in line:
+          approvers.append(line[:40])
+
+      result = {
+        "approvers": approvers[:5],
+        "count": len(approvers),
+      }
+    output: approvers_info
     on_error: continue
 
   # Step 6: Check Konflux pipelines
@@ -750,7 +939,20 @@ steps:
     output: approval_result
     on_error: continue
 
-  # Step 18b: Emit approval hook
+  # Step 18b: Auto-merge if approved (optional)
+  - name: merge_mr
+    description: "Merge the MR if auto_merge is enabled"
+    condition: "review_action.get('action') == 'approve' and inputs.get('auto_merge', False)"
+    tool: gitlab_mr_merge
+    args:
+      project: "{{ resolved.gitlab_project }}"
+      mr_id: "{{ mr_id }}"
+      should_remove_source_branch: true
+      merge_when_pipeline_succeeds: true
+    output: merge_result
+    on_error: continue
+
+  # Step 18c: Emit approval hook
   - name: emit_approval_hook
     description: "Notify author that MR was approved"
     condition: "review_action.get('action') == 'approve' and approval_result"
@@ -943,6 +1145,11 @@ outputs:
 
       {% if review_action.get('action') == 'approve' %}
       ✅ MR has been approved on GitLab.
+      {% if merge_result %}
+      🔀 MR has been merged (or will merge when pipeline succeeds).
+      {% elif inputs.get('auto_merge', False) %}
+      ⚠️ Auto-merge was requested but failed - merge manually.
+      {% endif %}
       {% else %}
       📝 Feedback has been posted to the MR.
       {% endif %}

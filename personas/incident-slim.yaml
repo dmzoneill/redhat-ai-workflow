@@ -1,0 +1,13 @@
+# Incident Persona - Slim Configuration
+# Only essential tools to stay under limit when combined with other personas
+
+name: incident
+description: Production incidents (slim)
+persona: personas/incident.md
+
+# Slim tool selection - only the essentials
+tools:
+  - alertmanager  # 6 tools - Alert silencing
+  - kibana        # 9 tools - Log search
+
+# Total: ~15 tools

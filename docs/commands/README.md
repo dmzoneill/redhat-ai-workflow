@@ -331,10 +331,10 @@ Shows 150+ tools across 15 modules.
 **Switch between specialized agent personas.**
 
 ```
-agent_load("developer")   # coding, PRs
-agent_load("devops")      # k8s, ephemeral, deployments
-agent_load("incident")    # logs, alerts, investigation
-agent_load("release")     # konflux, quay, app-interface
+persona_load("developer")   # coding, PRs
+persona_load("devops")      # k8s, ephemeral, deployments
+persona_load("incident")    # logs, alerts, investigation
+persona_load("release")     # konflux, quay, app-interface
 ```
 
 ---
@@ -425,7 +425,7 @@ skill_run("create_jira_issue", '{
 Quick command to load the developer agent.
 
 ```
-agent_load("developer")
+persona_load("developer")
 ```
 
 ---
@@ -434,7 +434,7 @@ agent_load("developer")
 Quick command to load the devops agent.
 
 ```
-agent_load("devops")
+persona_load("devops")
 ```
 
 ---

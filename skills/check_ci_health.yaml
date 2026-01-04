@@ -1,0 +1,250 @@
+# Skill: Check CI Health
+# Diagnose CI/CD issues
+
+name: check_ci_health
+description: |
+  Diagnose GitLab CI/CD pipeline issues.
+
+  This skill:
+  - Lists recent pipelines
+  - Shows failing jobs
+  - Gets trace logs for failures
+  - Validates .gitlab-ci.yml
+
+  Uses: gitlab_ci_list, gitlab_ci_view, gitlab_ci_trace, gitlab_ci_lint
+version: "1.0"
+
+inputs:
+  - name: project
+    type: string
+    required: false
+    default: "automation-analytics/automation-analytics-backend"
+    description: "GitLab project path"
+
+  - name: status
+    type: string
+    required: false
+    default: "failed"
+    description: "Filter by status (failed, success, running, all)"
+
+  - name: limit
+    type: integer
+    required: false
+    default: 5
+    description: "Number of pipelines to show"
+
+steps:
+  - name: list_pipelines
+    description: "List recent pipelines"
+    tool: gitlab_ci_list
+    args:
+      project: "{{ inputs.project }}"
+      status: "{{ inputs.status if inputs.status != 'all' else '' }}"
+    output: pipelines_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: list_pipelines ====================
+
+  - name: detect_failure_pipelines
+    description: "Detect if GitLab CI call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(pipelines_raw) if 'pipelines_raw' in dir() and pipelines_raw else ""
+      failure = detect_failure(result_text, "gitlab_ci_list")
+      result = failure
+    output: failure_pipelines
+    on_error: continue
+
+  - name: log_failure_pipelines
+    description: "Log failure to memory for learning"
+    condition: "failure_pipelines and failure_pipelines.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      entry = log_failure(
+          tool_name="gitlab_ci_list",
+          error_text=failure_pipelines.get('error_text', ''),
+          skill_name="check_ci_health",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_pipelines
+    on_error: continue
+
+  - name: parse_pipelines
+    description: "Parse pipeline list"
+    compute: |
+      pipelines_text = str(pipelines_raw) if 'pipelines_raw' in dir() and pipelines_raw else ""
+
+      import re
+      pipelines = []
+
+      for line in pipelines_text.split("\n"):
+        # Extract pipeline ID
+        id_match = re.search(r'#(\d+)', line)
+        if id_match:
+          pipeline_id = id_match.group(1)
+          status = "unknown"
+          if "failed" in line.lower():
+            status = "failed"
+          elif "success" in line.lower() or "passed" in line.lower():
+            status = "success"
+          elif "running" in line.lower():
+            status = "running"
+
+          pipelines.append({
+            "id": pipeline_id,
+            "status": status,
+            "raw": line.strip()[:100],
+          })
+
+      result = {
+        "pipelines": pipelines[:inputs.limit],
+        "count": len(pipelines),
+        "has_failures": any(p["status"] == "failed" for p in pipelines),
+      }
+    output: pipelines_info
+
+  - name: get_first_failed
+    description: "Get details of first failed pipeline"
+    condition: "pipelines_info.has_failures"
+    tool: gitlab_ci_view
+    args:
+      project: "{{ inputs.project }}"
+      pipeline_id: "{{ pipelines_info.pipelines[0].id if pipelines_info.pipelines else '0' }}"
+    output: failed_details_raw
+    on_error: continue
+
+  - name: get_trace
+    description: "Get trace log of failed pipeline"
+    condition: "pipelines_info.has_failures and pipelines_info.pipelines"
+    tool: gitlab_ci_trace
+    args:
+      project: "{{ inputs.project }}"
+      pipeline_id: "{{ pipelines_info.pipelines[0].id if pipelines_info.pipelines else '0' }}"
+    output: trace_raw
+    on_error: continue
+
+  - name: parse_trace
+    description: "Parse trace for error messages"
+    compute: |
+      trace_text = str(trace_raw) if 'trace_raw' in dir() and trace_raw else ""
+
+      # Look for common error patterns
+      import re
+
+      errors = []
+      error_patterns = [
+        r'error[:\s]+(.{0,100})',
+        r'failed[:\s]+(.{0,100})',
+        r'exception[:\s]+(.{0,100})',
+        r'AssertionError[:\s]+(.{0,100})',
+        r'ModuleNotFoundError[:\s]+(.{0,100})',
+      ]
+
+      for pattern in error_patterns:
+        matches = re.findall(pattern, trace_text, re.I)
+        errors.extend(matches[:3])
+
+      # Get last 500 chars as preview
+      preview = trace_text[-500:] if len(trace_text) > 500 else trace_text
+
+      result = {
+        "errors": errors[:10],
+        "preview": preview,
+        "length": len(trace_text),
+      }
+    output: trace_analysis
+
+  - name: lint_ci_config
+    description: "Lint .gitlab-ci.yml"
+    tool: gitlab_ci_lint
+    args:
+      project: "{{ inputs.project }}"
+    output: lint_raw
+    on_error: continue
+
+  - name: parse_lint
+    description: "Parse lint result"
+    compute: |
+      lint_text = str(lint_raw) if 'lint_raw' in dir() and lint_raw else ""
+
+      valid = "valid" in lint_text.lower() and "invalid" not in lint_text.lower()
+      has_errors = "error" in lint_text.lower()
+
+      result = {
+        "valid": valid,
+        "has_errors": has_errors,
+        "message": lint_text[:300] if lint_text else "",
+      }
+    output: lint_result
+
+outputs:
+  - name: report
+    value: |
+      ## 🔧 CI Health: {{ inputs.project }}
+
+      ---
+
+      ### 📋 Recent Pipelines
+
+      {% for pipeline in pipelines_info.pipelines %}
+      - {{ "❌" if pipeline.status == "failed" else ("✅" if pipeline.status == "success" else "🔄") }} #{{ pipeline.id }} - {{ pipeline.status }}
+      {% endfor %}
+
+      {% if pipelines_info.count == 0 %}
+      No pipelines found with status: {{ inputs.status }}
+      {% endif %}
+
+      ---
+
+      ### 📝 CI Config Validation
+
+      {% if lint_result.valid %}
+      ✅ `.gitlab-ci.yml` is valid
+      {% else %}
+      ❌ `.gitlab-ci.yml` has issues:
+
+      {{ lint_result.message }}
+      {% endif %}
+
+      {% if pipelines_info.has_failures %}
+      ---
+
+      ### ❌ Failed Pipeline Analysis
+
+      **Pipeline:** #{{ pipelines_info.pipelines[0].id }}
+
+      {% if trace_analysis.errors %}
+      **Errors found:**
+      {% for error in trace_analysis.errors[:5] %}
+      - `{{ error }}`
+      {% endfor %}
+      {% endif %}
+
+      **Trace tail:**
+      ```
+      {{ trace_analysis.preview }}
+      ```
+
+      ---
+
+      ### 🛠️ Debug Commands
+
+      **View full trace:**
+      ```
+      gitlab_ci_trace(project='{{ inputs.project }}', pipeline_id='{{ pipelines_info.pipelines[0].id }}')
+      ```
+
+      **Retry pipeline:**
+      ```
+      gitlab_ci_run(project='{{ inputs.project }}', ref='main')
+      ```
+
+      **Cancel running:**
+      ```
+      gitlab_ci_cancel(project='{{ inputs.project }}', pipeline_id='{{ pipelines_info.pipelines[0].id }}')
+      ```
+      {% endif %}

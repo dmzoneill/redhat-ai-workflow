@@ -57,6 +57,15 @@ inputs:
 # jira_url loaded from config.json in load_config step
 
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # ==================== RESOLVE REPOSITORY ====================
 
   - name: resolve_repo
@@ -185,7 +194,78 @@ steps:
       }
     output: commit_info
 
+  # ==================== GET TODAY'S CALENDAR ====================
+
+  - name: get_todays_meetings
+    description: "Get today's calendar events"
+    tool: google_calendar_list_events
+    args:
+      days: 1
+    output: calendar_events_raw
+    on_error: continue
+
+  - name: parse_calendar_events
+    description: "Parse calendar events"
+    compute: |
+      cal_text = str(calendar_events_raw) if 'calendar_events_raw' in dir() and calendar_events_raw else ""
+
+      meetings = []
+      if cal_text and "error" not in cal_text.lower() and "unauthorized" not in cal_text.lower():
+          import re
+          # Look for time patterns
+          for line in cal_text.split("\n"):
+              if any(kw in line for kw in [":", "AM", "PM", "standup", "meeting", "sync"]):
+                  # Extract time and title
+                  time_match = re.search(r'(\d{1,2}:\d{2}(?:\s*[AP]M)?)', line, re.I)
+                  if time_match:
+                      meetings.append({"time": time_match.group(1), "title": line.strip()[:60]})
+
+      result = {
+          "meetings": meetings[:10],
+          "has_calendar": bool(meetings),
+      }
+    output: calendar_events
+    on_error: continue
+
+  # ==================== GET SLACK UPDATES ====================
+
+  - name: get_slack_mentions
+    description: "Get recent Slack mentions"
+    tool: slack_channel_read
+    args:
+      channel: "team-automation-analytics"
+      limit: 20
+    output: slack_messages_raw
+    on_error: continue
+
+  - name: parse_slack_mentions
+    description: "Parse Slack messages"
+    compute: |
+      slack_text = str(slack_messages_raw) if 'slack_messages_raw' in dir() and slack_messages_raw else ""
+
+      mentions = []
+      if slack_text and "error" not in slack_text.lower():
+          for line in slack_text.split("\n")[:20]:
+              if line.strip():
+                  mentions.append(line.strip()[:100])
+
+      result = {
+          "recent_messages": mentions[:10],
+          "has_slack": bool(mentions),
+      }
+    output: slack_activity
+    on_error: continue
+
   # ==================== GET JIRA ACTIVITY ====================
+
+  - name: get_my_jira_issues
+    description: "Get all my assigned issues (quick query)"
+    condition: "inputs.include_jira"
+    tool: jira_my_issues
+    args:
+      max_results: 20
+    output: my_issues_raw
+    on_error: continue
 
   - name: get_jira_in_progress
     description: "Get my issues in progress"
@@ -319,6 +399,20 @@ steps:
               lines.append(f"- !{mr['iid']}: {mr['title']}")
 
       lines.append("")
+
+      # Today's Meetings
+      if calendar_events and calendar_events.get('has_calendar'):
+          lines.append("### 📅 Today's Meetings")
+          for mtg in calendar_events.get('meetings', [])[:5]:
+              lines.append(f"- {mtg['time']}: {mtg['title']}")
+          lines.append("")
+
+      # Slack Updates
+      if slack_activity and slack_activity.get('has_slack'):
+          lines.append("### 💬 Team Channel (Recent)")
+          for msg in slack_activity.get('recent_messages', [])[:3]:
+              lines.append(f"- {msg[:80]}")
+          lines.append("")
 
       # Blockers
       lines.append("### 🚧 Blockers")

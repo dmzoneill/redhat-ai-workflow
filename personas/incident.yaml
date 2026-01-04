@@ -1,0 +1,37 @@
+# Incident Persona Configuration
+# Specifies which MCP tool modules this persona needs
+
+name: incident
+description: Production incident response and recovery
+persona: personas/incident.md
+
+# Tool modules to load (from tool_modules/aa-*)
+tools:
+  - workflow      # 28 tools - Skills, agents, memory (REQUIRED)
+  - k8s           # 26 tools - Kubernetes operations
+  - prometheus    # 13 tools - Metrics and alerts
+  - alertmanager  # 6 tools - Silence management
+  - kibana        # 9 tools - Log search
+  - jira          # 24 tools - Incident tracking
+
+# Total: ~106 tools (under 128 limit)
+
+skills:
+  # Investigation
+  - investigate_alert       # Investigate Prometheus alerts
+  - investigate_slack_alert # Investigate alerts from Slack
+  - debug_prod              # Debug production issues
+  - environment_overview    # Full environment health check
+  - check_secrets           # Verify secrets/configmaps
+
+  # Mitigation
+  - silence_alert           # Create/manage alert silences
+  - rollout_restart         # Restart deployments
+  - scale_deployment        # Scale pods up/down
+
+  # Communication
+  - notify_team             # Send Slack notifications
+
+  # Issue tracking
+  - create_jira_issue       # Create incident ticket
+  - start_work              # Start working on incident

@@ -22,7 +22,8 @@
         skill-test skill-test-list skill-test-dry \
         docs-serve docs-check list-skills list-tools \
         sync-commands sync-commands-dry sync-commands-reverse \
-        sync-config-example sync-config-example-fix
+        sync-config-example sync-config-example-fix \
+        ext-build ext-install ext-watch ext-clean ext-package
 
 # Use bash for proper escape sequence handling
 SHELL := /bin/bash
@@ -105,6 +106,13 @@ help:
 	@printf "  \033[32mmake sync-commands-reverse\033[0m  Sync Claude Code to Cursor format\n"
 	@printf "  \033[32mmake sync-config-example\033[0m  Check config.json.example has all keys\n"
 	@printf "  \033[32mmake sync-config-example-fix\033[0m  Add missing keys to example\n"
+	@printf "\n"
+	@printf "\033[1mVSCode Extension:\033[0m\n"
+	@printf "  \033[32mmake ext-build\033[0m          Build the VSCode/Cursor extension\n"
+	@printf "  \033[32mmake ext-install\033[0m        Install extension to Cursor (symlink)\n"
+	@printf "  \033[32mmake ext-watch\033[0m          Watch and rebuild on changes\n"
+	@printf "  \033[32mmake ext-clean\033[0m          Clean extension build artifacts\n"
+	@printf "  \033[32mmake ext-package\033[0m        Package as .vsix for distribution\n"
 	@printf "\n"
 	@printf "\033[1mUtilities:\033[0m\n"
 	@printf "  \033[32mmake config-validate\033[0m    Validate config.json\n"
@@ -275,27 +283,27 @@ mcp-server: mcp-developer
 
 mcp-developer:
 	@printf "\033[36mStarting MCP server (developer agent)...\033[0m\n"
-	cd $(PROJECT_ROOT)/mcp-servers/aa-common && $(PYTHON) -m src.server --agent developer
+	cd $(PROJECT_ROOT) && $(PYTHON) -m server --agent developer
 
 mcp-devops:
 	@printf "\033[36mStarting MCP server (devops agent)...\033[0m\n"
-	cd $(PROJECT_ROOT)/mcp-servers/aa-common && $(PYTHON) -m src.server --agent devops
+	cd $(PROJECT_ROOT) && $(PYTHON) -m server --agent devops
 
 mcp-incident:
 	@printf "\033[36mStarting MCP server (incident agent)...\033[0m\n"
-	cd $(PROJECT_ROOT)/mcp-servers/aa-common && $(PYTHON) -m src.server --agent incident
+	cd $(PROJECT_ROOT) && $(PYTHON) -m server --agent incident
 
 mcp-release:
 	@printf "\033[36mStarting MCP server (release agent)...\033[0m\n"
-	cd $(PROJECT_ROOT)/mcp-servers/aa-common && $(PYTHON) -m src.server --agent release
+	cd $(PROJECT_ROOT) && $(PYTHON) -m server --agent release
 
 mcp-slack:
 	@printf "\033[36mStarting MCP server (slack agent)...\033[0m\n"
-	cd $(PROJECT_ROOT)/mcp-servers/aa-common && $(PYTHON) -m src.server --agent slack
+	cd $(PROJECT_ROOT) && $(PYTHON) -m server --agent slack
 
 mcp-all:
 	@printf "\033[33m⚠️  Loading ALL tools - may exceed Cursor's 128 tool limit!\033[0m\n"
-	cd $(PROJECT_ROOT)/mcp-servers/aa-common && $(PYTHON) -m src.server --all
+	cd $(PROJECT_ROOT) && $(PYTHON) -m server --all
 
 mcp-custom:
 	@printf "\033[36mUsage: make mcp-custom TOOLS='git,jira,slack'\033[0m\n"
@@ -303,7 +311,7 @@ mcp-custom:
 		echo -e "\033[31m❌ TOOLS not specified\033[0m"; \
 		exit 1; \
 	fi
-	cd $(PROJECT_ROOT)/mcp-servers/aa-common && $(PYTHON) -m src.server --tools $(TOOLS)
+	cd $(PROJECT_ROOT) && $(PYTHON) -m server --tools $(TOOLS)
 
 # =============================================================================
 # DEVELOPMENT
@@ -345,13 +353,13 @@ skill-test-dry:
 
 lint:
 	@printf "\033[36mRunning linters...\033[0m\n"
-	cd $(PROJECT_ROOT) && flake8 scripts/ mcp-servers/ --max-line-length=120 --ignore=E501,W503,E402,C901,E203
-	cd $(PROJECT_ROOT) && black --check scripts/ mcp-servers/ --line-length=120
+	cd $(PROJECT_ROOT) && flake8 scripts/ tool_modules/ --max-line-length=120 --ignore=E501,W503,E402,C901,E203
+	cd $(PROJECT_ROOT) && black --check scripts/ tool_modules/ --line-length=120
 	@printf "\033[32m✅ Linting passed\033[0m\n"
 
 format:
 	@printf "\033[36mFormatting code...\033[0m\n"
-	cd $(PROJECT_ROOT) && black scripts/ mcp-servers/ --line-length=120
+	cd $(PROJECT_ROOT) && black scripts/ tool_modules/ --line-length=120
 	@printf "\033[32m✅ Code formatted\033[0m\n"
 
 # =============================================================================
@@ -385,7 +393,7 @@ list-skills:
 
 list-tools:
 	@printf "\033[36mMCP Tool Modules:\033[0m\n"
-	@for dir in $(PROJECT_ROOT)/mcp-servers/aa-*/; do \
+	@for dir in $(PROJECT_ROOT)/tool_modules/aa-*/; do \
 		name=$$(basename $$dir); \
 		if [ -f "$$dir/src/tools.py" ]; then \
 			count=$$(grep -c "@server.tool" $$dir/src/tools.py 2>/dev/null || echo "0"); \
@@ -478,3 +486,37 @@ quick-start:
 	@printf "   make slack-daemon-bg\n"
 	@printf "   make slack-daemon-logs\n"
 	@printf "\n"
+
+# =============================================================================
+# VSCODE EXTENSION
+# =============================================================================
+
+EXT_DIR := $(PROJECT_ROOT)/extensions/aa-workflow-vscode
+CURSOR_EXT_DIR := $(HOME)/.cursor/extensions
+
+ext-build:
+	@printf "\033[36mBuilding VSCode extension...\033[0m\n"
+	cd $(EXT_DIR) && npm install && npm run compile
+	@printf "\033[32m✅ Extension built\033[0m\n"
+
+ext-install: ext-build
+	@printf "\033[36mInstalling extension to Cursor...\033[0m\n"
+	@mkdir -p $(CURSOR_EXT_DIR)
+	@rm -rf $(CURSOR_EXT_DIR)/aa-workflow-vscode
+	@ln -sf $(EXT_DIR) $(CURSOR_EXT_DIR)/aa-workflow-vscode
+	@printf "\033[32m✅ Extension installed (symlinked)\033[0m\n"
+	@printf "\033[33mRestart Cursor to activate the extension\033[0m\n"
+
+ext-watch:
+	@printf "\033[36mWatching extension for changes...\033[0m\n"
+	cd $(EXT_DIR) && npm run watch
+
+ext-clean:
+	@printf "\033[36mCleaning extension build...\033[0m\n"
+	rm -rf $(EXT_DIR)/out $(EXT_DIR)/node_modules
+	@printf "\033[32m✅ Extension cleaned\033[0m\n"
+
+ext-package:
+	@printf "\033[36mPackaging extension...\033[0m\n"
+	cd $(EXT_DIR) && npx --yes vsce package
+	@printf "\033[32m✅ Extension packaged (see $(EXT_DIR)/*.vsix)\033[0m\n"

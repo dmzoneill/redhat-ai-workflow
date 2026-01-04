@@ -311,6 +311,52 @@ steps:
         result = {"mergeable": True, "message": "Branch can merge cleanly"}
     output: merge_check
 
+  # Step 4b: Read .gitlab-ci.yml to understand CI configuration
+  - name: read_ci_config
+    description: "Read GitLab CI configuration to understand pipeline"
+    tool: gitlab_file_read
+    args:
+      project: "{{ resolved_repo.gitlab_project }}"
+      file_path: ".gitlab-ci.yml"
+      ref: "{{ resolved_repo.default_branch }}"
+    output: ci_config_raw
+    on_error: continue
+
+  - name: parse_ci_config
+    description: "Parse CI config for key jobs"
+    compute: |
+      ci_text = str(ci_config_raw) if 'ci_config_raw' in dir() and ci_config_raw else ""
+
+      # Skip if error or not found
+      if "error" in ci_text.lower() or "not found" in ci_text.lower():
+          result = {"found": False, "jobs": [], "stages": []}
+      else:
+          # Extract stages and jobs
+          import re
+
+          stages = []
+          stage_match = re.search(r'stages:\s*\n((?:\s+-\s+\w+\n?)+)', ci_text)
+          if stage_match:
+              stages = re.findall(r'-\s+(\w+)', stage_match.group(1))
+
+          # Find job names (lines ending with :)
+          jobs = []
+          for line in ci_text.split("\n"):
+              if line and not line.startswith(" ") and line.endswith(":") and not line.startswith("."):
+                  job_name = line.rstrip(":")
+                  if job_name not in ["stages", "variables", "include", "default", "workflow"]:
+                      jobs.append(job_name)
+
+          result = {
+              "found": True,
+              "jobs": jobs[:10],
+              "stages": stages[:8],
+              "has_tests": any("test" in j.lower() for j in jobs),
+              "has_lint": any("lint" in j.lower() for j in jobs),
+          }
+    output: ci_config
+    on_error: continue
+
   # Step 5: Check for existing MR using MCP tool
   - name: check_existing_mr
     description: "Check if MR already exists for this branch"
@@ -386,14 +432,25 @@ steps:
 
       if "✅" in output:
         if "check passed" in output.lower():
-          black_result = {"passed": True, "message": "Black check passed"}
+          black_result = {"passed": True, "message": "Black check passed", "blocking": False}
         else:
-          black_result = {"passed": True, "fixed": True, "message": "Black applied"}
+          black_result = {"passed": True, "fixed": True, "message": "Black applied fixes", "blocking": False}
       else:
-        black_result = {"passed": False, "message": "Files need formatting. Run 'black .'"}
+        black_result = {"passed": False, "message": "Files need formatting. Run 'black .'", "blocking": True}
 
       result = black_result
     output: black_result
+
+  - name: block_on_black_errors
+    description: "Block MR creation if black formatting needed"
+    condition: "inputs.run_linting and black_result and black_result.get('blocking', False)"
+    compute: |
+      raise ValueError(
+        "❌ Code formatting issues detected.\n\n"
+        "Run 'black .' to fix formatting, then commit the changes.\n"
+        "Or use: skill_run('create_mr', '{\"auto_fix_lint\": true, ...}') to auto-fix."
+      )
+    output: black_block
 
   - name: get_changed_files
     description: "Get list of Python files changed in this branch"
@@ -441,38 +498,38 @@ steps:
       else:
         # Extract issues from output - look for typical flake8 format
         # Common error/warning codes that indicate real issues
-        error_codes = ['F4', 'F8', 'E1', 'E2', 'E3', 'E4', 'E5', 'E7', 'E9', 'W']
+        error_codes = ['F', 'E', 'W', 'C']  # All flake8 codes
         issues = []
         for line in raw.split('\n'):
           line = line.strip()
           if ':' in line and any(code in line for code in error_codes):
-            issues.append(line)
+            # Skip ignored codes (E501=line length, W503=line break, E203=whitespace)
+            if not any(skip in line for skip in ['E501', 'W503', 'E203']):
+              issues.append(line)
         issues = issues[:15]
 
-        # F401 (unused import), F811 (redefinition), F821-823 (undefined) are blocking
-        blocking_codes = ['F401', 'F811', 'F821', 'F822', 'F823', 'E999']
-        has_blocking = any(any(code in issue for code in blocking_codes) for issue in issues)
-
+        # Block on ANY remaining issues (after ignoring the allowed ones)
         flake8_result = {
-          "passed": False,
-          "message": f"{len(issues)} flake8 issue(s) in changed files",
+          "passed": len(issues) == 0,
+          "message": f"{len(issues)} flake8 issue(s) in changed files" if issues else "Flake8 passed",
           "issues": issues,
-          "blocking": has_blocking,
+          "blocking": len(issues) > 0,
         }
 
       result = flake8_result
     output: flake8_result
 
   - name: block_on_lint_errors
-    description: "Block MR creation if there are critical lint errors"
+    description: "Block MR creation if there are lint errors"
     condition: "inputs.run_linting and flake8_result and flake8_result.get('blocking', False)"
     compute: |
       issues = flake8_result.get("issues", [])
       issue_text = "\n".join(f"  - {i}" for i in issues[:10])
 
       raise ValueError(
-        f"❌ Critical lint errors found. Fix before creating MR:\n{issue_text}\n\n"
-        "Run: pipenv run flake8 <files> to see all issues"
+        f"❌ Lint errors found. Fix before creating MR:\n{issue_text}\n\n"
+        "Run: pipenv run flake8 <files> to see all issues\n"
+        "Or: black . && isort . to auto-format"
       )
     output: lint_block
 
@@ -496,6 +553,32 @@ steps:
     output: jira_check
     on_error: continue
 
+  # ==================== VALIDATE CI CONFIG ====================
+
+  - name: lint_ci_config
+    description: "Validate .gitlab-ci.yml before creating MR"
+    tool: gitlab_ci_lint
+    args:
+      project: "{{ resolved_repo.gitlab_project }}"
+    output: ci_lint_raw
+    on_error: continue
+
+  - name: parse_ci_lint
+    description: "Parse CI lint result"
+    compute: |
+      lint_text = str(ci_lint_raw) if 'ci_lint_raw' in dir() and ci_lint_raw else ""
+
+      valid = "valid" in lint_text.lower() and "invalid" not in lint_text.lower()
+      has_errors = "error" in lint_text.lower()
+
+      result = {
+        "valid": valid,
+        "has_errors": has_errors,
+        "message": lint_text[:200] if lint_text else "",
+      }
+    output: ci_lint_result
+    on_error: continue
+
   # ==================== CREATE MR ====================
 
   - name: push_branch
@@ -506,6 +589,36 @@ steps:
       branch: "{{ current_branch.name }}"
       set_upstream: true
     output: push_result
+    on_error: continue
+
+  # ==================== AUTO-HEAL: push_branch ====================
+
+  - name: detect_failure_push
+    description: "Detect if git push failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(push_result) if 'push_result' in dir() and push_result else ""
+      failure = detect_failure(result_text, "git_push")
+      result = failure
+    output: failure_push
+    on_error: continue
+
+  - name: log_failure_push
+    description: "Log failure to memory for learning"
+    condition: "failure_push and failure_push.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      entry = log_failure(
+          tool_name="git_push",
+          error_text=failure_push.get('error_text', ''),
+          skill_name="create_mr",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_push
     on_error: continue
 
   - name: build_description
@@ -581,13 +694,10 @@ steps:
     description: "Build Slack message with proper team mention"
     condition: "mr and not inputs.draft"
     compute: |
-      # Build team mention
+      # Build team mention using shared utility
       team_group_id = resolved_repo.get("team_group_id", "")
       team_group_handle = resolved_repo.get("team_group_handle", "aa-api-team")
-      if team_group_id:
-          team_mention = f"<!subteam^{team_group_id}|@{team_group_handle}>"
-      else:
-          team_mention = f"@{team_group_handle}"
+      team_mention = slack_utils.build_team_mention(team_group_id, team_group_handle)
 
       jira_url = resolved_repo.get("jira_url", "https://issues.redhat.com")
       issue_key = inputs.get("issue_key", "").upper()
@@ -654,6 +764,16 @@ steps:
     args:
       action: "Created MR !{{ memory_context.mr_iid }} for {{ inputs.issue_key }}"
       details: "{{ memory_context.mr_url }}"
+    on_error: continue
+
+  - name: notify_slack_mr_created
+    description: "Post MR to team channel for visibility"
+    condition: "mr"
+    tool: slack_post_message
+    args:
+      channel: "team-automation-analytics"
+      message: "🔀 MR ready for review: [!{{ memory_context.mr_iid }}]({{ memory_context.mr_url }}) - {{ inputs.issue_key }}"
+    output: slack_mr_notify
     on_error: continue
 
   - name: add_mr_to_memory

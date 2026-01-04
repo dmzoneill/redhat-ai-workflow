@@ -85,9 +85,9 @@ jira_set_status(issue_key="AAP-12345", status="In Progress")
 
 ## Loaded By
 
-- [👨‍💻 Developer Agent](../agents/developer.md)
-- [🚨 Incident Agent](../agents/incident.md)
-- [💬 Slack Agent](../agents/slack.md)
+- [👨‍💻 Developer Persona](../personas/developer.md)
+- [🚨 Incident Persona](../personas/incident.md)
+- [💬 Slack Persona](../personas/slack.md)
 
 ## Related Skills
 

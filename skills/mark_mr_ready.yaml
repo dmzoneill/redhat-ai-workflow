@@ -33,7 +33,28 @@ inputs:
     default: true
     description: "Update Jira status to In Review"
 
+  - name: run_linting
+    type: boolean
+    required: false
+    default: true
+    description: "Run linting checks before marking MR ready"
+
+  - name: repo
+    type: string
+    required: false
+    default: ""
+    description: "Repository path for linting (auto-detected if not provided)"
+
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # Step 1: Load config
   - name: load_config
     compute: |
@@ -102,6 +123,102 @@ steps:
       }
     output: mr_info
 
+  # ==================== LINTING BEFORE MARKING READY ====================
+
+  - name: resolve_repo_for_lint
+    description: "Resolve repo path for linting"
+    condition: "inputs.run_linting"
+    compute: |
+      import os
+      from scripts.common.config_loader import load_config
+
+      repo_path = None
+
+      if inputs.repo and inputs.repo != "":
+        repo_path = inputs.repo
+      else:
+        # Try to resolve from project name
+        config = load_config()
+        repos = config.get("repositories", {})
+        project = inputs.project
+
+        for name, cfg in repos.items():
+          gitlab = cfg.get("gitlab", "")
+          if gitlab and project in gitlab:
+            repo_path = cfg.get("path")
+            break
+
+        # Fall back to cwd
+        if not repo_path:
+          cwd = os.getcwd()
+          if os.path.exists(os.path.join(cwd, ".git")):
+            repo_path = cwd
+
+      result = {"path": repo_path}
+    output: lint_repo
+
+  - name: run_black_check
+    description: "Check code formatting before marking ready"
+    condition: "inputs.run_linting and lint_repo and lint_repo.get('path')"
+    tool: code_format
+    args:
+      repo: "{{ lint_repo.path }}"
+      tool: "black"
+      check_only: true
+    output: black_raw
+    on_error: continue
+
+  - name: run_flake8_check
+    description: "Run flake8 linting before marking ready"
+    condition: "inputs.run_linting and lint_repo and lint_repo.get('path')"
+    tool: code_lint
+    args:
+      repo: "{{ lint_repo.path }}"
+      tool: "flake8"
+      max_line_length: 100
+      ignore: "E501,W503,E203"
+    output: flake8_raw
+    on_error: continue
+
+  - name: parse_lint_results
+    description: "Parse lint results"
+    condition: "inputs.run_linting and lint_repo and lint_repo.get('path')"
+    compute: |
+      black_output = str(black_raw) if 'black_raw' in dir() and black_raw else ""
+      flake8_output = str(flake8_raw) if 'flake8_raw' in dir() and flake8_raw else ""
+
+      black_ok = "✅" in black_output or "check passed" in black_output.lower() or not black_output.strip()
+      flake8_ok = "✅" in flake8_output or "passed" in flake8_output.lower() or not flake8_output.strip()
+
+      issues = []
+      if not black_ok and black_output.strip():
+        issues.append("Black: Code needs formatting (run 'black .')")
+      if not flake8_ok and flake8_output.strip():
+        issue_lines = [l for l in flake8_output.split('\n') if ':' in l and ('E' in l or 'F' in l or 'W' in l)]
+        # Skip ignored codes
+        issue_lines = [l for l in issue_lines if not any(skip in l for skip in ['E501', 'W503', 'E203'])]
+        if issue_lines:
+          issues.append(f"Flake8: {len(issue_lines)} issue(s) found")
+
+      result = {
+        "passed": len(issues) == 0,
+        "issues": issues,
+        "message": "Lint passed" if not issues else "; ".join(issues),
+      }
+    output: lint_result
+
+  - name: block_on_lint_before_ready
+    description: "Block marking ready if lint fails"
+    condition: "inputs.run_linting and lint_result and not lint_result.get('passed', True)"
+    compute: |
+      issues = lint_result.get("issues", [])
+      raise ValueError(
+        f"❌ Lint errors found. Fix before marking MR ready:\n" +
+        "\n".join(f"  - {i}" for i in issues) +
+        "\n\nRun 'black . && flake8' to check locally, then push fixes."
+      )
+    output: lint_block
+
   # Step 4: Mark as ready (remove draft)
   - name: mark_ready
     description: "Remove draft status from MR"
@@ -120,10 +237,7 @@ steps:
       # Build team mention
       team_group_id = cfg.get("team_group_id", "")
       team_group_handle = cfg.get("team_group_handle", "aa-api-team")
-      if team_group_id:
-          team_mention = f"<!subteam^{team_group_id}|@{team_group_handle}>"
-      else:
-          team_mention = f"@{team_group_handle}"
+      team_mention = slack_utils.build_team_mention(team_group_id, team_group_handle)
 
       jira_url = cfg.get("jira_url", "https://issues.redhat.com")
       jira_key = mr_info.get("jira_key", "")

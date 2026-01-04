@@ -99,7 +99,7 @@ KUBECONFIG=~/.kube/config.e bonfire deploy \
 
 ## Loaded By
 
-- [🔧 DevOps Agent](../agents/devops.md)
+- [🔧 DevOps Persona](../personas/devops.md)
 
 ## Related Skills
 

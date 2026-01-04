@@ -1,10 +1,12 @@
 # ⚡ workflow
 
-> Core workflow and agent management tools
+> Core workflow and persona management tools
 
 ## Overview
 
-The `aa-workflow` module provides core tools for session management, skill execution, and agent loading. These tools are always available regardless of which agent is loaded.
+The `aa-workflow` module provides core tools for session management, skill execution, and persona loading. These tools are always available regardless of which persona is loaded.
+
+> **Terminology:** "Agents" here means tool configuration profiles (personas), not separate AI instances.
 
 ## Tool Count
 
@@ -15,8 +17,8 @@ The `aa-workflow` module provides core tools for session management, skill execu
 | Tool | Description |
 |------|-------------|
 | `session_start` | Initialize session with context |
-| `agent_list` | List available agents |
-| `agent_load` | Switch to a different agent |
+| `persona_list` | List available personas |
+| `persona_load` | Switch to a different persona |
 | `skill_list` | List available skills |
 | `skill_run` | Execute a skill |
 | `tool_list` | List all available tools |
@@ -55,7 +57,7 @@ session_start(agent="developer")
 ### Switch Agent
 
 ```python
-agent_load("devops")
+persona_load("devops")
 ```
 
 ### Run Skill
@@ -95,5 +97,5 @@ Always loaded - these are core tools.
 ## Related
 
 - [Architecture](../architecture/README.md)
-- [Agents](../agents/README.md)
+- [Agents](../personas/README.md)
 - [Skills](../skills/README.md)

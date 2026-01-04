@@ -1,0 +1,153 @@
+# Integration Test Exclusions
+#
+# Skills and tools listed here will be SKIPPED during integration testing
+# to prevent production impact or resource consumption.
+#
+# Add items here when:
+# - They could affect production systems
+# - They create/modify external resources (Jira issues, MRs, namespaces)
+# - They send notifications (Slack, email)
+# - They require specific prerequisites that can't be easily mocked
+
+excluded_skills:
+  # ========== PRODUCTION IMPACT ==========
+  - name: release_aa_backend_prod
+    reason: "Creates app-interface MR for production deployment"
+    risk: critical
+
+  - name: test_mr_ephemeral
+    reason: "Reserves ephemeral namespace and deploys - uses real cluster resources"
+    risk: high
+
+  # ========== EXTERNAL MODIFICATIONS ==========
+  - name: create_mr
+    reason: "Creates real GitLab merge requests"
+    risk: high
+
+  - name: review_pr
+    reason: "Posts comments/approvals to real MRs"
+    risk: high
+
+  - name: review_all_prs
+    reason: "Batch reviews - high volume of real MR modifications"
+    risk: high
+
+  - name: rebase_pr
+    reason: "Modifies git history on real branches"
+    risk: medium
+
+  - name: close_issue
+    reason: "Closes real Jira issues"
+    risk: medium
+
+  # ========== NOTIFICATIONS ==========
+  - name: slack_daemon_control
+    reason: "Controls Slack listener - could send messages"
+    risk: medium
+
+  # ========== JIRA MODIFICATIONS ==========
+  - name: jira_hygiene
+    reason: "Updates Jira issue fields"
+    risk: medium
+
+excluded_tools:
+  # ========== DESTRUCTIVE GIT ==========
+  - git_commit
+  - git_push
+  - git_reset
+  - git_clean
+  - git_merge
+  - git_rebase
+
+  # ========== JIRA WRITES ==========
+  - jira_set_status
+  - jira_add_comment
+  - jira_create_issue
+  - jira_assign
+  - jira_unassign
+  - jira_add_flag
+  - jira_remove_flag
+  - jira_block
+  - jira_unblock
+
+  # ========== GITLAB WRITES ==========
+  - gitlab_mr_create
+  - gitlab_mr_merge
+  - gitlab_mr_approve
+  - gitlab_mr_close
+
+  # ========== K8S DESTRUCTIVE ==========
+  - kubectl_delete_pod
+  - kubectl_rollout_restart
+  - kubectl_scale
+  - kubectl_exec
+
+  # ========== BONFIRE RESOURCE OPS ==========
+  - bonfire_namespace_reserve
+  - bonfire_namespace_release
+  - bonfire_namespace_extend
+  - bonfire_deploy_aa
+  - bonfire_deploy_aa_local
+
+  # ========== SLACK WRITES ==========
+  - slack_send_message
+  - slack_respond_and_mark
+  - slack_add_reaction
+  - slack_listener_start
+  - slack_listener_stop
+
+# Skills that ARE safe to test (read-only or local-only)
+safe_skills:
+  - start_work       # Creates local branch only (skip Jira update step)
+  - check_my_prs     # Read-only GitLab queries
+  - sync_branch      # Local git fetch/rebase only
+  - standup_summary  # Read-only aggregation
+  - debug_prod       # Read-only investigation
+  - investigate_alert # Read-only queries
+  - integration_test # Meta - testing itself
+
+# Safe tool tests with read-only parameters
+safe_tool_tests:
+  git:
+    - tool: git_status
+      args: { repo: "." }
+    - tool: git_branch
+      args: { repo: "." }
+    - tool: git_log
+      args: { repo: ".", limit: 1 }
+    - tool: git_remote
+      args: { repo: "." }
+
+  gitlab:
+    - tool: gitlab_mr_list
+      args: { limit: 1 }
+    - tool: gitlab_project_info
+      args: {}
+
+  jira:
+    - tool: jira_search
+      args: { jql: "project=AAP AND created >= -1d", max_results: 3 }
+
+  k8s:
+    - tool: kubectl_get_pods
+      args: { namespace: "tower-analytics-stage", environment: "stage" }
+    - tool: kubectl_get_deployments
+      args: { namespace: "tower-analytics-stage", environment: "stage" }
+
+  bonfire:
+    - tool: bonfire_namespace_list
+      args: { mine_only: true }
+    - tool: bonfire_apps_list
+      args: {}
+
+  quay:
+    - tool: quay_list_tags
+      args: { limit: 1 }
+
+  workflow:
+    - tool: persona_list
+      args: {}
+    - tool: memory_read
+      args: {}
+    - tool: skill_list
+      args: {}

@@ -34,6 +34,12 @@ inputs:
     required: false
     description: "Repository name from config (e.g., 'automation-analytics-backend') - alternative to repo path"
 
+  - name: auto_stash
+    type: boolean
+    required: false
+    default: true
+    description: "Automatically stash uncommitted changes before checkout (default: true)"
+
 steps:
   # ==================== RESOLVE REPOSITORY ====================
 
@@ -157,6 +163,36 @@ steps:
     args:
       issue_key: "{{ validated_issue_key }}"
     output: issue
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_issue ====================
+
+  - name: detect_failure_issue
+    description: "Detect if Jira call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(issue) if 'issue' in dir() and issue else ""
+      failure = detect_failure(result_text, "jira_view_issue")
+      result = failure
+    output: failure_issue
+    on_error: continue
+
+  - name: log_failure_issue
+    description: "Log failure to memory for learning"
+    condition: "failure_issue and failure_issue.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      entry = log_failure(
+          tool_name="jira_view_issue",
+          error_text=failure_issue.get('error_text', ''),
+          skill_name="start_work",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_issue
     on_error: continue
 
   - name: check_issue_exists
@@ -349,6 +385,30 @@ steps:
       branch_name = f"{key}-{summary}"
     output: new_branch_name
 
+  # Step 7b: Stash uncommitted changes if needed
+  - name: stash_changes
+    description: "Stash any uncommitted changes before checkout"
+    condition: "inputs.get('auto_stash', True)"
+    tool: git_stash
+    args:
+      repo: "{{ resolved_repo.path }}"
+      action: "push"
+      message: "Auto-stash before switching to {{ inputs.issue_key }}"
+    output: stash_result
+    on_error: continue
+
+  - name: parse_stash_result
+    description: "Parse stash result"
+    compute: |
+      stash_text = str(stash_result) if 'stash_result' in dir() and stash_result else ""
+      had_changes = "Saved" in stash_text or "saved" in stash_text
+      result = {
+        "had_changes": had_changes,
+        "message": stash_text[:100] if stash_text else "No changes to stash",
+      }
+    output: stash_info
+    on_error: continue
+
   # Step 8a: Checkout existing branch using MCP tool
   - name: checkout_existing
     description: "Checkout existing branch for this issue"
@@ -411,6 +471,28 @@ steps:
       status: "In Progress"
     on_error: continue
 
+  # Step 9b: Transition issue using workflow transition (more reliable)
+  - name: transition_issue
+    description: "Transition issue to In Progress via workflow"
+    condition: "{{ not branch_check.get('exists', False) }}"
+    tool: jira_transition
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      transition: "Start Progress"
+    output: transition_result
+    on_error: continue
+
+  # Step 9c: Assign issue to current user
+  - name: assign_issue
+    description: "Assign issue to current user"
+    condition: "{{ not branch_check.get('exists', False) }}"
+    tool: jira_assign
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      assignee: "currentUser"
+    output: assign_result
+    on_error: continue
+
   # Step 10: Determine final branch name
   - name: get_final_branch
     compute: |
@@ -429,6 +511,17 @@ steps:
     args:
       action: "{{ 'Resumed' if branch_check.exists else 'Started' }} work on {{ inputs.issue_key }}"
       details: "Branch: {{ final_branch }}, Repo: {{ resolved_repo.path }}"
+    on_error: continue
+
+  # Step 11b: Notify team on Slack (optional)
+  - name: notify_slack_start
+    description: "Post to team channel that work started"
+    condition: "not branch_check.exists"
+    tool: slack_post_message
+    args:
+      channel: "team-automation-analytics"
+      message: "🚀 Started work on [{{ inputs.issue_key }}](https://issues.redhat.com/browse/{{ inputs.issue_key }})"
+    output: slack_notify_result
     on_error: continue
 
   # Step 12: Build issue summary and timestamp for memory
@@ -493,6 +586,13 @@ outputs:
 
       **Issue:** {{ issue }}
       **Branch:** `{{ final_branch }}`
+      {% if stash_info and stash_info.had_changes %}
+
+      📦 **Stashed changes:** {{ stash_info.message }}
+
+      _Tip: Run `git stash pop` when you want to restore these changes._
+
+      {% endif %}
       {% if branch_check.exists %}
 
       ---

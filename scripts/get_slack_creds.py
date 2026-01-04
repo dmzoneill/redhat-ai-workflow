@@ -30,6 +30,10 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 
+# Add scripts/common to path for shared utilities
+sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "common"))
+from config_loader import load_config
+
 # Try pycookiecheat for Chrome cookie extraction
 try:
     from pycookiecheat import chrome_cookies
@@ -156,14 +160,6 @@ def _format_mtime(path: Path) -> str:
 
     mtime = path.stat().st_mtime
     return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-
-
-def load_config() -> dict:
-    """Load existing config.json."""
-    if CONFIG_FILE.exists():
-        with open(CONFIG_FILE) as f:
-            return json.load(f)
-    return {}
 
 
 def save_config(config: dict):

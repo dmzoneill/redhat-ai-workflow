@@ -64,6 +64,15 @@ inputs:
 # No hardcoded constants - resolved dynamically
 
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"gitlab_failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # ==================== RESOLVE PROJECT ====================
 
   - name: resolve_project
@@ -78,12 +87,12 @@ steps:
       config = load_config()
       repos = config.get("repositories", {})
 
-      # Explicit project
-      if inputs.project:
-          gitlab_project = inputs.project
+      # Explicit project (inputs is a dict, use .get())
+      if inputs.get("project"):
+          gitlab_project = inputs.get("project")
       # Repo name from config
-      elif inputs.repo_name and inputs.repo_name in repos:
-          gitlab_project = repos[inputs.repo_name].get("gitlab")
+      elif inputs.get("repo_name") and inputs.get("repo_name") in repos:
+          gitlab_project = repos[inputs.get("repo_name")].get("gitlab")
       # Fall back to cwd
       else:
           cwd = os.getcwd()
@@ -142,8 +151,11 @@ steps:
       # Separate into own vs others using shared function
       separated = separate_mrs_by_author(all_mrs, my_username)
 
+      # inputs is a dict, use .get() with default
+      limit = inputs.get("limit", 10)
+
       result = {
-        'to_review': separated['to_review'][:inputs.limit],
+        'to_review': separated['to_review'][:limit],
         'my_mrs': separated['my_mrs'],
         'my_username': my_username
       }
@@ -151,25 +163,41 @@ steps:
 
   # ==================== CHECK MY MRs FOR MERGE CONFLICTS ====================
 
+  # Step 2b-prep: Extract my first MR info for tool calls
+  - name: prep_my_first_mr
+    description: "Extract my first MR info for subsequent tool calls"
+    condition: "parsed_mrs.get('my_mrs') and len(parsed_mrs.get('my_mrs', [])) > 0 and inputs.get('include_my_mrs', True)"
+    compute: |
+      my_mrs = parsed_mrs.get('my_mrs', [])
+      first_mr = my_mrs[0] if my_mrs else {}
+      result = {
+        'iid': first_mr.get('iid', 0),
+        'title': first_mr.get('title', ''),
+        'has_mr': len(my_mrs) > 0
+      }
+    output: my_first_mr_info
+
   # Step 2b: Get detailed status of first of my MRs to check for conflicts
   - name: check_my_mr_status
     description: "Check if any of my MRs have merge conflicts"
-    condition: "parsed_mrs.get('my_mrs') and len(parsed_mrs['my_mrs']) > 0 and inputs.include_my_mrs"
+    condition: "my_first_mr_info and my_first_mr_info.get('iid', 0) > 0"
     tool: gitlab_mr_view
     args:
       project: "{{ resolved.gitlab_project }}"
-      mr_id: "{{ parsed_mrs['my_mrs'][0]['iid'] }}"
+      mr_id: "{{ my_first_mr_info.iid }}"
     output: my_first_mr_details
     on_error: continue
 
   # Step 2c: Detect if my MR has merge conflicts
   - name: detect_merge_conflicts
     description: "Check for merge conflicts or needs rebase using shared parser"
-    condition: "my_first_mr_details"
+    condition: "my_first_mr_details and isinstance(my_first_mr_details, str)"
     compute: |
       from scripts.common.parsers import analyze_mr_status
 
-      mr = parsed_mrs['my_mrs'][0] if parsed_mrs.get('my_mrs') else {}
+      # Use my_first_mr_info which was already extracted
+      mr_iid = my_first_mr_info.get('iid', 0) if isinstance(my_first_mr_info, dict) else 0
+      mr_title = my_first_mr_info.get('title', '') if isinstance(my_first_mr_info, dict) else ''
 
       # Use shared MR status analyzer
       analysis = analyze_mr_status(my_first_mr_details or "")
@@ -177,8 +205,8 @@ steps:
       result = {
         'has_conflicts': analysis['has_conflicts'],
         'needs_rebase': analysis['needs_rebase'],
-        'mr_id': mr.get('iid'),
-        'title': mr.get('title', ''),
+        'mr_id': mr_iid,
+        'title': mr_title,
         'reason': analysis['action'] if analysis['needs_rebase'] else None
       }
     output: my_mr_conflict_status
@@ -186,11 +214,11 @@ steps:
   # Step 2d: Auto-rebase my MR if it has conflicts
   - name: auto_rebase_my_mr
     description: "Automatically rebase my MR if it has conflicts"
-    condition: "my_mr_conflict_status and my_mr_conflict_status.get('needs_rebase') and inputs.auto_rebase and not inputs.dry_run"
+    condition: "my_mr_conflict_status and isinstance(my_mr_conflict_status, dict) and my_mr_conflict_status.get('needs_rebase') and inputs.get('auto_rebase', True) and not inputs.get('dry_run', False)"
     tool: skill_run
     args:
       skill_name: rebase_pr
-      inputs: '{"mr_id": {{ my_mr_conflict_status.get("mr_id", 0) }}, "force_push": false}'
+      inputs: '{"mr_id": {{ my_mr_conflict_status.mr_id }}, "force_push": false}'
     output: rebase_result
     on_error: continue
 
@@ -240,33 +268,46 @@ steps:
 
 # ==================== INDIVIDUAL MR PROCESSING ====================
 
-  # Step 5: Get comments for first pending MR
+  # Step 5a: Extract first MR info for tool calls
+  - name: prep_first_mr
+    description: "Extract first MR info for subsequent tool calls"
+    condition: "len(mr_analysis) > 0"
+    compute: |
+      first_mr = mr_analysis[0] if mr_analysis else {}
+      result = {
+        'iid': first_mr.get('iid', 0),
+        'title': first_mr.get('title', ''),
+        'author': first_mr.get('author', 'unknown')
+      }
+    output: first_mr_info
+
+  # Step 5b: Get comments for first pending MR
   # Note: This is a simplified approach - a full implementation would loop
   - name: get_mr_comments
     description: "Get comments for MRs to check review status"
-    condition: "len(mr_analysis) > 0"
+    condition: "first_mr_info and first_mr_info.get('iid', 0) > 0"
     tool: gitlab_mr_view
     args:
       project: "{{ resolved.gitlab_project }}"
-      mr_id: "{{ mr_analysis[0]['iid'] }}"
+      mr_id: "{{ first_mr_info.iid }}"
     output: first_mr_details
     on_error: continue
 
   # Step 6: Analyze first MR's review status
   - name: analyze_first_mr
     description: "Check if first MR needs action using shared parsers"
-    condition: "len(mr_analysis) > 0 and first_mr_details"
+    condition: "isinstance(mr_analysis, list) and len(mr_analysis) > 0 and 'first_mr_details' in dir() and first_mr_details and isinstance(first_mr_details, str)"
     compute: |
       from scripts.common.parsers import analyze_mr_status, analyze_review_status
 
-      mr = mr_analysis[0]
-      details = first_mr_details or ""
+      mr = mr_analysis[0] if isinstance(mr_analysis, list) and mr_analysis else {}
+      details = first_mr_details if isinstance(first_mr_details, str) else ""
 
       # Get base analysis from shared parser
       analysis = analyze_mr_status(details, my_username)
 
       # Get review-specific analysis from shared parser
-      author = mr.get('author', '')
+      author = mr.get('author', '') if isinstance(mr, dict) else ''
       review_status = analyze_review_status(details, my_username, author)
 
       # Enhance with unresolved issues check
@@ -281,43 +322,45 @@ steps:
         action = review_status['recommended_action']
         reason = review_status['reason']
 
-      mr['action'] = action
-      mr['reason'] = reason
-
-      result = mr
+      if isinstance(mr, dict):
+        mr['action'] = action
+        mr['reason'] = reason
+        result = mr
+      else:
+        result = {'action': action, 'reason': reason, 'iid': 0}
     output: first_mr_action
 
   # Step 7: Run full review if needed
   - name: run_full_review
     description: "Run full review for MR that needs it"
-    condition: "first_mr_action and first_mr_action.get('action') == 'needs_full_review' and not inputs.dry_run"
+    condition: "first_mr_action and isinstance(first_mr_action, dict) and first_mr_action.get('action') == 'needs_full_review' and not inputs.get('dry_run', False)"
     tool: skill_run
     args:
       skill_name: review_pr
-      inputs: '{"mr_id": {{ first_mr_action.get("iid", 0) }}, "skip_tests": true}'
+      inputs: '{"mr_id": {{ first_mr_info.iid }}, "skip_tests": true}'
     output: full_review_result
     on_error: continue
 
   # Step 8: Approve MR if author addressed feedback
   - name: auto_approve
     description: "Approve MR where author addressed feedback"
-    condition: "first_mr_action and first_mr_action.get('action') == 'can_approve' and not inputs.dry_run"
+    condition: "first_mr_action and isinstance(first_mr_action, dict) and first_mr_action.get('action') == 'can_approve' and not inputs.get('dry_run', False)"
     tool: gitlab_mr_approve
     args:
       project: "{{ resolved.gitlab_project }}"
-      mr_id: "{{ first_mr_action.get('iid') }}"
+      mr_id: "{{ first_mr_info.iid }}"
     output: approve_result
     on_error: continue
 
   # Step 9: Post follow-up if needed
   - name: post_followup
     description: "Post follow-up comment for unresolved issues"
-    condition: "first_mr_action and first_mr_action.get('action') == 'needs_followup' and not inputs.dry_run"
+    condition: "first_mr_action and isinstance(first_mr_action, dict) and first_mr_action.get('action') == 'needs_followup' and not inputs.get('dry_run', False)"
     tool: gitlab_mr_comment
     args:
       project: "{{ resolved.gitlab_project }}"
-      mr_id: "{{ first_mr_action.get('iid') }}"
-      comment: |
+      mr_id: "{{ first_mr_info.iid }}"
+      message: |
         ## Follow-up Review
 
         I see you've responded to my feedback. However, there appear to be unresolved discussions.
@@ -333,16 +376,21 @@ steps:
   - name: build_summary
     description: "Compile batch review results"
     compute: |
-      my_username = parsed_mrs.get('my_username', 'unknown')
-      my_mrs = parsed_mrs.get('my_mrs', [])
-      mrs_to_review = parsed_mrs.get('to_review', [])
+      # Safely get values, handling cases where vars might be error strings
+      _parsed = parsed_mrs if isinstance(parsed_mrs, dict) else {}
+      my_username = _parsed.get('my_username', 'unknown')
+      my_mrs = _parsed.get('my_mrs', [])
+      mrs_to_review = _parsed.get('to_review', [])
+
+      _resolved = resolved if isinstance(resolved, dict) else {}
+      gitlab_project = _resolved.get('gitlab_project', 'unknown')
 
       lines = ["## Batch PR Review Summary", ""]
-      lines.append(f"**Project:** {resolved['gitlab_project']}")
+      lines.append(f"**Project:** {gitlab_project}")
       lines.append(f"**Current User:** {my_username}")
       lines.append(f"**MRs to Review (by others):** {len(mrs_to_review)}")
       lines.append(f"**My Open MRs:** {len(my_mrs)}")
-      lines.append(f"**Dry Run:** {'Yes' if inputs.dry_run else 'No'}")
+      lines.append(f"**Dry Run:** {'Yes' if inputs.get('dry_run', False) else 'No'}")
       lines.append("")
 
       # Categorize actions
@@ -353,15 +401,17 @@ steps:
         'skip': []
       }
 
-      if first_mr_action:
-        action = first_mr_action.get('action', 'skip')
-        actions.get(action, actions['skip']).append(first_mr_action)
+      # Only process first_mr_action if it's a dict (not an error string)
+      _first_mr_action = first_mr_action if isinstance(first_mr_action, dict) else None
+      if _first_mr_action:
+        action = _first_mr_action.get('action', 'skip')
+        actions.get(action, actions['skip']).append(_first_mr_action)
 
       # Summary by category
       if actions['can_approve']:
         lines.append("### ✅ Approved")
         for mr in actions['can_approve']:
-          status = "Would approve" if inputs.dry_run else "Approved"
+          status = "Would approve" if inputs.get('dry_run', False) else "Approved"
           lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ({status})")
         lines.append("")
 
@@ -374,7 +424,7 @@ steps:
       if actions['needs_followup']:
         lines.append("### 💬 Follow-up Posted")
         for mr in actions['needs_followup']:
-          status = "Would post follow-up" if inputs.dry_run else "Follow-up posted"
+          status = "Would post follow-up" if inputs.get('dry_run', False) else "Follow-up posted"
           lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ({status})")
         lines.append("")
 
@@ -385,43 +435,46 @@ steps:
         lines.append("")
 
       # Show my own MRs that might need attention
-      if my_mrs and inputs.include_my_mrs:
+      _my_mr_status = my_mr_conflict_status if isinstance(my_mr_conflict_status, dict) else None
+      if my_mrs and inputs.get('include_my_mrs', True):
         lines.append("---")
         lines.append("")
         lines.append("### 📝 Your Open MRs")
 
         # Check if we rebased any MR
-        if my_mr_conflict_status and my_mr_conflict_status.get('needs_rebase'):
-          first_mr_id = my_mr_conflict_status.get('mr_id')
-          reason = my_mr_conflict_status.get('reason', 'needs rebase')
+        if _my_mr_status and _my_mr_status.get('needs_rebase'):
+          first_mr_id = _my_mr_status.get('mr_id')
+          reason = _my_mr_status.get('reason', 'needs rebase')
 
-          if rebase_result:
-            lines.append(f"- !{first_mr_id}: {my_mr_conflict_status.get('title', '')} 🔄 **Rebased!**")
+          _rebase_result = rebase_result if 'rebase_result' in dir() else None
+          if _rebase_result:
+            lines.append(f"- !{first_mr_id}: {_my_mr_status.get('title', '')} 🔄 **Rebased!**")
             lines.append(f"  - {reason}")
             lines.append(f"  - *See rebase results below*")
-          elif inputs.auto_rebase and not inputs.dry_run:
-            lines.append(f"- !{first_mr_id}: {my_mr_conflict_status.get('title', '')} ⚠️ **Rebase attempted**")
-          elif inputs.dry_run:
-            lines.append(f"- !{first_mr_id}: {my_mr_conflict_status.get('title', '')} 🔄 **Would rebase** (dry run)")
+          elif inputs.get('auto_rebase', True) and not inputs.get('dry_run', False):
+            lines.append(f"- !{first_mr_id}: {_my_mr_status.get('title', '')} ⚠️ **Rebase attempted**")
+          elif inputs.get('dry_run', False):
+            lines.append(f"- !{first_mr_id}: {_my_mr_status.get('title', '')} 🔄 **Would rebase** (dry run)")
             lines.append(f"  - {reason}")
           else:
-            lines.append(f"- !{first_mr_id}: {my_mr_conflict_status.get('title', '')} ⚠️ **Needs rebase**")
+            lines.append(f"- !{first_mr_id}: {_my_mr_status.get('title', '')} ⚠️ **Needs rebase**")
             lines.append(f"  - {reason}")
             lines.append(f"  - Run: `skill_run(\"rebase_pr\", '{{\"mr_id\": {first_mr_id}}}')`")
 
         # Show remaining MRs
         for mr in my_mrs[:5]:
-          if my_mr_conflict_status and mr.get('iid') == my_mr_conflict_status.get('mr_id'):
+          if _my_mr_status and mr.get('iid') == _my_mr_status.get('mr_id'):
             continue  # Already shown above
           lines.append(f"- !{mr.get('iid', '?')}: {mr.get('title', '')}")
 
         lines.append("")
         lines.append("*Check these for feedback from reviewers. Use:*")
-        lines.append(f"*`gitlab_mr_view(project=\"{resolved['gitlab_project']}\", mr_id=<id>)` to see comments*")
+        lines.append(f"*`gitlab_mr_view(project=\"{gitlab_project}\", mr_id=<id>)` to see comments*")
         lines.append("")
 
       # Remaining MRs
-      remaining = len(mr_analysis) - 1
+      _mr_analysis = mr_analysis if isinstance(mr_analysis, list) else []
+      remaining = len(_mr_analysis) - 1
       if remaining > 0:
         lines.append(f"---")
         lines.append(f"*{remaining} more MRs not processed in this batch.*")
@@ -433,20 +486,25 @@ steps:
   # Step 11: Emit batch review hook
   - name: emit_batch_review_hook
     description: "Notify team channel about batch review"
-    condition: "not inputs.dry_run"
+    condition: "not inputs.get('dry_run', False)"
     compute: |
       # emit_event is available from skill engine safe_globals
+      # Safely handle cases where vars might be error strings
+      _first_mr_action = first_mr_action if isinstance(first_mr_action, dict) else None
+      _mr_analysis = mr_analysis if isinstance(mr_analysis, list) else []
+      _resolved = resolved if isinstance(resolved, dict) else {}
+
       # Count actions taken
-      approved = 1 if first_mr_action and first_mr_action.get('action') == 'can_approve' else 0
-      changes = 1 if first_mr_action and first_mr_action.get('action') in ['needs_full_review', 'needs_followup'] else 0
-      total = len(mr_analysis) if mr_analysis else 0
+      approved = 1 if _first_mr_action and _first_mr_action.get('action') == 'can_approve' else 0
+      changes = 1 if _first_mr_action and _first_mr_action.get('action') in ['needs_full_review', 'needs_followup'] else 0
+      total = len(_mr_analysis)
 
       if emit_event and total > 0:
           emit_event("batch_review_completed", {
               "count": str(total),
               "approved": str(approved),
               "changes": str(changes),
-              "project": resolved.get("gitlab_project", ""),
+              "project": _resolved.get("gitlab_project", ""),
           })
           result = "hook sent"
       elif total == 0:
@@ -463,13 +521,16 @@ steps:
     compute: |
       from datetime import datetime
 
+      # Safely handle mr_analysis that might be an error string
+      _mr_analysis = mr_analysis if isinstance(mr_analysis, list) else []
+
       # Count actions
       approved = 0
       feedback = 0
-      total = len(mr_analysis) if mr_analysis else 0
+      total = len(_mr_analysis)
 
-      for mr in (mr_analysis or []):
-          action = mr.get("action", "")
+      for mr in _mr_analysis:
+          action = mr.get("action", "") if isinstance(mr, dict) else ""
           if action == "can_approve":
               approved += 1
           elif action in ["needs_full_review", "needs_followup"]:
@@ -485,7 +546,7 @@ steps:
 
   - name: log_batch_review
     description: "Log batch review to session"
-    condition: "memory_context.total > 0"
+    condition: "isinstance(memory_context, dict) and memory_context.get('total', 0) > 0"
     tool: memory_session_log
     args:
       action: "Batch reviewed {{ memory_context.total }} MRs"
@@ -494,21 +555,29 @@ steps:
 
   - name: update_teammate_prefs
     description: "Update teammate preferences with review counts"
-    condition: "memory_context.total > 0 and mr_analysis"
+    condition: "isinstance(memory_context, dict) and memory_context.get('total', 0) > 0 and isinstance(mr_analysis, list)"
     compute: |
       # Use shared memory helpers
       data = memory.read_memory("learned/teammate_preferences")
-      teammates = data.get("teammates", {}) if isinstance(data.get("teammates"), dict) else {}
+      teammates = data.get("teammates", {}) if isinstance(data, dict) and isinstance(data.get("teammates"), dict) else {}
+
+      # Safely handle mr_analysis
+      _mr_analysis = mr_analysis if isinstance(mr_analysis, list) else []
+      _memory_context = memory_context if isinstance(memory_context, dict) else {}
 
       # Track reviews given to each author
-      for mr in (mr_analysis or []):
+      for mr in _mr_analysis:
+          if not isinstance(mr, dict):
+              continue
           author = mr.get("author", "unknown")
           if author and author != "unknown":
               if author not in teammates:
                   teammates[author] = {"reviews_received": 0}
               teammates[author]["reviews_received"] = teammates[author].get("reviews_received", 0) + 1
-              teammates[author]["last_reviewed_at"] = memory_context["timestamp"]
+              teammates[author]["last_reviewed_at"] = _memory_context.get("timestamp", "")
 
+      if data is None:
+          data = {}
       data["teammates"] = teammates
       memory.write_memory("learned/teammate_preferences", data)
       result = "updated"

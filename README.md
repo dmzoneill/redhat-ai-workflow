@@ -16,8 +16,8 @@
 [Getting Started](#-quick-start) •
 [Commands](docs/commands/README.md) •
 [Skills](docs/skills/README.md) •
-[Agents](docs/agents/README.md) •
-[MCP Servers](docs/mcp-servers/README.md) •
+[Personas](docs/personas/README.md) •
+[Tool Modules](docs/tool-modules/README.md) •
 [Architecture](docs/architecture/README.md)
 
 </div>
@@ -69,7 +69,7 @@ Create `.cursor/mcp.json` in your project:
       "command": "bash",
       "args": [
         "-c",
-        "cd ~/src/ai-workflow/mcp-servers/aa-common && source ~/src/ai-workflow/.venv/bin/activate && python3 -m src.server"
+        "cd ~/src/ai-workflow && source .venv/bin/activate && python3 -m server"
       ]
     }
   }
@@ -79,9 +79,9 @@ Create `.cursor/mcp.json` in your project:
 ### 3️⃣ Restart Cursor & Go!
 
 ```
-You: Load the developer agent
+You: Load the developer persona
 
-Claude: 👨‍💻 Developer Agent Loaded
+Claude: 👨‍💻 Developer Persona Loaded
         Tools: git, gitlab, jira, calendar, gmail (~86 tools)
 
 You: Start working on AAP-12345
@@ -139,23 +139,25 @@ make slack-daemon-llm
 
 ---
 
-## 🎭 Agents
+## 🎭 Personas (Tool Profiles)
 
-Switch agents to get different tool sets. See [full agent reference](docs/agents/README.md).
+> **Note:** "Agents" in this project are **tool configuration profiles** (personas), not separate AI instances. When you "load an agent," you're configuring which tools Claude has access to.
 
-| Agent | Command | Tools | Focus |
-|-------|---------|-------|-------|
-| [👨‍💻 developer](docs/agents/developer.md) | `Load developer agent` | ~86 | Daily coding, PRs |
-| [🔧 devops](docs/agents/devops.md) | `Load devops agent` | ~90 | Deployments, K8s |
-| [🚨 incident](docs/agents/incident.md) | `Load incident agent` | ~78 | Production debugging |
-| [📦 release](docs/agents/release.md) | `Load release agent` | ~69 | Shipping releases |
-| [💬 slack](docs/agents/slack.md) | `Load slack agent` | ~52 | Slack bot daemon |
+Switch personas to get different tool sets. See [full persona reference](docs/personas/README.md).
+
+| Persona | Command | Tools | Focus |
+|---------|---------|-------|-------|
+| [👨‍💻 developer](docs/personas/developer.md) | `Load developer persona` | ~86 | Daily coding, PRs |
+| [🔧 devops](docs/personas/devops.md) | `Load devops persona` | ~90 | Deployments, K8s |
+| [🚨 incident](docs/personas/incident.md) | `Load incident persona` | ~78 | Production debugging |
+| [📦 release](docs/personas/release.md) | `Load release persona` | ~69 | Shipping releases |
+| [💬 slack](docs/personas/slack.md) | `Load slack persona` | ~52 | Slack bot daemon |
 
 ```mermaid
 graph LR
-    DEV[👨‍💻 Developer] --> |"agent_load"| DEVOPS[🔧 DevOps]
-    DEVOPS --> |"agent_load"| INCIDENT[🚨 Incident]
-    INCIDENT --> |"agent_load"| DEV
+    DEV[👨‍💻 Developer] --> |"persona_load"| DEVOPS[🔧 DevOps]
+    DEVOPS --> |"persona_load"| INCIDENT[🚨 Incident]
+    INCIDENT --> |"persona_load"| DEV
 
     style DEV fill:#3b82f6,stroke:#2563eb,color:#fff
     style DEVOPS fill:#10b981,stroke:#059669,color:#fff
@@ -227,45 +229,69 @@ Skills are reusable workflows. See [full skills reference](docs/skills/README.md
 
 ## 🔧 Tool Modules
 
-150+ tools across 15 modules. See [full MCP server reference](docs/mcp-servers/README.md).
+150+ tools across 15 modules. See [full MCP server reference](docs/tool-modules/README.md).
 
 | Module | Tools | Description |
 |--------|-------|-------------|
-| [common](docs/mcp-servers/common.md) | 28 | Core server, agents, skills |
-| [git](docs/mcp-servers/git.md) | 19 | Git operations |
-| [gitlab](docs/mcp-servers/gitlab.md) | 35 | MRs, pipelines |
-| [jira](docs/mcp-servers/jira.md) | 24 | Issue tracking |
-| [k8s](docs/mcp-servers/k8s.md) | 26 | Kubernetes |
-| [bonfire](docs/mcp-servers/bonfire.md) | 21 | Ephemeral envs |
-| [quay](docs/mcp-servers/quay.md) | 8 | Container registry |
-| [prometheus](docs/mcp-servers/prometheus.md) | 13 | Metrics queries |
-| [alertmanager](docs/mcp-servers/alertmanager.md) | 7 | Alert management |
-| [kibana](docs/mcp-servers/kibana.md) | 9 | Log search |
-| [google-calendar](docs/mcp-servers/google-calendar.md) | 6 | Calendar & meetings |
-| [gmail](docs/mcp-servers/gmail.md) | 6 | Email processing |
-| [slack](docs/mcp-servers/slack.md) | 15 | Slack integration |
-| [konflux](docs/mcp-servers/konflux.md) | 40 | Build pipelines |
-| [workflow](docs/mcp-servers/workflow.md) | 28 | Core workflow tools |
+| [common](docs/tool_modules/common.md) | 28 | Core server, agents, skills |
+| [git](docs/tool_modules/git.md) | 19 | Git operations |
+| [gitlab](docs/tool_modules/gitlab.md) | 35 | MRs, pipelines |
+| [jira](docs/tool_modules/jira.md) | 24 | Issue tracking |
+| [k8s](docs/tool_modules/k8s.md) | 26 | Kubernetes |
+| [bonfire](docs/tool_modules/bonfire.md) | 21 | Ephemeral envs |
+| [quay](docs/tool_modules/quay.md) | 8 | Container registry |
+| [prometheus](docs/tool_modules/prometheus.md) | 13 | Metrics queries |
+| [alertmanager](docs/tool_modules/alertmanager.md) | 7 | Alert management |
+| [kibana](docs/tool_modules/kibana.md) | 9 | Log search |
+| [google-calendar](docs/tool_modules/google-calendar.md) | 6 | Calendar & meetings |
+| [gmail](docs/tool_modules/gmail.md) | 6 | Email processing |
+| [slack](docs/tool_modules/slack.md) | 15 | Slack integration |
+| [konflux](docs/tool_modules/konflux.md) | 40 | Build pipelines |
+| [workflow](docs/tool_modules/workflow.md) | 28 | Core workflow tools |
 
 See [MCP Server Architecture](docs/architecture/README.md) for implementation details.
 
 ---
 
-## 🛠️ Auto-Debug
+## 🛠️ Auto-Debug & Learning Loop
 
-When tools fail, Claude can fix them:
+When tools fail, Claude can fix them **and remember the fix forever**:
 
 ```
 Tool: ❌ Failed to release namespace
-      💡 To auto-fix: debug_tool('bonfire_namespace_release')
+      💡 Known Issues Found!
+         Previous fix for `bonfire_release`: Add --force flag
 
-Claude: Found the bug - missing --force flag.
-
-        - args = ['namespace', 'release', namespace]
-        + args = ['namespace', 'release', namespace, '--force']
-
-        Apply fix?
+      💡 Auto-fix: debug_tool('bonfire_namespace_release')
 ```
+
+### The Learning Loop
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  Tool fails → Check memory → Apply known fix → ✓              │
+│       ↓                                                        │
+│  Unknown? → debug_tool() → Fix code → learn_tool_fix() → ✓    │
+│                                              ↓                 │
+│                                    Saved to memory forever     │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Key Tools
+
+| Tool | Purpose |
+|------|---------|
+| `check_known_issues(tool, error)` | Check if we've seen this before |
+| `debug_tool(tool, error)` | Analyze source and propose fix |
+| `learn_tool_fix(tool, pattern, cause, fix)` | Save fix to memory |
+
+### Memory Files
+
+| File | Purpose |
+|------|---------|
+| `memory/learned/tool_fixes.yaml` | Tool-specific fixes from auto-remediation |
+| `memory/learned/patterns.yaml` | General error patterns and solutions |
+| `memory/learned/runbooks.yaml` | Operational procedures that worked |
 
 ---
 
@@ -273,19 +299,23 @@ Claude: Found the bug - missing --force flag.
 
 ```
 ai-workflow/
-├── agents/              # Agent personas (developer.yaml, devops.yaml)
+├── server/              # MCP server infrastructure
+│   ├── main.py          # Server entry point
+│   ├── persona_loader.py # Dynamic persona loading
+│   ├── debuggable.py    # Self-healing tool decorator
+│   └── utils.py         # Shared utilities
+├── tool_modules/        # Tool plugins (aa-git/, aa-jira/, etc.)
+├── personas/              # Persona configs (developer.yaml, devops.yaml)
 ├── skills/              # Workflow definitions (start_work.yaml, etc.)
 ├── memory/              # Persistent context
-├── mcp-servers/         # Tool modules (aa-git/, aa-jira/, etc.)
+│   ├── state/           # Active issues, MRs, environments
+│   └── learned/         # Patterns, tool fixes, runbooks
+├── extensions/          # IDE integrations
+│   └── aa-workflow-vscode/  # VSCode/Cursor extension
 ├── docs/                # Documentation
-│   ├── commands/        # Cursor command reference
-│   ├── skills/          # Skill reference docs
-│   ├── agents/          # Agent persona docs
-│   ├── mcp-servers/     # MCP tool module docs
-│   └── architecture/    # Architecture overview
-├── scripts/             # Python utilities and runners
+├── scripts/             # Python utilities
 ├── config.json          # Configuration
-└── .cursor/commands/    # Cursor slash commands (/coffee, /beer, etc.)
+└── .cursor/commands/    # Cursor slash commands
 ```
 
 ---
@@ -296,8 +326,10 @@ ai-workflow/
 |----------|-------------|
 | [Commands Reference](docs/commands/README.md) | 35 Cursor slash commands |
 | [Skills Reference](docs/skills/README.md) | All 21 available skills |
-| [Agents Reference](docs/agents/README.md) | 5 specialized agent personas |
-| [MCP Servers Reference](docs/mcp-servers/README.md) | 15 tool modules |
+| [Personas Reference](docs/personas/README.md) | 5 tool configuration profiles |
+| [Tool Modules Reference](docs/tool-modules/README.md) | 15 tool plugins |
+| [Learning Loop](docs/learning-loop.md) | Auto-remediation + memory |
+| [IDE Extension](docs/ide-extension.md) | VSCode/Cursor extension |
 | [Architecture Overview](docs/architecture/README.md) | High-level design |
 | [MCP Server Implementation](docs/architecture/mcp-implementation.md) | Server code details |
 | [Development Guide](docs/DEVELOPMENT.md) | Contributing and development setup |

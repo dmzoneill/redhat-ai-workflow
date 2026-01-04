@@ -64,7 +64,7 @@ Uses kubeconfig for authentication:
 
 ## Loaded By
 
-- [🚨 Incident Agent](../agents/incident.md)
+- [🚨 Incident Persona](../personas/incident.md)
 
 ## Related Skills
 

@@ -1,12 +1,12 @@
 ---
 name: load-devops
-description: "Switch to DevOps agent for deployment and infrastructure tasks."
+description: "Switch to DevOps persona for deployment and infrastructure tasks."
 ---
-# Load DevOps Agent
+# Load DevOps Persona
 
-Switch to DevOps agent for deployment and infrastructure tasks.
+Switch to DevOps persona for deployment and infrastructure tasks.
 
-Call `agent_load("devops")` to load:
+Call `persona_load("devops")` to load:
 - Kubernetes tools (kubectl, oc)
 - Bonfire tools (namespace, deploy)
 - Quay tools (image inspection)

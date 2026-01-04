@@ -1,0 +1,42 @@
+# Tool Fixes - Learned from auto-remediation
+# Each entry captures: what broke, why, how we fixed it
+# Agent consults this BEFORE making tool calls to avoid known pitfalls
+
+tool_fixes: []
+# Example entry:
+# - tool_name: bonfire_namespace_release
+#   error_pattern: "Output is not a TTY"
+#   root_cause: "Bonfire prompts for confirmation in non-interactive mode"
+#   fix_applied: "Added --force flag to command"
+#   file_changed: tool_modules/aa-bonfire/src/tools.py
+#   date_learned: "2026-01-03"
+#   times_prevented: 0  # Incremented when we skip this mistake
+
+# Aggregated insights for common mistake patterns
+common_mistakes:
+  missing_flags:
+    description: "CLI tools often need --yes/--force/--no-interactive for automation"
+    examples:
+      - bonfire: "--force"
+      - glab: "--yes"
+      - rh-issue: "--no-ai"
+
+  wrong_formats:
+    description: "Image tags, SHAs, and IDs have specific format requirements"
+    examples:
+      - "Git SHA must be full 40-char, not short 8-char"
+      - "IMAGE_TAG for ITS deploy needs sha256 digest, not git SHA"
+
+  auth_issues:
+    description: "Many tools need fresh credentials"
+    examples:
+      - "VPN required for internal clusters"
+      - "kube_login for expired tokens"
+      - "SSO browser for OAuth flows"
+
+
+
+
+
+
+

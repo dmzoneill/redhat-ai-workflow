@@ -1,0 +1,38 @@
+# Release Persona Configuration
+# Specifies which MCP tool modules this persona needs
+
+name: release
+description: Release management and deployments
+persona: personas/release.md
+
+# Tool modules to load (from tool_modules/aa-*)
+tools:
+  - workflow      # 28 tools - Skills, agents, memory (REQUIRED)
+  - konflux       # 40 tools - Builds, pipelines
+  - quay          # 8 tools - Container images
+  - appinterface  # 7 tools - GitOps config, user lookup
+  - git           # 15 tools - App-interface changes
+
+# Total: ~98 tools (under 128 limit)
+
+skills:
+  # Release workflows
+  - release_aa_backend_prod  # Production release workflow
+  - release_to_prod          # Generic production release
+  - hotfix                   # Cherry-pick fix to release branch
+
+  # Pre-release checks
+  - scan_vulnerabilities     # Scan images for CVEs
+  - check_integration_tests  # Review integration test results
+  - appinterface_check       # Validate app-interface config
+
+  # Build monitoring
+  - konflux_status           # Check Konflux build status
+  - cancel_pipeline          # Cancel stuck pipelines
+  - ci_retry                 # Retry failed pipelines
+
+  # Communication
+  - notify_team              # Send release announcements
+
+  # Post-release
+  - environment_overview     # Verify deployment health

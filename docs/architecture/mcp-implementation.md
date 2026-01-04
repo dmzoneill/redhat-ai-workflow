@@ -1,9 +1,11 @@
 # 🔧 MCP Server Architecture
 
+> **Terminology:** "Personas" are tool configuration profiles, not separate AI instances. The `persona_load` tool switches which tools are available.
+
 ## Design Principles
 
-1. **Single MCP Server**: One server loads/unloads tools dynamically based on active agent
-2. **Dynamic Agent Loading**: Switch agents mid-session with tools updating automatically
+1. **Single MCP Server**: One server loads/unloads tools dynamically based on active persona
+2. **Dynamic Persona Loading**: Switch personas mid-session with tools updating automatically
 3. **Tool Modules**: Each domain has tools in a `tools.py` with `register_tools(server)` function
 4. **Auto-Debug**: All tools wrapped with `@debuggable` for self-healing capabilities
 5. **Dual Mode**: Each module can run standalone OR be loaded as a plugin
@@ -19,7 +21,7 @@ Add to your project's `.cursor/mcp.json`:
       "command": "bash",
       "args": [
         "-c",
-        "cd ~/src/redhat-ai-workflow/mcp-servers/aa-common && source ~/src/redhat-ai-workflow/.venv/bin/activate && python3 -m src.server"
+        "cd ~/src/redhat-ai-workflow/server && source ~/src/redhat-ai-workflow/.venv/bin/activate && python3 -m src.server"
       ]
     }
   }
@@ -29,14 +31,13 @@ Add to your project's `.cursor/mcp.json`:
 ## Directory Structure
 
 ```
-mcp-servers/
-├── aa-common/                    # Core infrastructure
-│   ├── src/
-│   │   ├── server.py             # Main server entry point
-│   │   ├── agent_loader.py       # Dynamic agent/tool loading
-│   │   ├── debuggable.py         # Auto-debug decorator
-│   │   └── config.py             # Shared configuration
-│   └── pyproject.toml
+server/                           # Core infrastructure
+├── main.py                       # Main server entry point
+├── persona_loader.py             # Dynamic persona/tool loading
+├── debuggable.py                 # Auto-debug decorator
+└── utils.py                      # Shared utilities
+
+tool_modules/                     # Tool plugins
 │
 ├── aa-git/                       # Git operations (19 tools)
 │   ├── src/
@@ -124,7 +125,7 @@ sequenceDiagram
     participant Cursor
 
     User->>Claude: "Load devops agent"
-    Claude->>MCP: agent_load("devops")
+    Claude->>MCP: persona_load("devops")
     MCP->>Loader: switch_agent("devops")
     Loader->>Loader: Unload current tools
     Loader->>Loader: Load k8s, bonfire, quay, gitlab
@@ -136,18 +137,18 @@ sequenceDiagram
     Claude-->>User: "DevOps agent ready!"
 ```
 
-### AgentLoader Implementation
+### PersonaLoader Implementation
 
-The `AgentLoader` class (`aa-common/src/agent_loader.py`) manages dynamic tool switching:
+The `PersonaLoader` class (`server/persona_loader.py`) manages dynamic tool switching:
 
 ```python
-class AgentLoader:
-    CORE_TOOLS = {"agent_load", "agent_list", "session_start", "debug_tool"}
+class PersonaLoader:
+    CORE_TOOLS = {"persona_load", "persona_list", "session_start", "debug_tool"}
 
-    async def switch_agent(self, agent_name: str, ctx: Context) -> dict:
-        """Switch to a different agent, loading its tools dynamically."""
+    async def switch_persona(self, persona_name: str, ctx: Context) -> dict:
+        """Switch to a different persona, loading its tools dynamically."""
 
-        # 1. Read agent config (agents/devops.yaml)
+        # 1. Read persona config (personas/devops.yaml)
         config = self.load_agent_config(agent_name)
 
         # 2. Unload current tools (keep core)
@@ -172,8 +173,8 @@ These tools are never unloaded:
 
 | Tool | Purpose |
 |------|---------|
-| `agent_load` | Switch agents |
-| `agent_list` | List available agents |
+| `persona_load` | Switch personas |
+| `persona_list` | List available personas |
 | `session_start` | Initialize session |
 | `debug_tool` | Self-healing tool debugger |
 
@@ -206,7 +207,7 @@ flowchart LR
 ### The @debuggable Decorator
 
 ```python
-# mcp-servers/aa-common/src/debuggable.py
+# server/src/debuggable.py
 
 @debuggable
 async def my_tool(param: str) -> str:
@@ -243,7 +244,7 @@ python -m src.server  # Starts with workflow tools only (~29)
 Then in chat:
 ```
 You: Load the devops agent
-Claude: [calls agent_load("devops")]
+Claude: [calls persona_load("devops")]
         DevOps agent loaded! Now have k8s, bonfire, quay, gitlab (~90 tools)
 ```
 
@@ -261,7 +262,7 @@ python -m src.server --agent devops     # ~90 tools
 Run just one module:
 
 ```bash
-cd mcp-servers/aa-git
+cd tool_modules/aa-git
 python -m src.server
 ```
 
@@ -288,7 +289,7 @@ from .tools import register_tools
 __all__ = ["register_tools"]
 ```
 
-4. **Add to TOOL_MODULES** in `agent_loader.py`:
+4. **Add to TOOL_MODULES** in `persona_loader.py`:
 ```python
 TOOL_MODULES = {
     # ...
@@ -296,7 +297,7 @@ TOOL_MODULES = {
 }
 ```
 
-5. **Add to agent config** in `agents/{agent}.yaml`:
+5. **Add to persona config** in `personas/{persona}.yaml`:
 ```yaml
 tools:
   - {name}

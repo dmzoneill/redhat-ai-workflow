@@ -74,8 +74,8 @@ quay_list_tags(
 
 ## Loaded By
 
-- [🔧 DevOps Agent](../agents/devops.md)
-- [📦 Release Agent](../agents/release.md)
+- [🔧 DevOps Persona](../personas/devops.md)
+- [📦 Release Persona](../personas/release.md)
 
 ## Related Skills
 

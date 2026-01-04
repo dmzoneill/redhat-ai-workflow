@@ -1,0 +1,389 @@
+# Skill: Cancel Pipeline
+# Cancel stuck or failed Tekton pipelines
+
+name: cancel_pipeline
+description: |
+  Cancel a running or stuck Tekton pipeline.
+
+  Use when:
+  - A pipeline is stuck and needs to be killed
+  - You started a wrong build
+  - Need to free up cluster resources
+  - Want to retry with different parameters
+
+  The skill will:
+  1. List running pipelines
+  2. Get pipeline status
+  3. Cancel the specified pipeline
+  4. Optionally delete the run
+  5. Show how to retry
+
+version: "1.0"
+
+inputs:
+  - name: run_name
+    type: string
+    required: false
+    description: "PipelineRun name to cancel (lists running if not specified)"
+
+  - name: namespace
+    type: string
+    required: false
+    default: "aap-aa-tenant"
+    description: "Konflux/Tekton namespace"
+
+  - name: delete
+    type: boolean
+    required: false
+    default: false
+    description: "Delete the PipelineRun after cancelling"
+
+  - name: list_only
+    type: boolean
+    required: false
+    default: false
+    description: "Just list running pipelines without cancelling"
+
+steps:
+  # ==================== LIST PIPELINES ====================
+
+  - name: list_pipelineruns
+    description: "List recent pipeline runs"
+    tool: tkn_pipelinerun_list
+    args:
+      namespace: "{{ inputs.namespace }}"
+      limit: 20
+    output: pipelineruns_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: list_pipelineruns ====================
+
+  - name: detect_failure_pipelines
+    description: "Detect if Tekton call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(pipelineruns_raw) if 'pipelineruns_raw' in dir() and pipelineruns_raw else ""
+      failure = detect_failure(result_text, "tkn_pipelinerun_list")
+      result = failure
+    output: failure_pipelines
+    on_error: continue
+
+  - name: quick_fix_auth_pipelines
+    description: "Auto-fix auth issues for Tekton"
+    condition: "failure_pipelines and failure_pipelines.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "konflux"
+    output: auth_fix_pipelines
+    on_error: continue
+
+  - name: quick_fix_vpn_pipelines
+    description: "Auto-fix VPN issues for Tekton"
+    condition: "failure_pipelines and failure_pipelines.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_pipelines
+    on_error: continue
+
+  - name: retry_list_pipelines
+    description: "Retry Tekton call after auto-fix"
+    condition: "(auth_fix_pipelines or vpn_fix_pipelines) and failure_pipelines"
+    tool: tkn_pipelinerun_list
+    args:
+      namespace: "{{ inputs.namespace }}"
+      limit: 20
+    output: pipelineruns_raw_retry
+    on_error: continue
+
+  - name: merge_pipelines_result
+    description: "Use retry result if available"
+    condition: "pipelineruns_raw_retry"
+    compute: |
+      result = str(pipelineruns_raw_retry)
+    output: pipelineruns_raw
+    on_error: continue
+
+  - name: log_failure_pipelines
+    description: "Log failure to memory for learning"
+    condition: "failure_pipelines and failure_pipelines.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      fixed = bool(pipelineruns_raw_retry if 'pipelineruns_raw_retry' in dir() else None)
+
+      entry = log_failure(
+          tool_name="tkn_pipelinerun_list",
+          error_text=failure_pipelines.get('error_text', ''),
+          skill_name="cancel_pipeline",
+          fixed=fixed,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_pipelines
+    on_error: continue
+
+  - name: parse_pipelineruns
+    description: "Parse pipeline runs"
+    compute: |
+      runs_text = str(pipelineruns_raw) if pipelineruns_raw else ""
+
+      running = []
+      failed = []
+      all_runs = []
+
+      for line in runs_text.split("\n"):
+          if not line.strip() or "NAME" in line:
+              continue
+
+          parts = line.split()
+          if len(parts) >= 2:
+              name = parts[0]
+              status = parts[1] if len(parts) > 1 else "unknown"
+
+              run = {"name": name, "status": status, "line": line.strip()[:100]}
+              all_runs.append(run)
+
+              if "running" in status.lower():
+                  running.append(run)
+              elif "failed" in status.lower():
+                  failed.append(run)
+
+      result = {
+          "running": running[:10],
+          "running_count": len(running),
+          "failed": failed[:10],
+          "failed_count": len(failed),
+          "all": all_runs[:20],
+          "total": len(all_runs),
+          "raw": runs_text[:800] if runs_text else "No pipelines",
+      }
+    output: pipeline_list
+
+  - name: select_target
+    description: "Select pipeline to cancel"
+    compute: |
+      if inputs.run_name:
+          target = inputs.run_name
+      elif pipeline_list.get("running_count", 0) == 1:
+          target = pipeline_list["running"][0]["name"]
+      else:
+          target = None
+
+      result = {
+          "run_name": target,
+          "needs_selection": target is None and pipeline_list.get("running_count", 0) > 1,
+      }
+    output: target_run
+
+  # ==================== GET DETAILS ====================
+
+  - name: describe_run
+    description: "Get details of the target run"
+    condition: "target_run.run_name and not inputs.list_only"
+    tool: tkn_pipelinerun_describe
+    args:
+      run_name: "{{ target_run.run_name }}"
+      namespace: "{{ inputs.namespace }}"
+    output: run_details_raw
+    on_error: continue
+
+  - name: get_taskruns
+    description: "List task runs for this pipeline"
+    condition: "target_run.run_name and not inputs.list_only"
+    tool: tkn_taskrun_list
+    args:
+      namespace: "{{ inputs.namespace }}"
+      limit: 20
+    output: taskruns_raw
+    on_error: continue
+
+  - name: parse_details
+    description: "Parse run details"
+    condition: "run_details_raw"
+    compute: |
+      details_text = str(run_details_raw) if run_details_raw else ""
+      tasks_text = str(taskruns_raw) if 'taskruns_raw' in dir() and taskruns_raw else ""
+
+      # Check current status
+      status = "unknown"
+      if "running" in details_text.lower():
+          status = "running"
+      elif "failed" in details_text.lower():
+          status = "failed"
+      elif "succeeded" in details_text.lower():
+          status = "succeeded"
+      elif "cancelled" in details_text.lower():
+          status = "cancelled"
+
+      # Count related task runs
+      task_count = 0
+      for line in tasks_text.split("\n"):
+          if target_run.run_name in line:
+              task_count += 1
+
+      result = {
+          "status": status,
+          "can_cancel": status == "running",
+          "task_count": task_count,
+          "details": details_text[:600] if details_text else "",
+      }
+    output: run_status
+    on_error: continue
+
+  # ==================== CANCEL PIPELINE ====================
+
+  - name: cancel_pipelinerun
+    description: "Cancel the pipeline run"
+    condition: "target_run.run_name and not inputs.list_only and run_status and run_status.can_cancel"
+    tool: tkn_pipelinerun_cancel
+    args:
+      run_name: "{{ target_run.run_name }}"
+      namespace: "{{ inputs.namespace }}"
+    output: cancel_result
+    on_error: continue
+
+  - name: parse_cancel
+    description: "Parse cancel result"
+    condition: "cancel_result"
+    compute: |
+      cancel_text = str(cancel_result) if cancel_result else ""
+
+      success = "cancelled" in cancel_text.lower() or "error" not in cancel_text.lower()
+
+      result = {
+          "success": success,
+          "message": cancel_text[:200] if cancel_text else "No response",
+      }
+    output: cancel_status
+    on_error: continue
+
+  # ==================== DELETE PIPELINE ====================
+
+  - name: delete_pipelinerun
+    description: "Delete the pipeline run"
+    condition: "inputs.delete and target_run.run_name and cancel_status and cancel_status.success"
+    tool: tkn_pipelinerun_delete
+    args:
+      run_name: "{{ target_run.run_name }}"
+      namespace: "{{ inputs.namespace }}"
+    output: delete_result
+    on_error: continue
+
+  - name: parse_delete
+    description: "Parse delete result"
+    condition: "delete_result"
+    compute: |
+      delete_text = str(delete_result) if delete_result else ""
+
+      success = "deleted" in delete_text.lower() or "error" not in delete_text.lower()
+
+      result = {
+          "success": success,
+          "message": delete_text[:200] if delete_text else "No response",
+      }
+    output: delete_status
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_cancel
+    description: "Log cancel action"
+    condition: "cancel_status and cancel_status.success"
+    tool: memory_session_log
+    args:
+      action: "Cancelled pipeline {{ target_run.run_name }}"
+      details: "Namespace: {{ inputs.namespace }}{% if inputs.delete %}, deleted{% endif %}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🛑 Cancel Pipeline
+
+      **Namespace:** `{{ inputs.namespace }}`
+
+      ---
+
+      {% if inputs.list_only or not target_run.run_name %}
+      ### 📋 Pipeline Runs
+
+      {% if pipeline_list.running_count > 0 %}
+      **🔄 Running ({{ pipeline_list.running_count }}):**
+      {% for run in pipeline_list.running %}
+      - `{{ run.name }}` - {{ run.status }}
+      {% endfor %}
+      {% else %}
+      ✅ No pipelines currently running.
+      {% endif %}
+
+      {% if pipeline_list.failed_count > 0 %}
+      **❌ Failed ({{ pipeline_list.failed_count }}):**
+      {% for run in pipeline_list.failed[:5] %}
+      - `{{ run.name }}`
+      {% endfor %}
+      {% endif %}
+
+      {% if target_run.needs_selection %}
+      **Multiple running pipelines.** Specify which one:
+      ```python
+      skill_run("cancel_pipeline", '{"run_name": "PIPELINE_NAME"}')
+      ```
+      {% endif %}
+
+      {% else %}
+      ### Target: `{{ target_run.run_name }}`
+
+      {% if run_status %}
+      **Status:** {{ run_status.status }}
+      **Tasks:** {{ run_status.task_count }}
+      {% endif %}
+
+      {% if not run_status.can_cancel %}
+      ⚠️ Pipeline is not running (status: {{ run_status.status }}). Cannot cancel.
+
+      {% elif cancel_status and cancel_status.success %}
+      ✅ **Pipeline Cancelled**
+
+      {{ cancel_status.message }}
+
+      {% if inputs.delete and delete_status %}
+      {% if delete_status.success %}
+      ✅ PipelineRun deleted
+      {% else %}
+      ⚠️ Delete failed: {{ delete_status.message }}
+      {% endif %}
+      {% endif %}
+
+      {% else %}
+      ❌ **Cancel Failed**
+
+      {{ cancel_status.message if cancel_status else "Unknown error" }}
+      {% endif %}
+      {% endif %}
+
+      ---
+
+      ### Commands
+
+      **List running pipelines:**
+      ```python
+      tkn_pipelinerun_list(namespace='{{ inputs.namespace }}', limit=10)
+      ```
+
+      **Get logs:**
+      ```python
+      tkn_pipelinerun_logs(run_name='{{ target_run.run_name or "PIPELINE_NAME" }}', namespace='{{ inputs.namespace }}')
+      ```
+
+      **Retry (start new run):**
+      ```python
+      tkn_pipeline_start(pipeline_name='PIPELINE_NAME', namespace='{{ inputs.namespace }}')
+      ```
+
+  - name: context
+    value:
+      run_name: "{{ target_run.run_name }}"
+      cancelled: "{{ cancel_status.success if cancel_status else false }}"
+      deleted: "{{ delete_status.success if delete_status else false }}"
+      running_count: "{{ pipeline_list.running_count }}"

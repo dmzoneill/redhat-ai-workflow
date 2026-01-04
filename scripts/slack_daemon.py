@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Autonomous Slack Agent Daemon
+Autonomous Slack Persona Daemon
 
 A standalone process that monitors Slack and responds using Claude + MCP tools.
 The daemon is just a Slack interface - all intelligence goes through ClaudeAgent,
@@ -40,15 +40,15 @@ from pathlib import Path
 from typing import Any
 
 # Add project paths (use resolve() to get absolute paths)
-# NOTE: aa-common provides shared utils (src.utils), must be before servers that import from it
+# NOTE: server/ provides shared utils, tool_modules/ for individual modules
 # aa-slack must come LAST in inserts so it's FIRST in sys.path
 # (because insert(0, x) prepends, so last insert = first in list)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-common"))  # Shared utils first
-sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-git"))
-sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-gitlab"))
-sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-jira"))
-sys.path.insert(0, str(PROJECT_ROOT / "mcp-servers" / "aa-slack"))  # Must be first in path
+sys.path.insert(0, str(PROJECT_ROOT))  # For server.utils import
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-git"))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-gitlab"))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-jira"))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-slack"))  # Must be first in path
 
 from dotenv import load_dotenv
 
@@ -60,7 +60,7 @@ try:
     from gi.repository import Notify
 
     NOTIFY_AVAILABLE = True
-    Notify.init("AI Workflow Slack Agent")
+    Notify.init("AI Workflow Slack Persona")
 except (ImportError, ValueError):
     NOTIFY_AVAILABLE = False
 
@@ -147,24 +147,17 @@ class SingleInstance:
         self.release()
 
 
-load_dotenv(PROJECT_ROOT / "mcp-servers" / "aa-slack" / ".env")
+load_dotenv(PROJECT_ROOT / "tool_modules" / "aa-slack" / ".env")
 load_dotenv()
 
-# Import load_config from aa-common using importlib to avoid module cache conflicts
-# (all MCP servers use 'src' as package name, which causes import conflicts)
-import importlib.util
-
-_utils_path = PROJECT_ROOT / "mcp-servers" / "aa-common" / "src" / "utils.py"
-_spec = importlib.util.spec_from_file_location("aa_common_utils", _utils_path)
-_utils_module = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_utils_module)
-load_config = _utils_module.load_config
-
-from src.listener import ListenerConfig, SlackListener
-from src.persistence import PendingMessage, SlackStateDB
+from tool_modules.aa_slack.src.listener import ListenerConfig, SlackListener
+from tool_modules.aa_slack.src.persistence import PendingMessage, SlackStateDB
 
 # Import Slack components
-from src.slack_client import SlackSession
+from tool_modules.aa_slack.src.slack_client import SlackSession
+
+# Import load_config from server module
+from server.utils import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -630,7 +623,7 @@ class DesktopNotifier:
 
     def error(self, message: str):
         """Notify on error."""
-        title = "❌ Slack Agent Error"
+        title = "❌ Slack Persona Error"
         self._send(title, message, self._icons["error"], self.URGENCY_CRITICAL)
 
     def skill_activated(self, skill_name: str, description: str = ""):
@@ -651,13 +644,13 @@ class DesktopNotifier:
 
     def started(self):
         """Notify when daemon starts."""
-        title = "🤖 Slack Agent Started"
+        title = "🤖 Slack Persona Started"
         body = "Monitoring channels for messages..."
         self._send(title, body, "emblem-default", self.URGENCY_LOW, timeout=3000)
 
     def stopped(self):
         """Notify when daemon stops."""
-        title = "🛑 Slack Agent Stopped"
+        title = "🛑 Slack Persona Stopped"
         body = "No longer monitoring Slack"
         self._send(title, body, "emblem-important", self.URGENCY_LOW, timeout=3000)
 
@@ -701,7 +694,7 @@ class TerminalUI:
         print(
             f"""
 {cyan}╔══════════════════════════════════════════════════════════════════╗
-║  {bold}🤖 AI Workflow - Autonomous Slack Agent{reset}{cyan}                          ║
+║  {bold}🤖 AI Workflow - Autonomous Slack Persona{reset}{cyan}                          ║
 ║                                                                    ║
 ║  Monitoring Slack channels for messages...                         ║
 ║  Press Ctrl+C to stop                                              ║
@@ -1566,7 +1559,7 @@ The skill will:
 async def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Autonomous Slack Agent Daemon",
+        description="Autonomous Slack Persona Daemon",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Interaction Methods:

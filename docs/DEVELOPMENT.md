@@ -2,6 +2,16 @@
 
 > How to contribute to the AI Workflow project
 
+## Terminology
+
+| Term | Meaning |
+|------|---------|
+| **Agent / Persona** | Tool configuration profile (developer, devops, incident, release). NOT a separate AI instance. |
+| **Tool Module** | Directory (`tool_modules/aa-*/`) containing MCP tool implementations. |
+| **Skill** | YAML workflow in `skills/` that chains tools. |
+
+> This is a **single-agent system** with dynamic tool loading. "Agents" configure which tools Claude can use.
+
 ## Prerequisites
 
 - Python 3.10+
@@ -82,17 +92,17 @@ pytest tests/test_parsers.py::test_extract_jira_key -v
 
 ```bash
 # Run all linters
-flake8 mcp-servers/ scripts/
+flake8 tool_modules/ scripts/
 
 # Format code
-black mcp-servers/ scripts/
-isort mcp-servers/ scripts/
+black tool_modules/ scripts/
+isort tool_modules/ scripts/
 
 # Type checking
 mypy scripts/common/
 
 # Security scan
-bandit -r mcp-servers/ scripts/ --severity high
+bandit -r tool_modules/ scripts/ --severity high
 ```
 
 ### Pre-commit Hooks
@@ -109,11 +119,11 @@ pre-commit run --all-files
 
 ```
 redhat-ai-workflow/
-├── agents/                    # Agent persona definitions (YAML)
+├── personas/                    # Agent persona definitions (YAML)
 ├── skills/                    # Workflow skill definitions (YAML)
 ├── memory/                    # Persistent memory storage
-├── mcp-servers/               # MCP tool modules
-│   ├── aa-common/             # Core server, shared utilities
+├── tool_modules/               # MCP tool modules
+│   ├── server/             # Core server, shared utilities
 │   ├── aa-workflow/           # Workflow tools (30+ tools)
 │   ├── aa-git/                # Git operations
 │   ├── aa-gitlab/             # GitLab integration
@@ -197,7 +207,7 @@ def test_my_new_tool():
 
 ### 4. Update Documentation
 
-Add entry to the relevant docs file in `docs/mcp-servers/`.
+Add entry to the relevant docs file in `docs/tool_modules/`.
 
 ## Adding New Skills
 
@@ -272,7 +282,7 @@ skill_run("my_skill", {"required_input": "value"})
 
 ### 1. Create Agent YAML
 
-In `agents/my_agent.yaml`:
+In `personas/my_agent.yaml`:
 
 ```yaml
 name: my_agent
@@ -301,7 +311,7 @@ skills:
 
 ### 2. Add Documentation
 
-Create `docs/agents/my_agent.md`.
+Create `docs/personas/my_agent.md`.
 
 ## Testing MCP Integration
 
@@ -311,8 +321,8 @@ Create `docs/agents/my_agent.md`.
 # Test that the server starts and tools load
 python -c "
 import sys
-sys.path.insert(0, 'mcp-servers/aa-common')
-from src.server import create_mcp_server
+sys.path.insert(0, 'server')
+from server.main import create_mcp_server
 server = create_mcp_server(name='test', tools=['workflow'])
 print('Server created successfully')
 "

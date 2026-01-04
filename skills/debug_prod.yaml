@@ -8,7 +8,7 @@ description: |
   Suggests likely causes based on patterns and learned knowledge.
 
   Resolves namespace and paths from config.json.
-version: "1.1"
+version: "1.2"
 
 inputs:
   - name: namespace
@@ -140,6 +140,141 @@ steps:
       namespace: "{{ ns_info.namespace }}"
       environment: "production"
     output: pod_status
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_pods ====================
+
+  - name: detect_failure_pods
+    description: "Detect if kubectl failed"
+    condition: "{{ ns_info.namespace }}"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(pod_status) if 'pod_status' in dir() and pod_status else ""
+      failure = detect_failure(result_text, "kubectl_get_pods")
+      result = failure
+    output: failure_pods
+    on_error: continue
+
+  - name: quick_fix_auth_pods
+    description: "Auto-fix auth issues for kubectl"
+    condition: "failure_pods and failure_pods.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "production"
+    output: auth_fix_pods
+    on_error: continue
+
+  - name: quick_fix_vpn_pods
+    description: "Auto-fix VPN issues for kubectl"
+    condition: "failure_pods and failure_pods.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_pods
+    on_error: continue
+
+  - name: retry_get_pods
+    description: "Retry kubectl after auto-fix"
+    condition: "(auth_fix_pods or vpn_fix_pods) and failure_pods"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: pod_status_retry
+    on_error: continue
+
+  - name: merge_pod_status
+    description: "Use retry result if available"
+    condition: "pod_status_retry"
+    compute: |
+      # Update pod_status with retry result
+      result = str(pod_status_retry)
+    output: pod_status
+    on_error: continue
+
+  - name: log_failure_pods
+    description: "Log failure to memory for learning"
+    condition: "failure_pods and failure_pods.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      fixed = bool(pod_status_retry if 'pod_status_retry' in dir() else None)
+
+      entry = log_failure(
+          tool_name="kubectl_get_pods",
+          error_text=failure_pods.get('error_text', ''),
+          skill_name="debug_prod",
+          fixed=fixed,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_pods
+    on_error: continue
+
+  # Step 4b: Get pod resource usage
+  - name: get_pod_resources
+    description: "Get CPU/memory usage for pods"
+    condition: "{{ ns_info.namespace }}"
+    tool: kubectl_top_pods
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: pod_resources_raw
+    on_error: continue
+
+  - name: parse_pod_resources
+    description: "Parse resource usage data"
+    compute: |
+      resources_text = str(pod_resources_raw) if 'pod_resources_raw' in dir() and pod_resources_raw else ""
+
+      high_cpu = []
+      high_memory = []
+
+      for line in resources_text.split("\n"):
+          if not line.strip() or "NAME" in line:
+              continue
+          parts = line.split()
+          if len(parts) >= 3:
+              pod_name = parts[0]
+              cpu = parts[1]  # e.g., "250m"
+              memory = parts[2]  # e.g., "512Mi"
+
+              # Parse CPU (millicore)
+              cpu_val = 0
+              if "m" in cpu:
+                  try:
+                      cpu_val = int(cpu.replace("m", ""))
+                  except:
+                      pass
+              elif cpu.isdigit():
+                  cpu_val = int(cpu) * 1000
+
+              # Parse Memory (Mi/Gi)
+              mem_val = 0
+              if "Gi" in memory:
+                  try:
+                      mem_val = float(memory.replace("Gi", "")) * 1024
+                  except:
+                      pass
+              elif "Mi" in memory:
+                  try:
+                      mem_val = float(memory.replace("Mi", ""))
+                  except:
+                      pass
+
+              # Flag high usage
+              if cpu_val > 500:  # >500m = high CPU
+                  high_cpu.append({"pod": pod_name, "cpu": cpu})
+              if mem_val > 1024:  # >1Gi = high memory
+                  high_memory.append({"pod": pod_name, "memory": memory})
+
+      result = {
+          "raw": resources_text[:500] if resources_text else "Could not fetch",
+          "high_cpu_pods": high_cpu[:5],
+          "high_memory_pods": high_memory[:5],
+      }
+    output: pod_resources
+    on_error: continue
 
   # Step 5: Analyze pod issues
   - name: analyze_pods
@@ -225,6 +360,18 @@ steps:
 
       result = {"pods_to_check": pods_to_check, "time_range": inputs.time_range}
     output: pods_selection
+
+  # Step 8a2: Describe first problem pod
+  - name: describe_pod_1
+    description: "Get detailed info on first problem pod"
+    condition: "{{ pods_selection.pods_to_check|length > 0 }}"
+    tool: kubectl_describe_pod
+    args:
+      pod_name: "{{ pods_selection.pods_to_check[0] }}"
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: pod_describe_1_raw
+    on_error: continue
 
   # Step 8b: Get logs from first problem pod
   - name: get_pod_logs_1
@@ -355,14 +502,270 @@ steps:
     output: alert_definition
     on_error: continue
 
+  # ==================== SEARCH KIBANA LOGS ====================
+
+  - name: search_kibana_errors
+    description: "Search Kibana for recent errors"
+    condition: "{{ ns_info.namespace }}"
+    tool: kibana_search_logs
+    args:
+      query: "error OR exception OR traceback"
+      environment: "production"
+      namespace: "{{ ns_info.namespace }}"
+      limit: 20
+    output: kibana_errors_raw
+    on_error: continue
+
+  - name: parse_kibana_errors_initial
+    description: "Initial check for Kibana auth issues"
+    compute: |
+      kibana_text = str(kibana_errors_raw) if 'kibana_errors_raw' in dir() and kibana_errors_raw else ""
+      auth_issue = "Log In" in kibana_text or "403" in kibana_text
+      result = {"auth_issue": auth_issue, "raw": kibana_text}
+    output: kibana_check
+
+  # ==================== SLACK CONTEXT ====================
+
+  - name: check_slack_discussions
+    description: "Check team Slack channel for recent relevant discussions"
+    tool: slack_channel_read
+    args:
+      channel: "team-automation-analytics"
+      limit: 30
+    output: slack_messages_raw
+    on_error: continue
+
+  - name: parse_slack_context
+    description: "Parse Slack messages for relevant discussion"
+    compute: |
+      slack_text = str(slack_messages_raw) if 'slack_messages_raw' in dir() and slack_messages_raw else ""
+
+      # Look for keywords related to production issues
+      relevant_keywords = ["prod", "production", "error", "issue", "down", "alert", "fix", "deploy", "restart"]
+
+      relevant_messages = []
+      for line in slack_text.split("\n"):
+        if any(kw in line.lower() for kw in relevant_keywords):
+          relevant_messages.append(line[:150])
+
+      has_relevant = len(relevant_messages) > 0
+
+      result = {
+        "has_relevant": has_relevant,
+        "messages": relevant_messages[:5],
+        "preview": "\n".join(relevant_messages[:3]) if relevant_messages else "",
+      }
+    output: slack_context
+    on_error: continue
+
+  - name: finalize_kibana_results
+    description: "Finalize Kibana results after Slack check"
+    compute: |
+      kibana_text = str(kibana_errors_raw) if 'kibana_errors_raw' in dir() and kibana_errors_raw else ""
+
+      if "Log In" in kibana_text or "403" in kibana_text:
+          result = {"found": False, "errors": [], "auth_issue": True, "kibana_url": None}
+      else:
+          lines = [l.strip() for l in kibana_text.split("\n") if l.strip()]
+          error_lines = [l[:150] for l in lines if any(kw in l.lower() for kw in ["error", "exception", "traceback"])]
+
+          kibana_url = None
+          import re
+          for line in lines:
+              if "kibana" in line.lower() and "http" in line.lower():
+                  urls = re.findall(r'https?://[^\s\)]+', line)
+                  if urls:
+                      kibana_url = urls[0]
+                      break
+
+          result = {"found": len(error_lines) > 0, "errors": error_lines[:10], "auth_issue": False, "kibana_url": kibana_url}
+    output: kibana_results
+    on_error: continue
+
+  # ==================== CHECK SAAS DEPLOYMENTS ====================
+
+  - name: get_saas_pipelines
+    description: "Get SaaS pipeline status"
+    condition: "{{ ns_info.namespace }}"
+    tool: kubectl_saas_pipelines
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: saas_pipelines_raw
+    on_error: continue
+
+  - name: get_saas_deployments
+    description: "Get SaaS deployment status"
+    condition: "{{ ns_info.namespace }}"
+    tool: kubectl_saas_deployments
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: saas_deployments_raw
+    on_error: continue
+
+  - name: parse_saas_info
+    description: "Parse SaaS deployment info"
+    compute: |
+      pipelines_text = str(saas_pipelines_raw) if 'saas_pipelines_raw' in dir() and saas_pipelines_raw else ""
+      deployments_text = str(saas_deployments_raw) if 'saas_deployments_raw' in dir() and saas_deployments_raw else ""
+
+      result = {
+        "pipelines_preview": pipelines_text[:400] if pipelines_text else "",
+        "deployments_preview": deployments_text[:400] if deployments_text else "",
+        "has_data": len(pipelines_text) > 20 or len(deployments_text) > 20,
+      }
+    output: saas_info
+    on_error: continue
+
   # ==================== CHECK METRICS ====================
 
-  # Step 11: Check key metrics
+  # Step 11: Query error rate from Prometheus
+  - name: query_error_rate
+    description: "Query 5xx error rate from Prometheus"
+    condition: "{{ ns_info.namespace }}"
+    tool: prometheus_query
+    args:
+      query: "sum(rate(http_requests_total{namespace=\"{{ ns_info.namespace }}\",code=~\"5..\"}[5m]))"
+      environment: "production"
+    output: error_rate_raw
+    on_error: continue
+
+  - name: query_error_rate_trend
+    description: "Query error rate trend over time"
+    condition: "{{ ns_info.namespace }}"
+    tool: prometheus_query_range
+    args:
+      query: "sum(rate(http_requests_total{namespace=\"{{ ns_info.namespace }}\",code=~\"5..\"}[5m]))"
+      start: "1h"
+      end: "now"
+      step: "5m"
+      environment: "production"
+    output: error_trend_raw
+    on_error: continue
+
+  - name: query_memory_trend
+    description: "Query memory usage trend"
+    condition: "{{ ns_info.namespace }}"
+    tool: prometheus_query_range
+    args:
+      query: "sum(container_memory_working_set_bytes{namespace=\"{{ ns_info.namespace }}\"}) by (pod)"
+      start: "1h"
+      end: "now"
+      step: "5m"
+      environment: "production"
+    output: memory_trend_raw
+    on_error: continue
+
+  - name: query_pod_health
+    description: "Check pod health metrics"
+    condition: "{{ ns_info.namespace }}"
+    tool: prometheus_pod_health
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: pod_health_metrics_raw
+    on_error: continue
+
+  - name: get_prometheus_rules
+    description: "Get alerting rules for this namespace"
+    condition: "{{ ns_info.namespace }}"
+    tool: prometheus_rules
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: alert_rules_raw
+    on_error: continue
+
+  - name: list_grafana_dashboards
+    description: "List available Grafana dashboards"
+    condition: "{{ ns_info.namespace }}"
+    tool: grafana_dashboard_list
+    args:
+      environment: "production"
+    output: grafana_dashboards_raw
+    on_error: continue
+
+  - name: get_main_dashboard
+    description: "Get main AA dashboard from Grafana"
+    condition: "{{ grafana_dashboards_raw }}"
+    tool: grafana_dashboard_get
+    args:
+      dashboard_id: "tower-analytics"
+      environment: "production"
+    output: main_dashboard_raw
+    on_error: continue
+
+  - name: get_grafana_link
+    description: "Get Grafana dashboard link"
+    condition: "{{ ns_info.namespace }}"
+    tool: prometheus_grafana_link
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: grafana_link_raw
+    on_error: continue
+
+  - name: parse_metrics
+    description: "Parse Prometheus query results"
+    compute: |
+      error_rate_text = str(error_rate_raw) if 'error_rate_raw' in dir() and error_rate_raw else ""
+      pod_health_text = str(pod_health_metrics_raw) if 'pod_health_metrics_raw' in dir() and pod_health_metrics_raw else ""
+      grafana_text = str(grafana_link_raw) if 'grafana_link_raw' in dir() and grafana_link_raw else ""
+      error_trend_text = str(error_trend_raw) if 'error_trend_raw' in dir() and error_trend_raw else ""
+      memory_trend_text = str(memory_trend_raw) if 'memory_trend_raw' in dir() and memory_trend_raw else ""
+      rules_text = str(alert_rules_raw) if 'alert_rules_raw' in dir() and alert_rules_raw else ""
+      dashboards_text = str(grafana_dashboards_raw) if 'grafana_dashboards_raw' in dir() and grafana_dashboards_raw else ""
+
+      # Extract error rate value
+      error_rate = None
+      import re
+      rate_match = re.search(r'(\d+\.?\d*)', error_rate_text)
+      if rate_match:
+          error_rate = float(rate_match.group(1))
+
+      # Extract Grafana URL
+      grafana_url = None
+      urls = re.findall(r'https?://[^\s\)]+grafana[^\s\)]*', grafana_text)
+      if urls:
+          grafana_url = urls[0]
+
+      # Check if error rate is trending up
+      trend_up = False
+      if error_trend_text:
+          values = re.findall(r'(\d+\.?\d*)', error_trend_text)
+          if len(values) >= 2:
+              try:
+                  recent = float(values[-1])
+                  earlier = float(values[0])
+                  trend_up = recent > earlier * 1.5  # 50% increase
+              except:
+                  pass
+
+      # Count alert rules
+      rule_count = rules_text.lower().count("alert") if rules_text else 0
+
+      # Count dashboards
+      dashboard_count = dashboards_text.lower().count("dashboard") if dashboards_text else 0
+
+      result = {
+          "error_rate": error_rate,
+          "error_rate_high": error_rate is not None and error_rate > 0.1,
+          "error_trending_up": trend_up,
+          "pod_health_summary": pod_health_text[:500] if pod_health_text else "Could not query",
+          "grafana_url": grafana_url,
+          "alert_rules_count": rule_count,
+          "dashboards_count": dashboard_count,
+          "error_trend_preview": error_trend_text[:300] if error_trend_text else "",
+          "memory_trend_preview": memory_trend_text[:300] if memory_trend_text else "",
+      }
+    output: metrics_results
+    on_error: continue
+
   - name: check_metrics
-    description: "Query key Prometheus metrics"
+    description: "Build metric queries for reference"
     condition: "{{ ns_info.namespace }}"
     compute: |
-      # Prepare Prometheus queries
       ns = ns_info['namespace']
 
       queries = [
@@ -585,6 +988,41 @@ steps:
         lines.append(f"✅ All {pod_analysis['healthy_count']} pods healthy")
       lines.append("")
 
+      # === RESOURCE USAGE ===
+      if pod_resources and (pod_resources.get('high_cpu_pods') or pod_resources.get('high_memory_pods')):
+        lines.append("### 📊 Resource Usage (High)")
+        if pod_resources.get('high_cpu_pods'):
+          lines.append("**High CPU:**")
+          for p in pod_resources['high_cpu_pods'][:3]:
+            lines.append(f"- `{p['pod']}`: {p['cpu']}")
+        if pod_resources.get('high_memory_pods'):
+          lines.append("**High Memory:**")
+          for p in pod_resources['high_memory_pods'][:3]:
+            lines.append(f"- `{p['pod']}`: {p['memory']}")
+        lines.append("")
+
+      # === POD DETAILS ===
+      if 'pod_describe_1_raw' in dir() and pod_describe_1_raw:
+        desc_text = str(pod_describe_1_raw)
+        # Extract key info from describe
+        conditions = []
+        events = []
+        for line in desc_text.split('\n'):
+          if 'Conditions:' in line or ('Type' in line and 'Status' in line):
+            conditions.append(line.strip()[:80])
+          if 'Warning' in line or 'Error' in line:
+            events.append(line.strip()[:100])
+
+        if conditions or events:
+          lines.append("### 🔎 Pod Details")
+          pod_name = pods_selection.get('pods_to_check', [''])[0] if pods_selection else ''
+          lines.append(f"**Pod:** `{pod_name}`")
+          if events:
+            lines.append("**Warning Events:**")
+            for e in events[:3]:
+              lines.append(f"- {e}")
+          lines.append("")
+
       # === EVENTS ===
       if important_events:
         lines.append("### ⚡ Recent Events")
@@ -601,6 +1039,33 @@ steps:
           for err in log['errors'][-5:]:  # Last 5 errors per pod
             lines.append(err[:150])
           lines.append("```")
+        lines.append("")
+
+      # === KIBANA LOGS ===
+      if kibana_results and kibana_results.get('found'):
+        lines.append("### 📋 Kibana Log Errors")
+        lines.append(f"Found **{len(kibana_results.get('errors', []))}** errors in logs:")
+        for err in kibana_results.get('errors', [])[:5]:
+          lines.append(f"- `{err[:100]}`")
+        if kibana_results.get('kibana_url'):
+          lines.append(f"\n🔗 [Open in Kibana]({kibana_results['kibana_url']})")
+        lines.append("")
+      elif kibana_results and kibana_results.get('auth_issue'):
+        lines.append("### 📋 Kibana Logs")
+        lines.append("⚠️ Kibana auth required - open in browser first")
+        lines.append("")
+
+      # === METRICS ===
+      if metrics_results:
+        lines.append("### 📊 Metrics Summary")
+        if metrics_results.get('error_rate') is not None:
+          rate = metrics_results['error_rate']
+          status = "🔴 HIGH" if rate > 0.1 else ("🟡 ELEVATED" if rate > 0.01 else "🟢 OK")
+          lines.append(f"- **5xx Error Rate:** {rate:.4f}/sec {status}")
+        if metrics_results.get('pod_health_summary'):
+          lines.append(f"- **Pod Health:** {metrics_results['pod_health_summary'][:200]}")
+        if metrics_results.get('grafana_url'):
+          lines.append(f"\n📈 [Open Grafana Dashboard]({metrics_results['grafana_url']})")
         lines.append("")
 
       # === ALERTS ===
@@ -633,8 +1098,24 @@ steps:
             lines.append(f"- *Commands:* `{match['commands'][0]}`")
         lines.append("")
 
+      # === DASHBOARDS ===
+      lines.append("### 🔗 Dashboards")
+      if metrics_results and metrics_results.get('grafana_url'):
+        lines.append(f"- 📈 [Grafana]({metrics_results['grafana_url']})")
+      if kibana_results and kibana_results.get('kibana_url'):
+        lines.append(f"- 📋 [Kibana]({kibana_results['kibana_url']})")
+      lines.append("")
+
+      # === SLACK CONTEXT ===
+      if 'slack_context' in dir() and slack_context and slack_context.get('has_relevant'):
+        lines.append("### 💬 Recent Team Discussion")
+        lines.append("*From #team-automation-analytics:*")
+        for msg in slack_context.get('messages', [])[:3]:
+          lines.append(f"> {msg}")
+        lines.append("")
+
       # === SUGGESTED QUERIES ===
-      lines.append("### 📊 Prometheus Queries")
+      lines.append("### 📊 Additional Prometheus Queries")
       lines.append("Run these for more details:")
       for q in metric_queries.get('queries_to_run', [])[:3]:
         lines.append(f"```\n{q}\n```")

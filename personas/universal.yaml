@@ -1,0 +1,59 @@
+# Universal Persona Configuration
+# A combined toolset for most workflows, staying under 128 tools
+
+name: universal
+description: Combined developer and devops capabilities for full workflow support
+persona: personas/developer.md  # Defaults to developer persona, can adopt others
+
+# Tool modules to load (from tool_modules/aa-*)
+tools:
+  - workflow      # 16 tools - Core (memory, persona, session, skill, infra, meta)
+  - lint          # 7 tools - Python/YAML linting, testing
+  - dev-workflow  # 9 tools - Development workflow helpers
+  - git           # 15 tools - Git operations
+  - gitlab        # 35 tools - MRs, CI/CD, pipelines
+  - jira          # 24 tools - Issue tracking
+  - bonfire       # 21 tools - Ephemeral namespaces + deploys
+  # - quay        # 8 tools - Image checks (use skopeo directly if needed)
+  # - k8s         # 26 tools - Kubernetes (add if you need pod inspection)
+
+# Total: ~127 tools (under 128 limit)
+#
+# Persona switching: Tools are fixed at startup, but persona changes via persona_load().
+# When you say "load devops agent", Claude adopts the devops focus/expertise
+# while keeping access to all the universal tools.
+
+# This single agent supports:
+# - Development: start_work, create_mr, review_pr
+# - Ephemeral deployment: test_mr_ephemeral
+# - Production debugging: investigate_alert, debug_prod
+
+skills:
+  # Daily workflow
+  - coffee              # ☕ Morning briefing
+  - beer                # 🍺 End of day wrap-up
+  - standup_summary     # Generate standup summary
+  - weekly_summary      # Weekly work summary
+
+  # Development
+  - start_work          # Start working on a Jira issue
+  - create_mr           # Create MR
+  - mark_mr_ready       # Mark draft MR ready
+  - review_pr           # PR review workflow
+  - check_my_prs        # Check your PRs for feedback
+  - sync_branch         # Quick sync with main
+  - cleanup_branches    # Delete merged branches
+
+  # DevOps
+  - test_mr_ephemeral   # Deploy MR to ephemeral
+  - deploy_to_ephemeral # Deploy apps to ephemeral
+  - extend_ephemeral    # Extend namespace reservation
+
+  # Incident
+  - investigate_alert   # Investigate Prometheus alerts
+  - investigate_slack_alert
+  - debug_prod          # Debug production issues
+
+  # Communication
+  - notify_team         # Send Slack notifications
+  - schedule_meeting    # Schedule meetings

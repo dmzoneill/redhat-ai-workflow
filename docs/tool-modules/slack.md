@@ -150,7 +150,7 @@ Required credentials in `config.json` (from browser dev tools):
 
 ## Loaded By
 
-- [💬 Slack Agent](../agents/slack.md)
+- [💬 Slack Persona](../personas/slack.md)
 
 ## Related Skills
 

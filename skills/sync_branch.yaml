@@ -49,7 +49,22 @@ inputs:
     default: false
     description: "Force push after successful rebase"
 
+  - name: run_linting
+    type: boolean
+    required: false
+    default: true
+    description: "Run linting before force push (if force_push is true)"
+
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"git_failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # ==================== RESOLVE REPOSITORY ====================
 
   - name: resolve_repo
@@ -278,6 +293,69 @@ steps:
       action: "pop"
     output: pop_result
     on_error: continue
+
+  # ==================== LINTING BEFORE PUSH ====================
+
+  - name: run_black_check
+    description: "Check code formatting before push"
+    condition: "rebase_result.success and inputs.force_push and inputs.run_linting"
+    tool: code_format
+    args:
+      repo: "{{ resolved_repo.path }}"
+      tool: "black"
+      check_only: true
+    output: black_raw
+    on_error: continue
+
+  - name: run_flake8_check
+    description: "Run flake8 linting before push"
+    condition: "rebase_result.success and inputs.force_push and inputs.run_linting"
+    tool: code_lint
+    args:
+      repo: "{{ resolved_repo.path }}"
+      tool: "flake8"
+      max_line_length: 100
+      ignore: "E501,W503,E203"
+    output: flake8_raw
+    on_error: continue
+
+  - name: parse_lint_results
+    description: "Parse lint results and warn if issues"
+    condition: "rebase_result.success and inputs.force_push and inputs.run_linting"
+    compute: |
+      black_output = str(black_raw) if black_raw else ""
+      flake8_output = str(flake8_raw) if flake8_raw else ""
+
+      black_ok = "✅" in black_output or "check passed" in black_output.lower()
+      flake8_ok = "✅" in flake8_output or "passed" in flake8_output.lower() or not flake8_output.strip()
+
+      issues = []
+      if not black_ok:
+        issues.append("Black: Code needs formatting (run 'black .')")
+      if not flake8_ok:
+        # Count issues
+        issue_lines = [l for l in flake8_output.split('\n') if ':' in l and ('E' in l or 'F' in l or 'W' in l)]
+        if issue_lines:
+          issues.append(f"Flake8: {len(issue_lines)} issue(s) found")
+
+      result = {
+        "passed": len(issues) == 0,
+        "issues": issues,
+        "message": "Lint passed" if not issues else "; ".join(issues),
+      }
+    output: lint_result
+
+  - name: block_on_lint_before_push
+    description: "Block push if lint fails"
+    condition: "rebase_result.success and inputs.force_push and inputs.run_linting and lint_result and not lint_result.get('passed', True)"
+    compute: |
+      issues = lint_result.get("issues", [])
+      raise ValueError(
+        f"❌ Lint errors found. Fix before pushing:\n" +
+        "\n".join(f"  - {i}" for i in issues) +
+        "\n\nRun 'black . && flake8' to check locally."
+      )
+    output: lint_block
 
   # ==================== FORCE PUSH (using MCP tool) ====================
 

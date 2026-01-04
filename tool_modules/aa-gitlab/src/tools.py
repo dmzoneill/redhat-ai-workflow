@@ -17,13 +17,14 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import get_section_config
+from server.utils import get_gitlab_host, get_section_config
 
-GITLAB_HOST = os.getenv("GITLAB_HOST", "gitlab.cee.redhat.com")
+# Use shared implementation from utils
+GITLAB_HOST = get_gitlab_host()
 
 
 def _load_repo_config() -> dict[str, dict]:
@@ -144,33 +145,7 @@ async def run_glab(
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
 
-    @server.tool()
-    async def gitlab_view_url(url: str) -> str:
-        """
-        View a GitLab merge request or issue from a full URL.
-
-        This is the preferred way to view MRs/issues when given a URL.
-        Automatically resolves the project and runs from the local repo directory.
-
-        Args:
-            url: Full GitLab URL like https://gitlab.cee.redhat.com/org/repo/-/merge_requests/123
-
-        Returns:
-            MR or issue details.
-        """
-        project, item_id = parse_gitlab_url(url)
-        if not project or not item_id:
-            return f"Could not parse URL: {url}"
-
-        # Determine if it's an MR or issue
-        if "/merge_requests/" in url:
-            success, output = await run_glab(["mr", "view", item_id, "--web=false"], repo=project)
-        elif "/issues/" in url:
-            success, output = await run_glab(["issue", "view", item_id, "--web=false"], repo=project)
-        else:
-            return f"Unknown URL type: {url}"
-
-        return output if success else f"Unable to access {url}"
+    # REMOVED: gitlab_view_url - low value, just returns URL content
 
     @server.tool()
     async def gitlab_mr_list(
@@ -350,11 +325,7 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["mr", "rebase", str(mr_id)], repo=project)
         return f"✅ MR !{mr_id} Rebased" if success else f"❌ Failed: {output}"
 
-    @server.tool()
-    async def gitlab_mr_checkout(project: str, mr_id: int) -> str:
-        """Checkout a merge request branch locally."""
-        success, output = await run_glab(["mr", "checkout", str(mr_id)], repo=project)
-        return f"✅ Checked out MR !{mr_id}\n\n{output}" if success else f"❌ Failed: {output}"
+    # NOTE: gitlab_mr_checkout removed - interactive git operation
 
     @server.tool()
     async def gitlab_mr_approvers(project: str, mr_id: int) -> str:
@@ -442,11 +413,7 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(["repo", "view", "--web=false"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
-    async def gitlab_repo_clone(project: str) -> str:
-        """Get clone command for a GitLab repository."""
-        clone_url = f"git@{GITLAB_HOST}:{project}.git"
-        return f"## Clone {project}\n\n```bash\ngit clone {clone_url}\n```"
+    # NOTE: gitlab_repo_clone removed - one-time setup, not automation
 
     # ==================== ISSUES ====================
 
@@ -554,20 +521,7 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed: {output}"
         return f"## MRs in {project}\n\n{output}"
 
-    @server.tool()
-    async def gitlab_get_mr(project: str, mr_id: int) -> str:
-        """
-        Get details of a specific merge request (alias for gitlab_mr_view).
-
-        Args:
-            project: Project name or path
-            mr_id: Merge request IID
-
-        Returns:
-            Detailed MR information.
-        """
-        success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
-        return output if success else f"❌ Failed: {output}"
+    # REMOVED: gitlab_get_mr - duplicate of gitlab_mr_view
 
     @server.tool()
     async def gitlab_mr_comments(project: str, mr_id: int) -> str:
@@ -588,55 +542,7 @@ def register_tools(server: "FastMCP") -> int:
             success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
         return f"## Comments on !{mr_id}\n\n{output}" if success else f"❌ Failed: {output}"
 
-    @server.tool()
-    async def gitlab_pipeline_status(project: str, mr_id: int = 0, branch: str = "") -> str:
-        """
-        Get pipeline status for a merge request or branch.
-
-        Args:
-            project: Project name or path
-            mr_id: Merge request IID (optional)
-            branch: Branch name (optional, uses current if not specified)
-
-        Returns:
-            Pipeline status with job details.
-        """
-        if mr_id > 0:
-            # Get MR pipeline
-            success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
-            if not success:
-                return f"❌ Failed: {output}"
-            # Extract pipeline info from MR view
-            return f"## Pipeline for !{mr_id}\n\n{output}"
-        else:
-            # Get branch pipeline
-            args = ["ci", "view"]
-            if branch:
-                args.append(branch)
-            success, output = await run_glab(args, repo=project)
-            return f"## Pipeline Status\n\n{output}" if success else f"❌ Failed: {output}"
-
-    @server.tool()
-    async def gitlab_search_mrs_by_issue(
-        project: str,
-        issue_key: str,
-    ) -> str:
-        """
-        Search for merge requests related to a Jira issue.
-
-        Args:
-            project: Project name or path
-            issue_key: Jira issue key (e.g., AAP-12345)
-
-        Returns:
-            List of MRs mentioning the issue key.
-        """
-        # Search in MR titles/descriptions for the issue key (--all instead of --state all)
-        success, output = await run_glab(["mr", "list", "--all", "--search", issue_key], repo=project)
-        if not success:
-            return f"❌ Failed: {output}"
-        if not output.strip() or "no merge requests" in output.lower():
-            return f"No MRs found for {issue_key} in {project}"
-        return f"## MRs for {issue_key}\n\n{output}"
+    # REMOVED: gitlab_pipeline_status - duplicate of gitlab_ci_status
+    # REMOVED: gitlab_search_mrs_by_issue - use gitlab_mr_list with search param
 
     return len([m for m in dir() if not m.startswith("_")])  # Approximate count

@@ -8,8 +8,8 @@ import pytest
 
 # Add project paths
 PROJECT_ROOT = Path(__file__).parent.parent
-SERVERS_DIR = PROJECT_ROOT / "mcp-servers"
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 
@@ -32,9 +32,9 @@ def skills_dir(project_root):
 
 
 @pytest.fixture
-def agents_dir(project_root):
+def personas_dir(project_root):
     """Return path to agents directory."""
-    return project_root / "agents"
+    return project_root / "personas"
 
 
 @pytest.fixture

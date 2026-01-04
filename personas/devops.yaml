@@ -1,0 +1,48 @@
+# DevOps Persona Configuration
+# Specifies which MCP tool modules this persona needs
+
+name: devops
+description: Infrastructure, monitoring, and ephemeral deployments
+persona: personas/devops.md
+
+# Tool modules to load (from tool_modules/aa-*)
+tools:
+  - workflow      # 16 tools - Core (memory, persona, session, skill, infra, meta)
+  - k8s           # 26 tools - Kubernetes operations
+  - bonfire       # 21 tools - Ephemeral namespaces
+  - quay          # 8 tools - Container image checks
+  - gitlab        # 35 tools - MR lookup for ephemeral deploy
+
+# Total: ~106 tools (under 128 limit)
+# Focused on ephemeral deployment and debugging
+# Note: Does not include lint/dev-workflow tools - use developer persona for those
+
+skills:
+  # Ephemeral environments
+  - test_mr_ephemeral       # Deploy MR to ephemeral for testing
+  - deploy_to_ephemeral     # Deploy apps to ephemeral cluster
+  - extend_ephemeral        # Extend namespace reservation
+  - check_secrets           # Verify secrets/configmaps
+
+  # Incident response
+  - investigate_alert       # Investigate Prometheus alerts
+  - investigate_slack_alert # Investigate alerts from Slack
+  - debug_prod              # Debug production issues
+  - silence_alert           # Create/manage alert silences
+
+  # Deployment operations
+  - rollout_restart         # Restart deployments
+  - scale_deployment        # Scale pods up/down
+  - environment_overview    # Full environment health check
+
+  # Pipeline management
+  - ci_retry                # Retry failed pipelines
+  - cancel_pipeline         # Cancel stuck pipelines
+  - konflux_status          # Check Konflux build status
+  - check_integration_tests # Review integration test results
+
+  # Vulnerability scanning
+  - scan_vulnerabilities    # Scan images for CVEs
+
+  # Communication
+  - notify_team             # Send Slack notifications

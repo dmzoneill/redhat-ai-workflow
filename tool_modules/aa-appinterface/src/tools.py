@@ -11,12 +11,12 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import load_config
-from src.utils import run_cmd_full as run_cmd
+from server.utils import load_config
+from server.utils import run_cmd_full as run_cmd
 
 logger = logging.getLogger(__name__)
 

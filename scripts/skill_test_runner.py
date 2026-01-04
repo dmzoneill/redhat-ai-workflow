@@ -27,8 +27,8 @@ import yaml
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
 SKILLS_DIR = PROJECT_ROOT / "skills"
-CONFIG_DIR = PROJECT_ROOT / "config"
-SERVERS_DIR = PROJECT_ROOT / "mcp-servers"
+TESTS_DIR = PROJECT_ROOT / "tests"
+TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
 
 
 @dataclass
@@ -60,8 +60,8 @@ class SkillResult:
 
 # Load exclusions
 def load_exclusions() -> dict:
-    """Load test exclusions from config."""
-    exclusions_file = CONFIG_DIR / "test_exclusions.yaml"
+    """Load test exclusions from tests directory."""
+    exclusions_file = TESTS_DIR / "test_exclusions.yaml"
     if not exclusions_file.exists():
         return {"excluded_skills": [], "excluded_tools": []}
 

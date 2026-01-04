@@ -1,0 +1,316 @@
+# Skill: Cleanup Branches
+# Delete merged and stale feature branches
+
+name: cleanup_branches
+description: |
+  Clean up old feature branches that have been merged or are stale.
+
+  The skill will:
+  1. Fetch latest from remote
+  2. List all local and remote branches
+  3. Identify merged branches
+  4. Delete merged branches (with confirmation)
+  5. Optionally clean up tracking refs
+
+version: "1.0"
+
+inputs:
+  - name: repo
+    type: string
+    required: false
+    default: ""
+    description: "Repository path (defaults to cwd)"
+
+  - name: dry_run
+    type: boolean
+    required: false
+    default: true
+    description: "Just show what would be deleted (default: true for safety)"
+
+  - name: include_remote
+    type: boolean
+    required: false
+    default: false
+    description: "Also delete remote branches (requires push access)"
+
+  - name: older_than_days
+    type: integer
+    required: false
+    default: 30
+    description: "Consider branches stale if no commits in this many days"
+
+  - name: protected_branches
+    type: string
+    required: false
+    default: "main,master,develop,release"
+    description: "Comma-separated list of branches to never delete"
+
+steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"git_failures": []}
+    output: autoheal_state
+    on_error: continue
+
+  # ==================== RESOLVE REPOSITORY ====================
+
+  - name: resolve_repo
+    description: "Determine repository path"
+    compute: |
+      import os
+
+      if inputs.repo and inputs.repo != "":
+          repo_path = inputs.repo
+      else:
+          repo_path = os.getcwd()
+
+      if not os.path.exists(os.path.join(repo_path, ".git")):
+          raise ValueError(f"Not a git repository: {repo_path}")
+
+      # Parse protected branches
+      protected = [b.strip().lower() for b in inputs.protected_branches.split(",")]
+
+      result = {"path": repo_path, "protected": protected}
+    output: resolved_repo
+
+  # ==================== FETCH AND LIST ====================
+
+  - name: fetch_all
+    description: "Fetch latest from all remotes"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved_repo.path }}"
+      all: true
+      prune: true
+    output: fetch_result
+    on_error: continue
+
+  - name: list_local_branches
+    description: "List all local branches"
+    tool: git_branch_list
+    args:
+      repo: "{{ resolved_repo.path }}"
+      all: false
+    output: local_branches_raw
+
+  - name: list_remote_branches
+    description: "List all remote branches"
+    tool: git_remote
+    args:
+      repo: "{{ resolved_repo.path }}"
+      action: "show"
+      remote: "origin"
+    output: remote_info_raw
+    on_error: continue
+
+  - name: list_all_branches
+    description: "List all branches including remote"
+    tool: git_branch_list
+    args:
+      repo: "{{ resolved_repo.path }}"
+      all: true
+    output: all_branches_raw
+    on_error: continue
+
+  # ==================== IDENTIFY MERGED BRANCHES ====================
+
+  - name: identify_candidates
+    description: "Identify branches to delete"
+    compute: |
+      local_text = str(local_branches_raw) if local_branches_raw else ""
+      all_text = str(all_branches_raw) if 'all_branches_raw' in dir() and all_branches_raw else ""
+
+      protected = resolved_repo.get("protected", ["main", "master", "develop"])
+
+      # Parse local branches
+      local_branches = []
+      current_branch = None
+      for line in local_text.split("\n"):
+          line = line.strip()
+          if line.startswith("*"):
+              current_branch = line.replace("*", "").strip()
+              local_branches.append(current_branch)
+          elif line:
+              local_branches.append(line)
+
+      # Filter out protected branches
+      candidates = []
+      for branch in local_branches:
+          branch_lower = branch.lower()
+          is_protected = any(p in branch_lower for p in protected)
+
+          if not is_protected and branch != current_branch:
+              candidates.append({
+                  "name": branch,
+                  "type": "local",
+              })
+
+      # Count remote branches
+      remote_branches = []
+      for line in all_text.split("\n"):
+          if "remotes/origin/" in line and "HEAD" not in line:
+              branch_name = line.strip().replace("remotes/origin/", "")
+              if not any(p in branch_name.lower() for p in protected):
+                  remote_branches.append(branch_name)
+
+      result = {
+          "candidates": candidates[:50],
+          "candidate_count": len(candidates),
+          "remote_branches": remote_branches[:50],
+          "remote_count": len(remote_branches),
+          "current_branch": current_branch,
+          "protected": protected,
+      }
+    output: branch_candidates
+
+  # ==================== DELETE BRANCHES ====================
+
+  - name: delete_first_branch
+    description: "Delete first candidate branch"
+    condition: "not inputs.dry_run and branch_candidates.candidate_count > 0"
+    tool: git_branch_delete
+    args:
+      repo: "{{ resolved_repo.path }}"
+      branch: "{{ branch_candidates.candidates[0].name }}"
+      force: false
+    output: delete_1_result
+    on_error: continue
+
+  - name: delete_second_branch
+    description: "Delete second candidate branch"
+    condition: "not inputs.dry_run and branch_candidates.candidate_count > 1"
+    tool: git_branch_delete
+    args:
+      repo: "{{ resolved_repo.path }}"
+      branch: "{{ branch_candidates.candidates[1].name }}"
+      force: false
+    output: delete_2_result
+    on_error: continue
+
+  - name: delete_third_branch
+    description: "Delete third candidate branch"
+    condition: "not inputs.dry_run and branch_candidates.candidate_count > 2"
+    tool: git_branch_delete
+    args:
+      repo: "{{ resolved_repo.path }}"
+      branch: "{{ branch_candidates.candidates[2].name }}"
+      force: false
+    output: delete_3_result
+    on_error: continue
+
+  - name: count_deleted
+    description: "Count deleted branches"
+    compute: |
+      deleted = 0
+      errors = []
+
+      for i, result in enumerate([
+          delete_1_result if 'delete_1_result' in dir() else None,
+          delete_2_result if 'delete_2_result' in dir() else None,
+          delete_3_result if 'delete_3_result' in dir() else None,
+      ]):
+          if result:
+              result_text = str(result)
+              if "error" not in result_text.lower() and "not found" not in result_text.lower():
+                  deleted += 1
+              else:
+                  errors.append(result_text[:100])
+
+      result = {
+          "deleted_count": deleted,
+          "errors": errors,
+      }
+    output: deletion_results
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_cleanup
+    description: "Log cleanup action"
+    condition: "deletion_results and deletion_results.deleted_count > 0"
+    tool: memory_session_log
+    args:
+      action: "Cleaned up branches"
+      details: "Deleted {{ deletion_results.deleted_count }} branches in {{ resolved_repo.path }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🧹 Branch Cleanup
+
+      **Repository:** `{{ resolved_repo.path }}`
+      **Current Branch:** `{{ branch_candidates.current_branch }}`
+      **Mode:** {{ "🔍 Dry Run" if inputs.dry_run else "🗑️ Delete" }}
+
+      ---
+
+      ### Local Branches to Clean
+
+      {% if branch_candidates.candidate_count == 0 %}
+      ✅ No branches to clean up.
+      {% else %}
+      Found **{{ branch_candidates.candidate_count }}** candidate branches:
+
+      {% for branch in branch_candidates.candidates[:15] %}
+      - `{{ branch.name }}`
+      {% endfor %}
+      {% if branch_candidates.candidate_count > 15 %}
+      ... and {{ branch_candidates.candidate_count - 15 }} more
+      {% endif %}
+
+      {% if inputs.dry_run %}
+      ### ⚠️ Dry Run Mode
+
+      No branches were deleted. To delete, run:
+      ```python
+      skill_run("cleanup_branches", '{"dry_run": false}')
+      ```
+
+      {% else %}
+      ### Deletion Results
+
+      **Deleted:** {{ deletion_results.deleted_count }} branches
+
+      {% if deletion_results.errors %}
+      **Errors:**
+      {% for err in deletion_results.errors %}
+      - {{ err }}
+      {% endfor %}
+      {% endif %}
+
+      {% if branch_candidates.candidate_count > 3 %}
+      ⚠️ Only first 3 branches deleted per run for safety.
+      Run again to delete more.
+      {% endif %}
+      {% endif %}
+      {% endif %}
+
+      ---
+
+      ### Protected Branches (never deleted)
+      {% for p in resolved_repo.protected %}
+      - `{{ p }}`
+      {% endfor %}
+
+      ### Commands
+
+      **List all branches:**
+      ```python
+      git_branch_list(repo='{{ resolved_repo.path }}', all=True)
+      ```
+
+      **Delete specific branch:**
+      ```python
+      git_branch_delete(repo='{{ resolved_repo.path }}', branch='BRANCH_NAME')
+      ```
+
+  - name: context
+    value:
+      repo: "{{ resolved_repo.path }}"
+      candidate_count: "{{ branch_candidates.candidate_count }}"
+      deleted_count: "{{ deletion_results.deleted_count if deletion_results else 0 }}"
+      dry_run: "{{ inputs.dry_run }}"

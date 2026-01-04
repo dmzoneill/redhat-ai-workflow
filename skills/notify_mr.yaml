@@ -45,6 +45,15 @@ inputs:
     description: "If true, formats as a reminder rather than new MR notification"
 
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # ==================== SETUP ====================
 
   - name: setup
@@ -198,10 +207,7 @@ steps:
       # Build team mention using group ID from config
       team_group_id = ctx.get("team_group_id", "")
       team_group_handle = ctx.get("team_group_handle", "aa-api-team")
-      if team_group_id:
-          team_mention = f"<!subteam^{team_group_id}|@{team_group_handle}>"
-      else:
-          team_mention = f"@{team_group_handle}"
+      team_mention = slack_utils.build_team_mention(team_group_id, team_group_handle)
 
       # Build message
       lines = [team_mention]

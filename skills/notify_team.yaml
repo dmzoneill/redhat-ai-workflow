@@ -1,0 +1,281 @@
+# Skill: Notify Team via Slack
+# Send notifications to Slack channels
+
+name: notify_team
+description: |
+  Send notifications to Slack channels for key workflow events.
+
+  Use for:
+  - Deployment completed notifications
+  - MR ready for review
+  - Alert resolved
+  - Release announcements
+  - General team updates
+
+  The skill will:
+  1. Find the appropriate channel
+  2. Format the message nicely
+  3. Post to Slack
+  4. Optionally mention specific users
+
+version: "1.0"
+
+inputs:
+  - name: message
+    type: string
+    required: true
+    description: "Message to send"
+
+  - name: channel
+    type: string
+    required: false
+    default: "team-automation-analytics"
+    description: "Slack channel name (without #)"
+
+  - name: type
+    type: string
+    required: false
+    default: "info"
+    description: "Message type: 'info', 'success', 'warning', 'error', 'deployment', 'release'"
+
+  - name: mention
+    type: string
+    required: false
+    description: "User to mention (Slack username or email)"
+
+  - name: thread_ts
+    type: string
+    required: false
+    description: "Thread timestamp to reply to (for threaded messages)"
+
+  - name: context
+    type: string
+    required: false
+    description: "Additional context (e.g., MR ID, namespace, issue key)"
+
+steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"slack_failures": []}
+    output: autoheal_state
+    on_error: continue
+
+  # ==================== FIND CHANNEL ====================
+
+  - name: list_channels
+    description: "List available Slack channels"
+    tool: slack_list_channels
+    args:
+      limit: 100
+    output: channels_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: list_channels ====================
+
+  - name: detect_failure_slack
+    description: "Detect if Slack call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(channels_raw) if 'channels_raw' in dir() and channels_raw else ""
+      failure = detect_failure(result_text, "slack_list_channels")
+      result = failure
+    output: failure_slack
+    on_error: continue
+
+  - name: log_failure_slack
+    description: "Log failure to memory"
+    condition: "failure_slack and failure_slack.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+      entry = log_failure(
+          tool_name="slack_list_channels",
+          error_text=failure_slack.get('error_text', ''),
+          skill_name="notify_team",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure
+    on_error: continue
+
+  - name: find_channel
+    description: "Find the target channel"
+    compute: |
+      channels_text = str(channels_raw) if channels_raw else ""
+
+      target = inputs.channel.lower().replace("#", "")
+      channel_found = target in channels_text.lower()
+
+      # Try to extract channel ID
+      import re
+      channel_id = None
+      for line in channels_text.split("\n"):
+          if target in line.lower():
+              # Look for channel ID pattern
+              id_match = re.search(r'(C[A-Z0-9]+)', line)
+              if id_match:
+                  channel_id = id_match.group(1)
+                  break
+
+      result = {
+          "found": channel_found,
+          "channel_id": channel_id,
+          "channel_name": target,
+      }
+    output: channel_info
+
+  # ==================== RESOLVE USER ====================
+
+  - name: get_user_info
+    description: "Get Slack user info for mentions"
+    condition: "inputs.mention"
+    tool: slack_get_user
+    args:
+      user: "{{ inputs.mention }}"
+    output: user_info_raw
+    on_error: continue
+
+  - name: parse_user
+    description: "Parse user info for mention"
+    condition: "inputs.mention"
+    compute: |
+      user_text = str(user_info_raw) if 'user_info_raw' in dir() and user_info_raw else ""
+
+      # Extract user ID for mention
+      import re
+      user_id = None
+      id_match = re.search(r'(U[A-Z0-9]+)', user_text)
+      if id_match:
+          user_id = id_match.group(1)
+
+      result = {
+          "user_id": user_id,
+          "mention_text": f"<@{user_id}>" if user_id else inputs.mention,
+      }
+    output: user_mention
+    on_error: continue
+
+  # ==================== FORMAT MESSAGE ====================
+
+  - name: format_message
+    description: "Format the Slack message with emoji and structure"
+    compute: |
+      msg_type = inputs.type.lower()
+
+      # Choose emoji based on type
+      emoji_map = {
+          "info": "ℹ️",
+          "success": "✅",
+          "warning": "⚠️",
+          "error": "❌",
+          "deployment": "🚀",
+          "release": "📦",
+      }
+      emoji = emoji_map.get(msg_type, "📢")
+
+      # Build message
+      parts = [f"{emoji} {inputs.message}"]
+
+      # Add mention
+      if 'user_mention' in dir() and user_mention and user_mention.get('mention_text'):
+          parts.append(f"\ncc: {user_mention['mention_text']}")
+
+      # Add context
+      if inputs.context:
+          parts.append(f"\n```{inputs.context}```")
+
+      formatted = "".join(parts)
+
+      result = {
+          "text": formatted,
+          "emoji": emoji,
+      }
+    output: formatted_msg
+
+  # ==================== SEND MESSAGE ====================
+
+  - name: post_message
+    description: "Post the message to Slack"
+    tool: slack_post_message
+    args:
+      channel: "{{ channel_info.channel_name }}"
+      message: "{{ formatted_msg.text }}"
+      thread_ts: "{{ inputs.thread_ts or '' }}"
+    output: post_result
+    on_error: continue
+
+  - name: parse_post_result
+    description: "Parse post result"
+    compute: |
+      result_text = str(post_result) if post_result else ""
+
+      success = "error" not in result_text.lower() and "failed" not in result_text.lower()
+
+      # Extract message timestamp for threading
+      import re
+      ts = None
+      ts_match = re.search(r'(\d+\.\d+)', result_text)
+      if ts_match:
+          ts = ts_match.group(1)
+
+      result = {
+          "success": success,
+          "thread_ts": ts,
+          "raw": result_text[:300] if result_text else "No response",
+      }
+    output: post_status
+
+  # ==================== MEMORY ====================
+
+  - name: log_notification
+    description: "Log notification to session"
+    condition: "post_status.success"
+    tool: memory_session_log
+    args:
+      action: "Sent Slack notification"
+      details: "Channel: #{{ channel_info.channel_name }}, Type: {{ inputs.type }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 💬 Slack Notification
+
+      {% if post_status.success %}
+      ✅ **Message Sent**
+
+      **Channel:** #{{ channel_info.channel_name }}
+      **Type:** {{ formatted_msg.emoji }} {{ inputs.type }}
+
+      {% if post_status.thread_ts %}
+      **Thread ID:** `{{ post_status.thread_ts }}`
+
+      To reply in thread:
+      ```python
+      skill_run("notify_team", '{"message": "Follow-up", "channel": "{{ channel_info.channel_name }}", "thread_ts": "{{ post_status.thread_ts }}"}')
+      ```
+      {% endif %}
+
+      {% else %}
+      ❌ **Failed to Send**
+
+      {{ post_status.raw }}
+
+      {% if not channel_info.found %}
+      ⚠️ Channel `#{{ inputs.channel }}` not found.
+
+      Available channels:
+      ```python
+      slack_list_channels(limit=50)
+      ```
+      {% endif %}
+      {% endif %}
+
+  - name: context
+    value:
+      sent: "{{ post_status.success }}"
+      channel: "{{ channel_info.channel_name }}"
+      thread_ts: "{{ post_status.thread_ts }}"

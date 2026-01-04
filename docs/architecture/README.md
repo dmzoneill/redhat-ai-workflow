@@ -2,6 +2,17 @@
 
 This document describes the architecture of the AI Workflow MCP server.
 
+## Terminology
+
+| Term | Meaning in This Project |
+|------|------------------------|
+| **Agent / Persona** | A tool configuration profile that determines which MCP tools are loaded (e.g., developer, devops, incident). NOT a separate AI instance. |
+| **Tool Module** | A plugin directory containing MCP tool implementations (e.g., `aa-git/`, `aa-jira/`). |
+| **Skill** | A YAML-defined multi-step workflow that chains tools together. |
+| **Memory** | Persistent YAML files that maintain context across Claude sessions. |
+
+> **Important:** This is a **single-agent system** with dynamic tool loading. When you "load an agent," you're changing which tools Claude has access to, not spawning a separate AI. The term "agent" refers to adopting a persona/role.
+
 ## Core Concepts
 
 ```mermaid
@@ -39,7 +50,7 @@ Individual MCP tool functions that perform specific actions:
 - **150+ tools** across 14 modules
 - Each tool is a simple, focused function
 - Wrapped with `@debuggable` for self-healing
-- Shared utilities in `aa-common/src/utils.py`
+- Shared utilities in `server/src/utils.py`
 
 ### 🎭 Agents
 
@@ -81,7 +92,7 @@ sequenceDiagram
     participant Cursor
 
     User->>Claude: "Load devops agent"
-    Claude->>MCP: agent_load("devops")
+    Claude->>MCP: persona_load("devops")
     MCP->>Loader: switch_agent("devops")
     Loader->>Loader: Unload current tools
     Loader->>Loader: Load k8s, bonfire, quay, gitlab
@@ -95,8 +106,8 @@ sequenceDiagram
 ## Tool Modules
 
 ```
-mcp-servers/
-├── aa-common/          # Core server, agent loading
+tool_modules/
+├── server/          # Core server, agent loading
 ├── aa-git/             # Git operations (19 tools)
 ├── aa-gitlab/          # GitLab MRs, pipelines (35 tools)
 ├── aa-jira/            # Jira issues (24 tools)
@@ -130,7 +141,7 @@ flowchart LR
 
 ## Shared Utilities
 
-### MCP Tool Utilities (`aa-common/src/utils.py`)
+### MCP Tool Utilities (`server/src/utils.py`)
 
 Common utilities shared across all MCP servers:
 
@@ -168,4 +179,5 @@ Central configuration via `config.json`:
 - [MCP Implementation Details](./mcp-implementation.md) - Server code & patterns
 - [Workflow Module Architecture](./workflow-modules.md) - aa-workflow internal structure
 - [Skills Reference](../skills/README.md) - All available skills
+- [Learning Loop](../learning-loop.md) - Auto-remediation and memory integration
 - [README](../../README.md) - Getting started

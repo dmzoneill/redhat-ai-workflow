@@ -6,7 +6,7 @@ This server provides proactive Slack integration with:
 - MCP resources for pending message queue
 - Persistent state for restart survival
 
-Can run standalone or be loaded as a plugin via aa-common.
+Can run standalone or be loaded as a plugin via server/.
 
 Usage:
     # Standalone mode

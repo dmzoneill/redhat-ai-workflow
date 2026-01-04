@@ -16,11 +16,11 @@ from mcp.types import TextContent
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import load_config, run_cmd_full, run_cmd_shell
+from server.utils import load_config, run_cmd_full, run_cmd_shell
 
 
 def register_infra_tools(server: "FastMCP") -> int:

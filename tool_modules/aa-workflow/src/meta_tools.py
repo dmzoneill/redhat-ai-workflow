@@ -20,9 +20,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
+sys.path.insert(0, str(PROJECT_DIR))
+
+# Import known issues checker
+try:
+    from server.debuggable import _check_known_issues_sync, _format_known_issues
+except ImportError:
+
+    def _check_known_issues_sync(tool_name="", error_text=""):
+        return []
+
+    def _format_known_issues(matches):
+        return ""
+
 
 # Tool counts per module - for discovery
 TOOL_REGISTRY = {
@@ -199,6 +212,26 @@ TOOL_REGISTRY = {
         "appinterface_search",
         "appinterface_clusters",
     ],
+    "lint": [
+        "lint_python",
+        "lint_yaml",
+        "lint_dockerfile",
+        "test_run",
+        "test_coverage",
+        "security_scan",
+        "precommit_run",
+    ],
+    "dev-workflow": [
+        "workflow_start_work",
+        "workflow_check_deploy_readiness",
+        "workflow_review_feedback",
+        "workflow_create_branch",
+        "workflow_prepare_mr",
+        "workflow_run_local_checks",
+        "workflow_monitor_pipelines",
+        "workflow_handle_review",
+        "workflow_daily_standup",
+    ],
 }
 
 # Module prefix mapping
@@ -216,16 +249,22 @@ MODULE_PREFIXES = {
     "bonfire_": "bonfire",
     "quay_": "quay",
     "appinterface_": "appinterface",
-    "workflow_": "workflow",
-    "lint_": "workflow",
-    "test_": "workflow",
-    "security_": "workflow",
-    "precommit_": "workflow",
+    # Lint module tools (developer-specific)
+    "lint_": "lint",
+    "test_": "lint",
+    "security_": "lint",
+    "precommit_": "lint",
+    # Dev-workflow module tools (developer-specific)
+    "workflow_": "dev-workflow",
+    # Core workflow module tools (always loaded)
     "memory_": "workflow",
-    "agent_": "workflow",
+    "persona_": "workflow",
     "skill_": "workflow",
     "session_": "workflow",
     "tool_": "workflow",
+    "vpn_": "workflow",
+    "kube_": "workflow",
+    "debug_": "workflow",
 }
 
 
@@ -321,7 +360,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             return [TextContent(type="text", text=f"❌ Invalid JSON args: {e}")]
 
         # Load and execute the tool module
-        tools_file = SERVERS_DIR / f"aa-{module}" / "src" / "tools.py"
+        tools_file = TOOL_MODULES_DIR / f"aa-{module}" / "src" / "tools.py"
 
         if not tools_file.exists():
             return [TextContent(type="text", text=f"❌ Module not found: {module}")]
@@ -358,6 +397,16 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         except Exception as e:
             error_msg = str(e)
             lines = [f"❌ Error executing {tool_name}: {error_msg}"]
+
+            # Check for known issues from memory
+            matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
+            known_text = _format_known_issues(matches)
+            if known_text:
+                lines.append(known_text)
+            else:
+                lines.append("")
+                lines.append(f"💡 **Auto-fix:** `debug_tool('{tool_name}')`")
+                lines.append(f"📚 **After fixing:** `learn_tool_fix('{tool_name}', '<pattern>', '<cause>', '<fix>')`")
 
             # Auto-create GitHub issue for all tool failures
             if create_issue_fn:

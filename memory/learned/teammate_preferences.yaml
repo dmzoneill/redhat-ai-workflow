@@ -1,31 +1,6 @@
-# Teammate Preferences
-# Code review preferences, communication styles, and expertise areas
-# Updated as you learn about team members
-
-last_updated: null
-
-# Default preferences for all reviewers
 defaults:
-  review_style: "thorough"
   prefers_small_prs: true
-  timezone: "Europe/Dublin"
-
+  review_style: thorough
+  timezone: Europe/Dublin
+last_updated: '2026-01-04T20:32:28.261965'
 teammates: {}
-# Example entry:
-#   username:
-#     full_name: "Full Name"
-#     expertise:
-#       - "billing"
-#       - "celery"
-#       - "testing"
-#     review_preferences:
-#       style: "thorough"  # or "quick", "architectural"
-#       prefers_small_prs: true
-#       focus_areas:
-#         - "error handling"
-#         - "test coverage"
-#     communication:
-#       timezone: "Europe/Dublin"
-#       slack_handle: "@username"
-#       best_contact_hours: "10:00-17:00"
-#     notes: "Prefers to review billing changes"

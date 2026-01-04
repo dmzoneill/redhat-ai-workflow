@@ -19,8 +19,8 @@ from mcp.types import TextContent
 try:
     from .constants import MEMORY_DIR
 except ImportError:
-    SERVERS_DIR = Path(__file__).parent.parent.parent
-    PROJECT_DIR = SERVERS_DIR.parent
+    TOOL_MODULES_DIR = Path(__file__).parent.parent.parent
+    PROJECT_DIR = TOOL_MODULES_DIR.parent
     MEMORY_DIR = PROJECT_DIR / "memory"
 
 if TYPE_CHECKING:

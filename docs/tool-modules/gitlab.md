@@ -90,9 +90,9 @@ gitlab_mr_create(
 
 ## Loaded By
 
-- [👨‍💻 Developer Agent](../agents/developer.md)
-- [🔧 DevOps Agent](../agents/devops.md)
-- [💬 Slack Agent](../agents/slack.md)
+- [👨‍💻 Developer Persona](../personas/developer.md)
+- [🔧 DevOps Persona](../personas/devops.md)
+- [💬 Slack Persona](../personas/slack.md)
 
 ## Related Skills
 

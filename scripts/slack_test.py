@@ -2,24 +2,16 @@
 """Quick Slack smoke test - send a message to yourself."""
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
-# Add the slack module to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "mcp-servers/aa-slack/src"))
+# Add paths for shared utilities
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "common"))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules/aa-slack/src"))
 
+from config_loader import load_config
 from slack_client import SlackSession
-
-
-def load_config() -> dict:
-    """Load config.json."""
-    config_path = Path(__file__).parent.parent / "config.json"
-    if not config_path.exists():
-        print(f"❌ Config not found: {config_path}")
-        sys.exit(1)
-    with open(config_path) as f:
-        return json.load(f)
 
 
 async def main():

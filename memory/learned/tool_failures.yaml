@@ -1,0 +1,140 @@
+# Learned Tool Failure Patterns
+# Auto-populated by skill auto-heal blocks when tools fail
+# Used to automatically suggest/apply fixes for known issues
+
+# Quick-fix patterns for common errors
+auto_fixes:
+  unauthorized:
+    patterns:
+      - "unauthorized"
+      - "401"
+      - "forbidden"
+      - "403"
+      - "token expired"
+      - "authentication required"
+    fix_action: "kube_login"
+    fix_cluster: "auto"  # Will determine from context
+    success_rate: 0.95
+
+  network:
+    patterns:
+      - "no route to host"
+      - "connection refused"
+      - "network unreachable"
+      - "timeout"
+      - "dial tcp"
+    fix_action: "vpn_connect"
+    success_rate: 0.90
+
+  registry_auth:
+    patterns:
+      - "manifest unknown"
+      - "unauthorized"
+      - "podman login"
+      - "registry authentication"
+    fix_action: "suggest_podman_login"
+    manual: true
+    message: "Run: podman login quay.io"
+
+  tty_required:
+    patterns:
+      - "output is not a tty"
+      - "not a terminal"
+      - "aborting"
+    fix_action: "add_force_flag"
+    manual: true
+    message: "Tool missing --force or --yes flag. Use debug_tool() to fix."
+
+  cluster_env:
+    patterns:
+      - "kubeconfig"
+      - "no context"
+      - "cluster not found"
+    fix_action: "kube_login"
+    fix_cluster: "auto"
+    success_rate: 0.85
+
+# Tool-specific learned failures
+# Format: tool_name -> list of known failure patterns
+tool_failures:
+  # Bonfire tools
+  bonfire_namespace_reserve:
+    - error: "Unauthorized"
+      fix: "kube_login('ephemeral')"
+      success_rate: 0.95
+      last_seen: null
+    - error: "No namespaces available in pool"
+      fix: "Wait and retry, or try a different pool"
+      manual: true
+      success_rate: 0.0
+
+  bonfire_deploy:
+    - error: "timeout waiting for"
+      fix: "Increase timeout or check image availability"
+      manual: true
+    - error: "manifest unknown"
+      fix: "Check image tag - use FULL 40-char SHA"
+      manual: true
+
+  # Kubectl tools
+  kubectl_get_pods:
+    - error: "Unauthorized"
+      fix: "kube_login()"
+      cluster_hint: "from_context"
+    - error: "No resources found"
+      fix: "Normal - namespace may be empty"
+      not_an_error: true
+
+  # Kibana tools
+  kibana_search_logs:
+    - error: "403 Forbidden"
+      fix: "Manual browser login required"
+      manual: true
+      message: "Open Kibana in browser and complete SSO login"
+    - error: "Log In"
+      fix: "Manual browser login required"
+      manual: true
+
+  # Quay tools
+  quay_check_image_exists:
+    - error: "unauthorized"
+      fix: "podman login quay.io"
+      manual: true
+    - error: "not found"
+      fix: "Image not built yet - wait for Konflux"
+      not_an_error: true
+
+  # GitLab tools
+  gitlab_mr_view:
+    - error: "unauthorized"
+      fix: "glab auth login"
+      manual: true
+    - error: "404"
+      fix: "MR not found - check project and MR ID"
+      not_an_error: true
+
+  # Prometheus tools
+  prometheus_query:
+    - error: "bad_data"
+      fix: "Check PromQL syntax"
+      manual: true
+    - error: "unauthorized"
+      fix: "kube_login()"
+
+# Failure history log (most recent first)
+# Auto-populated by skills when tools fail
+failure_history: []
+
+# Statistics
+stats:
+  total_failures: 0
+  auto_fixed: 0
+  manual_required: 0
+  last_updated: null
+
+
+
+
+
+
+

@@ -25,8 +25,8 @@ from pathlib import Path
 
 import yaml
 
-# Add mcp-servers to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "mcp-servers" / "aa-common" / "src"))
+# Add server module to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 @dataclass
@@ -168,7 +168,7 @@ TOOL_TEST_PARAMS = {
         "limit": 1,
     },
     # Workflow tools
-    "agent_list": {},
+    "persona_list": {},
     "memory_read": {},
     "skill_list": {},
     # Slack tools - status only
@@ -245,16 +245,16 @@ class IntegrationTestRunner:
         self.auto_fix = auto_fix
         self.dry_run = dry_run
         self.project_root = Path(__file__).parent.parent
-        self.agents_dir = self.project_root / "agents"
-        self.config_dir = self.project_root / "config"
+        self.personas_dir = self.project_root / "personas"
+        self.tests_dir = self.project_root / "tests"
         self.report = TestReport(timestamp=datetime.now().isoformat())
 
         # Load exclusions from config
         self.exclusions = self._load_exclusions()
 
     def _load_exclusions(self) -> dict:
-        """Load test exclusions from config/test_exclusions.yaml."""
-        exclusions_file = self.config_dir / "test_exclusions.yaml"
+        """Load test exclusions from tests/test_exclusions.yaml."""
+        exclusions_file = self.tests_dir / "test_exclusions.yaml"
 
         if not exclusions_file.exists():
             print(f"  ⚠️  No exclusions file found at {exclusions_file}")
@@ -294,7 +294,7 @@ class IntegrationTestRunner:
 
     def load_agent_config(self, agent_name: str) -> dict:
         """Load agent configuration from YAML."""
-        config_path = self.agents_dir / f"{agent_name}.yaml"
+        config_path = self.personas_dir / f"{agent_name}.yaml"
         if not config_path.exists():
             raise FileNotFoundError(f"Agent config not found: {config_path}")
 
@@ -304,7 +304,7 @@ class IntegrationTestRunner:
     def get_available_agents(self) -> list[str]:
         """Get list of available agent names."""
         agents = []
-        for path in self.agents_dir.glob("*.yaml"):
+        for path in self.personas_dir.glob("*.yaml"):
             name = path.stem
             # Skip slim/combined variants
             if name.endswith("-slim") or name in ("combined", "core", "universal"):
@@ -373,8 +373,8 @@ class IntegrationTestRunner:
                 result.success = True
                 result.output = f"DRY RUN: would call {tool_name}({params})"
             else:
-                # TODO: Actually call the tool via MCP
-                # For now, we validate the tool exists and has proper signature
+                # Signature validation mode (non-dry-run)
+                # For full MCP tool execution tests, see tests/test_mcp_integration.py
                 result.success = True
                 result.output = f"VALIDATED: {tool_name} exists"
 

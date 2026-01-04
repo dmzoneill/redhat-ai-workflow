@@ -1,0 +1,453 @@
+# Skill: Create Hotfix
+# Cherry-pick a fix to a release branch and tag it
+
+name: hotfix
+description: |
+  Create a hotfix by cherry-picking a commit to a release branch.
+
+  Use when:
+  - A bug fix needs to be backported to an older release
+  - You need to create a patch release quickly
+  - A fix on main needs to go to a release branch
+
+  The skill will:
+  1. Fetch latest from remote
+  2. Checkout the target release branch
+  3. Cherry-pick the specified commit(s)
+  4. Optionally create a release tag
+  5. Push to remote
+
+version: "1.0"
+
+inputs:
+  - name: commit
+    type: string
+    required: true
+    description: "Commit SHA to cherry-pick (from main branch)"
+
+  - name: target_branch
+    type: string
+    required: true
+    description: "Target release branch (e.g., 'release/1.2', 'v1.2-branch')"
+
+  - name: repo
+    type: string
+    required: false
+    default: ""
+    description: "Repository path (defaults to cwd)"
+
+  - name: tag
+    type: string
+    required: false
+    description: "Optional: create a release tag (e.g., 'v1.2.3')"
+
+  - name: push
+    type: boolean
+    required: false
+    default: false
+    description: "Push changes to remote after cherry-pick"
+
+  - name: jira_key
+    type: string
+    required: false
+    description: "Jira issue key for the hotfix"
+
+steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize auto-heal tracking"
+    compute: |
+      result = {"git_failure": None, "jira_failure": None}
+    output: autoheal_state
+    on_error: continue
+
+  # ==================== RESOLVE REPOSITORY ====================
+
+  - name: resolve_repo
+    description: "Determine repository path"
+    compute: |
+      import os
+
+      if inputs.repo and inputs.repo != "":
+          repo_path = inputs.repo
+      else:
+          repo_path = os.getcwd()
+
+      # Verify it's a git repo
+      if not os.path.exists(os.path.join(repo_path, ".git")):
+          raise ValueError(f"Not a git repository: {repo_path}")
+
+      result = {"path": repo_path}
+    output: resolved_repo
+
+  # ==================== FETCH AND VERIFY ====================
+
+  - name: fetch_remote
+    description: "Fetch latest from remote"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved_repo.path }}"
+      all: true
+    output: fetch_result
+    on_error: continue
+
+  - name: list_branches
+    description: "List available branches"
+    tool: git_branch_list
+    args:
+      repo: "{{ resolved_repo.path }}"
+      all: true
+    output: branches_raw
+    on_error: continue
+
+  - name: verify_target_branch
+    description: "Verify target branch exists"
+    compute: |
+      branches_text = str(branches_raw) if branches_raw else ""
+
+      branch_exists = inputs.target_branch in branches_text or f"origin/{inputs.target_branch}" in branches_text
+
+      # Get current branch
+      import re
+      current = None
+      for line in branches_text.split("\n"):
+          if line.strip().startswith("*"):
+              current = line.replace("*", "").strip()
+              break
+
+      result = {
+          "exists": branch_exists,
+          "current_branch": current,
+          "available_branches": branches_text[:500] if branches_text else "Could not list",
+      }
+    output: branch_check
+
+  # ==================== CHECKOUT TARGET BRANCH ====================
+
+  - name: checkout_target
+    description: "Checkout the target release branch"
+    condition: "branch_check.exists"
+    tool: git_checkout
+    args:
+      repo: "{{ resolved_repo.path }}"
+      ref: "{{ inputs.target_branch }}"
+    output: checkout_result
+    on_error: continue
+
+  - name: parse_checkout
+    description: "Parse checkout result"
+    compute: |
+      checkout_text = str(checkout_result) if 'checkout_result' in dir() and checkout_result else ""
+
+      success = "error" not in checkout_text.lower() and "fatal" not in checkout_text.lower()
+
+      result = {
+          "success": success,
+          "message": checkout_text[:200] if checkout_text else "No output",
+      }
+    output: checkout_status
+    on_error: continue
+
+  # ==================== SHOW COMMIT DETAILS ====================
+
+  - name: show_commit_diff
+    description: "Show what the commit changes"
+    condition: "branch_check.exists"
+    tool: git_diff
+    args:
+      repo: "{{ resolved_repo.path }}"
+      ref1: "{{ inputs.commit }}^"
+      ref2: "{{ inputs.commit }}"
+      stat: true
+    output: commit_diff_raw
+    on_error: continue
+
+  - name: parse_commit_diff
+    description: "Parse commit diff"
+    compute: |
+      diff_text = str(commit_diff_raw) if 'commit_diff_raw' in dir() and commit_diff_raw else ""
+
+      # Count files changed
+      files_changed = []
+      for line in diff_text.split("\n"):
+          if "|" in line and ("+" in line or "-" in line):
+              # Format: filename | changes
+              parts = line.split("|")
+              if parts:
+                  files_changed.append(parts[0].strip())
+
+      result = {
+          "files_changed": files_changed[:10],
+          "file_count": len(files_changed),
+          "diff_preview": diff_text[:800] if diff_text else "",
+      }
+    output: commit_changes
+    on_error: continue
+
+  - name: blame_main_file
+    description: "Show blame for first changed file"
+    condition: "commit_changes and commit_changes.file_count > 0"
+    tool: git_blame
+    args:
+      repo: "{{ resolved_repo.path }}"
+      file: "{{ commit_changes.files_changed[0] }}"
+      rev: "{{ inputs.commit }}"
+    output: blame_raw
+    on_error: continue
+
+  - name: parse_blame
+    description: "Parse blame output"
+    condition: "blame_raw"
+    compute: |
+      blame_text = str(blame_raw) if blame_raw else ""
+
+      # Extract authors
+      import re
+      authors = set()
+      for line in blame_text.split("\n"):
+          author_match = re.search(r'\(([^)]+)\s+\d{4}-\d{2}-\d{2}', line)
+          if author_match:
+              authors.add(author_match.group(1).strip())
+
+      result = {
+          "authors": list(authors)[:5],
+          "preview": blame_text[:500] if blame_text else "",
+      }
+    output: blame_info
+    on_error: continue
+
+  # ==================== CHERRY-PICK ====================
+
+  - name: cherry_pick_commit
+    description: "Cherry-pick the commit"
+    condition: "branch_check.exists and checkout_status.success"
+    tool: git_cherry_pick
+    args:
+      repo: "{{ resolved_repo.path }}"
+      commit: "{{ inputs.commit }}"
+    output: cherry_pick_result
+    on_error: continue
+
+  - name: parse_cherry_pick
+    description: "Parse cherry-pick result"
+    compute: |
+      pick_text = str(cherry_pick_result) if 'cherry_pick_result' in dir() and cherry_pick_result else ""
+
+      success = "error" not in pick_text.lower() and "conflict" not in pick_text.lower() and "fatal" not in pick_text.lower()
+      has_conflict = "conflict" in pick_text.lower()
+
+      result = {
+          "success": success,
+          "has_conflict": has_conflict,
+          "message": pick_text[:400] if pick_text else "No output",
+      }
+    output: pick_status
+    on_error: continue
+
+  # ==================== CREATE TAG ====================
+
+  - name: create_tag
+    description: "Create release tag"
+    condition: "inputs.tag and pick_status.success"
+    tool: git_tag
+    args:
+      repo: "{{ resolved_repo.path }}"
+      tag_name: "{{ inputs.tag }}"
+      message: "Hotfix release {{ inputs.tag }}{% if inputs.jira_key %} for {{ inputs.jira_key }}{% endif %}"
+    output: tag_result
+    on_error: continue
+
+  - name: parse_tag
+    description: "Parse tag result"
+    condition: "inputs.tag"
+    compute: |
+      tag_text = str(tag_result) if 'tag_result' in dir() and tag_result else ""
+
+      success = "error" not in tag_text.lower() and "fatal" not in tag_text.lower()
+
+      result = {
+          "success": success,
+          "message": tag_text[:200] if tag_text else "No output",
+      }
+    output: tag_status
+    on_error: continue
+
+  # ==================== PUSH ====================
+
+  - name: push_changes
+    description: "Push changes and tag to remote"
+    condition: "inputs.push and pick_status.success"
+    tool: git_push
+    args:
+      repo: "{{ resolved_repo.path }}"
+      ref: "{{ inputs.target_branch }}"
+      tags: true
+    output: push_result
+    on_error: continue
+
+  - name: parse_push
+    description: "Parse push result"
+    condition: "inputs.push"
+    compute: |
+      push_text = str(push_result) if 'push_result' in dir() and push_result else ""
+
+      success = "error" not in push_text.lower() and "rejected" not in push_text.lower()
+
+      result = {
+          "success": success,
+          "message": push_text[:300] if push_text else "No output",
+      }
+    output: push_status
+    on_error: continue
+
+  # ==================== JIRA LINK ====================
+
+  - name: link_jira
+    description: "Link Jira issue if provided"
+    condition: "inputs.jira_key and pick_status.success"
+    tool: jira_add_comment
+    args:
+      issue_key: "{{ inputs.jira_key }}"
+      comment: "Hotfix created: cherry-picked {{ inputs.commit[:12] }} to {{ inputs.target_branch }}{% if inputs.tag %}\nTagged as {{ inputs.tag }}{% endif %}"
+    output: jira_comment_result
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_hotfix
+    description: "Log hotfix to session"
+    condition: "pick_status.success"
+    tool: memory_session_log
+    args:
+      action: "Created hotfix on {{ inputs.target_branch }}"
+      details: "Cherry-picked {{ inputs.commit[:12] }}{% if inputs.tag %}, tagged {{ inputs.tag }}{% endif %}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🔧 Hotfix
+
+      **Commit:** `{{ inputs.commit[:12] }}`
+      **Target Branch:** `{{ inputs.target_branch }}`
+      {% if inputs.tag %}**Tag:** `{{ inputs.tag }}`{% endif %}
+      {% if inputs.jira_key %}**Jira:** [{{ inputs.jira_key }}](https://issues.redhat.com/browse/{{ inputs.jira_key }}){% endif %}
+
+      ---
+
+      {% if not branch_check.exists %}
+      ### ❌ Target Branch Not Found
+
+      Branch `{{ inputs.target_branch }}` was not found.
+
+      **Available branches:**
+      ```
+      {{ branch_check.available_branches }}
+      ```
+
+      {% elif not checkout_status.success %}
+      ### ❌ Checkout Failed
+
+      Could not checkout `{{ inputs.target_branch }}`:
+      ```
+      {{ checkout_status.message }}
+      ```
+
+      {% elif pick_status.has_conflict %}
+      ### ⚠️ Cherry-pick Conflict
+
+      The cherry-pick resulted in conflicts that need manual resolution:
+      ```
+      {{ pick_status.message }}
+      ```
+
+      **To resolve:**
+      1. Fix conflicts in the listed files
+      2. `git add <resolved-files>`
+      3. `git cherry-pick --continue`
+
+      **To abort:**
+      ```bash
+      git cherry-pick --abort
+      ```
+
+      {% elif not pick_status.success %}
+      ### ❌ Cherry-pick Failed
+
+      ```
+      {{ pick_status.message }}
+      ```
+
+      Check:
+      - Commit exists on main branch
+      - No uncommitted changes in working directory
+
+      {% else %}
+      ### 📋 Commit Details
+
+      {% if commit_changes %}
+      **Files Changed:** {{ commit_changes.file_count }}
+      {% for f in commit_changes.files_changed[:5] %}
+      - `{{ f }}`
+      {% endfor %}
+      {% if commit_changes.file_count > 5 %}
+      ... and {{ commit_changes.file_count - 5 }} more
+      {% endif %}
+      {% endif %}
+
+      {% if blame_info and blame_info.authors %}
+      **Authors:** {{ blame_info.authors | join(", ") }}
+      {% endif %}
+
+      ---
+
+      ### ✅ Hotfix Created Successfully
+
+      Cherry-picked `{{ inputs.commit[:12] }}` to `{{ inputs.target_branch }}`
+
+      {% if inputs.tag and tag_status and tag_status.success %}
+      ✅ Created tag `{{ inputs.tag }}`
+      {% elif inputs.tag %}
+      ⚠️ Tag creation: {{ tag_status.message if tag_status else "failed" }}
+      {% endif %}
+
+      {% if inputs.push and push_status %}
+      {% if push_status.success %}
+      ✅ Pushed to remote
+      {% else %}
+      ⚠️ Push failed: {{ push_status.message }}
+      {% endif %}
+      {% elif not inputs.push %}
+      **Not pushed yet.** To push:
+      ```bash
+      git push origin {{ inputs.target_branch }}{% if inputs.tag %} --tags{% endif %}
+      ```
+      {% endif %}
+
+      {% if inputs.jira_key %}
+      ✅ Added comment to {{ inputs.jira_key }}
+      {% endif %}
+
+      {% endif %}
+
+      ---
+
+      ### Next Steps
+
+      {% if not inputs.push and pick_status.success %}
+      1. **Review the cherry-pick:** `git log -1`
+      2. **Push when ready:** `git push origin {{ inputs.target_branch }}{% if inputs.tag %} --tags{% endif %}`
+      {% endif %}
+
+      3. **Create MR if needed:** `skill_run("create_mr", '{"issue_key": "{{ inputs.jira_key or 'AAP-XXXXX' }}"}')`
+      4. **Return to main branch:** `git checkout main`
+
+  - name: context
+    value:
+      commit: "{{ inputs.commit }}"
+      target_branch: "{{ inputs.target_branch }}"
+      cherry_pick_success: "{{ pick_status.success if pick_status else false }}"
+      has_conflict: "{{ pick_status.has_conflict if pick_status else false }}"
+      tag_created: "{{ tag_status.success if tag_status else false }}"
+      pushed: "{{ push_status.success if push_status else false }}"

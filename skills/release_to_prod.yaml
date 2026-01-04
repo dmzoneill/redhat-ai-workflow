@@ -1,0 +1,489 @@
+# Skill: Release to Production
+# Create and manage Konflux releases to production
+
+name: release_to_prod
+description: |
+  Create a Konflux release to push images from staging to production.
+
+  This skill handles the full release workflow:
+  1. Verify the image exists in staging (redhat-user-workloads)
+  2. Check current release status in Konflux
+  3. Get component information
+  4. Create the release to production
+  5. Monitor release status
+
+  Prerequisites:
+  - Image must be built and available in Quay staging
+  - User must have Konflux access
+
+version: "1.0"
+
+inputs:
+  - name: commit_sha
+    type: string
+    required: true
+    description: "Git commit SHA to release (40-char full SHA)"
+
+  - name: component
+    type: string
+    required: false
+    default: "automation-analytics-backend-main"
+    description: "Konflux component name"
+
+  - name: namespace
+    type: string
+    required: false
+    default: "aap-aa-tenant"
+    description: "Konflux tenant namespace"
+
+  - name: application
+    type: string
+    required: false
+    default: "aap-aa-main"
+    description: "Konflux application name"
+
+  - name: dry_run
+    type: boolean
+    required: false
+    default: false
+    description: "If true, just show what would be released without creating"
+
+steps:
+  # ==================== VALIDATE INPUT ====================
+
+  - name: validate_sha
+    description: "Validate commit SHA format"
+    compute: |
+      sha = inputs.commit_sha.strip()
+
+      if len(sha) != 40:
+          raise ValueError(f"Expected 40-char commit SHA, got {len(sha)} chars: {sha[:20]}...")
+
+      if not all(c in '0123456789abcdef' for c in sha.lower()):
+          raise ValueError(f"Invalid SHA format: {sha}")
+
+      result = {"sha": sha, "short": sha[:12]}
+    output: validated_sha
+
+  # ==================== CHECK IMAGE EXISTS ====================
+
+  - name: check_staging_image
+    description: "Verify image exists in staging Quay"
+    tool: quay_check_image_exists
+    args:
+      repository: "{{ inputs.namespace }}/{{ inputs.application }}/{{ inputs.component }}"
+      tag: "{{ validated_sha.sha }}"
+      namespace: "redhat-user-workloads"
+    output: staging_image_check
+    on_error: continue
+
+  - name: parse_staging_check
+    description: "Parse staging image check result"
+    compute: |
+      check_text = str(staging_image_check) if staging_image_check else ""
+
+      exists = "not found" not in check_text.lower() and "error" not in check_text.lower()
+
+      result = {
+          "exists": exists,
+          "raw": check_text[:300] if check_text else "No response",
+      }
+    output: staging_status
+
+  # ==================== SECURITY SCAN ====================
+
+  - name: scan_vulnerabilities
+    description: "Scan image for security vulnerabilities"
+    condition: "staging_status.exists"
+    tool: quay_get_vulnerabilities
+    args:
+      repository: "{{ inputs.namespace }}/{{ inputs.application }}/{{ inputs.component }}"
+      tag: "{{ validated_sha.sha }}"
+      namespace: "redhat-user-workloads"
+    output: vuln_scan_raw
+    on_error: continue
+
+  - name: parse_vulnerabilities
+    description: "Parse vulnerability scan results"
+    condition: "vuln_scan_raw"
+    compute: |
+      vuln_text = str(vuln_scan_raw) if vuln_scan_raw else ""
+
+      # Count vulnerabilities by severity
+      critical = vuln_text.lower().count("critical")
+      high = vuln_text.lower().count("high")
+
+      # Extract CVE IDs
+      import re
+      cves = re.findall(r'CVE-\d{4}-\d+', vuln_text)
+      unique_cves = list(set(cves))[:10]
+
+      # Determine if release should be blocked
+      block_release = critical > 0
+
+      result = {
+          "critical": critical,
+          "high": high,
+          "cves": unique_cves,
+          "block_release": block_release,
+          "safe": critical == 0,
+          "preview": vuln_text[:500] if vuln_text else "",
+      }
+    output: security_status
+    on_error: continue
+    output: staging_status
+
+  # ==================== GET COMPONENT INFO ====================
+
+  - name: get_component
+    description: "Get Konflux component details"
+    tool: konflux_get_component
+    args:
+      component_name: "{{ inputs.component }}"
+      namespace: "{{ inputs.namespace }}"
+    output: component_info_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_component ====================
+
+  - name: detect_failure_component
+    description: "Detect if Konflux call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(component_info_raw) if 'component_info_raw' in dir() and component_info_raw else ""
+      failure = detect_failure(result_text, "konflux_get_component")
+      result = failure
+    output: failure_component
+    on_error: continue
+
+  - name: quick_fix_auth_component
+    description: "Auto-fix auth issues for Konflux"
+    condition: "failure_component and failure_component.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "konflux"
+    output: auth_fix_component
+    on_error: continue
+
+  - name: quick_fix_vpn_component
+    description: "Auto-fix VPN issues for Konflux"
+    condition: "failure_component and failure_component.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_component
+    on_error: continue
+
+  - name: retry_get_component
+    description: "Retry Konflux call after auto-fix"
+    condition: "(auth_fix_component or vpn_fix_component) and failure_component"
+    tool: konflux_get_component
+    args:
+      component_name: "{{ inputs.component }}"
+      namespace: "{{ inputs.namespace }}"
+    output: component_info_raw_retry
+    on_error: continue
+
+  - name: merge_component_result
+    description: "Use retry result if available"
+    condition: "component_info_raw_retry"
+    compute: |
+      result = str(component_info_raw_retry)
+    output: component_info_raw
+    on_error: continue
+
+  - name: log_failure_component
+    description: "Log failure to memory for learning"
+    condition: "failure_component and failure_component.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      fixed = bool(component_info_raw_retry if 'component_info_raw_retry' in dir() else None)
+
+      entry = log_failure(
+          tool_name="konflux_get_component",
+          error_text=failure_component.get('error_text', ''),
+          skill_name="release_to_prod",
+          fixed=fixed,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_component
+    on_error: continue
+
+  - name: list_components
+    description: "List all components in application"
+    tool: konflux_list_components
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: components_list_raw
+    on_error: continue
+
+  - name: parse_component_info
+    description: "Parse component information"
+    compute: |
+      comp_text = str(component_info_raw) if 'component_info_raw' in dir() and component_info_raw else ""
+      list_text = str(components_list_raw) if 'components_list_raw' in dir() and components_list_raw else ""
+
+      # Check if our component exists
+      component_found = inputs.component.lower() in comp_text.lower() or inputs.component.lower() in list_text.lower()
+
+      # Parse component count
+      import re
+      component_count = len(re.findall(r'component', list_text, re.I))
+
+      result = {
+          "component_found": component_found,
+          "component_info": comp_text[:500] if comp_text else "Not available",
+          "total_components": component_count,
+          "components_list": list_text[:500] if list_text else "Not available",
+      }
+    output: component_status
+
+  # ==================== CHECK EXISTING RELEASES ====================
+
+  - name: list_releases
+    description: "List recent releases"
+    tool: konflux_list_releases
+    args:
+      namespace: "{{ inputs.namespace }}"
+      limit: 10
+    output: releases_list_raw
+    on_error: continue
+
+  - name: get_latest_release
+    description: "Get details of latest release"
+    condition: "releases_list_raw"
+    tool: konflux_get_release
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: latest_release_raw
+    on_error: continue
+
+  - name: parse_releases
+    description: "Parse release information"
+    compute: |
+      list_text = str(releases_list_raw) if 'releases_list_raw' in dir() and releases_list_raw else ""
+      latest_text = str(latest_release_raw) if 'latest_release_raw' in dir() and latest_release_raw else ""
+
+      # Check if this SHA was already released
+      already_released = validated_sha.sha[:12] in list_text or validated_sha.sha in list_text
+
+      # Count releases
+      import re
+      release_count = len(re.findall(r'release', list_text, re.I))
+
+      result = {
+          "already_released": already_released,
+          "release_count": release_count,
+          "recent_releases": list_text[:600] if list_text else "No releases",
+          "latest_release": latest_text[:400] if latest_text else "No latest",
+      }
+    output: release_status
+
+  # ==================== VALIDATE APP-INTERFACE ====================
+
+  - name: validate_appinterface
+    description: "Validate app-interface configuration before release"
+    condition: "not inputs.dry_run and staging_status.exists"
+    tool: appinterface_validate
+    args: {}
+    output: appinterface_validation_raw
+    on_error: continue
+
+  - name: parse_appinterface_validation
+    description: "Parse validation result"
+    compute: |
+      validate_text = str(appinterface_validation_raw) if 'appinterface_validation_raw' in dir() and appinterface_validation_raw else ""
+
+      valid = "valid" in validate_text.lower() or "success" in validate_text.lower()
+      has_errors = "error" in validate_text.lower() or "failed" in validate_text.lower()
+
+      result = {
+        "valid": valid and not has_errors,
+        "message": validate_text[:300] if validate_text else "Validation not run",
+      }
+    output: appinterface_status
+    on_error: continue
+
+  # ==================== CREATE RELEASE ====================
+
+  - name: create_release
+    description: "Create Konflux release"
+    condition: "not inputs.dry_run and staging_status.exists and not release_status.already_released"
+    tool: konflux_create_release
+    args:
+      component: "{{ inputs.component }}"
+      snapshot: "{{ validated_sha.sha }}"
+      namespace: "{{ inputs.namespace }}"
+    output: create_release_result
+    on_error: continue
+
+  - name: parse_release_result
+    description: "Parse release creation result"
+    condition: "create_release_result"
+    compute: |
+      result_text = str(create_release_result) if create_release_result else ""
+
+      success = "created" in result_text.lower() or "success" in result_text.lower()
+
+      # Try to extract release name
+      import re
+      release_name = None
+      name_match = re.search(r'release[/\s]+([a-z0-9-]+)', result_text, re.I)
+      if name_match:
+          release_name = name_match.group(1)
+
+      result = {
+          "success": success,
+          "release_name": release_name,
+          "raw": result_text[:500] if result_text else "No result",
+      }
+    output: release_result
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_release
+    description: "Log release to session"
+    condition: "release_result and release_result.success"
+    tool: memory_session_log
+    args:
+      action: "Created Konflux release"
+      details: "SHA: {{ validated_sha.short }}, Component: {{ inputs.component }}"
+    on_error: continue
+
+  - name: create_grafana_annotation
+    description: "Mark release on Grafana dashboards"
+    condition: "release_result and release_result.success"
+    tool: grafana_annotation_create
+    args:
+      text: "Release {{ validated_sha.short }} - {{ inputs.component }}"
+      tags: ["release", "{{ inputs.component }}", "{{ inputs.application }}"]
+    output: grafana_annotation_result
+    on_error: continue
+
+  - name: announce_release
+    description: "Announce release to team channel"
+    condition: "release_result and release_result.success"
+    tool: slack_post_message
+    args:
+      channel: "team-automation-analytics"
+      message: "📦 **Production Release** - `{{ validated_sha.short }}` released to {{ inputs.component }}"
+    output: slack_release_notify
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🚀 Release to Production
+
+      **Commit:** `{{ validated_sha.sha }}`
+      **Component:** `{{ inputs.component }}`
+      **Application:** `{{ inputs.application }}`
+      **Namespace:** `{{ inputs.namespace }}`
+
+      ---
+
+      ### Pre-flight Checks
+
+      {% if not staging_status.exists %}
+      ❌ **Image Not Found in Staging**
+
+      The image for commit `{{ validated_sha.short }}` was not found in the staging Quay repository.
+
+      **Expected location:**
+      `quay.io/redhat-user-workloads/{{ inputs.namespace }}/{{ inputs.application }}/{{ inputs.component }}:{{ validated_sha.sha }}`
+
+      **Action:** Wait for Konflux to build the image, or verify the commit SHA.
+
+      ```python
+      quay_check_image_exists(repository='{{ inputs.namespace }}/{{ inputs.application }}/{{ inputs.component }}', tag='{{ validated_sha.sha }}', namespace='redhat-user-workloads')
+      ```
+
+      {% elif security_status and security_status.block_release %}
+      🔒 **Security Gate BLOCKED**
+
+      Critical vulnerabilities found - release blocked.
+
+      - **Critical:** {{ security_status.critical }}
+      - **High:** {{ security_status.high }}
+      {% if security_status.cves %}
+      - **CVEs:** {{ security_status.cves | join(', ') }}
+      {% endif %}
+
+      **Action:** Fix critical vulnerabilities before releasing.
+
+      {% elif release_status.already_released %}
+      ⚠️ **Already Released**
+
+      Commit `{{ validated_sha.short }}` appears to have already been released.
+
+      {% elif inputs.dry_run %}
+      ✅ **Ready to Release (Dry Run)**
+
+      All checks passed. Would create release for:
+      - **Image:** `{{ validated_sha.sha }}`
+      - **Component:** `{{ inputs.component }}`
+
+      To create the release:
+      ```python
+      skill_run("release_to_prod", '{"commit_sha": "{{ validated_sha.sha }}", "dry_run": false}')
+      ```
+
+      {% elif release_result and release_result.success %}
+      ✅ **Release Created Successfully**
+
+      {% if release_result.release_name %}
+      **Release Name:** `{{ release_result.release_name }}`
+      {% endif %}
+
+      {{ release_result.raw }}
+
+      **Next Steps:**
+      1. Monitor the release pipeline in Konflux
+      2. Verify image appears in production Quay
+      3. Monitor app-interface for deployment
+
+      ```python
+      konflux_list_releases(namespace='{{ inputs.namespace }}', limit=5)
+      ```
+
+      {% else %}
+      ❌ **Release Failed**
+
+      {{ release_result.raw if release_result else "Could not create release" }}
+
+      Check:
+      - Konflux access permissions
+      - Component exists and is healthy
+      - VPN connection
+
+      {% endif %}
+
+      ---
+
+      ### Component Status
+
+      {% if component_status.component_found %}
+      ✅ Component `{{ inputs.component }}` found
+      {% else %}
+      ⚠️ Component `{{ inputs.component }}` not found. Available components:
+      ```
+      {{ component_status.components_list }}
+      ```
+      {% endif %}
+
+      ### Recent Releases
+
+      ```
+      {{ release_status.recent_releases }}
+      ```
+
+  - name: context
+    value:
+      sha: "{{ validated_sha.sha }}"
+      image_exists: "{{ staging_status.exists }}"
+      already_released: "{{ release_status.already_released }}"
+      release_created: "{{ release_result.success if release_result else false }}"
+      dry_run: "{{ inputs.dry_run }}"

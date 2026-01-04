@@ -3,7 +3,7 @@
 Deploy an MR or branch to an ephemeral environment.
 
 ## Prerequisites
-1. Load DevOps agent: `agent_load("devops")`
+1. Load DevOps persona: `persona_load("devops")`
 2. Be logged into ephemeral cluster
 3. Have the MR ID or branch name
 

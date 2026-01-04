@@ -1,0 +1,180 @@
+# Skill: Close MR
+# Close a merge request (abandoned or replaced)
+
+name: close_mr
+description: |
+  Close a GitLab merge request.
+
+  Use when:
+  - MR is abandoned
+  - MR is replaced by another
+  - Work is no longer needed
+
+  Uses: gitlab_mr_view, gitlab_mr_close, jira_transition, jira_add_comment
+version: "1.0"
+
+inputs:
+  - name: mr_id
+    type: integer
+    required: true
+    description: "GitLab MR ID"
+
+  - name: project
+    type: string
+    required: false
+    default: "automation-analytics/automation-analytics-backend"
+    description: "GitLab project path"
+
+  - name: reason
+    type: string
+    required: false
+    default: "Closing - no longer needed"
+    description: "Reason for closing"
+
+  - name: update_jira
+    type: boolean
+    required: false
+    default: true
+    description: "Update linked Jira issue"
+
+steps:
+  - name: get_mr_details
+    description: "Get MR details before closing"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ inputs.mr_id }}"
+    output: mr_details_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_mr_details ====================
+
+  - name: detect_failure_gitlab
+    description: "Detect if GitLab call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
+      failure = detect_failure(result_text, "gitlab_mr_view")
+      result = failure
+    output: failure_gitlab
+    on_error: continue
+
+  - name: log_failure_gitlab
+    description: "Log failure to memory"
+    condition: "failure_gitlab and failure_gitlab.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+      entry = log_failure(
+          tool_name="gitlab_mr_view",
+          error_text=failure_gitlab.get('error_text', ''),
+          skill_name="close_mr",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure
+    on_error: continue
+
+  - name: extract_jira_key
+    description: "Extract Jira key from MR"
+    compute: |
+      mr_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
+
+      import re
+      jira_match = re.search(r'(AAP-\d+)', mr_text)
+      jira_key = jira_match.group(1) if jira_match else None
+
+      # Extract title
+      title_match = re.search(r'title[:\s]+([^\n]+)', mr_text, re.I)
+      title = title_match.group(1).strip()[:80] if title_match else f"MR !{inputs.mr_id}"
+
+      # Extract author
+      author_match = re.search(r'author[:\s]+([^\n]+)', mr_text, re.I)
+      author = author_match.group(1).strip() if author_match else "unknown"
+
+      result = {
+        "jira_key": jira_key,
+        "title": title,
+        "author": author,
+      }
+    output: mr_info
+
+  - name: close_mr
+    description: "Close the merge request"
+    tool: gitlab_mr_close
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ inputs.mr_id }}"
+    output: close_result
+    on_error: continue
+
+  - name: parse_close_result
+    description: "Parse close result"
+    compute: |
+      close_text = str(close_result) if 'close_result' in dir() and close_result else ""
+
+      success = "closed" in close_text.lower() or "success" in close_text.lower()
+      if "error" in close_text.lower() or "failed" in close_text.lower():
+        success = False
+
+      result = {
+        "success": success,
+        "message": close_text[:200] if close_text else "",
+      }
+    output: close_status
+
+  - name: add_jira_comment
+    description: "Add comment to Jira issue"
+    condition: "close_status.success and mr_info.jira_key and inputs.update_jira"
+    tool: jira_add_comment
+    args:
+      issue_key: "{{ mr_info.jira_key }}"
+      comment: |
+        MR !{{ inputs.mr_id }} was closed.
+
+        Reason: {{ inputs.reason }}
+    output: jira_comment_result
+    on_error: continue
+
+  - name: log_closure
+    description: "Log MR closure"
+    tool: memory_session_log
+    args:
+      action: "Closed MR !{{ inputs.mr_id }}"
+      details: "{{ mr_info.title }} - {{ inputs.reason }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🚫 Close MR !{{ inputs.mr_id }}
+
+      **Title:** {{ mr_info.title }}
+      **Author:** {{ mr_info.author }}
+      {% if mr_info.jira_key %}
+      **Jira:** {{ mr_info.jira_key }}
+      {% endif %}
+
+      ---
+
+      {% if close_status.success %}
+      ✅ **MR Closed Successfully**
+
+      Reason: {{ inputs.reason }}
+
+      {% if mr_info.jira_key and inputs.update_jira %}
+      📋 Comment added to {{ mr_info.jira_key }}
+      {% endif %}
+
+      ---
+
+      ### Need to Reopen?
+
+      ```
+      gitlab_mr_reopen(project='{{ inputs.project }}', mr_id={{ inputs.mr_id }})
+      ```
+      {% else %}
+      ❌ **Failed to close MR**
+
+      {{ close_status.message }}
+      {% endif %}

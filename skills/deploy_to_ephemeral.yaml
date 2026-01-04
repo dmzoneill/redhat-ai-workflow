@@ -1,0 +1,402 @@
+# Skill: Deploy to Ephemeral
+# Full ephemeral deployment from scratch
+
+name: deploy_to_ephemeral
+description: |
+  Deploy application to an ephemeral environment.
+
+  This skill handles the full deployment workflow:
+  1. Check available pools and reserve namespace
+  2. Verify app dependencies
+  3. Deploy with specified image/parameters
+  4. Monitor rollout and verify health
+
+  Uses: bonfire_pool_list, bonfire_namespace_reserve, bonfire_apps_dependencies,
+        bonfire_deploy, kubectl_rollout_status, kubectl_get_pods
+version: "1.0"
+
+inputs:
+  - name: app
+    type: string
+    required: false
+    default: "tower-analytics"
+    description: "Application name to deploy"
+
+  - name: image_tag
+    type: string
+    required: false
+    default: ""
+    description: "Image tag (git SHA) to deploy. If empty, uses latest."
+
+  - name: duration
+    type: string
+    required: false
+    default: "2h"
+    description: "Namespace reservation duration"
+
+  - name: pool
+    type: string
+    required: false
+    default: "default"
+    description: "Namespace pool to use"
+
+  - name: component
+    type: string
+    required: false
+    default: "main"
+    description: "Component to deploy (main or billing)"
+
+steps:
+  # ==================== CHECK POOLS ====================
+
+  - name: list_pools
+    description: "List available namespace pools"
+    tool: bonfire_pool_list
+    args: {}
+    output: pools_raw
+    on_error: continue
+
+  - name: parse_pools
+    description: "Parse pool availability"
+    compute: |
+      pools_text = str(pools_raw) if 'pools_raw' in dir() and pools_raw else ""
+
+      available = []
+      for line in pools_text.split("\n"):
+        if "available" in line.lower() or "ready" in line.lower():
+          available.append(line.strip())
+
+      result = {
+        "pools": available[:5],
+        "has_capacity": len(available) > 0,
+        "raw": pools_text[:500] if pools_text else "",
+      }
+    output: pool_status
+
+  # ==================== RESERVE NAMESPACE ====================
+
+  - name: reserve_namespace
+    description: "Reserve ephemeral namespace"
+    tool: bonfire_namespace_reserve
+    args:
+      duration: "{{ inputs.duration }}"
+      pool: "{{ inputs.pool }}"
+    output: reserve_result
+    on_error: continue
+
+  # ==================== AUTO-HEAL: reserve_namespace ====================
+
+  - name: detect_failure_reserve
+    description: "Detect if namespace reservation failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(reserve_result) if 'reserve_result' in dir() and reserve_result else ""
+      failure = detect_failure(result_text, "bonfire_namespace_reserve")
+      result = failure
+    output: failure_reserve
+    on_error: continue
+
+  - name: quick_fix_auth_reserve
+    description: "Auto-fix auth issues for bonfire"
+    condition: "failure_reserve and failure_reserve.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "ephemeral"
+    output: auth_fix_reserve
+    on_error: continue
+
+  - name: quick_fix_vpn_reserve
+    description: "Auto-fix VPN issues for bonfire"
+    condition: "failure_reserve and failure_reserve.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_reserve
+    on_error: continue
+
+  - name: retry_reserve_namespace
+    description: "Retry namespace reservation after auto-fix"
+    condition: "(auth_fix_reserve or vpn_fix_reserve) and failure_reserve"
+    tool: bonfire_namespace_reserve
+    args:
+      duration: "{{ inputs.duration }}"
+      pool: "{{ inputs.pool }}"
+    output: reserve_result_retry
+    on_error: continue
+
+  - name: log_failure_reserve
+    description: "Log failure to memory for learning"
+    condition: "failure_reserve and failure_reserve.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      fixed = bool(reserve_result_retry if 'reserve_result_retry' in dir() else None)
+
+      entry = log_failure(
+          tool_name="bonfire_namespace_reserve",
+          error_text=failure_reserve.get('error_text', ''),
+          skill_name="deploy_to_ephemeral",
+          fixed=fixed,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_reserve
+    on_error: continue
+
+  - name: parse_reservation
+    description: "Extract namespace name from reservation"
+    compute: |
+      # Use retry result if available
+      reserve_text = str(reserve_result_retry) if 'reserve_result_retry' in dir() and reserve_result_retry else ""
+      if not reserve_text or "❌" in reserve_text:
+        reserve_text = str(reserve_result) if 'reserve_result' in dir() and reserve_result else ""
+
+      import re
+      namespace = None
+      # Look for namespace pattern: ephemeral-xxxxx
+      ns_match = re.search(r'(ephemeral-[a-z0-9]+)', reserve_text)
+      if ns_match:
+        namespace = ns_match.group(1)
+
+      success = namespace is not None
+
+      result = {
+        "namespace": namespace,
+        "success": success,
+        "raw": reserve_text[:300] if reserve_text else "",
+      }
+    output: namespace_info
+
+  # ==================== CHECK DEPENDENCIES ====================
+
+  - name: check_dependencies
+    description: "Check app dependencies"
+    condition: "namespace_info.success"
+    tool: bonfire_apps_dependencies
+    args:
+      app: "{{ inputs.app }}"
+    output: deps_raw
+    on_error: continue
+
+  - name: parse_dependencies
+    description: "Parse dependency list"
+    compute: |
+      deps_text = str(deps_raw) if 'deps_raw' in dir() and deps_raw else ""
+
+      dependencies = []
+      for line in deps_text.split("\n"):
+        line = line.strip()
+        if line and not line.startswith("#"):
+          dependencies.append(line)
+
+      result = {
+        "dependencies": dependencies[:10],
+        "count": len(dependencies),
+      }
+    output: deps_info
+
+  # ==================== DEPLOY ====================
+
+  - name: determine_image_param
+    description: "Build image parameter if tag provided"
+    compute: |
+      if inputs.image_tag:
+        # Use the provided image tag
+        if inputs.component == "billing":
+          clowdapp = "tower-analytics-billing-clowdapp"
+        else:
+          clowdapp = "tower-analytics-clowdapp"
+
+        param = f"--set-parameter {clowdapp}/IMAGE_TAG={inputs.image_tag}"
+      else:
+        param = ""
+
+      result = {"param": param, "has_custom_image": bool(inputs.image_tag)}
+    output: image_config
+
+  - name: deploy_app
+    description: "Deploy application to namespace"
+    condition: "namespace_info.success"
+    tool: bonfire_deploy
+    args:
+      namespace: "{{ namespace_info.namespace }}"
+      app: "{{ inputs.app }}"
+      extra_args: "{{ image_config.param }}"
+    output: deploy_result
+    on_error: continue
+
+  - name: parse_deploy
+    description: "Parse deployment result"
+    compute: |
+      deploy_text = str(deploy_result) if 'deploy_result' in dir() and deploy_result else ""
+
+      success = "error" not in deploy_text.lower() and "failed" not in deploy_text.lower()
+      if "deployed" in deploy_text.lower() or "success" in deploy_text.lower():
+        success = True
+
+      result = {
+        "success": success,
+        "output": deploy_text[:800] if deploy_text else "",
+      }
+    output: deploy_status
+
+  # ==================== VERIFY DEPLOYMENT ====================
+
+  - name: check_rollout
+    description: "Check deployment rollout status"
+    condition: "deploy_status.success and namespace_info.namespace"
+    tool: kubectl_rollout_status
+    args:
+      deployment: "{{ inputs.app }}"
+      namespace: "{{ namespace_info.namespace }}"
+      environment: "ephemeral"
+    output: rollout_raw
+    on_error: continue
+
+  - name: check_pods
+    description: "Get pod status"
+    condition: "namespace_info.namespace"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ namespace_info.namespace }}"
+      environment: "ephemeral"
+    output: pods_raw
+    on_error: continue
+
+  - name: parse_pod_health
+    description: "Analyze pod health"
+    compute: |
+      pods_text = str(pods_raw) if 'pods_raw' in dir() and pods_raw else ""
+
+      running = 0
+      pending = 0
+      failed = 0
+
+      for line in pods_text.split("\n"):
+        if "Running" in line:
+          running += 1
+        elif "Pending" in line or "ContainerCreating" in line:
+          pending += 1
+        elif "Error" in line or "CrashLoopBackOff" in line:
+          failed += 1
+
+      healthy = running > 0 and failed == 0
+
+      result = {
+        "running": running,
+        "pending": pending,
+        "failed": failed,
+        "healthy": healthy,
+        "preview": pods_text[:600] if pods_text else "",
+      }
+    output: pod_health
+
+  # ==================== LOG SESSION ====================
+
+  - name: log_deployment
+    description: "Log deployment to session"
+    tool: memory_session_log
+    args:
+      action: "Deployed {{ inputs.app }} to {{ namespace_info.namespace }}"
+      details: "Duration: {{ inputs.duration }}, Image: {{ inputs.image_tag or 'latest' }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🚀 Ephemeral Deployment
+
+      {% if not namespace_info.success %}
+      ### ❌ Namespace Reservation Failed
+
+      Could not reserve ephemeral namespace.
+
+      {{ namespace_info.raw }}
+
+      **Check:**
+      - VPN connection
+      - Ephemeral cluster credentials: `kube_login("ephemeral")`
+      - Pool availability: `bonfire_pool_list()`
+
+      {% else %}
+      ### ✅ Namespace Reserved
+
+      **Namespace:** `{{ namespace_info.namespace }}`
+      **Duration:** {{ inputs.duration }}
+      **Pool:** {{ inputs.pool }}
+
+      ---
+
+      ### Dependencies
+      {% if deps_info.count > 0 %}
+      {{ inputs.app }} depends on {{ deps_info.count }} services:
+      {% for dep in deps_info.dependencies[:5] %}
+      - {{ dep }}
+      {% endfor %}
+      {% else %}
+      No external dependencies found.
+      {% endif %}
+
+      ---
+
+      ### Deployment Status
+
+      {% if deploy_status.success %}
+      ✅ **Deployment initiated successfully**
+
+      {% if image_config.has_custom_image %}
+      **Custom Image:** `{{ inputs.image_tag }}`
+      {% else %}
+      **Image:** Latest from Konflux
+      {% endif %}
+
+      {% else %}
+      ❌ **Deployment failed**
+
+      ```
+      {{ deploy_status.output }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Pod Health
+
+      - 🟢 Running: {{ pod_health.running }}
+      - 🟡 Pending: {{ pod_health.pending }}
+      - 🔴 Failed: {{ pod_health.failed }}
+
+      ```
+      {{ pod_health.preview }}
+      ```
+
+      ---
+
+      ### Quick Commands
+
+      **Check pods:**
+      ```
+      kubectl_get_pods(namespace='{{ namespace_info.namespace }}', environment='ephemeral')
+      ```
+
+      **Get logs:**
+      ```
+      kubectl_logs(pod_name='<pod>', namespace='{{ namespace_info.namespace }}', environment='ephemeral')
+      ```
+
+      **Extend time:**
+      ```
+      bonfire_namespace_extend(namespace='{{ namespace_info.namespace }}', duration='1h')
+      ```
+
+      **Release when done:**
+      ```
+      bonfire_namespace_release(namespace='{{ namespace_info.namespace }}')
+      ```
+      {% endif %}
+
+  - name: context
+    value:
+      namespace: "{{ namespace_info.namespace }}"
+      success: "{{ deploy_status.success if deploy_status else false }}"
+      healthy: "{{ pod_health.healthy if pod_health else false }}"

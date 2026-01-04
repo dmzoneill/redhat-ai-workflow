@@ -1,19 +1,19 @@
 """AA quay MCP Server - Standalone entry point.
 
-This module delegates to aa-common for the server infrastructure.
+This module delegates to server/ for the server infrastructure.
 It only specifies which tool modules to load.
 """
 
 import sys
 from pathlib import Path
 
-# Ensure aa-common is importable
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Ensure server module is importable
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
 import asyncio
 
-from src.server import create_mcp_server, run_mcp_server, setup_logging
+from server.main import create_mcp_server, run_mcp_server, setup_logging
 
 
 def main():

@@ -1,0 +1,298 @@
+# Skill: Scan Container Image Vulnerabilities
+# Security scan before release or deployment
+
+name: scan_vulnerabilities
+description: |
+  Scan a container image for security vulnerabilities before deployment.
+
+  Uses Quay.io vulnerability scanning and optional local security tools.
+
+  Steps:
+  1. Verify image exists in Quay
+  2. Get vulnerability report from Quay
+  3. Analyze severity and count
+  4. Provide recommendations
+
+  Useful before:
+  - Releasing to production
+  - Deploying to ephemeral
+  - Approving MRs with image changes
+version: "1.0"
+
+inputs:
+  - name: image_tag
+    type: string
+    required: true
+    description: "Image tag (commit SHA or version) to scan"
+
+  - name: repository
+    type: string
+    required: false
+    default: "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
+    description: "Quay repository path"
+
+  - name: namespace
+    type: string
+    required: false
+    default: "redhat-user-workloads"
+    description: "Quay namespace (redhat-user-workloads for PR, redhat-services-prod for releases)"
+
+  - name: fail_on_critical
+    type: boolean
+    required: false
+    default: true
+    description: "Return error if critical vulnerabilities found"
+
+  - name: fail_on_high
+    type: boolean
+    required: false
+    default: false
+    description: "Return error if high severity vulnerabilities found"
+
+steps:
+  # ==================== VERIFY IMAGE ====================
+
+  - name: check_image_exists
+    description: "Verify the image exists in Quay"
+    tool: quay_check_image_exists
+    args:
+      repository: "{{ inputs.repository }}"
+      tag: "{{ inputs.image_tag }}"
+    on_error: continue
+
+  # ==================== AUTO-HEAL: check_image_exists ====================
+
+  - name: detect_failure_quay
+    description: "Detect if Quay call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(image_exists_raw) if 'image_exists_raw' in dir() and image_exists_raw else ""
+      failure = detect_failure(result_text, "quay_check_image_exists")
+      result = failure
+    output: failure_quay
+    on_error: continue
+      namespace: "{{ inputs.namespace }}"
+    output: image_check
+    on_error: continue
+
+  - name: validate_image
+    description: "Stop if image doesn't exist"
+    compute: |
+      check_text = str(image_check) if image_check else ""
+
+      if "not found" in check_text.lower() or "error" in check_text.lower():
+          result = {
+              "exists": False,
+              "error": f"Image not found: {inputs.namespace}/{inputs.repository}:{inputs.image_tag}"
+          }
+      else:
+          result = {"exists": True, "error": None}
+    output: image_status
+
+  # ==================== GET VULNERABILITIES ====================
+
+  - name: get_vulnerabilities
+    description: "Fetch vulnerability report from Quay"
+    condition: "image_status.exists"
+    tool: quay_get_vulnerabilities
+    args:
+      repository: "{{ inputs.repository }}"
+      tag: "{{ inputs.image_tag }}"
+      namespace: "{{ inputs.namespace }}"
+    output: vuln_raw
+    on_error: continue
+
+  - name: get_manifest
+    description: "Get image manifest for metadata"
+    condition: "image_status.exists"
+    tool: quay_get_manifest
+    args:
+      repository: "{{ inputs.repository }}"
+      tag: "{{ inputs.image_tag }}"
+      namespace: "{{ inputs.namespace }}"
+    output: manifest_raw
+    on_error: continue
+
+  # ==================== ANALYZE RESULTS ====================
+
+  - name: parse_vulnerabilities
+    description: "Parse and categorize vulnerabilities"
+    condition: "image_status.exists"
+    compute: |
+      vuln_text = str(vuln_raw) if vuln_raw else ""
+
+      # Count by severity
+      critical = vuln_text.lower().count("critical")
+      high = vuln_text.lower().count("high")
+      medium = vuln_text.lower().count("medium")
+      low = vuln_text.lower().count("low")
+
+      # Extract CVE IDs
+      import re
+      cves = re.findall(r'CVE-\d{4}-\d+', vuln_text)
+      unique_cves = list(set(cves))[:20]
+
+      # Determine overall status
+      if critical > 0:
+          status = "critical"
+          icon = "🔴"
+      elif high > 0:
+          status = "high"
+          icon = "🟠"
+      elif medium > 0:
+          status = "medium"
+          icon = "🟡"
+      elif low > 0:
+          status = "low"
+          icon = "🟢"
+      else:
+          status = "clean"
+          icon = "✅"
+
+      total = critical + high + medium + low
+
+      result = {
+          "critical": critical,
+          "high": high,
+          "medium": medium,
+          "low": low,
+          "total": total,
+          "status": status,
+          "icon": icon,
+          "cves": unique_cves,
+          "raw_sample": vuln_text[:1000] if vuln_text else "No data",
+      }
+    output: vuln_analysis
+
+  - name: parse_manifest
+    description: "Extract manifest metadata"
+    condition: "image_status.exists"
+    compute: |
+      manifest_text = str(manifest_raw) if manifest_raw else ""
+
+      # Try to extract digest
+      import re
+      digest_match = re.search(r'sha256:[a-f0-9]{64}', manifest_text)
+      digest = digest_match.group(0) if digest_match else None
+
+      # Try to extract size
+      size_match = re.search(r'(\d+)\s*(MB|GB|bytes)', manifest_text, re.I)
+      size = size_match.group(0) if size_match else "unknown"
+
+      result = {
+          "digest": digest,
+          "size": size,
+      }
+    output: manifest_info
+    on_error: continue
+
+  # ==================== DETERMINE ACTION ====================
+
+  - name: evaluate_policy
+    description: "Check against security policy"
+    condition: "image_status.exists"
+    compute: |
+      blocked = False
+      block_reason = None
+
+      if inputs.fail_on_critical and vuln_analysis.get("critical", 0) > 0:
+          blocked = True
+          block_reason = f"Found {vuln_analysis['critical']} critical vulnerabilities"
+      elif inputs.fail_on_high and vuln_analysis.get("high", 0) > 0:
+          blocked = True
+          block_reason = f"Found {vuln_analysis['high']} high severity vulnerabilities"
+
+      result = {
+          "blocked": blocked,
+          "block_reason": block_reason,
+          "safe_to_deploy": not blocked and vuln_analysis.get("critical", 0) == 0,
+      }
+    output: policy_result
+
+  # ==================== MEMORY ====================
+
+  - name: log_scan
+    description: "Log security scan to session"
+    tool: memory_session_log
+    args:
+      action: "Security scan: {{ inputs.image_tag[:12] }}"
+      details: "{{ vuln_analysis.icon }} {{ vuln_analysis.status }} - {{ vuln_analysis.total }} vulns ({{ vuln_analysis.critical }} critical)"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🔒 Security Scan Report
+
+      **Image:** `{{ inputs.namespace }}/{{ inputs.repository }}:{{ inputs.image_tag[:12] }}`
+      {% if manifest_info and manifest_info.digest %}
+      **Digest:** `{{ manifest_info.digest[:20] }}...`
+      {% endif %}
+
+      ---
+
+      {% if not image_status.exists %}
+      ### ❌ Image Not Found
+
+      {{ image_status.error }}
+
+      Check the image exists:
+      ```python
+      quay_check_image_exists(repository='{{ inputs.repository }}', tag='{{ inputs.image_tag }}', namespace='{{ inputs.namespace }}')
+      ```
+
+      {% else %}
+      ### {{ vuln_analysis.icon }} Vulnerability Summary
+
+      | Severity | Count |
+      |----------|-------|
+      | 🔴 Critical | {{ vuln_analysis.critical }} |
+      | 🟠 High | {{ vuln_analysis.high }} |
+      | 🟡 Medium | {{ vuln_analysis.medium }} |
+      | 🟢 Low | {{ vuln_analysis.low }} |
+      | **Total** | **{{ vuln_analysis.total }}** |
+
+      {% if vuln_analysis.cves %}
+      ### CVEs Found
+      {% for cve in vuln_analysis.cves[:10] %}
+      - [{{ cve }}](https://nvd.nist.gov/vuln/detail/{{ cve }})
+      {% endfor %}
+      {% if vuln_analysis.cves|length > 10 %}
+      ... and {{ vuln_analysis.cves|length - 10 }} more
+      {% endif %}
+      {% endif %}
+
+      ---
+
+      ### 📋 Recommendation
+
+      {% if policy_result.blocked %}
+      ❌ **BLOCKED:** {{ policy_result.block_reason }}
+
+      Do not deploy this image until vulnerabilities are addressed.
+      {% elif vuln_analysis.critical > 0 %}
+      ⚠️ **Warning:** Critical vulnerabilities found. Review before deploying.
+      {% elif policy_result.safe_to_deploy %}
+      ✅ **Safe to deploy** - No critical vulnerabilities.
+      {% else %}
+      ⚠️ Review vulnerabilities before deploying.
+      {% endif %}
+
+      ### Commands
+      ```python
+      # Get full vulnerability details
+      quay_get_vulnerabilities(repository='{{ inputs.repository }}', tag='{{ inputs.image_tag }}', namespace='{{ inputs.namespace }}')
+
+      # Check specific CVE
+      # web_search("CVE-XXXX-XXXXX mitigation")
+      ```
+      {% endif %}
+
+  - name: context
+    value:
+      image_exists: "{{ image_status.exists }}"
+      status: "{{ vuln_analysis.status if vuln_analysis else 'unknown' }}"
+      critical_count: "{{ vuln_analysis.critical if vuln_analysis else 0 }}"
+      total_count: "{{ vuln_analysis.total if vuln_analysis else 0 }}"
+      blocked: "{{ policy_result.blocked if policy_result else false }}"
+      safe_to_deploy: "{{ policy_result.safe_to_deploy if policy_result else false }}"

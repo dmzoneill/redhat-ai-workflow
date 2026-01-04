@@ -56,11 +56,21 @@ inputs:
     description: "URL to AlertManager (extracted from message)"
 
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # ==================== LOAD CONFIG ====================
 
   - name: load_config
     description: "Load alert channel configuration"
     compute: |
+      from scripts.common.auto_heal import detect_failure, log_failure
       from scripts.common.config_loader import load_config
 
       config = load_config()

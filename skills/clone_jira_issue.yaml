@@ -1,0 +1,208 @@
+# Skill: Clone Jira Issue
+# Clone an issue for similar work
+
+name: clone_jira_issue
+description: |
+  Clone a Jira issue for similar work.
+
+  This skill:
+  - Clones an existing issue
+  - Links to the original
+  - Assigns to current user
+
+  Uses: jira_view_issue, jira_clone_issue, jira_add_link, jira_assign
+version: "1.0"
+
+inputs:
+  - name: issue_key
+    type: string
+    required: true
+    description: "Source issue key to clone (e.g., AAP-12345)"
+
+  - name: new_summary
+    type: string
+    required: false
+    default: ""
+    description: "New summary (optional, defaults to 'Clone of <original>')"
+
+  - name: link_type
+    type: string
+    required: false
+    default: "relates to"
+    description: "Link type to original (relates to, blocks, is blocked by)"
+
+  - name: assign_to_me
+    type: boolean
+    required: false
+    default: true
+    description: "Assign cloned issue to current user"
+
+steps:
+  - name: get_source
+    description: "Get source issue details"
+    tool: jira_view_issue
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: source_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_source ====================
+
+  - name: detect_failure_jira
+    description: "Detect if Jira call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(source_raw) if 'source_raw' in dir() and source_raw else ""
+      failure = detect_failure(result_text, "jira_view_issue")
+      result = failure
+    output: failure_jira
+    on_error: continue
+
+  - name: log_failure_jira
+    description: "Log failure to memory"
+    condition: "failure_jira and failure_jira.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+      entry = log_failure(
+          tool_name="jira_view_issue",
+          error_text=failure_jira.get('error_text', ''),
+          skill_name="clone_jira_issue",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure
+    on_error: continue
+
+  - name: parse_source
+    description: "Parse source issue"
+    compute: |
+      source_text = str(source_raw) if 'source_raw' in dir() and source_raw else ""
+
+      import re
+
+      # Extract summary
+      summary_match = re.search(r'Summary[:\s]+([^\n]+)', source_text, re.I)
+      summary = summary_match.group(1).strip()[:80] if summary_match else f"Clone of {inputs.issue_key}"
+
+      # Extract type
+      type_match = re.search(r'Type[:\s]+([^\n]+)', source_text, re.I)
+      issue_type = type_match.group(1).strip() if type_match else "Task"
+
+      exists = len(source_text) > 50
+
+      result = {
+        "exists": exists,
+        "summary": summary,
+        "type": issue_type,
+        "preview": source_text[:400] if source_text else "",
+      }
+    output: source_info
+
+  - name: clone_issue
+    description: "Clone the issue"
+    condition: "source_info.exists"
+    tool: jira_clone_issue
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      summary: "{{ inputs.new_summary if inputs.new_summary else 'Clone: ' + source_info.summary }}"
+    output: clone_raw
+    on_error: continue
+
+  - name: parse_clone
+    description: "Parse clone result"
+    compute: |
+      clone_text = str(clone_raw) if 'clone_raw' in dir() and clone_raw else ""
+
+      import re
+
+      # Extract new issue key
+      key_match = re.search(r'(AAP-\d+)', clone_text)
+      new_key = key_match.group(1) if key_match else None
+
+      success = new_key is not None
+
+      result = {
+        "success": success,
+        "new_key": new_key,
+        "message": clone_text[:200] if clone_text else "",
+      }
+    output: clone_result
+
+  - name: link_issues
+    description: "Link clone to original"
+    condition: "clone_result.success"
+    tool: jira_add_link
+    args:
+      issue_key: "{{ clone_result.new_key }}"
+      target_key: "{{ inputs.issue_key }}"
+      link_type: "{{ inputs.link_type }}"
+    output: link_raw
+    on_error: continue
+
+  - name: assign_issue
+    description: "Assign to current user"
+    condition: "clone_result.success and inputs.assign_to_me"
+    tool: jira_assign
+    args:
+      issue_key: "{{ clone_result.new_key }}"
+    output: assign_raw
+    on_error: continue
+
+  - name: log_clone
+    description: "Log clone action"
+    tool: memory_session_log
+    args:
+      action: "Cloned {{ inputs.issue_key }} to {{ clone_result.new_key if clone_result else 'failed' }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 📋 Clone Issue: {{ inputs.issue_key }}
+
+      {% if not source_info.exists %}
+      ### ❌ Source Issue Not Found
+
+      Could not find issue {{ inputs.issue_key }}
+
+      {% elif not clone_result.success %}
+      ### ❌ Clone Failed
+
+      {{ clone_result.message }}
+
+      {% else %}
+      ### ✅ Issue Cloned Successfully
+
+      **Original:** {{ inputs.issue_key }}
+      **Clone:** **{{ clone_result.new_key }}**
+
+      **Summary:** {{ inputs.new_summary if inputs.new_summary else 'Clone: ' + source_info.summary }}
+
+      ---
+
+      ### Actions Taken
+
+      - ✅ Created {{ clone_result.new_key }}
+      - ✅ Linked to {{ inputs.issue_key }} ({{ inputs.link_type }})
+      {% if inputs.assign_to_me %}
+      - ✅ Assigned to you
+      {% endif %}
+
+      ---
+
+      ### Next Steps
+
+      **View clone:**
+      ```
+      jira_view_issue(issue_key='{{ clone_result.new_key }}')
+      ```
+
+      **Start work:**
+      ```
+      skill_run('start_work', '{"issue_key": "{{ clone_result.new_key }}"}')
+      ```
+
+      **Open in browser:**
+      https://issues.redhat.com/browse/{{ clone_result.new_key }}
+      {% endif %}

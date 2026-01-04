@@ -22,11 +22,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import load_config, resolve_repo_path, run_cmd_full
+from server.utils import load_config, resolve_repo_path, run_cmd_full
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +211,7 @@ def format_github_issue_url(tool: str, error: str, context: str = "") -> str:
 
 # ==================== Helper Functions ====================
 
-# run_cmd is imported from src.utils as run_cmd_full
+# run_cmd is imported from server.utils as run_cmd_full
 run_cmd = run_cmd_full
 
 
@@ -235,55 +235,51 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 try:
-    from .agent_tools import register_agent_tools
     from .infra_tools import register_infra_tools
-    from .lint_tools import register_lint_tools
     from .memory_tools import register_memory_tools
     from .meta_tools import register_meta_tools
+    from .persona_tools import register_persona_tools
     from .resources import register_resources
     from .session_tools import register_prompts, register_session_tools
     from .skill_engine import register_skill_tools
-    from .workflow_tools import register_workflow_tools
 except ImportError:
-    from agent_tools import register_agent_tools
     from infra_tools import register_infra_tools
-    from lint_tools import register_lint_tools
     from memory_tools import register_memory_tools
     from meta_tools import register_meta_tools
+    from persona_tools import register_persona_tools
     from resources import register_resources
     from session_tools import register_prompts, register_session_tools
     from skill_engine import register_skill_tools
-    from workflow_tools import register_workflow_tools
 
 
 def register_tools(server: "FastMCP") -> int:
     """
-    Register all workflow tools with the MCP server.
+    Register core workflow tools with the MCP server.
 
-    This function delegates to specialized modules for better organization:
+    This function registers only CORE tools needed by all personas:
     - memory_tools: 5 tools for persistent context storage
-    - agent_tools: 2 tools for agent management
+    - persona_tools: 2 tools for persona management
     - session_tools: 1 tool + 3 prompts for session management
-    - resources: 5 MCP resources for config/state
+    - resources: 8 MCP resources for config/state
     - skill_engine: 2 tools for skill execution
     - infra_tools: 2 tools for VPN/Kube auth
-    - lint_tools: 7 tools for linting/testing
     - meta_tools: 2 tools for dynamic tool loading
-    - workflow_tools: 9 tools for workflow automation
+
+    Persona-specific tools are in separate modules:
+    - aa-lint: 7 tools for linting/testing (developer persona)
+    - aa-dev-workflow: 9 tools for dev workflow (developer persona)
     """
     tool_count = 0
 
-    # Register tools from each module
+    # Register CORE tools only
     tool_count += register_memory_tools(server)
-    tool_count += register_agent_tools(server)
+    tool_count += register_persona_tools(server)
     tool_count += register_session_tools(server)
     tool_count += register_prompts(server)
     tool_count += register_resources(server, load_config)
     tool_count += register_skill_tools(server, create_github_issue)
     tool_count += register_infra_tools(server)
-    tool_count += register_lint_tools(server)
     tool_count += register_meta_tools(server, create_github_issue)
-    tool_count += register_workflow_tools(server)
 
-    logger.info(f"Registered {tool_count} workflow tools from modular sources")
+    logger.info(f"Registered {tool_count} core workflow tools")
     return tool_count

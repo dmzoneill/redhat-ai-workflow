@@ -54,11 +54,11 @@ git_log(repo='/path/to/repo', limit=10)
 gitlab_mr_list(project='backend', state='opened')
 jira_search(jql='project = AAP AND status = "In Progress"')
 
-# Via tool_exec (for tools from non-loaded agents)
+# Via tool_exec (for tools from non-loaded personas)
 tool_exec('bonfire_namespace_list', '{"mine_only": true}')
 ```
 
 ## See Also
 
-- `/agents` - Load specialized tool sets
+- `/personas` - Load specialized tool sets
 - `/list-skills` - See available skills

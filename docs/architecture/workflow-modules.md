@@ -13,7 +13,6 @@ The aa-workflow server provides workflow automation tools. The codebase has been
 | Module | Purpose | Tools |
 |--------|---------|-------|
 | `tools.py` | Main entry point, imports all modules | Registers 30+ tools |
-| `constants.py` | Shared path constants | MEMORY_DIR, AGENTS_DIR, SKILLS_DIR |
 
 ### Tool Modules
 
@@ -64,8 +63,8 @@ The aa-workflow server provides workflow automation tools. The codebase has been
 
 | Tool | Description |
 |------|-------------|
-| `agent_list` | List available agent personas |
-| `agent_load` | Load an agent with its tools and persona |
+| `persona_list` | List available personas |
+| `persona_load` | Load a persona with its tools and context |
 
 ### session_tools.py (1 tool + 3 prompts)
 
@@ -153,8 +152,8 @@ pytest tests/test_mcp_integration.py -v
 # Test module loading
 python -c "
 import sys
-sys.path.insert(0, 'mcp-servers/aa-common')
-from src.server import create_mcp_server
+sys.path.insert(0, 'server')
+from server.main import create_mcp_server
 server = create_mcp_server(name='aa-workflow', tools=['workflow'])
 print('Server created with 30+ tools')
 "
@@ -162,5 +161,5 @@ print('Server created with 30+ tools')
 
 ## Related
 
-- [Workflow Tools](../mcp-servers/workflow.md) - User-facing documentation
+- [Workflow Tools](../tool-modules/workflow.md) - User-facing documentation
 - [MCP Implementation](mcp-implementation.md) - Overall MCP architecture

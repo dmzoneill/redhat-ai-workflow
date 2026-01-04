@@ -12,11 +12,11 @@ import yaml
 
 # Support both package import and direct loading
 try:
-    from .constants import AGENTS_DIR, MEMORY_DIR, SKILLS_DIR
+    from .constants import MEMORY_DIR, PERSONAS_DIR, SKILLS_DIR
 except ImportError:
-    SERVERS_DIR = Path(__file__).parent.parent.parent
-    PROJECT_DIR = SERVERS_DIR.parent
-    AGENTS_DIR = PROJECT_DIR / "agents"
+    TOOL_MODULES_DIR = Path(__file__).parent.parent.parent
+    PROJECT_DIR = TOOL_MODULES_DIR.parent
+    PERSONAS_DIR = PROJECT_DIR / "personas"
     MEMORY_DIR = PROJECT_DIR / "memory"
     SKILLS_DIR = PROJECT_DIR / "skills"
 
@@ -83,16 +83,16 @@ def register_resources(server: "FastMCP", load_config_fn) -> int:
 
     resource_count += 1
 
-    @server.resource("config://agents")
-    async def resource_agents() -> str:
-        """Available agent configurations."""
-        agents = []
-        if AGENTS_DIR.exists():
-            for f in AGENTS_DIR.glob("*.yaml"):
+    @server.resource("config://personas")
+    async def resource_personas() -> str:
+        """Available persona configurations."""
+        personas = []
+        if PERSONAS_DIR.exists():
+            for f in PERSONAS_DIR.glob("*.yaml"):
                 try:
                     with open(f) as fp:
                         data = yaml.safe_load(fp)
-                    agents.append(
+                    personas.append(
                         {
                             "name": data.get("name", f.stem),
                             "description": data.get("description", ""),
@@ -102,7 +102,7 @@ def register_resources(server: "FastMCP", load_config_fn) -> int:
                     )
                 except Exception:
                     pass
-        return yaml.dump({"agents": agents}, default_flow_style=False)
+        return yaml.dump({"personas": personas}, default_flow_style=False)
 
     resource_count += 1
 

@@ -3,12 +3,12 @@
 from pathlib import Path
 
 # Base directories
-SERVERS_DIR = Path(__file__).parent.parent.parent
-PROJECT_DIR = SERVERS_DIR.parent
+TOOL_MODULES_DIR = Path(__file__).parent.parent.parent
+PROJECT_DIR = TOOL_MODULES_DIR.parent
 
 # Feature directories
 MEMORY_DIR = PROJECT_DIR / "memory"
-AGENTS_DIR = PROJECT_DIR / "agents"
+PERSONAS_DIR = PROJECT_DIR / "personas"
 SKILLS_DIR = PROJECT_DIR / "skills"
 
 # GitHub configuration for error reporting

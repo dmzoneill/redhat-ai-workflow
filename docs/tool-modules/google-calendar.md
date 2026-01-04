@@ -82,7 +82,7 @@ google_calendar_check_mutual_availability(
 
 ## Loaded By
 
-- [👨‍💻 Developer Agent](../agents/developer.md)
+- [👨‍💻 Developer Persona](../personas/developer.md)
 
 ## Related Skills
 

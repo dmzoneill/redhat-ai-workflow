@@ -56,7 +56,7 @@ appinterface_get_alerts(namespace="tower-analytics-prod")
 
 ## Loaded By
 
-- [📦 Release Agent](../agents/release.md)
+- [📦 Release Persona](../personas/release.md)
 
 ## Related Skills
 

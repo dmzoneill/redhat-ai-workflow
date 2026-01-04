@@ -49,6 +49,15 @@ inputs:
 # No hardcoded constants - resolved dynamically
 
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"gitlab_failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # ==================== RESOLVE PROJECT ====================
 
   - name: resolve_project

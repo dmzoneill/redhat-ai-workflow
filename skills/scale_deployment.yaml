@@ -1,0 +1,329 @@
+# Skill: Scale Deployment
+# Scale pods up/down and monitor rollout
+
+name: scale_deployment
+description: |
+  Scale a Kubernetes deployment and monitor the rollout.
+
+  Use for:
+  - Scaling up for high traffic
+  - Scaling down to save resources
+  - Testing with different replica counts
+  - Recovering from OOM by increasing replicas
+
+  The skill will:
+  1. Get current deployment state
+  2. Scale to desired replicas
+  3. Monitor rollout progress
+  4. Report final state
+
+version: "1.0"
+
+inputs:
+  - name: deployment
+    type: string
+    required: true
+    description: "Deployment name to scale"
+
+  - name: replicas
+    type: integer
+    required: true
+    description: "Desired number of replicas"
+
+  - name: namespace
+    type: string
+    required: false
+    default: "tower-analytics-stage"
+    description: "Kubernetes namespace"
+
+  - name: environment
+    type: string
+    required: false
+    default: "stage"
+    description: "Environment: 'stage', 'production', 'ephemeral'"
+
+  - name: wait
+    type: boolean
+    required: false
+    default: true
+    description: "Wait for rollout to complete"
+
+steps:
+  # ==================== GET CURRENT STATE ====================
+
+  - name: get_current_deployment
+    description: "Get current deployment info"
+    tool: kubectl_get_deployments
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: deployments_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_current_deployment ====================
+
+  - name: detect_failure_deploy
+    description: "Detect if kubectl call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(deployments_raw) if 'deployments_raw' in dir() and deployments_raw else ""
+      failure = detect_failure(result_text, "kubectl_get_deployments")
+      result = failure
+    output: failure_deploy
+    on_error: continue
+
+  - name: quick_fix_auth_deploy
+    description: "Auto-fix auth issues"
+    condition: "failure_deploy and failure_deploy.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "{{ inputs.environment }}"
+    output: auth_fix_deploy
+    on_error: continue
+
+  - name: quick_fix_vpn_deploy
+    description: "Auto-fix VPN issues"
+    condition: "failure_deploy and failure_deploy.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_deploy
+    on_error: continue
+
+  - name: retry_get_deployment
+    description: "Retry after auto-fix"
+    condition: "(auth_fix_deploy or vpn_fix_deploy) and failure_deploy"
+    tool: kubectl_get_deployments
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: deployments_raw_retry
+    on_error: continue
+
+  - name: merge_deploy_result
+    condition: "deployments_raw_retry"
+    compute: |
+      result = str(deployments_raw_retry)
+    output: deployments_raw
+    on_error: continue
+    on_error: continue
+
+  - name: parse_current_state
+    description: "Parse current deployment state"
+    compute: |
+      deploy_text = str(deployments_raw) if deployments_raw else ""
+
+      # Find our deployment
+      current_replicas = None
+      ready_replicas = None
+      found = False
+
+      for line in deploy_text.split("\n"):
+          if inputs.deployment.lower() in line.lower():
+              found = True
+              parts = line.split()
+              if len(parts) >= 2:
+                  # Format is usually: NAME READY UP-TO-DATE AVAILABLE
+                  ready_str = parts[1] if len(parts) > 1 else ""
+                  if "/" in ready_str:
+                      ready, total = ready_str.split("/")
+                      ready_replicas = int(ready) if ready.isdigit() else 0
+                      current_replicas = int(total) if total.isdigit() else 0
+              break
+
+      result = {
+          "found": found,
+          "current_replicas": current_replicas,
+          "ready_replicas": ready_replicas,
+          "deployment_list": deploy_text[:500] if deploy_text else "No deployments",
+      }
+    output: current_state
+
+  # ==================== SCALE DEPLOYMENT ====================
+
+  - name: scale_deployment
+    description: "Scale the deployment to desired replicas"
+    condition: "current_state.found"
+    tool: kubectl_scale
+    args:
+      resource: "deployment/{{ inputs.deployment }}"
+      replicas: "{{ inputs.replicas }}"
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: scale_result
+    on_error: continue
+
+  - name: parse_scale_result
+    description: "Parse scale result"
+    compute: |
+      scale_text = str(scale_result) if 'scale_result' in dir() and scale_result else ""
+
+      success = "scaled" in scale_text.lower() or "error" not in scale_text.lower()
+
+      result = {
+          "success": success,
+          "message": scale_text[:200] if scale_text else "No response",
+      }
+    output: scale_status
+    on_error: continue
+
+  # ==================== MONITOR ROLLOUT ====================
+
+  - name: check_rollout_status
+    description: "Check rollout status"
+    condition: "scale_status.success and inputs.wait"
+    tool: kubectl_rollout
+    args:
+      action: "status"
+      resource: "deployment/{{ inputs.deployment }}"
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: rollout_status_raw
+    on_error: continue
+
+  - name: parse_rollout
+    description: "Parse rollout status"
+    condition: "rollout_status_raw"
+    compute: |
+      rollout_text = str(rollout_status_raw) if rollout_status_raw else ""
+
+      complete = "successfully rolled out" in rollout_text.lower()
+      in_progress = "waiting" in rollout_text.lower() or "progressing" in rollout_text.lower()
+
+      result = {
+          "complete": complete,
+          "in_progress": in_progress,
+          "message": rollout_text[:300] if rollout_text else "Unknown",
+      }
+    output: rollout_status
+    on_error: continue
+
+  # ==================== GET FINAL STATE ====================
+
+  - name: get_final_state
+    description: "Get final deployment state"
+    condition: "scale_status.success"
+    tool: kubectl_get_deployments
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: final_deployments_raw
+    on_error: continue
+
+  - name: get_pod_status
+    description: "Get pod status after scaling"
+    condition: "scale_status.success"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: pods_after_raw
+    on_error: continue
+
+  - name: parse_final_state
+    description: "Parse final state"
+    compute: |
+      deploy_text = str(final_deployments_raw) if 'final_deployments_raw' in dir() and final_deployments_raw else ""
+      pods_text = str(pods_after_raw) if 'pods_after_raw' in dir() and pods_after_raw else ""
+
+      # Count pods for our deployment
+      pod_count = 0
+      running_count = 0
+      for line in pods_text.split("\n"):
+          if inputs.deployment.lower() in line.lower():
+              pod_count += 1
+              if "running" in line.lower():
+                  running_count += 1
+
+      result = {
+          "pod_count": pod_count,
+          "running_count": running_count,
+          "all_running": pod_count == running_count and pod_count > 0,
+          "pods_preview": pods_text[:400] if pods_text else "",
+      }
+    output: final_state
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_scaling
+    description: "Log scaling action"
+    condition: "scale_status.success"
+    tool: memory_session_log
+    args:
+      action: "Scaled {{ inputs.deployment }}"
+      details: "{{ current_state.current_replicas }} → {{ inputs.replicas }} replicas in {{ inputs.namespace }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## ⚖️ Scale Deployment
+
+      **Deployment:** `{{ inputs.deployment }}`
+      **Namespace:** `{{ inputs.namespace }}`
+      **Environment:** {{ inputs.environment }}
+
+      ---
+
+      {% if not current_state.found %}
+      ### ❌ Deployment Not Found
+
+      Deployment `{{ inputs.deployment }}` not found in namespace `{{ inputs.namespace }}`.
+
+      **Available deployments:**
+      ```
+      {{ current_state.deployment_list }}
+      ```
+
+      {% elif not scale_status.success %}
+      ### ❌ Scaling Failed
+
+      {{ scale_status.message }}
+
+      {% else %}
+      ### ✅ Scaling {{ "Complete" if rollout_status and rollout_status.complete else "In Progress" }}
+
+      | Metric | Before | After |
+      |--------|--------|-------|
+      | Replicas | {{ current_state.current_replicas }} | {{ inputs.replicas }} |
+      | Ready | {{ current_state.ready_replicas }} | {{ final_state.running_count if final_state else "..." }} |
+
+      {% if rollout_status %}
+      **Rollout Status:** {{ "✅ Complete" if rollout_status.complete else "🔄 In Progress" }}
+      ```
+      {{ rollout_status.message }}
+      ```
+      {% endif %}
+
+      {% if final_state %}
+      **Pods Running:** {{ final_state.running_count }}/{{ final_state.pod_count }}
+      {% endif %}
+
+      {% endif %}
+
+      ---
+
+      ### Commands
+
+      **Check deployment:**
+      ```python
+      kubectl_get_deployments(namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
+      ```
+
+      **Check pods:**
+      ```python
+      kubectl_get_pods(namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
+      ```
+
+      **Rollback if needed:**
+      ```python
+      kubectl_rollout(action='undo', resource='deployment/{{ inputs.deployment }}', namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
+      ```
+
+  - name: context
+    value:
+      deployment: "{{ inputs.deployment }}"
+      scaled: "{{ scale_status.success if scale_status else false }}"
+      from_replicas: "{{ current_state.current_replicas }}"
+      to_replicas: "{{ inputs.replicas }}"
+      rollout_complete: "{{ rollout_status.complete if rollout_status else false }}"

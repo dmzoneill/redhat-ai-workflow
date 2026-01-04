@@ -14,11 +14,11 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import ensure_cluster_auth, get_kubeconfig, get_section_config
+from server.utils import ensure_cluster_auth, get_kubeconfig, get_section_config
 
 logger = logging.getLogger(__name__)
 
@@ -155,16 +155,7 @@ async def run_bonfire(
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
 
-    @server.tool()
-    async def bonfire_version() -> list[TextContent]:
-        """
-        Get bonfire version.
-
-        Returns:
-            Bonfire version string.
-        """
-        success, output = await run_bonfire(["version"])
-        return [TextContent(type="text", text=output.strip())]
+    # REMOVED: bonfire_version - low value, rarely needed
 
     # ==================== NAMESPACE MANAGEMENT ====================
 

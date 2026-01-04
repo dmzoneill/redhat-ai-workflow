@@ -41,7 +41,7 @@ except ImportError:
     AnthropicVertex = None  # type: ignore[assignment, misc]
 
 try:
-    from config.context_resolver import ContextResolver, ResolvedContext
+    from scripts.common.context_resolver import ContextResolver, ResolvedContext
 
     RESOLVER_AVAILABLE = True
 except ImportError:
@@ -57,7 +57,43 @@ except ImportError:
     HOOKS_AVAILABLE = False
     SkillHooks = None  # type: ignore[assignment, misc]
 
+# Import known issues checker for learning loop
+try:
+    PROJECT_ROOT = Path(__file__).parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from server.debuggable import _check_known_issues_sync, _format_known_issues
+
+    KNOWN_ISSUES_AVAILABLE = True
+except ImportError:
+    KNOWN_ISSUES_AVAILABLE = False
+
+    def _check_known_issues_sync(tool_name="", error_text=""):  # type: ignore[misc]
+        return []
+
+    def _format_known_issues(matches):  # type: ignore[misc]
+        return ""
+
+
 logger = logging.getLogger(__name__)
+
+# Skill executor - use the actual skill engine from aa-workflow
+try:
+    # Add tool_modules to path for skill_engine
+    PROJECT_ROOT = Path(__file__).parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-workflow" / "src"))
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+    import yaml as skill_yaml
+    from skill_engine import SkillExecutor
+
+    SKILL_EXECUTOR_AVAILABLE = True
+    SKILLS_DIR = Path(__file__).parent.parent / "skills"
+except ImportError as e:
+    SKILL_EXECUTOR_AVAILABLE = False
+    SkillExecutor = None  # type: ignore[assignment, misc]
+    skill_yaml = None  # type: ignore[assignment]
+    SKILLS_DIR = None  # type: ignore[assignment]
+    logger.debug(f"Skill executor not available: {e}")
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -491,13 +527,21 @@ REQUIRED:
                 name="skill_run",
                 description="""Run a workflow skill.
 
+Available skills include:
+- test_mr_ephemeral: Deploy MR to ephemeral (inputs: mr_id or commit_sha, billing: bool)
+- start_work: Begin work on Jira issue (inputs: issue_key, repo)
+- create_mr: Create merge request (inputs: issue_key, repo, draft: bool)
+- review_pr: Review a PR/MR (inputs: mr_id or issue_key)
+- close_issue: Close a Jira issue (inputs: issue_key)
+- coffee: Morning briefing with alerts, PRs, merges
+- beer: End of day summary
+- standup_summary: Generate standup summary
+
 For ephemeral deployments, USE THIS:
   skill_run("test_mr_ephemeral", {"mr_id": 1459})
   skill_run("test_mr_ephemeral", {"mr_id": 1459, "billing": true})
-  skill_run("test_mr_ephemeral", {"commit_sha": "abc123..."})
 
-This handles everything: gets SHA, checks image, reserves namespace, deploys.
-Works for both open and merged MRs.""",
+This handles everything: gets SHA, checks image, reserves namespace, deploys.""",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -505,6 +549,68 @@ Works for both open and merged MRs.""",
                         "inputs": {"type": "object", "description": "Inputs for the skill"},
                     },
                     "required": ["skill_name"],
+                },
+            )
+        )
+
+        # Memory tools - for tracking work context
+        self.register(
+            ToolDefinition(
+                name="memory_read",
+                description="""Read from persistent memory.
+
+Memory stores context that persists across sessions:
+- state/current_work - Active issues, branches, MRs
+- state/environments - Stage/prod health status
+- learned/patterns - Error patterns and solutions
+- learned/runbooks - Procedures that worked
+
+Leave key empty to list available memory files.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "Memory key (e.g., 'state/current_work', 'learned/patterns')",
+                        }
+                    },
+                    "required": [],
+                },
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="memory_append",
+                description="""Add an item to a list in memory.
+
+Useful for tracking:
+- active_issues: Issues you're working on
+- open_mrs: MRs awaiting review
+- follow_ups: Tasks to remember""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string", "description": "Memory file (e.g., 'state/current_work')"},
+                        "list_path": {"type": "string", "description": "Path to list (e.g., 'active_issues')"},
+                        "item": {"type": "string", "description": "Item to add (as YAML/JSON string)"},
+                    },
+                    "required": ["key", "list_path", "item"],
+                },
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="memory_session_log",
+                description="Log an action to today's session log for handoff to future sessions.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "description": "What was done"},
+                        "details": {"type": "string", "description": "Additional details (optional)"},
+                    },
+                    "required": ["action"],
                 },
             )
         )
@@ -573,13 +679,28 @@ class ToolExecutor:
                 return await self._execute_bonfire(tool_name, arguments)
             elif tool_name.startswith("quay_"):
                 return await self._execute_quay(tool_name, arguments)
+            elif tool_name.startswith("memory_"):
+                return await self._execute_memory(tool_name, arguments)
             elif tool_name == "skill_run":
                 return await self._execute_skill(arguments)
             else:
                 return f"Unknown tool: {tool_name}"
         except Exception as e:
-            logger.error(f"Tool execution error for {tool_name}: {e}", exc_info=True)
-            return f"The {tool_name} tool is currently unavailable. Please try a different approach."
+            error_msg = str(e)
+            logger.error(f"Tool execution error for {tool_name}: {error_msg}", exc_info=True)
+
+            # Check for known issues from memory
+            matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
+            known_text = _format_known_issues(matches)
+
+            if known_text:
+                return f"❌ Error with {tool_name}: {error_msg}\n{known_text}"
+            else:
+                return (
+                    f"❌ The {tool_name} tool failed: {error_msg}\n\n"
+                    f"💡 **Auto-fix:** `debug_tool('{tool_name}')`\n"
+                    f"📚 **After fixing:** `learn_tool_fix('{tool_name}', '<pattern>', '<cause>', '<fix>')`"
+                )
 
     async def _run_command(
         self, cmd: list[str], cwd: Optional[str] = None, env: Optional[dict[str, str]] = None
@@ -1049,60 +1170,152 @@ Please verify the image exists before proceeding."""
 
         return f"Unknown Quay tool: {tool_name}"
 
+    async def _execute_memory(self, tool_name: str, args: dict[str, Any]) -> str:
+        """Execute memory tools using scripts.common.memory helpers."""
+        try:
+            # Import memory helpers
+            from scripts.common.memory import append_to_list, read_memory
+        except ImportError:
+            return "Memory tools not available (scripts.common.memory not found)"
+
+        if tool_name == "memory_read":
+            key = args.get("key", "")
+            if not key:
+                # List available memory files
+                memory_dir = Path.home() / ".config/aa-workflow/memory"
+                if not memory_dir.exists():
+                    return "No memory directory found"
+                files = []
+                for f in memory_dir.rglob("*.yaml"):
+                    rel_path = f.relative_to(memory_dir)
+                    files.append(str(rel_path).replace(".yaml", ""))
+                return "Available memory files:\n" + "\n".join(f"- {f}" for f in sorted(files))
+
+            data = read_memory(key)
+            if not data:
+                return f"Memory file '{key}' is empty or not found"
+
+            import yaml
+
+            return f"## Memory: {key}\n```yaml\n{yaml.safe_dump(data, default_flow_style=False)}\n```"
+
+        elif tool_name == "memory_append":
+            key = args.get("key", "")
+            list_path = args.get("list_path", "")
+            item_str = args.get("item", "{}")
+
+            if not key or not list_path:
+                return "Error: key and list_path are required"
+
+            # Parse item
+            try:
+                import yaml
+
+                item = yaml.safe_load(item_str) if isinstance(item_str, str) else item_str
+            except Exception:
+                item = {"value": item_str}
+
+            append_to_list(key, list_path, item)
+            return f"Appended to {key}.{list_path}"
+
+        elif tool_name == "memory_session_log":
+            action = args.get("action", "")
+            details = args.get("details", "")
+
+            if not action:
+                return "Error: action is required"
+
+            # Use session log from memory tools
+            try:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+
+                from scripts.common.config_loader import get_timezone
+                from scripts.common.memory import read_memory as read_mem
+                from scripts.common.memory import write_memory
+
+                tz = ZoneInfo(get_timezone())
+                today = datetime.now(tz).strftime("%Y-%m-%d")
+                log_key = f"sessions/{today}"
+
+                # Read existing log
+                log_data = read_mem(log_key)
+                if not log_data:
+                    log_data = {"date": today, "entries": []}
+
+                # Add entry
+                entry = {
+                    "time": datetime.now(tz).strftime("%H:%M"),
+                    "action": action,
+                }
+                if details:
+                    entry["details"] = details
+
+                log_data.setdefault("entries", []).append(entry)
+                write_memory(log_key, log_data)
+
+                return f"Logged: {action}"
+            except Exception as e:
+                return f"Failed to log: {e}"
+
+        return f"Unknown memory tool: {tool_name}"
+
     async def _execute_skill(self, args: dict[str, Any]) -> str:
         """
-        Execute a workflow skill from YAML.
+        Execute a workflow skill from YAML using the full SkillExecutor.
 
-        This is a simplified executor - it handles common skills inline
-        using the available tools. For full skill YAML execution with
-        all steps, use the aa-workflow MCP server.
+        This now uses the actual skill engine from aa-workflow MCP server,
+        providing full skill execution with all steps, conditions, and tools.
         """
         skill_name = args.get("skill_name", "")
         inputs = args.get("inputs", {})
 
-        # Available skills and their descriptions
-        available_skills = {
-            "test_mr_ephemeral": "Deploy MR to ephemeral for testing",
-            "start_work": "Begin work on Jira issue",
-            "create_mr": "Create merge request",
-            "review_pr": "Review a PR/MR",
-            "close_issue": "Close a Jira issue",
-            "debug_prod": "Debug production issues",
-            "investigate_alert": "Investigate an alert",
-            "jira_hygiene": "Clean up Jira issues",
-            "rebase_pr": "Rebase a PR",
-            "sync_branch": "Sync branch with main",
-            "standup_summary": "Generate standup summary",
-            "check_my_prs": "Check your PRs for feedback",
-            "review_all_prs": "Review all open PRs",
-            "release_aa_backend_prod": "Release AA backend to prod",
-        }
+        # Ensure inputs is a dict (might be passed as JSON string)
+        if isinstance(inputs, str):
+            try:
+                inputs = json.loads(inputs)
+            except json.JSONDecodeError:
+                inputs = {}
 
-        if skill_name not in available_skills:
-            return f"Unknown skill: {skill_name}\n\nAvailable skills:\n" + "\n".join(
-                f"- {name}: {desc}" for name, desc in available_skills.items()
+        # Check if skill executor is available
+        if not SKILL_EXECUTOR_AVAILABLE:
+            logger.warning("Skill executor not available, using inline fallback")
+            # Fall back to inline executor for test_mr_ephemeral
+            if skill_name == "test_mr_ephemeral":
+                return await self._skill_test_mr_ephemeral(inputs)
+            return f"Skill executor not available. Cannot run: {skill_name}"
+
+        # Check if skill file exists
+        skill_file = SKILLS_DIR / f"{skill_name}.yaml"
+        if not skill_file.exists():
+            # List available skills
+            available = [f.stem for f in SKILLS_DIR.glob("*.yaml")] if SKILLS_DIR.exists() else []
+            return f"❌ Skill not found: {skill_name}\n\nAvailable: {', '.join(sorted(available)) or 'none'}"
+
+        # Load and execute the skill
+        try:
+            with open(skill_file) as f:
+                skill = skill_yaml.safe_load(f)
+
+            # Create executor and run
+            executor = SkillExecutor(
+                skill=skill,
+                inputs=inputs,
+                debug=True,  # Enable debug for visibility
+                server=None,  # No MCP server needed - tools loaded dynamically
             )
 
-        # ===== test_mr_ephemeral =====
-        if skill_name == "test_mr_ephemeral":
-            return await self._skill_test_mr_ephemeral(inputs)
+            # Execute and return result
+            result = await executor.execute()
+            return result
 
-        # ===== For other skills, provide guidance on what they need =====
-        # These skills exist as YAML but need the full skill runner
-        skill_file = f"skills/{skill_name}.yaml"
-
-        return f"""Skill `{skill_name}` exists but requires the full skill runner.
-
-**What it does:** {available_skills.get(skill_name, 'Unknown')}
-
-**Skill file:** `{skill_file}`
-
-**For now, you can:**
-1. Use the individual tools directly (jira_view, gitlab_mr_view, etc.)
-2. Ask me to help with the specific task and I'll use the right tools
-
-**Example inputs for {skill_name}:**
-{json.dumps(inputs, indent=2) if inputs else "{}"}"""
+        except Exception as e:
+            logger.error(f"Skill execution error for {skill_name}: {e}", exc_info=True)
+            # Fall back to inline executor for test_mr_ephemeral if skill engine fails
+            if skill_name == "test_mr_ephemeral":
+                logger.info("Falling back to inline executor for test_mr_ephemeral")
+                return await self._skill_test_mr_ephemeral(inputs)
+            return f"❌ Skill execution failed: {e}"
 
     async def _skill_test_mr_ephemeral(self, inputs: dict[str, Any]) -> str:
         """Execute test_mr_ephemeral skill inline using bonfire tools."""

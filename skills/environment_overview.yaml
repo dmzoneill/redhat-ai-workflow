@@ -1,0 +1,260 @@
+# Skill: Environment Overview
+# Full environment health check
+
+name: environment_overview
+description: |
+  Get a comprehensive overview of an environment.
+
+  This skill shows:
+  - Namespace health
+  - Service status
+  - Ingress configuration
+  - Pod summary
+
+  Uses: k8s_environment_summary, k8s_namespace_health, kubectl_get_services,
+        kubectl_get_ingress, kubectl_get_pods
+version: "1.0"
+
+inputs:
+  - name: namespace
+    type: string
+    required: true
+    description: "Kubernetes namespace"
+
+  - name: environment
+    type: string
+    required: false
+    default: "stage"
+    description: "Environment (stage, production, ephemeral)"
+
+steps:
+  - name: get_environment_summary
+    description: "Get environment summary"
+    tool: k8s_environment_summary
+    args:
+      environment: "{{ inputs.environment }}"
+    output: env_summary_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_environment_summary ====================
+
+  - name: detect_failure_env
+    description: "Detect if k8s call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(env_summary_raw) if 'env_summary_raw' in dir() and env_summary_raw else ""
+      failure = detect_failure(result_text, "k8s_environment_summary")
+      result = failure
+    output: failure_env
+    on_error: continue
+
+  - name: quick_fix_auth_env
+    description: "Auto-fix auth issues"
+    condition: "failure_env and failure_env.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "{{ inputs.environment }}"
+    output: auth_fix_env
+    on_error: continue
+
+  - name: quick_fix_vpn_env
+    description: "Auto-fix VPN issues"
+    condition: "failure_env and failure_env.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_env
+    on_error: continue
+
+  - name: retry_env_summary
+    description: "Retry after auto-fix"
+    condition: "(auth_fix_env or vpn_fix_env) and failure_env"
+    tool: k8s_environment_summary
+    args:
+      environment: "{{ inputs.environment }}"
+    output: env_summary_raw_retry
+    on_error: continue
+
+  - name: merge_env_result
+    condition: "env_summary_raw_retry"
+    compute: |
+      result = str(env_summary_raw_retry)
+    output: env_summary_raw
+    on_error: continue
+
+  - name: get_namespace_health
+    description: "Get namespace health"
+    tool: k8s_namespace_health
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: ns_health_raw
+    on_error: continue
+
+  - name: parse_health
+    description: "Parse namespace health"
+    compute: |
+      health_text = str(ns_health_raw) if 'ns_health_raw' in dir() and ns_health_raw else ""
+
+      healthy = "healthy" in health_text.lower() or "ready" in health_text.lower()
+      has_issues = "error" in health_text.lower() or "failed" in health_text.lower()
+
+      result = {
+        "healthy": healthy and not has_issues,
+        "preview": health_text[:600] if health_text else "",
+      }
+    output: health_info
+
+  - name: get_services
+    description: "List services in namespace"
+    tool: kubectl_get_services
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: services_raw
+    on_error: continue
+
+  - name: parse_services
+    description: "Parse services"
+    compute: |
+      services_text = str(services_raw) if 'services_raw' in dir() and services_raw else ""
+
+      services = []
+      for line in services_text.split("\n"):
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] != "NAME":
+          services.append({
+            "name": parts[0],
+            "type": parts[1] if len(parts) > 1 else "unknown",
+            "ports": parts[4] if len(parts) > 4 else "",
+          })
+
+      result = {
+        "services": services,
+        "count": len(services),
+      }
+    output: services_info
+
+  - name: get_ingress
+    description: "Get ingress configuration"
+    tool: kubectl_get_ingress
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: ingress_raw
+    on_error: continue
+
+  - name: parse_ingress
+    description: "Parse ingress"
+    compute: |
+      ingress_text = str(ingress_raw) if 'ingress_raw' in dir() and ingress_raw else ""
+
+      import re
+      hosts = re.findall(r'([a-zA-Z0-9.-]+\.(?:com|io|dev|redhat\.com))', ingress_text)
+
+      result = {
+        "hosts": list(set(hosts))[:10],
+        "count": len(set(hosts)),
+        "preview": ingress_text[:400] if ingress_text else "",
+      }
+    output: ingress_info
+
+  - name: get_pods
+    description: "Get pod summary"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: pods_raw
+    on_error: continue
+
+  - name: analyze_pods
+    description: "Analyze pod health"
+    compute: |
+      pods_text = str(pods_raw) if 'pods_raw' in dir() and pods_raw else ""
+
+      running = 0
+      pending = 0
+      failed = 0
+
+      for line in pods_text.split("\n"):
+        if "Running" in line:
+          running += 1
+        elif "Pending" in line or "ContainerCreating" in line:
+          pending += 1
+        elif "Error" in line or "CrashLoopBackOff" in line:
+          failed += 1
+
+      result = {
+        "running": running,
+        "pending": pending,
+        "failed": failed,
+        "healthy": running > 0 and failed == 0,
+      }
+    output: pod_analysis
+
+outputs:
+  - name: report
+    value: |
+      ## 🌐 Environment Overview: {{ inputs.namespace }}
+
+      **Environment:** {{ inputs.environment }}
+      **Overall Health:** {{ "✅ Healthy" if health_info.healthy else "⚠️ Issues Detected" }}
+
+      ---
+
+      ### 🏥 Namespace Health
+
+      {{ health_info.preview }}
+
+      ---
+
+      ### 🚀 Services ({{ services_info.count }})
+
+      | Name | Type | Ports |
+      |------|------|-------|
+      {% for svc in services_info.services[:10] %}
+      | `{{ svc.name }}` | {{ svc.type }} | {{ svc.ports }} |
+      {% endfor %}
+
+      ---
+
+      ### 🌍 Ingress ({{ ingress_info.count }} hosts)
+
+      {% for host in ingress_info.hosts %}
+      - `{{ host }}`
+      {% endfor %}
+
+      {% if not ingress_info.hosts %}
+      No ingress configured
+      {% endif %}
+
+      ---
+
+      ### 📦 Pods
+
+      | Status | Count |
+      |--------|-------|
+      | 🟢 Running | {{ pod_analysis.running }} |
+      | 🟡 Pending | {{ pod_analysis.pending }} |
+      | 🔴 Failed | {{ pod_analysis.failed }} |
+
+      {% if not pod_analysis.healthy %}
+      ⚠️ Some pods are unhealthy. Check:
+      ```
+      kubectl_get_pods(namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
+      ```
+      {% endif %}
+
+      ---
+
+      ### 🛠️ Commands
+
+      **List deployments:**
+      ```
+      k8s_list_deployments(namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
+      ```
+
+      **Check pod logs:**
+      ```
+      kubectl_logs(pod_name='<pod>', namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
+      ```

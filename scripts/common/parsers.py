@@ -6,6 +6,8 @@ These functions are used by multiple skills to avoid code duplication.
 import re
 from typing import Any, Dict, List, Optional
 
+from scripts.common.config_loader import get_jira_url
+
 # Bot patterns for filtering out non-human comments
 BOT_PATTERNS = [
     r"group_\d+_bot",
@@ -1172,7 +1174,7 @@ def extract_all_jira_keys(text: str) -> List[str]:
     return re.findall(r"([A-Z]+-\d+)", str(text))
 
 
-def linkify_jira_keys(text: str, jira_url: str = "https://issues.redhat.com") -> str:
+def linkify_jira_keys(text: str, jira_url: Optional[str] = None) -> str:
     """
     Replace Jira keys in text with markdown links.
 
@@ -1182,11 +1184,13 @@ def linkify_jira_keys(text: str, jira_url: str = "https://issues.redhat.com") ->
 
     Args:
         text: Text containing Jira keys
-        jira_url: Base URL for Jira (default: https://issues.redhat.com)
+        jira_url: Base URL for Jira (default: from config)
 
     Returns:
         Text with Jira keys converted to markdown links
     """
+    if jira_url is None:
+        jira_url = get_jira_url()
     if not text:
         return text
 

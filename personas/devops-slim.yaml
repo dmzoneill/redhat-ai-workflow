@@ -1,0 +1,13 @@
+# DevOps Persona - Slim Configuration
+# Only essential tools to stay under limit when combined with other personas
+
+name: devops
+description: Infrastructure, monitoring (slim)
+persona: personas/devops.md
+
+# Slim tool selection - only the essentials
+tools:
+  - k8s           # 26 tools - Core Kubernetes
+  - prometheus    # 13 tools - Alerts and metrics
+
+# Total: ~39 tools

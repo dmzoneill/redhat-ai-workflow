@@ -1,0 +1,57 @@
+# Developer Persona Configuration
+# Specifies which MCP tool modules this persona needs
+
+name: developer
+description: Coding, PRs, and code review
+persona: personas/developer.md
+
+# Tool modules to load (from tool_modules/aa-*)
+tools:
+  - workflow        # 16 tools - Core (memory, persona, session, skill, infra, meta)
+  - lint            # 7 tools - Python/YAML linting, testing, security scans
+  - dev-workflow    # 9 tools - Development workflow helpers
+  - git             # 15 tools - Git operations
+  - gitlab          # 35 tools - MRs, CI/CD
+  - jira            # 24 tools - Issue tracking
+
+# Total: ~106 tools (under 128 limit)
+# For ephemeral deployment, use the devops persona which has bonfire, k8s, quay
+
+skills:
+  # Daily workflow
+  - coffee              # ☕ Morning briefing - PRs, Jira, calendar
+  - beer                # 🍺 End of day wrap-up - wins, cleanup, standup prep
+  - standup_summary     # Generate standup summary from activity
+  - weekly_summary      # Weekly work summary for reports
+
+  # Issue management
+  - start_work          # Start working on a Jira issue
+  - create_jira_issue   # Create Jira issue with Markdown support
+  - clone_jira_issue    # Clone existing issue for similar work
+  - close_issue         # Close issue with commit summary
+  - jira_hygiene        # Issue quality checks
+  - sprint_planning     # Prepare sprint backlog
+
+  # MR/PR workflow
+  - create_mr           # Create MR with validation, linting, Slack notification
+  - mark_mr_ready       # Mark draft MR as ready, notify team
+  - close_mr            # Close abandoned MR
+  - review_pr           # PR review workflow (auto-approves or posts feedback)
+  - review_all_prs      # Batch review open PRs (excludes your own)
+  - check_my_prs        # Check your PRs for reviewer feedback
+  - check_mr_feedback   # Check MRs for comments needing response
+
+  # Git operations
+  - rebase_pr           # Rebase PR onto main, handle conflicts
+  - sync_branch         # Quick sync with main (daily rebase)
+  - cleanup_branches    # Delete merged/stale branches
+  - hotfix              # Cherry-pick fix to release branch
+
+  # CI/CD
+  - check_ci_health     # Diagnose GitLab CI issues
+  - ci_retry            # Retry failed pipelines
+
+  # Communication
+  - notify_mr           # Notify team about MR
+  - notify_team         # Send Slack notifications
+  - schedule_meeting    # Schedule Google Calendar meetings

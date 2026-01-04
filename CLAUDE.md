@@ -1,6 +1,17 @@
 # AI Workflow Assistant
 
-This is a complete AI-powered development workflow system with **MCP Tools**, **Agents**, **Skills**, and **Memory**.
+This is a complete AI-powered development workflow system with **MCP Tools**, **Personas**, **Skills**, and **Memory**.
+
+## Terminology
+
+| Term | Meaning |
+|------|---------|
+| **Agent / Persona** | A tool configuration profile (developer, devops, incident, release). NOT a separate AI instance - just a different set of tools. |
+| **Tool Module** | A plugin directory (e.g., `aa-git/`, `aa-jira/`) containing MCP tool implementations. |
+| **Skill** | A YAML-defined multi-step workflow that chains tools. |
+| **Memory** | Persistent YAML files for context across sessions. |
+
+> **This is a single-agent system.** When you "load an agent," you're configuring which tools are available, not spawning a separate AI.
 
 ---
 
@@ -10,7 +21,7 @@ This is a complete AI-powered development workflow system with **MCP Tools**, **
 ┌─────────────────────────────────────────────────────────┐
 │                    Claude Session                        │
 ├─────────────────────────────────────────────────────────┤
-│  AGENTS (agents/)           SKILLS (skills/)            │
+│  AGENTS (personas/)           SKILLS (skills/)            │
 │  Specialized personas       Reusable workflows          │
 │  - devops.md                - start_work.yaml           │
 │  - developer.md             - create_mr.yaml            │
@@ -22,7 +33,7 @@ This is a complete AI-powered development workflow system with **MCP Tools**, **
 │  - state/current_work.yaml  - learned/patterns.yaml    │
 │  - state/environments.yaml  - learned/runbooks.yaml    │
 ├─────────────────────────────────────────────────────────┤
-│  MCP TOOLS (mcp-servers/)                               │
+│  MCP TOOLS (tool_modules/)                               │
 │  219 tools across 12 modules                            │
 │  aa-git, aa-jira, aa-gitlab, aa-k8s, aa-prometheus...  │
 └─────────────────────────────────────────────────────────┘
@@ -115,9 +126,9 @@ bonfire_deploy(app="your-app", namespace="ephemeral-xxx")
 
 ---
 
-## Agents (Dynamic Loading!)
+## Personas (Dynamic Tool Loading!)
 
-Agents are specialized personas with focused tool sets. **Load one and tools switch dynamically!**
+Personas are tool configuration profiles. **Load one and tools switch dynamically!**
 
 ### How It Works
 ```
@@ -127,34 +138,34 @@ You: Load the devops agent
 [Server sends tools/list_changed to Cursor]
 [Cursor refreshes available tools]
 
-Claude: DevOps agent loaded with ~90 tools!
+Claude: DevOps persona loaded with ~90 tools!
 ```
 
-### Available Agents
+### Available Personas
 
-| Agent | Modules | ~Tools | Best For |
-|-------|---------|--------|----------|
+| Persona | Modules | ~Tools | Best For |
+|---------|---------|--------|----------|
 | **devops** | k8s, bonfire, quay, gitlab | 90 | Ephemeral deployments, K8s ops |
 | **developer** | git, gitlab, jira | 74 | Coding, PRs, code review |
 | **incident** | k8s, kibana, jira | 78 | Production debugging |
 | **release** | konflux, quay, appinterface, git | 69 | Shipping releases |
 
-### DevOps Agent (`agents/devops.md`)
+### DevOps Persona (`personas/devops.md`)
 - Focus: Infrastructure, ephemeral environments, deployments
 - Tools: aa-k8s, aa-bonfire, aa-quay, aa-gitlab
 - Use when: Deploying to ephemeral, checking namespaces
 
-### Developer Agent (`agents/developer.md`)
+### Developer Persona (`personas/developer.md`)
 - Focus: Coding, PRs, code review
 - Tools: aa-git, aa-gitlab, aa-jira
 - Use when: Writing code, creating MRs
 
-### Incident Agent (`agents/incident.md`)
+### Incident Persona (`personas/incident.md`)
 - Focus: Rapid triage, mitigation, recovery
 - Tools: aa-k8s, aa-kibana, aa-jira
 - Use when: Production incidents
 
-### Release Agent (`agents/release.md`)
+### Release Persona (`personas/release.md`)
 - Focus: Release coordination, deployment
 - Tools: aa-konflux, aa-quay, aa-appinterface, aa-git
 - Use when: Managing releases
@@ -310,7 +321,7 @@ ai-workflow/
 ├── CLAUDE.md              # This file (AI context)
 ├── README.md              # Human documentation
 ├── config.json             # Configuration
-├── agents/                # Agent personas
+├── personas/                # Agent personas
 │   ├── devops.md
 │   ├── developer.md
 │   ├── incident.md
@@ -322,8 +333,8 @@ ai-workflow/
 ├── memory/                # Persistent context
 │   ├── state/
 │   └── learned/
-├── mcp-servers/           # MCP tool modules
-│   ├── aa-common/         # Shared infrastructure
+├── tool_modules/           # MCP tool modules
+│   ├── server/         # Shared infrastructure
 │   ├── aa-git/
 │   ├── aa-jira/
 │   ├── aa-gitlab/
@@ -348,7 +359,7 @@ ai-workflow/
 ## Tips for AI Assistants
 
 1. **Load memory first** - Check `memory/state/current_work.yaml` for context
-2. **Use the right agent** - Match persona to the task (agent_load)
+2. **Use the right persona** - Match persona to the task (persona_load)
 3. **Follow skills** - Use predefined workflows for common tasks
 4. **Update memory** - Save learned patterns for future sessions
 5. **Be specific with tools** - Always include required parameters
@@ -356,25 +367,56 @@ ai-workflow/
 7. **Link Jira + GitLab** - Always reference issues in commits/MRs
 8. **Auto-debug on failures** - When a tool fails, call `debug_tool()` to fix it
 
-## 🔧 Auto-Debug: Self-Healing Tools
+## 🔧 Auto-Heal: Self-Fixing Skills
 
-When a tool fails (returns `❌`), you can diagnose and fix it:
+Skills now include **auto-heal** capabilities. When a tool fails, the skill:
 
-### Workflow
+1. **Detects** the failure pattern (auth, network, registry, etc.)
+2. **Applies** automatic fixes for known issues
+3. **Retries** the operation after fixing
+4. **Logs** the failure to memory for future learning
+
+### Auto-Fixed Error Types
+
+| Error Type | Pattern | Auto-Fix |
+|------------|---------|----------|
+| **auth** | "unauthorized", "401", "forbidden" | `kube_login(cluster)` |
+| **network** | "no route", "timeout", "connection refused" | `vpn_connect()` |
+| **registry** | "manifest unknown", "podman login" | Manual: `podman login quay.io` |
+| **tty** | "output is not a tty" | Use `debug_tool()` to add --force |
+
+### Skills with Auto-Heal (15 total)
+
+- ✅ `test_mr_ephemeral` - bonfire namespace reserve
+- ✅ `deploy_to_ephemeral` - bonfire namespace reserve
+- ✅ `debug_prod` - kubectl get pods
+- ✅ `investigate_alert` - kubectl get pods
+- ✅ `rollout_restart` - kubectl rollout restart
+- ✅ `release_to_prod` - konflux get component
+- ✅ `start_work` - jira view issue
+- ✅ `create_mr` - git push
+- ✅ `konflux_status` - konflux status
+- ✅ `appinterface_check` - appinterface validate
+- ✅ `review_pr` - gitlab mr view
+- ✅ `check_ci_health` - gitlab ci list
+- ✅ `silence_alert` - alertmanager alerts
+- ✅ `extend_ephemeral` - bonfire namespace list
+- ✅ `cancel_pipeline` - tkn pipelinerun list
+
+### Failure Memory
+
+Failures are logged to `memory/learned/tool_failures.yaml` for learning.
+
+### Manual Fixes with debug_tool
+
+For errors that can't be auto-fixed:
+
 1. **Tool fails** → Look for hint: `💡 To auto-fix: debug_tool('tool_name')`
 2. **Call debug_tool** → `debug_tool('bonfire_namespace_release', 'error message')`
 3. **Analyze source** → Compare error to code, identify bug
 4. **Propose fix** → Show exact `search_replace` edit
-5. **Ask user** → "Found bug: missing --force flag. Apply fix?"
-6. **Apply & commit** → `git commit -m "fix(tool_name): description"`
+5. **Apply & commit** → `git commit -m "fix(tool_name): description"`
 
-### Common Fixable Bugs
-| Error Pattern | Likely Cause |
-|---------------|--------------|
-| "Output is not a TTY" | Missing --force/--yes flag |
-| "Unknown flag: --state" | CLI syntax changed |
-| "Unauthorized" | Auth not passed correctly |
-| "manifest unknown" | Wrong image tag format |
 
 ## ⚠️ Critical Don'ts
 

@@ -21,23 +21,12 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Add aa-common to path for shared utilities
-# Handle both MCP server context (aa-common in path) and standalone script context
-SERVERS_DIR = Path(__file__).parent.parent.parent
-_common_path = str(SERVERS_DIR / "aa-common")
-if _common_path not in sys.path:
-    sys.path.insert(0, _common_path)
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 
-try:
-    # When running as MCP server, src.utils resolves to aa-common/src/utils
-    from src.utils import load_config
-except ImportError:
-    # When running from slack_daemon.py where aa-slack/src shadows aa-common/src,
-    # import directly from aa-common/src
-    _common_src = str(SERVERS_DIR / "aa-common" / "src")
-    if _common_src not in sys.path:
-        sys.path.insert(0, _common_src)
-    from utils import load_config
+from server.utils import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +45,7 @@ async def _send_via_dbus(channel_id: str, text: str, thread_ts: str = "") -> dic
     """
     try:
         # Import D-Bus client
-        scripts_dir = SERVERS_DIR.parent / "scripts"
+        scripts_dir = TOOL_MODULES_DIR.parent / "scripts"
         if str(scripts_dir) not in sys.path:
             sys.path.insert(0, str(scripts_dir))
 
@@ -682,230 +671,13 @@ def register_tools(server: FastMCP) -> int:
         except Exception as e:
             return json.dumps({"error": str(e), "success": False})
 
-    # ==================== Pending Message Tools ====================
+    # REMOVED: Pending Message Tools (slack_get_pending, slack_mark_processed)
+    # These are internal daemon tools, not workflow tools
 
-    @server.tool()
-    async def slack_get_pending(
-        limit: int = 20,
-        channel_id: str = "",
-    ) -> str:
-        """
-        Get pending messages waiting for agent processing.
+    # REMOVED: slack_respond_and_mark - internal daemon tool
 
-        These are messages that matched your watched keywords/mentions
-        and haven't been processed yet.
-
-        Args:
-            limit: Maximum messages to return
-            channel_id: Filter by channel (optional)
-
-        Returns:
-            Pending messages with full context
-        """
-        try:
-            manager = await get_manager()
-            await manager.initialize()
-
-            messages = await manager.get_pending_messages(
-                limit=limit,
-                channel_id=channel_id if channel_id else None,
-            )
-
-            if not messages:
-                return json.dumps(
-                    {
-                        "count": 0,
-                        "messages": [],
-                        "hint": "No pending messages",
-                    }
-                )
-
-            return json.dumps(
-                {
-                    "count": len(messages),
-                    "messages": [
-                        {
-                            "id": m.id,
-                            "channel_id": m.channel_id,
-                            "channel_name": m.channel_name,
-                            "user_id": m.user_id,
-                            "user_name": m.user_name,
-                            "text": m.text,
-                            "timestamp": m.timestamp,
-                            "thread_ts": m.thread_ts,
-                            "is_mention": m.is_mention,
-                            "is_dm": m.is_dm,
-                            "matched_keywords": m.matched_keywords,
-                            "age_seconds": time.time() - m.created_at,
-                        }
-                        for m in messages
-                    ],
-                },
-                indent=2,
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
-
-    @server.tool()
-    async def slack_mark_processed(message_id: str) -> str:
-        """
-        Mark a pending message as processed.
-
-        Call this after you've responded to or handled a message.
-
-        Args:
-            message_id: Message ID from slack_get_pending
-
-        Returns:
-            Confirmation
-        """
-        try:
-            manager = await get_manager()
-            await manager.mark_processed(message_id)
-
-            return json.dumps(
-                {
-                    "success": True,
-                    "message_id": message_id,
-                    "message": "Message marked as processed",
-                }
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e), "success": False})
-
-    @server.tool()
-    async def slack_respond_and_mark(
-        message_id: str,
-        response_text: str,
-        as_thread: bool = True,
-    ) -> str:
-        """
-        Respond to a pending message and mark it as processed.
-
-        Convenience tool that sends a response and marks the message handled.
-
-        Args:
-            message_id: Message ID from slack_get_pending
-            response_text: Your response text
-            as_thread: Reply in thread (recommended)
-
-        Returns:
-            Confirmation with response details
-        """
-        try:
-            manager = await get_manager()
-            await manager.initialize()
-
-            # Get the pending message
-            messages = await manager.get_pending_messages(limit=100)
-            pending = None
-            for m in messages:
-                if m.id == message_id:
-                    pending = m
-                    break
-
-            if not pending:
-                return json.dumps(
-                    {
-                        "error": f"Message {message_id} not found in pending queue",
-                        "success": False,
-                    }
-                )
-
-            # Send response
-            thread_ts = pending.thread_ts or pending.timestamp if as_thread else None
-
-            result = await manager.session.send_message(
-                channel_id=pending.channel_id,
-                text=response_text,
-                thread_ts=thread_ts,
-                typing_delay=True,
-            )
-
-            # Mark as processed
-            await manager.mark_processed(message_id)
-
-            return json.dumps(
-                {
-                    "success": True,
-                    "message_id": message_id,
-                    "response_ts": result.get("ts", ""),
-                    "channel": pending.channel_name,
-                    "in_thread": bool(thread_ts),
-                    "message": f"Responded to {pending.user_name} and marked processed",
-                }
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e), "success": False})
-
-    # ==================== Listener Control Tools ====================
-
-    @server.tool()
-    async def slack_listener_status() -> str:
-        """
-        Get the status of the Slack background listener.
-
-        Returns:
-            Listener status including running state, stats, and config
-        """
-        try:
-            manager = await get_manager()
-            status = await manager.get_status()
-            return json.dumps(status, indent=2)
-
-        except Exception as e:
-            return json.dumps({"error": str(e), "status": "error"})
-
-    @server.tool()
-    async def slack_listener_start() -> str:
-        """
-        Start the Slack background listener.
-
-        The listener polls watched channels and queues relevant messages.
-
-        Returns:
-            Confirmation with listener config
-        """
-        try:
-            manager = await get_manager()
-            await manager.start()
-
-            status = await manager.get_status()
-            return json.dumps(
-                {
-                    "success": True,
-                    "message": "Listener started",
-                    **status,
-                }
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e), "success": False})
-
-    @server.tool()
-    async def slack_listener_stop() -> str:
-        """
-        Stop the Slack background listener.
-
-        Returns:
-            Confirmation
-        """
-        try:
-            manager = await get_manager()
-            await manager.stop()
-
-            return json.dumps(
-                {
-                    "success": True,
-                    "message": "Listener stopped",
-                }
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e), "success": False})
+    # REMOVED: Listener Control Tools (slack_listener_status, slack_listener_start, slack_listener_stop)
+    # These are daemon control tools, not workflow tools
 
     # ==================== Utility Tools ====================
 
@@ -954,41 +726,7 @@ def register_tools(server: FastMCP) -> int:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    @server.tool()
-    async def slack_validate_session() -> str:
-        """
-        Validate the Slack session credentials.
-
-        Use this to check if your XOXC_TOKEN and D_COOKIE are valid.
-
-        Returns:
-            Session info if valid, error if expired
-        """
-        try:
-            manager = await get_manager()
-            await manager.initialize()
-
-            auth_info = await manager.session.validate_session()
-
-            return json.dumps(
-                {
-                    "valid": True,
-                    "user_id": auth_info.get("user_id", ""),
-                    "user": auth_info.get("user", ""),
-                    "team_id": auth_info.get("team_id", ""),
-                    "team": auth_info.get("team", ""),
-                    "message": "Session is valid",
-                }
-            )
-
-        except Exception as e:
-            return json.dumps(
-                {
-                    "valid": False,
-                    "error": str(e),
-                    "hint": "Re-obtain XOXC_TOKEN and D_COOKIE from browser dev tools",
-                }
-            )
+    # REMOVED: slack_validate_session - internal check, not workflow tool
 
     # Return count of registered tools
     return 16  # +1 for slack_dm_gitlab_user

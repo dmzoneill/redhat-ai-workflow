@@ -43,7 +43,7 @@ MCP server for GitLab operations via the `glab` CLI.
 ## Installation
 
 ```bash
-cd mcp-servers/aa-gitlab
+cd tool_modules/aa-gitlab
 pip install -e .
 ```
 

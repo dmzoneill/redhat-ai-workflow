@@ -25,7 +25,7 @@ MCP server for Git repository operations.
 ## Installation
 
 ```bash
-cd mcp-servers/aa-git
+cd tool_modules/aa-git
 pip install -e .
 ```
 

@@ -1,6 +1,8 @@
-# 🔧 MCP Servers Reference
+# 🔧 Tool Modules Reference
 
-MCP servers are **tool modules** that provide specific capabilities. Each server contains related tools that are loaded by agents.
+Tool modules are MCP plugins that provide specific capabilities. Each module contains related tools that are loaded based on which persona is active.
+
+> **Terminology:** "Personas" (sometimes called "agents") are tool configuration profiles that determine which modules are loaded. This is NOT a multi-agent AI system.
 
 ## Quick Reference
 
@@ -31,7 +33,7 @@ MCP servers are **tool modules** that provide specific capabilities. Each server
 
 ```mermaid
 graph TB
-    subgraph MCP["MCP Server (aa-common)"]
+    subgraph MCP["MCP Server (server)"]
         LOADER[AgentLoader]
         CORE[Core Tools]
     end
@@ -123,7 +125,7 @@ Claude: [AgentLoader]
 
 ## Adding a New Module
 
-1. Create directory: `mcp-servers/aa-{name}/src/`
+1. Create directory: `tool_modules/aa-{name}/src/`
 
 2. Create `tools.py`:
 ```python
@@ -138,14 +140,14 @@ def register_tools(server: FastMCP) -> int:
     return 1  # tool count
 ```
 
-3. Add to `agent_loader.py`:
+3. Add to `server/persona_loader.py`:
 ```python
 TOOL_MODULES = {
     "{name}": 5,  # estimated tool count
 }
 ```
 
-4. Add to agent config:
+4. Add to persona config:
 ```yaml
 tools:
   - {name}
@@ -154,5 +156,5 @@ tools:
 ## See Also
 
 - [Architecture Overview](../architecture/README.md)
-- [Agents](../agents/README.md)
+- [Agents](../personas/README.md)
 - [MCP Implementation Details](../architecture/mcp-implementation.md)

@@ -46,6 +46,15 @@ steps:
           "jira_url": config.get("jira", {}).get("url", "https://issues.redhat.com"),
       }
     output: cfg
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"jira_failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # ==================== GET ISSUE DETAILS ====================
 
   # Step 1: Get current issue status

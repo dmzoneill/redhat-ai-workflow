@@ -62,7 +62,7 @@ You: Check slack daemon status
 
 Claude: 🤖 Slack Daemon Status
 
-        ● aa-slack.service - AI Workflow Slack Agent
+        ● aa-slack.service - AI Workflow Slack Persona
            Loaded: loaded
            Active: active (running) since Mon 2025-01-15 09:00:00
            Main PID: 12345

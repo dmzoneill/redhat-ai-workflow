@@ -97,8 +97,8 @@ kubectl_get_events(
 
 ## Loaded By
 
-- [🔧 DevOps Agent](../agents/devops.md)
-- [🚨 Incident Agent](../agents/incident.md)
+- [🔧 DevOps Persona](../personas/devops.md)
+- [🚨 Incident Persona](../personas/incident.md)
 
 ## Related Skills
 

@@ -46,6 +46,34 @@ steps:
     output: open_mrs_raw
     on_error: continue
 
+  # ==================== AUTO-HEAL: get_my_mrs ====================
+
+  - name: detect_failure_gitlab
+    description: "Detect if GitLab call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(open_mrs_raw) if 'open_mrs_raw' in dir() and open_mrs_raw else ""
+      failure = detect_failure(result_text, "gitlab_mr_list")
+      result = failure
+    output: failure_gitlab
+    on_error: continue
+
+  - name: log_failure_gitlab
+    description: "Log failure to memory"
+    condition: "failure_gitlab and failure_gitlab.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+      entry = log_failure(
+          tool_name="gitlab_mr_list",
+          error_text=failure_gitlab.get('error_text', ''),
+          skill_name="check_mr_feedback",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure
+    on_error: continue
+
   - name: parse_open_mrs
     description: "Parse MR list output"
     compute: |

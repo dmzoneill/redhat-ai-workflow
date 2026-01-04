@@ -10,12 +10,12 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import get_kubeconfig, load_config
-from src.utils import run_cmd as run_cmd_base
+from server.utils import get_kubeconfig, load_config
+from server.utils import run_cmd as run_cmd_base
 
 
 def get_konflux_config() -> dict:
@@ -145,21 +145,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== TEKTON ====================
 
-    @server.tool()
-    async def tkn_list_pipelines(namespace: str = DEFAULT_NAMESPACE) -> str:
-        """List Tekton pipelines using tkn CLI."""
-        success, output = await run_cmd(["tkn", "pipeline", "list", "-n", namespace])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Tekton Pipelines\n\n```\n{output}\n```"
-
-    @server.tool()
-    async def tkn_list_pipelineruns(namespace: str = DEFAULT_NAMESPACE, limit: int = 10) -> str:
-        """List Tekton pipeline runs."""
-        success, output = await run_cmd(["tkn", "pipelinerun", "list", "-n", namespace, "--limit", str(limit)])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Tekton Pipeline Runs\n\n```\n{output}\n```"
+    # REMOVED: tkn_list_pipelines - duplicate of konflux_list_pipelines
+    # REMOVED: tkn_list_pipelineruns - duplicate of tkn_pipelinerun_list
 
     @server.tool()
     async def tkn_describe_pipelinerun(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
@@ -593,28 +580,8 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed: {output}"
         return f"## Task: {task_name}\n\n```\n{output}\n```"
 
-    @server.tool()
-    async def tkn_clustertask_list() -> str:
-        """List cluster-wide tasks."""
-        success, output = await run_cmd(["tkn", "clustertask", "list"])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Cluster Tasks\n\n```\n{output}\n```"
-
-    @server.tool()
-    async def tkn_triggertemplate_list(namespace: str = DEFAULT_NAMESPACE) -> str:
-        """List trigger templates in a namespace."""
-        success, output = await run_cmd(["tkn", "triggertemplate", "list", "-n", namespace])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Trigger Templates: {namespace}\n\n```\n{output}\n```"
-
-    @server.tool()
-    async def tkn_eventlistener_list(namespace: str = DEFAULT_NAMESPACE) -> str:
-        """List event listeners in a namespace."""
-        success, output = await run_cmd(["tkn", "eventlistener", "list", "-n", namespace])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Event Listeners: {namespace}\n\n```\n{output}\n```"
+    # REMOVED: tkn_clustertask_list - low value, rarely used
+    # REMOVED: tkn_triggertemplate_list - low value, rarely used
+    # REMOVED: tkn_eventlistener_list - low value, rarely used
 
     return len([m for m in dir() if not m.startswith("_")])  # Approximate count

@@ -1,45 +1,15 @@
-# Current Work State
-# Automatically updated by Claude during sessions
-
-last_updated: null
-
-# Active Issues being worked on
 active_issues: []
-# Example:
-#   - key: PROJ-12345
-#     summary: "Implement new API endpoint"
-#     status: "In Progress"
-#     branch: "proj-12345-implement-api"
-#     repo: "my-backend"
-#     started: "2024-12-21T10:00:00Z"
-#     notes: ""
-
-# Open Merge Requests
-open_mrs: []
-# Example:
-#   - id: 1234
-#     project: "my-backend"
-#     title: "PROJ-12345 - Implement new API endpoint"
-#     url: "https://gitlab.example.com/..."
-#     pipeline_status: "success"
-#     needs_review: true
-#     created: "2024-12-21T14:00:00Z"
-
-# Current branch per repository (configure repos in config.json)
 current_branches: {}
-# Example:
-#   my-backend: main
-#   my-frontend: main
+follow_ups:
+- created: '2026-01-04T20:11:33.907982'
+  issue_key: AAP-61214
+  priority: low
+  task: 'Fix hygiene issues on AAP-61214: '
+last_updated: '2026-01-04T20:11:33.908448'
+notes: 'Use memory_update or memory_append to modify this file.
 
-# Pending follow-up items
-follow_ups: []
-# Example:
-#   - task: "Address review comments on MR 1234"
-#     priority: high
-#     issue_key: PROJ-12345
-#     due: "2024-12-22"
+  Example: memory_append("state/current_work", "active_issues", ''{"key": "PROJ-123",
+  ...}'')
 
-# Session notes
-notes: |
-  Use memory_update or memory_append to modify this file.
-  Example: memory_append("state/current_work", "active_issues", '{"key": "PROJ-123", ...}')
+  '
+open_mrs: []

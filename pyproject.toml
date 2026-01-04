@@ -85,7 +85,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mcp-servers", "scripts", "agents", "skills"]
+packages = ["tool_modules", "scripts", "agents", "skills"]
 
 [tool.black]
 line-length = 120
@@ -123,7 +123,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["mcp-servers", "scripts"]
+source = ["tool_modules", "scripts"]
 branch = true
 omit = [
     "*/tests/*",

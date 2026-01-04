@@ -1,0 +1,328 @@
+# Skill: Rollout Restart
+# Restart a deployment and monitor rollout
+
+name: rollout_restart
+description: |
+  Restart a Kubernetes deployment and monitor its rollout.
+
+  This is useful for:
+  - Picking up new ConfigMap/Secret changes
+  - Recovering from stuck pods
+  - Forcing a fresh start without redeploying
+
+  Uses: kubectl_rollout_restart, kubectl_rollout_status, kubectl_describe_deployment,
+        kubectl_get_pods
+version: "1.0"
+
+inputs:
+  - name: deployment
+    type: string
+    required: true
+    description: "Deployment name to restart"
+
+  - name: namespace
+    type: string
+    required: true
+    description: "Kubernetes namespace"
+
+  - name: environment
+    type: string
+    required: false
+    default: "stage"
+    description: "Environment (stage, production, ephemeral)"
+
+  - name: wait
+    type: boolean
+    required: false
+    default: true
+    description: "Wait for rollout to complete"
+
+steps:
+  # ==================== PRE-RESTART CHECK ====================
+
+  - name: describe_before
+    description: "Get deployment state before restart"
+    tool: kubectl_describe_deployment
+    args:
+      deployment: "{{ inputs.deployment }}"
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: describe_before_raw
+    on_error: continue
+
+  - name: parse_before_state
+    description: "Parse current deployment state"
+    compute: |
+      desc_text = str(describe_before_raw) if 'describe_before_raw' in dir() and describe_before_raw else ""
+
+      import re
+
+      # Extract replicas
+      replicas_match = re.search(r'Replicas:\s*(\d+)', desc_text)
+      replicas = int(replicas_match.group(1)) if replicas_match else 0
+
+      # Extract image
+      image_match = re.search(r'Image:\s*(\S+)', desc_text)
+      image = image_match.group(1) if image_match else "unknown"
+
+      # Check if deployment exists
+      exists = "NotFound" not in desc_text and replicas > 0
+
+      result = {
+        "exists": exists,
+        "replicas": replicas,
+        "image": image[:80],
+        "preview": desc_text[:400] if desc_text else "",
+      }
+    output: before_state
+
+  # ==================== RESTART ====================
+
+  - name: restart_deployment
+    description: "Trigger rolling restart"
+    condition: "before_state.exists"
+    tool: kubectl_rollout_restart
+    args:
+      deployment: "{{ inputs.deployment }}"
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: restart_result
+    on_error: continue
+
+  # ==================== AUTO-HEAL: restart_deployment ====================
+
+  - name: detect_failure_restart
+    description: "Detect if kubectl rollout restart failed"
+    condition: "before_state.exists"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(restart_result) if 'restart_result' in dir() and restart_result else ""
+      failure = detect_failure(result_text, "kubectl_rollout_restart")
+      result = failure
+    output: failure_restart
+    on_error: continue
+
+  - name: quick_fix_auth_restart
+    description: "Auto-fix auth issues for kubectl"
+    condition: "failure_restart and failure_restart.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "{{ inputs.environment }}"
+    output: auth_fix_restart
+    on_error: continue
+
+  - name: quick_fix_vpn_restart
+    description: "Auto-fix VPN issues for kubectl"
+    condition: "failure_restart and failure_restart.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_restart
+    on_error: continue
+
+  - name: retry_restart_deployment
+    description: "Retry kubectl rollout restart after auto-fix"
+    condition: "(auth_fix_restart or vpn_fix_restart) and failure_restart"
+    tool: kubectl_rollout_restart
+    args:
+      deployment: "{{ inputs.deployment }}"
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: restart_result_retry
+    on_error: continue
+
+  - name: merge_restart_result
+    description: "Use retry result if available"
+    condition: "restart_result_retry"
+    compute: |
+      result = str(restart_result_retry)
+    output: restart_result
+    on_error: continue
+
+  - name: log_failure_restart
+    description: "Log failure to memory for learning"
+    condition: "failure_restart and failure_restart.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      fixed = bool(restart_result_retry if 'restart_result_retry' in dir() else None)
+
+      entry = log_failure(
+          tool_name="kubectl_rollout_restart",
+          error_text=failure_restart.get('error_text', ''),
+          skill_name="rollout_restart",
+          fixed=fixed,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_restart
+    on_error: continue
+
+  - name: parse_restart
+    description: "Parse restart result"
+    compute: |
+      restart_text = str(restart_result) if 'restart_result' in dir() and restart_result else ""
+
+      success = "restarted" in restart_text.lower() or "triggered" in restart_text.lower()
+      if "error" in restart_text.lower() or "failed" in restart_text.lower():
+        success = False
+
+      result = {
+        "success": success,
+        "message": restart_text[:200] if restart_text else "",
+      }
+    output: restart_status
+
+  # ==================== MONITOR ROLLOUT ====================
+
+  - name: check_rollout
+    description: "Monitor rollout progress"
+    condition: "restart_status.success and inputs.wait"
+    tool: kubectl_rollout_status
+    args:
+      deployment: "{{ inputs.deployment }}"
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: rollout_raw
+    on_error: continue
+
+  - name: parse_rollout
+    description: "Parse rollout status"
+    compute: |
+      rollout_text = str(rollout_raw) if 'rollout_raw' in dir() and rollout_raw else ""
+
+      complete = "successfully rolled out" in rollout_text.lower()
+      in_progress = "waiting" in rollout_text.lower() or "progressing" in rollout_text.lower()
+
+      result = {
+        "complete": complete,
+        "in_progress": in_progress,
+        "message": rollout_text[:300] if rollout_text else "",
+      }
+    output: rollout_status
+
+  # ==================== POST-RESTART CHECK ====================
+
+  - name: get_pods_after
+    description: "Get pod status after restart"
+    condition: "restart_status.success"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: pods_after_raw
+    on_error: continue
+
+  - name: parse_pods_after
+    description: "Analyze pod health after restart"
+    compute: |
+      pods_text = str(pods_after_raw) if 'pods_after_raw' in dir() and pods_after_raw else ""
+
+      running = 0
+      pending = 0
+      failed = 0
+      deployment_pods = []
+
+      for line in pods_text.split("\n"):
+        # Filter to only this deployment's pods
+        if inputs.deployment.lower() in line.lower():
+          deployment_pods.append(line)
+          if "Running" in line:
+            running += 1
+          elif "Pending" in line or "ContainerCreating" in line:
+            pending += 1
+          elif "Error" in line or "CrashLoopBackOff" in line:
+            failed += 1
+
+      healthy = running > 0 and failed == 0
+
+      result = {
+        "running": running,
+        "pending": pending,
+        "failed": failed,
+        "healthy": healthy,
+        "pods": deployment_pods[:5],
+      }
+    output: pods_health
+
+  # ==================== LOG ====================
+
+  - name: log_restart
+    description: "Log restart to session"
+    tool: memory_session_log
+    args:
+      action: "Restarted {{ inputs.deployment }} in {{ inputs.namespace }}"
+      details: "Environment: {{ inputs.environment }}, Healthy: {{ pods_health.healthy if pods_health else 'unknown' }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🔄 Rollout Restart: {{ inputs.deployment }}
+
+      **Namespace:** `{{ inputs.namespace }}`
+      **Environment:** {{ inputs.environment }}
+
+      ---
+
+      {% if not before_state.exists %}
+      ### ❌ Deployment Not Found
+
+      Could not find deployment `{{ inputs.deployment }}` in namespace `{{ inputs.namespace }}`.
+
+      {{ before_state.preview }}
+
+      {% elif not restart_status.success %}
+      ### ❌ Restart Failed
+
+      {{ restart_status.message }}
+
+      {% else %}
+      ### ✅ Restart Initiated
+
+      {{ restart_status.message }}
+
+      **Before:**
+      - Replicas: {{ before_state.replicas }}
+      - Image: `{{ before_state.image }}`
+
+      ---
+
+      ### Rollout Status
+
+      {% if rollout_status and rollout_status.complete %}
+      ✅ **Rollout complete**
+      {% elif rollout_status and rollout_status.in_progress %}
+      🔄 **Rollout in progress...**
+
+      {{ rollout_status.message }}
+      {% else %}
+      ⏳ Rollout status not checked (wait=false)
+      {% endif %}
+
+      ---
+
+      ### Pod Health
+
+      - 🟢 Running: {{ pods_health.running }}
+      - 🟡 Pending: {{ pods_health.pending }}
+      - 🔴 Failed: {{ pods_health.failed }}
+
+      {% for pod in pods_health.pods %}
+      - `{{ pod }}`
+      {% endfor %}
+
+      {% if not pods_health.healthy %}
+      ⚠️ **Some pods are not healthy. Check logs:**
+      ```
+      kubectl_logs(pod_name='<pod>', namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
+      ```
+      {% endif %}
+      {% endif %}
+
+  - name: context
+    value:
+      deployment: "{{ inputs.deployment }}"
+      namespace: "{{ inputs.namespace }}"
+      restarted: "{{ restart_status.success if restart_status else false }}"
+      healthy: "{{ pods_health.healthy if pods_health else false }}"

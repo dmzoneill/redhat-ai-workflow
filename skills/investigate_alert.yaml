@@ -15,7 +15,7 @@ description: |
   Use this for quick triage. For deep investigation, use debug_prod directly.
 
   Resolves namespaces and paths from config.json.
-version: "2.1"
+version: "2.2"
 
 inputs:
   - name: environment
@@ -128,6 +128,30 @@ steps:
 
   # ==================== QUICK HEALTH CHECK ====================
 
+  - name: get_namespace_health
+    description: "Get overall namespace health"
+    tool: k8s_namespace_health
+    args:
+      namespace: "{{ target.namespace }}"
+      environment: "{{ target.environment }}"
+    output: namespace_health_raw
+    on_error: continue
+
+  - name: parse_namespace_health
+    description: "Parse namespace health"
+    compute: |
+      health_text = str(namespace_health_raw) if 'namespace_health_raw' in dir() and namespace_health_raw else ""
+
+      healthy = "healthy" in health_text.lower() or "ready" in health_text.lower()
+      has_issues = "error" in health_text.lower() or "failed" in health_text.lower()
+
+      result = {
+        "healthy": healthy and not has_issues,
+        "preview": health_text[:400] if health_text else "",
+      }
+    output: ns_health_info
+    on_error: continue
+
   - name: get_pod_status
     description: "Get pod status"
     tool: kubectl_get_pods
@@ -135,6 +159,171 @@ steps:
       namespace: "{{ target.namespace }}"
       environment: "{{ target.environment }}"
     output: pods_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_pod_status ====================
+
+  - name: detect_failure_pods
+    description: "Detect if kubectl failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(pods_raw) if 'pods_raw' in dir() and pods_raw else ""
+      failure = detect_failure(result_text, "kubectl_get_pods")
+      result = failure
+    output: failure_pods
+    on_error: continue
+
+  - name: quick_fix_auth_pods
+    description: "Auto-fix auth issues for kubectl"
+    condition: "failure_pods and failure_pods.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "{{ target.environment }}"
+    output: auth_fix_pods
+    on_error: continue
+
+  - name: quick_fix_vpn_pods
+    description: "Auto-fix VPN issues for kubectl"
+    condition: "failure_pods and failure_pods.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_pods
+    on_error: continue
+
+  - name: retry_get_pods
+    description: "Retry kubectl after auto-fix"
+    condition: "(auth_fix_pods or vpn_fix_pods) and failure_pods"
+    tool: kubectl_get_pods
+    args:
+      namespace: "{{ target.namespace }}"
+      environment: "{{ target.environment }}"
+    output: pods_raw_retry
+    on_error: continue
+
+  - name: merge_pods_result
+    description: "Use retry result if available"
+    condition: "pods_raw_retry"
+    compute: |
+      result = str(pods_raw_retry)
+    output: pods_raw
+    on_error: continue
+
+  - name: log_failure_pods
+    description: "Log failure to memory for learning"
+    condition: "failure_pods and failure_pods.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      fixed = bool(pods_raw_retry if 'pods_raw_retry' in dir() else None)
+
+      entry = log_failure(
+          tool_name="kubectl_get_pods",
+          error_text=failure_pods.get('error_text', ''),
+          skill_name="investigate_alert",
+          fixed=fixed,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_pods
+    on_error: continue
+
+  - name: get_resource_usage
+    description: "Get CPU/memory usage for pods"
+    tool: kubectl_top_pods
+    args:
+      namespace: "{{ target.namespace }}"
+      environment: "{{ target.environment }}"
+    output: resource_usage_raw
+    on_error: continue
+
+  - name: parse_resource_usage
+    description: "Parse resource usage for high consumption"
+    compute: |
+      usage_text = str(resource_usage_raw) if 'resource_usage_raw' in dir() and resource_usage_raw else ""
+
+      high_cpu = []
+      high_memory = []
+
+      for line in usage_text.split("\n"):
+        parts = line.split()
+        if len(parts) >= 3:
+          pod_name = parts[0]
+          cpu = parts[1] if len(parts) > 1 else ""
+          mem = parts[2] if len(parts) > 2 else ""
+
+          # Check for high CPU (>500m) or memory (>1Gi)
+          if "m" in cpu:
+            try:
+              cpu_val = int(cpu.replace("m", ""))
+              if cpu_val > 500:
+                high_cpu.append({"pod": pod_name, "cpu": cpu})
+            except:
+              pass
+
+          if "Gi" in mem:
+            try:
+              mem_val = float(mem.replace("Gi", ""))
+              if mem_val > 1.0:
+                high_memory.append({"pod": pod_name, "memory": mem})
+            except:
+              pass
+
+      result = {
+        "high_cpu": high_cpu[:5],
+        "high_memory": high_memory[:5],
+        "raw_preview": usage_text[:500] if usage_text else "",
+      }
+    output: resource_analysis
+    on_error: continue
+
+  # Query error rate trend to see if issue is worsening
+  - name: query_error_trend
+    description: "Query error rate trend over last hour"
+    tool: prometheus_query_range
+    args:
+      query: "sum(rate(http_requests_total{namespace=\"{{ target.namespace }}\",code=~\"5..\"}[5m]))"
+      start: "1h"
+      end: "now"
+      step: "5m"
+      environment: "{{ target.environment }}"
+    output: error_trend_raw
+    on_error: continue
+
+  - name: parse_error_trend
+    description: "Analyze error rate trend"
+    compute: |
+      trend_text = str(error_trend_raw) if 'error_trend_raw' in dir() and error_trend_raw else ""
+
+      import re
+      values = re.findall(r'(\d+\.?\d*)', trend_text)
+
+      trend = "unknown"
+      current_rate = None
+      if len(values) >= 2:
+          try:
+              recent = float(values[-1])
+              earlier = float(values[0])
+              current_rate = recent
+
+              if recent > earlier * 2:
+                  trend = "increasing_fast"
+              elif recent > earlier * 1.2:
+                  trend = "increasing"
+              elif recent < earlier * 0.5:
+                  trend = "decreasing"
+              else:
+                  trend = "stable"
+          except:
+              pass
+
+      result = {
+          "trend": trend,
+          "current_rate": current_rate,
+          "is_worsening": trend in ["increasing", "increasing_fast"],
+          "preview": trend_text[:300] if trend_text else "",
+      }
+    output: error_trend
     on_error: continue
 
   - name: parse_pod_health
@@ -191,6 +380,78 @@ steps:
       result = events[:5]
     output: recent_events
 
+  # ==================== SEARCH LOGS IN KIBANA ====================
+
+  - name: search_kibana_errors
+    description: "Search Kibana for recent errors in namespace"
+    tool: kibana_search_logs
+    args:
+      query: "error OR exception OR critical"
+      environment: "{{ target.environment }}"
+      namespace: "{{ target.namespace }}"
+      limit: 10
+    output: kibana_errors_raw
+    on_error: continue
+
+  - name: parse_kibana_errors
+    description: "Parse Kibana error results"
+    compute: |
+      kibana_text = str(kibana_errors_raw) if kibana_errors_raw else ""
+
+      # Check if we got actual results vs auth error
+      if "Log In" in kibana_text or "403" in kibana_text:
+          result = {
+              "found": False,
+              "error_count": 0,
+              "errors": [],
+              "auth_issue": True,
+              "kibana_url": None
+          }
+      else:
+          # Extract error lines
+          lines = [l.strip() for l in kibana_text.split("\n") if l.strip()]
+          error_lines = [l for l in lines if any(kw in l.lower() for kw in ["error", "exception", "traceback"])]
+
+          # Extract Kibana URL if present
+          kibana_url = None
+          for line in lines:
+              if "kibana" in line.lower() and "http" in line.lower():
+                  import re
+                  urls = re.findall(r'https?://[^\s\)]+', line)
+                  if urls:
+                      kibana_url = urls[0]
+                      break
+
+          result = {
+              "found": len(error_lines) > 0,
+              "error_count": len(error_lines),
+              "errors": error_lines[:5],
+              "auth_issue": False,
+              "kibana_url": kibana_url
+          }
+    output: kibana_results
+
+  # ==================== GET GRAFANA LINK ====================
+
+  - name: get_grafana_link
+    description: "Get Grafana dashboard link for namespace"
+    tool: prometheus_grafana_link
+    args:
+      environment: "{{ target.environment }}"
+      namespace: "{{ target.namespace }}"
+    output: grafana_link_raw
+    on_error: continue
+
+  - name: parse_grafana_link
+    description: "Extract Grafana URL"
+    compute: |
+      link_text = str(grafana_link_raw) if grafana_link_raw else ""
+      import re
+      urls = re.findall(r'https?://[^\s\)]+grafana[^\s\)]*', link_text)
+      result = urls[0] if urls else None
+    output: grafana_url
+    on_error: continue
+
   # ==================== CHECK KNOWN PATTERNS ====================
 
   - name: check_patterns
@@ -246,6 +507,8 @@ steps:
           severity = "medium"
       elif len(recent_events) > 3:
           severity = "medium"
+      elif kibana_results.get("error_count", 0) > 5:
+          severity = "medium"
 
       result = {
           "severity": severity,
@@ -253,6 +516,65 @@ steps:
           "reason": "Critical alerts or unhealthy pods" if needs_escalation else "Routine check",
       }
     output: assessment
+
+  # ==================== OFFER TO SILENCE ALERT ====================
+
+  - name: check_existing_silences
+    description: "Check if alerts are already silenced"
+    condition: "alert_info.alerts"
+    tool: alertmanager_list_silences
+    args:
+      environment: "{{ target.environment }}"
+    output: existing_silences_raw
+    on_error: continue
+
+  - name: parse_existing_silences
+    description: "Parse existing silences"
+    condition: "existing_silences_raw"
+    compute: |
+      silences_text = str(existing_silences_raw) if existing_silences_raw else ""
+
+      # Check which alerts are already silenced
+      silenced_alerts = []
+      for alert in alert_info.get("alerts", []):
+          alert_name = alert.get("name", "")
+          if alert_name.lower() in silences_text.lower():
+              silenced_alerts.append(alert_name)
+
+      result = {
+          "any_silenced": len(silenced_alerts) > 0,
+          "silenced_alerts": silenced_alerts,
+          "total_silences": silences_text.count("silence") // 2 if silences_text else 0,
+      }
+    output: silences_check
+    on_error: continue
+
+  - name: build_silence_info
+    description: "Build silence recommendation for critical/high alerts"
+    condition: "assessment.severity in ['critical', 'high'] and alert_info.alerts"
+    compute: |
+      # Get the most critical alert for potential silencing
+      alerts = alert_info.get("alerts", [])
+      if not alerts:
+          result = None
+      else:
+          alert = alerts[0]
+          alert_name = alert.get("name", "unknown")
+
+          # Check if already silenced
+          already_silenced = False
+          if 'silences_check' in dir() and silences_check:
+              already_silenced = alert_name in silences_check.get("silenced_alerts", [])
+
+          result = {
+              "alert_name": alert_name,
+              "can_silence": not already_silenced,
+              "already_silenced": already_silenced,
+              "silence_duration": "2h",
+              "silence_command": f'skill_run("silence_alert", \'{{"alert_name": "{alert_name}", "environment": "{target.get("environment")}", "duration": "2h"}}\')'
+          }
+    output: silence_info
+    on_error: continue
 
   # ==================== ESCALATE TO DEBUG_PROD ====================
 
@@ -396,6 +718,24 @@ outputs:
       {% endfor %}
       {% endif %}
 
+      ### 📊 Resource Usage
+      {% if resource_analysis and (resource_analysis.high_cpu or resource_analysis.high_memory) %}
+      {% if resource_analysis.high_cpu %}
+      **High CPU:**
+      {% for pod in resource_analysis.high_cpu %}
+      - {{ pod.pod }}: {{ pod.cpu }}
+      {% endfor %}
+      {% endif %}
+      {% if resource_analysis.high_memory %}
+      **High Memory:**
+      {% for pod in resource_analysis.high_memory %}
+      - {{ pod.pod }}: {{ pod.memory }}
+      {% endfor %}
+      {% endif %}
+      {% else %}
+      ✅ Resource usage normal
+      {% endif %}
+
       ### ⚠️ Recent Events
       {% if recent_events %}
       {% for event in recent_events[:3] %}
@@ -403,6 +743,21 @@ outputs:
       {% endfor %}
       {% else %}
       No warning events
+      {% endif %}
+
+      ### 📋 Log Errors (Kibana)
+      {% if kibana_results.auth_issue %}
+      ⚠️ Kibana auth required - open in browser first
+      {% elif kibana_results.found %}
+      Found **{{ kibana_results.error_count }}** errors in logs:
+      {% for err in kibana_results.errors[:3] %}
+      - `{{ err[:80] }}`
+      {% endfor %}
+      {% else %}
+      ✅ No recent errors in logs
+      {% endif %}
+      {% if kibana_results.kibana_url %}
+      🔗 [Open in Kibana]({{ kibana_results.kibana_url }})
       {% endif %}
 
       {% if pattern_matches %}
@@ -415,6 +770,32 @@ outputs:
       {% endif %}
 
       ---
+
+      ### 📊 Dashboards
+      {% if grafana_url %}
+      - 📈 [Grafana Dashboard]({{ grafana_url }})
+      {% endif %}
+      {% if kibana_results.kibana_url %}
+      - 📋 [Kibana Logs]({{ kibana_results.kibana_url }})
+      {% endif %}
+
+      {% if silence_info %}
+      ### 🔇 Alert Silencing
+
+      {% if silence_info.already_silenced %}
+      ✅ **{{ silence_info.alert_name }}** is already silenced
+
+      List current silences:
+      ```python
+      alertmanager_list_silences(environment='{{ target.environment }}')
+      ```
+      {% elif silence_info.can_silence %}
+      To silence **{{ silence_info.alert_name }}** for {{ silence_info.silence_duration }} while investigating:
+      ```python
+      {{ silence_info.silence_command }}
+      ```
+      {% endif %}
+      {% endif %}
 
       {% if debug_result %}
       ### 🔬 Deep Investigation Results
@@ -429,7 +810,7 @@ outputs:
 
       - View pod logs: `kubectl_logs(namespace="{{ target.namespace }}", pod="<pod-name>")`
       - Get more details: `skill_run("debug_prod", '{"namespace": "{{ 'billing' if 'billing' in target.namespace else 'main' }}"}')`
-      - Check Grafana dashboards
+      - Search logs: `kibana_search_logs(query="error", namespace="{{ target.namespace }}")`
       {% endif %}
 
   - name: severity

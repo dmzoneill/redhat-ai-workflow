@@ -1,0 +1,235 @@
+# Skill: App Interface Check
+# Validate app-interface configuration
+
+name: appinterface_check
+description: |
+  Validate app-interface configuration for releases.
+
+  This skill:
+  - Validates YAML configuration
+  - Gets SaaS file details
+  - Shows diffs from main
+  - Lists resources
+
+  Uses: appinterface_validate, appinterface_get_saas, appinterface_diff,
+        appinterface_resources, appinterface_search
+version: "1.0"
+
+inputs:
+  - name: saas_file
+    type: string
+    required: false
+    default: "tower-analytics"
+    description: "SaaS file name to check"
+
+  - name: validate
+    type: boolean
+    required: false
+    default: true
+    description: "Run validation"
+
+steps:
+  - name: validate_config
+    description: "Validate app-interface configuration"
+    condition: "inputs.validate"
+    tool: appinterface_validate
+    args: {}
+    output: validate_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: validate_config ====================
+
+  - name: detect_failure_validate
+    description: "Detect if appinterface call failed"
+    condition: "inputs.validate"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(validate_raw) if 'validate_raw' in dir() and validate_raw else ""
+      failure = detect_failure(result_text, "appinterface_validate")
+      result = failure
+    output: failure_validate
+    on_error: continue
+
+  - name: log_failure_validate
+    description: "Log failure to memory for learning"
+    condition: "failure_validate and failure_validate.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      entry = log_failure(
+          tool_name="appinterface_validate",
+          error_text=failure_validate.get('error_text', ''),
+          skill_name="appinterface_check",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_validate
+    on_error: continue
+
+  - name: parse_validation
+    description: "Parse validation result"
+    compute: |
+      validate_text = str(validate_raw) if 'validate_raw' in dir() and validate_raw else ""
+
+      valid = "valid" in validate_text.lower() or "success" in validate_text.lower()
+      has_errors = "error" in validate_text.lower() or "failed" in validate_text.lower()
+
+      result = {
+        "valid": valid and not has_errors,
+        "message": validate_text[:500] if validate_text else "",
+      }
+    output: validation_result
+
+  - name: get_saas_file
+    description: "Get SaaS file details"
+    tool: appinterface_get_saas
+    args:
+      name: "{{ inputs.saas_file }}"
+    output: saas_raw
+    on_error: continue
+
+  - name: parse_saas
+    description: "Parse SaaS file"
+    compute: |
+      saas_text = str(saas_raw) if 'saas_raw' in dir() and saas_raw else ""
+
+      import re
+
+      # Extract key information
+      ref_match = re.search(r'ref:\s*(\S+)', saas_text)
+      ref = ref_match.group(1) if ref_match else "unknown"
+
+      namespace_match = re.search(r'namespace:\s*(\S+)', saas_text)
+      namespace = namespace_match.group(1) if namespace_match else "unknown"
+
+      result = {
+        "ref": ref,
+        "namespace": namespace,
+        "preview": saas_text[:800] if saas_text else "",
+      }
+    output: saas_info
+
+  - name: get_diff
+    description: "Get diff from main branch"
+    tool: appinterface_diff
+    args: {}
+    output: diff_raw
+    on_error: continue
+
+  - name: parse_diff
+    description: "Parse diff"
+    compute: |
+      diff_text = str(diff_raw) if 'diff_raw' in dir() and diff_raw else ""
+
+      has_changes = len(diff_text.strip()) > 0 and "no changes" not in diff_text.lower()
+
+      # Count changed files
+      import re
+      file_changes = re.findall(r'^\+\+\+ b/(.+)$', diff_text, re.M)
+
+      result = {
+        "has_changes": has_changes,
+        "changed_files": file_changes[:10],
+        "file_count": len(file_changes),
+        "preview": diff_text[:600] if diff_text else "",
+      }
+    output: diff_info
+
+  - name: list_resources
+    description: "List app-interface resources"
+    tool: appinterface_resources
+    args: {}
+    output: resources_raw
+    on_error: continue
+
+  - name: parse_resources
+    description: "Parse resources"
+    compute: |
+      resources_text = str(resources_raw) if 'resources_raw' in dir() and resources_raw else ""
+
+      resources = []
+      for line in resources_text.split("\n"):
+        line = line.strip()
+        if line and not line.startswith("#"):
+          resources.append(line[:60])
+
+      result = {
+        "resources": resources[:20],
+        "count": len(resources),
+      }
+    output: resources_info
+
+outputs:
+  - name: report
+    value: |
+      ## 📋 App-Interface Check
+
+      ---
+
+      ### ✅ Validation
+
+      {% if validation_result.valid %}
+      ✅ Configuration is valid
+      {% else %}
+      ❌ Validation issues found:
+
+      ```
+      {{ validation_result.message }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### 📄 SaaS File: {{ inputs.saas_file }}
+
+      **Current ref:** `{{ saas_info.ref }}`
+      **Namespace:** `{{ saas_info.namespace }}`
+
+      ```yaml
+      {{ saas_info.preview }}
+      ```
+
+      ---
+
+      ### 📝 Changes from Main
+
+      {% if diff_info.has_changes %}
+      **{{ diff_info.file_count }} files changed:**
+
+      {% for file in diff_info.changed_files %}
+      - `{{ file }}`
+      {% endfor %}
+
+      ```diff
+      {{ diff_info.preview }}
+      ```
+      {% else %}
+      ✅ No uncommitted changes
+      {% endif %}
+
+      ---
+
+      ### 📦 Resources ({{ resources_info.count }})
+
+      {% for resource in resources_info.resources[:10] %}
+      - {{ resource }}
+      {% endfor %}
+      {% if resources_info.count > 10 %}
+      ... and {{ resources_info.count - 10 }} more
+      {% endif %}
+
+      ---
+
+      ### 🛠️ Useful Commands
+
+      **Search for term:**
+      ```
+      appinterface_search(query='tower-analytics')
+      ```
+
+      **Get cluster info:**
+      ```
+      appinterface_clusters()
+      ```

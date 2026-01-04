@@ -12,11 +12,11 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
+from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ async def prometheus_api_request(
 async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
     """Get URL and token for Prometheus environment.
 
-    Uses shared utilities from aa-common for config loading.
+    Uses shared utilities from server for config loading.
     Auto-refreshes auth if credentials are stale.
     """
     url = get_service_url("prometheus", environment)
@@ -446,7 +446,7 @@ def register_tools(server: "FastMCP") -> int:
         # Load namespace from config.json
         namespace = ""
         try:
-            # Path: tools.py -> src -> aa-prometheus -> mcp-servers -> redhat-ai-workflow
+            # Path: tools.py -> src -> aa-prometheus -> tool_modules -> redhat-ai-workflow
             config_path = Path(__file__).parent.parent.parent.parent / "config.json"
             if config_path.exists():
                 import json

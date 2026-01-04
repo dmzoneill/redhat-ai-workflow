@@ -1,15 +1,17 @@
-# 🧠 common (aa-common)
+# 🧠 common (server)
 
-> Core MCP server with agent loading, workflow tools, and shared utilities
+> Core MCP server with persona loading, workflow tools, and shared utilities
 
 ## Overview
 
-The `aa-common` module is the **central hub** of the AI Workflow system. It provides:
+The `server` module is the **central hub** of the AI Workflow system. It provides:
 
-- Dynamic agent loading and switching
+- Dynamic persona loading (tool configuration profiles)
 - Core workflow tools (skills, memory, debugging)
-- Shared utilities for all other MCP servers
+- Shared utilities for all other tool modules
 - The main MCP server entry point
+
+> **Terminology:** "Personas" are tool configuration profiles, not separate AI instances. The `persona_load` tool switches which tools are available to Claude.
 
 ## Tool Count
 
@@ -22,8 +24,8 @@ The `aa-common` module is the **central hub** of the AI Workflow system. It prov
 | Tool | Description |
 |------|-------------|
 | `session_start` | Initialize session and load agent |
-| `agent_load` | Switch to a different agent |
-| `agent_list` | List available agents |
+| `persona_load` | Switch to a different persona |
+| `persona_list` | List available personas |
 | `agent_current` | Get current agent info |
 
 ### Skills
@@ -60,7 +62,7 @@ The `aa-common` module is the **central hub** of the AI Workflow system. It prov
 
 ## Shared Utilities
 
-Located in `aa-common/src/utils.py`:
+Located in `server/src/utils.py`:
 
 | Function | Description |
 |----------|-------------|
@@ -87,11 +89,11 @@ Located in `scripts/common/parsers.py` - **42 reusable parser functions**:
 
 ## Dynamic Tool Loading
 
-When you switch agents, `aa-common` dynamically loads/unloads tool modules:
+When you switch agents, `server` dynamically loads/unloads tool modules:
 
 ```mermaid
 graph LR
-    A[agent_load devops] --> B[Unload current tools]
+    A[persona_load devops] --> B[Unload current tools]
     B --> C[Load k8s, bonfire, quay]
     C --> D[Register with FastMCP]
     D --> E[Notify Cursor of change]
@@ -127,5 +129,5 @@ Configure in `config.json`:
 ## Related
 
 - [Architecture Overview](../architecture/README.md)
-- [Agents Reference](../agents/README.md)
+- [Personas Reference](../personas/README.md)
 - [Skills Reference](../skills/README.md)

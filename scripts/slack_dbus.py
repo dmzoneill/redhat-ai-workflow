@@ -62,6 +62,7 @@ class MessageRecord:
     status: str  # pending, approved, rejected, sent, skipped
     created_at: float
     processed_at: float | None = None
+    thread_ts: str | None = None  # Thread timestamp for replies
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -151,8 +152,8 @@ class MessageHistory:
 
 if DBUS_AVAILABLE:
 
-    class SlackAgentDBusInterface(ServiceInterface):
-        """D-Bus interface for the Slack Agent daemon."""
+    class SlackPersonaDBusInterface(ServiceInterface):
+        """D-Bus interface for the Slack Persona daemon."""
 
         def __init__(self, daemon: "SlackDaemonWithDBus"):
             super().__init__(DBUS_INTERFACE_NAME)
@@ -377,7 +378,7 @@ class SlackDaemonWithDBus:
                 await self.session.send_message(
                     channel_id=record.channel_id,
                     text=record.response,
-                    thread_ts=None,  # TODO: store thread_ts in record
+                    thread_ts=record.thread_ts,
                     typing_delay=True,
                 )
                 self.messages_responded += 1

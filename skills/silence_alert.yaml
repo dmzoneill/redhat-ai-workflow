@@ -1,0 +1,350 @@
+# Skill: Silence Prometheus Alert
+# Create, manage, and expire alert silences in Alertmanager
+
+name: silence_alert
+description: |
+  Silence a Prometheus alert in Alertmanager.
+
+  Use when:
+  - You're working on a known issue and don't want alert noise
+  - Performing maintenance and expect alerts
+  - Need to temporarily suppress false positives
+
+  The skill will:
+  1. Verify the alert exists/is firing
+  2. Create a silence with appropriate duration
+  3. Optionally list existing silences
+  4. Provide commands to extend or remove the silence
+
+version: "1.0"
+
+inputs:
+  - name: alert_name
+    type: string
+    required: true
+    description: "Name of the alert to silence (e.g., 'HighErrorRate', 'PodCrashLooping')"
+
+  - name: duration
+    type: string
+    required: false
+    default: "2h"
+    description: "How long to silence (e.g., '1h', '2h', '4h', '24h')"
+
+  - name: reason
+    type: string
+    required: false
+    default: "Investigating issue"
+    description: "Reason for silencing (for audit trail)"
+
+  - name: environment
+    type: string
+    required: false
+    default: "production"
+    description: "Environment: 'production' or 'stage'"
+
+  - name: namespace
+    type: string
+    required: false
+    description: "Optionally scope silence to specific namespace"
+
+  - name: action
+    type: string
+    required: false
+    default: "create"
+    description: "Action: 'create', 'list', or 'delete'"
+
+  - name: silence_id
+    type: string
+    required: false
+    description: "Silence ID (required for 'delete' action)"
+
+steps:
+  # ==================== CHECK CURRENT STATE ====================
+
+  - name: check_current_alerts
+    description: "Check if the alert is currently firing"
+    condition: "inputs.action == 'create'"
+    tool: alertmanager_alerts
+    args:
+      environment: "{{ inputs.environment }}"
+    output: current_alerts_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: check_current_alerts ====================
+
+  - name: detect_failure_alerts
+    description: "Detect if Alertmanager call failed"
+    condition: "inputs.action == 'create'"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(current_alerts_raw) if 'current_alerts_raw' in dir() and current_alerts_raw else ""
+      failure = detect_failure(result_text, "alertmanager_alerts")
+      result = failure
+    output: failure_alerts
+    on_error: continue
+
+  - name: quick_fix_auth_alerts
+    description: "Auto-fix auth issues for Alertmanager"
+    condition: "failure_alerts and failure_alerts.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "{{ inputs.environment }}"
+    output: auth_fix_alerts
+    on_error: continue
+
+  - name: quick_fix_vpn_alerts
+    description: "Auto-fix VPN issues for Alertmanager"
+    condition: "failure_alerts and failure_alerts.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_alerts
+    on_error: continue
+
+  - name: retry_check_alerts
+    description: "Retry Alertmanager call after auto-fix"
+    condition: "(auth_fix_alerts or vpn_fix_alerts) and failure_alerts"
+    tool: alertmanager_alerts
+    args:
+      environment: "{{ inputs.environment }}"
+    output: current_alerts_raw_retry
+    on_error: continue
+
+  - name: merge_alerts_result
+    description: "Use retry result if available"
+    condition: "current_alerts_raw_retry"
+    compute: |
+      result = str(current_alerts_raw_retry)
+    output: current_alerts_raw
+    on_error: continue
+
+  - name: log_failure_alerts
+    description: "Log failure to memory for learning"
+    condition: "failure_alerts and failure_alerts.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      fixed = bool(current_alerts_raw_retry if 'current_alerts_raw_retry' in dir() else None)
+
+      entry = log_failure(
+          tool_name="alertmanager_alerts",
+          error_text=failure_alerts.get('error_text', ''),
+          skill_name="silence_alert",
+          fixed=fixed,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_alerts
+    on_error: continue
+
+  - name: parse_current_alerts
+    description: "Check if our target alert is firing"
+    condition: "inputs.action == 'create'"
+    compute: |
+      alerts_text = str(current_alerts_raw) if current_alerts_raw else ""
+
+      alert_name = inputs.alert_name.lower()
+      is_firing = alert_name in alerts_text.lower()
+
+      # Count how many alerts match
+      import re
+      matches = re.findall(rf'{re.escape(inputs.alert_name)}', alerts_text, re.I)
+
+      result = {
+          "is_firing": is_firing,
+          "match_count": len(matches),
+          "alerts_preview": alerts_text[:500] if alerts_text else "No alerts data",
+      }
+    output: alert_status
+
+  # ==================== LIST SILENCES ====================
+
+  - name: list_existing_silences
+    description: "List all current silences"
+    tool: alertmanager_list_silences
+    args:
+      environment: "{{ inputs.environment }}"
+    output: silences_list_raw
+    on_error: continue
+
+  - name: parse_silences
+    description: "Parse existing silences"
+    compute: |
+      silences_text = str(silences_list_raw) if silences_list_raw else ""
+
+      # Look for our alert in silences
+      import re
+      our_silence = None
+      all_silences = []
+
+      for line in silences_text.split("\n"):
+          if line.strip():
+              all_silences.append(line.strip()[:100])
+              if inputs.alert_name.lower() in line.lower():
+                  our_silence = line.strip()
+
+      result = {
+          "total_silences": len(all_silences),
+          "already_silenced": our_silence is not None,
+          "our_silence": our_silence,
+          "all_silences": all_silences[:10],
+      }
+    output: silences_info
+
+  # ==================== CREATE SILENCE ====================
+
+  - name: create_silence
+    description: "Create new silence for the alert"
+    condition: "inputs.action == 'create' and not silences_info.already_silenced"
+    tool: alertmanager_create_silence
+    args:
+      alert_name: "{{ inputs.alert_name }}"
+      duration: "{{ inputs.duration }}"
+      comment: "{{ inputs.reason }}"
+      environment: "{{ inputs.environment }}"
+    output: create_result
+    on_error: continue
+
+  - name: parse_create_result
+    description: "Parse silence creation result"
+    condition: "inputs.action == 'create'"
+    compute: |
+      result_text = str(create_result) if 'create_result' in dir() and create_result else ""
+
+      # Extract silence ID if present
+      import re
+      silence_id = None
+      id_match = re.search(r'([a-f0-9-]{36})', result_text)
+      if id_match:
+          silence_id = id_match.group(1)
+
+      success = "success" in result_text.lower() or "created" in result_text.lower() or silence_id is not None
+
+      result = {
+          "success": success,
+          "silence_id": silence_id,
+          "raw": result_text[:300] if result_text else "No result",
+      }
+    output: create_status
+    on_error: continue
+
+  # ==================== DELETE SILENCE ====================
+
+  - name: delete_silence
+    description: "Delete an existing silence"
+    condition: "inputs.action == 'delete' and inputs.silence_id"
+    tool: alertmanager_delete_silence
+    args:
+      silence_id: "{{ inputs.silence_id }}"
+      environment: "{{ inputs.environment }}"
+    output: delete_result
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_silence_action
+    description: "Log silence action to session"
+    condition: "(create_status and create_status.success) or delete_result"
+    tool: memory_session_log
+    args:
+      action: "{{ 'Created' if inputs.action == 'create' else 'Deleted' }} alert silence"
+      details: "Alert: {{ inputs.alert_name }}, Duration: {{ inputs.duration }}, Env: {{ inputs.environment }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🔕 Alert Silence Manager
+
+      **Alert:** `{{ inputs.alert_name }}`
+      **Environment:** {{ inputs.environment }}
+
+      {% if inputs.action == 'list' %}
+      ### 📋 Current Silences
+
+      {% if silences_info.total_silences > 0 %}
+      Found **{{ silences_info.total_silences }}** active silences:
+
+      {% for silence in silences_info.all_silences[:10] %}
+      - {{ silence }}
+      {% endfor %}
+      {% else %}
+      No active silences found.
+      {% endif %}
+
+      {% elif inputs.action == 'delete' %}
+      ### 🗑️ Delete Silence
+
+      {% if delete_result %}
+      {{ delete_result }}
+      {% else %}
+      ❌ Could not delete silence. Ensure the silence_id is correct.
+      {% endif %}
+
+      {% elif inputs.action == 'create' %}
+      ### Create Silence
+
+      {% if silences_info.already_silenced %}
+      ⚠️ **Already Silenced**
+
+      This alert already has an active silence:
+      ```
+      {{ silences_info.our_silence }}
+      ```
+
+      To modify, delete the existing silence first.
+
+      {% elif create_status and create_status.success %}
+      ✅ **Silence Created**
+
+      **Duration:** {{ inputs.duration }}
+      **Reason:** {{ inputs.reason }}
+      {% if create_status.silence_id %}
+      **Silence ID:** `{{ create_status.silence_id }}`
+      {% endif %}
+
+      ### Manage This Silence
+
+      **Extend duration:**
+      ```python
+      alertmanager_create_silence(alert_name='{{ inputs.alert_name }}', duration='4h', environment='{{ inputs.environment }}')
+      ```
+
+      **Remove silence:**
+      ```python
+      alertmanager_delete_silence(silence_id='{{ create_status.silence_id or "SILENCE_ID" }}', environment='{{ inputs.environment }}')
+      ```
+
+      {% else %}
+      ❌ **Failed to Create Silence**
+
+      {{ create_status.raw if create_status else "Unknown error" }}
+
+      {% if not alert_status.is_firing %}
+      ⚠️ Note: The alert `{{ inputs.alert_name }}` is not currently firing.
+      You can still create a silence, but verify the alert name is correct.
+      {% endif %}
+
+      {% endif %}
+
+      {% endif %}
+
+      ---
+
+      ### Alert Status
+      {% if alert_status %}
+      {% if alert_status.is_firing %}
+      🔴 **{{ inputs.alert_name }}** is firing ({{ alert_status.match_count }} instances)
+      {% else %}
+      🟢 **{{ inputs.alert_name }}** is not currently firing
+      {% endif %}
+      {% endif %}
+
+  - name: context
+    value:
+      action: "{{ inputs.action }}"
+      alert_name: "{{ inputs.alert_name }}"
+      is_firing: "{{ alert_status.is_firing if alert_status else false }}"
+      already_silenced: "{{ silences_info.already_silenced if silences_info else false }}"
+      silence_created: "{{ create_status.success if create_status else false }}"
+      silence_id: "{{ create_status.silence_id if create_status else None }}"

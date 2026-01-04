@@ -1,0 +1,398 @@
+# Skill: Retry Failed CI Pipeline
+# Retry failed GitLab CI or Konflux/Tekton pipelines
+
+name: ci_retry
+description: |
+  Retry a failed CI pipeline - works with GitLab CI and Konflux/Tekton.
+
+  Detects the CI system and uses appropriate retry mechanism:
+  - GitLab CI: Uses gitlab_ci_retry
+  - Konflux/Tekton: Uses tkn_pipeline_start to re-run
+
+  Steps:
+  1. Determine CI system from context (MR, repo, or explicit)
+  2. Get current pipeline status
+  3. Retry failed jobs/pipeline
+  4. Monitor retry status
+
+version: "1.0"
+
+inputs:
+  - name: mr_id
+    type: integer
+    required: false
+    description: "GitLab MR ID - will retry its pipeline"
+
+  - name: pipeline_id
+    type: integer
+    required: false
+    description: "GitLab CI pipeline ID to retry"
+
+  - name: tekton_run
+    type: string
+    required: false
+    description: "Tekton PipelineRun name to re-trigger"
+
+  - name: project
+    type: string
+    required: false
+    default: "automation-analytics/automation-analytics-backend"
+    description: "GitLab project path"
+
+  - name: namespace
+    type: string
+    required: false
+    default: "aap-aa-tenant"
+    description: "Konflux/Tekton namespace"
+
+  - name: wait
+    type: boolean
+    required: false
+    default: false
+    description: "Wait for pipeline to complete (up to 15 min)"
+
+steps:
+  # ==================== DETERMINE CI SYSTEM ====================
+
+  - name: determine_system
+    description: "Determine which CI system to use"
+    compute: |
+      if inputs.tekton_run:
+          system = "tekton"
+          target = inputs.tekton_run
+      elif inputs.pipeline_id:
+          system = "gitlab"
+          target = str(inputs.pipeline_id)
+      elif inputs.mr_id:
+          system = "gitlab_mr"
+          target = str(inputs.mr_id)
+      else:
+          system = None
+          target = None
+
+      result = {"system": system, "target": target}
+    output: ci_system
+
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: detect_failure_gitlab
+    description: "Detect if GitLab call failed (set after first tool)"
+    compute: |
+      # Initialize failure tracking
+      result = None
+    output: failure_gitlab
+    on_error: continue
+
+  # ==================== GITLAB MR PIPELINE ====================
+
+  - name: get_mr_pipeline
+    description: "Get pipeline for MR"
+    condition: "ci_system.system == 'gitlab_mr'"
+    tool: gitlab_ci_status
+    args:
+      project: "{{ inputs.project }}"
+      mr_id: "{{ inputs.mr_id }}"
+    output: mr_pipeline_raw
+    on_error: continue
+
+  - name: parse_mr_pipeline
+    description: "Extract pipeline ID from MR"
+    condition: "ci_system.system == 'gitlab_mr'"
+    compute: |
+      pipe_text = str(mr_pipeline_raw) if mr_pipeline_raw else ""
+
+      import re
+      # Look for pipeline ID in the output
+      pipeline_id = None
+      id_match = re.search(r'pipeline[:\s#]*(\d+)', pipe_text, re.I)
+      if id_match:
+          pipeline_id = id_match.group(1)
+
+      # Check status
+      status = "unknown"
+      if "failed" in pipe_text.lower():
+          status = "failed"
+      elif "success" in pipe_text.lower() or "passed" in pipe_text.lower():
+          status = "success"
+      elif "running" in pipe_text.lower():
+          status = "running"
+      elif "pending" in pipe_text.lower():
+          status = "pending"
+
+      result = {
+          "pipeline_id": pipeline_id,
+          "status": status,
+          "needs_retry": status == "failed",
+      }
+    output: mr_pipeline
+
+  # ==================== GITLAB CI RETRY ====================
+
+  - name: get_gitlab_pipeline_status
+    description: "Get GitLab CI pipeline status"
+    condition: "ci_system.system == 'gitlab' or (ci_system.system == 'gitlab_mr' and mr_pipeline.pipeline_id)"
+    tool: gitlab_ci_status
+    args:
+      project: "{{ inputs.project }}"
+      pipeline_id: "{{ inputs.pipeline_id or mr_pipeline.pipeline_id }}"
+    output: gitlab_status_raw
+    on_error: continue
+
+  - name: parse_gitlab_status
+    description: "Parse GitLab pipeline status"
+    condition: "gitlab_status_raw"
+    compute: |
+      status_text = str(gitlab_status_raw) if gitlab_status_raw else ""
+
+      # Find failed jobs
+      import re
+      failed_jobs = []
+      for line in status_text.split("\n"):
+          if "failed" in line.lower() and "job" in line.lower():
+              job_match = re.search(r'(\S+).*failed', line, re.I)
+              if job_match:
+                  failed_jobs.append(job_match.group(1))
+
+      # Overall status
+      status = "unknown"
+      if "failed" in status_text.lower():
+          status = "failed"
+      elif "success" in status_text.lower():
+          status = "success"
+      elif "running" in status_text.lower():
+          status = "running"
+
+      result = {
+          "status": status,
+          "failed_jobs": failed_jobs[:10],
+          "can_retry": status == "failed",
+      }
+    output: gitlab_pipeline_status
+    on_error: continue
+
+  - name: retry_gitlab_pipeline
+    description: "Retry failed GitLab CI pipeline"
+    condition: "(ci_system.system == 'gitlab' or ci_system.system == 'gitlab_mr') and gitlab_pipeline_status and gitlab_pipeline_status.can_retry"
+    tool: gitlab_ci_retry
+    args:
+      project: "{{ inputs.project }}"
+      pipeline_id: "{{ inputs.pipeline_id or mr_pipeline.pipeline_id }}"
+    output: gitlab_retry_result
+    on_error: continue
+
+  - name: wait_gitlab_pipeline
+    description: "Wait for GitLab pipeline to complete"
+    condition: "inputs.wait and gitlab_retry_result"
+    tool: gitlab_ci_status
+    args:
+      project: "{{ inputs.project }}"
+      pipeline_id: "{{ inputs.pipeline_id or mr_pipeline.pipeline_id }}"
+    output: gitlab_final_status
+    on_error: continue
+
+  # ==================== TEKTON PIPELINE ====================
+
+  - name: get_tekton_status
+    description: "Get Tekton PipelineRun status"
+    condition: "ci_system.system == 'tekton'"
+    tool: tkn_pipelinerun_describe
+    args:
+      run_name: "{{ inputs.tekton_run }}"
+      namespace: "{{ inputs.namespace }}"
+    output: tekton_status_raw
+    on_error: continue
+
+  - name: parse_tekton_status
+    description: "Parse Tekton PipelineRun status"
+    condition: "ci_system.system == 'tekton' and tekton_status_raw"
+    compute: |
+      status_text = str(tekton_status_raw) if tekton_status_raw else ""
+
+      # Determine status
+      status = "unknown"
+      if "failed" in status_text.lower():
+          status = "failed"
+      elif "succeeded" in status_text.lower():
+          status = "succeeded"
+      elif "running" in status_text.lower():
+          status = "running"
+
+      # Extract pipeline name for re-trigger
+      import re
+      pipeline_name = None
+      for line in status_text.split("\n"):
+          if "pipeline" in line.lower() and ":" in line:
+              parts = line.split(":")
+              if len(parts) >= 2:
+                  pipeline_name = parts[1].strip()
+                  break
+
+      result = {
+          "status": status,
+          "pipeline_name": pipeline_name,
+          "can_retry": status == "failed" and pipeline_name is not None,
+      }
+    output: tekton_status
+    on_error: continue
+
+  - name: get_tekton_logs
+    description: "Get Tekton failure logs"
+    condition: "ci_system.system == 'tekton' and tekton_status and tekton_status.status == 'failed'"
+    tool: tkn_pipelinerun_logs
+    args:
+      run_name: "{{ inputs.tekton_run }}"
+      namespace: "{{ inputs.namespace }}"
+      follow: false
+      all_tasks: true
+    output: tekton_logs_raw
+    on_error: continue
+
+  - name: retry_tekton_pipeline
+    description: "Re-trigger Tekton pipeline"
+    condition: "ci_system.system == 'tekton' and tekton_status and tekton_status.can_retry"
+    tool: tkn_pipeline_start
+    args:
+      pipeline_name: "{{ tekton_status.pipeline_name }}"
+      namespace: "{{ inputs.namespace }}"
+    output: tekton_retry_result
+    on_error: continue
+
+  - name: list_tekton_runs
+    description: "List recent Tekton runs after retry"
+    condition: "ci_system.system == 'tekton' and tekton_retry_result"
+    tool: tkn_pipelinerun_list
+    args:
+      namespace: "{{ inputs.namespace }}"
+      limit: 5
+    output: tekton_runs_after
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_retry
+    description: "Log CI retry to session"
+    condition: "gitlab_retry_result or tekton_retry_result"
+    tool: memory_session_log
+    args:
+      action: "Retried {{ ci_system.system }} pipeline"
+      details: "Target: {{ ci_system.target }}, Project: {{ inputs.project if ci_system.system != 'tekton' else inputs.namespace }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🔄 CI Pipeline Retry
+
+      {% if not ci_system.system %}
+      ### ❌ No Target Specified
+
+      Provide one of:
+      - `mr_id`: GitLab MR ID to retry its pipeline
+      - `pipeline_id`: GitLab CI pipeline ID
+      - `tekton_run`: Tekton PipelineRun name
+
+      Example:
+      ```python
+      skill_run("ci_retry", '{"mr_id": 1234}')
+      skill_run("ci_retry", '{"tekton_run": "build-abc123"}')
+      ```
+
+      {% elif ci_system.system in ['gitlab', 'gitlab_mr'] %}
+      ### GitLab CI Pipeline
+
+      {% if ci_system.system == 'gitlab_mr' %}
+      **MR:** !{{ inputs.mr_id }}
+      {% endif %}
+      **Pipeline:** #{{ inputs.pipeline_id or mr_pipeline.pipeline_id }}
+      **Project:** {{ inputs.project }}
+
+      {% if gitlab_pipeline_status %}
+      **Status:** {{ gitlab_pipeline_status.status }}
+      {% if gitlab_pipeline_status.failed_jobs %}
+      **Failed Jobs:**
+      {% for job in gitlab_pipeline_status.failed_jobs[:5] %}
+      - {{ job }}
+      {% endfor %}
+      {% endif %}
+      {% endif %}
+
+      {% if gitlab_retry_result %}
+      ### ✅ Retry Initiated
+
+      {{ gitlab_retry_result }}
+
+      {% if inputs.wait and gitlab_final_status %}
+      **Final Status:**
+      {{ gitlab_final_status }}
+      {% else %}
+      Check status:
+      ```python
+      gitlab_ci_status(project='{{ inputs.project }}', pipeline_id={{ inputs.pipeline_id or mr_pipeline.pipeline_id }})
+      ```
+      {% endif %}
+
+      {% elif gitlab_pipeline_status and not gitlab_pipeline_status.can_retry %}
+      ### ℹ️ Cannot Retry
+
+      Pipeline is not in failed state (current: {{ gitlab_pipeline_status.status }}).
+
+      {% else %}
+      ### ❌ Retry Failed
+
+      Could not retry the pipeline. Check:
+      - Pipeline exists and is in failed state
+      - You have permission to retry
+      {% endif %}
+
+      {% elif ci_system.system == 'tekton' %}
+      ### Tekton PipelineRun
+
+      **Run:** {{ inputs.tekton_run }}
+      **Namespace:** {{ inputs.namespace }}
+
+      {% if tekton_status %}
+      **Status:** {{ tekton_status.status }}
+      **Pipeline:** {{ tekton_status.pipeline_name or "unknown" }}
+      {% endif %}
+
+      {% if tekton_logs_raw %}
+      **Recent Logs:**
+      ```
+      {{ tekton_logs_raw[-1000:] if tekton_logs_raw|length > 1000 else tekton_logs_raw }}
+      ```
+      {% endif %}
+
+      {% if tekton_retry_result %}
+      ### ✅ Pipeline Re-triggered
+
+      {{ tekton_retry_result }}
+
+      {% if tekton_runs_after %}
+      **Recent Runs:**
+      {{ tekton_runs_after }}
+      {% endif %}
+
+      Monitor:
+      ```python
+      tkn_pipelinerun_list(namespace='{{ inputs.namespace }}', limit=5)
+      ```
+
+      {% elif tekton_status and not tekton_status.can_retry %}
+      ### ℹ️ Cannot Retry
+
+      PipelineRun is not in failed state or pipeline name unknown.
+
+      {% else %}
+      ### ❌ Retry Failed
+
+      Could not re-trigger the pipeline.
+      {% endif %}
+
+      {% endif %}
+
+  - name: context
+    value:
+      system: "{{ ci_system.system }}"
+      target: "{{ ci_system.target }}"
+      retried: "{{ (gitlab_retry_result or tekton_retry_result) is not none }}"
+      status: "{{ gitlab_pipeline_status.status if gitlab_pipeline_status else (tekton_status.status if tekton_status else 'unknown') }}"

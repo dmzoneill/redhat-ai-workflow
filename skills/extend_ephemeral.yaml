@@ -1,0 +1,333 @@
+# Skill: Extend Ephemeral Namespace
+# Extend the duration of an ephemeral namespace reservation
+
+name: extend_ephemeral
+description: |
+  Extend the duration of an ephemeral namespace reservation.
+
+  Use when:
+  - Tests are taking longer than expected
+  - You need more time to debug
+  - Demo/testing session running long
+
+  The skill will:
+  1. List your current namespaces
+  2. Get details on the target namespace
+  3. Extend the reservation
+  4. Confirm new expiry time
+
+version: "1.0"
+
+inputs:
+  - name: namespace
+    type: string
+    required: false
+    description: "Namespace to extend (will list yours if not specified)"
+
+  - name: duration
+    type: string
+    required: false
+    default: "1h"
+    description: "How much time to add (e.g., '1h', '2h', '4h')"
+
+  - name: list_only
+    type: boolean
+    required: false
+    default: false
+    description: "Just list namespaces without extending"
+
+steps:
+  # ==================== LIST NAMESPACES ====================
+
+  - name: list_my_namespaces
+    description: "List my ephemeral namespaces"
+    tool: bonfire_namespace_list
+    args:
+      mine: true
+    output: my_namespaces_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: list_my_namespaces ====================
+
+  - name: detect_failure_ns_list
+    description: "Detect if bonfire call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(my_namespaces_raw) if 'my_namespaces_raw' in dir() and my_namespaces_raw else ""
+      failure = detect_failure(result_text, "bonfire_namespace_list")
+      result = failure
+    output: failure_ns_list
+    on_error: continue
+
+  - name: quick_fix_auth_ns_list
+    description: "Auto-fix auth issues for bonfire"
+    condition: "failure_ns_list and failure_ns_list.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "ephemeral"
+    output: auth_fix_ns_list
+    on_error: continue
+
+  - name: quick_fix_vpn_ns_list
+    description: "Auto-fix VPN issues for bonfire"
+    condition: "failure_ns_list and failure_ns_list.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_ns_list
+    on_error: continue
+
+  - name: retry_list_namespaces
+    description: "Retry bonfire call after auto-fix"
+    condition: "(auth_fix_ns_list or vpn_fix_ns_list) and failure_ns_list"
+    tool: bonfire_namespace_list
+    args:
+      mine: true
+    output: my_namespaces_raw_retry
+    on_error: continue
+
+  - name: merge_ns_list_result
+    description: "Use retry result if available"
+    condition: "my_namespaces_raw_retry"
+    compute: |
+      result = str(my_namespaces_raw_retry)
+    output: my_namespaces_raw
+    on_error: continue
+
+  - name: log_failure_ns_list
+    description: "Log failure to memory for learning"
+    condition: "failure_ns_list and failure_ns_list.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      fixed = bool(my_namespaces_raw_retry if 'my_namespaces_raw_retry' in dir() else None)
+
+      entry = log_failure(
+          tool_name="bonfire_namespace_list",
+          error_text=failure_ns_list.get('error_text', ''),
+          skill_name="extend_ephemeral",
+          fixed=fixed,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_ns_list
+    on_error: continue
+
+  - name: parse_namespaces
+    description: "Parse namespace list"
+    compute: |
+      ns_text = str(my_namespaces_raw) if my_namespaces_raw else ""
+
+      namespaces = []
+      for line in ns_text.split("\n"):
+          line = line.strip()
+          if line and "ephemeral" in line.lower():
+              # Extract namespace name (usually first word)
+              parts = line.split()
+              if parts:
+                  namespaces.append({
+                      "name": parts[0],
+                      "line": line[:100],
+                  })
+
+      result = {
+          "namespaces": namespaces,
+          "count": len(namespaces),
+          "raw": ns_text[:800] if ns_text else "No namespaces found",
+      }
+    output: namespaces_list
+
+  - name: select_namespace
+    description: "Select namespace to extend"
+    compute: |
+      if inputs.namespace:
+          target = inputs.namespace
+      elif namespaces_list.get("count", 0) == 1:
+          target = namespaces_list["namespaces"][0]["name"]
+      elif namespaces_list.get("count", 0) > 1:
+          target = None  # Need user to select
+      else:
+          target = None
+
+      result = {"namespace": target, "needs_selection": target is None and namespaces_list.get("count", 0) > 1}
+    output: selected_ns
+
+  # ==================== GET NAMESPACE DETAILS ====================
+
+  - name: describe_namespace
+    description: "Get namespace details"
+    condition: "selected_ns.namespace and not inputs.list_only"
+    tool: bonfire_namespace_describe
+    args:
+      namespace: "{{ selected_ns.namespace }}"
+    output: ns_describe_raw
+    on_error: continue
+
+  - name: parse_describe
+    description: "Parse namespace details"
+    condition: "ns_describe_raw"
+    compute: |
+      desc_text = str(ns_describe_raw) if ns_describe_raw else ""
+
+      # Extract key info
+      import re
+
+      # Look for expiry/reservation time
+      expiry = None
+      expiry_match = re.search(r'expir[a-z]*[:\s]+([^\n]+)', desc_text, re.I)
+      if expiry_match:
+          expiry = expiry_match.group(1).strip()
+
+      # Look for owner
+      owner = None
+      owner_match = re.search(r'owner[:\s]+([^\n]+)', desc_text, re.I)
+      if owner_match:
+          owner = owner_match.group(1).strip()
+
+      # Look for status
+      status = "unknown"
+      if "ready" in desc_text.lower():
+          status = "ready"
+      elif "reserved" in desc_text.lower():
+          status = "reserved"
+
+      result = {
+          "expiry": expiry,
+          "owner": owner,
+          "status": status,
+          "raw": desc_text[:600] if desc_text else "No details",
+      }
+    output: ns_details
+    on_error: continue
+
+  # ==================== EXTEND NAMESPACE ====================
+
+  - name: extend_namespace
+    description: "Extend the namespace reservation"
+    condition: "selected_ns.namespace and not inputs.list_only"
+    tool: bonfire_namespace_extend
+    args:
+      namespace: "{{ selected_ns.namespace }}"
+      duration: "{{ inputs.duration }}"
+    output: extend_result
+    on_error: continue
+
+  - name: parse_extend_result
+    description: "Parse extend result"
+    condition: "extend_result"
+    compute: |
+      result_text = str(extend_result) if extend_result else ""
+
+      success = "extended" in result_text.lower() or "success" in result_text.lower()
+
+      # Extract new expiry
+      import re
+      new_expiry = None
+      expiry_match = re.search(r'until[:\s]+([^\n]+)', result_text, re.I)
+      if expiry_match:
+          new_expiry = expiry_match.group(1).strip()
+
+      result = {
+          "success": success,
+          "new_expiry": new_expiry,
+          "raw": result_text[:400] if result_text else "No result",
+      }
+    output: extension_status
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_extension
+    description: "Log extension to session"
+    condition: "extension_status and extension_status.success"
+    tool: memory_session_log
+    args:
+      action: "Extended ephemeral namespace"
+      details: "{{ selected_ns.namespace }} + {{ inputs.duration }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## ⏰ Ephemeral Namespace Manager
+
+      {% if inputs.list_only or not selected_ns.namespace %}
+      ### 📋 Your Ephemeral Namespaces
+
+      {% if namespaces_list.count == 0 %}
+      No ephemeral namespaces found.
+
+      Reserve one:
+      ```python
+      bonfire_namespace_reserve(duration='2h')
+      ```
+      {% else %}
+      Found **{{ namespaces_list.count }}** namespace(s):
+
+      ```
+      {{ namespaces_list.raw }}
+      ```
+
+      {% if selected_ns.needs_selection %}
+      **Multiple namespaces found.** Specify which one:
+      ```python
+      skill_run("extend_ephemeral", '{"namespace": "ephemeral-xxxxx", "duration": "{{ inputs.duration }}"}')
+      ```
+      {% endif %}
+      {% endif %}
+
+      {% else %}
+      ### 🎯 Namespace: `{{ selected_ns.namespace }}`
+
+      {% if ns_details %}
+      **Status:** {{ ns_details.status }}
+      {% if ns_details.expiry %}**Previous Expiry:** {{ ns_details.expiry }}{% endif %}
+      {% if ns_details.owner %}**Owner:** {{ ns_details.owner }}{% endif %}
+      {% endif %}
+
+      ---
+
+      {% if extension_status and extension_status.success %}
+      ### ✅ Extended Successfully
+
+      Added **{{ inputs.duration }}** to the reservation.
+      {% if extension_status.new_expiry %}
+      **New Expiry:** {{ extension_status.new_expiry }}
+      {% endif %}
+
+      {% else %}
+      ### ❌ Extension Failed
+
+      {{ extension_status.raw if extension_status else "Could not extend namespace" }}
+
+      Try manually:
+      ```python
+      bonfire_namespace_extend(namespace='{{ selected_ns.namespace }}', duration='{{ inputs.duration }}')
+      ```
+      {% endif %}
+
+      ---
+
+      ### Other Actions
+
+      **Describe namespace:**
+      ```python
+      bonfire_namespace_describe(namespace='{{ selected_ns.namespace }}')
+      ```
+
+      **Release when done:**
+      ```python
+      bonfire_namespace_release(namespace='{{ selected_ns.namespace }}')
+      ```
+
+      **Get pods:**
+      ```python
+      kubectl_get_pods(namespace='{{ selected_ns.namespace }}', environment='ephemeral')
+      ```
+      {% endif %}
+
+  - name: context
+    value:
+      namespace: "{{ selected_ns.namespace }}"
+      extended: "{{ extension_status.success if extension_status else false }}"
+      namespaces_count: "{{ namespaces_list.count }}"

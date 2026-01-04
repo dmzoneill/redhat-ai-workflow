@@ -1,0 +1,206 @@
+# Skill: Check Integration Tests
+# Review Konflux integration test status
+
+name: check_integration_tests
+description: |
+  Check Konflux integration test status and results.
+
+  This skill:
+  - Lists integration test runs
+  - Gets test results
+  - Shows snapshots
+
+  Uses: konflux_list_integration_tests, konflux_get_test_results, konflux_list_snapshots,
+        konflux_get_snapshot
+version: "1.0"
+
+inputs:
+  - name: namespace
+    type: string
+    required: false
+    default: "aap-aa-tenant"
+    description: "Konflux namespace"
+
+  - name: limit
+    type: integer
+    required: false
+    default: 10
+    description: "Number of results to show"
+
+steps:
+  - name: list_tests
+    description: "List integration test runs"
+    tool: konflux_list_integration_tests
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: tests_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: list_tests ====================
+
+  - name: detect_failure_tests
+    description: "Detect if Konflux call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(tests_raw) if 'tests_raw' in dir() and tests_raw else ""
+      failure = detect_failure(result_text, "konflux_list_integration_tests")
+      result = failure
+    output: failure_tests
+    on_error: continue
+
+  - name: quick_fix_auth_tests
+    description: "Auto-fix auth issues"
+    condition: "failure_tests and failure_tests.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "konflux"
+    output: auth_fix_tests
+    on_error: continue
+
+  - name: quick_fix_vpn_tests
+    description: "Auto-fix VPN issues"
+    condition: "failure_tests and failure_tests.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_tests
+    on_error: continue
+
+  - name: retry_list_tests
+    description: "Retry after auto-fix"
+    condition: "(auth_fix_tests or vpn_fix_tests) and failure_tests"
+    tool: konflux_list_integration_tests
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: tests_raw_retry
+    on_error: continue
+
+  - name: merge_tests_result
+    condition: "tests_raw_retry"
+    compute: |
+      result = str(tests_raw_retry)
+    output: tests_raw
+    on_error: continue
+
+  - name: parse_tests
+    description: "Parse test list"
+    compute: |
+      tests_text = str(tests_raw) if 'tests_raw' in dir() and tests_raw else ""
+
+      import re
+      tests = []
+
+      for line in tests_text.split("\n"):
+        line = line.strip()
+        if line and not line.startswith("NAME"):
+          parts = line.split()
+          if parts:
+            name = parts[0]
+            status = "unknown"
+            if "pass" in line.lower() or "success" in line.lower():
+              status = "passed"
+            elif "fail" in line.lower():
+              status = "failed"
+            elif "running" in line.lower():
+              status = "running"
+
+            tests.append({"name": name, "status": status, "raw": line[:80]})
+
+      result = {
+        "tests": tests[:inputs.limit],
+        "count": len(tests),
+        "passed": len([t for t in tests if t["status"] == "passed"]),
+        "failed": len([t for t in tests if t["status"] == "failed"]),
+        "running": len([t for t in tests if t["status"] == "running"]),
+      }
+    output: tests_info
+
+  - name: get_first_failed_results
+    description: "Get results of first failed test"
+    condition: "tests_info.failed > 0"
+    tool: konflux_get_test_results
+    args:
+      name: "{{ tests_info.tests[0].name if tests_info.tests else '' }}"
+      namespace: "{{ inputs.namespace }}"
+    output: failed_results_raw
+    on_error: continue
+
+  - name: list_snapshots
+    description: "List recent snapshots"
+    tool: konflux_list_snapshots
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: snapshots_raw
+    on_error: continue
+
+  - name: parse_snapshots
+    description: "Parse snapshot list"
+    compute: |
+      snapshots_text = str(snapshots_raw) if 'snapshots_raw' in dir() and snapshots_raw else ""
+
+      snapshots = []
+      for line in snapshots_text.split("\n"):
+        line = line.strip()
+        if line and not line.startswith("NAME"):
+          parts = line.split()
+          if parts:
+            snapshots.append(parts[0])
+
+      result = {
+        "snapshots": snapshots[:10],
+        "count": len(snapshots),
+      }
+    output: snapshots_info
+
+outputs:
+  - name: report
+    value: |
+      ## 🧪 Integration Tests: {{ inputs.namespace }}
+
+      ---
+
+      ### Summary
+
+      | Status | Count |
+      |--------|-------|
+      | ✅ Passed | {{ tests_info.passed }} |
+      | ❌ Failed | {{ tests_info.failed }} |
+      | 🔄 Running | {{ tests_info.running }} |
+      | **Total** | {{ tests_info.count }} |
+
+      ---
+
+      ### Recent Test Runs
+
+      {% for test in tests_info.tests %}
+      - {{ "✅" if test.status == "passed" else ("❌" if test.status == "failed" else "🔄") }} `{{ test.name }}` - {{ test.status }}
+      {% endfor %}
+
+      {% if tests_info.failed > 0 %}
+      ---
+
+      ### ❌ Failed Test Details
+
+      **Test:** `{{ tests_info.tests[0].name if tests_info.tests else 'unknown' }}`
+
+      ```
+      {{ failed_results_raw[:1000] if failed_results_raw else 'Could not fetch results' }}
+      ```
+
+      **Get full results:**
+      ```
+      konflux_get_test_results(name='{{ tests_info.tests[0].name if tests_info.tests else "" }}', namespace='{{ inputs.namespace }}')
+      ```
+      {% endif %}
+
+      ---
+
+      ### 📸 Recent Snapshots ({{ snapshots_info.count }})
+
+      {% for snapshot in snapshots_info.snapshots[:5] %}
+      - `{{ snapshot }}`
+      {% endfor %}
+
+      **Get snapshot details:**
+      ```
+      konflux_get_snapshot(name='<snapshot-name>', namespace='{{ inputs.namespace }}')
+      ```

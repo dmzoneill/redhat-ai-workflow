@@ -59,7 +59,7 @@ kibana_count(
 
 ## Loaded By
 
-- [🚨 Incident Agent](../agents/incident.md)
+- [🚨 Incident Persona](../personas/incident.md)
 
 ## Related Skills
 

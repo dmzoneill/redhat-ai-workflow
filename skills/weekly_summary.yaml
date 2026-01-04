@@ -14,7 +14,7 @@ description: |
 
   Useful for weekly reports or sprint reviews.
 
-version: "1.0"
+version: "1.1"
 
 inputs:
   - name: days
@@ -29,7 +29,116 @@ inputs:
     default: "markdown"
     description: "Output format: 'markdown' or 'slack'"
 
+  - name: repo
+    type: string
+    required: false
+    default: "automation-analytics-backend"
+    description: "Repository to get commit history from"
+
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"failures": []}
+    output: autoheal_state
+    on_error: continue
+
+  # ==================== GATHER DATA FROM MULTIPLE SOURCES ====================
+
+  - name: get_recent_commits
+    description: "Get commits from the past week"
+    tool: git_log
+    args:
+      repo: "{{ inputs.repo }}"
+      since: "{{ inputs.days }} days ago"
+      author: ""
+    output: commits_raw
+    on_error: continue
+
+  - name: detect_failure_git
+    description: "Detect if git call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(commits_raw) if 'commits_raw' in dir() and commits_raw else ""
+      failure = detect_failure(result_text, "git_log")
+      result = failure
+    output: failure_git
+    on_error: continue
+
+  - name: get_my_jira_issues
+    description: "Get my recently updated Jira issues"
+    tool: jira_my_issues
+    args:
+      max_results: 20
+    output: jira_issues_raw
+    on_error: continue
+
+  - name: get_my_mrs
+    description: "Get my recent merge requests"
+    tool: gitlab_mr_list
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      state: "all"
+      per_page: 10
+    output: mrs_raw
+    on_error: continue
+
+  - name: get_recent_releases
+    description: "Get recent Konflux releases"
+    tool: konflux_list_releases
+    args:
+      namespace: "aap-aa-tenant"
+      limit: 5
+    output: releases_raw
+    on_error: continue
+
+  - name: get_recent_images
+    description: "Get recent image tags from Quay"
+    tool: quay_list_aa_tags
+    args:
+      limit: 10
+    output: quay_tags_raw
+    on_error: continue
+
+  - name: search_slack_discussions
+    description: "Search Slack for relevant team discussions"
+    tool: slack_search_messages
+    args:
+      query: "in:team-automation-analytics after:{{ inputs.days }}d"
+      limit: 20
+    output: slack_discussions_raw
+    on_error: continue
+
+  - name: parse_slack_discussions
+    description: "Parse Slack discussions"
+    compute: |
+      slack_text = str(slack_discussions_raw) if 'slack_discussions_raw' in dir() and slack_discussions_raw else ""
+
+      discussions = []
+      for line in slack_text.split("\n")[:20]:
+          if line.strip():
+              discussions.append(line.strip()[:100])
+
+      # Look for important topics
+      important = []
+      keywords = ["deploy", "release", "bug", "urgent", "hotfix", "incident", "outage"]
+      for msg in discussions:
+          if any(kw in msg.lower() for kw in keywords):
+              important.append(msg)
+
+      result = {
+          "total": len(discussions),
+          "discussions": discussions[:10],
+          "important": important[:5],
+          "has_slack": len(discussions) > 0,
+      }
+    output: slack_activity
+    on_error: continue
+
+  # ==================== READ SESSION LOGS ====================
+
   - name: get_session_logs
     description: "Read session logs from memory directory"
     compute: |
@@ -74,6 +183,42 @@ steps:
       key: "state/current_work"
     output: current_work_raw
     on_error: continue
+
+  - name: parse_external_data
+    description: "Parse data from git, jira, gitlab, konflux"
+    compute: |
+      # Parse commits
+      commits_text = str(commits_raw) if commits_raw else ""
+      commit_count = commits_text.count("\n") if commits_text else 0
+
+      # Parse Jira issues
+      jira_text = str(jira_issues_raw) if jira_issues_raw else ""
+      import re
+      jira_keys = re.findall(r'AAP-\d+', jira_text)
+      unique_jira = list(set(jira_keys))[:10]
+
+      # Parse MRs
+      mrs_text = str(mrs_raw) if mrs_raw else ""
+      mr_ids = re.findall(r'!(\d+)', mrs_text)
+      unique_mrs = list(set(mr_ids))[:10]
+
+      # Parse releases
+      releases_text = str(releases_raw) if releases_raw else ""
+      release_count = releases_text.lower().count("release") if releases_text else 0
+
+      # Parse Quay tags
+      quay_text = str(quay_tags_raw) if quay_tags_raw else ""
+      tag_count = len(re.findall(r'[a-f0-9]{40}', quay_text))
+
+      result = {
+          "commit_count": commit_count,
+          "jira_issues": unique_jira,
+          "gitlab_mrs": unique_mrs,
+          "release_count": release_count,
+          "image_count": tag_count,
+          "commits_sample": commits_text[:500] if commits_text else "",
+      }
+    output: external_data
 
   - name: analyze_logs
     description: "Analyze session logs for summary"
@@ -237,6 +382,30 @@ outputs:
     value: |
       {{ formatted_summary }}
 
+      ## 📈 Activity Metrics
+
+      | Source | Count |
+      |--------|-------|
+      | Commits ({{ inputs.repo }}) | {{ external_data.commit_count }} |
+      | Jira Issues Touched | {{ external_data.jira_issues|length }} |
+      | GitLab MRs | {{ external_data.gitlab_mrs|length }} |
+      | Konflux Releases | {{ external_data.release_count }} |
+      | Images Built | {{ external_data.image_count }} |
+
+      {% if external_data.jira_issues %}
+      ### Jira Issues
+      {% for issue in external_data.jira_issues[:5] %}
+      - [{{ issue }}](https://issues.redhat.com/browse/{{ issue }})
+      {% endfor %}
+      {% endif %}
+
+      {% if external_data.gitlab_mrs %}
+      ### GitLab MRs
+      {% for mr in external_data.gitlab_mrs[:5] %}
+      - !{{ mr }}
+      {% endfor %}
+      {% endif %}
+
       ---
 
-      *Generated from {{ analysis.total_entries }} session log entries.*
+      *Generated from {{ analysis.total_entries }} session log entries + live data.*

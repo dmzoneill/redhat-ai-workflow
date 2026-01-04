@@ -1,0 +1,346 @@
+# Skill: Schedule Meeting
+# Find available time and schedule a meeting using Google Calendar
+
+name: schedule_meeting
+description: |
+  Schedule a meeting by finding mutual availability and creating calendar event.
+
+  Uses Google Calendar API to:
+  1. Check your calendar status
+  2. Find free time slots
+  3. Check attendee availability (optional)
+  4. Create the meeting
+
+  Prerequisites:
+  - Google Calendar API credentials configured
+  - OAuth token for calendar access
+version: "1.0"
+
+inputs:
+  - name: title
+    type: string
+    required: true
+    description: "Meeting title"
+
+  - name: duration_minutes
+    type: integer
+    required: false
+    default: 30
+    description: "Meeting duration in minutes"
+
+  - name: attendees
+    type: string
+    required: false
+    description: "Comma-separated email addresses of attendees"
+
+  - name: preferred_time
+    type: string
+    required: false
+    description: "Preferred time like 'tomorrow 2pm' or 'next Monday morning'"
+
+  - name: days_ahead
+    type: integer
+    required: false
+    default: 5
+    description: "How many days ahead to search for free slots"
+
+  - name: description
+    type: string
+    required: false
+    default: ""
+    description: "Meeting description/agenda"
+
+steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"calendar_failures": []}
+    output: autoheal_state
+    on_error: continue
+
+  # ==================== CHECK CALENDAR STATUS ====================
+
+  - name: check_calendar_status
+    description: "Verify calendar API is accessible"
+    tool: google_calendar_status
+    output: calendar_status
+    on_error: continue
+
+  # ==================== AUTO-HEAL: check_calendar_status ====================
+
+  - name: detect_failure_calendar
+    description: "Detect if Google Calendar call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(calendar_status) if 'calendar_status' in dir() and calendar_status else ""
+      failure = detect_failure(result_text, "google_calendar_status")
+      result = failure
+    output: failure_calendar
+    on_error: continue
+
+  - name: log_failure_calendar
+    description: "Log failure to memory"
+    condition: "failure_calendar and failure_calendar.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+      entry = log_failure(
+          tool_name="google_calendar_status",
+          error_text=failure_calendar.get('error_text', ''),
+          skill_name="schedule_meeting",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_calendar
+    on_error: continue
+
+  - name: validate_calendar
+    description: "Check if calendar is accessible"
+    compute: |
+      status_text = str(calendar_status) if calendar_status else ""
+
+      if "error" in status_text.lower() or "unauthorized" in status_text.lower():
+          result = {
+              "available": False,
+              "error": "Calendar API not accessible. Check OAuth credentials.",
+          }
+      else:
+          result = {"available": True, "error": None}
+    output: calendar_check
+
+  # ==================== GET CURRENT EVENTS ====================
+
+  - name: list_upcoming_events
+    description: "Get upcoming calendar events"
+    condition: "calendar_check.available"
+    tool: google_calendar_list_events
+    args:
+      days: "{{ inputs.days_ahead }}"
+    output: events_raw
+    on_error: continue
+
+  - name: parse_events
+    description: "Parse existing events to find busy times"
+    condition: "calendar_check.available"
+    compute: |
+      events_text = str(events_raw) if events_raw else ""
+
+      # Extract event times (simplified parsing)
+      import re
+      busy_slots = []
+
+      # Look for time patterns
+      time_patterns = re.findall(r'(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})', events_text)
+      for start, end in time_patterns:
+          busy_slots.append({"start": start, "end": end})
+
+      result = {
+          "busy_count": len(busy_slots),
+          "busy_slots": busy_slots[:20],
+          "raw_preview": events_text[:500] if events_text else "No events",
+      }
+    output: existing_events
+
+  # ==================== FIND FREE SLOTS ====================
+
+  - name: find_free_slots
+    description: "Find available time slots"
+    condition: "calendar_check.available"
+    tool: google_calendar_find_meeting
+    args:
+      duration_minutes: "{{ inputs.duration_minutes }}"
+      days_ahead: "{{ inputs.days_ahead }}"
+    output: free_slots_raw
+    on_error: continue
+
+  - name: parse_free_slots
+    description: "Parse available time slots"
+    condition: "calendar_check.available"
+    compute: |
+      slots_text = str(free_slots_raw) if free_slots_raw else ""
+
+      # Extract suggested times
+      import re
+      suggestions = []
+
+      # Look for datetime patterns
+      datetime_patterns = re.findall(r'(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2})', slots_text)
+      for dt in datetime_patterns[:10]:
+          suggestions.append(dt)
+
+      result = {
+          "slots": suggestions,
+          "count": len(suggestions),
+          "raw": slots_text[:500] if slots_text else "No slots found",
+      }
+    output: available_slots
+
+  # ==================== CHECK ATTENDEE AVAILABILITY ====================
+
+  - name: check_attendee_availability
+    description: "Check if attendees are free"
+    condition: "calendar_check.available and inputs.attendees"
+    tool: google_calendar_check_mutual_availability
+    args:
+      attendees: "{{ inputs.attendees }}"
+      duration_minutes: "{{ inputs.duration_minutes }}"
+      days_ahead: "{{ inputs.days_ahead }}"
+    output: attendee_availability_raw
+    on_error: continue
+
+  - name: parse_attendee_availability
+    description: "Parse attendee availability"
+    condition: "calendar_check.available and inputs.attendees"
+    compute: |
+      avail_text = str(attendee_availability_raw) if attendee_availability_raw else ""
+
+      # Check for common availability
+      has_mutual = "available" in avail_text.lower() and "no mutual" not in avail_text.lower()
+
+      result = {
+          "has_mutual_time": has_mutual,
+          "raw": avail_text[:500] if avail_text else "Could not check",
+      }
+    output: mutual_availability
+    on_error: continue
+
+  # ==================== DETERMINE MEETING TIME ====================
+
+  - name: select_time
+    description: "Select best meeting time"
+    condition: "calendar_check.available"
+    compute: |
+      slots = available_slots.get("slots", [])
+
+      if inputs.preferred_time:
+          # User specified a preference - use that as hint
+          selected = inputs.preferred_time
+          auto_selected = False
+      elif slots:
+          # Use first available slot
+          selected = slots[0]
+          auto_selected = True
+      else:
+          selected = None
+          auto_selected = False
+
+      result = {
+          "selected_time": selected,
+          "auto_selected": auto_selected,
+          "alternatives": slots[1:5] if len(slots) > 1 else [],
+      }
+    output: meeting_time
+
+  # ==================== SCHEDULE MEETING ====================
+
+  - name: create_meeting
+    description: "Create the calendar event"
+    condition: "calendar_check.available and meeting_time.selected_time"
+    tool: google_calendar_schedule_meeting
+    args:
+      title: "{{ inputs.title }}"
+      start_time: "{{ meeting_time.selected_time }}"
+      duration_minutes: "{{ inputs.duration_minutes }}"
+      attendees: "{{ inputs.attendees or '' }}"
+      description: "{{ inputs.description or '' }}"
+    output: meeting_result
+    on_error: continue
+
+  # ==================== QUICK MEETING FALLBACK ====================
+
+  - name: quick_meeting_fallback
+    description: "Try quick meeting if schedule_meeting failed"
+    condition: "calendar_check.available and not meeting_result and meeting_time.selected_time"
+    tool: google_calendar_quick_meeting
+    args:
+      title: "{{ inputs.title }}"
+      when: "{{ meeting_time.selected_time }}"
+      duration_minutes: "{{ inputs.duration_minutes }}"
+    output: quick_meeting_result
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_meeting
+    description: "Log meeting scheduling"
+    condition: "meeting_result or quick_meeting_result"
+    tool: memory_session_log
+    args:
+      action: "Scheduled meeting: {{ inputs.title }}"
+      details: "Time: {{ meeting_time.selected_time }}, Duration: {{ inputs.duration_minutes }}min"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 📅 Meeting Scheduler
+
+      {% if not calendar_check.available %}
+      ### ❌ Calendar Not Available
+
+      {{ calendar_check.error }}
+
+      Please configure Google Calendar API credentials.
+
+      {% elif meeting_result or quick_meeting_result %}
+      ### ✅ Meeting Scheduled
+
+      **Title:** {{ inputs.title }}
+      **Time:** {{ meeting_time.selected_time }}
+      **Duration:** {{ inputs.duration_minutes }} minutes
+      {% if inputs.attendees %}
+      **Attendees:** {{ inputs.attendees }}
+      {% endif %}
+
+      {% if meeting_result %}
+      {{ meeting_result }}
+      {% else %}
+      {{ quick_meeting_result }}
+      {% endif %}
+
+      {% elif not meeting_time.selected_time %}
+      ### ⚠️ No Available Time Found
+
+      Could not find a suitable time slot in the next {{ inputs.days_ahead }} days.
+
+      **Your busy times:**
+      {{ existing_events.raw_preview }}
+
+      Try:
+      - Extending `days_ahead`
+      - Specifying a `preferred_time`
+      - Checking your calendar manually
+
+      {% else %}
+      ### 📋 Meeting Details (Not Yet Created)
+
+      **Title:** {{ inputs.title }}
+      **Suggested Time:** {{ meeting_time.selected_time }}
+      **Duration:** {{ inputs.duration_minutes }} minutes
+
+      {% if meeting_time.alternatives %}
+      **Alternative Times:**
+      {% for alt in meeting_time.alternatives %}
+      - {{ alt }}
+      {% endfor %}
+      {% endif %}
+
+      {% if mutual_availability %}
+      **Attendee Availability:**
+      {{ mutual_availability.raw }}
+      {% endif %}
+
+      To create the meeting:
+      ```python
+      google_calendar_schedule_meeting(title='{{ inputs.title }}', start_time='{{ meeting_time.selected_time }}', duration_minutes={{ inputs.duration_minutes }})
+      ```
+      {% endif %}
+
+  - name: context
+    value:
+      calendar_available: "{{ calendar_check.available }}"
+      selected_time: "{{ meeting_time.selected_time if meeting_time else None }}"
+      created: "{{ (meeting_result or quick_meeting_result) is not none }}"
+      alternatives_count: "{{ meeting_time.alternatives|length if meeting_time else 0 }}"

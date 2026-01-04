@@ -1,0 +1,13 @@
+# Developer Persona - Slim Configuration
+# Only essential tools to stay under limit when combined with other personas
+
+name: developer
+description: Coding, PRs (slim)
+persona: personas/developer.md
+
+# Slim tool selection - only the essentials
+tools:
+  - git           # 15 tools - Git operations
+  - jira          # 24 tools - Issue tracking
+
+# Total: ~39 tools

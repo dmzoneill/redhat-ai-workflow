@@ -181,6 +181,16 @@ class SkillExecutor:
             "len": len,
             "any": any,
             "all": all,
+            "isinstance": isinstance,
+            "type": type,
+            "hasattr": hasattr,
+            "dir": dir,
+            "str": str,
+            "int": int,
+            "float": float,
+            "list": list,
+            "dict": dict,
+            "bool": bool,
             "True": True,
             "False": False,
             "None": None,
@@ -192,8 +202,9 @@ class SkillExecutor:
             self._debug(f"  → Result: {result}")
             return bool(result)
         except Exception as e:
-            self._debug(f"  → Error: {e}, defaulting to True")
-            return True
+            self._debug(f"  → Error: {e}, defaulting to False")
+            # Default to False on error - safer to skip than to run with invalid state
+            return False
 
     def _exec_compute(self, code: str, output_name: str):
         """Execute a compute block (limited Python)."""

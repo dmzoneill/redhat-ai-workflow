@@ -16,11 +16,11 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import load_config
+from server.utils import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ async def quay_api_request(
 # ==================== Utilities ====================
 
 
-def resolve_repo_path(repository: str, namespace: str = "") -> str:
+def resolve_quay_repo(repository: str, namespace: str = "") -> str:
     """Resolve full repository path."""
     ns = namespace or QUAY_DEFAULT_NAMESPACE
     if "/" in repository and not repository.startswith(ns):
@@ -184,7 +184,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Repository details including description, visibility, tags count.
         """
-        full_path = resolve_repo_path(repository, namespace)
+        full_path = resolve_quay_repo(repository, namespace)
 
         # Try skopeo first to list tags (gives us tag count)
         image_ref = get_full_image_ref(full_path)
@@ -237,7 +237,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of image tags.
         """
-        full_path = resolve_repo_path(repository, namespace)
+        full_path = resolve_quay_repo(repository, namespace)
         image_ref = get_full_image_ref(full_path)
 
         # Use skopeo list-tags
@@ -293,7 +293,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Tag details including full sha256 digest for deployment.
         """
-        full_path = resolve_repo_path(repository, namespace)
+        full_path = resolve_quay_repo(repository, namespace)
         image_ref = get_full_image_ref(full_path, tag)
 
         # Use skopeo inspect to get digest
@@ -359,7 +359,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Whether the image exists, and its full digest if found.
         """
-        full_path = resolve_repo_path(repository, namespace)
+        full_path = resolve_quay_repo(repository, namespace)
         image_ref = get_full_image_ref(full_path, tag_or_digest)
 
         success, data = await skopeo_inspect(image_ref)
@@ -419,7 +419,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         Returns:
             Vulnerability scan results.
         """
-        full_path = resolve_repo_path(repository, namespace)
+        full_path = resolve_quay_repo(repository, namespace)
 
         if not digest.startswith("sha256:"):
             digest = f"sha256:{digest}"
@@ -506,7 +506,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         Returns:
             Manifest details including layers and config.
         """
-        full_path = resolve_repo_path(repository, namespace)
+        full_path = resolve_quay_repo(repository, namespace)
         image_ref = get_full_image_ref(full_path, tag_or_digest)
 
         # Get raw manifest
@@ -543,61 +543,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
 
     # ==================== AA SPECIFIC ====================
 
-    @server.tool()
-    async def quay_check_aa_image(
-        image_tag: str,
-        component: str = "main",
-    ) -> list[TextContent]:
-        """
-        Check if Automation Analytics image exists and get its digest.
-
-        Args:
-            image_tag: Git commit SHA or image tag from Konflux
-            component: "main" or "billing" (both use same image)
-
-        Returns:
-            Image status and sha256 digest for deployment.
-        """
-        repo = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
-        full_path = f"{QUAY_DEFAULT_NAMESPACE}/{repo}"
-        image_ref = get_full_image_ref(full_path, image_tag)
-
-        success, data = await skopeo_inspect(image_ref)
-
-        if not success:
-            if "manifest unknown" in str(data).lower():
-                lines = [
-                    "## ❌ Image Not Found",
-                    "",
-                    f"**Tag:** `{image_tag}`",
-                    f"**Repository:** `{full_path}`",
-                    "",
-                    "The Konflux build may still be in progress.",
-                    "",
-                    "Ensure you're logged in: `podman login quay.io` (or `docker login quay.io`)",
-                ]
-                return [TextContent(type="text", text="\n".join(lines))]
-            return [TextContent(type="text", text=f"❌ Error: {data}")]
-
-        digest = data.get("Digest", "N/A")
-        digest_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
-
-        lines = [
-            "## ✅ AA Image Ready",
-            "",
-            f"**Component:** {component}",
-            f"**Tag:** `{image_tag}`",
-            f"**Digest:** `{digest}`",
-            "",
-            "Image is built and ready for deployment!",
-            "",
-            "**For bonfire deploy:**",
-            "```",
-            f"--set-parameter tower-analytics-clowdapp/IMAGE_TAG={digest_hash}",
-            "```",
-        ]
-
-        return [TextContent(type="text", text="\n".join(lines))]
+    # REMOVED: quay_check_aa_image - duplicate of quay_check_image_exists
 
     @server.tool()
     async def quay_list_aa_tags(

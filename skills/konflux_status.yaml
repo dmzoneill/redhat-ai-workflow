@@ -1,0 +1,274 @@
+# Skill: Konflux Status
+# Get overall Konflux health
+
+name: konflux_status
+description: |
+  Get overall Konflux build system status.
+
+  This skill shows:
+  - Application status
+  - Running pipelines
+  - Failed pipelines
+  - Namespace summary
+
+  Uses: konflux_status, konflux_list_applications, konflux_namespace_summary,
+        konflux_running_pipelines, konflux_failed_pipelines
+version: "1.0"
+
+inputs:
+  - name: namespace
+    type: string
+    required: false
+    default: "aap-aa-tenant"
+    description: "Konflux namespace"
+
+  - name: application
+    type: string
+    required: false
+    default: ""
+    description: "Specific application to check (optional)"
+
+steps:
+  - name: get_status
+    description: "Get Konflux overall status"
+    tool: konflux_status
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: status_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_status ====================
+
+  - name: detect_failure_status
+    description: "Detect if Konflux call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(status_raw) if 'status_raw' in dir() and status_raw else ""
+      failure = detect_failure(result_text, "konflux_status")
+      result = failure
+    output: failure_status
+    on_error: continue
+
+  - name: quick_fix_auth_status
+    description: "Auto-fix auth issues for Konflux"
+    condition: "failure_status and failure_status.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "konflux"
+    output: auth_fix_status
+    on_error: continue
+
+  - name: quick_fix_vpn_status
+    description: "Auto-fix VPN issues for Konflux"
+    condition: "failure_status and failure_status.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_status
+    on_error: continue
+
+  - name: retry_get_status
+    description: "Retry Konflux call after auto-fix"
+    condition: "(auth_fix_status or vpn_fix_status) and failure_status"
+    tool: konflux_status
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: status_raw_retry
+    on_error: continue
+
+  - name: merge_status_result
+    description: "Use retry result if available"
+    condition: "status_raw_retry"
+    compute: |
+      result = str(status_raw_retry)
+    output: status_raw
+    on_error: continue
+
+  - name: log_failure_status
+    description: "Log failure to memory for learning"
+    condition: "failure_status and failure_status.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+
+      fixed = bool(status_raw_retry if 'status_raw_retry' in dir() else None)
+
+      entry = log_failure(
+          tool_name="konflux_status",
+          error_text=failure_status.get('error_text', ''),
+          skill_name="konflux_status",
+          fixed=fixed,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_status
+    on_error: continue
+
+  - name: parse_status
+    description: "Parse status"
+    compute: |
+      status_text = str(status_raw) if 'status_raw' in dir() and status_raw else ""
+
+      healthy = "healthy" in status_text.lower() or "ready" in status_text.lower()
+      has_issues = "error" in status_text.lower() or "failed" in status_text.lower()
+
+      result = {
+        "healthy": healthy and not has_issues,
+        "preview": status_text[:500] if status_text else "",
+      }
+    output: status_info
+
+  - name: list_applications
+    description: "List applications in namespace"
+    tool: konflux_list_applications
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: apps_raw
+    on_error: continue
+
+  - name: parse_applications
+    description: "Parse application list"
+    compute: |
+      apps_text = str(apps_raw) if 'apps_raw' in dir() and apps_raw else ""
+
+      apps = []
+      for line in apps_text.split("\n"):
+        line = line.strip()
+        if line and not line.startswith("NAME") and not line.startswith("-"):
+          parts = line.split()
+          if parts:
+            apps.append(parts[0])
+
+      result = {
+        "applications": apps,
+        "count": len(apps),
+      }
+    output: apps_info
+
+  - name: get_running_pipelines
+    description: "Get running pipelines"
+    tool: konflux_running_pipelines
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: running_raw
+    on_error: continue
+
+  - name: parse_running
+    description: "Parse running pipelines"
+    compute: |
+      running_text = str(running_raw) if 'running_raw' in dir() and running_raw else ""
+
+      import re
+      running = []
+      for line in running_text.split("\n"):
+        if line.strip() and "running" in line.lower():
+          running.append(line.strip()[:80])
+
+      result = {
+        "pipelines": running[:10],
+        "count": len(running),
+      }
+    output: running_info
+
+  - name: get_failed_pipelines
+    description: "Get failed pipelines"
+    tool: konflux_failed_pipelines
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: failed_raw
+    on_error: continue
+
+  - name: parse_failed
+    description: "Parse failed pipelines"
+    compute: |
+      failed_text = str(failed_raw) if 'failed_raw' in dir() and failed_raw else ""
+
+      import re
+      failed = []
+      for line in failed_text.split("\n"):
+        if line.strip() and ("failed" in line.lower() or "error" in line.lower()):
+          failed.append(line.strip()[:80])
+
+      result = {
+        "pipelines": failed[:10],
+        "count": len(failed),
+      }
+    output: failed_info
+
+  - name: get_namespace_summary
+    description: "Get namespace summary"
+    tool: konflux_namespace_summary
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: summary_raw
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🏗️ Konflux Status: {{ inputs.namespace }}
+
+      **Overall:** {{ "✅ Healthy" if status_info.healthy else "⚠️ Issues Detected" }}
+
+      ---
+
+      ### 📦 Applications ({{ apps_info.count }})
+
+      {% for app in apps_info.applications %}
+      - `{{ app }}`
+      {% endfor %}
+
+      ---
+
+      ### 🔄 Running Pipelines ({{ running_info.count }})
+
+      {% if running_info.count > 0 %}
+      {% for pipeline in running_info.pipelines %}
+      - {{ pipeline }}
+      {% endfor %}
+      {% else %}
+      No pipelines currently running.
+      {% endif %}
+
+      ---
+
+      ### ❌ Failed Pipelines ({{ failed_info.count }})
+
+      {% if failed_info.count > 0 %}
+      {% for pipeline in failed_info.pipelines %}
+      - {{ pipeline }}
+      {% endfor %}
+
+      **Debug failed pipeline:**
+      ```
+      tkn_logs(name='<pipeline-run-name>', namespace='{{ inputs.namespace }}')
+      ```
+      {% else %}
+      ✅ No failed pipelines!
+      {% endif %}
+
+      ---
+
+      ### 📊 Namespace Summary
+
+      ```
+      {{ summary_raw[:800] if summary_raw else 'No summary available' }}
+      ```
+
+      ---
+
+      ### 🛠️ Useful Commands
+
+      **Get specific application:**
+      ```
+      konflux_get_application(name='<app>', namespace='{{ inputs.namespace }}')
+      ```
+
+      **List snapshots:**
+      ```
+      konflux_list_snapshots(namespace='{{ inputs.namespace }}')
+      ```
+
+      **Check integration tests:**
+      ```
+      konflux_list_integration_tests(namespace='{{ inputs.namespace }}')
+      ```

@@ -70,8 +70,8 @@ git_log(
 
 ## Loaded By
 
-- [👨‍💻 Developer Agent](../agents/developer.md)
-- [📦 Release Agent](../agents/release.md)
+- [👨‍💻 Developer Persona](../personas/developer.md)
+- [📦 Release Persona](../personas/release.md)
 
 ## Related Skills
 

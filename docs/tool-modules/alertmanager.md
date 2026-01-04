@@ -79,7 +79,7 @@ URLs and kubeconfig paths are defined in `config.json`:
 
 ## Loaded By
 
-- [🚨 Incident Agent](../agents/incident.md)
+- [🚨 Incident Persona](../personas/incident.md)
 
 ## Related Skills
 

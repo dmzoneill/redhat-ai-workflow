@@ -1,0 +1,232 @@
+# Skill: Sprint Planning
+# Prepare sprint backlog
+
+name: sprint_planning
+description: |
+  Help with sprint planning by analyzing the backlog.
+
+  This skill:
+  - Lists unassigned issues in the backlog
+  - Identifies blocked items
+  - Shows issues ready for sprint
+  - Can add issues to a sprint
+
+  Uses: jira_list_issues, jira_list_blocked, jira_add_to_sprint, jira_add_flag
+version: "1.0"
+
+inputs:
+  - name: project
+    type: string
+    required: false
+    default: "AAP"
+    description: "Jira project key"
+
+  - name: sprint
+    type: string
+    required: false
+    default: ""
+    description: "Sprint name to add issues to (optional)"
+
+  - name: limit
+    type: integer
+    required: false
+    default: 20
+    description: "Max issues to show"
+
+steps:
+  - name: get_backlog
+    description: "Get backlog issues"
+    tool: jira_list_issues
+    args:
+      project: "{{ inputs.project }}"
+      status: "Backlog"
+      limit: "{{ inputs.limit }}"
+    output: backlog_raw
+    on_error: continue
+
+  # ==================== AUTO-HEAL: get_backlog ====================
+
+  - name: detect_failure_jira
+    description: "Detect if Jira call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(backlog_raw) if 'backlog_raw' in dir() and backlog_raw else ""
+      failure = detect_failure(result_text, "jira_list_issues")
+      result = failure
+    output: failure_jira
+    on_error: continue
+
+  - name: log_failure_jira
+    description: "Log Jira failure to memory"
+    condition: "failure_jira and failure_jira.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+      entry = log_failure(
+          tool_name="jira_list_issues",
+          error_text=failure_jira.get('error_text', ''),
+          skill_name="sprint_planning",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure_jira
+    on_error: continue
+
+  - name: parse_backlog
+    description: "Parse backlog issues"
+    compute: |
+      backlog_text = str(backlog_raw) if 'backlog_raw' in dir() and backlog_raw else ""
+
+      import re
+      issues = []
+
+      # Extract issue keys and summaries
+      for line in backlog_text.split("\n"):
+        key_match = re.search(r'(AAP-\d+)', line)
+        if key_match:
+          key = key_match.group(1)
+          # Get summary after the key
+          summary = line.split(key)[-1].strip()[:60] if key in line else ""
+          issues.append({"key": key, "summary": summary})
+
+      result = {
+        "issues": issues[:inputs.limit],
+        "count": len(issues),
+      }
+    output: backlog_info
+
+  - name: get_blocked
+    description: "Get blocked issues"
+    tool: jira_list_blocked
+    args:
+      project: "{{ inputs.project }}"
+    output: blocked_raw
+    on_error: continue
+
+  - name: parse_blocked
+    description: "Parse blocked issues"
+    compute: |
+      blocked_text = str(blocked_raw) if 'blocked_raw' in dir() and blocked_raw else ""
+
+      import re
+      blocked = []
+
+      for line in blocked_text.split("\n"):
+        key_match = re.search(r'(AAP-\d+)', line)
+        if key_match:
+          blocked.append(key_match.group(1))
+
+      result = {
+        "blocked": blocked,
+        "count": len(blocked),
+      }
+    output: blocked_info
+
+  - name: get_ready_issues
+    description: "Get issues ready for development"
+    tool: jira_list_issues
+    args:
+      project: "{{ inputs.project }}"
+      status: "Ready for Development"
+      limit: "{{ inputs.limit }}"
+    output: ready_raw
+    on_error: continue
+
+  - name: parse_ready
+    description: "Parse ready issues"
+    compute: |
+      ready_text = str(ready_raw) if 'ready_raw' in dir() and ready_raw else ""
+
+      import re
+      ready = []
+
+      for line in ready_text.split("\n"):
+        key_match = re.search(r'(AAP-\d+)', line)
+        if key_match:
+          key = key_match.group(1)
+          summary = line.split(key)[-1].strip()[:60] if key in line else ""
+          ready.append({"key": key, "summary": summary})
+
+      result = {
+        "issues": ready,
+        "count": len(ready),
+      }
+    output: ready_info
+
+  - name: analyze_sprint_candidates
+    description: "Identify best candidates for sprint"
+    compute: |
+      # Issues that are ready but not blocked
+      ready_issues = ready_info.get("issues", [])
+      blocked_keys = set(blocked_info.get("blocked", []))
+
+      candidates = []
+      for issue in ready_issues:
+        if issue["key"] not in blocked_keys:
+          candidates.append(issue)
+
+      result = {
+        "candidates": candidates[:10],
+        "count": len(candidates),
+      }
+    output: sprint_candidates
+
+outputs:
+  - name: report
+    value: |
+      ## 📋 Sprint Planning: {{ inputs.project }}
+
+      ---
+
+      ### 📥 Backlog ({{ backlog_info.count }} issues)
+
+      {% for issue in backlog_info.issues[:10] %}
+      - **{{ issue.key }}**: {{ issue.summary }}
+      {% endfor %}
+      {% if backlog_info.count > 10 %}
+      ... and {{ backlog_info.count - 10 }} more
+      {% endif %}
+
+      ---
+
+      ### ✅ Ready for Development ({{ ready_info.count }})
+
+      {% for issue in ready_info.issues[:10] %}
+      - **{{ issue.key }}**: {{ issue.summary }}
+      {% endfor %}
+
+      ---
+
+      ### 🚫 Blocked ({{ blocked_info.count }})
+
+      {% if blocked_info.count > 0 %}
+      {% for key in blocked_info.blocked[:10] %}
+      - {{ key }}
+      {% endfor %}
+      {% else %}
+      No blocked issues! 🎉
+      {% endif %}
+
+      ---
+
+      ### 🎯 Sprint Candidates ({{ sprint_candidates.count }})
+
+      These are ready and not blocked:
+
+      {% for issue in sprint_candidates.candidates %}
+      - **{{ issue.key }}**: {{ issue.summary }}
+      {% endfor %}
+
+      {% if inputs.sprint %}
+      ---
+
+      ### Add to Sprint
+
+      To add these to sprint "{{ inputs.sprint }}":
+
+      {% for issue in sprint_candidates.candidates[:5] %}
+      ```
+      jira_add_to_sprint(issue_key='{{ issue.key }}', sprint='{{ inputs.sprint }}')
+      ```
+      {% endfor %}
+      {% endif %}

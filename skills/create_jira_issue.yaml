@@ -1,23 +1,22 @@
 # Skill: Create Jira Issue
-# Creates a Jira issue with proper formatting, accepting Markdown input
+# Create new Jira issues with linking and assignment
 
 name: create_jira_issue
 description: |
-  Create a Jira issue with all the complexity handled:
-  - Accepts Markdown and auto-converts to Jira wiki markup
-  - Normalizes field names (snake_case → Title Case)
-  - Normalizes issue type case (Story → story)
-  - Uses CLI with user's shell environment for auth
+  Create a new Jira issue with proper linking and assignment.
 
-  Supports: story, bug, task, epic
+  Use for:
+  - Creating bug reports
+  - Creating feature requests
+  - Creating sub-tasks
+  - Linking related issues
 
-  Example usage:
-    skill_run("create_jira_issue", '{
-      "summary": "Add pytest-xdist parallelization",
-      "issue_type": "story",
-      "description": "## Overview\n\nSpeed up test suite...",
-      "labels": ["testing", "performance"]
-    }')
+  The skill will:
+  1. Create the issue
+  2. Assign to specified user (or self)
+  3. Link to related issues
+  4. Transition to appropriate status
+
 version: "1.0"
 
 inputs:
@@ -26,263 +25,279 @@ inputs:
     required: true
     description: "Issue summary/title"
 
-  - name: issue_type
-    type: string
-    required: false
-    default: "story"
-    description: "Issue type: story, bug, task, epic (case insensitive)"
-
-  - name: project
-    type: string
-    required: false
-    default: ""
-    description: "Jira project key (default: AAP from config)"
-
   - name: description
     type: string
     required: false
     default: ""
-    description: "Issue description (accepts Markdown)"
+    description: "Issue description (markdown supported)"
 
-  - name: user_story
+  - name: issue_type
     type: string
     required: false
-    default: ""
-    description: "User story text (accepts Markdown)"
+    default: "Task"
+    description: "Issue type: 'Bug', 'Task', 'Story', 'Sub-task'"
 
-  - name: acceptance_criteria
+  - name: project
     type: string
     required: false
-    default: ""
-    description: "Acceptance criteria (accepts Markdown)"
-
-  - name: supporting_documentation
-    type: string
-    required: false
-    default: ""
-    description: "Supporting documentation (accepts Markdown)"
-
-  - name: definition_of_done
-    type: string
-    required: false
-    default: ""
-    description: "Definition of done (accepts Markdown)"
-
-  - name: labels
-    type: array
-    required: false
-    description: "Labels to apply"
-
-  - name: components
-    type: array
-    required: false
-    description: "Components to set"
-
-  - name: story_points
-    type: integer
-    required: false
-    description: "Story points estimate"
-
-  - name: epic_link
-    type: string
-    required: false
-    default: ""
-    description: "Epic issue key to link to (e.g., AAP-12345)"
+    default: "AAP"
+    description: "Jira project key"
 
   - name: assignee
     type: string
     required: false
-    default: ""
-    description: "Assignee username"
+    description: "Assign to user (leave empty for self)"
 
-  - name: convert_markdown
-    type: boolean
+  - name: labels
+    type: string
     required: false
-    default: true
-    description: "Convert Markdown to Jira wiki markup"
+    description: "Comma-separated labels"
 
-  - name: start_work
+  - name: priority
+    type: string
+    required: false
+    default: "Medium"
+    description: "Priority: 'Highest', 'High', 'Medium', 'Low', 'Lowest'"
+
+  - name: link_to
+    type: string
+    required: false
+    description: "Issue key to link to (e.g., AAP-12345)"
+
+  - name: link_type
+    type: string
+    required: false
+    default: "relates to"
+    description: "Link type: 'relates to', 'blocks', 'is blocked by', 'duplicates'"
+
+  - name: start_progress
     type: boolean
     required: false
     default: false
-    description: "Add issue to active_issues in memory (default: false)"
+    description: "Immediately transition to In Progress"
 
 steps:
-  # Step 1: Load config for defaults
-  - name: load_config
-    description: "Load config for project defaults"
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
     compute: |
-      from scripts.common.config_loader import load_config
+      result = {"jira_failures": []}
+    output: autoheal_state
+    on_error: continue
 
-      config = load_config()
-      jira_config = config.get("jira", {})
-      user_config = config.get("user", {})
+  # ==================== CREATE ISSUE ====================
 
-      result = {
-        "default_project": jira_config.get("default_project", "AAP"),
-        "jira_url": jira_config.get("url", "https://issues.redhat.com"),
-        "cli": jira_config.get("cli", "rh-issue"),
-        "default_component": "Automation Analytics",
-        "username": user_config.get("jira_username", user_config.get("username", "")),
-      }
-    output: cfg
-
-  # Step 2: Normalize inputs
-  - name: normalize_inputs
-    description: "Normalize issue type and prepare data"
-    compute: |
-      # jira_utils is available from skill engine safe_globals
-      # Normalize issue type
-      issue_type = jira_utils.normalize_issue_type(inputs.get("issue_type", "story")) if jira_utils else inputs.get("issue_type", "Story")
-
-      # Get project
-      project = inputs.get("project") or cfg["default_project"]
-
-      # Build labels list
-      labels = inputs.get("labels", [])
-      if isinstance(labels, str):
-        labels = [l.strip() for l in labels.split(",")]
-
-      # Build components list
-      components = inputs.get("components", [])
-      if isinstance(components, str):
-        components = [c.strip() for c in components.split(",")]
-      if not components:
-        components = [cfg["default_component"]]
-
-      # Handle story_points - only include if actually provided as a valid integer
-      story_points = inputs.get("story_points")
-      if story_points is not None:
-        try:
-          story_points = int(story_points)
-        except (ValueError, TypeError):
-          story_points = None
-
-      result = {
-        "issue_type": issue_type,
-        "project": project,
-        "summary": inputs["summary"],
-        "labels": labels,
-        "components": components,
-        "story_points": story_points,
-      }
-    output: normalized
-
-  # Step 4: Create the issue via MCP tool
   - name: create_issue
-    description: "Create Jira issue using jira_create_issue tool"
+    description: "Create the Jira issue"
     tool: jira_create_issue
     args:
-      issue_type: "{{ normalized.issue_type }}"
-      summary: "{{ normalized.summary }}"
+      project: "{{ inputs.project }}"
+      summary: "{{ inputs.summary }}"
       description: "{{ inputs.description or '' }}"
-      user_story: "{{ inputs.user_story or '' }}"
-      acceptance_criteria: "{{ inputs.acceptance_criteria or '' }}"
-      supporting_documentation: "{{ inputs.supporting_documentation or '' }}"
-      definition_of_done: "{{ inputs.definition_of_done or '' }}"
-      project: "{{ normalized.project }}"
-      labels: "{{ ','.join(normalized.labels) if normalized.labels else '' }}"
-      components: "{{ ','.join(normalized.components) if normalized.components else '' }}"
-      convert_markdown: true
-    output: create_result_raw
+      issue_type: "{{ inputs.issue_type }}"
+      priority: "{{ inputs.priority }}"
+      labels: "{{ inputs.labels or '' }}"
+    output: create_result
     on_error: continue
 
-  # Step 5: Parse result
-  - name: parse_create_result
-    description: "Parse the create issue result using shared parser"
+  # ==================== AUTO-HEAL: create_issue ====================
+
+  - name: detect_failure_jira
+    description: "Detect if Jira call failed"
     compute: |
-      from scripts.common.parsers import extract_jira_key
+      from scripts.common.auto_heal import detect_failure
+      result_text = str(create_result) if 'create_result' in dir() and create_result else ""
+      failure = detect_failure(result_text, "jira_create_issue")
+      result = failure
+    output: failure_jira
+    on_error: continue
 
-      output = str(create_result_raw) if 'create_result_raw' in dir() and create_result_raw else ""
+  - name: log_failure_jira
+    description: "Log failure to memory"
+    condition: "failure_jira and failure_jira.get('failed')"
+    compute: |
+      from scripts.common.auto_heal import log_failure
+      entry = log_failure(
+          tool_name="jira_create_issue",
+          error_text=failure_jira.get('error_text', ''),
+          skill_name="create_jira_issue",
+          fixed=False,
+          memory_helper=memory
+      )
+      result = entry
+    output: logged_failure
+    on_error: continue
 
-      # Check for error
-      if output.startswith("❌") or "error" in output.lower():
-        result = {
-          "success": False,
-          "issue_key": None,
-          "output": output,
-          "url": None,
-        }
-      else:
-        # Use shared parser to extract issue key
-        issue_key = extract_jira_key(output)
+  - name: parse_create_result
+    description: "Parse issue creation result"
+    compute: |
+      result_text = str(create_result) if create_result else ""
 
-        result = {
-          "success": True,
+      # Extract issue key
+      import re
+      issue_key = None
+      key_match = re.search(r'([A-Z]+-\d+)', result_text)
+      if key_match:
+          issue_key = key_match.group(1)
+
+      success = issue_key is not None or ("created" in result_text.lower() and "error" not in result_text.lower())
+
+      result = {
+          "success": success,
           "issue_key": issue_key,
-          "output": output,
-          "url": f"{cfg['jira_url']}/browse/{issue_key}" if issue_key else None,
-        }
-    output: create_result
+          "message": result_text[:300] if result_text else "No response",
+      }
+    output: create_status
 
-  # Step 5: Verify issue was created
-  - name: verify_issue
-    description: "Verify the issue was created"
-    condition: "create_result.get('issue_key')"
+  # ==================== ASSIGN ISSUE ====================
+
+  - name: assign_issue
+    description: "Assign the issue"
+    condition: "create_status.issue_key"
+    tool: jira_assign
+    args:
+      issue_key: "{{ create_status.issue_key }}"
+      assignee: "{{ inputs.assignee or 'currentUser' }}"
+    output: assign_result
+    on_error: continue
+
+  # ==================== LINK ISSUES ====================
+
+  - name: link_issues
+    description: "Link to related issue"
+    condition: "create_status.issue_key and inputs.link_to"
+    tool: jira_link_issues
+    args:
+      inward_issue: "{{ create_status.issue_key }}"
+      outward_issue: "{{ inputs.link_to }}"
+      link_type: "{{ inputs.link_type }}"
+    output: link_result
+    on_error: continue
+
+  - name: parse_link
+    description: "Parse link result"
+    condition: "link_result"
+    compute: |
+      link_text = str(link_result) if link_result else ""
+
+      success = "error" not in link_text.lower()
+
+      result = {
+          "success": success,
+          "message": link_text[:200] if link_text else "Unknown",
+      }
+    output: link_status
+    on_error: continue
+
+  # ==================== UPDATE ISSUE (add more fields) ====================
+
+  - name: update_issue
+    description: "Update issue with additional fields"
+    condition: "create_status.issue_key and inputs.labels"
+    tool: jira_update_issue
+    args:
+      issue_key: "{{ create_status.issue_key }}"
+      fields: "labels"
+      values: "{{ inputs.labels }}"
+    output: update_result
+    on_error: continue
+
+  # ==================== TRANSITION ====================
+
+  - name: transition_to_progress
+    description: "Transition to In Progress"
+    condition: "create_status.issue_key and inputs.start_progress"
+    tool: jira_transition
+    args:
+      issue_key: "{{ create_status.issue_key }}"
+      transition: "Start Progress"
+    output: transition_result
+    on_error: continue
+
+  # ==================== GET FINAL STATE ====================
+
+  - name: get_issue
+    description: "Get the created issue details"
+    condition: "create_status.issue_key"
     tool: jira_view_issue
     args:
-      issue_key: "{{ create_result.issue_key }}"
-    output: verification
+      issue_key: "{{ create_status.issue_key }}"
+    output: issue_details
     on_error: continue
 
-  # ==================== MEMORY INTEGRATION ====================
+  # ==================== MEMORY ====================
 
-  - name: add_to_active_issues
-    description: "Optionally add new issue to active_issues if start_work is true"
-    condition: "create_result.success and inputs.get('start_work', False)"
-    compute: |
-      # Use shared memory helpers
-      memory.add_active_issue(
-          issue_key=create_result.get("issue_key", ""),
-          summary=normalized.get("summary", ""),
-          status="Open",
-          notes=""
-      )
-      result = "added to active issues"
-    output: memory_add_result
-    on_error: continue
-
-  - name: log_issue_creation
-    description: "Log issue creation to session"
-    condition: "create_result.success"
+  - name: log_creation
+    description: "Log issue creation"
+    condition: "create_status.success"
     tool: memory_session_log
     args:
-      action: "Created Jira issue {{ create_result.issue_key }}"
-      details: "{{ normalized.summary[:50] }}"
+      action: "Created Jira issue {{ create_status.issue_key }}"
+      details: "{{ inputs.summary[:50] }}{% if inputs.link_to %}, linked to {{ inputs.link_to }}{% endif %}"
     on_error: continue
 
 outputs:
-  - name: summary
+  - name: report
     value: |
-      ## {{ "✅" if create_result.success else "❌" }} Jira Issue {{ "Created" if create_result.success else "Failed" }}
+      ## 🎫 Create Jira Issue
 
-      {% if create_result.issue_key %}
-      **Issue:** [{{ create_result.issue_key }}]({{ create_result.url }})
-      **Summary:** {{ normalized.summary }}
-      **Type:** {{ normalized.issue_type | capitalize }}
-      **Project:** {{ normalized.project }}
+      {% if create_status.success %}
+      ### ✅ Issue Created
 
-      {% if normalized.labels %}
-      **Labels:** {{ normalized.labels | join(', ') }}
+      **Key:** [{{ create_status.issue_key }}](https://issues.redhat.com/browse/{{ create_status.issue_key }})
+      **Summary:** {{ inputs.summary }}
+      **Type:** {{ inputs.issue_type }}
+      **Priority:** {{ inputs.priority }}
+
+      {% if assign_result %}
+      **Assigned to:** {{ inputs.assignee or "you" }}
       {% endif %}
-      {% if normalized.components %}
-      **Components:** {{ normalized.components | join(', ') }}
+
+      {% if link_status and link_status.success %}
+      **Linked to:** [{{ inputs.link_to }}](https://issues.redhat.com/browse/{{ inputs.link_to }}) ({{ inputs.link_type }})
+      {% elif inputs.link_to and not link_status.success %}
+      ⚠️ Link to {{ inputs.link_to }} failed: {{ link_status.message }}
+      {% endif %}
+
+      {% if inputs.start_progress %}
+      **Status:** In Progress
       {% endif %}
 
       ---
 
       ### Next Steps
-      1. [View issue in Jira]({{ create_result.url }})
-      2. Add to sprint: `jira_add_to_sprint("{{ create_result.issue_key }}", "Sprint X")`
-      3. Start work: `skill_run("start_work", '{"issue_key": "{{ create_result.issue_key }}"}')`
+
+      **View issue:**
+      ```python
+      jira_view_issue(issue_key='{{ create_status.issue_key }}')
+      ```
+
+      **Start working:**
+      ```python
+      skill_run("start_work", '{"issue_key": "{{ create_status.issue_key }}"}')
+      ```
+
+      **Add comment:**
+      ```python
+      jira_add_comment(issue_key='{{ create_status.issue_key }}', comment='...')
+      ```
+
       {% else %}
-      **Error:** {{ create_result.output }}
+      ### ❌ Creation Failed
+
+      {{ create_status.message }}
+
+      Check:
+      - Project key is valid ({{ inputs.project }})
+      - Issue type exists ({{ inputs.issue_type }})
+      - You have permission to create issues
+
       {% endif %}
 
   - name: context
     value:
-      issue_key: "{{ create_result.issue_key }}"
-      url: "{{ create_result.url }}"
-      project: "{{ normalized.project }}"
-      issue_type: "{{ normalized.issue_type }}"
-      success: "{{ create_result.success }}"
+      issue_key: "{{ create_status.issue_key }}"
+      created: "{{ create_status.success }}"
+      linked: "{{ link_status.success if link_status else false }}"
+      link_to: "{{ inputs.link_to }}"

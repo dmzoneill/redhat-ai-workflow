@@ -31,6 +31,15 @@ inputs:
 # No hardcoded constants - resolved dynamically from config.json
 
 steps:
+  # ==================== AUTO-HEAL SETUP ====================
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"release_failures": []}
+    output: autoheal_state
+    on_error: continue
+
   # ==================== LOAD CONFIG ====================
 
   - name: load_config

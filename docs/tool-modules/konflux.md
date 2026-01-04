@@ -79,7 +79,7 @@ konflux_build_list(
 
 ## Loaded By
 
-- [📦 Release Agent](../agents/release.md)
+- [📦 Release Persona](../personas/release.md)
 
 ## Related Skills
 

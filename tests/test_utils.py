@@ -1,8 +1,15 @@
-"""Tests for shared utilities in aa-common/src/utils.py."""
+"""Tests for shared utilities in server/utils.py."""
 
 from pathlib import Path
 
-from src.utils import get_kubeconfig, get_project_root, get_section_config, get_username, load_config, resolve_repo_path
+from server.utils import (
+    get_kubeconfig,
+    get_project_root,
+    get_section_config,
+    get_username,
+    load_config,
+    resolve_repo_path,
+)
 
 
 class TestLoadConfig:

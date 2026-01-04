@@ -14,11 +14,11 @@ from mcp.types import TextContent
 
 # Support both package import and direct loading
 try:
-    from .constants import AGENTS_DIR, MEMORY_DIR
+    from .constants import MEMORY_DIR, PERSONAS_DIR
 except ImportError:
-    SERVERS_DIR = Path(__file__).parent.parent.parent
-    PROJECT_DIR = SERVERS_DIR.parent
-    AGENTS_DIR = PROJECT_DIR / "agents"
+    TOOL_MODULES_DIR = Path(__file__).parent.parent.parent
+    PROJECT_DIR = TOOL_MODULES_DIR.parent
+    PERSONAS_DIR = PROJECT_DIR / "personas"
     MEMORY_DIR = PROJECT_DIR / "memory"
 
 if TYPE_CHECKING:
@@ -149,7 +149,7 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
         # Load agent if specified
         if agent:
-            agent_file = AGENTS_DIR / f"{agent}.md"
+            agent_file = PERSONAS_DIR / f"{agent}.md"
             if agent_file.exists():
                 lines.append(f"## 🤖 Agent: {agent}\n")
                 lines.append("*Loading agent persona...*\n")
@@ -158,8 +158,8 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             else:
                 lines.append(f"*Agent '{agent}' not found. " "Available: devops, developer, incident, release*\n")
         else:
-            lines.append("## 💡 Available Agents\n")
-            lines.append("Load one with `agent_load(name)` or `session_start(agent='name')`:\n")
+            lines.append("## 💡 Available Personas\n")
+            lines.append("Load one with `persona_load(name)` or `session_start(agent='name')`:\n")
             lines.append("- **devops** - Infrastructure, monitoring, deployments")
             lines.append("- **developer** - Coding, PRs, code review")
             lines.append("- **incident** - Production issues, triage")

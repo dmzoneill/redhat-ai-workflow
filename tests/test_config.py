@@ -2,7 +2,7 @@
 
 import json
 
-from src.config import load_config
+from server.config import load_config
 
 
 class TestLoadConfig:
