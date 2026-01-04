@@ -435,7 +435,7 @@ steps:
         lines.append("")
 
       # Show my own MRs that might need attention
-      _my_mr_status = my_mr_conflict_status if isinstance(my_mr_conflict_status, dict) else None
+      _my_mr_status = my_mr_conflict_status if 'my_mr_conflict_status' in dir() and isinstance(my_mr_conflict_status, dict) else None
       if my_mrs and inputs.get('include_my_mrs', True):
         lines.append("---")
         lines.append("")
