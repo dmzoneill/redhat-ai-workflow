@@ -10,11 +10,18 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import get_project_root, run_cmd_shell
+from server.utils import get_project_root, load_config, run_cmd_shell
+
+
+def _get_jira_url() -> str:
+    """Get Jira URL from config."""
+    config = load_config()
+    return config.get("jira", {}).get("url", "https://issues.redhat.com")
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +49,7 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
                 f"❌ Jira authentication failed.\n\n"
                 f"Ensure these are in your ~/.bashrc:\n"
                 f"  export JIRA_JPAT='your-token'\n"
-                f"  export JIRA_URL='https://issues.redhat.com'\n\n"
+                f"  export JIRA_URL='{_get_jira_url()}'\n\n"
                 f"Original error: {output}"
             )
         if "No module named" in output:
@@ -83,20 +90,42 @@ def register_tools(server: "FastMCP") -> int:
     @server.tool()
     async def jira_view_issue_json(issue_key: str) -> str:
         """
-        Get Jira issue data as JSON for parsing.
+        Get Jira issue data as structured text for parsing.
 
         Args:
             issue_key: The Jira issue key (e.g., AAP-12345)
 
         Returns:
-            Issue data in JSON format.
+            Issue data in a parseable key-value format.
         """
-        success, output = await run_rh_issue(["view-issue", issue_key, "--output", "json"])
+        # Note: rh-issue view-issue doesn't support --output json
+        # Return raw output which can be parsed as key: value pairs
+        success, output = await run_rh_issue(["view-issue", issue_key])
 
         if not success:
             return f"❌ Failed to get issue: {output}"
 
-        return output
+        # Parse the output into a dict-like structure
+        import json
+        import re
+
+        data = {"raw": output}
+
+        # Parse key-value lines from the output
+        # Format: "key             : value"
+        for line in output.split("\n"):
+            match = re.match(r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$", line.strip(), re.IGNORECASE)
+            if match:
+                key = match.group(1).strip().lower().replace(" ", "_").replace("/", "_")
+                value = match.group(2).strip()
+                data[key] = value
+
+        # Extract description section if present
+        desc_match = re.search(r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL)
+        if desc_match:
+            data["description"] = desc_match.group(1).strip()
+
+        return json.dumps(data, indent=2)
 
     @server.tool()
     async def jira_search(jql: str, max_results: int = 20) -> str:
@@ -191,20 +220,27 @@ def register_tools(server: "FastMCP") -> int:
         return output
 
     @server.tool()
-    async def jira_lint(issue_key: str, fix: bool = False) -> str:
+    async def jira_lint(issue_key: str) -> str:
         """
         Lint a Jira issue for quality and completeness.
 
+        Checks issue for:
+        - Description quality and formatting
+        - Acceptance criteria presence and clarity
+        - Epic link assignment
+        - Story points (for in-progress issues)
+        - Labels and components
+
+        Note: The rh-issue CLI does not support auto-fix. Use jira_set_*
+        tools to fix issues found by lint.
+
         Args:
             issue_key: The Jira issue key (e.g., AAP-12345)
-            fix: Whether to automatically fix issues (default: False)
 
         Returns:
             Quality report and any issues found.
         """
         args = ["lint", issue_key]
-        if fix:
-            args.append("--fix")
 
         success, output = await run_rh_issue(args, timeout=60)
 
@@ -527,7 +563,7 @@ def register_tools(server: "FastMCP") -> int:
         issue_key_match = re.search(r"([A-Z]+-\d+)", output)
         if issue_key_match:
             issue_key = issue_key_match.group(1)
-            url = f"https://issues.redhat.com/browse/{issue_key}"
+            url = f"{_get_jira_url()}/browse/{issue_key}"
             return f"✅ Issue created: [{issue_key}]({url})\n\n{output}"
 
         return f"✅ Issue created\n\n{output}"
@@ -615,23 +651,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Flag removed from {issue_key}\n\n{output}"
 
-    @server.tool()
-    async def jira_open_browser(issue_key: str) -> str:
-        """
-        Open a Jira issue in the web browser.
-
-        Args:
-            issue_key: The Jira issue key (e.g., AAP-12345)
-
-        Returns:
-            Confirmation that browser was opened.
-        """
-        success, output = await run_rh_issue(["open-issue", issue_key])
-
-        if not success:
-            return f"❌ Failed to open browser: {output}"
-
-        return f"🌐 Opened {issue_key} in browser"
+    # NOTE: jira_open_browser removed - interactive only (opens browser)
 
     # ==================== ADDITIONAL TOOLS (from jira_tools) ====================
 
@@ -680,17 +700,26 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             AI-assisted analysis of the issue.
         """
-        # Get issue details
-        success, output = await run_rh_issue(["view-issue", issue_key, "--output", "json"])
+        import re
+
+        # Get issue details (using view-issue, no JSON output available)
+        success, output = await run_rh_issue(["view-issue", issue_key])
         if not success:
             return f"❌ Failed to get issue: {output}"
 
-        try:
-            import json
+        # Parse key-value pairs from output
+        issue = {}
+        for line in output.split("\n"):
+            match = re.match(r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$", line.strip(), re.IGNORECASE)
+            if match:
+                key = match.group(1).strip().lower().replace(" ", "_").replace("/", "_")
+                value = match.group(2).strip()
+                issue[key] = value
 
-            issue = json.loads(output)
-        except (json.JSONDecodeError, ValueError, TypeError):
-            return "❌ Failed to parse issue data"
+        # Extract description section if present
+        desc_match = re.search(r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL)
+        if desc_match:
+            issue["description"] = desc_match.group(1).strip()
 
         summary = issue.get("summary", "No summary")
         status = issue.get("status", "Unknown")
