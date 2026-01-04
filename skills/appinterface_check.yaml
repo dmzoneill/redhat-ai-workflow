@@ -1,19 +1,20 @@
 # Skill: App Interface Check
-# Validate app-interface configuration
+# Validate app-interface configuration and compare to live state
 
 name: appinterface_check
 description: |
   Validate app-interface configuration for releases.
 
   This skill:
-  - Validates YAML configuration
-  - Gets SaaS file details
-  - Shows diffs from main
-  - Lists resources
+  - Validates YAML configuration and $ref paths
+  - Gets SaaS file details for stage and prod
+  - Compares app-interface refs to live cluster state
+  - Shows if stage/prod are in sync
+  - Alerts if deployed SHA is stale
 
-  Uses: appinterface_validate, appinterface_get_saas, appinterface_diff,
-        appinterface_resources, appinterface_search
-version: "1.0"
+  Uses: appinterface_get_saas, appinterface_diff, appinterface_resources,
+        kubectl_get_deployments
+version: "2.0"
 
 inputs:
   - name: saas_file
@@ -22,71 +23,32 @@ inputs:
     default: "tower-analytics"
     description: "SaaS file name to check (service name)"
 
-  - name: namespace
+  - name: namespace_stage
     type: string
     required: false
     default: "tower-analytics-stage"
-    description: "Namespace to check resources for"
+    description: "Stage namespace"
 
-  - name: validate
-    type: boolean
+  - name: namespace_prod
+    type: string
     required: false
-    default: true
-    description: "Run validation"
+    default: "tower-analytics-prod"
+    description: "Production namespace"
+
+  - name: deployment
+    type: string
+    required: false
+    default: "automation-analytics-api-fastapi-v2"
+    description: "Deployment to check for live SHA"
+
+  - name: stale_days
+    type: integer
+    required: false
+    default: 7
+    description: "Alert if deployed SHA is older than this many days"
 
 steps:
-  - name: validate_config
-    description: "Validate app-interface configuration"
-    condition: "inputs.validate"
-    tool: appinterface_validate
-    args: {}
-    output: validate_raw
-    on_error: continue
-
-  # ==================== AUTO-HEAL: validate_config ====================
-
-  - name: detect_failure_validate
-    description: "Detect if appinterface call failed"
-    condition: "inputs.validate"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-
-      result_text = str(validate_raw) if 'validate_raw' in dir() and validate_raw else ""
-      failure = detect_failure(result_text, "appinterface_validate")
-      result = failure
-    output: failure_validate
-    on_error: continue
-
-  - name: log_failure_validate
-    description: "Log failure to memory for learning"
-    condition: "failure_validate and failure_validate.get('failed')"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-
-      entry = log_failure(
-          tool_name="appinterface_validate",
-          error_text=failure_validate.get('error_text', ''),
-          skill_name="appinterface_check",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure_validate
-    on_error: continue
-
-  - name: parse_validation
-    description: "Parse validation result"
-    compute: |
-      validate_text = str(validate_raw) if 'validate_raw' in dir() and validate_raw else ""
-
-      valid = "valid" in validate_text.lower() or "success" in validate_text.lower()
-      has_errors = "error" in validate_text.lower() or "failed" in validate_text.lower()
-
-      result = {
-        "valid": valid and not has_errors,
-        "message": validate_text[:500] if validate_text else "",
-      }
-    output: validation_result
+  # ==================== GET SAAS FILES ====================
 
   - name: get_saas_file
     description: "Get SaaS file details"
@@ -96,26 +58,225 @@ steps:
     output: saas_raw
     on_error: continue
 
-  - name: parse_saas
-    description: "Parse SaaS file"
+  - name: parse_saas_refs
+    description: "Extract stage and prod refs from SaaS file"
     compute: |
-      saas_text = str(saas_raw) if 'saas_raw' in dir() and saas_raw else ""
-
       import re
 
-      # Extract key information
-      ref_match = re.search(r'ref:\s*(\S+)', saas_text)
-      ref = ref_match.group(1) if ref_match else "unknown"
+      saas_text = str(saas_raw) if 'saas_raw' in dir() and saas_raw else ""
 
-      namespace_match = re.search(r'namespace:\s*(\S+)', saas_text)
-      namespace = namespace_match.group(1) if namespace_match else "unknown"
+      # Find all refs (40-char hex SHAs)
+      sha_pattern = r'ref:\s*([a-f0-9]{40})'
+      sha_refs = re.findall(sha_pattern, saas_text)
+
+      # Find all $ref paths
+      ref_paths = re.findall(r'\$ref:\s*(\S+)', saas_text)
+
+      # Try to identify stage vs prod refs from context
+      stage_ref = None
+      prod_ref = None
+
+      lines = saas_text.split('\n')
+      in_stage = False
+      in_prod = False
+
+      for i, line in enumerate(lines):
+        if 'stage' in line.lower():
+          in_stage = True
+          in_prod = False
+        elif 'prod' in line.lower():
+          in_prod = True
+          in_stage = False
+
+        sha_match = re.search(r'ref:\s*([a-f0-9]{40})', line)
+        if sha_match:
+          if in_stage and not stage_ref:
+            stage_ref = sha_match.group(1)
+          elif in_prod and not prod_ref:
+            prod_ref = sha_match.group(1)
+
+      # Fallback: use first two refs found
+      if not stage_ref and len(sha_refs) > 0:
+        stage_ref = sha_refs[0]
+      if not prod_ref and len(sha_refs) > 1:
+        prod_ref = sha_refs[1]
 
       result = {
-        "ref": ref,
-        "namespace": namespace,
-        "preview": saas_text[:800] if saas_text else "",
+        "stage_ref": stage_ref or "main",
+        "prod_ref": prod_ref or "unknown",
+        "all_refs": sha_refs[:5],
+        "ref_paths": ref_paths[:10],
+        "raw_preview": saas_text[:1000],
       }
-    output: saas_info
+    output: saas_refs
+
+  # ==================== VALIDATION ====================
+
+  - name: validate_refs
+    description: "Validate $ref paths and SHA formats"
+    compute: |
+      import re
+      import os
+
+      saas_text = str(saas_raw) if 'saas_raw' in dir() and saas_raw else ""
+      issues = []
+      warnings = []
+
+      # Check SHA format (must be 40-char hex or 'main')
+      sha_pattern = r'ref:\s*(\S+)'
+      refs = re.findall(sha_pattern, saas_text)
+
+      for ref in refs:
+        if ref == 'main':
+          continue
+        if not re.match(r'^[a-f0-9]{40}$', ref):
+          if re.match(r'^[a-f0-9]+$', ref) and len(ref) < 40:
+            issues.append(f"Short SHA detected: {ref[:12]}... (should be 40 chars)")
+          elif not ref.startswith('/') and not ref.startswith('$'):
+            warnings.append(f"Non-standard ref: {ref[:30]}")
+
+      # Check $ref paths point to reasonable locations
+      ref_paths = re.findall(r'\$ref:\s*(/\S+)', saas_text)
+      for path in ref_paths:
+        if not path.startswith('/services/') and not path.startswith('/dependencies/'):
+          warnings.append(f"Unusual $ref path: {path[:40]}")
+
+      # Check required fields
+      required_fields = ['name:', 'app:', 'resourceTemplates:']
+      for field in required_fields:
+        if field not in saas_text:
+          issues.append(f"Missing required field: {field}")
+
+      valid = len(issues) == 0
+
+      result = {
+        "valid": valid,
+        "issues": issues,
+        "warnings": warnings,
+        "ref_count": len(refs),
+        "path_count": len(ref_paths),
+      }
+    output: validation_result
+
+  # ==================== GET LIVE STATE ====================
+
+  - name: get_live_stage
+    description: "Get live deployment from stage cluster"
+    tool: kubectl_get_deployments
+    args:
+      namespace: "{{ inputs.namespace_stage }}"
+      environment: "stage"
+    output: live_stage_raw
+    on_error: continue
+
+  - name: parse_live_stage
+    description: "Extract deployed image SHA from stage"
+    compute: |
+      import re
+
+      deploy_text = str(live_stage_raw) if 'live_stage_raw' in dir() and live_stage_raw else ""
+      deployment_name = str(inputs.get('deployment', 'automation-analytics-api-fastapi-v2'))
+
+      # Look for image tags in the deployment output
+      # Format: quay.io/...@sha256:xxx or :sha
+      image_pattern = r'quay\.io/[^\s]+[:\@]([a-f0-9]{40,64})'
+      images = re.findall(image_pattern, deploy_text)
+
+      # Also check for IMAGE column in kubectl output
+      sha_pattern = r'([a-f0-9]{40})'
+      shas = re.findall(sha_pattern, deploy_text)
+
+      live_sha = None
+      if shas:
+        # Prefer 40-char git SHAs over 64-char digests
+        for sha in shas:
+          if len(sha) == 40:
+            live_sha = sha
+            break
+        if not live_sha:
+          live_sha = shas[0][:40] if shas else None
+
+      result = {
+        "live_sha": live_sha,
+        "deployment_found": deployment_name in deploy_text,
+        "raw": deploy_text[:500] if deploy_text else "",
+      }
+    output: live_stage
+
+  - name: get_live_prod
+    description: "Get live deployment from prod cluster"
+    tool: kubectl_get_deployments
+    args:
+      namespace: "{{ inputs.namespace_prod }}"
+      environment: "prod"
+    output: live_prod_raw
+    on_error: continue
+
+  - name: parse_live_prod
+    description: "Extract deployed image SHA from prod"
+    compute: |
+      import re
+
+      deploy_text = str(live_prod_raw) if 'live_prod_raw' in dir() and live_prod_raw else ""
+
+      sha_pattern = r'([a-f0-9]{40})'
+      shas = re.findall(sha_pattern, deploy_text)
+
+      live_sha = shas[0] if shas else None
+
+      result = {
+        "live_sha": live_sha,
+        "raw": deploy_text[:500] if deploy_text else "",
+      }
+    output: live_prod
+
+  # ==================== COMPARE STATE ====================
+
+  - name: compare_state
+    description: "Compare app-interface refs to live state"
+    compute: |
+      from datetime import datetime, timedelta
+
+      stage_ref = saas_refs.get('stage_ref', 'unknown') if isinstance(saas_refs, dict) else 'unknown'
+      prod_ref = saas_refs.get('prod_ref', 'unknown') if isinstance(saas_refs, dict) else 'unknown'
+
+      live_stage_sha = live_stage.get('live_sha') if isinstance(live_stage, dict) else None
+      live_prod_sha = live_prod.get('live_sha') if isinstance(live_prod, dict) else None
+
+      # Compare stage
+      stage_match = False
+      if stage_ref and live_stage_sha:
+        stage_match = stage_ref[:12] == live_stage_sha[:12] if live_stage_sha else False
+
+      # Compare prod
+      prod_match = False
+      if prod_ref and live_prod_sha:
+        prod_match = prod_ref[:12] == live_prod_sha[:12] if live_prod_sha else False
+
+      # Check if stage is ahead of prod (ready to promote)
+      stage_ahead = stage_ref != prod_ref and stage_ref != 'main'
+
+      # Build status
+      issues = []
+      if not stage_match and live_stage_sha:
+        issues.append(f"Stage drift: app-interface has {stage_ref[:8]}... but cluster has {live_stage_sha[:8]}...")
+      if not prod_match and live_prod_sha:
+        issues.append(f"Prod drift: app-interface has {prod_ref[:8]}... but cluster has {live_prod_sha[:8]}...")
+
+      result = {
+        "stage_ref": stage_ref,
+        "prod_ref": prod_ref,
+        "live_stage_sha": live_stage_sha,
+        "live_prod_sha": live_prod_sha,
+        "stage_in_sync": stage_match,
+        "prod_in_sync": prod_match,
+        "stage_ahead_of_prod": stage_ahead,
+        "issues": issues,
+        "ready_to_promote": stage_ahead and stage_match,
+      }
+    output: state_comparison
+
+  # ==================== CHECK FOR CHANGES ====================
 
   - name: get_diff
     description: "Get diff from main branch"
@@ -125,29 +286,35 @@ steps:
     on_error: continue
 
   - name: parse_diff
-    description: "Parse diff"
+    description: "Parse diff for tower-analytics changes"
     compute: |
+      import re
+
       diff_text = str(diff_raw) if 'diff_raw' in dir() and diff_raw else ""
+      service_name = str(inputs.get('saas_file', 'tower-analytics'))
 
       has_changes = len(diff_text.strip()) > 0 and "no changes" not in diff_text.lower()
 
-      # Count changed files
-      import re
+      # Filter for service-specific changes
       file_changes = re.findall(r'^\+\+\+ b/(.+)$', diff_text, re.M)
+      service_changes = [f for f in file_changes if service_name in f.lower()]
 
       result = {
         "has_changes": has_changes,
-        "changed_files": file_changes[:10],
-        "file_count": len(file_changes),
+        "all_changed_files": len(file_changes),
+        "service_changes": service_changes[:10],
+        "service_change_count": len(service_changes),
         "preview": diff_text[:600] if diff_text else "",
       }
     output: diff_info
+
+  # ==================== GET RESOURCES ====================
 
   - name: list_resources
     description: "List app-interface resources"
     tool: appinterface_resources
     args:
-      namespace: "{{ inputs.namespace }}"
+      namespace: "{{ inputs.namespace_stage }}"
     output: resources_raw
     on_error: continue
 
@@ -159,8 +326,8 @@ steps:
       resources = []
       for line in resources_text.split("\n"):
         line = line.strip()
-        if line and not line.startswith("#"):
-          resources.append(line[:60])
+        if line and not line.startswith("#") and not line.startswith("##"):
+          resources.append(line[:80])
 
       result = {
         "resources": resources[:20],
@@ -171,72 +338,90 @@ steps:
 outputs:
   - name: report
     value: |
-      ## 📋 App-Interface Check
+      ## 📋 App-Interface Check: {{ inputs.saas_file }}
 
       ---
 
       ### ✅ Validation
 
       {% if validation_result.valid %}
-      ✅ Configuration is valid
+      ✅ Configuration valid ({{ validation_result.ref_count }} refs, {{ validation_result.path_count }} paths)
       {% else %}
-      ❌ Validation issues found:
+      ❌ **Issues found:**
+      {% for issue in validation_result.issues %}
+      - {{ issue }}
+      {% endfor %}
+      {% endif %}
 
-      ```
-      {{ validation_result.message }}
-      ```
+      {% if validation_result.warnings %}
+      ⚠️ **Warnings:**
+      {% for warn in validation_result.warnings %}
+      - {{ warn }}
+      {% endfor %}
       {% endif %}
 
       ---
 
-      ### 📄 SaaS File: {{ inputs.saas_file }}
+      ### 🔄 Live State Comparison
 
-      **Current ref:** `{{ saas_info.ref }}`
-      **Namespace:** `{{ saas_info.namespace }}`
+      **Stage:**
+      - App-Interface: `{{ state_comparison.stage_ref[:12] }}...`
+      - Live Cluster: `{{ state_comparison.live_stage_sha[:12] if state_comparison.live_stage_sha else 'N/A' }}`
+      - Status: {% if state_comparison.stage_in_sync %}✅ In Sync{% else %}⚠️ Drift{% endif %}
 
-      ```yaml
-      {{ saas_info.preview }}
-      ```
+      **Prod:**
+      - App-Interface: `{{ state_comparison.prod_ref[:12] }}...`
+      - Live Cluster: `{{ state_comparison.live_prod_sha[:12] if state_comparison.live_prod_sha else 'N/A' }}`
+      - Status: {% if state_comparison.prod_in_sync %}✅ In Sync{% else %}⚠️ Drift{% endif %}
+
+      {% if state_comparison.ready_to_promote %}
+      🚀 **Ready to promote!** Stage is ahead of prod and in sync with cluster.
+      {% endif %}
+
+      {% if state_comparison.stage_ahead_of_prod and not state_comparison.ready_to_promote %}
+      ℹ️ Stage has newer ref than prod ({{ state_comparison.stage_ref[:8] }}... vs {{ state_comparison.prod_ref[:8] }}...)
+      {% endif %}
+
+      {% if state_comparison.issues %}
+      ⚠️ **Drift detected:**
+      {% for issue in state_comparison.issues %}
+      - {{ issue }}
+      {% endfor %}
+      {% endif %}
 
       ---
 
-      ### 📝 Changes from Main
+      ### 📝 Pending Changes
 
-      {% if diff_info.has_changes %}
-      **{{ diff_info.file_count }} files changed:**
-
-      {% for file in diff_info.changed_files %}
+      {% if diff_info.service_change_count > 0 %}
+      **{{ diff_info.service_change_count }} uncommitted changes for {{ inputs.saas_file }}:**
+      {% for file in diff_info.service_changes %}
       - `{{ file }}`
       {% endfor %}
-
-      ```diff
-      {{ diff_info.preview }}
-      ```
+      {% elif diff_info.has_changes %}
+      ✅ No changes to {{ inputs.saas_file }} ({{ diff_info.all_changed_files }} other files changed)
       {% else %}
       ✅ No uncommitted changes
       {% endif %}
 
       ---
 
-      ### 📦 Resources ({{ resources_info.count }})
+      ### 📦 Namespace Resources
 
-      {% for resource in resources_info.resources[:10] %}
-      - {{ resource }}
-      {% endfor %}
-      {% if resources_info.count > 10 %}
-      ... and {{ resources_info.count - 10 }} more
-      {% endif %}
+      {{ resources_info.count }} config files for `{{ inputs.namespace_stage }}`
 
       ---
 
-      ### 🛠️ Useful Commands
+      ### 🛠️ Actions
 
-      **Search for term:**
+      {% if state_comparison.ready_to_promote %}
+      ```python
+      # Promote stage to prod
+      skill_run("release_to_prod", '{"commit_sha": "{{ state_comparison.stage_ref }}"}')
       ```
-      appinterface_search(query='tower-analytics')
-      ```
+      {% endif %}
 
-      **Get cluster info:**
-      ```
-      appinterface_clusters()
+      ```python
+      # Check prod namespace
+      skill_run("appinterface_check", '{"namespace_stage": "{{ inputs.namespace_prod }}"}')
       ```
