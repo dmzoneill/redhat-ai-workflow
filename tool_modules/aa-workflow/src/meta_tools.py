@@ -38,6 +38,7 @@ except ImportError:
 
 
 # Tool counts per module - for discovery
+# This registry must be kept in sync with actual tools in each module
 TOOL_REGISTRY = {
     "git": [
         "git_status",
@@ -65,6 +66,10 @@ TOOL_REGISTRY = {
         "jira_list_blocked",
         "jira_lint",
         "jira_set_status",
+        "jira_set_summary",
+        "jira_set_priority",
+        "jira_set_story_points",
+        "jira_set_epic",
         "jira_assign",
         "jira_unassign",
         "jira_add_comment",
@@ -232,9 +237,46 @@ TOOL_REGISTRY = {
         "workflow_handle_review",
         "workflow_daily_standup",
     ],
+    # === NEW MODULES ===
+    "google-calendar": [
+        "google_calendar_find_meeting",
+        "google_calendar_check_mutual_availability",
+        "google_calendar_schedule_meeting",
+        "google_calendar_quick_meeting",
+        "google_calendar_list_events",
+        "google_calendar_status",
+    ],
+    "slack": [
+        "slack_list_messages",
+        "slack_send_message",
+        "slack_get_channels",
+        "slack_post_team",
+        "slack_dm_gitlab_user",
+        "slack_get_user",
+        "slack_search_messages",
+        "slack_add_reaction",
+        "slack_list_channels",
+    ],
+    "workflow": [
+        "vpn_connect",
+        "kube_login",
+        "memory_read",
+        "memory_write",
+        "memory_update",
+        "memory_append",
+        "memory_session_log",
+        "tool_list",
+        "tool_exec",
+        "persona_list",
+        "persona_load",
+        "session_start",
+        "skill_list",
+        "skill_run",
+        "debug_tool",
+    ],
 }
 
-# Module prefix mapping
+# Module prefix mapping - maps tool prefixes to module names
 MODULE_PREFIXES = {
     "git_": "git",
     "jira_": "jira",
@@ -265,6 +307,10 @@ MODULE_PREFIXES = {
     "vpn_": "workflow",
     "kube_": "workflow",
     "debug_": "workflow",
+    # Google Calendar module
+    "google_calendar_": "google-calendar",
+    # Slack module
+    "slack_": "slack",
 }
 
 
