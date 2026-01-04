@@ -651,6 +651,82 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Flag removed from {issue_key}\n\n{output}"
 
+    @server.tool()
+    async def jira_set_summary(issue_key: str, summary: str) -> str:
+        """
+        Update the summary (title) of a Jira issue.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+            summary: The new summary text for the issue
+
+        Returns:
+            Confirmation of the summary update.
+        """
+        success, output = await run_rh_issue(["set-summary", issue_key, summary])
+
+        if not success:
+            return f"❌ Failed to set summary: {output}"
+
+        return f"✅ Summary for {issue_key} updated to: **{summary}**\n\n{output}"
+
+    @server.tool()
+    async def jira_set_priority(issue_key: str, priority: str) -> str:
+        """
+        Set the priority of a Jira issue.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+            priority: Priority level (e.g., "Blocker", "Critical", "Major", "Normal", "Minor")
+
+        Returns:
+            Confirmation of the priority change.
+        """
+        success, output = await run_rh_issue(["set-priority", issue_key, priority])
+
+        if not success:
+            return f"❌ Failed to set priority: {output}"
+
+        return f"✅ Priority for {issue_key} set to **{priority}**\n\n{output}"
+
+    @server.tool()
+    async def jira_set_story_points(issue_key: str, points: int) -> str:
+        """
+        Set the story points for a Jira issue.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+            points: Story points value (e.g., 1, 2, 3, 5, 8, 13)
+
+        Returns:
+            Confirmation of the story points update.
+        """
+        success, output = await run_rh_issue(["set-story-points", issue_key, str(points)])
+
+        if not success:
+            return f"❌ Failed to set story points: {output}"
+
+        return f"✅ Story points for {issue_key} set to **{points}**\n\n{output}"
+
+    @server.tool()
+    async def jira_set_epic(issue_key: str, epic_key: str) -> str:
+        """
+        Link a Jira issue to an Epic.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+            epic_key: The Epic issue key (e.g., AAP-10000)
+
+        Returns:
+            Confirmation of the epic link.
+        """
+        success, output = await run_rh_issue(["set-story-epic", issue_key, epic_key])
+
+        if not success:
+            return f"❌ Failed to set epic: {output}"
+
+        return f"✅ {issue_key} linked to Epic **{epic_key}**\n\n{output}"
+
     # NOTE: jira_open_browser removed - interactive only (opens browser)
 
     # ==================== ADDITIONAL TOOLS (from jira_tools) ====================
