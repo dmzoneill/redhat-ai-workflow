@@ -148,8 +148,10 @@ async def quay_api_request(
 def resolve_quay_repo(repository: str, namespace: str = "") -> str:
     """Resolve full repository path."""
     ns = namespace or QUAY_DEFAULT_NAMESPACE
-    if "/" in repository and not repository.startswith(ns):
+    # If repository already has path components (contains /), use as-is
+    if "/" in repository:
         return repository
+    # Otherwise, prefix with namespace
     return f"{ns}/{repository}"
 
 
