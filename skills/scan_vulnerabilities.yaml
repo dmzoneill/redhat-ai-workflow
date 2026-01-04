@@ -71,9 +71,6 @@ steps:
       result = failure
     output: failure_quay
     on_error: continue
-      namespace: "{{ inputs.namespace }}"
-    output: image_check
-    on_error: continue
 
   - name: validate_image
     description: "Stop if image doesn't exist"
