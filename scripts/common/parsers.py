@@ -553,13 +553,52 @@ def separate_mrs_by_author(mrs: List[Dict[str, Any]], my_username: str) -> Dict[
     Returns:
         Dict with 'my_mrs' and 'to_review' lists
     """
+    from scripts.common.config_loader import load_config
+
     my_mrs = []
     to_review = []
-    my_user = my_username.lower()
+
+    # Build list of all user identities to check against
+    my_identities = {my_username.lower()}
+
+    # Load additional identities from config
+    try:
+        config = load_config()
+        user_config = config.get("user", {})
+
+        # Add all configured usernames
+        for key in ["username", "gitlab_username", "jira_username"]:
+            if user_config.get(key):
+                my_identities.add(user_config[key].lower())
+
+        # Add email and email aliases
+        if user_config.get("email"):
+            my_identities.add(user_config["email"].lower())
+            # Also add the username part of the email
+            email_user = user_config["email"].split("@")[0].lower()
+            my_identities.add(email_user)
+
+        for alias in user_config.get("email_aliases", []):
+            my_identities.add(alias.lower())
+            # Also add the username part of each alias
+            alias_user = alias.split("@")[0].lower()
+            my_identities.add(alias_user)
+
+        # Add full name variations
+        if user_config.get("full_name"):
+            full_name = user_config["full_name"].lower()
+            my_identities.add(full_name)
+            # Also add without apostrophe and with underscores
+            my_identities.add(full_name.replace("'", ""))
+            my_identities.add(full_name.replace(" ", "_"))
+    except Exception:
+        pass  # Fall back to just my_username
 
     for mr in mrs:
         author = (mr.get("author", "") or "").lower()
-        if my_user in author or author == my_user:
+        # Check if author matches any of our identities
+        is_mine = any(identity in author or author == identity for identity in my_identities)
+        if is_mine:
             my_mrs.append(mr)
         else:
             to_review.append(mr)

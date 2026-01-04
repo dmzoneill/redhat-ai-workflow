@@ -298,36 +298,66 @@ steps:
     description: "Check if first MR needs action using shared parsers"
     condition: "isinstance(mr_analysis, list) and len(mr_analysis) > 0 and 'first_mr_details' in dir() and first_mr_details and isinstance(first_mr_details, str)"
     compute: |
-      from scripts.common.parsers import analyze_mr_status, analyze_review_status
+      import re
+      from scripts.common.parsers import analyze_mr_status, analyze_review_status, extract_author_from_mr
+      from scripts.common.config_loader import load_config
 
       mr = mr_analysis[0] if isinstance(mr_analysis, list) and mr_analysis else {}
       details = first_mr_details if isinstance(first_mr_details, str) else ""
 
-      # Get base analysis from shared parser
-      analysis = analyze_mr_status(details, my_username)
+      # Extract author from MR details (more reliable than list output)
+      mr_author = extract_author_from_mr(details) or mr.get('author', '') if isinstance(mr, dict) else ''
+      mr_author_lower = mr_author.lower() if mr_author else ''
 
-      # Get review-specific analysis from shared parser
-      author = mr.get('author', '') if isinstance(mr, dict) else ''
-      review_status = analyze_review_status(details, my_username, author)
+      # Build set of my identities to check if this is my own MR
+      my_identities = {my_username.lower()}
+      try:
+        cfg = load_config()
+        user_cfg = cfg.get("user", {})
+        for key in ["username", "gitlab_username", "jira_username"]:
+          if user_cfg.get(key):
+            my_identities.add(user_cfg[key].lower())
+        if user_cfg.get("email"):
+          my_identities.add(user_cfg["email"].lower())
+          my_identities.add(user_cfg["email"].split("@")[0].lower())
+        for alias in user_cfg.get("email_aliases", []):
+          my_identities.add(alias.lower())
+          my_identities.add(alias.split("@")[0].lower())
+      except Exception:
+        pass
 
-      # Enhance with unresolved issues check
-      if review_status['my_feedback_exists'] and review_status['author_replied']:
-        if analysis['unresolved']:
-          action = "needs_followup"
-          reason = "Author replied but unresolved issues"
-        else:
-          action = "can_approve"
-          reason = "Author addressed feedback"
+      # Check if this is my own MR - skip if so
+      is_my_mr = any(identity in mr_author_lower or mr_author_lower == identity for identity in my_identities)
+
+      if is_my_mr:
+        action = "skip"
+        reason = "This is my own MR"
       else:
-        action = review_status['recommended_action']
-        reason = review_status['reason']
+        # Get base analysis from shared parser
+        analysis = analyze_mr_status(details, my_username)
+
+        # Get review-specific analysis from shared parser
+        review_status = analyze_review_status(details, my_username, mr_author)
+
+        # Enhance with unresolved issues check
+        if review_status['my_feedback_exists'] and review_status['author_replied']:
+          if analysis['unresolved']:
+            action = "needs_followup"
+            reason = "Author replied but unresolved issues"
+          else:
+            action = "can_approve"
+            reason = "Author addressed feedback"
+        else:
+          action = review_status['recommended_action']
+          reason = review_status['reason']
 
       if isinstance(mr, dict):
         mr['action'] = action
         mr['reason'] = reason
+        mr['author'] = mr_author  # Update with extracted author
         result = mr
       else:
-        result = {'action': action, 'reason': reason, 'iid': 0}
+        result = {'action': action, 'reason': reason, 'iid': 0, 'author': mr_author}
     output: first_mr_action
 
   # Step 7: Run full review if needed
