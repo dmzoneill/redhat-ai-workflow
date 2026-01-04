@@ -20,7 +20,13 @@ inputs:
     type: string
     required: false
     default: "tower-analytics"
-    description: "SaaS file name to check"
+    description: "SaaS file name to check (service name)"
+
+  - name: namespace
+    type: string
+    required: false
+    default: "tower-analytics-stage"
+    description: "Namespace to check resources for"
 
   - name: validate
     type: boolean
@@ -86,7 +92,7 @@ steps:
     description: "Get SaaS file details"
     tool: appinterface_get_saas
     args:
-      name: "{{ inputs.saas_file }}"
+      service_name: "{{ inputs.saas_file }}"
     output: saas_raw
     on_error: continue
 
@@ -140,7 +146,8 @@ steps:
   - name: list_resources
     description: "List app-interface resources"
     tool: appinterface_resources
-    args: {}
+    args:
+      namespace: "{{ inputs.namespace }}"
     output: resources_raw
     on_error: continue
 
