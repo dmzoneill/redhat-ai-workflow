@@ -3,18 +3,18 @@
 
 name: appinterface_check
 description: |
-  Validate app-interface configuration for releases.
+  Comprehensive app-interface validation and release readiness check.
 
   This skill:
-  - Validates YAML configuration and $ref paths
-  - Gets SaaS file details for stage and prod
+  - Validates YAML configuration, $ref paths, and SHA formats
   - Compares app-interface refs to live cluster state
-  - Shows if stage/prod are in sync
-  - Alerts if deployed SHA is stale
+  - Shows resource quotas and limits
+  - Lists pending MRs that may affect release
+  - Assesses overall release readiness with blockers/warnings
 
   Uses: appinterface_get_saas, appinterface_diff, appinterface_resources,
-        kubectl_get_deployments
-version: "2.0"
+        kubectl_get_deployments, kubectl_get_resourcequotas, gitlab_mr_list
+version: "3.0"
 
 inputs:
   - name: saas_file
@@ -46,6 +46,12 @@ inputs:
     required: false
     default: 7
     description: "Alert if deployed SHA is older than this many days"
+
+  - name: gitlab_project
+    type: string
+    required: false
+    default: "automation-analytics/automation-analytics-backend"
+    description: "GitLab project to check for pending MRs"
 
 steps:
   # ==================== GET SAAS FILES ====================
@@ -335,6 +341,164 @@ steps:
       }
     output: resources_info
 
+  # ==================== GET QUOTAS ====================
+
+  - name: get_quota_stage
+    description: "Get resource quotas from stage namespace"
+    tool: kubectl_get
+    args:
+      resource: "resourcequota"
+      namespace: "{{ inputs.namespace_stage }}"
+      environment: "stage"
+    output: quota_stage_raw
+    on_error: continue
+
+  - name: get_limits_stage
+    description: "Get limit ranges from stage namespace"
+    tool: kubectl_get
+    args:
+      resource: "limitrange"
+      namespace: "{{ inputs.namespace_stage }}"
+      environment: "stage"
+    output: limits_stage_raw
+    on_error: continue
+
+  - name: parse_quotas
+    description: "Parse quota and limit information"
+    compute: |
+      import re
+
+      quota_text = str(quota_stage_raw) if 'quota_stage_raw' in dir() and quota_stage_raw else ""
+      limits_text = str(limits_stage_raw) if 'limits_stage_raw' in dir() and limits_stage_raw else ""
+
+      quotas = {}
+      limits = {}
+
+      # Parse CPU quota
+      cpu_match = re.search(r'cpu[:\s]+(\d+[mM]?)', quota_text)
+      if cpu_match:
+        quotas['cpu'] = cpu_match.group(1)
+
+      # Parse memory quota
+      mem_match = re.search(r'memory[:\s]+(\d+[GgMmKk]i?)', quota_text)
+      if mem_match:
+        quotas['memory'] = mem_match.group(1)
+
+      # Parse pod count
+      pod_match = re.search(r'pods[:\s]+(\d+)', quota_text)
+      if pod_match:
+        quotas['pods'] = pod_match.group(1)
+
+      # Parse limits
+      limit_cpu = re.search(r'default.*cpu[:\s]+(\d+[mM]?)', limits_text, re.I)
+      if limit_cpu:
+        limits['default_cpu'] = limit_cpu.group(1)
+
+      limit_mem = re.search(r'default.*memory[:\s]+(\d+[GgMmKk]i?)', limits_text, re.I)
+      if limit_mem:
+        limits['default_memory'] = limit_mem.group(1)
+
+      result = {
+        "quotas": quotas,
+        "limits": limits,
+        "quota_raw": quota_text[:300] if quota_text else "No quotas found",
+        "limits_raw": limits_text[:300] if limits_text else "No limits found",
+        "has_quotas": len(quotas) > 0,
+        "has_limits": len(limits) > 0,
+      }
+    output: quota_info
+
+  # ==================== GET PENDING MRs ====================
+
+  - name: get_pending_mrs
+    description: "Get open MRs that might affect this service"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ inputs.gitlab_project }}"
+      state: "opened"
+      per_page: 10
+    output: mrs_raw
+    on_error: continue
+
+  - name: parse_pending_mrs
+    description: "Parse pending MRs for release-relevant changes"
+    compute: |
+      import re
+
+      mrs_text = str(mrs_raw) if 'mrs_raw' in dir() and mrs_raw else ""
+
+      # Extract MR info from the listing
+      mr_pattern = r'!(\d+)\s+\S+!(\d+)\s+(.+?)\s+\(main\)'
+      mrs = re.findall(mr_pattern, mrs_text)
+
+      pending_mrs = []
+      for mr in mrs[:5]:
+        mr_id = mr[0]
+        title = mr[2].strip()[:60]
+        pending_mrs.append({
+          "id": mr_id,
+          "title": title,
+        })
+
+      # Also extract from simpler format
+      if not pending_mrs:
+        simple_pattern = r'!(\d+)[^\n]+\n[^\n]*([A-Z]+-\d+[^\n]+)'
+        simple_mrs = re.findall(simple_pattern, mrs_text)
+        for mr in simple_mrs[:5]:
+          pending_mrs.append({
+            "id": mr[0],
+            "title": mr[1].strip()[:60],
+          })
+
+      result = {
+        "pending_mrs": pending_mrs,
+        "count": len(pending_mrs),
+        "raw": mrs_text[:500] if mrs_text else "",
+      }
+    output: pending_mrs_info
+
+  # ==================== RELEASE READINESS ====================
+
+  - name: assess_release_readiness
+    description: "Assess overall release readiness"
+    compute: |
+      # Gather all signals
+      validation_ok = validation_result.get('valid', False) if isinstance(validation_result, dict) else False
+      stage_in_sync = state_comparison.get('stage_in_sync', False) if isinstance(state_comparison, dict) else False
+      stage_ahead = state_comparison.get('stage_ahead_of_prod', False) if isinstance(state_comparison, dict) else False
+      no_pending_changes = not diff_info.get('service_change_count', 0) if isinstance(diff_info, dict) else True
+      pending_mr_count = pending_mrs_info.get('count', 0) if isinstance(pending_mrs_info, dict) else 0
+
+      # Determine readiness
+      ready = validation_ok and stage_ahead and no_pending_changes
+      blockers = []
+
+      if not validation_ok:
+        blockers.append("Validation issues found")
+      if not stage_ahead:
+        blockers.append("Stage is not ahead of prod (nothing to promote)")
+      if not no_pending_changes:
+        blockers.append("Uncommitted changes in app-interface")
+
+      warnings = []
+      if pending_mr_count > 0:
+        warnings.append(f"{pending_mr_count} open MRs - consider waiting for merge")
+      if not stage_in_sync:
+        warnings.append("Stage cluster may not reflect app-interface yet")
+
+      stage_ref = state_comparison.get('stage_ref', '') if isinstance(state_comparison, dict) else ''
+      prod_ref = state_comparison.get('prod_ref', '') if isinstance(state_comparison, dict) else ''
+
+      result = {
+        "ready": ready,
+        "blockers": blockers,
+        "warnings": warnings,
+        "stage_ref": stage_ref,
+        "prod_ref": prod_ref,
+        "commits_ahead": 1 if stage_ahead else 0,  # Simplified
+      }
+    output: release_readiness
+
 outputs:
   - name: report
     value: |
@@ -410,14 +574,61 @@ outputs:
 
       {{ resources_info.count }} config files for `{{ inputs.namespace_stage }}`
 
+      {% if quota_info.has_quotas or quota_info.has_limits %}
+      **Resource Quotas:**
+      {% for key, val in quota_info.quotas.items() %}
+      - {{ key }}: {{ val }}
+      {% endfor %}
+
+      **Default Limits:**
+      {% for key, val in quota_info.limits.items() %}
+      - {{ key }}: {{ val }}
+      {% endfor %}
+      {% endif %}
+
+      ---
+
+      ### 🔀 Pending Merge Requests
+
+      {% if pending_mrs_info.count > 0 %}
+      **{{ pending_mrs_info.count }} open MRs:**
+      {% for mr in pending_mrs_info.pending_mrs %}
+      - !{{ mr.id }} - {{ mr.title }}
+      {% endfor %}
+      {% else %}
+      ✅ No pending MRs
+      {% endif %}
+
+      ---
+
+      ### 🚀 Release Readiness
+
+      {% if release_readiness.ready %}
+      ✅ **Ready to release!**
+      - Stage ref: `{{ release_readiness.stage_ref[:12] }}...`
+      - Prod ref: `{{ release_readiness.prod_ref[:12] }}...`
+      {% else %}
+      ❌ **Not ready to release**
+      {% for blocker in release_readiness.blockers %}
+      - ❌ {{ blocker }}
+      {% endfor %}
+      {% endif %}
+
+      {% if release_readiness.warnings %}
+      ⚠️ **Warnings:**
+      {% for warn in release_readiness.warnings %}
+      - {{ warn }}
+      {% endfor %}
+      {% endif %}
+
       ---
 
       ### 🛠️ Actions
 
-      {% if state_comparison.ready_to_promote %}
+      {% if release_readiness.ready %}
       ```python
       # Promote stage to prod
-      skill_run("release_to_prod", '{"commit_sha": "{{ state_comparison.stage_ref }}"}')
+      skill_run("release_to_prod", '{"commit_sha": "{{ release_readiness.stage_ref }}"}')
       ```
       {% endif %}
 
