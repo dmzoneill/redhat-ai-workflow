@@ -14,7 +14,7 @@ description: |
 
   Uses: appinterface_get_saas, appinterface_diff, appinterface_resources,
         kubectl_get_deployments, kubectl_get_resourcequotas, gitlab_mr_list
-version: "3.0"
+version: "3.1"
 
 inputs:
   - name: saas_file
@@ -63,6 +63,43 @@ steps:
       service_name: "{{ inputs.saas_file }}"
     output: saas_raw
     on_error: continue
+
+  # ==================== AUTO-HEAL: get_saas_file ====================
+
+  - name: detect_failure_saas
+    description: "Detect if app-interface call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(saas_raw) if 'saas_raw' in dir() and saas_raw else ""
+      failure = detect_failure(result_text, "appinterface_get_saas")
+      result = failure
+    output: failure_saas
+    on_error: continue
+
+  - name: quick_fix_vpn_saas
+    description: "Auto-fix VPN issues for app-interface"
+    condition: "failure_saas and failure_saas.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_saas
+    on_error: continue
+
+  - name: retry_get_saas
+    description: "Retry app-interface call after auto-fix"
+    condition: "vpn_fix_saas and failure_saas"
+    tool: appinterface_get_saas
+    args:
+      service_name: "{{ inputs.saas_file }}"
+    output: saas_raw_retry
+    on_error: continue
+
+  - name: merge_saas_result
+    description: "Use retry result if available"
+    condition: "saas_raw_retry"
+    compute: |
+      result = saas_raw_retry
+    output: saas_raw
 
   - name: parse_saas_refs
     description: "Extract stage and prod refs from SaaS file"
@@ -175,6 +212,53 @@ steps:
     output: live_stage_raw
     on_error: continue
 
+  # ==================== AUTO-HEAL: get_live_stage ====================
+
+  - name: detect_failure_stage
+    description: "Detect if stage k8s call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(live_stage_raw) if 'live_stage_raw' in dir() and live_stage_raw else ""
+      failure = detect_failure(result_text, "kubectl_get_deployments")
+      result = failure
+    output: failure_stage
+    on_error: continue
+
+  - name: quick_fix_auth_stage
+    description: "Auto-fix auth issues for stage cluster"
+    condition: "failure_stage and failure_stage.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "stage"
+    output: auth_fix_stage
+    on_error: continue
+
+  - name: quick_fix_vpn_stage
+    description: "Auto-fix VPN issues for stage cluster"
+    condition: "failure_stage and failure_stage.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_stage
+    on_error: continue
+
+  - name: retry_get_stage
+    description: "Retry stage k8s call after auto-fix"
+    condition: "(auth_fix_stage or vpn_fix_stage) and failure_stage"
+    tool: kubectl_get_deployments
+    args:
+      namespace: "{{ inputs.namespace_stage }}"
+      environment: "stage"
+    output: live_stage_raw_retry
+    on_error: continue
+
+  - name: merge_stage_result
+    description: "Use retry result if available"
+    condition: "live_stage_raw_retry"
+    compute: |
+      result = live_stage_raw_retry
+    output: live_stage_raw
+
   - name: parse_live_stage
     description: "Extract deployed image SHA from stage"
     compute: |
@@ -217,6 +301,53 @@ steps:
       environment: "prod"
     output: live_prod_raw
     on_error: continue
+
+  # ==================== AUTO-HEAL: get_live_prod ====================
+
+  - name: detect_failure_prod
+    description: "Detect if prod k8s call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(live_prod_raw) if 'live_prod_raw' in dir() and live_prod_raw else ""
+      failure = detect_failure(result_text, "kubectl_get_deployments")
+      result = failure
+    output: failure_prod
+    on_error: continue
+
+  - name: quick_fix_auth_prod
+    description: "Auto-fix auth issues for prod cluster"
+    condition: "failure_prod and failure_prod.get('error_type') == 'auth'"
+    tool: kube_login
+    args:
+      cluster: "prod"
+    output: auth_fix_prod
+    on_error: continue
+
+  - name: quick_fix_vpn_prod
+    description: "Auto-fix VPN issues for prod cluster"
+    condition: "failure_prod and failure_prod.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_prod
+    on_error: continue
+
+  - name: retry_get_prod
+    description: "Retry prod k8s call after auto-fix"
+    condition: "(auth_fix_prod or vpn_fix_prod) and failure_prod"
+    tool: kubectl_get_deployments
+    args:
+      namespace: "{{ inputs.namespace_prod }}"
+      environment: "prod"
+    output: live_prod_raw_retry
+    on_error: continue
+
+  - name: merge_prod_result
+    description: "Use retry result if available"
+    condition: "live_prod_raw_retry"
+    compute: |
+      result = live_prod_raw_retry
+    output: live_prod_raw
 
   - name: parse_live_prod
     description: "Extract deployed image SHA from prod"
@@ -419,6 +550,45 @@ steps:
       per_page: 10
     output: mrs_raw
     on_error: continue
+
+  # ==================== AUTO-HEAL: get_pending_mrs ====================
+
+  - name: detect_failure_gitlab
+    description: "Detect if GitLab call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(mrs_raw) if 'mrs_raw' in dir() and mrs_raw else ""
+      failure = detect_failure(result_text, "gitlab_mr_list")
+      result = failure
+    output: failure_gitlab
+    on_error: continue
+
+  - name: quick_fix_vpn_gitlab
+    description: "Auto-fix VPN issues for GitLab"
+    condition: "failure_gitlab and failure_gitlab.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_gitlab
+    on_error: continue
+
+  - name: retry_get_gitlab
+    description: "Retry GitLab call after VPN fix"
+    condition: "vpn_fix_gitlab and failure_gitlab"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ inputs.gitlab_project }}"
+      state: "opened"
+      per_page: 10
+    output: mrs_raw_retry
+    on_error: continue
+
+  - name: merge_gitlab_result
+    description: "Use retry result if available"
+    condition: "mrs_raw_retry"
+    compute: |
+      result = mrs_raw_retry
+    output: mrs_raw
 
   - name: parse_pending_mrs
     description: "Parse pending MRs for release-relevant changes"

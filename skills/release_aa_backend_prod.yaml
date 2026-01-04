@@ -8,7 +8,7 @@ description: |
   by updating the commit SHA in app-interface and creating a PR for approval.
 
   Resolves paths and Quay images from config.json.
-version: "1.1"
+version: "1.2"
 
 inputs:
   - name: commit_sha
@@ -109,6 +109,54 @@ steps:
       expect_success: true
       error_message: "Image not found in Quay for SHA {{ inputs.commit_sha }}. Build may not have completed."
     output: quay_image
+    on_error: continue
+
+  # ==================== AUTO-HEAL: verify_quay_image ====================
+
+  - name: detect_failure_quay
+    description: "Detect if Quay call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(quay_image) if 'quay_image' in dir() and quay_image else ""
+      failure = detect_failure(result_text, "quay_get_tag")
+      result = failure
+    output: failure_quay
+    on_error: continue
+
+  - name: quick_fix_auth_quay
+    description: "Auto-fix auth issues for Quay (docker login)"
+    condition: "failure_quay and failure_quay.get('error_type') == 'auth'"
+    tool: quay_login
+    args: {}
+    output: auth_fix_quay
+    on_error: continue
+
+  - name: quick_fix_vpn_quay
+    description: "Auto-fix VPN issues for Quay"
+    condition: "failure_quay and failure_quay.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_quay
+    on_error: continue
+
+  - name: retry_quay
+    description: "Retry Quay call after auto-fix"
+    condition: "(auth_fix_quay or vpn_fix_quay) and failure_quay"
+    tool: quay_get_tag
+    args:
+      repository: "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
+      tag: "{{ inputs.commit_sha }}"
+      namespace: "redhat-services-prod"
+    output: quay_image_retry
+    on_error: continue
+
+  - name: merge_quay_result
+    description: "Use retry result if available"
+    condition: "quay_image_retry"
+    compute: |
+      result = quay_image_retry
+    output: quay_image
 
   # ==================== GET CURRENT STATE ====================
 
@@ -166,7 +214,45 @@ steps:
       issue_type: "story"
       summary: "{{ inputs.release_date }} Analytics HCC Service Release"
     output: jira_issue
-    on_error: continue  # Don't fail if Jira is unavailable
+    on_error: continue
+
+  # ==================== AUTO-HEAL: create_jira_issue ====================
+
+  - name: detect_failure_jira
+    description: "Detect if Jira call failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(jira_issue) if 'jira_issue' in dir() and jira_issue else ""
+      failure = detect_failure(result_text, "jira_create_issue")
+      result = failure
+    output: failure_jira
+    on_error: continue
+
+  - name: quick_fix_vpn_jira
+    description: "Auto-fix VPN issues for Jira"
+    condition: "failure_jira and failure_jira.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_jira
+    on_error: continue
+
+  - name: retry_jira
+    description: "Retry Jira call after VPN fix"
+    condition: "vpn_fix_jira and failure_jira"
+    tool: jira_create_issue
+    args:
+      issue_type: "story"
+      summary: "{{ inputs.release_date }} Analytics HCC Service Release"
+    output: jira_issue_retry
+    on_error: continue
+
+  - name: merge_jira_result
+    description: "Use retry result if available"
+    condition: "jira_issue_retry"
+    compute: |
+      result = jira_issue_retry
+    output: jira_issue
 
   # ==================== PREPARE APP-INTERFACE ====================
 
@@ -371,6 +457,49 @@ steps:
       target_branch: "master"
       source_branch: "{{ branch_name }}"
       draft: false
+    output: mr_result
+    on_error: continue
+
+  # ==================== AUTO-HEAL: create_mr ====================
+
+  - name: detect_failure_mr
+    description: "Detect if GitLab MR create failed"
+    compute: |
+      from scripts.common.auto_heal import detect_failure
+
+      result_text = str(mr_result) if 'mr_result' in dir() and mr_result else ""
+      failure = detect_failure(result_text, "gitlab_mr_create")
+      result = failure
+    output: failure_mr
+    on_error: continue
+
+  - name: quick_fix_vpn_mr
+    description: "Auto-fix VPN issues for GitLab"
+    condition: "failure_mr and failure_mr.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_mr
+    on_error: continue
+
+  - name: retry_create_mr
+    description: "Retry GitLab MR create after VPN fix"
+    condition: "vpn_fix_mr and failure_mr"
+    tool: gitlab_mr_create
+    args:
+      project: "app-interface"
+      title: "tower-analytics: release {{ inputs.commit_sha[:12] }} to production"
+      description: "Release {{ inputs.commit_sha[:12] }} to production"
+      target_branch: "master"
+      source_branch: "{{ branch_name }}"
+      draft: false
+    output: mr_result_retry
+    on_error: continue
+
+  - name: merge_mr_result
+    description: "Use retry result if available"
+    condition: "mr_result_retry"
+    compute: |
+      result = mr_result_retry
     output: mr_result
 
   # ==================== UPDATE JIRA ====================

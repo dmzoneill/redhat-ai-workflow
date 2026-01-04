@@ -17,7 +17,7 @@ description: |
   Uses MCP tools: jira_view_issue, git_fetch, git_branch_list, git_checkout,
                   git_branch_create, git_pull, gitlab_mr_list, gitlab_mr_view,
                   gitlab_mr_comments, gitlab_ci_status, jira_set_status
-version: "1.4"
+version: "1.5"
 
 inputs:
   - name: issue_key
@@ -178,9 +178,33 @@ steps:
     output: failure_issue
     on_error: continue
 
+  - name: quick_fix_vpn_issue
+    description: "Auto-fix VPN issues for Jira"
+    condition: "failure_issue and failure_issue.get('error_type') == 'network'"
+    tool: vpn_connect
+    args: {}
+    output: vpn_fix_issue
+    on_error: continue
+
+  - name: retry_get_issue
+    description: "Retry Jira call after VPN fix"
+    condition: "vpn_fix_issue and failure_issue"
+    tool: jira_view_issue
+    args:
+      issue_key: "{{ validated_issue_key }}"
+    output: issue_retry
+    on_error: continue
+
+  - name: merge_issue_result
+    description: "Use retry result if available"
+    condition: "issue_retry"
+    compute: |
+      result = issue_retry
+    output: issue
+
   - name: log_failure_issue
     description: "Log failure to memory for learning"
-    condition: "failure_issue and failure_issue.get('failed')"
+    condition: "failure_issue and failure_issue.get('failed') and not issue_retry"
     compute: |
       from scripts.common.auto_heal import log_failure
 
