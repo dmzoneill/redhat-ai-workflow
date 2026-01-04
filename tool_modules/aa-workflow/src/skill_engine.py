@@ -18,10 +18,10 @@ from mcp.types import TextContent
 
 # Support both package import and direct loading
 try:
-    from .constants import SKILLS_DIR
+    from .constants import SKILLS_DIR, TOOL_MODULES_DIR
 except ImportError:
-    SERVERS_DIR_LOCAL = Path(__file__).parent.parent.parent
-    PROJECT_DIR = SERVERS_DIR_LOCAL.parent
+    TOOL_MODULES_DIR = Path(__file__).parent.parent.parent
+    PROJECT_DIR = TOOL_MODULES_DIR.parent
     SKILLS_DIR = PROJECT_DIR / "skills"
 
 if TYPE_CHECKING:
@@ -29,11 +29,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import load_config
+from server.utils import load_config
+
+# Import known issues checker from debuggable module
+try:
+    from server.debuggable import _check_known_issues_sync, _format_known_issues
+except ImportError:
+    # Fallback if debuggable not available
+    def _check_known_issues_sync(tool_name="", error_text=""):
+        return []
+
+    def _format_known_issues(matches):
+        return ""
 
 
 class SkillExecutor:
@@ -207,9 +218,9 @@ class SkillExecutor:
             sys.path.insert(0, str(PROJECT_ROOT))
 
         try:
-            from scripts.common import jira_utils
+            from scripts.common import config_loader, jira_utils, lint_utils
             from scripts.common import memory as memory_helpers
-            from scripts.common import parsers
+            from scripts.common import parsers, repo_utils, slack_utils
             from scripts.common.config_loader import get_timezone
             from scripts.common.config_loader import load_config as load_skill_config
             from scripts.skill_hooks import emit_event_sync
@@ -220,6 +231,10 @@ class SkillExecutor:
             get_timezone = None
             emit_event_sync = None
             memory_helpers = None
+            config_loader = None
+            lint_utils = None
+            repo_utils = None
+            slack_utils = None
 
         try:
             from google.oauth2.credentials import Credentials as GoogleCredentials
@@ -285,6 +300,11 @@ class SkillExecutor:
             "get_timezone": get_timezone,
             "GoogleCredentials": GoogleCredentials,
             "google_build": google_build,
+            # New shared utilities
+            "config_loader": config_loader,
+            "lint_utils": lint_utils,
+            "repo_utils": repo_utils,
+            "slack_utils": slack_utils,
         }
 
         try:
@@ -339,16 +359,22 @@ class SkillExecutor:
             "bonfire_": "bonfire",
             "quay_": "quay",
             "appinterface_": "appinterface",
-            "workflow_": "workflow",
-            "lint_": "workflow",
-            "test_": "workflow",
-            "security_": "workflow",
-            "precommit_": "workflow",
+            # Lint module tools (developer-specific)
+            "lint_": "lint",
+            "test_": "lint",
+            "security_": "lint",
+            "precommit_": "lint",
+            # Dev-workflow module tools (developer-specific)
+            "workflow_": "dev-workflow",
+            # Core workflow module tools (always loaded)
             "memory_": "workflow",
-            "agent_": "workflow",
+            "persona_": "workflow",
             "skill_": "workflow",
             "session_": "workflow",
             "tool_": "workflow",
+            "vpn_": "workflow",
+            "kube_": "workflow",
+            "debug_": "workflow",
         }
 
         module = None
@@ -375,7 +401,7 @@ class SkillExecutor:
             except Exception as e:
                 return {"success": False, "error": str(e)}
 
-        tools_file = SERVERS_DIR / f"aa-{module}" / "src" / "tools.py"
+        tools_file = TOOL_MODULES_DIR / f"aa-{module}" / "src" / "tools.py"
 
         if not tools_file.exists():
             return {"success": False, "error": f"Module not found: {module}"}
@@ -408,8 +434,18 @@ class SkillExecutor:
             return {"success": True, "result": str(result), "duration": duration}
 
         except Exception as e:
-            self._debug(f"  → Error: {e}")
-            return {"success": False, "error": str(e)}
+            error_msg = str(e)
+            self._debug(f"  → Error: {error_msg}")
+
+            # Check for known issues
+            matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
+            known_text = _format_known_issues(matches)
+
+            if known_text:
+                error_msg = f"{error_msg}\n{known_text}"
+                self._debug(f"  → Found {len(matches)} known issue(s)")
+
+            return {"success": False, "error": error_msg}
 
     async def execute(self) -> str:
         """Execute all steps and return the result."""
