@@ -33,6 +33,21 @@ inputs:
     default: true
     description: "Auto-transition New → Refinement when ready"
 
+  - name: epic_key
+    type: string
+    required: false
+    description: "Epic key to link issue to (e.g., AAP-50000). If provided with auto_fix, will set epic."
+
+  - name: story_points
+    type: integer
+    required: false
+    description: "Story points to set (e.g., 3). If provided with auto_fix, will set points."
+
+  - name: priority
+    type: string
+    required: false
+    description: "Priority to set (e.g., 'Major'). If provided with auto_fix, will set priority."
+
 # No hardcoded constants - resolved dynamically
 
 steps:
@@ -295,59 +310,111 @@ steps:
 
   # ==================== AUTO-FIX WHERE POSSIBLE ====================
 
-  # Step 4: Apply auto-fixes
-  # Check if status needs transition
-  - name: check_status_fix_needed
-    description: "Check if status transition is needed"
-    condition: "{{ inputs.auto_fix and validation.can_fix }}"
+  # Step 4: Prepare fixes - determine what can be auto-fixed
+  - name: prepare_fixes
+    description: "Determine which fixes to apply automatically"
+    condition: "{{ inputs.auto_fix }}"
     compute: |
-      needs_status_fix = False
-      other_fixes = []
+      auto_fix = inputs.get('auto_fix', False) if isinstance(inputs, dict) else getattr(inputs, 'auto_fix', False)
+      auto_transition = inputs.get('auto_transition', True) if isinstance(inputs, dict) else getattr(inputs, 'auto_transition', True)
+
+      fixes_to_apply = {
+        "status": False,
+        "priority": None,
+        "story_points": None,
+        "epic": None,
+      }
 
       for fix in validation.get('can_fix', []):
-        if fix['field'] == 'status' and inputs.get('auto_transition'):
-          needs_status_fix = True
-        else:
-          other_fixes.append(fix)
+        field = fix.get('field')
+        value = fix.get('value')
 
-      result = {"needs_status_fix": needs_status_fix, "other_fixes": other_fixes}
-    output: fix_check
+        if field == 'status' and auto_transition:
+          fixes_to_apply["status"] = True
+        elif field == 'priority' and value:
+          fixes_to_apply["priority"] = value
 
-  # Apply status transition using MCP tool
+      # Check inputs for user-provided values (override detected fixes)
+      epic_key = inputs.get('epic_key', '') if isinstance(inputs, dict) else getattr(inputs, 'epic_key', '')
+      story_points = inputs.get('story_points', None) if isinstance(inputs, dict) else getattr(inputs, 'story_points', None)
+      priority_input = inputs.get('priority', '') if isinstance(inputs, dict) else getattr(inputs, 'priority', '')
+
+      if epic_key:
+        fixes_to_apply["epic"] = epic_key
+      if story_points:
+        fixes_to_apply["story_points"] = story_points
+      if priority_input:
+        fixes_to_apply["priority"] = priority_input
+
+      result = fixes_to_apply
+    output: fixes_to_apply
+
+  # Apply status transition
   - name: apply_status_transition
-    description: "Transition issue status"
-    condition: "{{ fix_check.needs_status_fix }}"
+    description: "Transition issue status to Refinement"
+    condition: "{{ fixes_to_apply.status }}"
     tool: jira_set_status
     args:
       issue_key: "{{ inputs.issue_key }}"
       status: "Refinement"
-    output: status_transition_raw
+    output: status_result
     on_error: continue
 
-  # Apply other fixes
-  - name: apply_other_fixes
-    description: "Apply remaining fixes"
-    condition: "{{ inputs.auto_fix and validation.can_fix }}"
+  # Apply priority fix
+  - name: apply_priority_fix
+    description: "Set missing priority"
+    condition: "{{ fixes_to_apply.priority }}"
+    tool: jira_set_priority
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      priority: "{{ fixes_to_apply.priority }}"
+    output: priority_result
+    on_error: continue
+
+  # Apply epic link fix
+  - name: apply_epic_fix
+    description: "Link issue to epic"
+    condition: "{{ fixes_to_apply.epic }}"
+    tool: jira_set_epic
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      epic_key: "{{ fixes_to_apply.epic }}"
+    output: epic_result
+    on_error: continue
+
+  # Apply story points fix
+  - name: apply_story_points_fix
+    description: "Set story points"
+    condition: "{{ fixes_to_apply.story_points }}"
+    tool: jira_set_story_points
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      points: "{{ fixes_to_apply.story_points }}"
+    output: points_result
+    on_error: continue
+
+  # Collect fix results
+  - name: collect_fix_results
+    description: "Summarize what was fixed"
     compute: |
       fixed = []
       failed = []
 
-      # Handle status transition result
-      if 'status_transition_raw' in dir() and status_transition_raw:
-        if "✅" in str(status_transition_raw) or "success" in str(status_transition_raw).lower():
-          fixed.append("✅ Status: New → Refinement")
-        elif "❌" in str(status_transition_raw):
-          failed.append(f"❌ Could not transition status: {str(status_transition_raw)[:100]}")
+      # Check each result
+      results = [
+        ("Status → Refinement", 'status_result'),
+        ("Priority", 'priority_result'),
+        ("Epic link", 'epic_result'),
+        ("Story points", 'points_result'),
+      ]
 
-      # Handle other fixes
-      for fix in fix_check.get('other_fixes', []):
-        field = fix['field']
-        value = fix.get('value')
-
-        if field == 'priority' and value:
-          fixed.append(f"⚠️ Priority should be set to: {value} (manual)")
-        elif field == 'component' and value:
-          fixed.append(f"⚠️ Component should be: {value} (manual)")
+      for label, var_name in results:
+        if var_name in dir():
+          result_val = eval(var_name)
+          if result_val and "✅" in str(result_val):
+            fixed.append(f"✅ {label}")
+          elif result_val and "❌" in str(result_val):
+            failed.append(f"❌ {label}: {str(result_val)[:80]}")
 
       result = {"fixed": fixed, "failed": failed}
     output: fix_results
