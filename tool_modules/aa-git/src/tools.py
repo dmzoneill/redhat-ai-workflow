@@ -11,11 +11,11 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Add aa-common to path for shared utilities
-SERVERS_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(SERVERS_DIR / "aa-common"))
+# Add project root to path for server utilities
+PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
 
-from src.utils import resolve_repo_path, run_cmd
+from server.utils import resolve_repo_path, run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -540,9 +540,45 @@ def register_tools(server: FastMCP) -> int:
         issue_key: str = "",
         commit_type: str = "",
         scope: str = "",
+        run_lint: bool = False,
     ) -> str:
-        """Commit staged changes with optional conventional commit format."""
+        """
+        Commit staged changes with optional conventional commit format.
+
+        Args:
+            repo: Repository path
+            message: Commit message
+            all_changes: Stage all changes before commit (-a flag)
+            issue_key: Jira issue key for conventional commit prefix
+            commit_type: Commit type (feat, fix, refactor, etc.)
+            scope: Optional scope for conventional commit
+            run_lint: Run black/flake8 check before committing (blocks on errors)
+
+        Returns:
+            Commit result or lint error.
+        """
         path = resolve_repo_path(repo)
+
+        # Auto-detect issue key from branch name if not provided
+        if not issue_key:
+            import re
+            success, branch_name = await run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
+            if success and branch_name:
+                match = re.match(r"(AAP-\d{4,6})", branch_name.strip())
+                if match:
+                    issue_key = match.group(1)
+
+        # Run linting if requested
+        if run_lint:
+            try:
+                from scripts.common.lint_utils import format_lint_error, run_lint_check
+
+                lint_result = run_lint_check(path)
+                if not lint_result.passed:
+                    return format_lint_error(lint_result)
+            except ImportError:
+                # Fallback if lint_utils not available
+                pass
 
         if issue_key:
             if not commit_type:
@@ -588,6 +624,7 @@ def register_tools(server: FastMCP) -> int:
         set_upstream: bool = False,
         force: bool = False,
         dry_run: bool = False,
+        run_lint: bool = False,
     ) -> str:
         """
         Push commits to remote.
@@ -598,11 +635,24 @@ def register_tools(server: FastMCP) -> int:
             set_upstream: Set upstream tracking (-u flag)
             force: Force push with lease (--force-with-lease)
             dry_run: Show what would be pushed without pushing
+            run_lint: Run black/flake8 check before pushing (blocks on errors)
 
         Returns:
-            Push result.
+            Push result or lint error.
         """
         path = resolve_repo_path(repo)
+
+        # Run linting if requested
+        if run_lint:
+            try:
+                from scripts.common.lint_utils import format_lint_error, run_lint_check
+
+                lint_result = run_lint_check(path)
+                if not lint_result.passed:
+                    return format_lint_error(lint_result)
+            except ImportError:
+                # Fallback if lint_utils not available
+                pass
 
         args = ["push"]
         if dry_run:
