@@ -26,7 +26,7 @@ Tool modules are MCP plugins that provide specific capabilities. Each module con
 
 **Total:** ~260+ tools across 16 modules
 
-> Plus **44 shared parsers** in `scripts/common/parsers.py` for reusable output parsing (including `extract_web_url`, `extract_mr_url`)
+> Plus **45 shared parsers** in `scripts/common/parsers.py` for reusable output parsing (including `extract_web_url`, `extract_mr_url`)
 
 ## Architecture
 

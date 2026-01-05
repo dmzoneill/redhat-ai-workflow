@@ -1,18 +1,33 @@
 # Skill Auto-Heal Implementation Plan
 
-## ✅ Status: COMPLETE
+## ✅ Status: COMPLETE (Refactored to Python Decorator)
 
-**All 42 production skills now include auto-healing.**
+**Auto-healing is now implemented via Python decorators in `server/auto_heal_decorator.py`.**
+
+> **Note:** This plan originally described YAML-based auto-heal blocks in skills. That approach has been **refactored** to use Python decorators applied directly to MCP tools. This eliminates ~1,800 lines of duplicated YAML and provides a single point of maintenance.
 
 | Metric | Count |
 |--------|-------|
-| Skills with auto-heal | 42 ✅ |
-| Skills that should have auto-heal | 0 remaining |
+| Tools with auto-heal decorators | 42+ ✅ |
+| Skills with manual auto-heal blocks | 0 (removed) |
 | Skills that are utility/internal (no auto-heal needed) | 8 |
+
+### New Approach: Python Decorators
+
+```python
+from server.auto_heal_decorator import auto_heal_k8s
+
+@registry.tool()
+@auto_heal_k8s()
+async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
+    ...
+```
+
+See `server/auto_heal_decorator.py` for implementation and `docs/plans/code-deduplication.md` for the refactoring details.
 
 ---
 
-## Overview
+## Overview (Original Plan - Historical)
 
 This document outlines the changes required to enable **auto-heal** capabilities across all skills. When a tool fails, the skill:
 

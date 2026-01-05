@@ -198,37 +198,32 @@ Skills are reusable multi-step workflows with **built-in auto-healing**. See [fu
 | [🎫 create_jira_issue](docs/skills/create_jira_issue.md) | Create Jira issue | ✅ |
 | [✅ close_issue](docs/skills/close_issue.md) | Close issue with summary | ✅ VPN |
 
-### 🔄 Auto-Heal in Skills
+### 🔄 Auto-Heal via Python Decorators
 
-All 42 production skills include **auto-healing** - when a tool fails due to VPN or auth issues, the skill automatically:
+MCP tools include **auto-healing** via Python decorators (`server/auto_heal_decorator.py`). When a tool fails due to VPN or auth issues:
 
-1. **Detects** the failure (network timeout, unauthorized, forbidden)
+1. **Detects** the failure pattern (network timeout, unauthorized, forbidden)
 2. **Fixes** by calling `vpn_connect()` or `kube_login()`
-3. **Retries** the failed operation
+3. **Retries** the operation automatically
 4. **Logs** the failure to memory for analysis
 
-```yaml
-# Example auto-heal pattern in skills
-- name: call_kubectl
-  tool: kubectl_get_pods
-  args: { namespace: "{{ namespace }}" }
-  on_error: continue
+```python
+from server.auto_heal_decorator import auto_heal_k8s
 
-- name: detect_failure
-  condition: "'error' in str(call_kubectl) or '❌' in str(call_kubectl)"
-  compute: |
-    needs_vpn = 'no route' in str(call_kubectl).lower()
-    needs_auth = 'unauthorized' in str(call_kubectl).lower()
-
-- name: quick_fix_vpn
-  condition: "needs_vpn"
-  tool: vpn_connect
-
-- name: retry_kubectl
-  condition: "needs_vpn or needs_auth"
-  tool: kubectl_get_pods
-  args: { namespace: "{{ namespace }}" }
+@registry.tool()
+@auto_heal_k8s()
+async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
+    """Get pods - auto-heals VPN/auth failures."""
+    ...
 ```
+
+| Decorator | Use Case |
+|-----------|----------|
+| `@auto_heal_ephemeral()` | Bonfire namespace tools |
+| `@auto_heal_konflux()` | Tekton pipeline tools |
+| `@auto_heal_k8s()` | Kubectl tools |
+| `@auto_heal_jira()` | Jira tools |
+| `@auto_heal_git()` | Git/GitLab tools |
 
 ---
 
@@ -286,7 +281,7 @@ All 42 production skills include **auto-healing** - when a tool fails due to VPN
 | [konflux](docs/tool-modules/konflux.md) | 40 | Build pipelines |
 | [appinterface](docs/tool-modules/appinterface.md) | 8 | GitOps config |
 
-> Plus **44 shared parsers** in `scripts/common/parsers.py` for reusable output parsing
+> Plus **45 shared parsers** in `scripts/common/parsers.py` for reusable output parsing
 
 See [MCP Server Architecture](docs/architecture/README.md) for implementation details.
 
