@@ -479,7 +479,7 @@ pylint --disable=all --enable=unused-import tool_modules/
 
 ### Low Priority (High Effort)
 
-8. **Auto-heal templating** - Would save 500+ lines but complex to implement
+8. ~~**Auto-heal templating**~~ → Implemented as decorator instead (see code-deduplication.md)
 9. **Response builder** - Stylistic, current approach is fine
 
 ---
@@ -496,6 +496,44 @@ pylint --disable=all --enable=unused-import tool_modules/
 **Completed:** 2026-01-05
 **Estimated savings:** ~40 lines + much better consistency
 
+---
+
+## Medium Priority Implementation (2026-01-05)
+
+### CLI Runner Consolidation ✅
+
+Created `server/cli_runner.py` with:
+- `CLIRunner` class for configurable command execution
+- Factory functions: `git_runner()`, `glab_runner()`, `bonfire_runner()`, etc.
+- Auth/network error pattern detection
+- Shell mode support for commands needing `~/.bashrc`
+
+### HTTP Client Consolidation ✅
+
+Created `server/http_client.py` with:
+- `APIClient` class for reusable async HTTP requests
+- Factory functions: `prometheus_client()`, `alertmanager_client()`, `kibana_client()`, `quay_client()`
+- Consistent error handling (401, 404, timeouts)
+- Bearer token authentication
+
+Updated modules: `aa-prometheus`, `aa-alertmanager`, `aa-kibana`, `aa-quay`
+
+### Exception Handling ✅
+
+Improved bare `except Exception` catches with specific exceptions:
+- JSON parsing errors
+- OS/file errors
+- HTTP request errors
+
+### Additional Inline Truncation Fixes ✅
+
+Fixed remaining inline truncations in:
+- `aa-bonfire` (7 occurrences)
+- `aa-git` (2 occurrences)
+- `aa-dev-workflow` (2 occurrences)
+
+---
+
 ### New Files Created
 
 - `server/timeouts.py` - Contains:
@@ -504,3 +542,11 @@ pylint --disable=all --enable=unused-import tool_modules/
   - `parse_duration_to_minutes()` function
   - `Environment` type alias
   - `DEFAULT_ENVIRONMENT` constant
+
+- `server/cli_runner.py` - Contains:
+  - `CLIRunner` class
+  - Factory functions for common CLI tools
+
+- `server/http_client.py` - Contains:
+  - `APIClient` class
+  - Factory functions for common HTTP services

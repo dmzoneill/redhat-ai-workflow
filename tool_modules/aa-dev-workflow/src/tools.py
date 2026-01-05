@@ -271,7 +271,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
         # 1. Fetch latest
         success, stdout, stderr = await run_cmd(["git", "fetch", "--all", "--prune"], cwd=path)
         lines.append("### 1. Fetch latest")
-        lines.append("✅ Fetched" if success else f"⚠️ {stderr[:50]}")
+        lines.append("✅ Fetched" if success else f"⚠️ {truncate_output(stderr, 50)}")
 
         # 2. Check for existing branch
         success, stdout, stderr = await run_cmd(["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path)
@@ -446,7 +446,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
         if success:
             lines.append(f"```\n{stdout}\n```")
         else:
-            lines.append(f"⚠️ {stderr[:100]}")
+            lines.append(f"⚠️ {truncate_output(stderr, 100)}")
 
         # Konflux hint
         lines.append("\n### Konflux")

@@ -463,7 +463,7 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if not success:
             return [TextContent(type="text", text=f"❌ Deployment failed:\n\n```\n{output}\n```")]
 
-        display_output = output[-5000:] if len(output) > 5000 else output
+        display_output = truncate_output(output, 5000, mode="tail")
 
         lines = [
             f"## ✅ Deployed `{app}`",
@@ -519,7 +519,7 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if not success:
             return [TextContent(type="text", text=f"❌ Deploy with reserve failed:\n\n```\n{output}\n```")]
 
-        display_output = output[-5000:] if len(output) > 5000 else output
+        display_output = truncate_output(output, 5000, mode="tail")
 
         return [TextContent(type="text", text=f"## ✅ Reserved & Deployed `{app}`\n\n```\n{display_output}\n```")]
 
@@ -938,7 +938,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
                 )
             ]
 
-        display_output = output[-5000:] if len(output) > 5000 else output
+        display_output = truncate_output(output, 5000, mode="tail")
 
         lines = [
             f"## ✅ Deployed Automation Analytics ({'billing' if billing else 'main'})",
@@ -1037,7 +1037,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
                 )
             ]
 
-        display_output = output[-5000:] if len(output) > 5000 else output
+        display_output = truncate_output(output, 5000, mode="tail")
 
         return [
             TextContent(
@@ -1148,7 +1148,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
         success, output = await run_bonfire(deploy_args, timeout=960)
 
         if not success:
-            lines.append(f"❌ Deployment failed:\n```\n{output[-2000:]}\n```")
+            lines.append(f"❌ Deployment failed:\n```\n{truncate_output(output, 2000, mode='tail')}\n```")
             lines.append(
                 f"\n⚠️ Namespace `{namespace}` still reserved. "
                 f"Release with: `bonfire_namespace_release(namespace='{namespace}')`"
@@ -1175,7 +1175,8 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
             success, output = await run_bonfire(iqe_args, timeout=660)
 
             if not success:
-                lines.append(f"⚠️ IQE deployment failed (app is still running):\n```\n{output[-1000:]}\n```")
+                truncated = truncate_output(output, 1000, mode="tail")
+                lines.append(f"⚠️ IQE deployment failed (app is still running):\n```\n{truncated}\n```")
             else:
                 lines.append("✅ IQE CJI deployed")
 
@@ -1332,7 +1333,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
         success, output = await run_bonfire(deploy_args, timeout=timeout + 60)
 
         if not success:
-            lines.append(f"❌ Deployment failed:\n```\n{output[-2000:]}\n```")
+            lines.append(f"❌ Deployment failed:\n```\n{truncate_output(output, 2000, mode='tail')}\n```")
         else:
             lines.append(f"✅ Deployed `{component}` from snapshot!")
             lines.append(f"\n**Namespace:** `{namespace}`")
