@@ -25,9 +25,9 @@ This document tracks the refactoring effort to reduce code duplication and impro
 | P2 | Response Builder Utilities | Medium | Low | ✅ Completed |
 | P3 | Project Path Bootstrap | Low | Low | ✅ Completed |
 | P3 | Tool Registration Helper | Low | Low | ✅ Completed |
-| P2 | CLI Runner Consolidation | Medium | Medium | ⏸️ Deferred |
+| P2 | CLI Runner Consolidation | Medium | Medium | ✅ Completed |
 | P1 | **Auto-Heal Decorator** | **High** | **Medium** | ✅ **Completed** |
-| P2 | HTTP Client Consolidation | Medium | Medium | ⏸️ Deferred |
+| P2 | HTTP Client Consolidation | Medium | Medium | ✅ Completed |
 
 ---
 
