@@ -168,8 +168,10 @@ def load_config(reload: bool = False) -> dict:
             with open(config_path) as f:
                 _config_cache = json.load(f)
                 return _config_cache
-    except Exception as e:
-        logger.warning(f"Failed to load config.json: {e}")
+    except json.JSONDecodeError as e:
+        logger.warning(f"Invalid JSON in config.json: {e}")
+    except OSError as e:
+        logger.warning(f"Failed to read config.json: {e}")
 
     return {}
 

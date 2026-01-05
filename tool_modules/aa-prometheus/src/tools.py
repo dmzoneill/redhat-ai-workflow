@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_stage
+from server.http_client import prometheus_client
 from server.timeouts import parse_duration_to_minutes
 from server.tool_registry import ToolRegistry
 from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
@@ -33,25 +34,12 @@ async def prometheus_api_request(
     token: str | None = None,
     timeout: int = 30,
 ) -> tuple[bool, dict | str]:
-    """Make a request to Prometheus API."""
-    import httpx
-
-    full_url = f"{url.rstrip('/')}{endpoint}"
-    headers = {"Accept": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
+    """Make a request to Prometheus API using shared HTTP client."""
+    client = prometheus_client(url, token, timeout)
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            response = await client.get(full_url, headers=headers, params=params)
-
-            if response.status_code == 401:
-                return False, "Authentication required. Run: kube s (or kube p) to authenticate."
-
-            response.raise_for_status()
-            return True, response.json()
-    except Exception as e:
-        return False, str(e)
+        return await client.get(endpoint, params=params)
+    finally:
+        await client.close()
 
 
 async def get_prometheus_config(environment: str) -> tuple[str, str | None]:

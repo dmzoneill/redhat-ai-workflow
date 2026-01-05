@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_stage
+from server.http_client import alertmanager_client
 from server.timeouts import parse_duration_to_minutes
 from server.tool_registry import ToolRegistry
 from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
@@ -33,39 +34,19 @@ async def alertmanager_request(
     token: str | None = None,
     timeout: int = 30,
 ) -> tuple[bool, dict | str]:
-    """Make a request to Alertmanager API."""
-    import httpx
-
-    base_url = url.rstrip("/")
-    full_url = f"{base_url}/api/v2{endpoint}"
-
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
+    """Make a request to Alertmanager API using shared HTTP client."""
+    client = alertmanager_client(url, token, timeout)
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            if method == "GET":
-                response = await client.get(full_url, headers=headers)
-            elif method == "POST":
-                response = await client.post(full_url, headers=headers, json=data)
-            elif method == "DELETE":
-                response = await client.delete(full_url, headers=headers)
-            else:
-                return False, f"Unsupported method: {method}"
-
-            if response.status_code == 401:
-                return False, "Authentication required"
-
-            if response.status_code >= 400:
-                return False, f"HTTP {response.status_code}: {response.text[:200]}"
-
-            try:
-                return True, response.json()
-            except (ValueError, TypeError):
-                return True, response.text
-    except Exception as e:
-        return False, str(e)
+        if method == "GET":
+            return await client.get(endpoint)
+        elif method == "POST":
+            return await client.post(endpoint, json=data)
+        elif method == "DELETE":
+            return await client.delete(endpoint)
+        else:
+            return False, f"Unsupported method: {method}"
+    finally:
+        await client.close()
 
 
 async def get_alertmanager_config(environment: str) -> tuple[str, str | None]:
