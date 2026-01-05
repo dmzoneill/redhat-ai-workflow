@@ -64,20 +64,22 @@ Skills are **reusable multi-step workflows** that chain MCP tools together with 
 
 ## 🔄 Auto-Heal Feature
 
-All production skills include automatic remediation for common failures:
+All production skills include automatic remediation for common failures via **Python decorators** applied to MCP tools.
 
 ### How It Works
+
+Auto-healing is now implemented at the **tool level** using decorators in `server/auto_heal_decorator.py`:
 
 ```mermaid
 graph LR
     A[Tool Call] --> B{Success?}
-    B -->|Yes| C[Continue]
-    B -->|No| D[Detect Failure]
+    B -->|Yes| C[Return Result]
+    B -->|No| D[@auto_heal Decorator]
     D --> E{VPN Issue?}
     E -->|Yes| F[vpn_connect]
     E -->|No| G{Auth Issue?}
     G -->|Yes| H[kube_login]
-    G -->|No| I[Log & Report]
+    G -->|No| I[Return Error]
     F --> J[Retry Tool]
     H --> J
     J --> C
@@ -93,53 +95,32 @@ graph LR
 | "Forbidden" / "403" | Auth issue | `kube_login(cluster)` |
 | "Token expired" | Auth expired | `kube_login(cluster)` |
 
-### Example in Skill YAML
+### Auto-Heal Decorators
 
-```yaml
-# Original tool call
-- name: get_pods
-  tool: kubectl_get_pods
-  args:
-    namespace: "{{ namespace }}"
-    environment: "{{ env }}"
-  output: pods_result
-  on_error: continue
+| Decorator | Environment | Use Case |
+|-----------|-------------|----------|
+| `@auto_heal_ephemeral()` | Ephemeral | Bonfire namespace tools |
+| `@auto_heal_konflux()` | Konflux | Tekton pipeline tools |
+| `@auto_heal_k8s()` | Stage/Prod | Kubectl tools |
+| `@auto_heal_stage()` | Stage | Prometheus, Alertmanager, Kibana |
+| `@auto_heal_jira()` | - | Jira tools (auth only) |
+| `@auto_heal_git()` | - | Git/GitLab tools (VPN only) |
 
-# Detect failure
-- name: detect_failure_pods
-  condition: "pods_result and ('❌' in str(pods_result) or 'error' in str(pods_result).lower())"
-  compute: |
-    error_text = str(pods_result)[:300].lower()
-    result = {
-      "failed": True,
-      "needs_vpn": any(x in error_text for x in ['no route', 'timeout', 'connection refused']),
-      "needs_auth": any(x in error_text for x in ['unauthorized', '401', 'forbidden', '403']),
-    }
-  output: failure_pods
+### Example Tool with Auto-Heal
 
-# Auto-fix VPN
-- name: quick_fix_vpn_pods
-  condition: "failure_pods and failure_pods.get('needs_vpn')"
-  tool: vpn_connect
-  on_error: continue
+```python
+from server.auto_heal_decorator import auto_heal_k8s
 
-# Auto-fix Auth
-- name: quick_fix_auth_pods
-  condition: "failure_pods and failure_pods.get('needs_auth')"
-  tool: kube_login
-  args:
-    cluster: "{{ env }}"
-  on_error: continue
-
-# Retry after fix
-- name: retry_get_pods
-  condition: "failure_pods"
-  tool: kubectl_get_pods
-  args:
-    namespace: "{{ namespace }}"
-    environment: "{{ env }}"
-  output: pods_retry_result
+@registry.tool()
+@auto_heal_k8s()
+async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
+    """Get pods in a namespace with auto-healing."""
+    # If this fails with auth/VPN issues, the decorator
+    # automatically runs kube_login or vpn_connect and retries
+    ...
 ```
+
+Skills no longer need to include manual auto-heal YAML blocks - the decorator handles it automatically.
 
 ## Daily Workflow
 

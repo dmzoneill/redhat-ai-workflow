@@ -34,7 +34,7 @@ This is a complete AI-powered development workflow system with **MCP Tools**, **
 │  - state/environments.yaml  - learned/runbooks.yaml    │
 ├─────────────────────────────────────────────────────────┤
 │  MCP TOOLS (tool_modules/)                               │
-│  219 tools across 12 modules                            │
+│  260+ tools across 16 modules                           │
 │  aa-git, aa-jira, aa-gitlab, aa-k8s, aa-prometheus...  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -75,24 +75,29 @@ Claude runs the `test_mr_ephemeral` skill automatically.
 
 ---
 
-## MCP Tools (219 total)
+## MCP Tools (260+ total)
 
 ### Tool Categories
 
 | Module | Tools | Purpose |
 |--------|-------|---------|
-| `aa-git` | 15 | Git operations (status, branch, commit, push) |
-| `aa-jira` | 24 | Jira issues (view, create, update, transition) |
+| `aa-workflow` | 30 | Core: agents, skills, memory, vpn, kube_login |
+| `aa-git` | 19 | Git operations (status, branch, commit, push) |
 | `aa-gitlab` | 35 | GitLab MRs, CI/CD pipelines |
+| `aa-jira` | 28 | Jira issues (view, create, update, transition) |
 | `aa-k8s` | 26 | Kubernetes (pods, deployments, logs) |
-| `aa-prometheus` | 13 | Prometheus queries, alerts, metrics |
-| `aa-alertmanager` | 6 | Silences, alert management |
-| `aa-kibana` | 9 | Log search and analysis |
-| `aa-konflux` | 40 | Konflux builds, Tekton, snapshots |
 | `aa-bonfire` | 21 | Ephemeral namespace management |
 | `aa-quay` | 8 | Container registry, vulnerabilities |
-| `aa-appinterface` | 6 | App-Interface validation |
-| `aa-workflow` | 16 | Orchestrated workflows |
+| `aa-prometheus` | 13 | Prometheus queries, alerts, metrics |
+| `aa-alertmanager` | 7 | Silences, alert management |
+| `aa-kibana` | 9 | Log search and analysis |
+| `aa-konflux` | 40 | Konflux builds, Tekton, snapshots |
+| `aa-appinterface` | 8 | App-Interface validation |
+| `aa-google-calendar` | 6 | Calendar & meetings |
+| `aa-gmail` | 6 | Email processing |
+| `aa-slack` | 16 | Slack integration |
+| `aa-lint` | 7 | Code linting and testing |
+| `aa-dev-workflow` | 9 | Development workflow helpers |
 
 ### Most-Used Tools
 

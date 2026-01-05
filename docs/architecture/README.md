@@ -74,7 +74,7 @@ Multi-step workflows that chain tools:
 - Template substitution (Jinja2)
 - Error handling
 - **Auto-heal patterns** for VPN/auth issues
-- **44 shared parsers** in `scripts/common/parsers.py`
+- **45 shared parsers** in `scripts/common/parsers.py`
 
 ### 💾 Memory
 
@@ -155,70 +155,53 @@ flowchart LR
     G --> H[Retry operation]
 ```
 
-### Skill-Level Auto-Heal
+### Tool-Level Auto-Heal (Python Decorator)
 
-All 42 production skills include auto-healing for VPN/auth:
+Auto-healing is now implemented at the **tool level** using Python decorators in `server/auto_heal_decorator.py`. This eliminates duplicated YAML blocks in skills.
 
 ```mermaid
 flowchart LR
     A[Tool Call] --> B{Success?}
-    B -->|Yes| C[Continue]
-    B -->|No| D[Detect Failure]
+    B -->|Yes| C[Return Result]
+    B -->|No| D[@auto_heal Decorator]
     D --> E{VPN Issue?}
     E -->|Yes| F[vpn_connect]
     E -->|No| G{Auth Issue?}
     G -->|Yes| H[kube_login]
-    G -->|No| I[Log & Report]
-    F --> J[Retry]
+    G -->|No| I[Return Error]
+    F --> J[Retry Tool]
     H --> J
     J --> C
 ```
 
-### Auto-Heal Pattern in Skills
+### Auto-Heal Decorators
 
-```yaml
-# Original tool call
-- name: get_pods
-  tool: kubectl_get_pods
-  args: { namespace: "{{ namespace }}" }
-  output: pods_result
-  on_error: continue
+| Decorator | Environment | Use Case |
+|-----------|-------------|----------|
+| `@auto_heal_ephemeral()` | Ephemeral | Bonfire namespace tools |
+| `@auto_heal_konflux()` | Konflux | Tekton pipeline tools |
+| `@auto_heal_k8s()` | Stage/Prod | Kubectl tools |
+| `@auto_heal_stage()` | Stage | Prometheus, Alertmanager, Kibana |
+| `@auto_heal_jira()` | - | Jira tools (auth only) |
+| `@auto_heal_git()` | - | Git/GitLab tools (VPN only) |
 
-# Detect failure
-- name: detect_failure_pods
-  condition: "pods_result and 'error' in str(pods_result).lower()"
-  compute: |
-    error_text = str(pods_result)[:300].lower()
-    result = {
-      "needs_vpn": 'no route' in error_text,
-      "needs_auth": 'unauthorized' in error_text,
-    }
-  output: failure_pods
+### Example Usage
 
-# Quick fix VPN
-- name: quick_fix_vpn_pods
-  condition: "failure_pods and failure_pods.get('needs_vpn')"
-  tool: vpn_connect
-  on_error: continue
+```python
+from server.auto_heal_decorator import auto_heal_k8s
 
-# Quick fix auth
-- name: quick_fix_auth_pods
-  condition: "failure_pods and failure_pods.get('needs_auth')"
-  tool: kube_login
-  args: { cluster: "{{ env }}" }
-  on_error: continue
-
-# Retry after fix
-- name: retry_get_pods
-  condition: "failure_pods"
-  tool: kubectl_get_pods
-  args: { namespace: "{{ namespace }}" }
-  output: pods_retry_result
+@registry.tool()
+@auto_heal_k8s()
+async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
+    """Get pods in a namespace with auto-healing."""
+    # If this fails with auth/VPN issues, the decorator
+    # automatically runs kube_login or vpn_connect and retries
+    ...
 ```
 
 ## Shared Utilities
 
-### MCP Tool Utilities (`server/src/utils.py`)
+### MCP Tool Utilities (`server/utils.py`)
 
 Common utilities shared across all MCP servers:
 
