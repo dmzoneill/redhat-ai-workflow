@@ -14,6 +14,7 @@ from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_stage
 from server.config import get_token_from_kubeconfig
+from server.http_client import kibana_client
 from server.tool_registry import ToolRegistry
 from server.utils import get_kubeconfig, load_config
 
@@ -119,49 +120,29 @@ async def kibana_request(
     method: str = "GET",
     data: dict | None = None,
 ) -> tuple[bool, dict | str]:
-    """Make authenticated request to Kibana."""
-    import httpx
-
+    """Make authenticated request to Kibana using shared HTTP client."""
     env_config = get_cached_kibana_config(environment)
     if not env_config:
         return (
             False,
-            f"Unknown environment: {environment}. " f"Configure in config.json or set KIBANA_{environment.upper()}_URL",
+            f"Unknown environment: {environment}. Configure in config.json or set KIBANA_{environment.upper()}_URL",
         )
 
     token = get_token(env_config.kubeconfig)
-
     if not token:
         return (
             False,
             f"No auth token. Run 'kube {env_config.kubeconfig.split('.')[-1]}' to authenticate",
         )
 
-    url = f"{env_config.url}{endpoint}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "kbn-xsrf": "true",
-        "Content-Type": "application/json",
-    }
-
+    client = kibana_client(env_config.url, token)
     try:
-        async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
-            if method == "GET":
-                response = await client.get(url, headers=headers)
-            else:
-                response = await client.post(url, headers=headers, json=data)
-
-            if response.status_code == 401:
-                return False, "Unauthorized - run 'kube s' or 'kube p' to authenticate"
-            elif response.status_code >= 400:
-                return False, f"Error {response.status_code}: {response.text[:500]}"
-
-            try:
-                return True, response.json()
-            except (ValueError, TypeError):
-                return True, response.text
-    except Exception as e:
-        return False, str(e)
+        if method == "GET":
+            return await client.get(endpoint)
+        else:
+            return await client.post(endpoint, json=data)
+    finally:
+        await client.close()
 
 
 def build_kibana_url(

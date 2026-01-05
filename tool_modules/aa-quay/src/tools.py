@@ -10,10 +10,10 @@ import logging
 import os
 import subprocess
 
-import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+from server.http_client import quay_client
 from server.utils import load_config
 
 # Setup project path for server imports
@@ -114,29 +114,13 @@ async def quay_api_request(
     method: str = "GET",
     params: dict | None = None,
 ) -> tuple[bool, dict | str]:
-    """Make a request to Quay.io API (fallback when skopeo fails)."""
-    url = f"{QUAY_API_URL}{endpoint}"
-    headers = {"Accept": "application/json"}
-
-    # Try to get token from environment
+    """Make a request to Quay.io API using shared HTTP client."""
     token = os.getenv("QUAY_TOKEN", "")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
+    client = quay_client(token if token else None)
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.request(method, url, headers=headers, params=params)
-
-            if response.status_code == 404:
-                return False, "Not found"
-            elif response.status_code == 401:
-                return False, "Unauthorized"
-            elif response.status_code >= 400:
-                return False, f"Error {response.status_code}"
-
-            return True, response.json()
-    except Exception as e:
-        return False, str(e)
+        return await client.request(method, endpoint, params=params)
+    finally:
+        await client.close()
 
 
 # ==================== Utilities ====================

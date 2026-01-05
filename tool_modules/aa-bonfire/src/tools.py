@@ -1281,8 +1281,12 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
             lines.append(f"**Image Digest:** `{image_digest[:16]}...`")
             lines.append("")
 
-        except Exception as e:
-            return [TextContent(type="text", text=f"❌ Failed to parse snapshot: {e}")]
+        except json_module.JSONDecodeError as e:
+            return [TextContent(type="text", text=f"❌ Invalid JSON in snapshot: {e}")]
+        except OSError as e:
+            return [TextContent(type="text", text=f"❌ Failed to read snapshot file: {e}")]
+        except (KeyError, TypeError) as e:
+            return [TextContent(type="text", text=f"❌ Failed to parse snapshot structure: {e}")]
 
         # Deploy using exact ITS pattern
         app_cfg = get_app_config(billing=billing)
