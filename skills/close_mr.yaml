@@ -47,34 +47,6 @@ steps:
     output: mr_details_raw
     on_error: continue
 
-  # ==================== AUTO-HEAL: get_mr_details ====================
-
-  - name: detect_failure_gitlab
-    description: "Detect if GitLab call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
-      failure = detect_failure(result_text, "gitlab_mr_view")
-      result = failure
-    output: failure_gitlab
-    on_error: continue
-
-  - name: log_failure_gitlab
-    description: "Log failure to memory"
-    condition: "failure_gitlab and failure_gitlab.get('failed')"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-      entry = log_failure(
-          tool_name="gitlab_mr_view",
-          error_text=failure_gitlab.get('error_text', ''),
-          skill_name="close_mr",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure
-    on_error: continue
-
   - name: extract_jira_key
     description: "Extract Jira key from MR"
     compute: |

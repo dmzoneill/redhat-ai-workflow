@@ -9,18 +9,15 @@ import json
 import logging
 import os
 import subprocess
-import sys
-from pathlib import Path
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
-
 from server.utils import load_config
+
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 logger = logging.getLogger(__name__)
 

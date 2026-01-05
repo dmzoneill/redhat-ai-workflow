@@ -13,7 +13,6 @@ Provides tools for:
 import json
 import logging
 import os
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,11 +21,10 @@ from mcp.types import TextContent
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
-
-from server.utils import load_config, resolve_repo_path, run_cmd_full
+# Setup project path for server imports
+from server.tool_registry import ToolRegistry
+from server.utils import load_config, resolve_repo_path, run_cmd_full, truncate_output
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +45,7 @@ def _resolve_repo_path_local(repo: str, repo_paths: dict) -> str:
 
 def register_tools(server: "FastMCP") -> int:
     """Register lint/test tools with the MCP server."""
-    tool_count = 0
+    registry = ToolRegistry(server)
 
     # Load repository paths from config
     config = load_config()
@@ -60,7 +58,7 @@ def register_tools(server: "FastMCP") -> int:
     def resolve_path(repo: str) -> str:
         return _resolve_repo_path_local(repo, repo_paths)
 
-    @server.tool()
+    @registry.tool()
     async def lint_python(
         repo: str,
         fix: bool = False,
@@ -97,7 +95,7 @@ def register_tools(server: "FastMCP") -> int:
             all_passed = False
             output = stderr or stdout
             if output:
-                lines.append(f"```\n{output[:1500]}\n```")
+                lines.append(f"```\n{truncate_output(output, max_length=1500)}\n```")
         lines.append("")
 
         # 2. isort
@@ -114,7 +112,7 @@ def register_tools(server: "FastMCP") -> int:
             all_passed = False
             output = stderr or stdout
             if output:
-                lines.append(f"```\n{output[:1500]}\n```")
+                lines.append(f"```\n{truncate_output(output, max_length=1500)}\n```")
         lines.append("")
 
         # 3. Flake8
@@ -128,7 +126,7 @@ def register_tools(server: "FastMCP") -> int:
             if stdout:
                 issue_count = len(stdout.strip().split("\n"))
                 lines.append(f"Found {issue_count} issues:")
-                lines.append(f"```\n{stdout[:2000]}\n```")
+                lines.append(f"```\n{truncate_output(stdout, max_length=2000)}\n```")
         lines.append("")
 
         # 4. mypy (optional)
@@ -143,7 +141,7 @@ def register_tools(server: "FastMCP") -> int:
             else:
                 lines.append("⚠️ Type issues")
                 if stdout:
-                    lines.append(f"```\n{stdout[:1500]}\n```")
+                    lines.append(f"```\n{truncate_output(stdout, max_length=1500)}\n```")
 
         # Summary
         lines.append("")
@@ -156,9 +154,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def lint_yaml(
         repo: str,
         path_filter: str = ".",
@@ -202,9 +198,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def lint_dockerfile(
         repo: str,
         dockerfile: str = "Dockerfile",
@@ -240,16 +234,14 @@ def register_tools(server: "FastMCP") -> int:
             if output:
                 lines.append("⚠️ Suggestions:")
                 lines.append("```")
-                lines.append(output[:2000])
+                lines.append(truncate_output(output, max_length=2000))
                 lines.append("```")
             else:
                 lines.append("❌ Linting failed")
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def test_run(
         repo: str,
         test_path: str = "",
@@ -316,18 +308,12 @@ def register_tools(server: "FastMCP") -> int:
 
         lines.append("\n### Output")
         lines.append("```")
-        if len(output) > 5000:
-            lines.append("... (truncated)\n")
-            lines.append(output[-4500:])
-        else:
-            lines.append(output)
+        lines.append(truncate_output(output, max_length=5000, mode="tail"))
         lines.append("```")
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def test_coverage(repo: str) -> list[TextContent]:
         """
         Get test coverage report.
@@ -373,13 +359,11 @@ def register_tools(server: "FastMCP") -> int:
             lines.append("```")
         else:
             lines.append("⚠️ Could not parse coverage output")
-            lines.append(f"```\n{output[:2000]}\n```")
+            lines.append(f"```\n{truncate_output(output, max_length=2000)}\n```")
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def security_scan(repo: str) -> list[TextContent]:
         """
         Run security scan (bandit for Python, npm audit for Node).
@@ -405,7 +389,7 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append("✅ No issues found")
             else:
                 output = stdout or stderr
-                lines.append(f"```\n{output[:2000]}\n```")
+                lines.append(f"```\n{truncate_output(output, max_length=2000)}\n```")
 
         if (Path(repo_path) / "package.json").exists():
             lines.append("\n### npm audit")
@@ -424,13 +408,11 @@ def register_tools(server: "FastMCP") -> int:
                         if count > 0:
                             lines.append(f"  - {severity}: {count}")
             except (json.JSONDecodeError, ValueError, TypeError, KeyError):
-                lines.append(f"```\n{stdout[:1500]}\n```")
+                lines.append(f"```\n{truncate_output(stdout, max_length=1500)}\n```")
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def precommit_run(
         repo: str,
         all_files: bool = False,
@@ -480,7 +462,5 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    logger.info(f"Registered {tool_count} lint tools")
-    return tool_count
+    logger.info(f"Registered {registry.count} lint tools")
+    return registry.count

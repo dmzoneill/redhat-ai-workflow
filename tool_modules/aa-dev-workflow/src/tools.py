@@ -14,18 +14,17 @@ Provides workflow tools for common development tasks:
 
 import logging
 import os
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
+from server.tool_registry import ToolRegistry
+from server.utils import load_config, resolve_repo_path, run_cmd_full, truncate_output
 
-from server.utils import load_config, resolve_repo_path, run_cmd_full
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -57,9 +56,9 @@ def resolve_path(repo: str) -> str:
 
 def register_tools(server: "FastMCP") -> int:
     """Register development workflow tools with the MCP server."""
-    tool_count = 0
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @registry.tool()
     async def workflow_start_work(issue_key: str) -> list[TextContent]:
         """
         Get all context needed to start working on a Jira issue.
@@ -121,9 +120,7 @@ View issue details: `jira_view_issue('{issue_key}')`
 
         return [TextContent(type="text", text=result)]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def workflow_check_deploy_readiness(
         project: str,
         mr_id: int,
@@ -186,9 +183,7 @@ quay_list_aa_tags()
 
         return [TextContent(type="text", text=result)]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def workflow_review_feedback(
         project: str,
         mr_id: int,
@@ -246,9 +241,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         return [TextContent(type="text", text=result)]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def workflow_create_branch(
         issue_key: str,
         repo: str,
@@ -302,9 +295,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def workflow_prepare_mr(
         issue_key: str,
         repo: str,
@@ -357,9 +348,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def workflow_run_local_checks(
         repo: str,
         skip_tests: bool = False,
@@ -399,7 +388,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
                     all_passed = False
                     output = stderr or stdout
                     if output:
-                        lines.append(f"```\n{output[:1000]}\n```")
+                        lines.append(f"```\n{truncate_output(output, max_length=1000)}\n```")
 
         if (Path(path) / "package.json").exists():
             # Node project
@@ -423,9 +412,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def workflow_monitor_pipelines(
         repo: str,
         branch: str = "",
@@ -467,9 +454,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def workflow_handle_review(
         issue_key: str,
         repo: str,
@@ -512,9 +497,7 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def workflow_daily_standup(
         author: str = "",
     ) -> list[TextContent]:
@@ -569,7 +552,5 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    logger.info(f"Registered {tool_count} dev-workflow tools")
-    return tool_count
+    logger.info(f"Registered {registry.count} dev-workflow tools")
+    return registry.count

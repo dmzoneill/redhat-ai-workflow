@@ -6,16 +6,15 @@ by the shared server infrastructure.
 
 import logging
 import os
-import sys
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
+from server.auto_heal_decorator import auto_heal
+from server.tool_registry import ToolRegistry
+from server.utils import resolve_repo_path, run_cmd, truncate_output
 
-from server.utils import resolve_repo_path, run_cmd
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +39,12 @@ def register_tools(server: FastMCP) -> int:
     Returns:
         Number of tools registered
     """
-    tool_count = 0
+    registry = ToolRegistry(server)
 
     # ==================== STATUS & INFO ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_status(repo: str) -> str:
         """
         Get the current status of a git repository.
@@ -111,9 +111,8 @@ def register_tools(server: FastMCP) -> int:
 
         return "\n".join(lines)
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_config_get(repo: str, key: str) -> str:
         """
         Get a git config value.
@@ -133,9 +132,8 @@ def register_tools(server: FastMCP) -> int:
 
         return output.strip()
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_branch_list(
         repo: str,
         all_branches: bool = False,
@@ -189,9 +187,8 @@ def register_tools(server: FastMCP) -> int:
 
         return "\n".join(lines)
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_log(
         repo: str,
         limit: int = 10,
@@ -317,9 +314,8 @@ def register_tools(server: FastMCP) -> int:
 
         return "\n".join(lines)
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_diff(repo: str, staged: bool = False, file: str = "") -> str:
         """Show uncommitted changes."""
         path = resolve_repo_path(repo)
@@ -344,9 +340,7 @@ def register_tools(server: FastMCP) -> int:
             args2.extend(["--", file])
 
         _, full_diff = await run_git(args2, cwd=path)
-
-        if len(full_diff) > 10000:
-            full_diff = full_diff[:10000] + "\n\n... (truncated)"
+        full_diff = truncate_output(full_diff, max_length=10000)
 
         lines = [
             f"## Diff: `{repo}`" + (" (staged)" if staged else ""),
@@ -364,9 +358,8 @@ def register_tools(server: FastMCP) -> int:
 
         return "\n".join(lines)
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_show(
         repo: str,
         commit: str = "HEAD",
@@ -397,14 +390,10 @@ def register_tools(server: FastMCP) -> int:
         if not success:
             return f"❌ Failed to show commit: {output}"
 
-        if len(output) > 5000:
-            output = output[:5000] + "\n\n... (truncated)"
+        return truncate_output(output, max_length=5000)
 
-        return output
-
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_diff_tree(
         repo: str,
         commit: str,
@@ -433,9 +422,8 @@ def register_tools(server: FastMCP) -> int:
 
         return output.strip()
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_branch_create(repo: str, branch_name: str, base: str = "", checkout: bool = True) -> str:
         """Create a new branch."""
         path = resolve_repo_path(repo)
@@ -461,9 +449,8 @@ def register_tools(server: FastMCP) -> int:
 
         return "\n".join(lines)
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_checkout(
         repo: str,
         target: str,
@@ -508,9 +495,8 @@ def register_tools(server: FastMCP) -> int:
         action = "Created and switched" if (create or force_create) else "Switched"
         return f"✅ {action} to `{target}`\n\n{output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_add(repo: str, files: str = ".") -> str:
         """Stage files for commit."""
         path = resolve_repo_path(repo)
@@ -530,9 +516,8 @@ def register_tools(server: FastMCP) -> int:
 
         return "\n".join(lines)
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_commit(
         repo: str,
         message: str,
@@ -562,6 +547,7 @@ def register_tools(server: FastMCP) -> int:
         # Auto-detect issue key from branch name if not provided
         if not issue_key:
             import re
+
             success, branch_name = await run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
             if success and branch_name:
                 match = re.match(r"(AAP-\d{4,6})", branch_name.strip())
@@ -615,9 +601,8 @@ def register_tools(server: FastMCP) -> int:
 
         return f"✅ Committed as `{hash_.strip()}`\n\n**Message:** `{formatted_message}`\n\n{output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_push(
         repo: str,
         branch: str = "",
@@ -673,9 +658,8 @@ def register_tools(server: FastMCP) -> int:
         prefix = "(dry-run) " if dry_run else ""
         return f"✅ {prefix}Pushed successfully\n\n{output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_pull(repo: str, rebase: bool = False) -> str:
         """Pull changes from remote."""
         path = resolve_repo_path(repo)
@@ -690,9 +674,8 @@ def register_tools(server: FastMCP) -> int:
 
         return f"✅ Pulled successfully\n\n{output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_fetch(
         repo: str,
         prune: bool = True,
@@ -735,9 +718,8 @@ def register_tools(server: FastMCP) -> int:
 
         return f"✅ Fetched successfully\n\n{output or 'Already up to date.'}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_stash(repo: str, action: str = "push", message: str = "") -> str:
         """Stash or restore changes."""
         path = resolve_repo_path(repo)
@@ -760,9 +742,8 @@ def register_tools(server: FastMCP) -> int:
 
         return f"✅ Stash {action} successful\n\n{output or 'Done'}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_reset(repo: str, target: str = "HEAD", mode: str = "mixed") -> str:
         """Reset current HEAD to specified state."""
         path = resolve_repo_path(repo)
@@ -776,9 +757,8 @@ def register_tools(server: FastMCP) -> int:
         warning = "⚠️ Changes discarded!" if mode == "hard" else ""
         return f"✅ Reset to `{target}` ({mode}) {warning}\n\n{output or 'Done'}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_clean(repo: str, dry_run: bool = True) -> str:
         """Remove untracked files."""
         path = resolve_repo_path(repo)
@@ -804,9 +784,8 @@ def register_tools(server: FastMCP) -> int:
 
         return "\n".join(lines)
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_remote_info(repo: str) -> str:
         """Get remote repository information."""
         path = resolve_repo_path(repo)
@@ -828,11 +807,10 @@ def register_tools(server: FastMCP) -> int:
 
         return "\n".join(lines)
 
-    tool_count += 1
-
     # ==================== REBASE ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_rebase(
         repo: str,
         onto: str = "",
@@ -925,9 +903,8 @@ def register_tools(server: FastMCP) -> int:
 
         return f"❌ Rebase failed:\n{output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_rev_parse(
         repo: str,
         ref: str,
@@ -978,9 +955,8 @@ def register_tools(server: FastMCP) -> int:
 
         return sha
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_merge(
         repo: str,
         target: str,
@@ -1022,9 +998,8 @@ def register_tools(server: FastMCP) -> int:
 
         return f"❌ Merge failed: {output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def git_merge_abort(repo: str) -> str:
         """
         Abort an in-progress merge.
@@ -1043,11 +1018,10 @@ def register_tools(server: FastMCP) -> int:
             return "✅ Merge aborted. Working tree restored."
         return f"❌ Failed to abort merge (perhaps no merge in progress?): {output}"
 
-    tool_count += 1
-
     # ==================== CODE FORMATTING ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def code_format(
         repo: str,
         check_only: bool = False,
@@ -1097,9 +1071,8 @@ def register_tools(server: FastMCP) -> int:
             return f"⚠️ Formatting issues found ({tool}):\n\n{output}"
         return f"❌ Formatting failed:\n{output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def code_lint(
         repo: str,
         tool: str = "flake8",
@@ -1155,16 +1128,18 @@ def register_tools(server: FastMCP) -> int:
         issue_count = len([ln for ln in lines if ln.strip() and ":" in ln])
 
         # Truncate if too long
-        if len(output) > 3000:
-            output = output[:3000] + f"\n\n... truncated ({issue_count} total issues)"
+        output = truncate_output(
+            output,
+            max_length=3000,
+            suffix=f"\n\n... truncated ({issue_count} total issues)",
+        )
 
         return f"⚠️ Linting issues found ({tool}): {issue_count} issues\n\n```\n{output}\n```"
 
-    tool_count += 1
-
     # ==================== BUILD/MAKE ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def make_target(
         repo: str,
         target: str,
@@ -1190,11 +1165,10 @@ def register_tools(server: FastMCP) -> int:
             return f"✅ make {target} completed\n\n{output[-2000:] if len(output) > 2000 else output}"
         return f"❌ make {target} failed:\n{output[-2000:] if len(output) > 2000 else output}"
 
-    tool_count += 1
-
     # ==================== DOCKER ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def docker_compose_status(
         repo: str,
         filter_name: str = "",
@@ -1236,9 +1210,8 @@ def register_tools(server: FastMCP) -> int:
 
         return "\n".join(lines)
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def docker_compose_up(
         repo: str,
         detach: bool = True,
@@ -1268,13 +1241,11 @@ def register_tools(server: FastMCP) -> int:
         success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
 
         if success:
-            truncated = output[-1000:] if len(output) > 1000 else output
-            return f"✅ docker-compose up completed\n\n{truncated}"
+            return f"✅ docker-compose up completed\n\n{truncate_output(output, max_length=1000, mode='tail')}"
         return f"❌ docker-compose up failed:\n{output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def docker_compose_down(
         repo: str,
         volumes: bool = False,
@@ -1303,9 +1274,8 @@ def register_tools(server: FastMCP) -> int:
             return f"✅ docker-compose down completed\n\n{output}"
         return f"❌ docker-compose down failed:\n{output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def docker_cp(
         source: str,
         destination: str,
@@ -1335,9 +1305,8 @@ def register_tools(server: FastMCP) -> int:
             return f"✅ Copied {direction}: {source} → {destination}"
         return f"❌ Copy failed: {output}"
 
-    tool_count += 1
-
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def docker_exec(
         container: str,
         command: str,
@@ -1362,6 +1331,4 @@ def register_tools(server: FastMCP) -> int:
             return f"## Docker exec: {command[:50]}...\n\n```\n{output}\n```"
         return f"❌ Docker exec failed:\n{output}"
 
-    tool_count += 1
-
-    return tool_count
+    return registry.count

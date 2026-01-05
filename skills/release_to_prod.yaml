@@ -131,7 +131,6 @@ steps:
       }
     output: security_status
     on_error: continue
-    output: staging_status
 
   # ==================== GET COMPONENT INFO ====================
 
@@ -142,73 +141,6 @@ steps:
       component_name: "{{ inputs.component }}"
       namespace: "{{ inputs.namespace }}"
     output: component_info_raw
-    on_error: continue
-
-  # ==================== AUTO-HEAL: get_component ====================
-
-  - name: detect_failure_component
-    description: "Detect if Konflux call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-
-      result_text = str(component_info_raw) if 'component_info_raw' in dir() and component_info_raw else ""
-      failure = detect_failure(result_text, "konflux_get_component")
-      result = failure
-    output: failure_component
-    on_error: continue
-
-  - name: quick_fix_auth_component
-    description: "Auto-fix auth issues for Konflux"
-    condition: "failure_component and failure_component.get('error_type') == 'auth'"
-    tool: kube_login
-    args:
-      cluster: "konflux"
-    output: auth_fix_component
-    on_error: continue
-
-  - name: quick_fix_vpn_component
-    description: "Auto-fix VPN issues for Konflux"
-    condition: "failure_component and failure_component.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_component
-    on_error: continue
-
-  - name: retry_get_component
-    description: "Retry Konflux call after auto-fix"
-    condition: "(auth_fix_component or vpn_fix_component) and failure_component"
-    tool: konflux_get_component
-    args:
-      component_name: "{{ inputs.component }}"
-      namespace: "{{ inputs.namespace }}"
-    output: component_info_raw_retry
-    on_error: continue
-
-  - name: merge_component_result
-    description: "Use retry result if available"
-    condition: "component_info_raw_retry"
-    compute: |
-      result = str(component_info_raw_retry)
-    output: component_info_raw
-    on_error: continue
-
-  - name: log_failure_component
-    description: "Log failure to memory for learning"
-    condition: "failure_component and failure_component.get('failed')"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-
-      fixed = bool(component_info_raw_retry if 'component_info_raw_retry' in dir() else None)
-
-      entry = log_failure(
-          tool_name="konflux_get_component",
-          error_text=failure_component.get('error_text', ''),
-          skill_name="release_to_prod",
-          fixed=fixed,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure_component
     on_error: continue
 
   - name: list_components

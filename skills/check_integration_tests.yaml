@@ -36,51 +36,6 @@ steps:
     output: tests_raw
     on_error: continue
 
-  # ==================== AUTO-HEAL: list_tests ====================
-
-  - name: detect_failure_tests
-    description: "Detect if Konflux call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(tests_raw) if 'tests_raw' in dir() and tests_raw else ""
-      failure = detect_failure(result_text, "konflux_list_integration_tests")
-      result = failure
-    output: failure_tests
-    on_error: continue
-
-  - name: quick_fix_auth_tests
-    description: "Auto-fix auth issues"
-    condition: "failure_tests and failure_tests.get('error_type') == 'auth'"
-    tool: kube_login
-    args:
-      cluster: "konflux"
-    output: auth_fix_tests
-    on_error: continue
-
-  - name: quick_fix_vpn_tests
-    description: "Auto-fix VPN issues"
-    condition: "failure_tests and failure_tests.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_tests
-    on_error: continue
-
-  - name: retry_list_tests
-    description: "Retry after auto-fix"
-    condition: "(auth_fix_tests or vpn_fix_tests) and failure_tests"
-    tool: konflux_list_integration_tests
-    args:
-      namespace: "{{ inputs.namespace }}"
-    output: tests_raw_retry
-    on_error: continue
-
-  - name: merge_tests_result
-    condition: "tests_raw_retry"
-    compute: |
-      result = str(tests_raw_retry)
-    output: tests_raw
-    on_error: continue
-
   - name: parse_tests
     description: "Parse test list"
     compute: |

@@ -72,87 +72,29 @@ steps:
   - name: resolve_repo
     description: "Determine which repo and GitLab project to use"
     compute: |
-      import os
-      from scripts.common.config_loader import load_config
+      from scripts.common.repo_utils import resolve_repo
+      from scripts.common.config_loader import load_config, get_team_config
 
-      repo_path = None
-      gitlab_project = None
-      default_branch = "main"
-      repo_config = {}
+      # Use centralized repository resolution
+      resolved = resolve_repo(
+          repo_path=inputs.repo if inputs.repo and inputs.repo not in ("", ".") else None,
+          repo_name=inputs.repo_name if inputs.repo_name else None,
+          issue_key=inputs.issue_key,
+          target_branch=inputs.target_branch if inputs.target_branch else None,
+      )
 
-      # Load config using shared loader
+      # Get team config for mentions
       config = load_config()
-      repos = config.get("repositories", {})
-
-      # Explicit repo path takes priority
-      if inputs.repo and inputs.repo != "" and inputs.repo != ".":
-          repo_path = inputs.repo
-          for name, cfg in repos.items():
-              if cfg.get("path") == repo_path:
-                  gitlab_project = cfg.get("gitlab")
-                  default_branch = cfg.get("default_branch", "main")
-                  repo_config = cfg
-                  break
-      # Then repo name from config
-      elif inputs.repo_name:
-          if inputs.repo_name in repos:
-              repo_config = repos[inputs.repo_name]
-              repo_path = repo_config.get("path", "")
-              gitlab_project = repo_config.get("gitlab")
-              default_branch = repo_config.get("default_branch", "main")
-          else:
-              raise ValueError(f"Repository '{inputs.repo_name}' not found in config.json")
-      # Finally, resolve from issue key prefix
-      else:
-          project_prefix = inputs.issue_key.split("-")[0].upper()
-          matching = []
-          for name, cfg in repos.items():
-              if cfg.get("jira_project") == project_prefix:
-                  matching.append({"name": name, "config": cfg})
-
-          if len(matching) == 0:
-              cwd = os.getcwd()
-              if os.path.exists(os.path.join(cwd, ".git")):
-                  repo_path = cwd
-                  for name, cfg in repos.items():
-                      if cfg.get("path") == cwd:
-                          gitlab_project = cfg.get("gitlab")
-                          default_branch = cfg.get("default_branch", "main")
-                          repo_config = cfg
-                          break
-              else:
-                  raise ValueError(
-                      f"No repository configured for {project_prefix} issues."
-                  )
-          elif len(matching) == 1:
-              repo_config = matching[0]["config"]
-              repo_path = repo_config.get("path")
-              gitlab_project = repo_config.get("gitlab")
-              default_branch = repo_config.get("default_branch", "main")
-          else:
-              names = ", ".join(m["name"] for m in matching)
-              raise ValueError(f"Multiple repos match {project_prefix}: {names}")
-
-      if not repo_path or not os.path.exists(repo_path):
-          raise ValueError(f"Repository path not found: {repo_path}")
-
-      if inputs.target_branch:
-          default_branch = inputs.target_branch
-
+      team_config = get_team_config()
       jira_url = config.get("jira", {}).get("url", "https://issues.redhat.com")
 
-      # Get team group info for @mentions
-      team_channel = config.get("slack", {}).get("channels", {}).get("team", {})
-      team_group_id = team_channel.get("group_id", "")
-      team_group_handle = team_channel.get("group_handle", "aa-api-team")
-
       result = {
-          "path": repo_path,
-          "gitlab_project": gitlab_project or "automation-analytics/automation-analytics-backend",
-          "default_branch": default_branch,
+          "path": resolved.path,
+          "gitlab_project": resolved.gitlab_project or "automation-analytics/automation-analytics-backend",
+          "default_branch": resolved.default_branch,
           "jira_url": jira_url,
-          "team_group_id": team_group_id,
-          "team_group_handle": team_group_handle,
+          "team_group_id": team_config.get("team_group_id", ""),
+          "team_group_handle": team_config.get("team_group_handle", "aa-api-team"),
       }
     output: resolved_repo
 
@@ -590,72 +532,7 @@ steps:
       set_upstream: true
     output: push_result
     on_error: continue
-
-  # ==================== AUTO-HEAL: push_branch ====================
-
-  - name: detect_failure_push
-    description: "Detect if git push failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-
-      result_text = str(push_result) if 'push_result' in dir() and push_result else ""
-      failure = detect_failure(result_text, "git_push")
-      result = failure
-    output: failure_push
-    on_error: continue
-
-  - name: quick_fix_auth_push
-    description: "Auto-fix auth issues for git push"
-    condition: "failure_push and failure_push.get('error_type') == 'auth'"
-    compute: |
-      # Git auth usually requires SSH key or credential refresh
-      # For now, just log the issue and suggest manual fix
-      result = {"attempted": True, "message": "Git auth issues require manual SSH/credential fix"}
-    output: auth_fix_push
-    on_error: continue
-
-  - name: quick_fix_vpn_push
-    description: "Auto-fix VPN issues for git push"
-    condition: "failure_push and failure_push.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_push
-    on_error: continue
-
-  - name: retry_push
-    description: "Retry git push after VPN fix"
-    condition: "vpn_fix_push and failure_push"
-    tool: git_push
-    args:
-      repo: "{{ resolved_repo.path }}"
-      branch: "{{ branch_name }}"
-      set_upstream: true
-    output: push_result_retry
-    on_error: continue
-
-  - name: merge_push_result
-    description: "Use retry result if available"
-    condition: "push_result_retry"
-    compute: |
-      result = push_result_retry
-    output: push_result
-
-  - name: log_failure_push
-    description: "Log failure to memory for learning"
-    condition: "failure_push and failure_push.get('failed') and not push_result_retry"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-
-      entry = log_failure(
-          tool_name="git_push",
-          error_text=failure_push.get('error_text', ''),
-          skill_name="create_mr",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure_push
-    on_error: continue
+    # NOTE: Auto-heal is now handled by @auto_heal() decorator on the tool
 
   - name: build_description
     description: "Build MR description with Jira link"

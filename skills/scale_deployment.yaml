@@ -60,53 +60,6 @@ steps:
     output: deployments_raw
     on_error: continue
 
-  # ==================== AUTO-HEAL: get_current_deployment ====================
-
-  - name: detect_failure_deploy
-    description: "Detect if kubectl call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(deployments_raw) if 'deployments_raw' in dir() and deployments_raw else ""
-      failure = detect_failure(result_text, "kubectl_get_deployments")
-      result = failure
-    output: failure_deploy
-    on_error: continue
-
-  - name: quick_fix_auth_deploy
-    description: "Auto-fix auth issues"
-    condition: "failure_deploy and failure_deploy.get('error_type') == 'auth'"
-    tool: kube_login
-    args:
-      cluster: "{{ inputs.environment }}"
-    output: auth_fix_deploy
-    on_error: continue
-
-  - name: quick_fix_vpn_deploy
-    description: "Auto-fix VPN issues"
-    condition: "failure_deploy and failure_deploy.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_deploy
-    on_error: continue
-
-  - name: retry_get_deployment
-    description: "Retry after auto-fix"
-    condition: "(auth_fix_deploy or vpn_fix_deploy) and failure_deploy"
-    tool: kubectl_get_deployments
-    args:
-      namespace: "{{ inputs.namespace }}"
-      environment: "{{ inputs.environment }}"
-    output: deployments_raw_retry
-    on_error: continue
-
-  - name: merge_deploy_result
-    condition: "deployments_raw_retry"
-    compute: |
-      result = str(deployments_raw_retry)
-    output: deployments_raw
-    on_error: continue
-    on_error: continue
-
   - name: parse_current_state
     description: "Parse current deployment state"
     compute: |

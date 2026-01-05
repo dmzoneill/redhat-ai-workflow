@@ -73,16 +73,6 @@ steps:
       result = {"system": system, "target": target}
     output: ci_system
 
-  # ==================== AUTO-HEAL SETUP ====================
-
-  - name: detect_failure_gitlab
-    description: "Detect if GitLab call failed (set after first tool)"
-    compute: |
-      # Initialize failure tracking
-      result = None
-    output: failure_gitlab
-    on_error: continue
-
   # ==================== GITLAB MR PIPELINE ====================
 
   - name: get_mr_pipeline
@@ -170,16 +160,6 @@ steps:
     output: gitlab_pipeline_status
     on_error: continue
 
-  - name: retry_gitlab_pipeline
-    description: "Retry failed GitLab CI pipeline"
-    condition: "(ci_system.system == 'gitlab' or ci_system.system == 'gitlab_mr') and gitlab_pipeline_status and gitlab_pipeline_status.can_retry"
-    tool: gitlab_ci_retry
-    args:
-      project: "{{ inputs.project }}"
-      pipeline_id: "{{ inputs.pipeline_id or mr_pipeline.pipeline_id }}"
-    output: gitlab_retry_result
-    on_error: continue
-
   - name: wait_gitlab_pipeline
     description: "Wait for GitLab pipeline to complete"
     condition: "inputs.wait and gitlab_retry_result"
@@ -245,16 +225,6 @@ steps:
       follow: false
       all_tasks: true
     output: tekton_logs_raw
-    on_error: continue
-
-  - name: retry_tekton_pipeline
-    description: "Re-trigger Tekton pipeline"
-    condition: "ci_system.system == 'tekton' and tekton_status and tekton_status.can_retry"
-    tool: tkn_pipeline_start
-    args:
-      pipeline_name: "{{ tekton_status.pipeline_name }}"
-      namespace: "{{ inputs.namespace }}"
-    output: tekton_retry_result
     on_error: continue
 
   - name: list_tekton_runs

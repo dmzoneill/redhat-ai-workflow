@@ -57,7 +57,6 @@ inputs:
 # jira_url loaded from config.json in load_config step
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"

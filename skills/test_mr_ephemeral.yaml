@@ -214,15 +214,6 @@ steps:
     on_error: continue
 
   # Step 1c: Auto-retry failed GitLab CI
-  - name: retry_failed_ci
-    description: "Retry failed GitLab CI pipeline"
-    condition: "{{ gitlab_ci_status and gitlab_ci_status.get('can_retry') }}"
-    tool: gitlab_ci_retry
-    args:
-      project: "{{ cfg.gitlab_project }}"
-      pipeline_id: "{{ gitlab_ci_status.pipeline_id }}"
-    output: ci_retry_result
-    on_error: continue
 
   - name: parse_mr_info
     description: "Extract SHA and branch from MR info"
@@ -709,67 +700,6 @@ steps:
       timeout: 600
       force: true
     output: namespace_result
-    on_error: continue
-
-  # ==================== AUTO-HEAL: reserve_namespace ====================
-
-  - name: detect_failure_reserve
-    description: "Detect if namespace reservation failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-
-      result_text = str(namespace_result) if 'namespace_result' in dir() and namespace_result else ""
-      failure = detect_failure(result_text, "bonfire_namespace_reserve")
-      result = failure
-    output: failure_reserve
-    on_error: continue
-
-  - name: quick_fix_auth_reserve
-    description: "Auto-fix auth issues for bonfire"
-    condition: "failure_reserve and failure_reserve.get('error_type') == 'auth'"
-    tool: kube_login
-    args:
-      cluster: "ephemeral"
-    output: auth_fix_reserve
-    on_error: continue
-
-  - name: quick_fix_vpn_reserve
-    description: "Auto-fix VPN issues for bonfire"
-    condition: "failure_reserve and failure_reserve.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_reserve
-    on_error: continue
-
-  - name: retry_reserve_namespace
-    description: "Retry namespace reservation after auto-fix"
-    condition: "(auth_fix_reserve or vpn_fix_reserve) and failure_reserve and failure_reserve.get('can_auto_fix')"
-    tool: bonfire_namespace_reserve
-    args:
-      duration: "{{ inputs.duration }}"
-      pool: "default"
-      timeout: 600
-      force: true
-    output: namespace_result_retry
-    on_error: continue
-
-  - name: log_failure_reserve
-    description: "Log failure to memory for learning"
-    condition: "failure_reserve and failure_reserve.get('failed')"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-
-      fixed = bool(namespace_result_retry if 'namespace_result_retry' in dir() and namespace_result_retry else None)
-
-      entry = log_failure(
-          tool_name="bonfire_namespace_reserve",
-          error_text=failure_reserve.get('error_text', ''),
-          skill_name="test_mr_ephemeral",
-          fixed=fixed,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure_reserve
     on_error: continue
 
   # Step 8: Extract namespace name

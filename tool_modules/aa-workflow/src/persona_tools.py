@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
 
+from server.tool_registry import ToolRegistry
+
 # Support both package import and direct loading
 try:
     from .constants import PERSONAS_DIR
@@ -28,9 +30,9 @@ logger = logging.getLogger(__name__)
 
 def register_persona_tools(server: "FastMCP") -> int:
     """Register persona tools with the MCP server."""
-    tool_count = 0
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @registry.tool()
     async def persona_list() -> list[TextContent]:
         """
         List all available personas.
@@ -76,9 +78,7 @@ def register_persona_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def persona_load(persona_name: str, ctx=None) -> list[TextContent]:
         """
         Load a persona with its full toolset and context.
@@ -163,6 +163,4 @@ def register_persona_tools(server: "FastMCP") -> int:
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error loading persona: {e}")]
 
-    tool_count += 1
-
-    return tool_count
+    return registry.count

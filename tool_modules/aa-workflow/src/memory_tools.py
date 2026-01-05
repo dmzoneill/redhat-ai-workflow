@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 import yaml
 from mcp.types import TextContent
 
+from server.tool_registry import ToolRegistry
+
 # Support both package import and direct loading
 try:
     from .constants import MEMORY_DIR
@@ -29,9 +31,9 @@ if TYPE_CHECKING:
 
 def register_memory_tools(server: "FastMCP") -> int:
     """Register memory tools with the MCP server."""
-    tool_count = 0
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @registry.tool()
     async def memory_read(key: str = "") -> list[TextContent]:
         """
         Read from persistent memory.
@@ -79,9 +81,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error reading memory: {e}")]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def memory_write(key: str, content: str) -> list[TextContent]:
         """
         Write to persistent memory.
@@ -120,9 +120,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error writing memory: {e}")]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def memory_update(key: str, path: str, value: str) -> list[TextContent]:
         """
         Update a specific field in memory.
@@ -169,9 +167,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error updating memory: {e}")]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def memory_append(key: str, list_path: str, item: str) -> list[TextContent]:
         """
         Append an item to a list in memory.
@@ -225,9 +221,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error appending to memory: {e}")]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def memory_session_log(action: str, details: str = "") -> list[TextContent]:
         """
         Log an action to today's session log.
@@ -275,6 +269,4 @@ def register_memory_tools(server: "FastMCP") -> int:
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error logging: {e}")]
 
-    tool_count += 1
-
-    return tool_count
+    return registry.count

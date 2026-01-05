@@ -8,17 +8,16 @@ import logging
 import os
 import re
 import subprocess
-import sys
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
+from server.auto_heal_decorator import auto_heal_ephemeral
+from server.tool_registry import ToolRegistry
+from server.utils import ensure_cluster_auth, get_kubeconfig, get_section_config, truncate_output
 
-from server.utils import ensure_cluster_auth, get_kubeconfig, get_section_config
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 logger = logging.getLogger(__name__)
 
@@ -154,12 +153,14 @@ async def run_bonfire(
 
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
+    registry = ToolRegistry(server)
 
     # REMOVED: bonfire_version - low value, rarely needed
 
     # ==================== NAMESPACE MANAGEMENT ====================
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_namespace_reserve(
         duration: str = "1h",
         pool: str = "default",
@@ -217,7 +218,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_namespace_list(mine_only: bool = True) -> list[TextContent]:
         """
         List current ephemeral namespace reservations.
@@ -241,7 +243,8 @@ def register_tools(server: "FastMCP") -> int:
         title = "My Ephemeral Namespaces" if mine_only else "All Ephemeral Namespaces"
         return [TextContent(type="text", text=f"## {title}\n\n```\n{output}\n```")]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_namespace_describe(namespace: str) -> list[TextContent]:
         """
         Get detailed info about a namespace reservation.
@@ -259,7 +262,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text=f"## Namespace: `{namespace}`\n\n```\n{output}\n```")]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_namespace_release(namespace: str, force: bool = False) -> list[TextContent]:
         """
         Release an ephemeral namespace reservation.
@@ -303,7 +307,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
         return [TextContent(type="text", text=f"✅ Namespace `{namespace}` released\n\n{output}")]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_namespace_extend(
         namespace: str,
         duration: str = "1h",
@@ -325,7 +330,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
         return [TextContent(type="text", text=f"✅ Namespace `{namespace}` extended by {duration}\n\n{output}")]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_namespace_wait(
         namespace: str,
         timeout: int = 300,
@@ -352,7 +358,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
     # ==================== APPS ====================
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_apps_list(target_env: str = "insights-ephemeral") -> list[TextContent]:
         """
         List all deployable apps.
@@ -370,7 +377,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
         return [TextContent(type="text", text=f"## Deployable Apps\n\n```\n{output}\n```")]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_apps_dependencies(component: str) -> list[TextContent]:
         """
         Show apps that depend on a component.
@@ -390,7 +398,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
     # ==================== DEPLOYMENT ====================
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_deploy(
         app: str,
         namespace: str = "",
@@ -470,7 +479,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_deploy_with_reserve(
         app: str,
         duration: str = "1h",
@@ -515,7 +525,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
     # ==================== PROCESS (DRY-RUN) ====================
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_process(
         app: str,
         namespace: str = "",
@@ -560,14 +571,13 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to process template:\n\n{output}")]
 
-        if len(output) > 15000:
-            output = output[:15000] + "\n\n... (truncated, output too large)"
-
+        output = truncate_output(output, max_length=15000, suffix="\n\n... (truncated, output too large)")
         return [TextContent(type="text", text=f"## ClowdApp Template: `{app}`\n\n```yaml\n{output}\n```")]
 
     # ==================== CLOWDENV ====================
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_deploy_env(
         namespace: str,
         timeout: int = 300,
@@ -591,7 +601,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
         return [TextContent(type="text", text=f"✅ ClowdEnvironment deployed to `{namespace}`\n\n{output}")]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_process_env(namespace: str) -> list[TextContent]:
         """
         Process ClowdEnv template and show output (dry-run).
@@ -609,14 +620,13 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to process ClowdEnv:\n\n{output}")]
 
-        if len(output) > 10000:
-            output = output[:10000] + "\n\n... (truncated)"
-
+        output = truncate_output(output, max_length=10000)
         return [TextContent(type="text", text=f"## ClowdEnvironment: `{namespace}`\n\n```yaml\n{output}\n```")]
 
     # ==================== IQE CJI ====================
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_deploy_iqe_cji(
         namespace: str,
         cji_name: str = "",
@@ -658,7 +668,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
         return [TextContent(type="text", text=f"✅ IQE CJI deployed to `{namespace}`\n\n```\n{output}\n```")]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_process_iqe_cji(
         namespace: str,
         marker: str = "",
@@ -687,14 +698,13 @@ If you're sure you want to release it, call with `force=True` (not recommended).
         if not success:
             return [TextContent(type="text", text=f"❌ Failed to process IQE CJI:\n\n{output}")]
 
-        if len(output) > 8000:
-            output = output[:8000] + "\n\n... (truncated)"
-
+        output = truncate_output(output, max_length=8000)
         return [TextContent(type="text", text=f"## IQE CJI Template\n\n```yaml\n{output}\n```")]
 
     # ==================== POOL ====================
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_pool_list() -> list[TextContent]:
         """
         List available namespace pool types.
@@ -711,7 +721,8 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
     # ==================== AUTOMATION ANALYTICS HELPERS ====================
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_deploy_aa(
         namespace: str,
         template_ref: str,
@@ -954,7 +965,8 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_deploy_aa_local(
         namespace: str,
         billing: bool = False,
@@ -1047,7 +1059,8 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
             )
         ]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_full_test_workflow(
         duration: str = "2h",
         billing: bool = False,
@@ -1182,7 +1195,8 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_ephemeral()
+    @registry.tool()
     async def bonfire_deploy_aa_from_snapshot(
         namespace: str,
         snapshot_json: str,
@@ -1323,4 +1337,4 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
 
     # ==================== ENTRY POINT ====================
 
-    return len([m for m in dir() if not m.startswith("_")])  # Approximate count
+    return registry.count

@@ -5,21 +5,20 @@ Provides 9 tools for searching and analyzing logs via Kibana.
 
 import logging
 import os
-import sys
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
-
+from server.auto_heal_decorator import auto_heal_stage
 from server.config import get_token_from_kubeconfig
+from server.tool_registry import ToolRegistry
 from server.utils import get_kubeconfig, load_config
+
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +199,10 @@ def build_kibana_url(
 
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def kibana_search_logs(
         environment: str,
         query: str = "*",
@@ -310,7 +311,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def kibana_get_errors(
         environment: str,
         namespace: str = "",
@@ -338,7 +340,8 @@ def register_tools(server: "FastMCP") -> int:
             size=size,
         )
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def kibana_get_pod_logs(
         environment: str,
         pod_name: str,
@@ -368,7 +371,8 @@ def register_tools(server: "FastMCP") -> int:
             size=size,
         )
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def kibana_trace_request(
         environment: str,
         request_id: str,
@@ -401,7 +405,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== LINK TOOLS ====================
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def kibana_get_link(
         environment: str,
         query: str = "*",
@@ -441,7 +446,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def kibana_error_link(
         environment: str,
         namespace: str = "",
@@ -463,7 +469,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== STATUS TOOLS ====================
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def kibana_status(
         environment: str = "",
     ) -> list[TextContent]:
@@ -505,7 +512,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def kibana_index_patterns(
         environment: str,
     ) -> list[TextContent]:
@@ -542,7 +550,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def kibana_list_dashboards(
         environment: str,
         search: str = "",
@@ -584,4 +593,4 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== ENTRY POINT ====================
 
-    return len([m for m in dir() if not m.startswith("_")])  # Approximate count
+    return registry.count

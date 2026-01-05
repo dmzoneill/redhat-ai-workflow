@@ -51,7 +51,6 @@ inputs:
     description: "Meeting description/agenda"
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -66,34 +65,6 @@ steps:
     description: "Verify calendar API is accessible"
     tool: google_calendar_status
     output: calendar_status
-    on_error: continue
-
-  # ==================== AUTO-HEAL: check_calendar_status ====================
-
-  - name: detect_failure_calendar
-    description: "Detect if Google Calendar call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(calendar_status) if 'calendar_status' in dir() and calendar_status else ""
-      failure = detect_failure(result_text, "google_calendar_status")
-      result = failure
-    output: failure_calendar
-    on_error: continue
-
-  - name: log_failure_calendar
-    description: "Log failure to memory"
-    condition: "failure_calendar and failure_calendar.get('failed')"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-      entry = log_failure(
-          tool_name="google_calendar_status",
-          error_text=failure_calendar.get('error_text', ''),
-          skill_name="schedule_meeting",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure_calendar
     on_error: continue
 
   - name: validate_calendar

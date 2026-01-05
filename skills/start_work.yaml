@@ -47,65 +47,22 @@ steps:
   - name: resolve_repo
     description: "Determine which repo to use based on issue key or explicit input"
     compute: |
-      import os
-      from scripts.common.config_loader import load_config, resolve_repo
+      from scripts.common.repo_utils import resolve_repo
 
-      # Explicit repo path takes priority
-      if inputs.repo and inputs.repo != "" and inputs.repo != ".":
-          repo_path = inputs.repo
-          gitlab_project = None
-          repo_source = "explicit"
-      # Then repo name from config
-      elif inputs.repo_name:
-          config = load_config()
-          repos = config.get("repositories", {})
-          if inputs.repo_name in repos:
-              repo_path = repos[inputs.repo_name].get("path", "")
-              gitlab_project = repos[inputs.repo_name].get("gitlab", "")
-              repo_source = "config_name"
-          else:
-              raise ValueError(f"Repository '{inputs.repo_name}' not found in config.json")
-      # Finally, try to resolve from issue key prefix
-      else:
-          config = load_config()
-          repos = config.get("repositories", {})
-          project_prefix = inputs.issue_key.split("-")[0].upper()
+      # Use centralized repository resolution
+      resolved = resolve_repo(
+          repo_path=inputs.repo if inputs.repo and inputs.repo not in ("", ".") else None,
+          repo_name=inputs.repo_name if inputs.repo_name else None,
+          issue_key=inputs.issue_key,
+      )
 
-          # Find repos matching this Jira project
-          matching = []
-          for name, cfg in repos.items():
-              if cfg.get("jira_project") == project_prefix:
-                  matching.append({"name": name, "path": cfg.get("path"), "gitlab": cfg.get("gitlab")})
-
-          if len(matching) == 0:
-              # Fall back to cwd if we're in a git repo
-              cwd = os.getcwd()
-              git_check = os.path.exists(os.path.join(cwd, ".git"))
-              if git_check:
-                  repo_path = cwd
-                  gitlab_project = None
-                  repo_source = "cwd_fallback"
-              else:
-                  raise ValueError(
-                      f"No repository configured for {project_prefix} issues. "
-                      "Please specify 'repo' or 'repo_name', or run from within a git repository."
-                  )
-          elif len(matching) == 1:
-              repo_path = matching[0]["path"]
-              gitlab_project = matching[0]["gitlab"]
-              repo_source = "issue_key"
-          else:
-              # Multiple matches - need clarification
-              names = ", ".join(m["name"] for m in matching)
-              raise ValueError(
-                  f"Multiple repositories match {project_prefix} issues: {names}. "
-                  "Please specify 'repo_name' to choose one."
-              )
-
-      if not repo_path or not os.path.exists(repo_path):
-          raise ValueError(f"Repository path not found: {repo_path}")
-
-      result = {"path": repo_path, "source": repo_source, "gitlab": gitlab_project or ""}
+      result = {
+          "path": resolved.path,
+          "source": "resolved",
+          "gitlab": resolved.gitlab_project or "",
+          "name": resolved.name,
+          "jira_project": resolved.jira_project,
+      }
     output: resolved_repo
 
   # ==================== PRE-FLIGHT VALIDATION ====================
@@ -164,60 +121,7 @@ steps:
       issue_key: "{{ validated_issue_key }}"
     output: issue
     on_error: continue
-
-  # ==================== AUTO-HEAL: get_issue ====================
-
-  - name: detect_failure_issue
-    description: "Detect if Jira call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-
-      result_text = str(issue) if 'issue' in dir() and issue else ""
-      failure = detect_failure(result_text, "jira_view_issue")
-      result = failure
-    output: failure_issue
-    on_error: continue
-
-  - name: quick_fix_vpn_issue
-    description: "Auto-fix VPN issues for Jira"
-    condition: "failure_issue and failure_issue.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_issue
-    on_error: continue
-
-  - name: retry_get_issue
-    description: "Retry Jira call after VPN fix"
-    condition: "vpn_fix_issue and failure_issue"
-    tool: jira_view_issue
-    args:
-      issue_key: "{{ validated_issue_key }}"
-    output: issue_retry
-    on_error: continue
-
-  - name: merge_issue_result
-    description: "Use retry result if available"
-    condition: "issue_retry"
-    compute: |
-      result = issue_retry
-    output: issue
-
-  - name: log_failure_issue
-    description: "Log failure to memory for learning"
-    condition: "failure_issue and failure_issue.get('failed') and not issue_retry"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-
-      entry = log_failure(
-          tool_name="jira_view_issue",
-          error_text=failure_issue.get('error_text', ''),
-          skill_name="start_work",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure_issue
-    on_error: continue
+    # NOTE: Auto-heal is now handled by @auto_heal() decorator on the tool
 
   - name: check_issue_exists
     description: "Verify issue was found"
