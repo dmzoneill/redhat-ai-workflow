@@ -5,18 +5,18 @@ Provides 6 tools for working with app-interface GitOps configuration.
 
 import logging
 import os
-import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
-
+from server.tool_registry import ToolRegistry
 from server.utils import load_config
 from server.utils import run_cmd_full as run_cmd
+from server.utils import truncate_output
+
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +69,9 @@ APP_INTERFACE_PATH = find_app_interface_path()
 
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @registry.tool()
     async def appinterface_validate(path: str = "") -> list[TextContent]:
         """
         Run qontract validation on app-interface.
@@ -98,7 +99,7 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append("❌ Validation failed")
 
             lines.append("```")
-            lines.append(output[-3000:] if len(output) > 3000 else output)
+            lines.append(truncate_output(output, max_length=3000, mode="tail"))
             lines.append("```")
         else:
             lines.append("⚠️ No Makefile found, trying qontract-validator directly...")
@@ -113,7 +114,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @registry.tool()
     async def appinterface_get_saas(
         service_name: str,
         path: str = "",
@@ -169,9 +170,7 @@ def register_tools(server: "FastMCP") -> int:
             try:
                 content = match.read_text()
                 lines.append("```yaml")
-                lines.append(content[:2000])
-                if len(content) > 2000:
-                    lines.append("... (truncated)")
+                lines.append(truncate_output(content, max_length=2000))
                 lines.append("```")
             except Exception as e:
                 lines.append(f"❌ Could not read: {e}")
@@ -179,7 +178,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @registry.tool()
     async def appinterface_diff(path: str = "") -> list[TextContent]:
         """
         Show what changes would be applied by qontract-reconcile.
@@ -212,14 +211,12 @@ def register_tools(server: "FastMCP") -> int:
         if stdout.strip():
             lines.append("\n### YAML Changes")
             lines.append("```diff")
-            lines.append(stdout[:5000])
-            if len(stdout) > 5000:
-                lines.append("... (truncated)")
+            lines.append(truncate_output(stdout, max_length=5000))
             lines.append("```")
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @registry.tool()
     async def appinterface_resources(
         namespace: str,
         path: str = "",
@@ -289,7 +286,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @registry.tool()
     async def appinterface_search(
         query: str,
         file_type: str = "yml",
@@ -341,12 +338,12 @@ def register_tools(server: "FastMCP") -> int:
 
         if success and stdout:
             lines.append("```")
-            lines.append(stdout[:2000])
+            lines.append(truncate_output(stdout, max_length=2000))
             lines.append("```")
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @registry.tool()
     async def appinterface_get_user(
         username: str,
         team: str = "insights",
@@ -422,10 +419,10 @@ def register_tools(server: "FastMCP") -> int:
                 lines.append("")
                 lines.append("### Raw YAML")
                 lines.append("```yaml")
-                lines.append(yaml.dump(data, default_flow_style=False)[:1500])
+                lines.append(truncate_output(yaml.dump(data, default_flow_style=False), max_length=1500))
                 lines.append("```")
             else:
-                lines.append(f"```yaml\n{content[:2000]}\n```")
+                lines.append(f"```yaml\n{truncate_output(content, max_length=2000)}\n```")
 
         except urllib.error.HTTPError as e:
             if e.code == 404:
@@ -440,7 +437,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @registry.tool()
     async def appinterface_clusters(path: str = "") -> list[TextContent]:
         """
         List clusters defined in app-interface.
@@ -483,4 +480,4 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== ENTRY POINT ====================
 
-    return len([m for m in dir() if not m.startswith("_")])  # Approximate count
+    return registry.count

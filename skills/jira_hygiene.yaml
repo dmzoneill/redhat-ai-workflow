@@ -51,7 +51,6 @@ inputs:
 # No hardcoded constants - resolved dynamically
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -116,43 +115,7 @@ steps:
       issue_key: "{{ inputs.issue_key }}"
     output: issue_raw
     on_error: continue
-
-  # ==================== AUTO-HEAL: get_issue ====================
-
-  - name: detect_failure_issue
-    description: "Detect if Jira call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-
-      result_text = str(issue_raw) if 'issue_raw' in dir() and issue_raw else ""
-      failure = detect_failure(result_text, "jira_view_issue_json")
-      result = failure
-    output: failure_issue
-    on_error: continue
-
-  - name: quick_fix_vpn_issue
-    description: "Auto-fix VPN issues for Jira"
-    condition: "failure_issue and failure_issue.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_issue
-    on_error: continue
-
-  - name: retry_get_issue
-    description: "Retry Jira call after VPN fix"
-    condition: "vpn_fix_issue and failure_issue"
-    tool: jira_view_issue_json
-    args:
-      issue_key: "{{ inputs.issue_key }}"
-    output: issue_raw_retry
-    on_error: continue
-
-  - name: merge_issue_result
-    description: "Use retry result if available"
-    condition: "issue_raw_retry"
-    compute: |
-      result = issue_raw_retry
-    output: issue_raw
+    # NOTE: Auto-heal now handled by @auto_heal() decorator on the tool
 
   # Step 2: Parse issue data
   - name: parse_issue

@@ -36,7 +36,6 @@ inputs:
     description: "Repository to get commit history from"
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -55,16 +54,6 @@ steps:
       since: "{{ inputs.days }} days ago"
       author: ""
     output: commits_raw
-    on_error: continue
-
-  - name: detect_failure_git
-    description: "Detect if git call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(commits_raw) if 'commits_raw' in dir() and commits_raw else ""
-      failure = detect_failure(result_text, "git_log")
-      result = failure
-    output: failure_git
     on_error: continue
 
   - name: get_my_jira_issues

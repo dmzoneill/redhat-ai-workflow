@@ -45,7 +45,6 @@ inputs:
     description: "If true, formats as a reminder rather than new MR notification"
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"

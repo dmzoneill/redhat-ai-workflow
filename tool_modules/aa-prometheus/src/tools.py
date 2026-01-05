@@ -5,18 +5,19 @@ Provides 14 tools for Prometheus queries, alerts, targets, and metrics.
 
 import logging
 import os
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
-
+from server.auto_heal_decorator import auto_heal_stage
+from server.timeouts import parse_duration_to_minutes
+from server.tool_registry import ToolRegistry
 from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
+
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +72,10 @@ async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
 
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_query(
         query: str,
         environment: str = "stage",
@@ -137,7 +140,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_query_range(
         query: str,
         environment: str = "stage",
@@ -172,10 +176,7 @@ def register_tools(server: "FastMCP") -> int:
             end_time = datetime.fromisoformat(end)
 
         if not start:
-            duration_map = {"m": 1, "h": 60, "d": 1440}
-            unit = duration[-1]
-            amount = int(duration[:-1])
-            minutes = amount * duration_map.get(unit, 60)
+            minutes = parse_duration_to_minutes(duration)
             start_time = end_time - timedelta(minutes=minutes)
         else:
             start_time = datetime.fromisoformat(start)
@@ -244,7 +245,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== ALERTS ====================
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_alerts(
         environment: str = "stage",
         state: str = "",
@@ -350,7 +352,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_get_alerts(
         environment: str = "stage",
         namespace: str = "",
@@ -367,7 +370,8 @@ def register_tools(server: "FastMCP") -> int:
         """
         return await prometheus_alerts(environment=environment, state="firing", namespace=namespace)
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_check_health(
         namespace: str,
         environment: str = "stage",
@@ -430,7 +434,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_pre_deploy_check(
         environment: str = "stage",
     ) -> list[TextContent]:
@@ -476,7 +481,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== RULES ====================
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_rules(
         environment: str = "stage",
         rule_type: str = "",
@@ -541,7 +547,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== TARGETS ====================
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_targets(
         environment: str = "stage",
         state: str = "",
@@ -608,7 +615,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== METADATA ====================
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_labels(
         environment: str = "stage",
         label: str = "",
@@ -656,7 +664,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_series(
         match: str,
         environment: str = "stage",
@@ -707,7 +716,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== COMMON QUERIES ====================
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_namespace_metrics(
         namespace: str,
         environment: str = "stage",
@@ -769,7 +779,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_error_rate(
         namespace: str,
         environment: str = "stage",
@@ -836,7 +847,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal_stage()
+    @registry.tool()
     async def prometheus_pod_health(
         pod: str,
         namespace: str,
@@ -907,4 +919,4 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== ENTRY POINT ====================
 
-    return len([m for m in dir() if not m.startswith("_")])  # Approximate count
+    return registry.count

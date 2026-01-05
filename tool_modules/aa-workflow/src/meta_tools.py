@@ -8,22 +8,22 @@ Provides tools for:
 import importlib.util
 import json
 import logging
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+from server.tool_registry import ToolRegistry
+
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT
+
+TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
+
 if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
-
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
-sys.path.insert(0, str(PROJECT_DIR))
 
 # Import known issues checker
 try:
@@ -316,9 +316,9 @@ MODULE_PREFIXES = {
 
 def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
     """Register meta tools with the MCP server."""
-    tool_count = 0
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @registry.tool()
     async def tool_list(module: str = "") -> list[TextContent]:
         """
         List all available tools across all modules.
@@ -364,9 +364,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def tool_exec(tool_name: str, args: str = "{}") -> list[TextContent]:
         """
         Execute ANY tool from ANY module dynamically.
@@ -471,6 +469,4 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
 
             return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    return tool_count
+    return registry.count

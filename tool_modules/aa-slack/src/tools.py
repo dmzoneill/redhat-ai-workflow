@@ -20,11 +20,10 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
+
 TOOL_MODULES_DIR = Path(__file__).parent.parent.parent  # tool_modules/
-if str(PROJECT_DIR) not in sys.path:
-    sys.path.insert(0, str(PROJECT_DIR))
 
 from server.utils import load_config
 

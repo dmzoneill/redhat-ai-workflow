@@ -46,34 +46,6 @@ steps:
     output: source_raw
     on_error: continue
 
-  # ==================== AUTO-HEAL: get_source ====================
-
-  - name: detect_failure_jira
-    description: "Detect if Jira call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(source_raw) if 'source_raw' in dir() and source_raw else ""
-      failure = detect_failure(result_text, "jira_view_issue")
-      result = failure
-    output: failure_jira
-    on_error: continue
-
-  - name: log_failure_jira
-    description: "Log failure to memory"
-    condition: "failure_jira and failure_jira.get('failed')"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-      entry = log_failure(
-          tool_name="jira_view_issue",
-          error_text=failure_jira.get('error_text', ''),
-          skill_name="clone_jira_issue",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure
-    on_error: continue
-
   - name: parse_source
     description: "Parse source issue"
     compute: |

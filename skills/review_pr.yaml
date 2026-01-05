@@ -187,61 +187,6 @@ steps:
     output: mr_details
     on_error: continue
 
-  # ==================== AUTO-HEAL: get_mr ====================
-
-  - name: detect_failure_mr
-    description: "Detect if GitLab call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-
-      result_text = str(mr_details) if 'mr_details' in dir() and mr_details else ""
-      failure = detect_failure(result_text, "gitlab_mr_view")
-      result = failure
-    output: failure_mr
-    on_error: continue
-
-  - name: quick_fix_vpn_mr
-    description: "Auto-fix VPN issues for GitLab"
-    condition: "failure_mr and failure_mr.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_mr
-    on_error: continue
-
-  - name: retry_get_mr
-    description: "Retry GitLab call after VPN fix"
-    condition: "vpn_fix_mr and failure_mr"
-    tool: gitlab_mr_view
-    args:
-      project: "{{ resolved_repo.gitlab }}"
-      mr_id: "{{ target_mr_id }}"
-    output: mr_details_retry
-    on_error: continue
-
-  - name: merge_mr_details_result
-    description: "Use retry result if available"
-    condition: "mr_details_retry"
-    compute: |
-      result = mr_details_retry
-    output: mr_details
-
-  - name: log_failure_mr
-    description: "Log failure to memory for learning"
-    condition: "failure_mr and failure_mr.get('failed') and not mr_details_retry"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-
-      entry = log_failure(
-          tool_name="gitlab_mr_view",
-          error_text=failure_mr.get('error_text', ''),
-          skill_name="review_pr",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure_mr
-    on_error: continue
-
   # Step 1b: Get commit history for the MR
   - name: get_mr_commits
     description: "Get commit history for the MR"
@@ -875,7 +820,7 @@ steps:
       result = '\n'.join(lines)
     output: review_summary
 
-# ==================== AUTO ACTIONS ====================
+  # ==================== AUTO ACTIONS ====================
 
   # Step 15: Determine action based on review
   - name: determine_action
@@ -965,19 +910,6 @@ steps:
     on_error: continue
 
   # Step 18b: Auto-merge if approved (optional)
-  - name: merge_mr
-    description: "Merge the MR if auto_merge is enabled"
-    condition: "review_action.get('action') == 'approve' and inputs.get('auto_merge', False)"
-    tool: gitlab_mr_merge
-    args:
-      project: "{{ resolved.gitlab_project }}"
-      mr_id: "{{ mr_id }}"
-      should_remove_source_branch: true
-      merge_when_pipeline_succeeds: true
-    output: merge_result
-    on_error: continue
-
-  # Step 18c: Emit approval hook
   - name: emit_approval_hook
     description: "Notify author that MR was approved"
     condition: "review_action.get('action') == 'approve' and approval_result"

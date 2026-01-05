@@ -16,6 +16,8 @@ import yaml
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+from server.tool_registry import ToolRegistry
+
 # Support both package import and direct loading
 try:
     from .constants import SKILLS_DIR, TOOL_MODULES_DIR
@@ -649,9 +651,9 @@ class SkillExecutor:
 
 def register_skill_tools(server: "FastMCP", create_issue_fn=None) -> int:
     """Register skill tools with the MCP server."""
-    tool_count = 0
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @registry.tool()
     async def skill_list() -> list[TextContent]:
         """
         List all available skills (reusable workflows).
@@ -692,9 +694,7 @@ def register_skill_tools(server: "FastMCP", create_issue_fn=None) -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def skill_run(
         skill_name: str, inputs: str = "{}", execute: bool = True, debug: bool = False
     ) -> list[TextContent]:
@@ -785,6 +785,4 @@ def register_skill_tools(server: "FastMCP", create_issue_fn=None) -> int:
                 return [TextContent(type="text", text=f"❌ Error: {e}\n\n```\n{traceback.format_exc()}\n```")]
             return [TextContent(type="text", text=f"❌ Error loading skill: {e}")]
 
-    tool_count += 1
-
-    return tool_count
+    return registry.count

@@ -36,51 +36,6 @@ steps:
     output: env_summary_raw
     on_error: continue
 
-  # ==================== AUTO-HEAL: get_environment_summary ====================
-
-  - name: detect_failure_env
-    description: "Detect if k8s call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(env_summary_raw) if 'env_summary_raw' in dir() and env_summary_raw else ""
-      failure = detect_failure(result_text, "k8s_environment_summary")
-      result = failure
-    output: failure_env
-    on_error: continue
-
-  - name: quick_fix_auth_env
-    description: "Auto-fix auth issues"
-    condition: "failure_env and failure_env.get('error_type') == 'auth'"
-    tool: kube_login
-    args:
-      cluster: "{{ inputs.environment }}"
-    output: auth_fix_env
-    on_error: continue
-
-  - name: quick_fix_vpn_env
-    description: "Auto-fix VPN issues"
-    condition: "failure_env and failure_env.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_env
-    on_error: continue
-
-  - name: retry_env_summary
-    description: "Retry after auto-fix"
-    condition: "(auth_fix_env or vpn_fix_env) and failure_env"
-    tool: k8s_environment_summary
-    args:
-      environment: "{{ inputs.environment }}"
-    output: env_summary_raw_retry
-    on_error: continue
-
-  - name: merge_env_result
-    condition: "env_summary_raw_retry"
-    compute: |
-      result = str(env_summary_raw_retry)
-    output: env_summary_raw
-    on_error: continue
-
   - name: get_namespace_health
     description: "Get namespace health"
     tool: k8s_namespace_health

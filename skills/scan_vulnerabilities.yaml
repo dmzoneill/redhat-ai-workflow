@@ -60,18 +60,6 @@ steps:
       tag: "{{ inputs.image_tag }}"
     on_error: continue
 
-  # ==================== AUTO-HEAL: check_image_exists ====================
-
-  - name: detect_failure_quay
-    description: "Detect if Quay call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(image_exists_raw) if 'image_exists_raw' in dir() and image_exists_raw else ""
-      failure = detect_failure(result_text, "quay_check_image_exists")
-      result = failure
-    output: failure_quay
-    on_error: continue
-
   - name: validate_image
     description: "Stop if image doesn't exist"
     compute: |

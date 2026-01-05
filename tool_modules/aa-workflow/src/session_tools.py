@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 import yaml
 from mcp.types import TextContent
 
+from server.tool_registry import ToolRegistry
+
 # Support both package import and direct loading
 try:
     from .constants import MEMORY_DIR, PERSONAS_DIR
@@ -32,9 +34,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
         server: The FastMCP server instance
         memory_session_log_fn: Optional function to log session actions
     """
-    tool_count = 0
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @registry.tool()
     async def session_start(agent: str = "") -> list[TextContent]:
         """
         Initialize a new session with full context.
@@ -183,9 +185,7 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    return tool_count
+    return registry.count
 
 
 def register_prompts(server: "FastMCP") -> int:

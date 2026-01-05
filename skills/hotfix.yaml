@@ -53,7 +53,6 @@ inputs:
     description: "Jira issue key for the hotfix"
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize auto-heal tracking"

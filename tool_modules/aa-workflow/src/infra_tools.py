@@ -7,8 +7,6 @@ Provides tools for:
 
 import asyncio
 import os
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
@@ -16,18 +14,17 @@ from mcp.types import TextContent
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
-
-from server.utils import load_config, run_cmd_full, run_cmd_shell
+# Setup project path for server imports
+from server.tool_registry import ToolRegistry
+from server.utils import load_config, run_cmd_full, run_cmd_shell, truncate_output
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 
 def register_infra_tools(server: "FastMCP") -> int:
     """Register infrastructure tools with the MCP server."""
-    tool_count = 0
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @registry.tool()
     async def vpn_connect() -> list[TextContent]:
         """
         Connect to the Red Hat VPN.
@@ -90,7 +87,7 @@ def register_infra_tools(server: "FastMCP") -> int:
 
             lines.append("")
             lines.append("```")
-            lines.append(output[-2000:] if len(output) > 2000 else output)
+            lines.append(truncate_output(output, max_length=2000, mode="tail"))
             lines.append("```")
 
         except asyncio.TimeoutError:
@@ -101,9 +98,7 @@ def register_infra_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    @server.tool()
+    @registry.tool()
     async def kube_login(
         cluster: str,
     ) -> list[TextContent]:
@@ -193,7 +188,7 @@ def register_infra_tools(server: "FastMCP") -> int:
 
             lines.append("")
             lines.append("```")
-            lines.append(output[-1500:] if len(output) > 1500 else output)
+            lines.append(truncate_output(output, max_length=1500, mode="tail"))
             lines.append("```")
 
             if os.path.exists(kubeconfig):
@@ -236,6 +231,4 @@ def register_infra_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    tool_count += 1
-
-    return tool_count
+    return registry.count

@@ -5,16 +5,15 @@ Authentication: JIRA_JPAT environment variable.
 """
 
 import logging
-import sys
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
-
+from server.auto_heal_decorator import auto_heal
+from server.tool_registry import ToolRegistry
 from server.utils import get_project_root, load_config, run_cmd_shell
+
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 
 def _get_jira_url() -> str:
@@ -68,8 +67,10 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
 
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_view_issue(issue_key: str) -> str:
         """
         View detailed information about a Jira issue.
@@ -87,7 +88,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return output
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_view_issue_json(issue_key: str) -> str:
         """
         Get Jira issue data as structured text for parsing.
@@ -127,7 +129,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return json.dumps(data, indent=2)
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_search(jql: str, max_results: int = 20) -> str:
         """
         Search for Jira issues using JQL (Jira Query Language).
@@ -149,7 +152,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return output
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_list_issues(
         project: str = "AAP",
         status: str = "",
@@ -179,7 +183,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return output
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_my_issues(status: str = "") -> str:
         """
         List issues assigned to the current user.
@@ -204,7 +209,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return output
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_list_blocked() -> str:
         """
         List all blocked issues with blocker details.
@@ -219,7 +225,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return output
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_lint(issue_key: str) -> str:
         """
         Lint a Jira issue for quality and completeness.
@@ -249,7 +256,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== WRITE OPERATIONS ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_set_status(issue_key: str, status: str) -> str:
         """
         Set the status of a Jira issue (transition it).
@@ -268,7 +276,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} status changed to **{status}**\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_assign(issue_key: str, assignee: str) -> str:
         """
         Assign a Jira issue to a user.
@@ -287,7 +296,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} assigned to **@{assignee}**\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_unassign(issue_key: str) -> str:
         """
         Remove the assignee from a Jira issue.
@@ -305,7 +315,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} unassigned\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_add_comment(issue_key: str, comment: str) -> str:
         """
         Add a comment to a Jira issue.
@@ -324,7 +335,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Comment added to {issue_key}\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_block(issue_key: str, blocked_by: str, reason: str = "") -> str:
         """
         Mark a Jira issue as blocked by another issue.
@@ -348,7 +360,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"🚧 {issue_key} blocked by {blocked_by}\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_unblock(issue_key: str, blocked_by: str) -> str:
         """
         Remove the blocked status from a Jira issue.
@@ -367,7 +380,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} unblocked from {blocked_by}\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_add_to_sprint(issue_key: str, sprint_id: str = "") -> str:
         """
         Add an issue to a sprint.
@@ -390,7 +404,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} added to sprint\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_remove_sprint(issue_key: str) -> str:
         """
         Remove an issue from its current sprint.
@@ -408,7 +423,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ {issue_key} removed from sprint\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_create_issue(
         issue_type: str,
         summary: str,
@@ -568,7 +584,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Issue created\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_clone_issue(issue_key: str, new_summary: str = "") -> str:
         """
         Create a copy of an existing Jira issue.
@@ -591,7 +608,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Issue cloned\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_add_link(
         from_issue: str,
         to_issue: str,
@@ -615,7 +633,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"🔗 {from_issue} {link_type} {to_issue}\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_add_flag(issue_key: str) -> str:
         """
         Add a flag (impediment) to a Jira issue.
@@ -633,7 +652,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"🚩 Flag added to {issue_key}\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_remove_flag(issue_key: str) -> str:
         """
         Remove a flag from a Jira issue.
@@ -651,7 +671,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Flag removed from {issue_key}\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_set_summary(issue_key: str, summary: str) -> str:
         """
         Update the summary (title) of a Jira issue.
@@ -670,7 +691,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Summary for {issue_key} updated to: **{summary}**\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_set_priority(issue_key: str, priority: str) -> str:
         """
         Set the priority of a Jira issue.
@@ -689,7 +711,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Priority for {issue_key} set to **{priority}**\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_set_story_points(issue_key: str, points: int) -> str:
         """
         Set the story points for a Jira issue.
@@ -708,7 +731,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return f"✅ Story points for {issue_key} set to **{points}**\n\n{output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_set_epic(issue_key: str, epic_key: str) -> str:
         """
         Link a Jira issue to an Epic.
@@ -731,7 +755,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== ADDITIONAL TOOLS (from jira_tools) ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_get_issue(issue_key: str) -> str:
         """
         Get details of a Jira issue (alias for jira_view_issue).
@@ -747,7 +772,8 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed: {output}"
         return output
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_transition(issue_key: str, status: str) -> str:
         """
         Transition a Jira issue to a new status (alias for jira_set_status).
@@ -764,7 +790,8 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed: {output}"
         return f"✅ {issue_key} transitioned to '{status}'"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_ai_helper(issue_key: str, action: str = "summarize") -> str:
         """
         AI helper for Jira issues - provides structured analysis.
@@ -851,7 +878,8 @@ Use `jira_view_issue({issue_key})` for full details including linked issues.
         else:
             return f"Unknown action: {action}. Use: summarize, next_steps, blockers"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def jira_show_template(issue_type: str = "story") -> str:
         """
         Show the expected YAML template for creating Jira issues.
@@ -1006,4 +1034,4 @@ skill_run("create_jira_issue", '{{"summary": "...", "description": "## Markdown 
 ```
 """
 
-    return len([m for m in dir() if not m.startswith("_")])  # Approximate count
+    return registry.count

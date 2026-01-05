@@ -105,7 +105,7 @@ class TestWorkflowExtractedModules:
             assert hasattr(constants, "PERSONAS_DIR")
             assert hasattr(constants, "SKILLS_DIR")
             assert constants.MEMORY_DIR.name == "memory"
-            assert constants.PERSONAS_DIR.name == "agents"
+            assert constants.PERSONAS_DIR.name == "personas"
             assert constants.SKILLS_DIR.name == "skills"
         finally:
             # Clean up path

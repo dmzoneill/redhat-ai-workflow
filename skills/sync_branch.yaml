@@ -56,7 +56,6 @@ inputs:
     description: "Run linting before force push (if force_push is true)"
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -170,44 +169,6 @@ steps:
       prune: true
     output: fetch_result
     on_error: continue
-
-  # ==================== AUTO-HEAL: fetch_base ====================
-
-  - name: detect_failure_fetch
-    description: "Detect if git fetch failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-
-      result_text = str(fetch_result) if 'fetch_result' in dir() and fetch_result else ""
-      failure = detect_failure(result_text, "git_fetch")
-      result = failure
-    output: failure_fetch
-    on_error: continue
-
-  - name: quick_fix_vpn_fetch
-    description: "Auto-fix VPN issues for git"
-    condition: "failure_fetch and failure_fetch.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_fetch
-    on_error: continue
-
-  - name: retry_fetch
-    description: "Retry git fetch after VPN fix"
-    condition: "vpn_fix_fetch and failure_fetch"
-    tool: git_fetch
-    args:
-      repo: "{{ resolved_repo.path }}"
-      prune: true
-    output: fetch_result_retry
-    on_error: continue
-
-  - name: merge_fetch_result
-    description: "Use retry result if available"
-    condition: "fetch_result_retry"
-    compute: |
-      result = fetch_result_retry
-    output: fetch_result
 
   # ==================== CHECK COMMITS ====================
 

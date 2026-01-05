@@ -46,7 +46,6 @@ inputs:
     description: "Comma-separated list of branches to never delete"
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"

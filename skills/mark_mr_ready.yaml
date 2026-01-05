@@ -46,7 +46,6 @@ inputs:
     description: "Repository path for linting (auto-detected if not provided)"
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"

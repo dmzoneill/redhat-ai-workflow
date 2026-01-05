@@ -12,16 +12,16 @@ import asyncio
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
+from server.auto_heal_decorator import auto_heal
+from server.tool_registry import ToolRegistry
+from server.utils import get_gitlab_host, get_section_config, truncate_output
 
-from server.utils import get_gitlab_host, get_section_config
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 # Use shared implementation from utils
 GITLAB_HOST = get_gitlab_host()
@@ -144,10 +144,12 @@ async def run_glab(
 
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
+    registry = ToolRegistry(server)
 
     # REMOVED: gitlab_view_url - low value, just returns URL content
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_list(
         project: str,
         state: str = "opened",
@@ -187,13 +189,15 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_view(project: str, mr_id: int) -> str:
         """View detailed information about a merge request."""
         success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_create(
         project: str,
         title: str = "",
@@ -227,7 +231,8 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return f"✅ MR Created\n\n{output}" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_update(
         project: str,
         mr_id: int,
@@ -260,19 +265,22 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return f"✅ MR !{mr_id} Updated\n\n{output}" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_approve(project: str, mr_id: int) -> str:
         """Approve a merge request."""
         success, output = await run_glab(["mr", "approve", str(mr_id)], repo=project)
         return f"✅ MR !{mr_id} Approved" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_revoke(project: str, mr_id: int) -> str:
         """Revoke approval from a merge request."""
         success, output = await run_glab(["mr", "revoke", str(mr_id)], repo=project)
         return f"✅ Approval revoked from !{mr_id}" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_merge(
         project: str,
         mr_id: int,
@@ -291,35 +299,38 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return f"✅ MR !{mr_id} Merged\n\n{output}" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_close(project: str, mr_id: int) -> str:
         """Close a merge request without merging."""
         success, output = await run_glab(["mr", "close", str(mr_id)], repo=project)
         return f"✅ MR !{mr_id} Closed" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_reopen(project: str, mr_id: int) -> str:
         """Reopen a closed merge request."""
         success, output = await run_glab(["mr", "reopen", str(mr_id)], repo=project)
         return f"✅ MR !{mr_id} Reopened" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_comment(project: str, mr_id: int, message: str) -> str:
         """Add a comment to a merge request."""
         success, output = await run_glab(["mr", "note", str(mr_id), "--message", message], repo=project)
         return f"✅ Comment added to !{mr_id}" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_diff(project: str, mr_id: int) -> str:
         """View the diff/changes in a merge request."""
         success, output = await run_glab(["mr", "diff", str(mr_id)], repo=project, timeout=120)
         if not success:
             return f"❌ Failed: {output}"
-        if len(output) > 10000:
-            output = output[:10000] + "\n\n... (truncated)"
-        return f"## Diff for !{mr_id}\n\n```diff\n{output}\n```"
+        return f"## Diff for !{mr_id}\n\n```diff\n{truncate_output(output, max_length=10000)}\n```"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_rebase(project: str, mr_id: int) -> str:
         """Rebase a merge request's source branch against target."""
         success, output = await run_glab(["mr", "rebase", str(mr_id)], repo=project)
@@ -327,7 +338,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # NOTE: gitlab_mr_checkout removed - interactive git operation
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_approvers(project: str, mr_id: int) -> str:
         """List eligible approvers for a merge request."""
         success, output = await run_glab(["mr", "approvers", str(mr_id)], repo=project)
@@ -335,7 +347,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== CI/CD PIPELINES ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_ci_list(project: str, status: str = "", page: int = 1) -> str:
         """List CI/CD pipelines for a project."""
         args = ["ci", "list", "--page", str(page)]
@@ -344,7 +357,8 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_ci_status(project: str, branch: str = "") -> str:
         """Get the status of the latest pipeline on a branch."""
         args = ["ci", "status"]
@@ -353,7 +367,8 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_ci_view(project: str, branch: str = "") -> str:
         """View detailed pipeline information with all jobs."""
         args = ["ci", "view"]
@@ -362,7 +377,8 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_ci_run(project: str, branch: str = "", variables: str = "") -> str:
         """Trigger a new pipeline run."""
         args = ["ci", "run"]
@@ -374,13 +390,15 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return f"✅ Pipeline Started\n\n{output}" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_ci_retry(project: str, job_id: int) -> str:
         """Retry a failed CI/CD job."""
         success, output = await run_glab(["ci", "retry", str(job_id)], repo=project)
         return f"✅ Job {job_id} Retried" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_ci_cancel(project: str, pipeline_id: int = 0) -> str:
         """Cancel a running pipeline."""
         args = ["ci", "cancel"]
@@ -389,17 +407,17 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return "✅ Pipeline Cancelled" if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_ci_trace(project: str, job_id: int) -> str:
         """Get the log output from a CI/CD job."""
         success, output = await run_glab(["ci", "trace", str(job_id)], repo=project, timeout=120)
         if not success:
             return f"❌ Failed: {output}"
-        if len(output) > 15000:
-            output = "... (truncated)\n\n" + output[-15000:]
-        return f"## Job {job_id} Log\n\n```\n{output}\n```"
+        return f"## Job {job_id} Log\n\n```\n{truncate_output(output, max_length=15000, mode='tail')}\n```"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_ci_lint(project: str) -> str:
         """Lint/validate the .gitlab-ci.yml file."""
         success, output = await run_glab(["ci", "lint"], repo=project)
@@ -407,7 +425,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== REPOSITORY ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_repo_view(project: str) -> str:
         """View repository/project information."""
         success, output = await run_glab(["repo", "view", "--web=false"], repo=project)
@@ -417,7 +436,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== ISSUES ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_issue_list(project: str, state: str = "opened", label: str = "", assignee: str = "") -> str:
         """List GitLab issues for a project.
 
@@ -444,13 +464,15 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_glab(args, repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_issue_view(project: str, issue_id: int) -> str:
         """View a GitLab issue."""
         success, output = await run_glab(["issue", "view", str(issue_id), "--web=false"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_issue_create(
         project: str, title: str, description: str = "", labels: str = "", assignee: str = ""
     ) -> str:
@@ -467,19 +489,22 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== MISC ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_label_list(project: str) -> str:
         """List all labels in a project."""
         success, output = await run_glab(["label", "list"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_release_list(project: str) -> str:
         """List releases for a project."""
         success, output = await run_glab(["release", "list"], repo=project)
         return output if success else f"❌ Failed: {output}"
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_user_info() -> str:
         """Get current authenticated GitLab user information."""
         success, output = await run_glab(["auth", "status"])
@@ -487,7 +512,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== ADDITIONAL TOOLS (from gitlab_tools) ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_list_mrs(
         project: str,
         state: str = "opened",
@@ -523,7 +549,8 @@ def register_tools(server: "FastMCP") -> int:
 
     # REMOVED: gitlab_get_mr - duplicate of gitlab_mr_view
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def gitlab_mr_comments(project: str, mr_id: int) -> str:
         """
         Get comments/feedback on a merge request.
@@ -545,4 +572,4 @@ def register_tools(server: "FastMCP") -> int:
     # REMOVED: gitlab_pipeline_status - duplicate of gitlab_ci_status
     # REMOVED: gitlab_search_mrs_by_issue - use gitlab_mr_list with search param
 
-    return len([m for m in dir() if not m.startswith("_")])  # Approximate count
+    return registry.count

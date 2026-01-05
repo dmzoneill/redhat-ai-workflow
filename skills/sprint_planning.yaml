@@ -44,34 +44,6 @@ steps:
     output: backlog_raw
     on_error: continue
 
-  # ==================== AUTO-HEAL: get_backlog ====================
-
-  - name: detect_failure_jira
-    description: "Detect if Jira call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(backlog_raw) if 'backlog_raw' in dir() and backlog_raw else ""
-      failure = detect_failure(result_text, "jira_list_issues")
-      result = failure
-    output: failure_jira
-    on_error: continue
-
-  - name: log_failure_jira
-    description: "Log Jira failure to memory"
-    condition: "failure_jira and failure_jira.get('failed')"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-      entry = log_failure(
-          tool_name="jira_list_issues",
-          error_text=failure_jira.get('error_text', ''),
-          skill_name="sprint_planning",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure_jira
-    on_error: continue
-
   - name: parse_backlog
     description: "Parse backlog issues"
     compute: |

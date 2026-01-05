@@ -13,6 +13,129 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+# ==================== Output Formatting ====================
+
+
+def truncate_output(
+    text: str,
+    max_length: int = 5000,
+    suffix: str = "\n\n... (truncated)",
+    mode: str = "head",
+) -> str:
+    """Truncate long output with a suffix/prefix message.
+
+    Args:
+        text: Text to potentially truncate
+        max_length: Maximum length before truncation (default: 5000)
+        suffix: Message to append/prepend when truncated
+        mode: "head" keeps first N chars (default), "tail" keeps last N chars
+
+    Returns:
+        Original text if within limit, otherwise truncated with message
+    """
+    if not text or len(text) <= max_length:
+        return text
+
+    if mode == "tail":
+        # Keep the end (useful for logs where recent output matters)
+        prefix = suffix.rstrip() + "\n\n" if suffix else "... (truncated)\n\n"
+        return prefix + text[-max_length:]
+    else:
+        # Keep the beginning (default)
+        return text[:max_length] + suffix
+
+
+def format_error(
+    message: str,
+    output: str = "",
+    hint: str = "",
+    tool_name: str = "",
+) -> str:
+    """Build consistent error response.
+
+    Args:
+        message: Error message
+        output: Optional command output
+        hint: Optional hint for fixing the error
+        tool_name: Optional tool name for debug_tool hint
+
+    Returns:
+        Formatted error string
+    """
+    parts = [f"❌ {message}"]
+    if output:
+        parts.append(f"\n{output}")
+    if hint:
+        parts.append(f"\n💡 {hint}")
+    if tool_name:
+        parts.append(f"\n💡 To auto-fix: `debug_tool('{tool_name}')`")
+    return "".join(parts)
+
+
+def format_success(message: str, **details: str | int | bool) -> str:
+    """Build consistent success response.
+
+    Args:
+        message: Success message
+        **details: Key-value details to include
+
+    Returns:
+        Formatted success string
+    """
+    parts = [f"✅ {message}"]
+    for key, value in details.items():
+        # Convert snake_case to Title Case
+        display_key = key.replace("_", " ").title()
+        parts.append(f"\n  • {display_key}: {value}")
+    return "".join(parts)
+
+
+def format_warning(message: str, action: str = "") -> str:
+    """Build consistent warning response.
+
+    Args:
+        message: Warning message
+        action: Optional suggested action
+
+    Returns:
+        Formatted warning string
+    """
+    result = f"⚠️ {message}"
+    if action:
+        result += f"\n💡 {action}"
+    return result
+
+
+def format_list(
+    title: str,
+    items: list[str | dict],
+    empty_message: str = "None found.",
+    item_key: str = "",
+) -> str:
+    """Build consistent list response.
+
+    Args:
+        title: List title/header
+        items: List of strings or dicts to format
+        empty_message: Message when list is empty
+        item_key: If items are dicts, key to use for display
+
+    Returns:
+        Formatted list string
+    """
+    if not items:
+        return f"{title}\n{empty_message}"
+
+    lines = [title]
+    for item in items:
+        if isinstance(item, dict) and item_key:
+            lines.append(f"  • {item.get(item_key, str(item))}")
+        else:
+            lines.append(f"  • {item}")
+    return "\n".join(lines)
+
+
 # ==================== Config Loading ====================
 
 _config_cache: dict | None = None

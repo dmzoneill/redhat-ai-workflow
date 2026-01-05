@@ -54,7 +54,6 @@ inputs:
     description: "Additional context (e.g., MR ID, namespace, issue key)"
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -71,34 +70,6 @@ steps:
     args:
       limit: 100
     output: channels_raw
-    on_error: continue
-
-  # ==================== AUTO-HEAL: list_channels ====================
-
-  - name: detect_failure_slack
-    description: "Detect if Slack call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(channels_raw) if 'channels_raw' in dir() and channels_raw else ""
-      failure = detect_failure(result_text, "slack_list_channels")
-      result = failure
-    output: failure_slack
-    on_error: continue
-
-  - name: log_failure_slack
-    description: "Log failure to memory"
-    condition: "failure_slack and failure_slack.get('failed')"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-      entry = log_failure(
-          tool_name="slack_list_channels",
-          error_text=failure_slack.get('error_text', ''),
-          skill_name="notify_team",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure
     on_error: continue
 
   - name: find_channel

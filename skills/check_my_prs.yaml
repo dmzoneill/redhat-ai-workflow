@@ -49,7 +49,6 @@ inputs:
 # No hardcoded constants - resolved dynamically
 
 steps:
-  # ==================== AUTO-HEAL SETUP ====================
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -114,45 +113,6 @@ steps:
       author: "{{ my_username }}"
     output: my_mrs_raw
     on_error: continue
-
-  # ==================== AUTO-HEAL: list_my_mrs ====================
-
-  - name: detect_failure_mrs
-    description: "Detect if GitLab call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-
-      result_text = str(my_mrs_raw) if 'my_mrs_raw' in dir() and my_mrs_raw else ""
-      failure = detect_failure(result_text, "gitlab_mr_list")
-      result = failure
-    output: failure_mrs
-    on_error: continue
-
-  - name: quick_fix_vpn_mrs
-    description: "Auto-fix VPN issues for GitLab"
-    condition: "failure_mrs and failure_mrs.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_mrs
-    on_error: continue
-
-  - name: retry_list_mrs
-    description: "Retry GitLab call after VPN fix"
-    condition: "vpn_fix_mrs and failure_mrs"
-    tool: gitlab_mr_list
-    args:
-      project: "{{ resolved.gitlab_project }}"
-      state: opened
-      author: "{{ my_username }}"
-    output: my_mrs_raw_retry
-    on_error: continue
-
-  - name: merge_mrs_result
-    description: "Use retry result if available"
-    condition: "my_mrs_raw_retry"
-    compute: |
-      result = my_mrs_raw_retry
-    output: my_mrs_raw
 
   - name: parse_my_mrs
     description: "Parse MR list using shared parser"
@@ -303,16 +263,6 @@ steps:
     output: summary
 
   # ==================== MERGE APPROVED MRs ====================
-
-  - name: merge_approved
-    description: "Merge the first approved MR if auto_merge is enabled"
-    condition: "inputs.auto_merge and first_mr_status and first_mr_status.get('status') == 'approved'"
-    tool: gitlab_mr_merge
-    args:
-      project: "{{ resolved.gitlab_project }}"
-      mr_id: "{{ first_mr_status.get('iid') }}"
-    output: merge_result
-    on_error: continue
 
   - name: update_summary_with_merge
     description: "Update summary if MR was merged"

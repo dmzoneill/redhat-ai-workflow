@@ -46,59 +46,6 @@ steps:
     output: open_mrs_raw
     on_error: continue
 
-  # ==================== AUTO-HEAL: get_my_mrs ====================
-
-  - name: detect_failure_gitlab
-    description: "Detect if GitLab call failed"
-    compute: |
-      from scripts.common.auto_heal import detect_failure
-      result_text = str(open_mrs_raw) if 'open_mrs_raw' in dir() and open_mrs_raw else ""
-      failure = detect_failure(result_text, "gitlab_mr_list")
-      result = failure
-    output: failure_gitlab
-    on_error: continue
-
-  - name: quick_fix_vpn_gitlab
-    description: "Auto-fix VPN issues for GitLab"
-    condition: "failure_gitlab and failure_gitlab.get('error_type') == 'network'"
-    tool: vpn_connect
-    args: {}
-    output: vpn_fix_gitlab
-    on_error: continue
-
-  - name: retry_get_mrs
-    description: "Retry GitLab call after VPN fix"
-    condition: "vpn_fix_gitlab and failure_gitlab"
-    tool: gitlab_mr_list
-    args:
-      project: "{{ inputs.project }}"
-      author: "@me"
-    output: open_mrs_raw_retry
-    on_error: continue
-
-  - name: merge_mrs_result
-    description: "Use retry result if available"
-    condition: "open_mrs_raw_retry"
-    compute: |
-      result = open_mrs_raw_retry
-    output: open_mrs_raw
-
-  - name: log_failure_gitlab
-    description: "Log failure to memory"
-    condition: "failure_gitlab and failure_gitlab.get('failed') and not open_mrs_raw_retry"
-    compute: |
-      from scripts.common.auto_heal import log_failure
-      entry = log_failure(
-          tool_name="gitlab_mr_list",
-          error_text=failure_gitlab.get('error_text', ''),
-          skill_name="check_mr_feedback",
-          fixed=False,
-          memory_helper=memory
-      )
-      result = entry
-    output: logged_failure
-    on_error: continue
-
   - name: parse_open_mrs
     description: "Parse MR list output"
     compute: |
