@@ -1162,8 +1162,8 @@ def register_tools(server: FastMCP) -> int:
         success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
 
         if success:
-            return f"✅ make {target} completed\n\n{output[-2000:] if len(output) > 2000 else output}"
-        return f"❌ make {target} failed:\n{output[-2000:] if len(output) > 2000 else output}"
+            return f"✅ make {target} completed\n\n{truncate_output(output, 2000, mode='tail')}"
+        return f"❌ make {target} failed:\n{truncate_output(output, 2000, mode='tail')}"
 
     # ==================== DOCKER ====================
 
