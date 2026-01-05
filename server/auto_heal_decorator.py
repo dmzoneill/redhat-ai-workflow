@@ -133,8 +133,11 @@ async def _run_kube_login(cluster: str) -> bool:
         logger.warning(f"Auto-heal: kube_login({cluster}) failed: {output[:200]}")
         return False
 
-    except Exception as e:
-        logger.warning(f"Auto-heal: kube_login({cluster}) error: {e}")
+    except ImportError as e:
+        logger.warning(f"Auto-heal: kube_login missing dependency: {e}")
+        return False
+    except OSError as e:
+        logger.warning(f"Auto-heal: kube_login({cluster}) OS error: {e}")
         return False
 
 
@@ -169,8 +172,11 @@ async def _run_vpn_connect() -> bool:
         logger.warning(f"Auto-heal: vpn_connect failed: {output[:200]}")
         return False
 
-    except Exception as e:
-        logger.warning(f"Auto-heal: vpn_connect error: {e}")
+    except ImportError as e:
+        logger.warning(f"Auto-heal: vpn_connect missing dependency: {e}")
+        return False
+    except OSError as e:
+        logger.warning(f"Auto-heal: vpn_connect OS error: {e}")
         return False
 
 
