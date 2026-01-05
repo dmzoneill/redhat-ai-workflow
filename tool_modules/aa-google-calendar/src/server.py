@@ -1,34 +1,23 @@
-"""
-aa-google-calendar MCP Server
+"""AA Google-calendar MCP Server - Standalone entry point.
 
-Provides Google Calendar integration for creating events and meetings.
-
-CONSTRAINTS:
-- All meetings in Irish time (Europe/Dublin)
-- Meetings only between 15:00-19:00 Irish time
-- Checks attendee availability before scheduling
+This module delegates to server/ for the server infrastructure.
+It only specifies which tool modules to load.
 """
 
-from mcp.server.fastmcp import FastMCP
+import asyncio
 
-from .tools import (
-    google_calendar_check_mutual_availability,
-    google_calendar_find_meeting,
-    google_calendar_list_events,
-    google_calendar_quick_meeting,
-    google_calendar_schedule_meeting,
-    google_calendar_status,
-)
+from server.main import create_mcp_server, run_mcp_server, setup_logging
 
-mcp = FastMCP("aa-google-calendar")
+# Setup path using shared bootstrap
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
-# Register tools
-mcp.add_tool(google_calendar_schedule_meeting)
-mcp.add_tool(google_calendar_quick_meeting)
-mcp.add_tool(google_calendar_check_mutual_availability)
-mcp.add_tool(google_calendar_find_meeting)
-mcp.add_tool(google_calendar_list_events)
-mcp.add_tool(google_calendar_status)
+
+def main():
+    """Run the google-calendar-only MCP server."""
+    setup_logging()
+    server = create_mcp_server(name="aa-google-calendar", tools=["google-calendar"])
+    asyncio.run(run_mcp_server(server))
+
 
 if __name__ == "__main__":
-    mcp.run()
+    main()

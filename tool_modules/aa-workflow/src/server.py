@@ -1,19 +1,15 @@
-"""AA workflow MCP Server - Standalone entry point.
+"""AA Workflow MCP Server - Standalone entry point.
 
 This module delegates to server/ for the server infrastructure.
 It only specifies which tool modules to load.
 """
 
-import sys
-from pathlib import Path
-
-# Ensure server module is importable
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
-
 import asyncio
 
 from server.main import create_mcp_server, run_mcp_server, setup_logging
+
+# Setup path using shared bootstrap
+from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 
 def main():
