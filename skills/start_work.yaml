@@ -40,6 +40,12 @@ inputs:
     default: true
     description: "Automatically stash uncommitted changes before checkout (default: true)"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format"
+
 steps:
   # ==================== RESOLVE REPOSITORY ====================
 
@@ -445,10 +451,20 @@ steps:
   - name: notify_slack_start
     description: "Post to team channel that work started"
     condition: "not branch_check.exists"
+    compute: |
+      from scripts.common.parsers import linkify_jira_keys
+      is_slack = inputs.get('slack_format', True)
+      msg = f"🚀 Started work on {inputs.issue_key}"
+      result = linkify_jira_keys(msg, slack_format=is_slack)
+    output: slack_msg
+
+  - name: post_slack_start
+    description: "Post to team channel"
+    condition: "not branch_check.exists"
     tool: slack_post_message
     args:
       channel: "team-automation-analytics"
-      message: "🚀 Started work on [{{ inputs.issue_key }}](https://issues.redhat.com/browse/{{ inputs.issue_key }})"
+      message: "{{ slack_msg }}"
     output: slack_notify_result
     on_error: continue
 
@@ -510,7 +526,12 @@ steps:
 outputs:
   - name: summary
     value: |
-      ## {{ "📂 Resuming" if branch_check.exists else "✨ Starting" }} Work on {{ inputs.issue_key }}
+      {% set is_slack = inputs.slack_format | default(true) %}
+      {% if is_slack %}
+      ## {{ "📂 Resuming" if branch_check.exists else "✨ Starting" }} Work on <https://issues.redhat.com/browse/{{ inputs.issue_key }}|{{ inputs.issue_key }}>
+      {% else %}
+      ## {{ "📂 Resuming" if branch_check.exists else "✨ Starting" }} Work on [{{ inputs.issue_key }}](https://issues.redhat.com/browse/{{ inputs.issue_key }})
+      {% endif %}
 
       **Issue:** {{ issue }}
       **Branch:** `{{ final_branch }}`
@@ -526,7 +547,12 @@ outputs:
       ---
       {% if mr_feedback and mr_feedback.has_feedback %}
 
-      ### 💬 MR Feedback ({{ mr_feedback.mr_id }})
+      {% set mr_url = "https://gitlab.cee.redhat.com/" ~ (resolved_repo.gitlab or "automation-analytics/automation-analytics-backend") ~ "/-/merge_requests/" ~ mr_feedback.mr_id %}
+      {% if is_slack %}
+      ### 💬 MR Feedback (<{{ mr_url }}|!{{ mr_feedback.mr_id }}>)
+      {% else %}
+      ### 💬 MR Feedback ([!{{ mr_feedback.mr_id }}]({{ mr_url }}))
+      {% endif %}
 
       There are review comments on your MR:
 

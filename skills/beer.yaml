@@ -29,6 +29,12 @@ inputs:
     default: true
     description: "Show cleanup reminders (branches, ephemeral)"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format"
+
 steps:
   # ==================== CONFIGURATION ====================
 
@@ -346,13 +352,16 @@ steps:
     description: "Generate standup notes for tomorrow"
     condition: "inputs.get('generate_standup', True)"
     compute: |
+      from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
+      is_slack = inputs.get('slack_format', True)
       lines = []
 
       # Yesterday (what I did today)
       lines.append("**Yesterday:**")
       if todays_work and todays_work.get('commits'):
         for c in todays_work['commits'][:3]:
-          lines.append(f"- {c['message']}")
+          msg = linkify_jira_keys(c['message'], slack_format=is_slack)
+          lines.append(f"- {msg}")
       else:
         lines.append("- (no commits today)")
 
@@ -362,7 +371,9 @@ steps:
       if my_prs:
         for pr in my_prs[:2]:
           if not pr.get('draft'):
-            lines.append(f"- Continue !{pr['id']}: {pr['title']}")
+            title = linkify_jira_keys(pr['title'], slack_format=is_slack)
+            mr_id = linkify_mr_ids(f"!{pr['id']}", slack_format=is_slack)
+            lines.append(f"- Continue {mr_id}: {title}")
             break
       else:
         lines.append("- (check Jira board)")
@@ -453,8 +464,15 @@ steps:
       # Base URL for GitLab MRs
       gitlab_mr_base = "https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests"
 
-      # Import shared linkify function
-      from scripts.common.parsers import linkify_jira_keys
+      # Import shared linkify functions
+      from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
+
+      is_slack = inputs.get('slack_format', True)
+
+      def build_link(url, text):
+          if is_slack:
+              return f"<{url}|{text}>"
+          return f"[{text}]({url})"
 
       # Header
       lines.append(f"# {ctx['emoji']} {ctx['greeting']}, {first_name}!")
@@ -469,10 +487,20 @@ steps:
       if todays_work and todays_work.get('count', 0) > 0:
         lines.append(f"**{todays_work['count']}** commits pushed:")
         for c in todays_work.get('commits', [])[:5]:
-          lines.append(f"- `{c['sha']}` {c['message']}")
+          msg = linkify_jira_keys(c['message'], slack_format=is_slack)
+          lines.append(f"- `{c['sha']}` {msg}")
       else:
         lines.append("- No commits today (and that's okay! 🎄)")
       lines.append("")
+
+      # Today's Merges
+      if merged_today:
+        lines.append("## 🚀 Merged Today")
+        for mr in merged_today:
+          title = linkify_jira_keys(mr['title'], slack_format=is_slack)
+          url = f"{gitlab_mr_base}/{mr['id']}"
+          lines.append(f"- {build_link(url, '!' + str(mr['id']))} - {title}")
+        lines.append("")
 
       # Weekly Stats
       lines.append("## 📊 This Week's Stats")
@@ -498,8 +526,9 @@ steps:
         active = [p for p in my_prs if not p.get('draft')]
         lines.append(f"**{len(active)}** active, **{len(drafts)}** draft")
         for pr in active[:3]:
-          title_with_links = linkify_jira_keys(pr.get('title', ''))
-          lines.append(f"- [!{pr['id']}]({gitlab_mr_base}/{pr['id']}) - {title_with_links}")
+          title_with_links = linkify_jira_keys(pr.get('title', ''), slack_format=is_slack)
+          url = f"{gitlab_mr_base}/{pr['id']}"
+          lines.append(f"- {build_link(url, '!' + str(pr['id']))} - {title_with_links}")
       else:
         lines.append("- No open PRs")
       lines.append("")

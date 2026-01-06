@@ -423,14 +423,36 @@ pytest tests/test_mcp_integration.py -v
 ### Development Mode
 
 ```bash
-# Start the daemon
-make slack-daemon-start
+# Validate credentials
+make slack-test
+
+# Run in foreground (Ctrl+C to stop)
+make slack-daemon
+
+# Run with verbose logging
+make slack-daemon-verbose
+
+# Dry-run mode (no messages sent)
+make slack-daemon-dry
+```
+
+### Background Mode (D-Bus IPC)
+
+```bash
+# Start in background with D-Bus control
+make slack-daemon-bg
 
 # Check status
 make slack-daemon-status
 
 # View logs
-tail -f /tmp/slack-daemon.log
+make slack-daemon-logs
+# or: tail -f /tmp/slack-daemon.log
+
+# Control via D-Bus
+make slack-status      # Get daemon stats
+make slack-pending     # List pending messages
+make slack-approve-all # Approve all pending
 
 # Stop
 make slack-daemon-stop
@@ -439,7 +461,10 @@ make slack-daemon-stop
 ### Testing Locally
 
 ```bash
-# Run the test script
+# Validate credentials
+make slack-test
+
+# Run test script
 python scripts/slack_test.py
 ```
 

@@ -124,9 +124,9 @@ steps:
 
   - name: acknowledge_alert
     description: "Reply to Slack thread to acknowledge we're looking into it"
-    tool: slack_reply
+    tool: slack_send_message
     args:
-      channel: "{{ inputs.channel_id }}"
+      target: "{{ inputs.channel_id }}"
       thread_ts: "{{ inputs.message_ts }}"
       text: "👀 Looking into this..."
     output: ack_result
@@ -426,9 +426,9 @@ steps:
 
   - name: reply_with_findings
     description: "Reply to Slack with investigation findings"
-    tool: slack_reply
+    tool: slack_send_message
     args:
-      channel: "{{ inputs.channel_id }}"
+      target: "{{ inputs.channel_id }}"
       thread_ts: "{{ inputs.message_ts }}"
       text: "{{ slack_response }}"
     output: reply_result

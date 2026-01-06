@@ -44,6 +44,12 @@ inputs:
     default: false
     description: "If true, formats as a reminder rather than new MR notification"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format in summary"
+
 steps:
 
   - name: init_autoheal
@@ -264,12 +270,21 @@ steps:
 outputs:
   - name: summary
     value: |
+      {% set is_slack = inputs.slack_format | default(true) %}
       ## {{ "✅ Team Notified" if slack_result else "📋 Message Ready" }}
 
-      **MR:** !{{ notification.mr_id }}
+      {% if is_slack %}
+      **MR:** <{{ notification.mr_url }}|!{{ notification.mr_id }}>
+      {% else %}
+      **MR:** [!{{ notification.mr_id }}]({{ notification.mr_url }})
+      {% endif %}
       **URL:** {{ notification.mr_url }}
       {% if notification.issue_key %}
-      **Jira:** {{ notification.issue_key }}
+      {% if is_slack %}
+      **Jira:** <{{ ctx.jira_url }}/browse/{{ notification.issue_key }}|{{ notification.issue_key }}>
+      {% else %}
+      **Jira:** [{{ notification.issue_key }}]({{ ctx.jira_url }}/browse/{{ notification.issue_key }})
+      {% endif %}
       {% endif %}
 
       {% if slack_result %}

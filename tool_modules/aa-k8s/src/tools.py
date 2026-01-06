@@ -53,39 +53,51 @@ def register_tools(server: "FastMCP") -> int:
     @auto_heal()
     @registry.tool()
     async def kubectl_logs(
-        pod_name: str,
-        namespace: str,
+        pod_name: str = "",
+        namespace: str = "",
         environment: str = "stage",
         container: str = "",
         tail: int = 100,
         previous: bool = False,
         since: str = "",
+        selector: str = "",
     ) -> str:
         """
-        Get logs from a pod.
+        Get logs from a pod or selector.
 
         Args:
-            pod_name: Name of the pod
+            pod_name: Name of the pod (optional if selector provided)
             namespace: Kubernetes namespace
             environment: Target environment (stage, production, ephemeral)
             container: Specific container name (for multi-container pods)
             tail: Number of lines to show from the end
             previous: Get logs from previous instance (after crash)
             since: Only show logs since duration (e.g., "1h", "30m", "24h")
+            selector: Label selector (e.g., "app=myapp") - used if pod_name is empty
 
         Returns:
             Pod logs.
         """
         kubeconfig = get_kubeconfig(environment, namespace)
-        args = ["logs", pod_name, f"--tail={tail}"]
-        if container:
+
+        if pod_name:
+            args = ["logs", pod_name, f"--tail={tail}"]
+        elif selector:
+            args = ["logs", "-l", selector, f"--tail={tail}", "--all-containers"]
+        else:
+            return "❌ Error: Either pod_name or selector must be provided"
+
+        if container and pod_name:  # container only works with single pod
             args.extend(["-c", container])
         if previous:
             args.append("--previous")
         if since:
             args.append(f"--since={since}")
+
         success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace, timeout=120)
-        return f"## Logs: {pod_name}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+
+        target = pod_name or f"selector {selector}"
+        return f"## Logs: {target}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
     @auto_heal()
     @registry.tool()

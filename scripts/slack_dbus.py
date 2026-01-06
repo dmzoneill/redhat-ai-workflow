@@ -313,7 +313,7 @@ class SlackDaemonWithDBus:
         self.history = MessageHistory()
 
         self._bus: MessageBus | None = None
-        self._dbus_interface: SlackAgentDBusInterface | None = None
+        self._dbus_interface: SlackPersonaDBusInterface | None = None
         self._shutdown_requested = False
 
         # Will be set when daemon starts
@@ -336,7 +336,7 @@ class SlackDaemonWithDBus:
             self._event_loop = asyncio.get_running_loop()
 
             self._bus = await MessageBus().connect()
-            self._dbus_interface = SlackAgentDBusInterface(self)
+            self._dbus_interface = SlackPersonaDBusInterface(self)
 
             self._bus.export(DBUS_OBJECT_PATH, self._dbus_interface)
             await self._bus.request_name(DBUS_SERVICE_NAME)

@@ -35,6 +35,12 @@ inputs:
     required: false
     description: "Specific MR IDs to check (optional - defaults to all open MRs)"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format in summary"
+
 steps:
   # Step 1: Get list of user's open MRs using MCP tool
   - name: get_my_mrs
@@ -282,6 +288,9 @@ steps:
   - name: format_summary
     description: "Create human-readable summary"
     compute: |
+      from scripts.common.parsers import linkify_mr_ids
+      is_slack = inputs.get('slack_format', True)
+
       lines = []
       lines.append("# MR Feedback Summary")
       lines.append("")
@@ -310,9 +319,10 @@ steps:
         # Details per MR
         for mr_feedback in analysis:
           mr_id = mr_feedback['mr_id']
+          mr_str = linkify_mr_ids(f"!{mr_id}", slack_format=is_slack)
           title = mr_feedback['title'][:60]
 
-          lines.append(f"## MR !{mr_id}")
+          lines.append(f"## MR {mr_str}")
           lines.append(f"*{title}*")
           lines.append("")
 
@@ -358,7 +368,8 @@ steps:
         if meeting_results.get('skipped'):
           lines.append("## ⏭️ Skipped Meeting Requests (already scheduled)")
           for m in meeting_results['skipped']:
-            lines.append(f"- MR !{m['mr_id']} with {m['requester']}: {m['reason']}")
+            mr_id_str = linkify_mr_ids(f"!{m['mr_id']}", slack_format=is_slack)
+            lines.append(f"- MR {mr_id_str} with {m['requester']}: {m['reason']}")
           lines.append("")
 
         if meeting_results.get('created'):

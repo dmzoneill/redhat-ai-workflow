@@ -50,6 +50,12 @@ inputs:
     default: false
     description: "Automatically merge if approved (default: false)"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format in summary"
+
 # No hardcoded constants - resolved dynamically
 
 steps:
@@ -759,10 +765,14 @@ steps:
   - name: prepare_summary
     description: "Compile review findings"
     compute: |
+      from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
+      is_slack = inputs.get('slack_format', True)
       lines = []
       lines.append("## PR Review Summary")
-      lines.append(f"**MR:** !{mr_id}")
-      lines.append(f"**Jira:** {jira_key}")
+      mr_str = linkify_mr_ids(f"!{mr_id}", slack_format=is_slack)
+      lines.append(f"**MR:** {mr_str}")
+      jira_str = linkify_jira_keys(jira_key, slack_format=is_slack)
+      lines.append(f"**Jira:** {jira_str}")
       lines.append("")
 
       # Format validation

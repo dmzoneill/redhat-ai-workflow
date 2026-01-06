@@ -64,6 +64,12 @@ inputs:
     default: false
     description: "Auto-fix linting issues with black"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format"
+
 # jira_url loaded from config.json in load_config step
 
 steps:
@@ -682,10 +688,21 @@ steps:
   - name: notify_slack_mr_created
     description: "Post MR to team channel for visibility"
     condition: "mr"
+    compute: |
+      from scripts.common.parsers import linkify_mr_ids, linkify_jira_keys
+      is_slack = inputs.get('slack_format', True)
+      mr_str = linkify_mr_ids(f"!{memory_context['mr_iid']}", slack_format=is_slack)
+      key_str = linkify_jira_keys(inputs.issue_key, slack_format=is_slack)
+      result = f"🔀 MR ready for review: {mr_str} - {key_str}"
+    output: slack_msg
+
+  - name: post_slack_mr_created
+    description: "Post to team channel"
+    condition: "mr"
     tool: slack_post_message
     args:
       channel: "team-automation-analytics"
-      message: "🔀 MR ready for review: [!{{ memory_context.mr_iid }}]({{ memory_context.mr_url }}) - {{ inputs.issue_key }}"
+      message: "{{ slack_msg }}"
     output: slack_mr_notify
     on_error: continue
 
@@ -721,10 +738,15 @@ steps:
 outputs:
   - name: summary
     value: |
+      {% set is_slack = inputs.slack_format | default(true) %}
       ## {{ "✅" if mr else "❌" }} Merge Request {{ "Created" if mr else "Failed" }}
 
       {% if mr %}
-      **MR:** {{ mr.title }}
+      {% if is_slack %}
+      **MR:** <{{ mr.web_url }}|{{ mr.title }}>
+      {% else %}
+      **MR:** [{{ mr.title }}]({{ mr.web_url }})
+      {% endif %}
       **URL:** {{ mr.web_url }}
       **Status:** {{ "Draft" if inputs.draft else "Ready for Review" }}
       **Branch:** `{{ current_branch.name }}` → `{{ resolved_repo.default_branch }}`

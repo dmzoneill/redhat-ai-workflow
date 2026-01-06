@@ -47,11 +47,13 @@ CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 TOKEN_FILE = CONFIG_DIR / "token.json"
 SERVICE_ACCOUNT_FILE = CONFIG_DIR / "service_account.json"
 
-# Scopes required for calendar access (includes freebusy for availability)
+# Scopes required for calendar and gmail access
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
 ]
 
 # CONSTRAINTS

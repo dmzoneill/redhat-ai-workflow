@@ -79,6 +79,10 @@
   "user": {
     "username": "YOUR_USERNAME",
     "email": "you@example.com",
+    "email_aliases": [
+      "you@example.com",
+      "personal@gmail.com"
+    ],
     "full_name": "Your Name",
     "gitlab_username": "YOUR_USERNAME",
     "jira_username": "YOUR_USERNAME",
@@ -516,9 +520,7 @@
       "daoneill": "U023CKSHHS4"
     },
     "state_db_path": "./slack_state.db",
-    "debug": false,
-    "d_cookie": "YOUR_COOKIE_HERE",
-    "xoxc_token": "YOUR_TOKEN_HERE"
+    "debug": false
   },
   "skill_hooks": {
     "description": "Event notifications during skill execution",
@@ -747,6 +749,32 @@
       "6. Delete ~/.config/google-calendar/token.json",
       "7. Run google_calendar_status() to re-authenticate"
     ]
+  },
+  "linting": {
+    "black": {
+      "line_length": 100
+    },
+    "flake8": {
+      "max_line_length": 100,
+      "ignore": "E501,W503,E203",
+      "exclude": ".git,__pycache__,migrations,venv,.venv"
+    }
+  },
+  "testing": {
+    "containers": {
+      "fastapi": "your-app-api-fastapi-1",
+      "postgres": "your-app-db-postgres-1"
+    },
+    "markers": {
+      "smoke": "smoke",
+      "unit": "unit",
+      "integration": "integration"
+    }
+  },
+  "timeouts": {
+    "ephemeral_default": "2h",
+    "alert_default": "1h",
+    "standup_days": 1
   },
   "paths": {
     "kube_base": "/home/YOUR_USER/.kube",

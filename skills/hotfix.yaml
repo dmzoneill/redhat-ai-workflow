@@ -52,6 +52,12 @@ inputs:
     required: false
     description: "Jira issue key for the hotfix"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format in report"
+
 steps:
 
   - name: init_autoheal
@@ -326,12 +332,19 @@ steps:
 outputs:
   - name: report
     value: |
+      {% set is_slack = inputs.slack_format | default(true) %}
       ## 🔧 Hotfix
 
       **Commit:** `{{ inputs.commit[:12] }}`
       **Target Branch:** `{{ inputs.target_branch }}`
       {% if inputs.tag %}**Tag:** `{{ inputs.tag }}`{% endif %}
-      {% if inputs.jira_key %}**Jira:** [{{ inputs.jira_key }}](https://issues.redhat.com/browse/{{ inputs.jira_key }}){% endif %}
+      {% if inputs.jira_key %}
+      {% if is_slack %}
+      **Jira:** <https://issues.redhat.com/browse/{{ inputs.jira_key }}|{{ inputs.jira_key }}>
+      {% else %}
+      **Jira:** [{{ inputs.jira_key }}](https://issues.redhat.com/browse/{{ inputs.jira_key }})
+      {% endif %}
+      {% endif %}
 
       ---
 

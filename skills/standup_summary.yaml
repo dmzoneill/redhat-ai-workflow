@@ -54,6 +54,12 @@ inputs:
     required: false
     description: "Git author email (defaults to git config)"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format in summary"
+
 # jira_url loaded from config.json in load_config step
 
 steps:
@@ -348,6 +354,9 @@ steps:
     description: "Build standup summary"
     compute: |
       from datetime import datetime
+      from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
+
+      is_slack = inputs.get('slack_format', True)
 
       lines = []
       lines.append(f"## 📋 Standup Summary")
@@ -360,7 +369,8 @@ steps:
       if commit_info.get("commits"):
           lines.append(f"**Commits:** {commit_info['count']}")
           for c in commit_info["commits"][:5]:
-              lines.append(f"- `{c['sha']}` {c['message'][:50]}")
+              msg = linkify_jira_keys(c['message'], slack_format=is_slack)
+              lines.append(f"- `{c['sha']}` {msg[:70]}")
           if commit_info["count"] > 5:
               lines.append(f"- ... and {commit_info['count'] - 5} more")
       else:
@@ -370,13 +380,17 @@ steps:
           lines.append("")
           lines.append("**Issues Closed:**")
           for issue in jira_issues["done"][:5]:
-              lines.append(f"- [{issue['key']}] {issue['summary']}")
+              key_str = linkify_jira_keys(issue['key'], slack_format=is_slack)
+              summary = linkify_jira_keys(issue['summary'], slack_format=is_slack)
+              lines.append(f"- {key_str} {summary}")
 
       if gitlab_activity and gitlab_activity.get("reviewed"):
           lines.append("")
           lines.append("**PRs Reviewed:**")
           for mr in gitlab_activity["reviewed"][:3]:
-              lines.append(f"- !{mr['iid']}: {mr['title']}")
+              mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+              title = linkify_jira_keys(mr['title'], slack_format=is_slack)
+              lines.append(f"- {mr_id}: {title}")
 
       lines.append("")
 
@@ -384,10 +398,12 @@ steps:
       lines.append("### 🔄 What I'm Working On")
       if jira_issues and jira_issues.get("in_progress"):
           for issue in jira_issues["in_progress"][:5]:
-              lines.append(f"- [{issue['key']}] {issue['summary']}")
+              key_str = linkify_jira_keys(issue['key'], slack_format=is_slack)
+              summary = linkify_jira_keys(issue['summary'], slack_format=is_slack)
+              lines.append(f"- {key_str} {summary}")
       elif commit_info.get("issue_keys"):
           for key in commit_info["issue_keys"][:5]:
-              lines.append(f"- {key}")
+              lines.append(f"- {linkify_jira_keys(key, slack_format=is_slack)}")
       else:
           lines.append("- (Add your current work here)")
 
@@ -395,7 +411,9 @@ steps:
           lines.append("")
           lines.append("**Open MRs:**")
           for mr in gitlab_activity["my_mrs"][:3]:
-              lines.append(f"- !{mr['iid']}: {mr['title']}")
+              mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+              title = linkify_jira_keys(mr['title'], slack_format=is_slack)
+              lines.append(f"- {mr_id}: {title}")
 
       lines.append("")
 

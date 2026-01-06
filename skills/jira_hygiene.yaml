@@ -171,7 +171,7 @@ steps:
         "priority": issue_data.get("priority", ""),
         "labels": labels,
         "components": components,
-        "epic_link": issue_data.get("epic_link", issue_data.get("customfield_12311140", issue_data.get("parent", ""))),
+        "epic_link": issue_data.get("epic_link", issue_data.get("epic", issue_data.get("customfield_12311140", issue_data.get("parent", "")))),
         "fix_version": issue_data.get("fixVersions", issue_data.get("fix_version", [])),
         "story_points": issue_data.get("story_points", issue_data.get("customfield_12310243", None)),
         "assignee": issue_data.get("assignee", ""),

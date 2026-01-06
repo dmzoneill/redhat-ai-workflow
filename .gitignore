@@ -70,7 +70,12 @@ memory/sessions/*.yaml
 # Generated files
 docs/*.pdf
 
-# slack db
+# Slack state database
 slack_state.db
 
+# Test results
 test-results
+
+# Temporary debug scripts (use temp_*.py or debug_*.py naming)
+scripts/temp_*.py
+scripts/debug_*.py

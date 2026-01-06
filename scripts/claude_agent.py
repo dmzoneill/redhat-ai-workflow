@@ -615,6 +615,34 @@ Useful for tracking:
             )
         )
 
+        # Slack tools
+        self.register(
+            ToolDefinition(
+                name="slack_send_message",
+                description="""Send a message to a Slack channel or thread.
+ALWAYS use this tool to reply to alerts or conversations.
+Use thread_ts to reply in a thread (REQUIRED for alert replies).""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "channel_id": {
+                            "type": "string",
+                            "description": "Slack channel ID (e.g., C01CPSKFG0P)",
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Message text (supports Slack markdown: *bold*, _italic_, `code`)",
+                        },
+                        "thread_ts": {
+                            "type": "string",
+                            "description": "Thread timestamp to reply in (REQUIRED for alert responses)",
+                        },
+                    },
+                    "required": ["channel_id", "text"],
+                },
+            )
+        )
+
     def register(self, tool: ToolDefinition) -> None:
         """Register a tool."""
         self.tools[tool.name] = tool
@@ -681,6 +709,8 @@ class ToolExecutor:
                 return await self._execute_quay(tool_name, arguments)
             elif tool_name.startswith("memory_"):
                 return await self._execute_memory(tool_name, arguments)
+            elif tool_name.startswith("slack_"):
+                return await self._execute_slack(tool_name, arguments)
             elif tool_name == "skill_run":
                 return await self._execute_skill(arguments)
             else:
@@ -1260,6 +1290,44 @@ Please verify the image exists before proceeding."""
 
         return f"Unknown memory tool: {tool_name}"
 
+    async def _execute_slack(self, tool_name: str, args: dict[str, Any]) -> str:
+        """Execute Slack tools via D-Bus or direct API."""
+        if tool_name == "slack_send_message":
+            channel_id = args.get("channel_id", "")
+            text = args.get("text", "")
+            thread_ts = args.get("thread_ts", "")
+
+            if not channel_id or not text:
+                return "Error: channel_id and text are required"
+
+            try:
+                # Try D-Bus first (via slack_dbus)
+                import sys
+                from pathlib import Path
+
+                scripts_dir = Path(__file__).parent
+                if str(scripts_dir) not in sys.path:
+                    sys.path.insert(0, str(scripts_dir))
+
+                from slack_dbus import SlackAgentClient
+
+                client = SlackAgentClient()
+                if await client.connect():
+                    result = await client.send_message(channel_id, text, thread_ts or "")
+                    await client.disconnect()
+                    if result.get("success"):
+                        return f"✅ Message sent to {channel_id}" + (f" in thread {thread_ts}" if thread_ts else "")
+                    else:
+                        return f"❌ Failed to send message: {result.get('error', 'unknown error')}"
+                else:
+                    return "❌ D-Bus not connected - is slack-daemon running?"
+
+            except Exception as e:
+                logger.error(f"Slack send failed: {e}")
+                return f"❌ Error sending to Slack: {e}"
+
+        return f"Unknown Slack tool: {tool_name}"
+
     async def _execute_skill(self, args: dict[str, Any]) -> str:
         """
         Execute a workflow skill from YAML using the full SkillExecutor.
@@ -1276,6 +1344,10 @@ Please verify the image exists before proceeding."""
                 inputs = json.loads(inputs)
             except json.JSONDecodeError:
                 inputs = {}
+
+        # ALWAYS default to slack_format=True when called from the Slack agent
+        if "slack_format" not in inputs:
+            inputs["slack_format"] = True
 
         # Check if skill executor is available
         if not SKILL_EXECUTOR_AVAILABLE:
@@ -1553,6 +1625,10 @@ INTENT MAPPING - when user says these, use skill_run:
   → skill_run("start_work", {"issue_key": "AAP-12345"})
 - "review MR 123", "review AAP-12345"
   → skill_run("review_pr", {"mr_id": 123}) or {"issue_key": "AAP-12345"}
+- "investigate this alert", "look into this alert"
+  → skill_run("investigate_slack_alert", {"channel_id": "...", "message_ts": "...", "message_text": "..."})
+
+ALWAYS run the investigate_slack_alert skill when you receive an alert context.
 
 for ephemeral deploys: ALWAYS use skill_run("test_mr_ephemeral", {...})
 it handles: getting SHA, checking quay, reserving namespace, deploying
@@ -1577,19 +1653,6 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
     ) -> str:
         """
         Process a message using Claude.
-
-        1. Extract repository context from message (URLs, issue keys)
-        2. Load conversation history for context continuity
-        3. Send message to Claude with available tools
-        4. Claude decides what to do (maybe call tools)
-        5. Execute any tool calls
-        6. Save exchange to history and return response
-
-        Args:
-            message: The user's message
-            context: Additional context (user_name, channel_name, etc.)
-            conversation_id: Unique ID for conversation tracking (e.g., "C123:U456")
-                            If provided, previous messages in this conversation are included.
         """
         # Load conversation history if we have an ID
         history = []

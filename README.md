@@ -98,46 +98,70 @@ Claude: [Runs start_work skill]
 
 ## 💬 Slack Bot Setup
 
-The Slack bot requires authentication tokens from your browser session.
+The Slack bot is an autonomous agent that monitors channels, responds to queries, and investigates alerts.
 
-### Getting Slack Credentials
+### 1. Get Slack Credentials
+
+The bot uses Slack's web API. Extract credentials from Chrome:
 
 ```bash
-# Install dependency
 pip install pycookiecheat
-
-# Extract both credentials automatically
 python scripts/get_slack_creds.py
 ```
 
-The script extracts directly from Chrome's storage:
-- `d_cookie` from Chrome's encrypted Cookies database
-- `xoxc_token` from Chrome's Local Storage
+### 2. Configure
 
-No browser debugging or manual steps required!
-
-### Add to config.json
+Add to `config.json`:
 
 ```json
 {
   "slack": {
-    "xoxc_token": "xoxc-...",
-    "d_cookie": "xoxd-...",
+    "auth": {
+      "xoxc_token": "xoxc-...",
+      "d_cookie": "xoxd-...",
+      "workspace_id": "E...",
+      "host": "your-company.enterprise.slack.com"
+    },
     "channels": {
-      "team": {
-        "id": "C01234567",
-        "name": "my-team-channel"
-      }
+      "team": { "id": "C01234567", "name": "my-team" }
+    },
+    "alert_channels": {
+      "C089XXXXXX": { "name": "alerts", "environment": "stage" }
     }
   }
 }
 ```
 
-### Run the Slack Bot
+### 3. Configure Claude AI (Optional)
+
+For autonomous responses:
 
 ```bash
-make slack-daemon-llm
+# Vertex AI (recommended)
+export CLAUDE_CODE_USE_VERTEX=1
+export ANTHROPIC_VERTEX_PROJECT_ID="your-gcp-project"
+
+# Or Anthropic API
+export ANTHROPIC_API_KEY="your-key"
 ```
+
+### 4. Run
+
+```bash
+# Test credentials
+make slack-test
+
+# Foreground (Ctrl+C to stop)
+make slack-daemon
+
+# Background with D-Bus control
+make slack-daemon-bg
+make slack-status
+make slack-daemon-logs
+make slack-daemon-stop
+```
+
+See [Slack Persona docs](docs/personas/slack.md) for full setup guide.
 
 ---
 

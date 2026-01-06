@@ -39,6 +39,12 @@ inputs:
     default: 1
     description: "Days to look back for activity (default: 1)"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack's <URL|Text> link format instead of standard markdown"
+
 steps:
   # ==================== CONFIGURATION ====================
 
@@ -705,6 +711,14 @@ steps:
       # Import shared linkify function
       from scripts.common.parsers import linkify_jira_keys
 
+      # Slack vs Markdown link helper
+      is_slack = inputs.get('slack_format', True)
+
+      def build_link(url, text):
+          if is_slack:
+              return f"<{url}|{text}>"
+          return f"[{text}]({url})"
+
       # Header
       lines.append(f"# ☕ {ctx['greeting']}, {first_name}!")
       lines.append(f"")
@@ -725,7 +739,8 @@ steps:
             key = issue.get('key', 'Unknown')
             summary = issue.get('summary', '')[:40]
             branch = issue.get('branch', '')
-            lines.append(f"- **[{key}](https://issues.redhat.com/browse/{key})**: {summary}")
+            jira_url = f"https://issues.redhat.com/browse/{key}"
+            lines.append(f"- **{build_link(jira_url, key)}**: {summary}")
             if branch:
               lines.append(f"  - Branch: `{branch}`")
         if follow_ups:
@@ -813,14 +828,16 @@ steps:
       lines.append(f"**Open PRs:** {len(my_prs) if my_prs else 0}")
       if my_prs:
         for pr in my_prs[:5]:
-          title_with_links = linkify_jira_keys(pr['title'])
-          lines.append(f"- [!{pr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{pr['id']}) - {title_with_links}")
+          title_with_links = linkify_jira_keys(pr['title'], slack_format=is_slack)
+          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{pr['id']}"
+          lines.append(f"- {build_link(mr_url, '!' + str(pr['id']))} - {title_with_links}")
       lines.append("")
 
       if pr_feedback:
         lines.append(f"**⚠️ Feedback Waiting ({len(pr_feedback)}):**")
         for fb in pr_feedback:
-          lines.append(f"- [!{fb['mr_id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fb['mr_id']}) - Comment from **{fb['author']}**")
+          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fb['mr_id']}"
+          lines.append(f"- {build_link(mr_url, '!' + str(fb['mr_id']))} - Comment from **{fb['author']}**")
       else:
         lines.append("✅ No pending feedback on your PRs")
       lines.append("")
@@ -829,7 +846,8 @@ steps:
       if failed_pipelines:
         lines.append(f"**🔴 Failed Pipelines ({len(failed_pipelines)}):**")
         for fp in failed_pipelines:
-          lines.append(f"- [!{fp['mr_id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fp['mr_id']}) - {fp['status'].upper()}")
+          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fp['mr_id']}"
+          lines.append(f"- {build_link(mr_url, '!' + str(fp['mr_id']))} - {fp['status'].upper()}")
         lines.append("")
 
       # Review requests - PRs assigned to YOU for review
@@ -837,8 +855,9 @@ steps:
       if review_requests:
         lines.append(f"**Assigned to you:** {len(review_requests)}")
         for rr in review_requests:
-          title_with_links = linkify_jira_keys(rr['title'])
-          lines.append(f"- [!{rr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{rr['id']}) - {title_with_links}")
+          title_with_links = linkify_jira_keys(rr['title'], slack_format=is_slack)
+          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{rr['id']}"
+          lines.append(f"- {build_link(mr_url, '!' + str(rr['id']))} - {title_with_links}")
       else:
         lines.append("✅ No PRs waiting for your review")
       lines.append("")
@@ -848,7 +867,8 @@ steps:
       if jira_activity and jira_activity.get('count', 0) > 0:
         lines.append(f"**{jira_activity.get('count', 0)}** issues updated in last {inputs.get('days_back', 1)} day(s)")
         for issue in jira_activity.get('issues', [])[:5]:
-          lines.append(f"- [{issue['key']}](https://issues.redhat.com/browse/{issue['key']}) - {issue['summary']}")
+          jira_url = f"https://issues.redhat.com/browse/{issue['key']}"
+          lines.append(f"- {build_link(jira_url, issue['key'])} - {issue['summary']}")
       else:
         lines.append("- No Jira activity in the last day")
       lines.append("")
@@ -857,8 +877,9 @@ steps:
       lines.append("## 🚀 Recent Merges")
       if recent_merges:
         for mr in recent_merges:
-          title_with_links = linkify_jira_keys(mr['title'])
-          lines.append(f"- [!{mr['id']}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{mr['id']}) - {title_with_links}")
+          title_with_links = linkify_jira_keys(mr['title'], slack_format=is_slack)
+          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{mr['id']}"
+          lines.append(f"- {build_link(mr_url, '!' + str(mr['id']))} - {title_with_links}")
       else:
         lines.append("- No recent merges")
       lines.append("")

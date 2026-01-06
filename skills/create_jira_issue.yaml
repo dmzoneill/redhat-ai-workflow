@@ -76,6 +76,12 @@ inputs:
     default: false
     description: "Immediately transition to In Progress"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format in report"
+
 steps:
 
   - name: init_autoheal
@@ -211,12 +217,17 @@ steps:
 outputs:
   - name: report
     value: |
+      {% set is_slack = inputs.slack_format | default(true) %}
       ## 🎫 Create Jira Issue
 
       {% if create_status.success %}
       ### ✅ Issue Created
 
+      {% if is_slack %}
+      **Key:** <https://issues.redhat.com/browse/{{ create_status.issue_key }}|{{ create_status.issue_key }}>
+      {% else %}
       **Key:** [{{ create_status.issue_key }}](https://issues.redhat.com/browse/{{ create_status.issue_key }})
+      {% endif %}
       **Summary:** {{ inputs.summary }}
       **Type:** {{ inputs.issue_type }}
       **Priority:** {{ inputs.priority }}
@@ -226,7 +237,11 @@ outputs:
       {% endif %}
 
       {% if link_status and link_status.success %}
+      {% if is_slack %}
+      **Linked to:** <https://issues.redhat.com/browse/{{ inputs.link_to }}|{{ inputs.link_to }}> ({{ inputs.link_type }})
+      {% else %}
       **Linked to:** [{{ inputs.link_to }}](https://issues.redhat.com/browse/{{ inputs.link_to }}) ({{ inputs.link_type }})
+      {% endif %}
       {% elif inputs.link_to and not link_status.success %}
       ⚠️ Link to {{ inputs.link_to }} failed: {{ link_status.message }}
       {% endif %}

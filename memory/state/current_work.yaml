@@ -1,17 +1,17 @@
 active_issues:
-- branch: '<compute error: ''str'' object has no attribute ''get''>'
-  key: AAP-61697
-  repo: '{{ resolved_repo.path }}'
-  started: '2026-01-05T11:58:27.499945'
+- branch: AAP-61661-pytest-xdist-parallelization
+  key: AAP-61661
+  repo: automation-analytics-backend
+  started: '2026-01-06T11:00:00'
   status: In Progress
-  summary: "\u274C Failed to get issue: Command timed out after 30s"
+  summary: Enable pytest-xdist parallelization with database isolation
 current_branches: {}
 follow_ups:
 - created: '2026-01-04T20:11:33.907982'
   issue_key: AAP-61214
   priority: low
   task: 'Fix hygiene issues on AAP-61214: '
-last_updated: 2026-01-05 11:58:27.499945
+last_updated: '2026-01-06T12:15:00.000000'
 notes: 'Use memory_update or memory_append to modify this file.
 
   Example: memory_append("state/current_work", "active_issues", ''{"key": "PROJ-123",

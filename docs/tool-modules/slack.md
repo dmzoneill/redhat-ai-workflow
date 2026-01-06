@@ -133,7 +133,22 @@ Configure channels in `config.json`:
 
 > ⚠️ Uses Slack's internal web API (not official Bot API)
 
-Required credentials in `config.json` (from browser dev tools):
+### Automatic Extraction
+
+```bash
+pip install pycookiecheat
+python scripts/get_slack_creds.py
+```
+
+### Manual Extraction
+
+From Chrome DevTools while logged into Slack:
+1. **d_cookie**: Application → Cookies → find `d` cookie
+2. **xoxc_token**: Application → Local Storage → find `xoxc` value
+
+### Configuration
+
+Add to `config.json`:
 
 ```json
 {
@@ -147,6 +162,51 @@ Required credentials in `config.json` (from browser dev tools):
   }
 }
 ```
+
+### Token Refresh
+
+Tokens expire periodically. Re-run `get_slack_creds.py` when you see auth errors.
+
+## Alert Channels
+
+Configure channels for automatic alert detection:
+
+```json
+{
+  "slack": {
+    "alert_channels": {
+      "C089XXXXXX": {
+        "name": "aleets",
+        "environment": "stage"
+      },
+      "C089YYYYYY": {
+        "name": "prod-alerts",
+        "environment": "prod"
+      }
+    }
+  }
+}
+```
+
+The daemon will:
+1. Monitor these channels for Prometheus/AlertManager messages
+2. Detect `[FIRING]` alerts automatically
+3. Run `investigate_slack_alert` skill
+4. Post investigation findings back to the channel
+
+## Running the Daemon
+
+```bash
+# Foreground
+make slack-daemon
+
+# Background with D-Bus control
+make slack-daemon-bg
+make slack-status
+make slack-daemon-stop
+```
+
+See [Slack Persona](../personas/slack.md) for full installation guide.
 
 ## Loaded By
 
