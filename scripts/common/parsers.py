@@ -1213,7 +1213,7 @@ def extract_all_jira_keys(text: str) -> List[str]:
     return re.findall(r"([A-Z]+-\d+)", str(text))
 
 
-def linkify_jira_keys(text: str, jira_url: Optional[str] = None) -> str:
+def linkify_jira_keys(text: str, jira_url: Optional[str] = None, slack_format: bool = False) -> str:
     """
     Replace Jira keys in text with markdown links.
 
@@ -1224,6 +1224,7 @@ def linkify_jira_keys(text: str, jira_url: Optional[str] = None) -> str:
     Args:
         text: Text containing Jira keys
         jira_url: Base URL for Jira (default: from config)
+        slack_format: Whether to use Slack's <URL|Text> format instead of markdown
 
     Returns:
         Text with Jira keys converted to markdown links
@@ -1235,14 +1236,50 @@ def linkify_jira_keys(text: str, jira_url: Optional[str] = None) -> str:
 
     # Match AAP-XXXXX pattern, capturing just the key portion
     # This handles both "AAP-12345" and "AAP-12345-some-description"
-    jira_pattern = re.compile(r"\b(AAP-\d+)(-[\w-]+)?\b")
+    jira_pattern = re.compile(r"\b([A-Z]+-\d+)(-[\w-]+)?\b")
 
     def replace_jira(match: re.Match) -> str:
-        key = match.group(1)  # Just the AAP-XXXXX part
+        key = match.group(1)  # Just the project-12345 part
         suffix = match.group(2) or ""  # Optional -description suffix
+        if slack_format:
+            return f"<{jira_url}/browse/{key}|{key}{suffix}>"
         return f"[{key}{suffix}]({jira_url}/browse/{key})"
 
     return jira_pattern.sub(replace_jira, str(text))
+
+
+def linkify_mr_ids(
+    text: str, project_path: str = "automation-analytics/automation-analytics-backend", slack_format: bool = False
+) -> str:
+    """
+    Replace MR IDs (!123) in text with markdown links.
+
+    Args:
+        text: Text containing MR IDs
+        project_path: GitLab project path
+        slack_format: Whether to use Slack link format
+
+    Returns:
+        Text with MR IDs converted to links
+    """
+    if not text:
+        return text
+
+    from scripts.common.config_loader import get_gitlab_url
+
+    base_url = f"{get_gitlab_url()}/{project_path}/-/merge_requests"
+
+    # Match !123 pattern
+    mr_pattern = re.compile(r"!(\d+)")
+
+    def replace_mr(match: re.Match) -> str:
+        mr_id = match.group(1)
+        url = f"{base_url}/{mr_id}"
+        if slack_format:
+            return f"<{url}|!{mr_id}>"
+        return f"[!{mr_id}]({url})"
+
+    return mr_pattern.sub(replace_mr, str(text))
 
 
 def find_full_conflict_marker(content: str, ours: str, theirs: str) -> Optional[str]:

@@ -13,12 +13,23 @@ import asyncio
 import logging
 import os
 import random
+import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
-from .persistence import PendingMessage, SlackStateDB
-from .slack_client import SlackSession
+# Add current directory to sys.path to support both relative and absolute imports
+_DIR = Path(__file__).parent.absolute()
+if str(_DIR) not in sys.path:
+    sys.path.insert(0, str(_DIR))
+
+try:
+    from .persistence import PendingMessage, SlackStateDB
+    from .slack_client import SlackSession
+except (ImportError, SystemError, TypeError):
+    from persistence import PendingMessage, SlackStateDB
+    from slack_client import SlackSession
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +312,46 @@ class SlackListener:
             if self.config.debug:
                 logger.debug(f"Updated {channel_id} last_ts to {newest_ts}")
 
+    def _extract_content(self, message: dict[str, Any]) -> tuple[str, str, str]:
+        """Extract effective user_id, user_name, and text from a message.
+
+        Handles bot messages, attachments, and subtypes.
+        """
+        user_id = message.get("user", "")
+        text = message.get("text", "")
+        subtype = message.get("subtype", "")
+
+        # For bot messages or messages without a user ID, try to get username/bot_id
+        effective_user_name = ""
+        if subtype == "bot_message" or not user_id:
+            effective_user_name = message.get("username", message.get("bot_id", "bot"))
+
+        # Extract text from attachments if main text is empty or short
+        # Many alert bots put the entire content in attachments
+        if "attachments" in message:
+            attachment_texts = []
+            for att in message["attachments"]:
+                # Check title, text, and fallback
+                att_content = []
+                if att.get("title"):
+                    att_content.append(att["title"])
+                if att.get("text"):
+                    att_content.append(att["text"])
+                if not att_content and att.get("fallback"):
+                    att_content.append(att["fallback"])
+
+                if att_content:
+                    attachment_texts.append("\n".join(att_content))
+
+            if attachment_texts:
+                combined_attachments = "\n\n".join(attachment_texts)
+                if not text:
+                    text = combined_attachments
+                elif len(text) < 100:  # If text is short, append attachments
+                    text = f"{text}\n\n{combined_attachments}"
+
+        return user_id, effective_user_name, text
+
     def _should_process(self, message: dict[str, Any], channel_id: str) -> bool:
         """
         Determine if a message should trigger the agent.
@@ -318,8 +369,7 @@ class SlackListener:
             channel_id: The channel this message is from (Slack API doesn't include it in message)
         """
         # Get message metadata
-        user_id = message.get("user", "")
-        text = message.get("text", "")
+        user_id, _, text = self._extract_content(message)
         subtype = message.get("subtype", "")
 
         # Ignore our own messages (UNLESS in self-DM testing channel)
@@ -367,6 +417,9 @@ class SlackListener:
 
     async def _resolve_user_name(self, user_id: str) -> str:
         """Resolve user ID to name, with caching."""
+        if not user_id:
+            return ""
+
         # Check cache first
         cached = await self.state_db.get_user_name(user_id)
         if cached:
@@ -390,12 +443,16 @@ class SlackListener:
     async def _process_message(self, channel_id: str, message: dict[str, Any]):
         """Process a message that passed filtering."""
         ts = message.get("ts", "")
-        user_id = message.get("user", "")
-        text = message.get("text", "")
         thread_ts = message.get("thread_ts")
 
-        # Resolve user name
-        user_name = await self._resolve_user_name(user_id)
+        # Extract content
+        user_id, bot_user_name, text = self._extract_content(message)
+
+        # Resolve user name (for real users) or use bot name
+        if user_id:
+            user_name = await self._resolve_user_name(user_id)
+        else:
+            user_name = bot_user_name
 
         # Check if it's a mention
         is_mention = bool(self.config.self_user_id and f"<@{self.config.self_user_id}>" in text)

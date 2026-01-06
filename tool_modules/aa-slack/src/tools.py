@@ -20,14 +20,20 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Setup project path for server imports
-from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
-
-TOOL_MODULES_DIR = Path(__file__).parent.parent.parent  # tool_modules/
+logger = logging.getLogger(__name__)
 
 from server.utils import load_config
 
-logger = logging.getLogger(__name__)
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT, setup_path  # noqa: F401 - side effect: adds to sys.path
+
+# Add current directory to sys.path to support both relative and absolute imports
+# when loaded via spec_from_file_location
+_TOOLS_DIR = Path(__file__).parent.absolute()
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+
+TOOL_MODULES_DIR = _TOOLS_DIR.parent.parent  # tool_modules/
 
 
 def _get_slack_config() -> dict:
@@ -48,12 +54,17 @@ async def _send_via_dbus(channel_id: str, text: str, thread_ts: str = "") -> dic
         if str(scripts_dir) not in sys.path:
             sys.path.insert(0, str(scripts_dir))
 
-        from slack_dbus import SlackDBusClient
+        from slack_dbus import SlackAgentClient
 
-        client = SlackDBusClient()
-        result = await client.send_message(channel_id, text, thread_ts)
-        logger.debug(f"D-Bus send result: {result}")
-        return result
+        client = SlackAgentClient()
+        if await client.connect():
+            result = await client.send_message(channel_id, text, thread_ts)
+            await client.disconnect()
+            logger.debug(f"D-Bus send result: {result}")
+            return result
+        else:
+            logger.debug("D-Bus connect failed")
+            return None
     except Exception as e:
         # D-Bus not available, will fall back to direct API
         logger.debug(f"D-Bus not available: {e}")
@@ -70,7 +81,27 @@ async def get_manager():
     global _manager
     async with _manager_lock:
         if _manager is None:
-            from .listener import SlackListenerManager
+            # Use dynamic loading to avoid import issues when loaded via spec_from_file_location
+            try:
+                import importlib.util
+                from pathlib import Path
+
+                curr_dir = Path(__file__).parent.absolute()
+                listener_file = curr_dir / "listener.py"
+
+                spec = importlib.util.spec_from_file_location("slack_listener_dynamic", listener_file)
+                mod = importlib.util.module_from_spec(spec)
+                # Add to sys.modules to handle internal relative imports in listener.py if any
+                sys.modules["slack_listener_dynamic"] = mod
+                spec.loader.exec_module(mod)
+                SlackListenerManager = mod.SlackListenerManager
+            except Exception as e:
+                logger.error(f"Failed to load SlackListenerManager dynamically: {e}")
+                # Fallback to standard imports
+                try:
+                    from listener import SlackListenerManager
+                except ImportError:
+                    from .listener import SlackListenerManager
 
             _manager = SlackListenerManager()
         return _manager
@@ -225,21 +256,6 @@ def register_tools(server: FastMCP) -> int:
     ) -> str:
         """
         Send a message to a Slack channel or user.
-
-        Supports:
-        - Channels: C12345678 (public/private channels)
-        - DMs: D12345678 (direct message channels)
-        - Users: U12345678 (will open DM automatically)
-        - @username: Will resolve to user ID and open DM
-
-        Args:
-            target: Channel ID (C...), DM ID (D...), User ID (U...), or @username
-            text: Message text (supports Slack markdown)
-            thread_ts: Thread timestamp to reply in (optional)
-            typing_delay: Add natural typing delay (0.5-2.5s)
-
-        Returns:
-            Confirmation with message timestamp
         """
         try:
             manager = await get_manager()

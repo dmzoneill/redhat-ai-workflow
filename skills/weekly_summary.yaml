@@ -35,6 +35,12 @@ inputs:
     default: "automation-analytics-backend"
     description: "Repository to get commit history from"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format"
+
 steps:
 
   - name: init_autoheal
@@ -286,9 +292,10 @@ steps:
   - name: format_summary
     description: "Format summary for output"
     compute: |
+      from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
       lines = []
       fmt = inputs.get("format", "markdown")
-      is_slack = fmt == "slack"
+      is_slack = inputs.get("slack_format", fmt == "slack")
 
       if is_slack:
           lines.append("*📊 Weekly Summary*\n")
@@ -300,7 +307,8 @@ steps:
       if analysis["issues_worked"]:
           if is_slack:
               lines.append(f"*Issues Worked:* {len(analysis['issues_worked'])}")
-              lines.append(", ".join(analysis["issues_worked"][:10]))
+              linked_issues = [linkify_jira_keys(issue, slack_format=True) for issue in analysis["issues_worked"][:10]]
+              lines.append(", ".join(linked_issues))
           else:
               lines.append("## 🎫 Issues Worked")
               for issue in analysis["issues_worked"][:10]:
@@ -310,13 +318,17 @@ steps:
       # MRs
       if analysis["mrs_created"] or analysis["mrs_reviewed"]:
           if is_slack:
-              lines.append(f"*MRs:* {len(analysis['mrs_created'])} created, {len(analysis['mrs_reviewed'])} reviewed")
+              created = [linkify_mr_ids(f"!{mr}", slack_format=True) for mr in analysis["mrs_created"][:5]]
+              reviewed = [linkify_mr_ids(f"!{mr}", slack_format=True) for mr in analysis["mrs_reviewed"][:5]]
+              lines.append(f"*MRs:* {len(analysis['mrs_created'])} created ({', '.join(created)}), {len(analysis['mrs_reviewed'])} reviewed ({', '.join(reviewed)})")
           else:
               lines.append("## 🔀 Merge Requests")
               if analysis["mrs_created"]:
-                  lines.append(f"**Created:** {', '.join(['!' + mr for mr in analysis['mrs_created'][:5]])}")
+                  created = [linkify_mr_ids(f"!{mr}") for mr in analysis["mrs_created"][:5]]
+                  lines.append(f"**Created:** {', '.join(created)}")
               if analysis["mrs_reviewed"]:
-                  lines.append(f"**Reviewed:** {', '.join(['!' + mr for mr in analysis['mrs_reviewed'][:5]])}")
+                  reviewed = [linkify_mr_ids(f"!{mr}") for mr in analysis["mrs_reviewed"][:5]]
+                  lines.append(f"**Reviewed:** {', '.join(reviewed)}")
           lines.append("")
 
       # Deployments
@@ -326,7 +338,7 @@ steps:
           else:
               lines.append("## 🚀 Deployments")
               for d in analysis["deployments"][:5]:
-                  lines.append(f"- {d['date']}: {d['action']}")
+                  lines.append(f"- {d['date']}: {linkify_jira_keys(linkify_mr_ids(d['action']))}")
           lines.append("")
 
       # Debug sessions
@@ -336,7 +348,7 @@ steps:
           else:
               lines.append("## 🔍 Debug Sessions")
               for d in analysis["debug_sessions"][:5]:
-                  lines.append(f"- {d['date']}: {d['action']}")
+                  lines.append(f"- {d['date']}: {linkify_jira_keys(linkify_mr_ids(d['action']))}")
           lines.append("")
 
       # Patterns learned
@@ -356,11 +368,15 @@ steps:
               if analysis["active_issues"]:
                   lines.append("**Active Issues:**")
                   for issue in analysis["active_issues"][:5]:
-                      lines.append(f"- {issue.get('key', '?')}: {issue.get('summary', 'No summary')[:50]}")
+                      key = issue.get('key', '?')
+                      summary = linkify_jira_keys(issue.get('summary', 'No summary')[:50])
+                      lines.append(f"- [{key}](https://issues.redhat.com/browse/{key}): {summary}")
               if analysis["open_mrs"]:
                   lines.append("**Open MRs:**")
                   for mr in analysis["open_mrs"][:5]:
-                      lines.append(f"- !{mr.get('id', '?')}: {mr.get('title', 'No title')[:50]}")
+                      mr_id = mr.get('id', '?')
+                      title = linkify_jira_keys(mr.get('title', 'No title')[:50])
+                      lines.append(f"- [!{mr_id}](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{mr_id}): {title}")
           lines.append("")
 
       result = "\n".join(lines)

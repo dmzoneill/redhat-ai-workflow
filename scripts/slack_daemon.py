@@ -150,11 +150,11 @@ class SingleInstance:
 load_dotenv(PROJECT_ROOT / "tool_modules" / "aa-slack" / ".env")
 load_dotenv()
 
-from tool_modules.aa_slack.src.listener import ListenerConfig, SlackListener
-from tool_modules.aa_slack.src.persistence import PendingMessage, SlackStateDB
+from src.listener import ListenerConfig, SlackListener
+from src.persistence import PendingMessage, SlackStateDB
 
 # Import Slack components
-from tool_modules.aa_slack.src.slack_client import SlackSession
+from src.slack_client import SlackSession
 
 # Import load_config from server module
 from server.utils import load_config
@@ -346,7 +346,7 @@ class AlertDetector:
         self.alert_channels = self.config.get("alert_channels", {})
         self.alert_bot_names = ["app-sre-alerts", "alertmanager"]
 
-    def is_alert_message(self, channel_id: str, user_name: str, text: str) -> bool:
+    def is_alert_message(self, channel_id: str, user_name: str, text: str, raw_message: dict | None = None) -> bool:
         """
         Check if this message is a Prometheus alert.
 
@@ -361,31 +361,56 @@ class AlertDetector:
 
         # Check if from alert bot
         user_lower = (user_name or "").lower()
+
+        # If user_name is missing, try to get it from raw_message
+        if not user_lower and raw_message:
+            user_lower = (raw_message.get("username") or raw_message.get("bot_id") or "").lower()
+
         is_from_alert_bot = any(bot in user_lower for bot in self.alert_bot_names)
 
         # Check for alert indicators in text
         text_lower = (text or "").lower()
+
+        # If text is missing, try to get it from attachments in raw_message
+        if not text_lower and raw_message and "attachments" in raw_message:
+            att_texts = []
+            for att in raw_message["attachments"]:
+                if isinstance(att, dict):
+                    att_texts.append((att.get("text") or att.get("fallback") or "").lower())
+                    att_texts.append((att.get("title") or "").lower())
+                elif isinstance(att, str):
+                    att_texts.append(att.lower())
+            text_lower = " ".join(att_texts)
+
         alert_indicators = ["firing", "resolved", "alert:", "alertmanager", "prometheus"]
         has_alert_indicator = any(ind in text_lower for ind in alert_indicators)
 
-        return is_from_alert_bot or (channel_id in self.alert_channels and has_alert_indicator)
+        is_alert = is_from_alert_bot or (channel_id in self.alert_channels and has_alert_indicator)
+
+        if is_alert:
+            logger.info(f"🚨 Alert detected: channel={channel_id}, user={user_name}, text={text[:100]}...")
+
+        return is_alert
 
     def get_alert_info(self, channel_id: str) -> dict:
         """Get the channel's alert configuration."""
-        return self.alert_channels.get(
-            channel_id,
-            {
-                "environment": "unknown",
-                "namespace": "tower-analytics-stage",
-                "severity": "medium",
-                "auto_investigate": False,
-            },
-        )
+        info = self.alert_channels.get(channel_id)
+        if isinstance(info, dict):
+            return info
+
+        return {
+            "environment": "unknown",
+            "namespace": "tower-analytics-stage",
+            "severity": "medium",
+            "auto_investigate": False,
+        }
 
     def should_auto_investigate(self, channel_id: str) -> bool:
         """Check if this channel has auto-investigate enabled."""
         info = self.get_alert_info(channel_id)
-        return info.get("auto_investigate", False)
+        if isinstance(info, dict):
+            return info.get("auto_investigate", False)
+        return False
 
 
 # =============================================================================
@@ -727,6 +752,10 @@ class TerminalUI:
         self.clear_line()
         print(status, end="", flush=True)
 
+    def print_info(self, text: str):
+        """Print info message."""
+        print(f"\n{self.COLORS['cyan']}ℹ️ {text}{self.COLORS['reset']}")
+
     def print_message(
         self,
         msg: PendingMessage,
@@ -1053,6 +1082,10 @@ class SlackDaemon:
                 auth = await self.session.validate_session()
                 print(f"✅ Authenticated as: {auth.get('user', 'unknown')}")
                 auth_success = True
+
+                # Update D-Bus handler with session
+                if self._dbus_handler:
+                    self._dbus_handler.session = self.session
                 break
 
             except Exception as e:
@@ -1212,7 +1245,7 @@ class SlackDaemon:
                 self.ui.print_error(str(e))
                 await asyncio.sleep(5)
 
-    async def _handle_alert_message(self, msg: PendingMessage, alert_info: dict):
+    async def _handle_alert_message(self, msg: PendingMessage, alert_info: Any):
         """
         Handle a Prometheus alert message by running the investigate_slack_alert skill.
 
@@ -1222,38 +1255,50 @@ class SlackDaemon:
         3. The skill will reply with findings and Jira link
         """
         try:
-            env = alert_info.get("environment", "unknown")
-            namespace = alert_info.get("namespace", "unknown")
+            # Ensure alert_info is a dict
+            if not isinstance(alert_info, dict):
+                logger.warning(f"alert_info is {type(alert_info)}, converting to dict. Content: {alert_info}")
+                if isinstance(alert_info, str):
+                    alert_info = {"environment": alert_info}
+                else:
+                    alert_info = {}
 
-            self.ui.print_status(f"🚨 Alert detected in {env} ({namespace})")
+            env = alert_info.get("environment", "unknown")
+            namespace = alert_info.get("namespace", "tower-analytics-stage")
+
+            self.ui.print_info(f"🚨 Alert detected in {env} ({namespace})")
 
             # Build context for Claude to run the skill
             alert_context = f"""
-This is a Prometheus alert from the {env} environment that needs investigation.
+This is a Prometheus alert from the {env} environment that needs investigation AND a reply.
 
 **Channel:** {msg.channel_id}
-**Message TS:** {msg.ts}
+**Message TS:** {msg.timestamp}
 **Namespace:** {namespace}
 
 **Alert Message:**
 {msg.text[:2000]}
 
-Please run the `investigate_slack_alert` skill with these inputs:
+IMPORTANT: After investigating, you MUST use `slack_send_message` to reply to the alert thread:
 - channel_id: "{msg.channel_id}"
-- message_ts: "{msg.ts}"
-- message_text: (the alert message above)
+- thread_ts: "{msg.timestamp}"
+- text: (your investigation summary)
 
-The skill will:
-1. Reply to acknowledge we're looking into it
-2. Check pod status and logs
-3. Search for or create a Jira issue
-4. Reply with findings
+Steps:
+1. Check pod status with k8s_get_pods
+2. Check events with k8s_get_events
+3. Get logs if pods are unhealthy
+4. Search for existing Jira issues
+5. **REPLY using slack_send_message with your findings** (REQUIRED!)
+
+Do NOT just describe what you found - you MUST call slack_send_message to actually reply to Slack!
 """
 
             # Use Claude to handle the investigation
             if self.response_generator.claude_agent:
+                logger.info(f"Invoking Claude for alert investigation in #{msg.channel_id} (ts: {msg.timestamp})")
                 # Use thread_ts for alert conversation tracking
-                alert_conversation_id = f"{msg.channel_id}:{msg.ts}"
+                alert_conversation_id = f"{msg.channel_id}:{msg.timestamp}"
                 response = await self.response_generator.claude_agent.process_message(
                     alert_context,
                     context={
@@ -1261,15 +1306,17 @@ The skill will:
                         "environment": env,
                         "namespace": namespace,
                         "channel_id": msg.channel_id,
-                        "message_ts": msg.ts,
+                        "message_ts": msg.timestamp,
                     },
                     conversation_id=alert_conversation_id,
                 )
 
                 if response:
-                    self.ui.print_status("✅ Alert investigation complete")
+                    logger.info(f"Claude alert investigation response: {response[:200]}...")
+                    self.ui.print_info("✅ Alert investigation complete")
                 else:
-                    self.ui.print_status("⚠️ Alert investigation returned no response")
+                    logger.warning(f"Claude alert investigation returned no response for alert in {msg.channel_id}")
+                    self.ui.print_info("⚠️ Alert investigation returned no response")
             else:
                 # Fallback: just acknowledge the alert
                 logger.warning("Claude agent not available for alert investigation")
@@ -1285,8 +1332,18 @@ The skill will:
 
         # ==================== ALERT DETECTION ====================
         # Check if this is a Prometheus alert that should be auto-investigated
-        if self.alert_detector.is_alert_message(msg.channel_id, msg.user_name, msg.text):
+        if self.alert_detector.is_alert_message(msg.channel_id, msg.user_name, msg.text, msg.raw_message):
             alert_info = self.alert_detector.get_alert_info(msg.channel_id)
+
+            # CRITICAL: Always ensure alert_info is a dict
+            if not isinstance(alert_info, dict):
+                logger.error(f"alert_info is not a dict! type={type(alert_info)}, content={alert_info}")
+                alert_info = {
+                    "environment": "unknown",
+                    "namespace": "tower-analytics-stage",
+                    "severity": "medium",
+                    "auto_investigate": False,
+                }
 
             if self.alert_detector.should_auto_investigate(msg.channel_id):
                 logger.info(f"🚨 Alert detected in {alert_info.get('environment', 'unknown')}: auto-investigating")
@@ -1667,7 +1724,7 @@ Single Instance:
         return
 
     # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.WARNING
+    log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

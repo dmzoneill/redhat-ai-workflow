@@ -61,6 +61,12 @@ inputs:
     default: true
     description: "Automatically rebase my MRs that have merge conflicts"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format in summary"
+
 # No hardcoded constants - resolved dynamically
 
 steps:
@@ -406,6 +412,9 @@ steps:
   - name: build_summary
     description: "Compile batch review results"
     compute: |
+      from scripts.common.parsers import linkify_mr_ids, linkify_jira_keys
+      is_slack = inputs.get('slack_format', True)
+
       # Safely get values, handling cases where vars might be error strings
       _parsed = parsed_mrs if isinstance(parsed_mrs, dict) else {}
       my_username = _parsed.get('my_username', 'unknown')
@@ -442,26 +451,34 @@ steps:
         lines.append("### ✅ Approved")
         for mr in actions['can_approve']:
           status = "Would approve" if inputs.get('dry_run', False) else "Approved"
-          lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ({status})")
+          mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+          title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
+          lines.append(f"- {mr_id}: {title} ({status})")
         lines.append("")
 
       if actions['needs_full_review']:
         lines.append("### 🔍 Full Review Performed")
         for mr in actions['needs_full_review']:
-          lines.append(f"- !{mr['iid']}: {mr.get('title', '')}")
+          mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+          title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
+          lines.append(f"- {mr_id}: {title}")
         lines.append("")
 
       if actions['needs_followup']:
         lines.append("### 💬 Follow-up Posted")
         for mr in actions['needs_followup']:
           status = "Would post follow-up" if inputs.get('dry_run', False) else "Follow-up posted"
-          lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ({status})")
+          mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+          title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
+          lines.append(f"- {mr_id}: {title} ({status})")
         lines.append("")
 
       if actions['skip']:
         lines.append("### ⏭️ Skipped (Waiting for Author)")
         for mr in actions['skip']:
-          lines.append(f"- !{mr['iid']}: {mr.get('title', '')} - {mr.get('reason', 'No action needed')}")
+          mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+          title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
+          lines.append(f"- {mr_id}: {title} - {mr.get('reason', 'No action needed')}")
         lines.append("")
 
       # Show my own MRs that might need attention
@@ -475,19 +492,21 @@ steps:
         if _my_mr_status and _my_mr_status.get('needs_rebase'):
           first_mr_id = _my_mr_status.get('mr_id')
           reason = _my_mr_status.get('reason', 'needs rebase')
+          mr_id_str = linkify_mr_ids(f"!{first_mr_id}", slack_format=is_slack)
+          title = linkify_jira_keys(_my_mr_status.get('title', ''), slack_format=is_slack)
 
           _rebase_result = rebase_result if 'rebase_result' in dir() else None
           if _rebase_result:
-            lines.append(f"- !{first_mr_id}: {_my_mr_status.get('title', '')} 🔄 **Rebased!**")
+            lines.append(f"- {mr_id_str}: {title} 🔄 **Rebased!**")
             lines.append(f"  - {reason}")
             lines.append(f"  - *See rebase results below*")
           elif inputs.get('auto_rebase', True) and not inputs.get('dry_run', False):
-            lines.append(f"- !{first_mr_id}: {_my_mr_status.get('title', '')} ⚠️ **Rebase attempted**")
+            lines.append(f"- {mr_id_str}: {title} ⚠️ **Rebase attempted**")
           elif inputs.get('dry_run', False):
-            lines.append(f"- !{first_mr_id}: {_my_mr_status.get('title', '')} 🔄 **Would rebase** (dry run)")
+            lines.append(f"- {mr_id_str}: {title} 🔄 **Would rebase** (dry run)")
             lines.append(f"  - {reason}")
           else:
-            lines.append(f"- !{first_mr_id}: {_my_mr_status.get('title', '')} ⚠️ **Needs rebase**")
+            lines.append(f"- {mr_id_str}: {title} ⚠️ **Needs rebase**")
             lines.append(f"  - {reason}")
             lines.append(f"  - Run: `skill_run(\"rebase_pr\", '{{\"mr_id\": {first_mr_id}}}')`")
 
@@ -495,7 +514,9 @@ steps:
         for mr in my_mrs[:5]:
           if _my_mr_status and mr.get('iid') == _my_mr_status.get('mr_id'):
             continue  # Already shown above
-          lines.append(f"- !{mr.get('iid', '?')}: {mr.get('title', '')}")
+          mr_id_str = linkify_mr_ids(f"!{mr.get('iid', '?')}", slack_format=is_slack)
+          title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
+          lines.append(f"- {mr_id_str}: {title}")
 
         lines.append("")
         lines.append("*Check these for feedback from reviewers. Use:*")

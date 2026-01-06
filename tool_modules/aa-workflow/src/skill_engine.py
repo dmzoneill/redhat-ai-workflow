@@ -120,44 +120,105 @@ class SkillExecutor:
             return None
 
     def _template(self, text: str) -> str:
-        """Resolve {{ variable }} templates in text."""
-        import re
+        """Resolve {{ variable }} templates in text using Jinja2 if available."""
+        if not isinstance(text, str) or "{{" not in text:
+            return text
 
-        def replace_var(match):
-            var_path = match.group(1).strip()
-            try:
-                value = self.context
-                parts = var_path.split(".")
+        try:
+            from jinja2 import Environment
 
-                for part in parts:
-                    array_match = re.match(r"^(\w+)\[(\d+)\]$", part)
-                    if array_match:
-                        var_name, index = array_match.groups()
-                        index = int(index)
-                        if isinstance(value, dict):
-                            value = value.get(var_name)
-                        elif hasattr(value, var_name):
-                            value = getattr(value, var_name)
+            # Create a simple environment
+            env = Environment()
+
+            # Add some helpful filters
+            def linkify_jira_keys(text):
+                import re
+
+                if not text:
+                    return text
+
+                is_slack = self.inputs.get("slack_format", False)
+                jira_url = self.config.get("jira", {}).get("url", "https://issues.redhat.com")
+
+                pattern = re.compile(r"\b([A-Z]+-\d+)(-[\w-]+)?\b")
+
+                def replace(match):
+                    key = match.group(1)
+                    suffix = match.group(2) or ""
+                    if is_slack:
+                        return f"<{jira_url}/browse/{key}|{key}{suffix}>"
+                    return f"[{key}{suffix}]({jira_url}/browse/{key})"
+
+                return pattern.sub(replace, str(text))
+
+            def linkify_mr_ids(text):
+                import re
+
+                if not text:
+                    return text
+
+                is_slack = self.inputs.get("slack_format", False)
+                gitlab_url = self.config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
+                project = "automation-analytics/automation-analytics-backend"
+
+                pattern = re.compile(r"!(\d+)")
+
+                def replace(match):
+                    mr_id = match.group(1)
+                    url = f"{gitlab_url}/{project}/-/merge_requests/{mr_id}"
+                    if is_slack:
+                        return f"<{url}|!{mr_id}>"
+                    return f"[!{mr_id}]({url})"
+
+                return pattern.sub(replace, str(text))
+
+            env.filters["jira_link"] = linkify_jira_keys
+            env.filters["mr_link"] = linkify_mr_ids
+            env.filters["length"] = len
+
+            template = env.from_string(text)
+            return template.render(**self.context)
+        except ImportError:
+            # Fallback to simple regex replacement if Jinja2 not installed
+            import re
+
+            def replace_var(match):
+                var_path = match.group(1).strip()
+                try:
+                    value = self.context
+                    parts = var_path.split(".")
+
+                    for part in parts:
+                        array_match = re.match(r"^(\w+)\[(\d+)\]$", part)
+                        if array_match:
+                            var_name, index = array_match.groups()
+                            index = int(index)
+                            if isinstance(value, dict):
+                                value = value.get(var_name)
+                            elif hasattr(value, var_name):
+                                value = getattr(value, var_name)
+                            else:
+                                return match.group(0)
+                            if isinstance(value, (list, tuple)) and index < len(value):
+                                value = value[index]
+                            else:
+                                return match.group(0)
+                        elif isinstance(value, dict):
+                            value = value.get(part, match.group(0))
+                            if value == match.group(0):
+                                return value
+                        elif hasattr(value, part):
+                            value = getattr(value, part)
                         else:
                             return match.group(0)
-                        if isinstance(value, (list, tuple)) and index < len(value):
-                            value = value[index]
-                        else:
-                            return match.group(0)
-                    elif isinstance(value, dict):
-                        value = value.get(part, match.group(0))
-                        if value == match.group(0):
-                            return value
-                    elif hasattr(value, part):
-                        value = getattr(value, part)
-                    else:
-                        return match.group(0)
-                return str(value) if value is not None else ""
-            except Exception:
-                return match.group(0)
+                    return str(value) if value is not None else ""
+                except Exception:
+                    return match.group(0)
 
-        result = re.sub(r"\{\{\s*([^}]+)\s*\}\}", replace_var, str(text))
-        return result
+            return re.sub(r"\{\{\s*([^}]+)\s*\}\}", replace_var, str(text))
+        except Exception as e:
+            self._debug(f"Template error: {e}")
+            return text
 
     def _template_dict(self, d: dict) -> dict:
         """Recursively template a dictionary."""
@@ -174,38 +235,61 @@ class SkillExecutor:
         return result
 
     def _eval_condition(self, condition: str) -> bool:
-        """Safely evaluate a condition expression."""
+        """Safely evaluate a condition expression using Jinja2 if available."""
         self._debug(f"Evaluating condition: {condition}")
-        templated = self._template(condition)
-        self._debug(f"  → Templated: {templated}")
-
-        safe_context = {
-            "len": len,
-            "any": any,
-            "all": all,
-            "isinstance": isinstance,
-            "type": type,
-            "hasattr": hasattr,
-            "dir": dir,
-            "str": str,
-            "int": int,
-            "float": float,
-            "list": list,
-            "dict": dict,
-            "bool": bool,
-            "True": True,
-            "False": False,
-            "None": None,
-            **self.context,
-        }
 
         try:
-            result = eval(templated, {"__builtins__": {}}, safe_context)
-            self._debug(f"  → Result: {result}")
-            return bool(result)
+            from jinja2 import Environment
+
+            env = Environment()
+            # Wrap condition in {{ }} if not already there for Jinja evaluation
+            if "{{" not in condition:
+                expr = "{{ " + condition + " }}"
+            else:
+                expr = condition
+
+            result_str = env.from_string(expr).render(**self.context).strip()
+            # If it's a boolean-like string, convert it
+            if result_str.lower() in ("true", "1", "yes"):
+                return True
+            if result_str.lower() in ("false", "0", "no", ""):
+                return False
+            # Otherwise check if it's non-empty
+            return bool(result_str)
+        except ImportError:
+            # Fallback to eval
+            templated = self._template(condition)
+            self._debug(f"  → Templated (fallback): {templated}")
+
+            safe_context = {
+                "len": len,
+                "any": any,
+                "all": all,
+                "isinstance": isinstance,
+                "type": type,
+                "hasattr": hasattr,
+                "dir": dir,
+                "str": str,
+                "int": int,
+                "float": float,
+                "list": list,
+                "dict": dict,
+                "bool": bool,
+                "True": True,
+                "False": False,
+                "None": None,
+                **self.context,
+            }
+
+            try:
+                result = eval(templated, {"__builtins__": {}}, safe_context)
+                self._debug(f"  → Result: {result}")
+                return bool(result)
+            except Exception as e:
+                self._debug(f"  → Error: {e}, defaulting to False")
+                return False
         except Exception as e:
-            self._debug(f"  → Error: {e}, defaulting to False")
-            # Default to False on error - safer to skip than to run with invalid state
+            self._debug(f"  → Jinja eval error: {e}, defaulting to False")
             return False
 
     def _exec_compute(self, code: str, output_name: str):
@@ -627,7 +711,19 @@ class SkillExecutor:
             for out in self.skill["outputs"]:
                 out_name = out.get("name", "output")
                 if "value" in out:
-                    templated = self._template(out["value"])
+                    val = out["value"]
+                    if isinstance(val, str):
+                        templated = self._template(val)
+                    elif isinstance(val, (dict, list)):
+                        templated = (
+                            self._template_dict(val)
+                            if isinstance(val, dict)
+                            else [self._template(i) if isinstance(i, str) else i for i in val]
+                        )
+                    else:
+                        templated = val
+
+                    self.context[out_name] = templated
                     output_lines.append(f"**{out_name}:**\n{templated}\n")
                 elif "compute" in out:
                     result = self._exec_compute(out["compute"], out_name)

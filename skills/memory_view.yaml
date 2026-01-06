@@ -53,6 +53,12 @@ inputs:
     default: "normal"
     description: "Priority for new follow-up: high, medium, normal"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format"
+
 steps:
   # ==================== LOAD MEMORY ====================
 
@@ -216,13 +222,20 @@ steps:
   - name: format_output
     description: "Format memory view output"
     compute: |
+      from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
+      is_slack = inputs.get('slack_format', True)
       section = inputs.section or "all"
       lines = []
+
+      def build_link(url, text):
+          if is_slack:
+              return f"<{url}|{text}>"
+          return f"[{text}]({url})"
 
       lines.append("# 🧠 Memory View")
       lines.append("")
 
-      if action_result:
+      if 'action_result' in dir() and action_result:
           lines.append(f"**Action:** {action_result}")
           lines.append("")
           lines.append("---")
@@ -240,10 +253,11 @@ steps:
               lines.append(f"### Active Issues ({len(active)})")
               for issue in active[:10]:
                   key = issue.get("key", "Unknown")
-                  summary = issue.get("summary", "")[:50]
+                  summary = linkify_jira_keys(issue.get("summary", "")[:50], slack_format=is_slack)
                   status = issue.get("status", "unknown")
                   branch = issue.get("branch", "")
-                  lines.append(f"- **[{key}](https://issues.redhat.com/browse/{key})** - {summary}")
+                  jira_url = f"https://issues.redhat.com/browse/{key}"
+                  lines.append(f"- **{build_link(jira_url, key)}** - {summary}")
                   lines.append(f"  - Status: {status} | Branch: `{branch}`" if branch else f"  - Status: {status}")
               lines.append("")
           else:
@@ -256,11 +270,11 @@ steps:
               lines.append(f"### Open MRs ({len(mrs)})")
               for mr in mrs[:10]:
                   mr_id = mr.get("id", "?")
-                  title = mr.get("title", "")[:50]
-                  url = mr.get("url", "")
+                  title = linkify_jira_keys(mr.get("title", "")[:50], slack_format=is_slack)
+                  url = mr.get("url", f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{mr_id}")
                   needs_review = "👀" if mr.get("needs_review") else ""
                   draft = "📝" if mr.get("is_draft") else ""
-                  lines.append(f"- [!{mr_id}]({url}) - {title} {needs_review}{draft}")
+                  lines.append(f"- {build_link(url, '!' + str(mr_id))} - {title} {needs_review}{draft}")
               lines.append("")
           else:
               lines.append("*No open MRs tracked*")
@@ -276,7 +290,7 @@ steps:
 
           if followups:
               for fu in followups[:10]:
-                  task = fu.get("task", "Unknown")
+                  task = linkify_jira_keys(linkify_mr_ids(fu.get("task", "Unknown"), slack_format=is_slack), slack_format=is_slack)
                   priority = fu.get("priority", "normal")
                   emoji = "🔴" if priority == "high" else "🟡" if priority == "medium" else "⚪"
                   lines.append(f"- {emoji} {task}")
@@ -311,7 +325,8 @@ steps:
                   if active_ns:
                       lines.append(f"- Active namespaces: {len(active_ns)}")
                       for ns in active_ns[:5]:
-                          lines.append(f"  - `{ns.get('name')}` (MR: !{ns.get('mr_id')}, expires: {ns.get('expires', 'unknown')[:16]})")
+                          mr_str = linkify_mr_ids(f"!{ns.get('mr_id')}", slack_format=is_slack)
+                          lines.append(f"  - `{ns.get('name')}` (MR: {mr_str}, expires: {ns.get('expires', 'unknown')[:16]})")
 
               lines.append("")
 
@@ -327,7 +342,9 @@ steps:
               lines.append(f"**{len(error_patterns)} error patterns known**")
               lines.append("")
               for p in error_patterns[:5]:
-                  lines.append(f"- **{p.get('pattern')}**: {p.get('meaning', p.get('fix', ''))[:60]}")
+                  pat = linkify_jira_keys(p.get('pattern', ''), slack_format=is_slack)
+                  meaning = linkify_jira_keys(p.get('meaning', p.get('fix', ''))[:60], slack_format=is_slack)
+                  lines.append(f"- **{pat}**: {meaning}")
               if len(error_patterns) > 5:
                   lines.append(f"*...and {len(error_patterns) - 5} more*")
           else:
@@ -347,7 +364,7 @@ steps:
                   actions = session.get("actions", [])
                   lines.append(f"### {date}")
                   for action in actions[-5:]:
-                      action_text = action.get("action", str(action))[:70]
+                      action_text = linkify_jira_keys(linkify_mr_ids(action.get("action", str(action))[:70], slack_format=is_slack), slack_format=is_slack)
                       lines.append(f"- {action_text}")
                   lines.append("")
           else:

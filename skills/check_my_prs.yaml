@@ -46,6 +46,12 @@ inputs:
     default: false
     description: "Automatically rebase MRs with merge conflicts"
 
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format in summary"
+
 # No hardcoded constants - resolved dynamically
 
 steps:
@@ -183,6 +189,9 @@ steps:
   - name: build_summary
     description: "Compile status of all my MRs"
     compute: |
+      from scripts.common.parsers import linkify_mr_ids, linkify_jira_keys
+      is_slack = inputs.get('slack_format', True)
+
       lines = ["## 📋 Your Open MRs", ""]
       lines.append(f"**User:** {my_username}")
       lines.append(f"**Project:** {resolved['gitlab_project']}")
@@ -223,7 +232,9 @@ steps:
           lines.append("*Reviewers have left feedback - please address*")
           lines.append("")
           for mr in needs_response:
-            lines.append(f"**!{mr['iid']}**: {mr.get('title', '')}")
+            mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+            title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
+            lines.append(f"**{mr_id}**: {title}")
             if mr.get('reviewers'):
               lines.append(f"  - Feedback from: {', '.join(mr['reviewers'])}")
             if mr.get('unresolved'):
@@ -233,30 +244,38 @@ steps:
         if needs_rebase:
           lines.append("### 🔄 Needs Rebase")
           for mr in needs_rebase:
+            mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+            title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
             if rebase_result:
-              lines.append(f"- !{mr['iid']}: {mr.get('title', '')} 🔄 **Rebased!**")
+              lines.append(f"- {mr_id}: {title} 🔄 **Rebased!**")
               lines.append(f"  - *See rebase results below*")
             else:
-              lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ⚠️ Has merge conflicts")
+              lines.append(f"- {mr_id}: {title} ⚠️ Has merge conflicts")
               lines.append(f"  - Run: `skill_run(\"rebase_pr\", '{{\"mr_id\": {mr[\"iid\"]}}}')`")
           lines.append("")
 
         if failed:
           lines.append("### 🔴 Pipeline Failed")
           for mr in failed:
-            lines.append(f"- !{mr['iid']}: {mr.get('title', '')} - Fix CI before review")
+            mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+            title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
+            lines.append(f"- {mr_id}: {title} - Fix CI before review")
           lines.append("")
 
         if awaiting:
           lines.append("### 🟡 Awaiting Review")
           for mr in awaiting:
-            lines.append(f"- !{mr['iid']}: {mr.get('title', '')}")
+            mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+            title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
+            lines.append(f"- {mr_id}: {title}")
           lines.append("")
 
         if approved and inputs.show_approved:
           lines.append("### 🟢 Approved - Ready to Merge")
           for mr in approved:
-            lines.append(f"- !{mr['iid']}: {mr.get('title', '')} ✅")
+            mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+            title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
+            lines.append(f"- {mr_id}: {title} ✅")
           lines.append("")
 
         result = '\n'.join(lines)

@@ -51,6 +51,9 @@ TOOL_MODULES = {
     "appinterface": 7,  # +1 for appinterface_get_user
     "workflow": 28,  # +2 for vpn_connect, kube_login
     "slack": 16,  # +1 for slack_dm_gitlab_user
+    "google-calendar": 5,
+    "lint": 2,
+    "dev-workflow": 2,
 }
 
 
