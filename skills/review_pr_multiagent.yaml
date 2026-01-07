@@ -85,19 +85,16 @@ steps:
 - name: run_architecture
   description: Architecture Agent (Claude)
   condition: '''architecture'' in agents_config[''enabled'']'
-  compute: "import subprocess\nimport tempfile\n\ncfg = agents_config[\"configs\"\
-    ][\"architecture\"]\n\n# Write prompt to file\nprompt_text = f\"\"\"Review this\
-    \ MR for architecture issues.\n\nMR: {mr_details}\n\nDiff (first 3000 chars):\n\
-    {str(mr_diff)[:3000]}\n\nProvide findings as:\n[CRITICAL] issue\n[WARNING] issue\
-    \  \n[SUGGESTION] issue\n\"\"\"\n\nwith tempfile.NamedTemporaryFile(mode='w',\
-    \ suffix='.txt', delete=False) as f:\n    f.write(prompt_text)\n    prompt_file\
-    \ = f.name\n\ntry:\n    proc = subprocess.run(\n        [cfg[\"cli\"], \"--model\"\
-    , inputs.get(\"model\", \"sonnet\"), prompt_text],\n        capture_output=True,\n\
-    \        text=True,\n        timeout=120\n    )\n    \n    result = {\n      \
-    \  \"agent\": \"architecture\",\n        \"cli\": cfg[\"cli\"],\n        \"review\"\
-    : proc.stdout,\n        \"stderr\": proc.stderr,\n        \"returncode\": proc.returncode\n\
-    \    }\nexcept Exception as e:\n    result = {\"agent\": \"architecture\", \"\
-    error\": str(e)}\n"
+  compute: "import subprocess\n\ncfg = agents_config[\"configs\"][\"architecture\"\
+    ]\n\nprompt_text = f\"\"\"Review this MR for architecture issues.\n\nMR: {mr_details}\n\
+    \nDiff (first 3000 chars):\n{str(mr_diff)[:3000]}\n\nProvide findings as:\n[CRITICAL]\
+    \ issue\n[WARNING] issue  \n[SUGGESTION] issue\n\"\"\"\n\ntry:\n    proc = subprocess.run(\n\
+    \        [cfg[\"cli\"], \"--model\", inputs.get(\"model\", \"sonnet\")],\n   \
+    \     input=prompt_text,\n        capture_output=True,\n        text=True,\n \
+    \       timeout=120\n    )\n    \n    result = {\n        \"agent\": \"architecture\"\
+    ,\n        \"cli\": cfg[\"cli\"],\n        \"review\": proc.stdout,\n        \"\
+    stderr\": proc.stderr,\n        \"returncode\": proc.returncode\n    }\nexcept\
+    \ Exception as e:\n    result = {\"agent\": \"architecture\", \"error\": str(e)}\n"
   output: arch_review
   on_error: continue
 - name: run_security
@@ -107,12 +104,12 @@ steps:
     prompt_text = f\"\"\"Review this MR for security issues.\n\nMR: {mr_details}\n\
     \nDiff (first 3000 chars):\n{str(mr_diff)[:3000]}\n\nProvide findings as:\n[CRITICAL]\
     \ issue\n[WARNING] issue\n[SUGGESTION] issue\n\"\"\"\n\ntry:\n    proc = subprocess.run(\n\
-    \        [cfg[\"cli\"], \"--model\", inputs.get(\"model\", \"sonnet\"), prompt_text],\n\
-    \        capture_output=True,\n        text=True,\n        timeout=120\n    )\n\
-    \    \n    result = {\n        \"agent\": \"security\",\n        \"cli\": cfg[\"\
-    cli\"],\n        \"review\": proc.stdout,\n        \"stderr\": proc.stderr,\n\
-    \        \"returncode\": proc.returncode\n    }\nexcept Exception as e:\n    result\
-    \ = {\"agent\": \"security\", \"error\": str(e)}\n"
+    \        [cfg[\"cli\"], \"--model\", inputs.get(\"model\", \"sonnet\")],\n   \
+    \     input=prompt_text,\n        capture_output=True,\n        text=True,\n \
+    \       timeout=120\n    )\n    \n    result = {\n        \"agent\": \"security\"\
+    ,\n        \"cli\": cfg[\"cli\"],\n        \"review\": proc.stdout,\n        \"\
+    stderr\": proc.stderr,\n        \"returncode\": proc.returncode\n    }\nexcept\
+    \ Exception as e:\n    result = {\"agent\": \"security\", \"error\": str(e)}\n"
   output: sec_review
   on_error: continue
 - name: coordinate
