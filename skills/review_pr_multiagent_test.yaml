@@ -1,0 +1,121 @@
+# Skill: Multi-Agent PR Review
+# Coordinates multiple specialized review agents using Claude + Gemini CLI (Vertex AI)
+
+name: review_pr_multiagent
+description: |
+  Multi-agent code review system using hybrid Claude + Gemini agents.
+
+  Uses Claude/Gemini CLI with Vertex AI - no API keys required!
+
+version: "2.0"
+
+inputs:
+  - name: mr_id
+    type: integer
+    required: true
+    description: "GitLab MR ID"
+
+  - name: agents
+    type: string
+    required: false
+    default: "architecture,security,performance"
+    description: "Comma-separated agents (architecture,security,performance,testing,documentation,style)"
+
+  - name: post_combined
+    type: boolean
+    required: false
+    default: false
+    description: "Post combined review to MR (default: false for testing)"
+
+  - name: model
+    type: string
+    required: false
+    default: "sonnet"
+    description: "Model to use (sonnet, opus, haiku)"
+
+outputs:
+  - name: summary
+  - name: review
+  - name: stats
+
+steps:
+  - name: get_mr_diff
+    description: "Get MR diff"
+    tool: gitlab_mr_diff
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      mr_id: "{{ inputs.mr_id }}"
+    output: mr_diff
+
+  - name: test_architecture_agent
+    description: "Test Architecture Agent (Claude)"
+    compute: |
+      import subprocess
+
+      # Simple test - just run claude with a basic prompt
+      prompt = "Review this code for architecture issues: " + str(mr_diff)[:500]
+
+      try:
+          result_obj = subprocess.run(
+              ["claude", "--model", inputs.get("model", "sonnet"), prompt],
+              capture_output=True,
+              text=True,
+              timeout=60
+          )
+
+          result = {
+              "agent": "architecture",
+              "cli": "claude",
+              "review": result_obj.stdout,
+              "error": result_obj.stderr if result_obj.returncode != 0 else None
+          }
+      except Exception as e:
+          result = {"agent": "architecture", "error": str(e)}
+    output: architecture_review
+
+  - name: test_security_agent
+    description: "Test Security Agent (Gemini)"
+    compute: |
+      import subprocess
+
+      # Simple test - just run gemini with a basic prompt
+      prompt = "Review this code for security issues: " + str(mr_diff)[:500]
+
+      try:
+          result_obj = subprocess.run(
+              ["gemini", "--model", inputs.get("model", "sonnet"), prompt],
+              capture_output=True,
+              text=True,
+              timeout=60
+          )
+
+          result = {
+              "agent": "security",
+              "cli": "gemini",
+              "review": result_obj.stdout,
+              "error": result_obj.stderr if result_obj.returncode != 0 else None
+          }
+      except Exception as e:
+          result = {"agent": "security", "error": str(e)}
+    output: security_review
+
+  - name: build_summary
+    description: "Build summary"
+    compute: |
+      summary_lines = []
+      summary_lines.append("# Multi-Agent Review Test")
+      summary_lines.append("")
+
+      if 'architecture_review' in globals():
+          summary_lines.append("## Architecture (Claude)")
+          summary_lines.append(f"Error: {architecture_review.get('error', 'None')}")
+          summary_lines.append(f"Review: {architecture_review.get('review', '')[:200]}")
+          summary_lines.append("")
+
+      if 'security_review' in globals():
+          summary_lines.append("## Security (Gemini)")
+          summary_lines.append(f"Error: {security_review.get('error', 'None')}")
+          summary_lines.append(f"Review: {security_review.get('review', '')[:200]}")
+
+      result = "\n".join(summary_lines)
+    output: summary

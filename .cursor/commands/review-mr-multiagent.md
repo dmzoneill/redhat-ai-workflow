@@ -1,6 +1,6 @@
 # /review-mr-multiagent
 
-**Description:** Run comprehensive multi-agent code review with 6 specialized agents.
+**Description:** Run comprehensive multi-agent code review with 6 specialized agents (hybrid Claude + Gemini).
 
 **Usage:**
 ```
@@ -9,22 +9,25 @@ skill_run("review_pr_multiagent", '{"mr_id": 1482}')
 
 ## Specialized Agents
 
-Each agent focuses on a specific aspect with optimized model selection:
+Each agent focuses on a specific aspect using Claude or Gemini via Vertex AI:
 
-- 🏗️ **Architecture** (Sonnet 4.5): Design patterns, SOLID principles, code organization
-- 🔒 **Security** (Sonnet 4.5): Vulnerabilities, auth issues, OWASP Top 10
-- ⚡ **Performance** (Sonnet 3.7): Algorithm efficiency, database queries, scalability
-- 🧪 **Testing** (Sonnet 3.7): Test coverage, edge cases, test quality
-- 📝 **Documentation** (Haiku 3.5): Comments, API docs, README updates
-- 🎨 **Style** (Haiku 3.5): Naming conventions, formatting, consistency
+- 🏗️ **Architecture** (Claude): Design patterns, SOLID principles, code organization
+- 🔒 **Security** (Gemini): Vulnerabilities, auth issues, OWASP Top 10
+- ⚡ **Performance** (Claude): Algorithm efficiency, database queries, scalability
+- 🧪 **Testing** (Gemini): Test coverage, edge cases, test quality
+- 📝 **Documentation** (Claude): Comments, API docs, README updates
+- 🎨 **Style** (Gemini): Naming conventions, formatting, consistency
 
-**Coordinator Agent** (Sonnet 4.5): Synthesizes all reviews into unified feedback
+**Coordinator**: Synthesizes all reviews into unified feedback
 
-## Cost & Performance
+**No API Keys Required** - Uses your Claude Code/Gemini CLI setup with Vertex AI!
 
-- **Cost:** ~$0.12 per review (standard mode)
-- **Time:** ~30 seconds (parallel execution)
-- **Quality:** Expert-level insights from specialized agents
+## Performance
+
+- **Time:** ~2-3 minutes (6 agents running sequentially via CLI)
+- **Quality:** Expert-level insights from specialized agents with diverse model perspectives
+- **Cost:** Depends on your Vertex AI pricing
+- **Models:** Hybrid approach - 3 Claude agents + 3 Gemini agents
 
 ## Options
 
