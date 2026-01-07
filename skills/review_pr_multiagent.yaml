@@ -1,811 +1,135 @@
-# Skill: Multi-Agent PR Review
-# Coordinates multiple specialized review agents and combines their findings
-
 name: review_pr_multiagent
-description: |
-  Multi-agent code review system that coordinates specialized reviewers:
+description: 'Multi-agent code review system that coordinates specialized reviewers:
 
-  **Review Agents:**
-  - 🏗️ **Architecture Agent**: Design patterns, SOLID principles, architectural decisions
-  - 🔒 **Security Agent**: Security vulnerabilities, auth issues, data validation
-  - ⚡ **Performance Agent**: Performance bottlenecks, inefficient algorithms, resource usage
-  - 🧪 **Testing Agent**: Test coverage, test quality, edge cases
-  - 📝 **Documentation Agent**: Code comments, API docs, README updates
-  - 🎨 **Style Agent**: Code style, naming conventions, formatting
 
-  **Coordinator Agent**: Synthesizes all reviews into comprehensive feedback
+  **Review Agents (Hybrid Claude + Gemini):**
 
-  Each agent reviews independently, then the coordinator combines findings,
-  removes duplicates, prioritizes issues, and creates a unified review.
+  - 🏗️ **Architecture Agent** (Claude): Design patterns, SOLID principles, architectural
+  decisions
 
-version: "1.0"
+  - 🔒 **Security Agent** (Gemini): Security vulnerabilities, auth issues, data validation
 
+  - ⚡ **Performance Agent** (Claude): Performance bottlenecks, inefficient algorithms,
+  resource usage
+
+  - 🧪 **Testing Agent** (Gemini): Test coverage, test quality, edge cases
+
+  - 📝 **Documentation Agent** (Claude): Code comments, API docs, README updates
+
+  - 🎨 **Style Agent** (Gemini): Code style, naming conventions, formatting
+
+
+  **Coordinator**: Synthesizes all reviews into comprehensive feedback
+
+
+  Uses Claude + Gemini CLI with Vertex AI - no API keys required!
+
+  '
+version: '2.0'
 inputs:
-  - name: mr_id
-    type: integer
-    required: false
-    description: "GitLab MR ID (e.g., 1234)"
-
-  - name: issue_key
-    type: string
-    required: false
-    description: "Jira issue key (e.g., AAP-61214) - will search for associated MR"
-
-  - name: repo_name
-    type: string
-    required: false
-    description: "Repository name from config (e.g., 'automation-analytics-backend')"
-
-  - name: agents
-    type: string
-    required: false
-    default: "architecture,security,performance,testing,documentation,style"
-    description: "Comma-separated list of agents to use (default: all)"
-
-  - name: parallel
-    type: boolean
-    required: false
-    default: true
-    description: "Run agents in parallel (faster) vs sequential (default: true)"
-
-  - name: post_combined
-    type: boolean
-    required: false
-    default: true
-    description: "Post combined review to MR (default: true)"
-
-  - name: slack_format
-    type: boolean
-    required: false
-    default: false
-    description: "Use Slack link format in output"
-
-steps:
-  # ==================== SETUP ====================
-
-  - name: resolve_mr
-    description: "Resolve MR ID and get MR details"
-    compute: |
-      from scripts.common.config_loader import load_config
-
-      config = load_config()
-      repos = config.get("repositories", {})
-
-      gitlab_project = None
-      mr_id_resolved = inputs.get("mr_id")
-
-      # Resolve from repo_name
-      if inputs.get("repo_name") and inputs.get("repo_name") in repos:
-          gitlab_project = repos[inputs.get("repo_name")].get("gitlab")
-
-      result = {
-          "mr_id": mr_id_resolved,
-          "project": gitlab_project or "automation-analytics/automation-analytics-backend"
-      }
-    output: mr_info
-
-  - name: get_mr_details
-    description: "Get MR content for review"
-    tool: gitlab_mr_view
-    args:
-      project: "{{ mr_info.project }}"
-      mr_id: "{{ mr_info.mr_id }}"
-    output: mr_details
-
-  - name: get_mr_diff
-    description: "Get full diff for code analysis"
-    tool: gitlab_mr_diff
-    args:
-      project: "{{ mr_info.project }}"
-      mr_id: "{{ mr_info.mr_id }}"
-    output: mr_diff
-
-  - name: parse_enabled_agents
-    description: "Parse which agents to run with their model assignments"
-    compute: |
-      agents_str = inputs.get("agents", "architecture,security,performance,testing,documentation,style")
-      enabled = [a.strip() for a in agents_str.split(",") if a.strip()]
-
-      # Map agent names to their focus areas AND recommended models
-      # Model selection strategy:
-      # - Sonnet 4.5: Deep reasoning, critical decisions (security, architecture)
-      # - Sonnet 3.7: Cost-effective, still strong (performance, testing)
-      # - Haiku 3.5: Fast, simple tasks (style, documentation)
-      # - Opus 4.5: Maximum capability when you need the best (reserved for special cases)
-
-      agent_configs = {
-          "architecture": {
-              "name": "Architecture Reviewer",
-              "icon": "🏗️",
-              "model": "claude-sonnet-4-5-20250929",  # Deep architectural reasoning
-              "max_tokens": 2000,
-              "focus": [
-                  "Design patterns and architectural decisions",
-                  "SOLID principles adherence",
-                  "Separation of concerns",
-                  "Code organization and modularity",
-                  "Dependency management",
-                  "API design and contracts"
-              ]
-          },
-          "security": {
-              "name": "Security Reviewer",
-              "icon": "🔒",
-              "model": "claude-sonnet-4-5-20250929",  # Critical security analysis
-              "max_tokens": 2000,
-              "focus": [
-                  "Input validation and sanitization",
-                  "Authentication and authorization",
-                  "SQL injection, XSS, CSRF vulnerabilities",
-                  "Secrets and credential management",
-                  "Data exposure and privacy",
-                  "OWASP Top 10 vulnerabilities"
-              ]
-          },
-          "performance": {
-              "name": "Performance Reviewer",
-              "icon": "⚡",
-              "model": "claude-sonnet-3-7-20250219",  # Good balance for perf analysis
-              "max_tokens": 1500,
-              "focus": [
-                  "Algorithm efficiency and complexity",
-                  "Database query optimization",
-                  "Caching opportunities",
-                  "Resource leaks (memory, connections, files)",
-                  "Unnecessary computations",
-                  "Scalability concerns"
-              ]
-          },
-          "testing": {
-              "name": "Testing Reviewer",
-              "icon": "🧪",
-              "model": "claude-sonnet-3-7-20250219",  # Good for test analysis
-              "max_tokens": 1500,
-              "focus": [
-                  "Test coverage completeness",
-                  "Edge cases and error handling",
-                  "Test quality and maintainability",
-                  "Integration vs unit test balance",
-                  "Mock usage appropriateness",
-                  "Test data and fixtures"
-              ]
-          },
-          "documentation": {
-              "name": "Documentation Reviewer",
-              "icon": "📝",
-              "model": "claude-3-5-haiku-20241022",  # Fast for simple doc review
-              "max_tokens": 1000,
-              "focus": [
-                  "Code comments clarity",
-                  "API documentation completeness",
-                  "README updates for new features",
-                  "Migration guides if needed",
-                  "Inline explanations for complex logic",
-                  "Type hints and docstrings"
-              ]
-          },
-          "style": {
-              "name": "Style Reviewer",
-              "icon": "🎨",
-              "model": "claude-3-5-haiku-20241022",  # Fast for style checks
-              "max_tokens": 1000,
-              "focus": [
-                  "Naming conventions consistency",
-                  "Code formatting standards",
-                  "Function length and complexity",
-                  "Import organization",
-                  "Dead code removal",
-                  "Consistent patterns with codebase"
-              ]
-          }
-      }
-
-      result = {
-          "enabled": enabled,
-          "configs": {k: agent_configs[k] for k in enabled if k in agent_configs}
-      }
-    output: agents_config
-
-  # ==================== AGENT REVIEWS ====================
-
-  - name: run_architecture_review
-    description: "Architecture Agent: Review design patterns and structure"
-    condition: "'architecture' in agents_config['enabled']"
-    compute: |
-      import os
-      import anthropic
-
-      # Get config for API key
-      api_key = os.getenv("ANTHROPIC_API_KEY")
-
-      if not api_key:
-          result = {"findings": [], "summary": "⚠️ API key not available", "error": "No API key"}
-      else:
-          agent_cfg = agents_config["configs"]["architecture"]
-
-          focus_areas = chr(10).join(f'- {focus}' for focus in agent_cfg['focus'])
-
-          prompt = (
-              f"You are an expert {agent_cfg['name']} conducting a code review.\\n\\n"
-              f"Your Focus Areas:\\n{focus_areas}\\n\\n"
-              f"MR Details:\\n{mr_details}\\n\\n"
-              f"Code Changes:\\n{mr_diff}\\n\\n"
-              f"Instructions:\\n"
-              f"Review the code changes focusing ONLY on your assigned areas. Provide:\\n"
-              f"1. Critical issues (must fix before merge)\\n"
-              f"2. Warnings (should fix, but not blocking)\\n"
-              f"3. Suggestions (nice to have improvements)\\n\\n"
-              f"Format each finding as:\\n"
-              f"[CRITICAL/WARNING/SUGGESTION] Location: Issue description\\n\\n"
-              f"Be concise but specific. Include line numbers or function names when relevant.\\n"
-              f"If you find NO issues in your focus areas, say 'No issues found.'"
-          )
-
-          try:
-              client = anthropic.Anthropic(api_key=api_key)
-              message = client.messages.create(
-                  model=agent_cfg["model"],
-                  max_tokens=agent_cfg["max_tokens"],
-                  messages=[{"role": "user", "content": prompt}]
-              )
-
-              review_text = message.content[0].text if message.content else "No review generated"
-
-              # Parse findings
-              findings = []
-              for line in review_text.split('\n'):
-                  line = line.strip()
-                  if line.startswith('[CRITICAL]') or line.startswith('**[CRITICAL]'):
-                      findings.append({"severity": "critical", "text": line})
-                  elif line.startswith('[WARNING]') or line.startswith('**[WARNING]'):
-                      findings.append({"severity": "warning", "text": line})
-                  elif line.startswith('[SUGGESTION]') or line.startswith('**[SUGGESTION]'):
-                      findings.append({"severity": "suggestion", "text": line})
-
-              result = {
-                  "agent": "architecture",
-                  "findings": findings,
-                  "full_review": review_text,
-                  "summary": f"Found {len([f for f in findings if f['severity'] == 'critical'])} critical, "
-                            f"{len([f for f in findings if f['severity'] == 'warning'])} warnings, "
-                            f"{len([f for f in findings if f['severity'] == 'suggestion'])} suggestions"
-              }
-          except Exception as e:
-              result = {"findings": [], "summary": f"⚠️ Error: {str(e)}", "error": str(e)}
-    output: architecture_review
-    on_error: continue
-
-  - name: run_security_review
-    description: "Security Agent: Review security vulnerabilities"
-    condition: "'security' in agents_config['enabled']"
-    compute: |
-      import os
-      import anthropic
-
-      api_key = os.getenv("ANTHROPIC_API_KEY")
-
-      if not api_key:
-          result = {"findings": [], "summary": "⚠️ API key not available", "error": "No API key"}
-      else:
-          agent_cfg = agents_config["configs"]["security"]
-
-          focus_areas = chr(10).join(f'- {focus}' for focus in agent_cfg['focus'])
-
-          prompt = (
-              f"You are an expert {agent_cfg['name']} conducting a code review.\n\n"
-              f"Your Focus Areas:\n{focus_areas}\n\n"
-              f"MR Details:\n{mr_details}\n\n"
-              f"Code Changes:\n{mr_diff}\n\n"
-              f"Instructions:\n"
-              f"Review the code changes focusing ONLY on security concerns. Look for:\n"
-              f"- OWASP Top 10 vulnerabilities\n"
-              f"- Authentication/authorization flaws\n"
-              f"- Input validation gaps\n"
-              f"- Secrets or credentials in code\n"
-              f"- Data exposure risks\n\n"
-              f"Format each finding as:\n"
-              f"[CRITICAL/WARNING/SUGGESTION] Location: Issue description\n\n"
-              f"Be specific about the security risk and potential exploit. Include OWASP category if applicable.\n"
-              f"If you find NO security issues, say 'No security issues found.'"
-          )
-
-          try:
-              client = anthropic.Anthropic(api_key=api_key)
-              message = client.messages.create(
-                  model=agent_cfg["model"],
-                  max_tokens=agent_cfg["max_tokens"],
-                  messages=[{"role": "user", "content": prompt}]
-              )
-
-              review_text = message.content[0].text if message.content else "No review generated"
-
-              findings = []
-              for line in review_text.split('\n'):
-                  line = line.strip()
-                  if line.startswith('**[CRITICAL]'):
-                      findings.append({"severity": "critical", "text": line})
-                  elif line.startswith('**[WARNING]'):
-                      findings.append({"severity": "warning", "text": line})
-                  elif line.startswith('**[SUGGESTION]'):
-                      findings.append({"severity": "suggestion", "text": line})
-
-              result = {
-                  "agent": "security",
-                  "findings": findings,
-                  "full_review": review_text,
-                  "summary": f"Found {len([f for f in findings if f['severity'] == 'critical'])} critical, "
-                            f"{len([f for f in findings if f['severity'] == 'warning'])} warnings, "
-                            f"{len([f for f in findings if f['severity'] == 'suggestion'])} suggestions"
-              }
-          except Exception as e:
-              result = {"findings": [], "summary": f"⚠️ Error: {str(e)}", "error": str(e)}
-    output: security_review
-    on_error: continue
-
-  - name: run_performance_review
-    description: "Performance Agent: Review efficiency and optimization"
-    condition: "'performance' in agents_config['enabled']"
-    compute: |
-      import os
-      import anthropic
-
-      api_key = os.getenv("ANTHROPIC_API_KEY")
-
-      if not api_key:
-          result = {"findings": [], "summary": "⚠️ API key not available", "error": "No API key"}
-      else:
-          agent_cfg = agents_config["configs"]["performance"]
-
-          focus_areas = chr(10).join(f'- {focus}' for focus in agent_cfg['focus'])
-
-          prompt = (
-              f"You are an expert {agent_cfg['name']} conducting a code review.\\n\\n"
-              f"Your Focus Areas:\\n{focus_areas}\\n\\n"
-              f"MR Details:\\n{mr_details}\\n\\n"
-              f"Code Changes:\\n{mr_diff}\\n\\n"
-              f"Instructions:\\n"
-              f"Review the code changes focusing ONLY on performance and efficiency. Look for:\\n"
-              f"- O(n²) or worse algorithms where better exists\\n"
-              f"- N+1 query problems\\n"
-              f"- Missing database indexes\\n"
-              f"- Resource leaks\\n"
-              f"- Unnecessary computations\\n\\n"
-              f"Format each finding as:\\n"
-              f"[CRITICAL/WARNING/SUGGESTION] Location: Issue and optimization opportunity\\n\\n"
-              f"Be specific about the performance impact and suggested optimization.\\n"
-              f"If you find NO performance issues, say 'No performance issues found.'"
-          )
-
-          try:
-              client = anthropic.Anthropic(api_key=api_key)
-              message = client.messages.create(
-                  model=agent_cfg["model"],
-                  max_tokens=agent_cfg["max_tokens"],
-                  messages=[{"role": "user", "content": prompt}]
-              )
-
-              review_text = message.content[0].text if message.content else "No review generated"
-
-              findings = []
-              for line in review_text.split('\n'):
-                  line = line.strip()
-                  if line.startswith('**[CRITICAL]'):
-                      findings.append({"severity": "critical", "text": line})
-                  elif line.startswith('**[WARNING]'):
-                      findings.append({"severity": "warning", "text": line})
-                  elif line.startswith('**[SUGGESTION]'):
-                      findings.append({"severity": "suggestion", "text": line})
-
-              result = {
-                  "agent": "performance",
-                  "findings": findings,
-                  "full_review": review_text,
-                  "summary": f"Found {len([f for f in findings if f['severity'] == 'critical'])} critical, "
-                            f"{len([f for f in findings if f['severity'] == 'warning'])} warnings, "
-                            f"{len([f for f in findings if f['severity'] == 'suggestion'])} suggestions"
-              }
-          except Exception as e:
-              result = {"findings": [], "summary": f"⚠️ Error: {str(e)}", "error": str(e)}
-    output: performance_review
-    on_error: continue
-
-  - name: run_testing_review
-    description: "Testing Agent: Review test coverage and quality"
-    condition: "'testing' in agents_config['enabled']"
-    compute: |
-      import os
-      import anthropic
-
-      api_key = os.getenv("ANTHROPIC_API_KEY")
-
-      if not api_key:
-          result = {"findings": [], "summary": "⚠️ API key not available", "error": "No API key"}
-      else:
-          agent_cfg = agents_config["configs"]["testing"]
-
-          focus_areas = chr(10).join(f'- {focus}' for focus in agent_cfg['focus'])
-
-          prompt = (
-              f"You are an expert {agent_cfg['name']} conducting a code review.\\n\\n"
-              f"Your Focus Areas:\\n{focus_areas}\\n\\n"
-              f"MR Details:\\n{mr_details}\\n\\n"
-              f"Code Changes:\\n{mr_diff}\\n\\n"
-              f"Instructions:\\n"
-              f"Review the code changes focusing ONLY on testing. Look for:\\n"
-              f"- Missing test coverage for new code\\n"
-              f"- Untested edge cases\\n"
-              f"- Poor test quality (brittle, unclear, too complex)\\n"
-              f"- Missing error handling tests\\n"
-              f"- Integration test gaps\\n\\n"
-              f"Format each finding as:\\n"
-              f"[CRITICAL/WARNING/SUGGESTION] Location: Testing gap or issue\\n\\n"
-              f"Be specific about what needs testing and why.\\n"
-              f"If testing is adequate, say 'Testing coverage is adequate.'"
-          )
-
-          try:
-              client = anthropic.Anthropic(api_key=api_key)
-              message = client.messages.create(
-                  model=agent_cfg["model"],
-                  max_tokens=agent_cfg["max_tokens"],
-                  messages=[{"role": "user", "content": prompt}]
-              )
-
-              review_text = message.content[0].text if message.content else "No review generated"
-
-              findings = []
-              for line in review_text.split('\n'):
-                  line = line.strip()
-                  if line.startswith('**[CRITICAL]'):
-                      findings.append({"severity": "critical", "text": line})
-                  elif line.startswith('**[WARNING]'):
-                      findings.append({"severity": "warning", "text": line})
-                  elif line.startswith('**[SUGGESTION]'):
-                      findings.append({"severity": "suggestion", "text": line})
-
-              result = {
-                  "agent": "testing",
-                  "findings": findings,
-                  "full_review": review_text,
-                  "summary": f"Found {len([f for f in findings if f['severity'] == 'critical'])} critical, "
-                            f"{len([f for f in findings if f['severity'] == 'warning'])} warnings, "
-                            f"{len([f for f in findings if f['severity'] == 'suggestion'])} suggestions"
-              }
-          except Exception as e:
-              result = {"findings": [], "summary": f"⚠️ Error: {str(e)}", "error": str(e)}
-    output: testing_review
-    on_error: continue
-
-  - name: run_documentation_review
-    description: "Documentation Agent: Review code comments and docs"
-    condition: "'documentation' in agents_config['enabled']"
-    compute: |
-      import os
-      import anthropic
-
-      api_key = os.getenv("ANTHROPIC_API_KEY")
-
-      if not api_key:
-          result = {"findings": [], "summary": "⚠️ API key not available", "error": "No API key"}
-      else:
-          agent_cfg = agents_config["configs"]["documentation"]
-
-          focus_areas = chr(10).join(f'- {focus}' for focus in agent_cfg['focus'])
-
-          prompt = (
-              f"You are an expert {agent_cfg['name']} conducting a code review.\\n\\n"
-              f"Your Focus Areas:\\n{focus_areas}\\n\\n"
-              f"MR Details:\\n{mr_details}\\n\\n"
-              f"Code Changes:\\n{mr_diff}\\n\\n"
-              f"Instructions:\\n"
-              f"Review the code changes focusing ONLY on documentation. Look for:\\n"
-              f"- Missing docstrings for public functions/classes\\n"
-              f"- Unclear or outdated comments\\n"
-              f"- Missing README updates for new features\\n"
-              f"- Poor API documentation\\n"
-              f"- Complex logic without explanations\\n\\n"
-              f"Format each finding as:\\n"
-              f"[CRITICAL/WARNING/SUGGESTION] Location: Documentation gap\\n\\n"
-              f"Be specific about what documentation is needed and why.\\n"
-              f"If documentation is adequate, say 'Documentation is adequate.'"
-          )
-
-          try:
-              client = anthropic.Anthropic(api_key=api_key)
-              message = client.messages.create(
-                  model=agent_cfg["model"],
-                  max_tokens=agent_cfg["max_tokens"],
-                  messages=[{"role": "user", "content": prompt}]
-              )
-
-              review_text = message.content[0].text if message.content else "No review generated"
-
-              findings = []
-              for line in review_text.split('\n'):
-                  line = line.strip()
-                  if line.startswith('**[CRITICAL]'):
-                      findings.append({"severity": "critical", "text": line})
-                  elif line.startswith('**[WARNING]'):
-                      findings.append({"severity": "warning", "text": line})
-                  elif line.startswith('**[SUGGESTION]'):
-                      findings.append({"severity": "suggestion", "text": line})
-
-              result = {
-                  "agent": "documentation",
-                  "findings": findings,
-                  "full_review": review_text,
-                  "summary": f"Found {len([f for f in findings if f['severity'] == 'critical'])} critical, "
-                            f"{len([f for f in findings if f['severity'] == 'warning'])} warnings, "
-                            f"{len([f for f in findings if f['severity'] == 'suggestion'])} suggestions"
-              }
-          except Exception as e:
-              result = {"findings": [], "summary": f"⚠️ Error: {str(e)}", "error": str(e)}
-    output: documentation_review
-    on_error: continue
-
-  - name: run_style_review
-    description: "Style Agent: Review code style and conventions"
-    condition: "'style' in agents_config['enabled']"
-    compute: |
-      import os
-      import anthropic
-
-      api_key = os.getenv("ANTHROPIC_API_KEY")
-
-      if not api_key:
-          result = {"findings": [], "summary": "⚠️ API key not available", "error": "No API key"}
-      else:
-          agent_cfg = agents_config["configs"]["style"]
-
-          focus_areas = chr(10).join(f'- {focus}' for focus in agent_cfg['focus'])
-
-          prompt = (
-              f"You are an expert {agent_cfg['name']} conducting a code review.\\n\\n"
-              f"Your Focus Areas:\\n{focus_areas}\\n\\n"
-              f"MR Details:\\n{mr_details}\\n\\n"
-              f"Code Changes:\\n{mr_diff}\\n\\n"
-              f"Instructions:\\n"
-              f"Review the code changes focusing ONLY on style and conventions. Look for:\\n"
-              f"- Inconsistent naming (camelCase vs snake_case)\\n"
-              f"- Overly long functions (>50 lines)\\n"
-              f"- Poor variable names\\n"
-              f"- Inconsistent patterns with existing codebase\\n"
-              f"- Dead code or unused imports\\n\\n"
-              f"Format each finding as:\\n"
-              f"[CRITICAL/WARNING/SUGGESTION] Location: Style issue\\n\\n"
-              f"Be specific but avoid nitpicking. Focus on maintainability impact.\\n"
-              f"If style is consistent, say 'Code style is consistent.'"
-          )
-
-          try:
-              client = anthropic.Anthropic(api_key=api_key)
-              message = client.messages.create(
-                  model=agent_cfg["model"],
-                  max_tokens=agent_cfg["max_tokens"],
-                  messages=[{"role": "user", "content": prompt}]
-              )
-
-              review_text = message.content[0].text if message.content else "No review generated"
-
-              findings = []
-              for line in review_text.split('\n'):
-                  line = line.strip()
-                  if line.startswith('**[CRITICAL]'):
-                      findings.append({"severity": "critical", "text": line})
-                  elif line.startswith('**[WARNING]'):
-                      findings.append({"severity": "warning", "text": line})
-                  elif line.startswith('**[SUGGESTION]'):
-                      findings.append({"severity": "suggestion", "text": line})
-
-              result = {
-                  "agent": "style",
-                  "findings": findings,
-                  "full_review": review_text,
-                  "summary": f"Found {len([f for f in findings if f['severity'] == 'critical'])} critical, "
-                            f"{len([f for f in findings if f['severity'] == 'warning'])} warnings, "
-                            f"{len([f for f in findings if f['severity'] == 'suggestion'])} suggestions"
-              }
-          except Exception as e:
-              result = {"findings": [], "summary": f"⚠️ Error: {str(e)}", "error": str(e)}
-    output: style_review
-    on_error: continue
-
-  # ==================== COORDINATION ====================
-
-  - name: coordinate_reviews
-    description: "Coordinator: Synthesize all agent reviews into unified feedback"
-    compute: |
-      import os
-      import anthropic
-
-      api_key = os.getenv("ANTHROPIC_API_KEY")
-
-      # Collect all reviews
-      reviews = []
-      for agent in agents_config["enabled"]:
-          # Try to get each agent's review if it exists
-          if agent == "architecture" and 'architecture_review' in globals():
-              reviews.append(architecture_review)
-          elif agent == "security" and 'security_review' in globals():
-              reviews.append(security_review)
-          elif agent == "performance" and 'performance_review' in globals():
-              reviews.append(performance_review)
-          elif agent == "testing" and 'testing_review' in globals():
-              reviews.append(testing_review)
-          elif agent == "documentation" and 'documentation_review' in globals():
-              reviews.append(documentation_review)
-          elif agent == "style" and 'style_review' in globals():
-              reviews.append(style_review)
-
-      if not api_key:
-          # Fallback: just concatenate reviews
-          combined_text = "## Multi-Agent Code Review\n\n"
-          for review in reviews:
-              if review and not review.get("error"):
-                  agent_cfg = agents_config["configs"].get(review["agent"], {})
-                  icon = agent_cfg.get("icon", "")
-                  name = agent_cfg.get("name", review["agent"])
-                  combined_text += f"\n### {icon} {name}\n{review['full_review']}\n"
-
-          # Count findings by severity
-          total_critical = sum(len([f for f in r.get("findings", []) if f.get("severity") == "critical"]) for r in reviews)
-          total_warnings = sum(len([f for f in r.get("findings", []) if f.get("severity") == "warning"]) for r in reviews)
-          total_suggestions = sum(len([f for f in r.get("findings", []) if f.get("severity") == "suggestion"]) for r in reviews)
-
-          # Determine recommendation
-          has_critical = any(
-              any(f.get("severity") == "critical" for f in r.get("findings", []))
-              for r in reviews
-          )
-          recommendation = "NEEDS_WORK" if has_critical else "APPROVE"
-
-          result = {
-              "combined_review": combined_text,
-              "total_critical": total_critical,
-              "total_warnings": total_warnings,
-              "total_suggestions": total_suggestions,
-              "recommendation": recommendation
-          }
-      else:
-          # Use coordinator agent to synthesize
-          reviews_summary = "\\n\\n".join([
-              f"{agents_config['configs'][r['agent']]['icon']} {agents_config['configs'][r['agent']]['name']}:\\n{r['full_review']}"
-              for r in reviews if r and not r.get("error")
-          ])
-
-          prompt = (
-              f"You are the Coordinator Agent for a multi-agent code review system.\\n\\n"
-              f"Your Role:\\n"
-              f"1. Synthesize findings from all specialized review agents\\n"
-              f"2. Remove duplicate or overlapping issues\\n"
-              f"3. Prioritize issues by severity and impact\\n"
-              f"4. Create a unified, coherent review with clear sections\\n"
-              f"5. Provide an overall recommendation (APPROVE / NEEDS_WORK / NEEDS_MAJOR_CHANGES)\\n\\n"
-              f"Agent Reviews:\\n{reviews_summary}\\n\\n"
-              f"Instructions:\\n"
-              f"Create a comprehensive code review that:\\n"
-              f"- Groups related findings across agents\\n"
-              f"- Highlights critical issues first\\n"
-              f"- Removes redundancy\\n"
-              f"- Provides actionable next steps\\n"
-              f"- Gives an overall assessment\\n\\n"
-              f"Format:\\n"
-              f"## Multi-Agent Code Review\\n\\n"
-              f"### Critical Issues\\n"
-              f"[List critical issues that must be fixed]\\n\\n"
-              f"### Warnings\\n"
-              f"[List warnings that should be addressed]\\n\\n"
-              f"### Suggestions\\n"
-              f"[List nice-to-have improvements]\\n\\n"
-              f"### Summary\\n"
-              f"[Overall assessment and recommendation]\\n\\n"
-              f"Recommendation: [APPROVE / NEEDS_WORK / NEEDS_MAJOR_CHANGES]"
-          )
-
-          try:
-              client = anthropic.Anthropic(api_key=api_key)
-              message = client.messages.create(
-                  model="claude-sonnet-4-5-20250929",
-                  max_tokens=3000,
-                  messages=[{"role": "user", "content": prompt}]
-              )
-
-              combined_review = message.content[0].text if message.content else "No review generated"
-
-              # Extract recommendation
-              recommendation = "NEEDS_WORK"
-              if "APPROVE" in combined_review.upper() and "NEEDS_WORK" not in combined_review.upper():
-                  recommendation = "APPROVE"
-              elif "NEEDS_MAJOR_CHANGES" in combined_review.upper():
-                  recommendation = "NEEDS_MAJOR_CHANGES"
-
-              # Count total findings
-              total_critical = sum(len([f for f in r.get("findings", []) if f.get("severity") == "critical"]) for r in reviews)
-              total_warnings = sum(len([f for f in r.get("findings", []) if f.get("severity") == "warning"]) for r in reviews)
-              total_suggestions = sum(len([f for f in r.get("findings", []) if f.get("severity") == "suggestion"]) for r in reviews)
-
-              result = {
-                  "combined_review": combined_review,
-                  "total_critical": total_critical,
-                  "total_warnings": total_warnings,
-                  "total_suggestions": total_suggestions,
-                  "recommendation": recommendation
-              }
-          except Exception as e:
-              result = {"combined_review": f"⚠️ Coordination failed: {e}", "recommendation": "NEEDS_WORK"}
-    output: coordinated_review
-
-  # ==================== POST REVIEW ====================
-
-  - name: post_review_comment
-    description: "Post the combined review to the MR"
-    condition: "{{ inputs.post_combined }}"
-    tool: gitlab_mr_comment
-    args:
-      project: "{{ mr_info.project }}"
-      mr_id: "{{ mr_info.mr_id }}"
-      message: "{{ coordinated_review.combined_review }}"
-    output: comment_result
-    on_error: continue
-
-  - name: approve_if_ready
-    description: "Approve MR if no critical issues found"
-    condition: "{{ coordinated_review.recommendation == 'APPROVE' and inputs.post_combined }}"
-    tool: gitlab_mr_approve
-    args:
-      project: "{{ mr_info.project }}"
-      mr_id: "{{ mr_info.mr_id }}"
-    output: approval_result
-    on_error: continue
-
-  # ==================== SUMMARY ====================
-
-  - name: build_summary
-    description: "Create execution summary"
-    compute: |
-      lines = []
-      lines.append("# 🤖 Multi-Agent Code Review Complete")
-      lines.append("")
-      lines.append(f"**MR:** !{mr_info['mr_id']}")
-      lines.append(f"**Agents Used:** {', '.join(agents_config['enabled'])}")
-      lines.append("")
-      lines.append("## 📊 Review Statistics")
-      lines.append(f"- 🔴 Critical Issues: {coordinated_review['total_critical']}")
-      lines.append(f"- 🟡 Warnings: {coordinated_review['total_warnings']}")
-      lines.append(f"- 💡 Suggestions: {coordinated_review['total_suggestions']}")
-      lines.append("")
-      lines.append(f"**Recommendation:** {coordinated_review['recommendation']}")
-      lines.append("")
-
-      if inputs.get("post_combined"):
-          lines.append("✅ Review posted to MR")
-          if coordinated_review["recommendation"] == "APPROVE":
-              lines.append("✅ MR approved")
-
-      lines.append("")
-      lines.append("## 🔍 Individual Agent Summaries")
-
-      for agent in agents_config["enabled"]:
-          review_var = f"{agent}_review"
-          if review_var in dir():
-              review = eval(review_var)
-              if review and not review.get("error"):
-                  agent_cfg = agents_config["configs"][agent]
-                  lines.append(f"- {agent_cfg['icon']} **{agent_cfg['name']}**: {review['summary']}")
-
-      result = '\n'.join(lines)
-    output: summary
-
+- name: mr_id
+  type: integer
+  required: true
+  description: GitLab MR ID (e.g., 1483)
+- name: agents
+  type: string
+  required: false
+  default: architecture,security
+  description: Comma-separated list of agents
+- name: post_combined
+  type: boolean
+  required: false
+  default: false
+  description: Post review to MR
+- name: model
+  type: string
+  required: false
+  default: sonnet
+  description: Model to use
 outputs:
-  - name: summary
-    value: "{{ summary }}"
-
-  - name: review
-    value: "{{ coordinated_review.combined_review }}"
-
-  - name: stats
-    value:
-      critical: "{{ coordinated_review.total_critical }}"
-      warnings: "{{ coordinated_review.total_warnings }}"
-      suggestions: "{{ coordinated_review.total_suggestions }}"
-      recommendation: "{{ coordinated_review.recommendation }}"
+- name: summary
+  description: Summary of the review
+- name: review
+  description: Combined review text
+- name: stats
+  description: Review statistics
+steps:
+- name: get_mr_details
+  description: Get MR details
+  tool: gitlab_mr_view
+  args:
+    project: automation-analytics/automation-analytics-backend
+    mr_id: '{{ inputs.mr_id }}'
+  output: mr_details
+- name: get_mr_diff
+  description: Get MR diff
+  tool: gitlab_mr_diff
+  args:
+    project: automation-analytics/automation-analytics-backend
+    mr_id: '{{ inputs.mr_id }}'
+  output: mr_diff
+- name: parse_agents
+  description: Parse enabled agents
+  compute: "agents_str = inputs.get(\"agents\", \"architecture,security\")\nenabled\
+    \ = [a.strip() for a in agents_str.split(\",\") if a.strip()]\n\nconfigs = {\n\
+    \    \"architecture\": {\"name\": \"Architecture\", \"icon\": \"\U0001F3D7️\"\
+    , \"cli\": \"claude\"},\n    \"security\": {\"name\": \"Security\", \"icon\":\
+    \ \"\U0001F512\", \"cli\": \"gemini\"},\n    \"performance\": {\"name\": \"Performance\"\
+    , \"icon\": \"⚡\", \"cli\": \"claude\"},\n    \"testing\": {\"name\": \"Testing\"\
+    , \"icon\": \"\U0001F9EA\", \"cli\": \"gemini\"},\n    \"documentation\": {\"\
+    name\": \"Documentation\", \"icon\": \"\U0001F4DD\", \"cli\": \"claude\"},\n \
+    \   \"style\": {\"name\": \"Style\", \"icon\": \"\U0001F3A8\", \"cli\": \"gemini\"\
+    }\n}\n\nresult = {\"enabled\": enabled, \"configs\": {k: configs[k] for k in enabled\
+    \ if k in configs}}\n"
+  output: agents_config
+- name: run_architecture
+  description: Architecture Agent (Claude)
+  condition: '''architecture'' in agents_config[''enabled'']'
+  compute: "import subprocess\nimport tempfile\n\ncfg = agents_config[\"configs\"\
+    ][\"architecture\"]\n\n# Write prompt to file\nprompt_text = f\"\"\"Review this\
+    \ MR for architecture issues.\n\nMR: {mr_details}\n\nDiff (first 3000 chars):\n\
+    {str(mr_diff)[:3000]}\n\nProvide findings as:\n[CRITICAL] issue\n[WARNING] issue\
+    \  \n[SUGGESTION] issue\n\"\"\"\n\nwith tempfile.NamedTemporaryFile(mode='w',\
+    \ suffix='.txt', delete=False) as f:\n    f.write(prompt_text)\n    prompt_file\
+    \ = f.name\n\ntry:\n    proc = subprocess.run(\n        [cfg[\"cli\"], \"--model\"\
+    , inputs.get(\"model\", \"sonnet\"), prompt_text],\n        capture_output=True,\n\
+    \        text=True,\n        timeout=120\n    )\n    \n    result = {\n      \
+    \  \"agent\": \"architecture\",\n        \"cli\": cfg[\"cli\"],\n        \"review\"\
+    : proc.stdout,\n        \"stderr\": proc.stderr,\n        \"returncode\": proc.returncode\n\
+    \    }\nexcept Exception as e:\n    result = {\"agent\": \"architecture\", \"\
+    error\": str(e)}\n"
+  output: arch_review
+  on_error: continue
+- name: run_security
+  description: Security Agent (Gemini)
+  condition: '''security'' in agents_config[''enabled'']'
+  compute: "import subprocess\n\ncfg = agents_config[\"configs\"][\"security\"]\n\n\
+    prompt_text = f\"\"\"Review this MR for security issues.\n\nMR: {mr_details}\n\
+    \nDiff (first 3000 chars):\n{str(mr_diff)[:3000]}\n\nProvide findings as:\n[CRITICAL]\
+    \ issue\n[WARNING] issue\n[SUGGESTION] issue\n\"\"\"\n\ntry:\n    proc = subprocess.run(\n\
+    \        [cfg[\"cli\"], \"--model\", inputs.get(\"model\", \"sonnet\"), prompt_text],\n\
+    \        capture_output=True,\n        text=True,\n        timeout=120\n    )\n\
+    \    \n    result = {\n        \"agent\": \"security\",\n        \"cli\": cfg[\"\
+    cli\"],\n        \"review\": proc.stdout,\n        \"stderr\": proc.stderr,\n\
+    \        \"returncode\": proc.returncode\n    }\nexcept Exception as e:\n    result\
+    \ = {\"agent\": \"security\", \"error\": str(e)}\n"
+  output: sec_review
+  on_error: continue
+- name: coordinate
+  description: Combine reviews
+  compute: "reviews = []\nfor agent in agents_config[\"enabled\"]:\n    if agent ==\
+    \ \"architecture\" and \"arch_review\" in dir():\n        reviews.append(arch_review)\n\
+    \    elif agent == \"security\" and \"sec_review\" in dir():\n        reviews.append(sec_review)\n\
+    \ncombined = \"## Multi-Agent Review\\n\\n\"\nfor r in reviews:\n    if r and\
+    \ not r.get(\"error\"):\n        combined += f\"### {r.get('cli', 'unknown')}\
+    \ - {r.get('agent')}\\n\"\n        combined += r.get('review', '')[:500] + \"\\\
+    n\\n\"\n\nresult = {\"combined_review\": combined, \"reviews\": reviews}\n"
+  output: coordinated
+- name: build_summary
+  description: Build summary
+  compute: "lines = [\"# Multi-Agent Review\", \"\"]\nfor r in coordinated.get(\"\
+    reviews\", []):\n    agent = r.get(\"agent\", \"unknown\")\n    cli = r.get(\"\
+    cli\", \"unknown\")\n    error = r.get(\"error\")\n    if error:\n        lines.append(f\"\
+    - {agent} ({cli}): ERROR - {error}\")\n    else:\n        lines.append(f\"- {agent}\
+    \ ({cli}): OK\")\n\nresult = \"\\n\".join(lines)\n"
+  output: summary
