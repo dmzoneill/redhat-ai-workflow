@@ -130,3 +130,14 @@ steps:
     - {agent} ({cli}): ERROR - {error}\")\n    else:\n        lines.append(f\"- {agent}\
     \ ({cli}): OK\")\n\nresult = \"\\n\".join(lines)\n"
   output: summary
+- name: build_review_output
+  description: Build review output
+  compute: "result = coordinated.get(\"combined_review\", \"No review generated\"\
+    )\n"
+  output: review
+- name: build_stats_output
+  description: Build stats output
+  compute: "result = {\"agent_count\": len(coordinated.get(\"reviews\", [])), \"\
+    successful\": len([r for r in coordinated.get(\"reviews\", []) if not r.get(\"\
+    error\")])}\n"
+  output: stats
