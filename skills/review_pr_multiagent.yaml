@@ -34,13 +34,18 @@ inputs:
 - name: agents
   type: string
   required: false
-  default: architecture,security
+  default: architecture,security,performance,testing,documentation,style
   description: Comma-separated list of agents
 - name: post_combined
   type: boolean
   required: false
   default: false
   description: Post review to MR
+- name: debug
+  type: boolean
+  required: false
+  default: true
+  description: Debug mode - shows full review output without posting
 - name: model
   type: string
   required: false
@@ -91,7 +96,7 @@ steps:
     \ issue\n[WARNING] issue  \n[SUGGESTION] issue\n\"\"\"\n\ntry:\n    proc = subprocess.run(\n\
     \        [cfg[\"cli\"], \"--model\", inputs.get(\"model\", \"sonnet\")],\n   \
     \     input=prompt_text,\n        capture_output=True,\n        text=True,\n \
-    \       timeout=120\n    )\n    \n    result = {\n        \"agent\": \"architecture\"\
+    \       timeout=300\n    )\n    \n    result = {\n        \"agent\": \"architecture\"\
     ,\n        \"cli\": cfg[\"cli\"],\n        \"review\": proc.stdout,\n        \"\
     stderr\": proc.stderr,\n        \"returncode\": proc.returncode\n    }\nexcept\
     \ Exception as e:\n    result = {\"agent\": \"architecture\", \"error\": str(e)}\n"
@@ -106,7 +111,7 @@ steps:
     \ issue\n[WARNING] issue\n[SUGGESTION] issue\n\"\"\"\n\ntry:\n    proc = subprocess.run(\n\
     \        [cfg[\"cli\"], \"--model\", inputs.get(\"model\", \"sonnet\")],\n   \
     \     input=prompt_text,\n        capture_output=True,\n        text=True,\n \
-    \       timeout=120\n    )\n    \n    result = {\n        \"agent\": \"security\"\
+    \       timeout=300\n    )\n    \n    result = {\n        \"agent\": \"security\"\
     ,\n        \"cli\": cfg[\"cli\"],\n        \"review\": proc.stdout,\n        \"\
     stderr\": proc.stderr,\n        \"returncode\": proc.returncode\n    }\nexcept\
     \ Exception as e:\n    result = {\"agent\": \"security\", \"error\": str(e)}\n"
@@ -117,10 +122,17 @@ steps:
   compute: "reviews = []\nfor agent in agents_config[\"enabled\"]:\n    if agent ==\
     \ \"architecture\" and \"arch_review\" in dir():\n        reviews.append(arch_review)\n\
     \    elif agent == \"security\" and \"sec_review\" in dir():\n        reviews.append(sec_review)\n\
-    \ncombined = \"## Multi-Agent Review\\n\\n\"\nfor r in reviews:\n    if r and\
-    \ not r.get(\"error\"):\n        combined += f\"### {r.get('cli', 'unknown')}\
-    \ - {r.get('agent')}\\n\"\n        combined += r.get('review', '')[:500] + \"\\\
-    n\\n\"\n\nresult = {\"combined_review\": combined, \"reviews\": reviews}\n"
+    \n# In debug mode, show full reviews; otherwise truncate\ndebug_mode = inputs.get(\"\
+    debug\", True)\nmax_len = 10000 if debug_mode else 500\n\ncombined = \"## 🤖\
+    \ Multi-Agent Code Review\\n\\n\"\nfor r in reviews:\n    if r and not r.get(\"\
+    error\"):\n        agent_name = r.get('agent', 'unknown')\n        cli = r.get('cli',\
+    \ 'unknown')\n        agent_cfg = agents_config['configs'].get(agent_name, {})\n\
+    \        icon = agent_cfg.get('icon', '')\n        name = agent_cfg.get('name',\
+    \ agent_name)\n        \n        combined += f\"### {icon} {name} ({cli})\\n\"\
+    \n        review_text = r.get('review', '')\n        if review_text:\n       \
+    \     combined += review_text[:max_len] + \"\\n\\n\"\n        else:\n        \
+    \    combined += \"*No output*\\n\\n\"\n\nresult = {\"combined_review\": combined,\
+    \ \"reviews\": reviews}\n"
   output: coordinated
 - name: build_summary
   description: Build summary
