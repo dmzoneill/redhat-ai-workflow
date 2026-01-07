@@ -210,7 +210,7 @@ steps:
 
   - name: run_architecture_review
     description: "Architecture Agent: Review design patterns and structure"
-    condition: "{{ 'architecture' in agents_config['enabled'] }}"
+    condition: "'architecture' in agents_config['enabled']"
     compute: |
       import os
       import anthropic
@@ -277,7 +277,7 @@ steps:
 
   - name: run_security_review
     description: "Security Agent: Review security vulnerabilities"
-    condition: "{{ 'security' in agents_config['enabled'] }}"
+    condition: "'security' in agents_config['enabled']"
     compute: |
       import os
       import anthropic
@@ -344,7 +344,7 @@ steps:
 
   - name: run_performance_review
     description: "Performance Agent: Review efficiency and optimization"
-    condition: "{{ 'performance' in agents_config['enabled'] }}"
+    condition: "'performance' in agents_config['enabled']"
     compute: |
       import os
       import anthropic
@@ -411,7 +411,7 @@ steps:
 
   - name: run_testing_review
     description: "Testing Agent: Review test coverage and quality"
-    condition: "{{ 'testing' in agents_config['enabled'] }}"
+    condition: "'testing' in agents_config['enabled']"
     compute: |
       import os
       import anthropic
@@ -478,7 +478,7 @@ steps:
 
   - name: run_documentation_review
     description: "Documentation Agent: Review code comments and docs"
-    condition: "{{ 'documentation' in agents_config['enabled'] }}"
+    condition: "'documentation' in agents_config['enabled']"
     compute: |
       import os
       import anthropic
@@ -545,7 +545,7 @@ steps:
 
   - name: run_style_review
     description: "Style Agent: Review code style and conventions"
-    condition: "{{ 'style' in agents_config['enabled'] }}"
+    condition: "'style' in agents_config['enabled']"
     compute: |
       import os
       import anthropic
@@ -623,9 +623,19 @@ steps:
       # Collect all reviews
       reviews = []
       for agent in agents_config["enabled"]:
-          review_var = f"{agent}_review"
-          if review_var in dir():
-              reviews.append(eval(review_var))
+          # Try to get each agent's review if it exists
+          if agent == "architecture" and 'architecture_review' in globals():
+              reviews.append(architecture_review)
+          elif agent == "security" and 'security_review' in globals():
+              reviews.append(security_review)
+          elif agent == "performance" and 'performance_review' in globals():
+              reviews.append(performance_review)
+          elif agent == "testing" and 'testing_review' in globals():
+              reviews.append(testing_review)
+          elif agent == "documentation" and 'documentation_review' in globals():
+              reviews.append(documentation_review)
+          elif agent == "style" and 'style_review' in globals():
+              reviews.append(style_review)
 
       if not api_key:
           # Fallback: just concatenate reviews
