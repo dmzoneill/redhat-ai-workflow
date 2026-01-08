@@ -43,11 +43,18 @@
       "scopes": [
         "ui",
         "components"
-      ]
+      ],
+      "docs": {
+        "enabled": true,
+        "path": "docs/",
+        "readme": "README.md",
+        "auto_update": false,
+        "check_on_mr": true
+      }
     },
     "automation-analytics-backend": {
       "path": "/path/to/something",
-      "scopes": [],
+      "scopes": ["api", "billing", "reports", "ingestion", "auth"],
       "default_branch": "main",
       "fastapi_container": "YOUR_VALUE_HERE",
       "lint_command": "black --check . && flake8 . && yamllint .",
@@ -56,7 +63,22 @@
       "gitlab": "automation-analytics/automation-analytics-backend",
       "jira_component": "Automation Analytics",
       "konflux_namespace": "example-name",
-      "test_setup": "# Test Environment Setup for automation-analytics-backend\n# 1. Start the database:\n#    podman-compose up -d postgres redis\n# 2. Set environment variables:\n#    export DATABASE_URL=postgresql://user:pass@localhost:5432/aa\n#    export REDIS_URL=redis://localhost:6379\n# 3. Run migrations:\n#    python manage.py migrate\n# 4. Now you can run tests:\n#    pytest tests/ -v"
+      "test_setup": "# Test Environment Setup for automation-analytics-backend\n# 1. Start the database:\n#    podman-compose up -d postgres redis\n# 2. Set environment variables:\n#    export DATABASE_URL=postgresql://user:pass@localhost:5432/aa\n#    export REDIS_URL=redis://localhost:6379\n# 3. Run migrations:\n#    python manage.py migrate\n# 4. Now you can run tests:\n#    pytest tests/ -v",
+      "docs": {
+        "enabled": true,
+        "path": "docs/",
+        "readme": "README.md",
+        "api_docs": "docs/api/",
+        "architecture": "docs/architecture/",
+        "diagrams": ["docs/architecture/*.md", "docs/*.md"],
+        "auto_update": true,
+        "check_on_mr": true,
+        "patterns": {
+          "endpoints": "docs/api/endpoints.md",
+          "models": "docs/api/models.md",
+          "workflows": "docs/workflows/"
+        }
+      }
     },
     "konflux-release-data": {
       "jira_project": "KONFLUX",
@@ -79,7 +101,7 @@
       "jira_project": "APPSRE"
     },
     "pdf-generator": {
-      "scopes": [],
+      "scopes": ["pdf", "templates", "api"],
       "jira_project": "AAP",
       "konflux_namespace": "example-name",
       "default_branch": "main",
@@ -88,7 +110,14 @@
       "gitlab": "automation-analytics/pdf-generator",
       "lint_command": "npm run lint",
       "jira_component": "Automation Analytics",
-      "path": "/path/to/something"
+      "path": "/path/to/something",
+      "docs": {
+        "enabled": true,
+        "path": "docs/",
+        "readme": "README.md",
+        "auto_update": false,
+        "check_on_mr": true
+      }
     }
   },
   "user": {
