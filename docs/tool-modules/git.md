@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-git` module provides tools for Git operations including status, branches, commits, and more.
+The `aa_git` module provides tools for Git operations including status, branches, commits, and more.
 
 ## Tool Count
 

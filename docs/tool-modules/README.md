@@ -41,10 +41,10 @@ graph TB
     end
 
     subgraph MODULES["Tool Modules"]
-        GIT[aa-git]
-        GITLAB[aa-gitlab]
-        JIRA[aa-jira]
-        K8S[aa-k8s]
+        GIT[aa_git]
+        GITLAB[aa_gitlab]
+        JIRA[aa_jira]
+        K8S[aa_k8s]
         MORE[...]
     end
 
@@ -146,7 +146,7 @@ Claude: [AgentLoader]
 
 ## Adding a New Module
 
-1. Create directory: `tool_modules/aa-{name}/src/`
+1. Create directory: `tool_modules/aa_{name}/src/`
 
 2. Create `tools.py`:
 ```python
@@ -174,7 +174,7 @@ tools:
   - {name}
 ```
 
-5. Add to `tool_modules/aa-workflow/src/meta_tools.py`:
+5. Add to `tool_modules/aa_workflow/src/meta_tools.py`:
 ```python
 TOOL_REGISTRY = {
     # ...

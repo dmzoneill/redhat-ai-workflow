@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "aa-workflow": {
+    "aa_workflow": {
       "command": "bash",
       "args": [
         "-c",

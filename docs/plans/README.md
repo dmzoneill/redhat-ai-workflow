@@ -26,7 +26,7 @@ This directory contains design documents and implementation plans for future fea
 - Dashboard webview with current work overview
 - Skill execution visualizer (GitHub Actions style)
 
-**Location:** `extensions/aa-workflow-vscode/`
+**Location:** `extensions/aa_workflow-vscode/`
 
 ## Creating New Plans
 

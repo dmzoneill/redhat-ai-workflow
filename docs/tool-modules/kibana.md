@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-kibana` module provides tools for searching and analyzing logs in Kibana/Elasticsearch.
+The `aa_kibana` module provides tools for searching and analyzing logs in Kibana/Elasticsearch.
 
 ## Tool Count
 

@@ -27,15 +27,15 @@
 
 | Module | Function | Timeout | Purpose |
 |--------|----------|---------|---------|
-| aa-jira | `run_rh_issue()` | 30s | Default |
-| aa-git | `run_git()` | 60s | Default |
-| aa-gitlab | `run_glab()` | 60s | Default |
-| aa-konflux | `run_konflux_cmd()` | 60s | Default |
-| aa-bonfire | `run_bonfire()` | 300s | Default |
-| aa-bonfire | `bonfire_deploy()` | 600s | Deploy |
-| aa-bonfire | `bonfire_reserve_deploy()` | 960s | Combined |
-| aa-lint | `run_pytest()` | 600s | Tests |
-| aa-lint | `run_pylint()` | 300s | Linting |
+| aa_jira | `run_rh_issue()` | 30s | Default |
+| aa_git | `run_git()` | 60s | Default |
+| aa_gitlab | `run_glab()` | 60s | Default |
+| aa_konflux | `run_konflux_cmd()` | 60s | Default |
+| aa_bonfire | `run_bonfire()` | 300s | Default |
+| aa_bonfire | `bonfire_deploy()` | 600s | Deploy |
+| aa_bonfire | `bonfire_reserve_deploy()` | 960s | Combined |
+| aa_lint | `run_pytest()` | 600s | Tests |
+| aa_lint | `run_pylint()` | 300s | Linting |
 
 **Solution:** Create `server/timeouts.py`:
 
@@ -100,7 +100,7 @@ class OutputLimits:
 
 ### 1.3 Duration Maps (2 duplicates)
 
-**Problem:** Same duration map in `aa-alertmanager` and `aa-prometheus`:
+**Problem:** Same duration map in `aa_alertmanager` and `aa_prometheus`:
 
 ```python
 duration_map = {"m": 1, "h": 60, "d": 1440}
@@ -125,12 +125,12 @@ Six modules have their own async CLI runner with similar patterns:
 
 | Module | Function | Lines | Special Features |
 |--------|----------|-------|------------------|
-| aa-git | `run_git()` | 8 | Uses `run_cmd` |
-| aa-gitlab | `run_glab()` | 52 | Custom env, cwd resolution |
-| aa-jira | `run_rh_issue()` | 35 | Shell mode, auth error handling |
-| aa-bonfire | `run_bonfire()` | 70 | Kubeconfig, timeout, shell |
-| aa-quay | `run_skopeo()` | 25 | Standard subprocess |
-| aa-konflux | `run_konflux_cmd()` | 30 | Kubeconfig handling |
+| aa_git | `run_git()` | 8 | Uses `run_cmd` |
+| aa_gitlab | `run_glab()` | 52 | Custom env, cwd resolution |
+| aa_jira | `run_rh_issue()` | 35 | Shell mode, auth error handling |
+| aa_bonfire | `run_bonfire()` | 70 | Kubeconfig, timeout, shell |
+| aa_quay | `run_skopeo()` | 25 | Standard subprocess |
+| aa_konflux | `run_konflux_cmd()` | 30 | Kubeconfig handling |
 
 **Common patterns:**
 - Subprocess execution with timeout
@@ -161,10 +161,10 @@ class CLIRunner:
 Then each module:
 
 ```python
-# aa-git
+# aa_git
 git_runner = CLIRunner("git", timeout=60)
 
-# aa-bonfire
+# aa_bonfire
 bonfire_runner = CLIRunner(
     "bonfire",
     timeout=300,
@@ -185,23 +185,23 @@ bonfire_runner = CLIRunner(
 Five modules create their own `httpx.AsyncClient`:
 
 ```python
-# aa-prometheus
+# aa_prometheus
 async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
     ...
 
-# aa-alertmanager
+# aa_alertmanager
 async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
     ...
 
-# aa-kibana
+# aa_kibana
 async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
     ...
 
-# aa-quay
+# aa_quay
 async with httpx.AsyncClient(timeout=30.0) as client:
     ...
 
-# aa-workflow
+# aa_workflow
 async with httpx.AsyncClient() as client:
     ...
 ```
@@ -249,11 +249,11 @@ class APIClient:
 
 **Examples:**
 ```python
-# aa-workflow/src/skill_engine.py - 10 occurrences
+# aa_workflow/src/skill_engine.py - 10 occurrences
 except Exception as e:
     return f"Error: {e}"
 
-# aa-workflow/src/memory_tools.py - 5 occurrences
+# aa_workflow/src/memory_tools.py - 5 occurrences
 except Exception as e:
     return [TextContent(type="text", text=f"Error: {e}")]
 ```
@@ -290,7 +290,7 @@ except Exception as e:
 Despite adding `truncate_output()`, some modules still have inline truncation:
 
 ```python
-# aa-lint/src/tools.py
+# aa_lint/src/tools.py
 lines.append(f"```\n{output[:1500]}\n```")
 lines.append(f"```\n{output[:2000]}\n```")
 lines.append(f"```\n{stdout[:2000]}\n```")
@@ -299,7 +299,7 @@ lines.append(f"```\n{stdout[:2000]}\n```")
 lines.append(output[-2000:] if len(output) > 2000 else output)
 lines.append(output[-1500:] if len(output) > 1500 else output)
 
-# aa-appinterface/src/tools.py
+# aa_appinterface/src/tools.py
 lines.append(output[-3000:] if len(output) > 3000 else output)
 lines.append(stdout[:2000])
 lines.append(yaml.dump(data)[:1500])
@@ -491,7 +491,7 @@ pylint --disable=all --enable=unused-import tool_modules/
 - [x] Add `OutputLimits` class to `server/timeouts.py` ✅
 - [x] Add `parse_duration_to_minutes()` utility ✅
 - [x] Add `Environment` type alias ✅
-- [x] Update `aa-alertmanager` and `aa-prometheus` to use shared duration parser ✅
+- [x] Update `aa_alertmanager` and `aa_prometheus` to use shared duration parser ✅
 
 **Completed:** 2026-01-05
 **Estimated savings:** ~40 lines + much better consistency
@@ -516,7 +516,7 @@ Created `server/http_client.py` with:
 - Consistent error handling (401, 404, timeouts)
 - Bearer token authentication
 
-Updated modules: `aa-prometheus`, `aa-alertmanager`, `aa-kibana`, `aa-quay`
+Updated modules: `aa_prometheus`, `aa_alertmanager`, `aa_kibana`, `aa_quay`
 
 ### Exception Handling ✅
 
@@ -528,9 +528,9 @@ Improved bare `except Exception` catches with specific exceptions:
 ### Additional Inline Truncation Fixes ✅
 
 Fixed remaining inline truncations in:
-- `aa-bonfire` (7 occurrences)
-- `aa-git` (2 occurrences)
-- `aa-dev-workflow` (2 occurrences)
+- `aa_bonfire` (7 occurrences)
+- `aa_git` (2 occurrences)
+- `aa_dev_workflow` (2 occurrences)
 
 ---
 

@@ -4,7 +4,7 @@ Autonomous Slack Persona Daemon
 
 A standalone process that monitors Slack and responds using Claude + MCP tools.
 The daemon is just a Slack interface - all intelligence goes through ClaudeAgent,
-which routes to MCP servers (aa-jira, aa-gitlab, aa-k8s, aa-bonfire, etc.)
+which routes to MCP servers (aa_jira, aa_gitlab, aa_k8s, aa_bonfire, etc.)
 
 Requirements:
 - Claude API credentials (ANTHROPIC_API_KEY or Vertex AI)
@@ -41,14 +41,14 @@ from typing import Any
 
 # Add project paths (use resolve() to get absolute paths)
 # NOTE: server/ provides shared utils, tool_modules/ for individual modules
-# aa-slack must come LAST in inserts so it's FIRST in sys.path
+# aa_slack must come LAST in inserts so it's FIRST in sys.path
 # (because insert(0, x) prepends, so last insert = first in list)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))  # For server.utils import
-sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-git"))
-sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-gitlab"))
-sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-jira"))
-sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-slack"))  # Must be first in path
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_git"))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_gitlab"))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_jira"))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_slack"))  # Must be first in path
 
 from dotenv import load_dotenv
 
@@ -147,7 +147,7 @@ class SingleInstance:
         self.release()
 
 
-load_dotenv(PROJECT_ROOT / "tool_modules" / "aa-slack" / ".env")
+load_dotenv(PROJECT_ROOT / "tool_modules" / "aa_slack" / ".env")
 load_dotenv()
 
 from src.listener import ListenerConfig, SlackListener
@@ -824,7 +824,7 @@ class TerminalUI:
 # NOTE: IntentDetector and ToolExecutor classes have been REMOVED.
 #
 # All message understanding and tool execution now goes through ClaudeAgent,
-# which routes to MCP servers (aa-jira, aa-gitlab, aa-k8s, aa-bonfire, etc.)
+# which routes to MCP servers (aa_jira, aa_gitlab, aa_k8s, aa_bonfire, etc.)
 #
 # The Slack daemon is just a Slack interface - all intelligence is in Claude.
 # =============================================================================
@@ -848,7 +848,7 @@ class ResponseGenerator:
     Generates responses for messages using Claude.
 
     All message understanding and tool execution goes through ClaudeAgent,
-    which routes to MCP servers (aa-jira, aa-gitlab, aa-k8s, etc.)
+    which routes to MCP servers (aa_jira, aa_gitlab, aa_k8s, etc.)
 
     The Slack daemon is just a Slack interface - all intelligence is in Claude.
     """
@@ -934,7 +934,7 @@ class ResponseGenerator:
 
         All requests go through ClaudeAgent which:
         - Understands the user's intent
-        - Calls appropriate MCP tools (aa-jira, aa-gitlab, aa-k8s, etc.)
+        - Calls appropriate MCP tools (aa_jira, aa_gitlab, aa_k8s, etc.)
         - Runs skills when needed
         - Formats the response
 

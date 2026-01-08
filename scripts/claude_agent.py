@@ -76,11 +76,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Skill executor - use the actual skill engine from aa-workflow
+# Skill executor - use the actual skill engine from aa_workflow
 try:
     # Add tool_modules to path for skill_engine
     PROJECT_ROOT = Path(__file__).parent.parent
-    sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa-workflow" / "src"))
+    sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_workflow" / "src"))
     sys.path.insert(0, str(PROJECT_ROOT))
 
     import yaml as skill_yaml
@@ -195,7 +195,7 @@ class ToolRegistry:
             )
         )
 
-        # GitLab tools - simplified, full functionality in aa-gitlab MCP server
+        # GitLab tools - simplified, full functionality in aa_gitlab MCP server
         self.register(
             ToolDefinition(
                 name="gitlab_mr_view",
@@ -1212,7 +1212,7 @@ Please verify the image exists before proceeding."""
             key = args.get("key", "")
             if not key:
                 # List available memory files
-                memory_dir = Path.home() / ".config/aa-workflow/memory"
+                memory_dir = Path.home() / ".config/aa_workflow/memory"
                 if not memory_dir.exists():
                     return "No memory directory found"
                 files = []
@@ -1332,7 +1332,7 @@ Please verify the image exists before proceeding."""
         """
         Execute a workflow skill from YAML using the full SkillExecutor.
 
-        This now uses the actual skill engine from aa-workflow MCP server,
+        This now uses the actual skill engine from aa_workflow MCP server,
         providing full skill execution with all steps, conditions, and tools.
         """
         skill_name = args.get("skill_name", "")

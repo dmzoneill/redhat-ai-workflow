@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-alertmanager` module provides tools for managing Alertmanager alerts, silences, and receivers.
+The `aa_alertmanager` module provides tools for managing Alertmanager alerts, silences, and receivers.
 
 ## Tool Count
 

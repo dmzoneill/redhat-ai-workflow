@@ -7,7 +7,7 @@ This document describes the architecture of the AI Workflow MCP server.
 | Term | Meaning in This Project |
 |------|------------------------|
 | **Agent / Persona** | A tool configuration profile that determines which MCP tools are loaded (e.g., developer, devops, incident). NOT a separate AI instance. |
-| **Tool Module** | A plugin directory containing MCP tool implementations (e.g., `aa-git/`, `aa-jira/`). |
+| **Tool Module** | A plugin directory containing MCP tool implementations (e.g., `aa_git/`, `aa_jira/`). |
 | **Skill** | A YAML-defined multi-step workflow that chains tools together. |
 | **Memory** | Persistent YAML files that maintain context across Claude sessions. |
 | **Auto-Heal** | Automatic detection and remediation of VPN/auth failures in skills. |
@@ -121,23 +121,23 @@ sequenceDiagram
 
 ```
 tool_modules/
-├── aa-workflow/        # Core workflow tools (16 tools)
-├── aa-git/             # Git operations (30 tools)
-├── aa-gitlab/          # GitLab MRs, pipelines (30 tools)
-├── aa-jira/            # Jira issues (28 tools)
-├── aa-k8s/             # Kubernetes ops (28 tools)
-├── aa-bonfire/         # Ephemeral environments (20 tools)
-├── aa-quay/            # Container registry (8 tools)
-├── aa-prometheus/      # Metrics queries (13 tools)
-├── aa-alertmanager/    # Alert management (7 tools)
-├── aa-kibana/          # Log search (9 tools)
-├── aa-google-calendar/ # Calendar & meetings (6 tools)
+├── aa_workflow/        # Core workflow tools (16 tools)
+├── aa_git/             # Git operations (30 tools)
+├── aa_gitlab/          # GitLab MRs, pipelines (30 tools)
+├── aa_jira/            # Jira issues (28 tools)
+├── aa_k8s/             # Kubernetes ops (28 tools)
+├── aa_bonfire/         # Ephemeral environments (20 tools)
+├── aa_quay/            # Container registry (8 tools)
+├── aa_prometheus/      # Metrics queries (13 tools)
+├── aa_alertmanager/    # Alert management (7 tools)
+├── aa_kibana/          # Log search (9 tools)
+├── aa_google_calendar/ # Calendar & meetings (6 tools)
 ├── aa-gmail/           # Email processing (6 tools)
-├── aa-slack/           # Slack integration (10 tools)
-├── aa-konflux/         # Build pipelines (35 tools)
-├── aa-appinterface/    # App-interface config (7 tools)
-├── aa-lint/            # Linting tools (7 tools)
-└── aa-dev-workflow/    # Dev workflow helpers (9 tools)
+├── aa_slack/           # Slack integration (10 tools)
+├── aa_konflux/         # Build pipelines (35 tools)
+├── aa_appinterface/    # App-interface config (7 tools)
+├── aa_lint/            # Linting tools (7 tools)
+└── aa_dev_workflow/    # Dev workflow helpers (9 tools)
 ```
 
 ## Auto-Heal Architecture
@@ -249,7 +249,7 @@ Central configuration via `config.json`:
 ## See Also
 
 - [MCP Implementation Details](./mcp-implementation.md) - Server code & patterns
-- [Workflow Module Architecture](./workflow-modules.md) - aa-workflow internal structure
+- [Workflow Module Architecture](./workflow-modules.md) - aa_workflow internal structure
 - [Skills Reference](../skills/README.md) - All 50 available skills
 - [Learning Loop](../learning-loop.md) - Auto-remediation and memory integration
 - [Skill Auto-Heal Plan](../plans/skill-auto-heal.md) - Auto-heal implementation details

@@ -8,7 +8,7 @@ from pathlib import Path
 # Add paths for shared utilities
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "common"))
-sys.path.insert(0, str(PROJECT_ROOT / "tool_modules/aa-slack/src"))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules/aa_slack/src"))
 
 from config_loader import load_config
 from slack_client import SlackSession

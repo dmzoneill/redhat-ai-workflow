@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-appinterface` module provides tools for managing app-interface (GitOps) configuration.
+The `aa_appinterface` module provides tools for managing app-interface (GitOps) configuration.
 
 ## Tool Count
 

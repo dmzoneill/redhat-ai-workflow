@@ -73,7 +73,7 @@ Create `.mcp.json` in your **project root**:
 ```json
 {
   "mcpServers": {
-    "aa-workflow": {
+    "aa_workflow": {
       "command": "bash",
       "args": [
         "-c",
@@ -96,7 +96,7 @@ Create `.cursor/mcp.json` in your **project directory**:
 ```json
 {
   "mcpServers": {
-    "aa-workflow": {
+    "aa_workflow": {
       "command": "bash",
       "args": [
         "-c",
@@ -423,14 +423,14 @@ ai-workflow/
 │   ├── persona_loader.py # Dynamic persona loading
 │   ├── auto_heal_decorator.py  # Auto-heal decorators
 │   └── utils.py         # Shared utilities
-├── tool_modules/        # Tool plugins (aa-git/, aa-jira/, etc.)
+├── tool_modules/        # Tool plugins (aa_git/, aa_jira/, etc.)
 ├── personas/            # Persona configs (developer.yaml, devops.yaml)
 ├── skills/              # 53 workflow definitions (start_work.yaml, etc.)
 ├── memory/              # Persistent context
 │   ├── state/           # Active issues, MRs, environments
 │   └── learned/         # Patterns, tool fixes, runbooks
 ├── extensions/          # IDE integrations
-│   └── aa-workflow-vscode/  # VSCode/Cursor extension
+│   └── aa_workflow-vscode/  # VSCode/Cursor extension
 ├── docs/                # Documentation
 ├── scripts/             # Python utilities
 │   └── common/
@@ -484,20 +484,3 @@ MIT License - See [LICENSE](LICENSE) for details.
 <div align="center">
   <sub>Built with ❤️ for developers who want AI that actually does things</sub>
 </div>
-
-## Type Checking
-
-Due to the monorepo structure with multiple `aa-*` modules containing hyphens (invalid Python package names), mypy cannot be run from the project root with `mypy .`.
-
-Instead, use the provided script to check all modules or specific modules:
-
-```bash
-# Check all modules
-./scripts/check-types.sh
-
-# Check specific module
-./scripts/check-types.sh aa-git
-
-# Or check a module directly
-cd tool_modules/aa-git && mypy --package src --explicit-package-bases
-```

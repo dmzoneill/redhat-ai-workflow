@@ -8,7 +8,7 @@ tool_fixes: []
 #   error_pattern: "Output is not a TTY"
 #   root_cause: "Bonfire prompts for confirmation in non-interactive mode"
 #   fix_applied: "Added --force flag to command"
-#   file_changed: tool_modules/aa-bonfire/src/tools.py
+#   file_changed: tool_modules/aa_bonfire/src/tools.py
 #   date_learned: "2026-01-03"
 #   times_prevented: 0  # Incremented when we skip this mistake
 

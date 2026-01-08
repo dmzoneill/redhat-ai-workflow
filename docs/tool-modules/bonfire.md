@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-bonfire` module provides tools for managing ephemeral Kubernetes namespaces using the `bonfire` CLI.
+The `aa_bonfire` module provides tools for managing ephemeral Kubernetes namespaces using the `bonfire` CLI.
 
 ## Tool Count
 

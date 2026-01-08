@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-google-calendar` module provides tools for Google Calendar integration including event creation, availability checking, and meeting scheduling.
+The `aa_google_calendar` module provides tools for Google Calendar integration including event creation, availability checking, and meeting scheduling.
 
 ## Tool Count
 

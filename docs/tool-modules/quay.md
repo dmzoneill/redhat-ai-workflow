@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-quay` module provides tools for checking container images in Quay.io registries using `skopeo`.
+The `aa_quay` module provides tools for checking container images in Quay.io registries using `skopeo`.
 
 ## Tool Count
 

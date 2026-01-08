@@ -29,7 +29,7 @@ class TestMCPServerCreation:
         """Workflow server should create successfully."""
         from server.main import create_mcp_server
 
-        server = create_mcp_server(name="aa-workflow", tools=["workflow"])
+        server = create_mcp_server(name="aa_workflow", tools=["workflow"])
         assert server is not None
 
     def test_utils_import(self):
@@ -89,14 +89,14 @@ class TestWorkflowExtractedModules:
     def test_constants_import(self):
         """Constants module should define key paths."""
         # Add workflow to path
-        sys.path.insert(0, str(TOOL_MODULES_DIR / "aa-workflow"))
+        sys.path.insert(0, str(TOOL_MODULES_DIR / "aa_workflow"))
 
         try:
             import importlib.util
 
             spec = importlib.util.spec_from_file_location(
                 "constants",
-                TOOL_MODULES_DIR / "aa-workflow" / "src" / "constants.py",
+                TOOL_MODULES_DIR / "aa_workflow" / "src" / "constants.py",
             )
             constants = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(constants)
@@ -109,8 +109,8 @@ class TestWorkflowExtractedModules:
             assert constants.SKILLS_DIR.name == "skills"
         finally:
             # Clean up path
-            if str(TOOL_MODULES_DIR / "aa-workflow") in sys.path:
-                sys.path.remove(str(TOOL_MODULES_DIR / "aa-workflow"))
+            if str(TOOL_MODULES_DIR / "aa_workflow") in sys.path:
+                sys.path.remove(str(TOOL_MODULES_DIR / "aa_workflow"))
 
     def test_memory_tools_loadable(self):
         """Memory tools module should be loadable."""
@@ -118,7 +118,7 @@ class TestWorkflowExtractedModules:
 
         spec = importlib.util.spec_from_file_location(
             "memory_tools",
-            TOOL_MODULES_DIR / "aa-workflow" / "src" / "memory_tools.py",
+            TOOL_MODULES_DIR / "aa_workflow" / "src" / "memory_tools.py",
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -132,7 +132,7 @@ class TestWorkflowExtractedModules:
 
         spec = importlib.util.spec_from_file_location(
             "persona_tools",
-            TOOL_MODULES_DIR / "aa-workflow" / "src" / "persona_tools.py",
+            TOOL_MODULES_DIR / "aa_workflow" / "src" / "persona_tools.py",
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -146,7 +146,7 @@ class TestWorkflowExtractedModules:
 
         spec = importlib.util.spec_from_file_location(
             "lint_tools",
-            TOOL_MODULES_DIR / "aa-lint" / "src" / "tools.py",
+            TOOL_MODULES_DIR / "aa_lint" / "src" / "tools.py",
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -160,7 +160,7 @@ class TestWorkflowExtractedModules:
 
         spec = importlib.util.spec_from_file_location(
             "infra_tools",
-            TOOL_MODULES_DIR / "aa-workflow" / "src" / "infra_tools.py",
+            TOOL_MODULES_DIR / "aa_workflow" / "src" / "infra_tools.py",
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -174,7 +174,7 @@ class TestWorkflowExtractedModules:
 
         spec = importlib.util.spec_from_file_location(
             "dev_workflow_tools",
-            TOOL_MODULES_DIR / "aa-dev-workflow" / "src" / "tools.py",
+            TOOL_MODULES_DIR / "aa_dev_workflow" / "src" / "tools.py",
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

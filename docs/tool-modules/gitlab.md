@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-gitlab` module provides tools for GitLab operations including merge requests, pipelines, comments, and project management.
+The `aa_gitlab` module provides tools for GitLab operations including merge requests, pipelines, comments, and project management.
 
 ## Tool Count
 

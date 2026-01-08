@@ -9,10 +9,10 @@ The AI Workflow VSCode/Cursor extension provides real-time status and quick acti
 make ext-install
 
 # Or manually:
-cd extensions/aa-workflow-vscode
+cd extensions/aa_workflow-vscode
 npm install
 npm run compile
-ln -sf "$(pwd)" ~/.cursor/extensions/aa-workflow
+ln -sf "$(pwd)" ~/.cursor/extensions/aa_workflow
 ```
 
 **Restart Cursor** after installation.
@@ -91,11 +91,11 @@ Settings in VSCode/Cursor preferences:
 
 ```json
 {
-  "aa-workflow.refreshInterval": 30,
-  "aa-workflow.showSlackStatus": true,
-  "aa-workflow.showActiveIssue": true,
-  "aa-workflow.showEnvironment": true,
-  "aa-workflow.showActiveMR": true
+  "aa_workflow.refreshInterval": 30,
+  "aa_workflow.showSlackStatus": true,
+  "aa_workflow.showActiveIssue": true,
+  "aa_workflow.showEnvironment": true,
+  "aa_workflow.showActiveMR": true
 }
 ```
 
@@ -124,7 +124,7 @@ make ext-clean
 
 ### Extension not showing
 
-1. Check the extension is linked: `ls -la ~/.cursor/extensions/aa-workflow`
+1. Check the extension is linked: `ls -la ~/.cursor/extensions/aa_workflow`
 2. Reload Cursor: `Ctrl+Shift+P` → "Developer: Reload Window"
 3. Check Output panel: `View` → `Output` → Select "AI Workflow"
 
@@ -136,4 +136,4 @@ make ext-clean
 
 ### Status bar items missing
 
-Check settings: `Ctrl+,` → Search "aa-workflow" → Enable desired indicators
+Check settings: `Ctrl+,` → Search "aa_workflow" → Enable desired indicators

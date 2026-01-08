@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-jira` module provides tools for Jira operations including issue viewing, creation, transitions, and search.
+The `aa_jira` module provides tools for Jira operations including issue viewing, creation, transitions, and search.
 
 ## Tool Count
 

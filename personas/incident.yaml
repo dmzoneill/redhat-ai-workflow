@@ -5,7 +5,7 @@ name: incident
 description: Production incident response and recovery
 persona: personas/incident.md
 
-# Tool modules to load (from tool_modules/aa-*)
+# Tool modules to load (from tool_modules/aa_*)
 tools:
   - workflow      # 28 tools - Skills, agents, memory (REQUIRED)
   - k8s           # 26 tools - Kubernetes operations

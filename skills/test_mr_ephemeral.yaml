@@ -1,7 +1,7 @@
 # Skill: Test MR in Ephemeral Environment
 # Deploy PR/MR image to ephemeral namespace and run pytest validation
 #
-# IMPORTANT: This skill uses MCP tools (aa-bonfire, aa-quay). DO NOT run raw bonfire commands.
+# IMPORTANT: This skill uses MCP tools (aa_bonfire, aa_quay). DO NOT run raw bonfire commands.
 # The skill handles: kubeconfig, component names, image tags, and bonfire syntax automatically.
 
 name: test_mr_ephemeral

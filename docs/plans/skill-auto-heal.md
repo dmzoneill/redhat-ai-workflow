@@ -331,7 +331,7 @@ auto_fixes:
 
 - `scripts/common/auto_heal.py` - Shared auto-heal utilities
 - `server/auto_heal_decorator.py` - Python decorators for auto-heal
-- `tool_modules/aa-workflow/src/memory_tools.py` - memory tools
-- `tool_modules/aa-workflow/src/infra_tools.py` - kube_login, vpn_connect
+- `tool_modules/aa_workflow/src/memory_tools.py` - memory tools
+- `tool_modules/aa_workflow/src/infra_tools.py` - kube_login, vpn_connect
 - `memory/learned/patterns.yaml` - existing pattern storage
 - `memory/learned/tool_failures.yaml` - skill auto-heal tracking

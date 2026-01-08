@@ -5,7 +5,7 @@ name: devops
 description: Infrastructure, monitoring, and ephemeral deployments
 persona: personas/devops.md
 
-# Tool modules to load (from tool_modules/aa-*)
+# Tool modules to load (from tool_modules/aa_*)
 tools:
   - workflow      # 16 tools - Core (memory, persona, session, skill, infra, meta)
   - k8s           # 26 tools - Kubernetes operations

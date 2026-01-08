@@ -17,7 +17,7 @@ Add to your project's `.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
-    "aa-workflow": {
+    "aa_workflow": {
       "command": "bash",
       "args": [
         "-c",
@@ -39,27 +39,27 @@ server/                           # Core infrastructure
 
 tool_modules/                     # Tool plugins
 │
-├── aa-git/                       # Git operations (30 tools)
+├── aa_git/                       # Git operations (30 tools)
 │   ├── src/
 │   │   ├── tools.py              # register_tools(server) function
 │   │   └── server.py             # Standalone wrapper
 │   └── pyproject.toml
 │
-├── aa-gitlab/                    # GitLab MRs & pipelines (30 tools)
-├── aa-jira/                      # Jira issues (28 tools)
-├── aa-k8s/                       # Kubernetes operations (28 tools)
-├── aa-bonfire/                   # Ephemeral environments (20 tools)
-├── aa-quay/                      # Container registry (8 tools)
-├── aa-prometheus/                # Metrics queries (13 tools)
-├── aa-alertmanager/              # Alert management (7 tools)
-├── aa-kibana/                    # Log search (9 tools)
-├── aa-google-calendar/           # Calendar & meetings (6 tools)
+├── aa_gitlab/                    # GitLab MRs & pipelines (30 tools)
+├── aa_jira/                      # Jira issues (28 tools)
+├── aa_k8s/                       # Kubernetes operations (28 tools)
+├── aa_bonfire/                   # Ephemeral environments (20 tools)
+├── aa_quay/                      # Container registry (8 tools)
+├── aa_prometheus/                # Metrics queries (13 tools)
+├── aa_alertmanager/              # Alert management (7 tools)
+├── aa_kibana/                    # Log search (9 tools)
+├── aa_google_calendar/           # Calendar & meetings (6 tools)
 ├── aa-gmail/                     # Email processing (6 tools)
-├── aa-slack/                     # Slack integration (10 tools)
-├── aa-konflux/                   # Build pipelines (35 tools)
-├── aa-appinterface/              # App-interface config (7 tools)
-├── aa-lint/                      # Linting tools (7 tools)
-└── aa-dev-workflow/              # Dev workflow helpers (9 tools)
+├── aa_slack/                     # Slack integration (10 tools)
+├── aa_konflux/                   # Build pipelines (35 tools)
+├── aa_appinterface/              # App-interface config (7 tools)
+├── aa_lint/                      # Linting tools (7 tools)
+└── aa_dev_workflow/              # Dev workflow helpers (9 tools)
 ```
 
 ## Tool Module Pattern
@@ -99,14 +99,14 @@ def register_tools(server: FastMCP) -> int:
 ### server.py - Standalone Wrapper
 
 ```python
-"""Standalone entry point for aa-git."""
+"""Standalone entry point for aa_git."""
 
 import asyncio
 from mcp.server.fastmcp import FastMCP
 from .tools import register_tools
 
 def main():
-    server = FastMCP("aa-git")
+    server = FastMCP("aa_git")
     register_tools(server)
     asyncio.run(server.run_stdio_async())
 
@@ -272,7 +272,7 @@ python -m src.server --agent devops     # ~106 tools
 Run just one module:
 
 ```bash
-cd tool_modules/aa-git
+cd tool_modules/aa_git
 python -m src.server
 ```
 
@@ -315,13 +315,13 @@ tools:
 
 ## Special Modules
 
-### aa-slack: Event-Driven Architecture
+### aa_slack: Event-Driven Architecture
 
-The `aa-slack` module implements a **long-running listener** pattern:
+The `aa_slack` module implements a **long-running listener** pattern:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  aa-slack MCP Server                                            │
+│  aa_slack MCP Server                                            │
 │                                                                 │
 │  ┌──────────────────┐     ┌──────────────────┐                 │
 │  │  Background      │     │  SQLite State    │                 │
@@ -346,10 +346,10 @@ The `aa-slack` module implements a **long-running listener** pattern:
 
 | Variable | Module | Description |
 |----------|--------|-------------|
-| `JIRA_URL` | aa-jira | Jira instance URL |
-| `JIRA_JPAT` | aa-jira | Jira Personal Access Token |
-| `GITLAB_TOKEN` | aa-gitlab | GitLab API token |
-| `KUBECONFIG` | aa-k8s | Default kubeconfig path |
+| `JIRA_URL` | aa_jira | Jira instance URL |
+| `JIRA_JPAT` | aa_jira | Jira Personal Access Token |
+| `GITLAB_TOKEN` | aa_gitlab | GitLab API token |
+| `KUBECONFIG` | aa_k8s | Default kubeconfig path |
 
 > **Note:** Quay tools use `skopeo` which leverages your existing `podman login` or `docker login` credentials - no separate token needed!
 

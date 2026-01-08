@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-slack` module provides tools for Slack integration including message handling, channel management, team notifications, and background listening for autonomous responses.
+The `aa_slack` module provides tools for Slack integration including message handling, channel management, team notifications, and background listening for autonomous responses.
 
 ## Tool Count
 

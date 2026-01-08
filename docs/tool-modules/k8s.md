@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-k8s` module provides tools for Kubernetes operations including pod management, logs, events, and deployments.
+The `aa_k8s` module provides tools for Kubernetes operations including pod management, logs, events, and deployments.
 
 ## Tool Count
 

@@ -1,10 +1,10 @@
 # AA-Workflow Module Architecture
 
-> Internal module structure for developers working on the aa-workflow MCP server
+> Internal module structure for developers working on the aa_workflow MCP server
 
 ## Overview
 
-The aa-workflow server provides workflow automation tools. The codebase has been organized into focused modules for maintainability.
+The aa_workflow server provides workflow automation tools. The codebase has been organized into focused modules for maintainability.
 
 ## Module Reference
 
@@ -156,7 +156,7 @@ python -c "
 import sys
 sys.path.insert(0, 'server')
 from server.main import create_mcp_server
-server = create_mcp_server(name='aa-workflow', tools=['workflow'])
+server = create_mcp_server(name='aa_workflow', tools=['workflow'])
 print('Server created with 30+ tools')
 "
 ```

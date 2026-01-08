@@ -7,7 +7,7 @@
 | Term | Meaning |
 |------|---------|
 | **Agent / Persona** | Tool configuration profile (developer, devops, incident, release). NOT a separate AI instance. |
-| **Tool Module** | Directory (`tool_modules/aa-*/`) containing MCP tool implementations. |
+| **Tool Module** | Directory (`tool_modules/aa_*/`) containing MCP tool implementations. |
 | **Skill** | YAML workflow in `skills/` that chains tools. |
 | **Auto-Heal** | Automatic VPN/auth remediation patterns in skills. |
 
@@ -126,23 +126,23 @@ redhat-ai-workflow/
 │   ├── state/                   # Active issues, MRs, environments
 │   └── learned/                 # Patterns, tool fixes, runbooks
 ├── tool_modules/                # MCP tool modules (17 modules, ~270 tools)
-│   ├── aa-workflow/             # Workflow tools (16 tools)
-│   ├── aa-git/                  # Git operations (30 tools)
-│   ├── aa-gitlab/               # GitLab integration (30 tools)
-│   ├── aa-jira/                 # Jira integration (28 tools)
-│   ├── aa-k8s/                  # Kubernetes operations (28 tools)
-│   ├── aa-bonfire/              # Ephemeral environments (20 tools)
-│   ├── aa-quay/                 # Container registry (8 tools)
-│   ├── aa-prometheus/           # Metrics queries (13 tools)
-│   ├── aa-alertmanager/         # Alert management (7 tools)
-│   ├── aa-kibana/               # Log search (9 tools)
-│   ├── aa-google-calendar/      # Calendar integration (6 tools)
+│   ├── aa_workflow/             # Workflow tools (16 tools)
+│   ├── aa_git/                  # Git operations (30 tools)
+│   ├── aa_gitlab/               # GitLab integration (30 tools)
+│   ├── aa_jira/                 # Jira integration (28 tools)
+│   ├── aa_k8s/                  # Kubernetes operations (28 tools)
+│   ├── aa_bonfire/              # Ephemeral environments (20 tools)
+│   ├── aa_quay/                 # Container registry (8 tools)
+│   ├── aa_prometheus/           # Metrics queries (13 tools)
+│   ├── aa_alertmanager/         # Alert management (7 tools)
+│   ├── aa_kibana/               # Log search (9 tools)
+│   ├── aa_google_calendar/      # Calendar integration (6 tools)
 │   ├── aa-gmail/                # Email processing (6 tools)
-│   ├── aa-slack/                # Slack integration (10 tools)
-│   ├── aa-konflux/              # Build pipelines (35 tools)
-│   ├── aa-appinterface/         # App-interface config (7 tools)
-│   ├── aa-lint/                 # Linting tools (7 tools)
-│   └── aa-dev-workflow/         # Dev workflow helpers (9 tools)
+│   ├── aa_slack/                # Slack integration (10 tools)
+│   ├── aa_konflux/              # Build pipelines (35 tools)
+│   ├── aa_appinterface/         # App-interface config (7 tools)
+│   ├── aa_lint/                 # Linting tools (7 tools)
+│   └── aa_dev_workflow/         # Dev workflow helpers (9 tools)
 ├── scripts/                     # Python utilities
 │   ├── common/                  # Shared modules
 │   │   ├── config_loader.py     # Configuration loading
@@ -160,7 +160,7 @@ redhat-ai-workflow/
 
 ### 1. Choose the Right Module
 
-- Add to existing module if it fits (e.g., new Git command → `aa-git`)
+- Add to existing module if it fits (e.g., new Git command → `aa_git`)
 - Create new module for new service integrations
 
 ### 2. Create the Tool Function
@@ -215,7 +215,7 @@ Add entry to the relevant docs file in `docs/tool-modules/`.
 
 ### 5. Register in Meta Tools
 
-Add to `tool_modules/aa-workflow/src/meta_tools.py`:
+Add to `tool_modules/aa_workflow/src/meta_tools.py`:
 
 ```python
 TOOL_REGISTRY = {

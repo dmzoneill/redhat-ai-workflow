@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-konflux` module provides tools for Konflux (Tekton-based) build pipeline management.
+The `aa_konflux` module provides tools for Konflux (Tekton-based) build pipeline management.
 
 ## Tool Count
 

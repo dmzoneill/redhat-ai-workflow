@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-workflow` module provides core tools for session management, skill execution, and persona loading. These tools are always available regardless of which persona is loaded.
+The `aa_workflow` module provides core tools for session management, skill execution, and persona loading. These tools are always available regardless of which persona is loaded.
 
 > **Terminology:** "Agents" here means tool configuration profiles (personas), not separate AI instances.
 

@@ -48,7 +48,7 @@ Instead of chaining tools manually, use pre-built skills:
 | Term | Meaning |
 |------|---------|
 | **Agent / Persona** | A tool configuration profile (developer, devops, incident, release). NOT a separate AI instance - just a different set of tools. |
-| **Tool Module** | A plugin directory (e.g., `aa-git/`, `aa-jira/`) containing MCP tool implementations. |
+| **Tool Module** | A plugin directory (e.g., `aa_git/`, `aa_jira/`) containing MCP tool implementations. |
 | **Skill** | A YAML-defined multi-step workflow that chains tools. |
 | **Memory** | Persistent YAML files for context across sessions. |
 
@@ -76,7 +76,7 @@ Instead of chaining tools manually, use pre-built skills:
 ├─────────────────────────────────────────────────────────┤
 │  MCP TOOLS (tool_modules/)                               │
 │  ~270 tools across 17 modules                           │
-│  aa-git, aa-jira, aa-gitlab, aa-k8s, aa-prometheus...  │
+│  aa_git, aa_jira, aa_gitlab, aa_k8s, aa_prometheus...  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -122,23 +122,23 @@ Claude runs the `test_mr_ephemeral` skill automatically.
 
 | Module | Tools | Purpose |
 |--------|-------|---------|
-| `aa-workflow` | 16 | Core: agents, skills, memory, vpn, kube_login |
-| `aa-git` | 19 | Git operations (status, branch, commit, push) |
-| `aa-gitlab` | 35 | GitLab MRs, CI/CD pipelines |
-| `aa-jira` | 28 | Jira issues (view, create, update, transition) |
-| `aa-k8s` | 26 | Kubernetes (pods, deployments, logs) |
-| `aa-bonfire` | 21 | Ephemeral namespace management |
-| `aa-quay` | 8 | Container registry, vulnerabilities |
-| `aa-prometheus` | 13 | Prometheus queries, alerts, metrics |
-| `aa-alertmanager` | 7 | Silences, alert management |
-| `aa-kibana` | 9 | Log search and analysis |
-| `aa-konflux` | 40 | Konflux builds, Tekton, snapshots |
-| `aa-appinterface` | 8 | App-Interface validation |
-| `aa-google-calendar` | 6 | Calendar & meetings |
+| `aa_workflow` | 16 | Core: agents, skills, memory, vpn, kube_login |
+| `aa_git` | 19 | Git operations (status, branch, commit, push) |
+| `aa_gitlab` | 35 | GitLab MRs, CI/CD pipelines |
+| `aa_jira` | 28 | Jira issues (view, create, update, transition) |
+| `aa_k8s` | 26 | Kubernetes (pods, deployments, logs) |
+| `aa_bonfire` | 21 | Ephemeral namespace management |
+| `aa_quay` | 8 | Container registry, vulnerabilities |
+| `aa_prometheus` | 13 | Prometheus queries, alerts, metrics |
+| `aa_alertmanager` | 7 | Silences, alert management |
+| `aa_kibana` | 9 | Log search and analysis |
+| `aa_konflux` | 40 | Konflux builds, Tekton, snapshots |
+| `aa_appinterface` | 8 | App-Interface validation |
+| `aa_google_calendar` | 6 | Calendar & meetings |
 | `aa-gmail` | 6 | Email processing |
-| `aa-slack` | 16 | Slack integration |
-| `aa-lint` | 7 | Code linting and testing |
-| `aa-dev-workflow` | 9 | Development workflow helpers |
+| `aa_slack` | 16 | Slack integration |
+| `aa_lint` | 7 | Code linting and testing |
+| `aa_dev_workflow` | 9 | Development workflow helpers |
 
 ### Most-Used Tools
 
@@ -198,22 +198,22 @@ Claude: DevOps persona loaded with ~106 tools!
 
 ### DevOps Persona (`personas/devops.md`)
 - Focus: Infrastructure, ephemeral environments, deployments
-- Tools: aa-k8s, aa-bonfire, aa-quay, aa-gitlab
+- Tools: aa_k8s, aa_bonfire, aa_quay, aa_gitlab
 - Use when: Deploying to ephemeral, checking namespaces
 
 ### Developer Persona (`personas/developer.md`)
 - Focus: Coding, PRs, code review
-- Tools: aa-git, aa-gitlab, aa-jira
+- Tools: aa_git, aa_gitlab, aa_jira
 - Use when: Writing code, creating MRs
 
 ### Incident Persona (`personas/incident.md`)
 - Focus: Rapid triage, mitigation, recovery
-- Tools: aa-k8s, aa-kibana, aa-jira
+- Tools: aa_k8s, aa_kibana, aa_jira
 - Use when: Production incidents
 
 ### Release Persona (`personas/release.md`)
 - Focus: Release coordination, deployment
-- Tools: aa-konflux, aa-quay, aa-appinterface, aa-git
+- Tools: aa_konflux, aa_quay, aa_appinterface, aa_git
 - Use when: Managing releases
 
 ---
@@ -381,18 +381,18 @@ ai-workflow/
 │   └── learned/
 ├── tool_modules/           # MCP tool modules
 │   ├── server/         # Shared infrastructure
-│   ├── aa-git/
-│   ├── aa-jira/
-│   ├── aa-gitlab/
-│   ├── aa-k8s/
-│   ├── aa-prometheus/
-│   ├── aa-alertmanager/
-│   ├── aa-kibana/
-│   ├── aa-konflux/
-│   ├── aa-bonfire/
-│   ├── aa-quay/
-│   ├── aa-appinterface/
-│   └── aa-workflow/
+│   ├── aa_git/
+│   ├── aa_jira/
+│   ├── aa_gitlab/
+│   ├── aa_k8s/
+│   ├── aa_prometheus/
+│   ├── aa_alertmanager/
+│   ├── aa_kibana/
+│   ├── aa_konflux/
+│   ├── aa_bonfire/
+│   ├── aa_quay/
+│   ├── aa_appinterface/
+│   └── aa_workflow/
 └── examples/              # MCP config examples
     ├── mcp-full.json
     ├── mcp-minimal.json

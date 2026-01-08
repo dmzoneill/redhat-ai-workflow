@@ -5,7 +5,7 @@ name: developer
 description: Coding, PRs, and code review
 persona: personas/developer.md
 
-# Tool modules to load (from tool_modules/aa-*)
+# Tool modules to load (from tool_modules/aa_*)
 tools:
   - workflow        # 16 tools - Core (memory, persona, session, skill, infra, meta)
   - lint            # 7 tools - Python/YAML linting, testing, security scans

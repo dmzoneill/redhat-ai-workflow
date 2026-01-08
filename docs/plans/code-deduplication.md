@@ -38,12 +38,12 @@ This document tracks the refactoring effort to reduce code duplication and impro
 **Problem:** 10+ places with duplicate truncation logic.
 
 **Files affected:**
-- `tool_modules/aa-git/src/tools.py`
-- `tool_modules/aa-gitlab/src/tools.py`
-- `tool_modules/aa-k8s/src/tools.py`
-- `tool_modules/aa-bonfire/src/tools.py`
-- `tool_modules/aa-prometheus/src/tools.py`
-- `tool_modules/aa-kibana/src/tools.py`
+- `tool_modules/aa_git/src/tools.py`
+- `tool_modules/aa_gitlab/src/tools.py`
+- `tool_modules/aa_k8s/src/tools.py`
+- `tool_modules/aa_bonfire/src/tools.py`
+- `tool_modules/aa_prometheus/src/tools.py`
+- `tool_modules/aa_kibana/src/tools.py`
 
 **Solution:** Add to `server/utils.py`:
 
@@ -126,11 +126,11 @@ Then simplify skills to:
 **Current state:**
 | Module | Function | Lines |
 |--------|----------|-------|
-| aa-git | `run_git()` | 12 |
-| aa-gitlab | `run_glab()` | 45 |
-| aa-jira | `run_rh_issue()` | 35 |
-| aa-bonfire | `run_bonfire()` | 55 |
-| aa-quay | `run_skopeo()` | 25 |
+| aa_git | `run_git()` | 12 |
+| aa_gitlab | `run_glab()` | 45 |
+| aa_jira | `run_rh_issue()` | 35 |
+| aa_bonfire | `run_bonfire()` | 55 |
+| aa_quay | `run_skopeo()` | 25 |
 
 **Solution:** Add to `server/utils.py`:
 
@@ -391,19 +391,19 @@ def register_tools(server: FastMCP) -> int:
 ### Week 3: Tool Registration ✅ COMPLETED
 1. ✅ Created `server/tool_registry.py` with `ToolRegistry` class
 2. ✅ Updated ALL tool modules to use ToolRegistry:
-   - `aa-git` (30 tools)
-   - `aa-gitlab` (30+ tools)
-   - `aa-k8s` (28 tools)
-   - `aa-jira` (37 tools)
-   - `aa-bonfire` (21 tools)
-   - `aa-konflux` (11 tools)
-   - `aa-alertmanager` (10 tools)
-   - `aa-prometheus` (18 tools)
-   - `aa-kibana` (10 tools)
-   - `aa-appinterface` (10 tools)
-   - `aa-lint` (7 tools)
-   - `aa-dev-workflow` (9 tools)
-   - `aa-workflow` submodules: memory_tools, persona_tools, session_tools, infra_tools, meta_tools, skill_engine
+   - `aa_git` (30 tools)
+   - `aa_gitlab` (30+ tools)
+   - `aa_k8s` (28 tools)
+   - `aa_jira` (37 tools)
+   - `aa_bonfire` (21 tools)
+   - `aa_konflux` (11 tools)
+   - `aa_alertmanager` (10 tools)
+   - `aa_prometheus` (18 tools)
+   - `aa_kibana` (10 tools)
+   - `aa_appinterface` (10 tools)
+   - `aa_lint` (7 tools)
+   - `aa_dev_workflow` (9 tools)
+   - `aa_workflow` submodules: memory_tools, persona_tools, session_tools, infra_tools, meta_tools, skill_engine
 3. ✅ Removed all `tool_count += 1` lines and approximate counting
 
 ### Future Work (Deferred)
@@ -445,28 +445,28 @@ def register_tools(server: FastMCP) -> int:
 
 **Modified (Imports & Truncation):**
 - `server/utils.py` - Added `truncate_output()`, `format_error()`, `format_success()`, `format_warning()`, `format_list()`
-- `tool_modules/aa-git/src/tools.py`
-- `tool_modules/aa-gitlab/src/tools.py`
-- `tool_modules/aa-k8s/src/tools.py`
-- `tool_modules/aa-bonfire/src/tools.py`
-- `tool_modules/aa-konflux/src/tools.py`
-- `tool_modules/aa-jira/src/tools.py`
-- `tool_modules/aa-quay/src/tools.py`
-- `tool_modules/aa-prometheus/src/tools.py`
-- `tool_modules/aa-kibana/src/tools.py`
-- `tool_modules/aa-alertmanager/src/tools.py`
-- `tool_modules/aa-appinterface/src/tools.py`
-- `tool_modules/aa-lint/src/tools.py`
-- `tool_modules/aa-google-calendar/src/tools.py`
-- `tool_modules/aa-slack/src/tools.py`
-- `tool_modules/aa-workflow/src/tools.py`
-- `tool_modules/aa-workflow/src/meta_tools.py`
-- `tool_modules/aa-workflow/src/infra_tools.py`
-- `tool_modules/aa-workflow/src/memory_tools.py`
-- `tool_modules/aa-workflow/src/persona_tools.py`
-- `tool_modules/aa-workflow/src/session_tools.py`
-- `tool_modules/aa-workflow/src/skill_engine.py`
-- `tool_modules/aa-dev-workflow/src/tools.py`
+- `tool_modules/aa_git/src/tools.py`
+- `tool_modules/aa_gitlab/src/tools.py`
+- `tool_modules/aa_k8s/src/tools.py`
+- `tool_modules/aa_bonfire/src/tools.py`
+- `tool_modules/aa_konflux/src/tools.py`
+- `tool_modules/aa_jira/src/tools.py`
+- `tool_modules/aa_quay/src/tools.py`
+- `tool_modules/aa_prometheus/src/tools.py`
+- `tool_modules/aa_kibana/src/tools.py`
+- `tool_modules/aa_alertmanager/src/tools.py`
+- `tool_modules/aa_appinterface/src/tools.py`
+- `tool_modules/aa_lint/src/tools.py`
+- `tool_modules/aa_google_calendar/src/tools.py`
+- `tool_modules/aa_slack/src/tools.py`
+- `tool_modules/aa_workflow/src/tools.py`
+- `tool_modules/aa_workflow/src/meta_tools.py`
+- `tool_modules/aa_workflow/src/infra_tools.py`
+- `tool_modules/aa_workflow/src/memory_tools.py`
+- `tool_modules/aa_workflow/src/persona_tools.py`
+- `tool_modules/aa_workflow/src/session_tools.py`
+- `tool_modules/aa_workflow/src/skill_engine.py`
+- `tool_modules/aa_dev_workflow/src/tools.py`
 
 **Skills Refactored:**
 - `skills/start_work.yaml` - Now uses `scripts/common/repo_utils.resolve_repo()`

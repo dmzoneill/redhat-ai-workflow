@@ -31,8 +31,8 @@ from mcp.server.fastmcp import FastMCP
 #   server/         <- This file is here
 #     main.py
 #   tool_modules/   <- Plugins are here
-#     aa-git/
-#     aa-jira/
+#     aa_git/
+#     aa_jira/
 #     ...
 PROJECT_DIR = Path(__file__).parent.parent  # ai-workflow root
 TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
@@ -111,7 +111,7 @@ def setup_logging(web_mode: bool = False) -> logging.Logger:
 
 
 def create_mcp_server(
-    name: str = "aa-workflow",
+    name: str = "aa_workflow",
     tools: list[str] | None = None,
 ) -> FastMCP:
     """
@@ -295,7 +295,7 @@ Examples:
     parser.add_argument(
         "--name",
         default="",
-        help="Server name (default: based on agent or 'aa-workflow')",
+        help="Server name (default: based on agent or 'aa_workflow')",
     )
 
     args = parser.parse_args()
@@ -314,11 +314,11 @@ Examples:
         logger.info(f"Loading agent '{args.agent}' with ~{estimated} tools: {tools}")
     elif args.all:
         tools = None  # Load all
-        server_name = args.name or "aa-workflow"
+        server_name = args.name or "aa_workflow"
         logger.warning("Loading ALL tools - may exceed Cursor's 128 tool limit!")
     elif args.tools:
         tools = [t.strip() for t in args.tools.split(",") if t.strip()]
-        server_name = args.name or "aa-workflow"
+        server_name = args.name or "aa_workflow"
     else:
         # Default: load developer persona (most common use case)
         # This provides git, gitlab, jira + workflow tools
@@ -327,7 +327,7 @@ Examples:
         if tools is None:
             # Fallback to workflow only if developer persona missing
             tools = ["workflow"]
-            server_name = args.name or "aa-workflow"
+            server_name = args.name or "aa_workflow"
             logger.info("Starting in dynamic mode - use persona_load() to switch personas")
         else:
             server_name = args.name or f"aa-{default_agent}"

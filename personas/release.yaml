@@ -5,7 +5,7 @@ name: release
 description: Release management and deployments
 persona: personas/release.md
 
-# Tool modules to load (from tool_modules/aa-*)
+# Tool modules to load (from tool_modules/aa_*)
 tools:
   - workflow      # 28 tools - Skills, agents, memory (REQUIRED)
   - konflux       # 40 tools - Builds, pipelines

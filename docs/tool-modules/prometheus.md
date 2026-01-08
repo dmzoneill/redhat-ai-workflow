@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `aa-prometheus` module provides tools for querying Prometheus metrics and checking alert status.
+The `aa_prometheus` module provides tools for querying Prometheus metrics and checking alert status.
 
 ## Tool Count
 

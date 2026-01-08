@@ -81,7 +81,7 @@ class SkillExecutor:
 | Slash Commands | ✅ 35 commands | `.cursor/commands/` |
 | Rules Files | ✅ Project context | `.cursor/rules/` |
 | Browser Tools | ✅ Testing | Built-in MCP |
-| **Status Bar Extension** | ✅ **Phase 1 Complete** | `extensions/aa-workflow-vscode/` |
+| **Status Bar Extension** | ✅ **Phase 1 Complete** | `extensions/aa_workflow-vscode/` |
 
 ### What We've Built (Phases 1-4)
 
@@ -275,7 +275,7 @@ WORKFLOW EXPLORER
 
 ```
 extensions/
-└── aa-workflow-vscode/
+└── aa_workflow-vscode/
     ├── package.json
     ├── src/
     │   ├── extension.ts      # Entry point
@@ -305,7 +305,7 @@ Extension communicates with our existing MCP server:
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │  VSCode     │────▶│  Extension  │────▶│  MCP Server │
-│  Extension  │◀────│  (bridge)   │◀────│  (aa-workflow)│
+│  Extension  │◀────│  (bridge)   │◀────│  (aa_workflow)│
 └─────────────┘     └─────────────┘     └─────────────┘
 ```
 
@@ -763,7 +763,7 @@ flowchart TD
 ## Next Steps
 
 1. [x] ~~Decide on priority phases (1-6)~~ - Started with Phase 1
-2. [x] ~~Create VSCode extension scaffold~~ - Done: `extensions/aa-workflow-vscode/`
+2. [x] ~~Create VSCode extension scaffold~~ - Done: `extensions/aa_workflow-vscode/`
 3. [ ] Add skill execution events to skill_engine.py (Phase 6 prep)
 4. [ ] Implement D-Bus signals for real-time updates (Phase 6 prep)
 5. [ ] Build webview with Mermaid.js flowchart (Phase 5/6)
