@@ -610,37 +610,14 @@ steps:
 
   # ==================== SLACK NOTIFICATION ====================
 
-  - name: build_slack_message
-    description: "Build Slack message with proper team mention"
+  - name: notify_team_about_mr
+    description: "Use notify_mr skill to post to team channel"
     condition: "mr and not inputs.draft"
-    compute: |
-      # Build team mention using shared utility
-      team_group_id = resolved_repo.get("team_group_id", "")
-      team_group_handle = resolved_repo.get("team_group_handle", "aa-api-team")
-      team_mention = slack_utils.build_team_mention(team_group_id, team_group_handle)
-
-      jira_url = resolved_repo.get("jira_url", "https://issues.redhat.com")
-      issue_key = inputs.get("issue_key", "").upper()
-      issue_summary = issue.get("summary", "Update")[:60] if issue else "Update"
-      mr_url = mr.get("web_url", "")
-      mr_iid = mr.get("iid", "")
-      mr_title = mr.get("title", "")[:60]
-      gitlab_project = resolved_repo.get("gitlab_project", "")
-      repo_name = gitlab_project.split("/")[-1] if "/" in gitlab_project else gitlab_project
-
-      lines = [team_mention, "🔀 *New MR Ready for Review*", ""]
-      lines.append(f"• <{jira_url}/browse/{issue_key}|{issue_key}: {issue_summary}>")
-      lines.append(f"• <{mr_url}|!{mr_iid}: {mr_title}>")
-
-      result = "\n".join(lines)
-    output: slack_message
-
-  - name: notify_team_slack
-    description: "Post MR to team channel asking for review"
-    condition: "slack_message"
-    tool: slack_post_team
+    tool: skill_run
     args:
-      text: "{{ slack_message }}"
+      skill_name: notify_mr
+      inputs: '{"mr_id": "{{ mr.iid }}", "issue_key": "{{ inputs.issue_key }}"}'
+      execute: true
     output: slack_notification
     on_error: continue
 
@@ -684,27 +661,6 @@ steps:
     args:
       action: "Created MR !{{ memory_context.mr_iid }} for {{ inputs.issue_key }}"
       details: "{{ memory_context.mr_url }}"
-    on_error: continue
-
-  - name: notify_slack_mr_created
-    description: "Post MR to team channel for visibility"
-    condition: "mr"
-    compute: |
-      from scripts.common.parsers import linkify_mr_ids, linkify_jira_keys
-      is_slack = inputs.get('slack_format', True)
-      mr_str = linkify_mr_ids(f"!{memory_context['mr_iid']}", slack_format=is_slack)
-      key_str = linkify_jira_keys(inputs.issue_key, slack_format=is_slack)
-      result = f"🔀 MR ready for review: {mr_str} - {key_str}"
-    output: slack_msg
-
-  - name: post_slack_mr_created
-    description: "Post to team channel"
-    condition: "mr"
-    tool: slack_post_message
-    args:
-      channel: "team-automation-analytics"
-      message: "{{ slack_msg }}"
-    output: slack_mr_notify
     on_error: continue
 
   - name: add_mr_to_memory
