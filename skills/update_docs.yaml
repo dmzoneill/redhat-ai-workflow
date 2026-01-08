@@ -1,0 +1,384 @@
+# Skill: Update Documentation
+# Checks and updates repository documentation before creating PRs/MRs
+
+name: update_docs
+description: |
+  Check and update repository documentation before creating a PR/MR.
+  - Scans for outdated docs based on code changes
+  - Updates mermaid diagrams if architecture changed
+  - Checks README.md for accuracy
+  - Updates API docs if endpoints changed
+  - Only runs for repos with docs.enabled=true in config.json
+
+  Uses MCP tools: git_log, git_diff, git_status, git_add, git_commit
+
+version: "1.0"
+
+inputs:
+  - name: repo
+    type: string
+    required: false
+    default: ""
+    description: "Repository path - if not provided, uses current directory"
+
+  - name: repo_name
+    type: string
+    required: false
+    description: "Repository name from config (e.g., 'automation-analytics-backend')"
+
+  - name: issue_key
+    type: string
+    required: false
+    default: ""
+    description: "Jira issue key for commit message"
+
+  - name: auto_commit
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically commit doc updates"
+
+  - name: check_only
+    type: boolean
+    required: false
+    default: false
+    description: "Only check, don't suggest updates"
+
+steps:
+  # ==================== RESOLVE REPOSITORY ====================
+
+  - name: resolve_repo
+    description: "Determine which repo to check"
+    compute: |
+      from scripts.common.repo_utils import resolve_repo
+      from scripts.common.config_loader import load_config
+
+      resolved = resolve_repo(
+          repo_path=inputs.get("repo") if inputs.get("repo") and inputs.get("repo") not in ("", ".") else None,
+          repo_name=inputs.get("repo_name") if inputs.get("repo_name") else None,
+          issue_key=inputs.get("issue_key"),
+      )
+
+      config = load_config()
+      repos = config.get("repositories", {})
+
+      # Find repo config by path
+      repo_config = None
+      repo_key = None
+      for key, cfg in repos.items():
+          if cfg.get("path") == resolved.path:
+              repo_config = cfg
+              repo_key = key
+              break
+
+      docs_config = repo_config.get("docs", {}) if repo_config else {}
+
+      result = {
+          "path": resolved.path,
+          "repo_key": repo_key,
+          "gitlab_project": resolved.gitlab_project,
+          "default_branch": resolved.default_branch,
+          "docs_enabled": docs_config.get("enabled", False),
+          "docs_path": docs_config.get("path", "docs/"),
+          "readme": docs_config.get("readme", "README.md"),
+          "api_docs": docs_config.get("api_docs", ""),
+          "architecture": docs_config.get("architecture", ""),
+          "diagrams": docs_config.get("diagrams", []),
+          "auto_update": docs_config.get("auto_update", False),
+          "check_on_mr": docs_config.get("check_on_mr", True),
+          "patterns": docs_config.get("patterns", {}),
+      }
+    output: resolved_repo
+
+  # ==================== CHECK IF DOCS ENABLED ====================
+
+  - name: check_docs_enabled
+    description: "Skip if docs not enabled for this repo"
+    compute: |
+      if not resolved_repo.get("docs_enabled"):
+          result = {
+              "skip": True,
+              "reason": f"Documentation checks not enabled for {resolved_repo.get('repo_key', 'this repo')}. Set docs.enabled=true in config.json.",
+          }
+      else:
+          result = {"skip": False, "reason": ""}
+    output: docs_check
+
+  # ==================== GET CHANGED FILES ====================
+
+  - name: get_changed_files
+    description: "Get list of files changed in this branch"
+    condition: "not docs_check.skip"
+    compute: |
+      import subprocess
+      import os
+
+      repo = resolved_repo["path"]
+      target = resolved_repo.get("default_branch", "main")
+
+      # Get list of changed files compared to target branch
+      cmd = ["git", "-C", repo, "diff", "--name-only", f"origin/{target}...HEAD"]
+      try:
+          output = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+          files = [f.strip() for f in output.stdout.strip().split('\n') if f.strip()]
+
+          # Categorize changes
+          py_files = [f for f in files if f.endswith('.py')]
+          api_files = [f for f in py_files if 'api' in f.lower() or 'route' in f.lower() or 'endpoint' in f.lower() or 'view' in f.lower()]
+          model_files = [f for f in py_files if 'model' in f.lower() or 'schema' in f.lower()]
+          config_files = [f for f in files if f.endswith(('.yaml', '.yml', '.json', '.toml'))]
+          doc_files = [f for f in files if f.startswith('docs/') or f.endswith('.md')]
+
+          result = {
+              "all": files,
+              "python": py_files,
+              "api": api_files,
+              "models": model_files,
+              "config": config_files,
+              "docs": doc_files,
+              "count": len(files),
+          }
+      except Exception as e:
+          result = {"all": [], "python": [], "api": [], "models": [], "config": [], "docs": [], "count": 0, "error": str(e)}
+    output: changed_files
+
+  # ==================== CHECK DOC STALENESS ====================
+
+  - name: check_readme
+    description: "Check if README needs updating based on changes"
+    condition: "not docs_check.skip"
+    compute: |
+      import os
+
+      repo = resolved_repo["path"]
+      readme_path = os.path.join(repo, resolved_repo.get("readme", "README.md"))
+
+      issues = []
+      suggestions = []
+
+      if not os.path.exists(readme_path):
+          issues.append("README.md not found")
+      else:
+          with open(readme_path, 'r') as f:
+              readme_content = f.read()
+
+          # Check for outdated content indicators
+          api_changed = len(changed_files.get("api", [])) > 0
+          model_changed = len(changed_files.get("models", [])) > 0
+          config_changed = len(changed_files.get("config", [])) > 0
+
+          if api_changed and "## API" in readme_content:
+              suggestions.append("API files changed - review API section in README")
+
+          if model_changed and ("## Models" in readme_content or "## Schema" in readme_content):
+              suggestions.append("Model files changed - review Models/Schema section")
+
+          if config_changed and "## Configuration" in readme_content:
+              suggestions.append("Config files changed - review Configuration section")
+
+          # Check for broken links (basic check)
+          import re
+          links = re.findall(r'\[([^\]]+)\]\(([^)]+)\)', readme_content)
+          for text, url in links:
+              if url.startswith('./') or url.startswith('../'):
+                  link_path = os.path.normpath(os.path.join(os.path.dirname(readme_path), url))
+                  if not os.path.exists(link_path) and not url.startswith('#'):
+                      issues.append(f"Broken link: [{text}]({url})")
+
+      result = {
+          "path": readme_path,
+          "issues": issues[:5],
+          "suggestions": suggestions[:5],
+          "needs_update": len(issues) > 0 or len(suggestions) > 0,
+      }
+    output: readme_check
+
+  - name: check_api_docs
+    description: "Check if API docs need updating"
+    condition: "not docs_check.skip and resolved_repo.api_docs and len(changed_files.get('api', [])) > 0"
+    compute: |
+      import os
+
+      repo = resolved_repo["path"]
+      api_docs_path = os.path.join(repo, resolved_repo.get("api_docs", "docs/api/"))
+
+      issues = []
+      suggestions = []
+
+      if not os.path.exists(api_docs_path):
+          issues.append(f"API docs directory not found: {api_docs_path}")
+      else:
+          # Check if API docs are older than changed API files
+          api_files = changed_files.get("api", [])
+          if api_files:
+              suggestions.append(f"API files changed ({len(api_files)} files) - update API documentation")
+              for f in api_files[:3]:
+                  suggestions.append(f"  - {f}")
+
+      result = {
+          "path": api_docs_path,
+          "issues": issues,
+          "suggestions": suggestions,
+          "needs_update": len(api_files) > 0 if 'api_files' in dir() else False,
+      }
+    output: api_docs_check
+
+  - name: check_mermaid_diagrams
+    description: "Check mermaid diagrams for staleness"
+    condition: "not docs_check.skip and resolved_repo.diagrams"
+    compute: |
+      import os
+      import re
+      import glob
+
+      repo = resolved_repo["path"]
+      diagram_patterns = resolved_repo.get("diagrams", [])
+
+      diagrams_found = []
+      issues = []
+      suggestions = []
+
+      for pattern in diagram_patterns:
+          full_pattern = os.path.join(repo, pattern)
+          for md_file in glob.glob(full_pattern):
+              with open(md_file, 'r') as f:
+                  content = f.read()
+
+              # Find mermaid blocks
+              mermaid_blocks = re.findall(r'```mermaid\n(.*?)```', content, re.DOTALL)
+              if mermaid_blocks:
+                  diagrams_found.append({
+                      "file": os.path.relpath(md_file, repo),
+                      "count": len(mermaid_blocks),
+                  })
+
+      # Check if architecture-related files changed
+      arch_files = [f for f in changed_files.get("python", [])
+                    if any(kw in f.lower() for kw in ['service', 'handler', 'controller', 'router', 'workflow'])]
+
+      if arch_files and diagrams_found:
+          suggestions.append(f"Architecture-related files changed ({len(arch_files)}) - review mermaid diagrams")
+          for d in diagrams_found[:3]:
+              suggestions.append(f"  - {d['file']} ({d['count']} diagrams)")
+
+      result = {
+          "diagrams": diagrams_found,
+          "arch_files_changed": arch_files[:5],
+          "issues": issues,
+          "suggestions": suggestions,
+          "needs_update": len(arch_files) > 0 and len(diagrams_found) > 0,
+      }
+    output: diagram_check
+
+  # ==================== GENERATE UPDATE SUGGESTIONS ====================
+
+  - name: compile_suggestions
+    description: "Compile all documentation suggestions"
+    condition: "not docs_check.skip"
+    compute: |
+      all_issues = []
+      all_suggestions = []
+
+      # Collect from all checks
+      if readme_check:
+          all_issues.extend(readme_check.get("issues", []))
+          all_suggestions.extend(readme_check.get("suggestions", []))
+
+      if 'api_docs_check' in dir() and api_docs_check:
+          all_issues.extend(api_docs_check.get("issues", []))
+          all_suggestions.extend(api_docs_check.get("suggestions", []))
+
+      if 'diagram_check' in dir() and diagram_check:
+          all_issues.extend(diagram_check.get("issues", []))
+          all_suggestions.extend(diagram_check.get("suggestions", []))
+
+      needs_attention = len(all_issues) > 0 or len(all_suggestions) > 0
+
+      result = {
+          "issues": all_issues[:10],
+          "suggestions": all_suggestions[:10],
+          "needs_attention": needs_attention,
+          "issue_count": len(all_issues),
+          "suggestion_count": len(all_suggestions),
+      }
+    output: doc_summary
+
+  # ==================== MEMORY LOGGING ====================
+
+  - name: log_doc_check
+    description: "Log documentation check to session"
+    condition: "not docs_check.skip"
+    tool: memory_session_log
+    args:
+      action: "Checked docs for {{ resolved_repo.repo_key }}"
+      details: "{{ doc_summary.issue_count }} issues, {{ doc_summary.suggestion_count }} suggestions"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## 📚 Documentation Check: {{ resolved_repo.repo_key or 'Repository' }}
+
+      {% if docs_check.skip %}
+      ⏭️ **Skipped:** {{ docs_check.reason }}
+      {% else %}
+
+      **Repository:** `{{ resolved_repo.path }}`
+      **Docs Path:** `{{ resolved_repo.docs_path }}`
+      **Files Changed:** {{ changed_files.count }}
+
+      ---
+
+      ### Status
+
+      {% if not doc_summary.needs_attention %}
+      ✅ **Documentation looks up to date!**
+      {% else %}
+
+      {% if doc_summary.issues %}
+      #### ❌ Issues Found ({{ doc_summary.issue_count }})
+      {% for issue in doc_summary.issues %}
+      - {{ issue }}
+      {% endfor %}
+      {% endif %}
+
+      {% if doc_summary.suggestions %}
+      #### 💡 Suggestions ({{ doc_summary.suggestion_count }})
+      {% for suggestion in doc_summary.suggestions %}
+      - {{ suggestion }}
+      {% endfor %}
+      {% endif %}
+
+      {% endif %}
+
+      ---
+
+      ### Changed Files Summary
+
+      | Category | Count |
+      |----------|-------|
+      | Python | {{ changed_files.python | length }} |
+      | API/Routes | {{ changed_files.api | length }} |
+      | Models | {{ changed_files.models | length }} |
+      | Config | {{ changed_files.config | length }} |
+      | Docs | {{ changed_files.docs | length }} |
+
+      {% if diagram_check and diagram_check.diagrams %}
+      ---
+
+      ### Mermaid Diagrams Found
+
+      {% for d in diagram_check.diagrams %}
+      - `{{ d.file }}` ({{ d.count }} diagrams)
+      {% endfor %}
+      {% endif %}
+
+      {% endif %}
+
+  - name: context
+    value:
+      needs_attention: "{{ doc_summary.needs_attention if doc_summary else false }}"
+      issues: "{{ doc_summary.issues if doc_summary else [] }}"
+      suggestions: "{{ doc_summary.suggestions if doc_summary else [] }}"
+      docs_enabled: "{{ resolved_repo.docs_enabled }}"
+      repo: "{{ resolved_repo.path }}"
