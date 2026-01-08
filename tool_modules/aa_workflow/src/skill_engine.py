@@ -160,6 +160,92 @@ class SkillExecutor:
             elapsed = f"[{time.time() - self.start_time:.2f}s]" if self.start_time else ""
             self.log.append(f"🔍 {elapsed} {msg}")
 
+    async def _try_auto_fix(self, error_msg: str, matches: list) -> bool:
+        """Try to auto-fix based on known patterns.
+
+        Returns True if a fix was applied, False otherwise.
+        """
+        import asyncio
+
+        error_lower = error_msg.lower()
+
+        # Check for auth/network issues first (most common)
+        auth_patterns = ["unauthorized", "401", "403", "forbidden", "token expired"]
+        network_patterns = ["no route to host", "connection refused", "timeout"]
+
+        # Determine which fix to apply
+        fix_type = None
+        if any(p in error_lower for p in auth_patterns):
+            fix_type = "auth"
+        elif any(p in error_lower for p in network_patterns):
+            fix_type = "network"
+
+        # Also check matches from known issues
+        for match in matches:
+            fix = match.get("fix", "").lower()
+            if "vpn" in fix or "connect" in fix:
+                fix_type = "network"
+                break
+            if "login" in fix or "auth" in fix or "kube" in fix:
+                fix_type = "auth"
+                break
+
+        if not fix_type:
+            return False
+
+        self._debug(f"  → Detected {fix_type} issue, applying auto-fix")
+
+        try:
+            if fix_type == "network":
+                # Try VPN connect using asyncio subprocess
+                proc = await asyncio.create_subprocess_shell(
+                    "nmcli connection up 'Red Hat Global VPN' 2>/dev/null || true",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(proc.wait(), timeout=30)
+                self._debug(f"  → VPN connect result: {proc.returncode}")
+                await asyncio.sleep(2)  # Wait for VPN to establish
+                return True
+
+            elif fix_type == "auth":
+                # Try kube login - guess cluster from error
+                cluster = "stage"  # default
+                if "ephemeral" in error_lower or "bonfire" in error_lower:
+                    cluster = "ephemeral"
+                elif "konflux" in error_lower or "tekton" in error_lower:
+                    cluster = "konflux"
+                elif "prod" in error_lower:
+                    cluster = "prod"
+
+                # Call oc login using asyncio subprocess
+                kubeconfig = f"~/.kube/config.{cluster[0]}"
+                cluster_urls = {
+                    "stage": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
+                    "ephemeral": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
+                    "prod": "api.crcp01ue1.o9m8.p1.openshiftapps.com:6443",
+                    "konflux": "api.stone-prd-rh01.pg1f.p1.openshiftapps.com:6443",
+                }
+                url = cluster_urls.get(cluster, cluster_urls["stage"])
+
+                proc = await asyncio.create_subprocess_exec(
+                    "oc",
+                    "login",
+                    f"--kubeconfig={kubeconfig}",
+                    f"https://{url}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(proc.wait(), timeout=30)
+                self._debug(f"  → Kube login result: {proc.returncode}")
+                await asyncio.sleep(1)
+                return proc.returncode == 0
+
+        except Exception as e:
+            self._debug(f"  → Auto-fix failed: {e}")
+
+        return False
+
     def _check_error_patterns(self, error: str) -> str | None:
         """Check if error matches known patterns and return fix suggestion."""
         try:
@@ -726,7 +812,7 @@ class SkillExecutor:
             except Exception as e:
                 return {"success": False, "error": str(e)}
 
-        tools_file = TOOL_MODULES_DIR / f"aa-{module}" / "src" / "tools.py"
+        tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools.py"
 
         if not tools_file.exists():
             return {"success": False, "error": f"Module not found: {module}"}
@@ -762,13 +848,35 @@ class SkillExecutor:
             error_msg = str(e)
             self._debug(f"  → Error: {error_msg}")
 
-            # Check for known issues
+            # Check for known issues and attempt auto-fix
             matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
             known_text = _format_known_issues(matches)
 
+            if matches:
+                self._debug(f"  → Found {len(matches)} known issue(s), attempting auto-fix")
+
+                # Try auto-fix based on known patterns
+                fix_applied = await self._try_auto_fix(error_msg, matches)
+
+                if fix_applied:
+                    self._debug("  → Auto-fix applied, retrying tool")
+                    # Retry the tool once after fix
+                    try:
+                        result = await temp_server.call_tool(tool_name, args)
+                        duration = time.time() - start
+                        self._debug(f"  → Retry completed in {duration:.2f}s")
+
+                        if isinstance(result, tuple):
+                            result = result[0]
+                        if isinstance(result, list) and result:
+                            text = result[0].text if hasattr(result[0], "text") else str(result[0])
+                            return {"success": True, "result": text, "duration": duration}
+                        return {"success": True, "result": str(result), "duration": duration}
+                    except Exception as retry_e:
+                        error_msg = f"{error_msg}\n\n(Retry after auto-fix also failed: {retry_e})"
+
             if known_text:
                 error_msg = f"{error_msg}\n{known_text}"
-                self._debug(f"  → Found {len(matches)} known issue(s)")
 
             return {"success": False, "error": error_msg}
 
