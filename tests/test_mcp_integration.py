@@ -49,9 +49,9 @@ class TestToolModuleLoading:
         """Load a tool module using importlib."""
         import importlib.util
 
-        tools_file = TOOL_MODULES_DIR / f"aa-{module_name}" / "src" / "tools.py"
+        tools_file = TOOL_MODULES_DIR / f"aa_{module_name}" / "src" / "tools.py"
         if not tools_file.exists():
-            pytest.skip(f"Module aa-{module_name} not found")
+            pytest.skip(f"Module aa_{module_name} not found")
 
         # Add server to path for imports
         spec = importlib.util.spec_from_file_location(f"aa_{module_name}_tools", tools_file)

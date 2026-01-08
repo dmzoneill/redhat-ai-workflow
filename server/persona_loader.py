@@ -83,7 +83,7 @@ class PersonaLoader:
 
     async def _load_tool_module(self, module_name: str) -> list[str]:
         """Load a tool module and return list of tool names added."""
-        module_dir = TOOL_MODULES_DIR / f"aa-{module_name}"
+        module_dir = TOOL_MODULES_DIR / f"aa_{module_name}"
         tools_file = module_dir / "src" / "tools.py"
 
         if not tools_file.exists():
