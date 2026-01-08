@@ -484,7 +484,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             return [TextContent(type="text", text=f"❌ Invalid JSON args: {e}")]
 
         # Load and execute the tool module
-        tools_file = TOOL_MODULES_DIR / f"aa-{module}" / "src" / "tools.py"
+        tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools.py"
 
         if not tools_file.exists():
             return [TextContent(type="text", text=f"❌ Module not found: {module}")]
