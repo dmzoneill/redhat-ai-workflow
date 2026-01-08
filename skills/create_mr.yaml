@@ -82,11 +82,12 @@ steps:
       from scripts.common.config_loader import load_config, get_team_config
 
       # Use centralized repository resolution
+      # inputs is a dict in compute context, so use dict access
       resolved = resolve_repo(
-          repo_path=inputs.repo if inputs.repo and inputs.repo not in ("", ".") else None,
-          repo_name=inputs.repo_name if inputs.repo_name else None,
-          issue_key=inputs.issue_key,
-          target_branch=inputs.target_branch if inputs.target_branch else None,
+          repo_path=inputs.get("repo") if inputs.get("repo") and inputs.get("repo") not in ("", ".") else None,
+          repo_name=inputs.get("repo_name") if inputs.get("repo_name") else None,
+          issue_key=inputs.get("issue_key"),
+          target_branch=inputs.get("target_branch") if inputs.get("target_branch") else None,
       )
 
       # Get team config for mentions
@@ -144,7 +145,7 @@ steps:
       if branch in ["main", "master"]:
           raise ValueError("Cannot create MR from main/master. Create a feature branch first.")
 
-      issue_key = inputs.issue_key.upper()
+      issue_key = inputs.get("issue_key", "").upper()
 
       # Validate branch name format per .gitlab-ci.yml validate-mr job
       # Required pattern: ^aap-[0-9]{3,6} at start of branch name (case insensitive)
@@ -190,7 +191,7 @@ steps:
     compute: |
       from scripts.common.parsers import extract_jira_key
 
-      issue_key = inputs.issue_key.upper()
+      issue_key = inputs.get("issue_key", "").upper()
 
       commits = []
       bad_commits = []
@@ -546,7 +547,7 @@ steps:
       import textwrap
 
       jira_url = resolved_repo.get("jira_url", "https://issues.redhat.com")
-      issue_key = inputs.issue_key.upper()
+      issue_key = inputs.get("issue_key", "").upper()
       issue_text = str(issue) if issue else ""
       summary_match = issue_text[:100] if issue_text else "No description"
 
