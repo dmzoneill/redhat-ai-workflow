@@ -1,0 +1,23 @@
+name: test_error_recovery
+description: Test skill to demonstrate interactive error recovery
+version: "1.0"
+
+inputs:
+  - name: test_value
+    type: string
+    required: false
+    default: "hello"
+
+steps:
+  - name: test_dict_access_error
+    description: "Deliberately trigger dict attribute error"
+    compute: |
+      # This will fail and trigger recovery
+      value = inputs.test_value  # ❌ Should be inputs.get("test_value")
+
+      result = f"Got value: {value}"
+    output: test_result
+
+outputs:
+  - name: summary
+    value: "{{ test_result }}"
