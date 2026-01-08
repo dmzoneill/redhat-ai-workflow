@@ -325,23 +325,23 @@ async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
 
 | Module | Tools | Description |
 |--------|-------|-------------|
-| [workflow](docs/tool-modules/workflow.md) | 16 | Core workflow, agents, skills, memory |
-| [git](docs/tool-modules/git.md) | 30 | Git operations |
-| [gitlab](docs/tool-modules/gitlab.md) | 30 | MRs, pipelines, code review |
-| [jira](docs/tool-modules/jira.md) | 28 | Issue tracking |
-| [k8s](docs/tool-modules/k8s.md) | 28 | Kubernetes operations |
-| [bonfire](docs/tool-modules/bonfire.md) | 20 | Ephemeral environments |
-| [quay](docs/tool-modules/quay.md) | 8 | Container registry |
-| [prometheus](docs/tool-modules/prometheus.md) | 13 | Metrics queries |
-| [alertmanager](docs/tool-modules/alertmanager.md) | 7 | Alert management |
-| [kibana](docs/tool-modules/kibana.md) | 9 | Log search |
+| [workflow](docs/tool-modules/workflow.md) | 33 | Core: agents, skills, memory, vpn, kube_login |
+| [git](docs/tool-modules/git.md) | 31 | Git operations (14 basic + 17 extra) |
+| [gitlab](docs/tool-modules/gitlab.md) | 31 | MRs, pipelines, code review (16 basic + 15 extra) |
+| [jira](docs/tool-modules/jira.md) | 28 | Issue tracking (15 basic + 13 extra) |
+| [k8s](docs/tool-modules/k8s.md) | 28 | Kubernetes operations (14 basic + 14 extra) |
+| [bonfire](docs/tool-modules/bonfire.md) | 21 | Ephemeral environments (10 basic + 11 extra) |
+| [konflux](docs/tool-modules/konflux.md) | 36 | Build pipelines (18 basic + 18 extra) |
+| [prometheus](docs/tool-modules/prometheus.md) | 13 | Metrics queries (8 basic + 5 extra) |
+| [kibana](docs/tool-modules/kibana.md) | 10 | Log search |
+| [alertmanager](docs/tool-modules/alertmanager.md) | 9 | Alert management |
+| [quay](docs/tool-modules/quay.md) | 11 | Container registry |
+| [slack](docs/tool-modules/slack.md) | 16 | Slack integration |
 | [google_calendar](docs/tool-modules/google_calendar.md) | 6 | Calendar & meetings |
 | [gmail](docs/tool-modules/gmail.md) | 6 | Email processing |
-| [slack](docs/tool-modules/slack.md) | 10 | Slack integration |
-| [konflux](docs/tool-modules/konflux.md) | 35 | Build pipelines |
 | [appinterface](docs/tool-modules/appinterface.md) | 7 | GitOps config |
-| lint | 7 | Python/YAML linting |
-| dev_workflow | 9 | Development helpers |
+| [lint](docs/tool-modules/common.md) | 7 | Python/YAML linting |
+| [dev_workflow](docs/tool-modules/common.md) | 9 | Development helpers |
 
 > Plus **45+ shared parsers** in `scripts/common/parsers.py` and **config helpers** in `scripts/common/config_loader.py`
 
