@@ -15,7 +15,22 @@
         "api",
         "auth",
         "db"
-      ]
+      ],
+      "docs": {
+        "enabled": true,
+        "path": "docs/",
+        "readme": "README.md",
+        "api_docs": "docs/api/",
+        "architecture": "docs/architecture/",
+        "diagrams": ["docs/architecture/*.md", "docs/*.md"],
+        "auto_update": true,
+        "check_on_mr": true,
+        "patterns": {
+          "endpoints": "docs/api/endpoints.md",
+          "models": "docs/api/models.md",
+          "workflows": "docs/workflows/"
+        }
+      }
     },
     "my-frontend": {
       "path": "/home/YOUR_USER/src/my-frontend",
