@@ -7,12 +7,15 @@
 
 [![MCP](https://img.shields.io/badge/MCP-Protocol-6366f1?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDEgMC04LTMuNTktOC04czMuNTktOCA4LTggOCAzLjU5IDggOC0zLjU5IDgtOCA4eiIvPjxjaXJjbGUgZmlsbD0iI2ZmZiIgY3g9IjEyIiBjeT0iMTIiIHI9IjQiLz48L3N2Zz4=)](https://modelcontextprotocol.io/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Claude](https://img.shields.io/badge/Claude-Anthropic-FF6B6B?style=for-the-badge&logo=anthropic&logoColor=white)](https://anthropic.com/)
 [![Cursor](https://img.shields.io/badge/Cursor-IDE-000000?style=for-the-badge&logo=cursor&logoColor=white)](https://cursor.sh/)
 [![Tools](https://img.shields.io/badge/Tools-270-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#-tool-modules)
 [![Skills](https://img.shields.io/badge/Skills-53-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)](#-skills)
 [![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 **Transform Claude into your personal DevOps engineer, developer assistant, and incident responder.**
+
+*Works with both **Claude Code** and **Cursor IDE***
 
 [Getting Started](#-quick-start) •
 [Commands](docs/commands/README.md) •
@@ -40,39 +43,6 @@ AI Workflow is a **comprehensive MCP (Model Context Protocol) server** that give
 
 ---
 
-## 🔧 Commit Format (Centralized)
-
-All commits and MR titles follow a standardized format defined in `config.json`:
-
-```
-{issue_key} - {type}({scope}): {description}
-```
-
-| Type | Description |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `refactor` | Code refactoring |
-| `docs` | Documentation |
-| `test` | Tests |
-| `chore` | Maintenance |
-| `style` | Formatting |
-| `perf` | Performance |
-
-**Examples:**
-- `AAP-12345 - feat: add user authentication`
-- `AAP-12345 - fix(api): handle null response`
-- `AAP-12345 - chore(release): release abc123 to production`
-
-The `git_commit` tool automatically formats messages using this pattern:
-
-```python
-git_commit(repo=".", message="add user authentication", issue_key="AAP-12345", commit_type="feat")
-# → AAP-12345 - feat: add user authentication
-```
-
----
-
 ## 🚀 Quick Start
 
 ### 1️⃣ Clone & Install
@@ -93,9 +63,12 @@ pip install -e .
 
 > **Don't have UV?** Install it: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
-### 2️⃣ Add to Your Project
+### 2️⃣ Configure Your IDE
 
-Create `.cursor/mcp.json` in your project:
+<details>
+<summary><strong>🔷 Claude Code (claude.ai/code)</strong></summary>
+
+Create `.mcp.json` in your **project root**:
 
 ```json
 {
@@ -111,9 +84,36 @@ Create `.cursor/mcp.json` in your project:
 }
 ```
 
+Then restart Claude Code or run `/mcp` to reload.
+
+</details>
+
+<details>
+<summary><strong>⬛ Cursor IDE</strong></summary>
+
+Create `.cursor/mcp.json` in your **project directory**:
+
+```json
+{
+  "mcpServers": {
+    "aa-workflow": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ~/src/ai-workflow && source .venv/bin/activate && python3 -m server"
+      ]
+    }
+  }
+}
+```
+
+Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
+
+</details>
+
 > **Default Persona:** The server starts with the `developer` persona loaded by default (~106 tools). Use `persona_load("devops")` to switch.
 
-### 3️⃣ Restart Cursor & Go!
+### 3️⃣ Restart & Go!
 
 ```
 You: Load the developer persona
@@ -287,7 +287,7 @@ async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
 
 ---
 
-## 🎯 Cursor Commands
+## 🎯 Slash Commands
 
 64 slash commands for quick access. See [full commands reference](docs/commands/README.md).
 
@@ -438,7 +438,8 @@ ai-workflow/
 │       ├── config_loader.py # Config helpers (commit format, repos)
 │       └── parsers.py     # 44 shared parser functions
 ├── config.json          # Configuration (commit format, repos, Slack, etc.)
-└── .cursor/commands/    # 63 Cursor slash commands
+├── .cursor/commands/    # 64 slash commands (Cursor)
+└── .claude/commands/    # 64 slash commands (Claude Code)
 ```
 
 ---
@@ -447,7 +448,7 @@ ai-workflow/
 
 | Document | Description |
 |----------|-------------|
-| [Commands Reference](docs/commands/README.md) | 63 Cursor slash commands |
+| [Commands Reference](docs/commands/README.md) | 64 slash commands (Claude/Cursor) |
 | [Skills Reference](docs/skills/README.md) | All 53 available skills |
 | [Personas Reference](docs/personas/README.md) | 5 tool configuration profiles |
 | [Tool Modules Reference](docs/tool-modules/README.md) | 17 tool plugins with ~270 tools |
