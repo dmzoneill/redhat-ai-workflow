@@ -6,15 +6,16 @@ description: Coding, PRs, and code review
 persona: personas/developer.md
 
 # Tool modules to load (from tool_modules/aa_*)
-# Target: ~80 tools to stay well under Cursor's 128 limit
+# Using split modules to stay under 100 tools
 tools:
   - workflow        # 33 tools - Core (memory, persona, session, skill, infra, meta)
-  - git             # 31 tools - Git operations
-  - gitlab          # 31 tools - MRs, CI/CD
+  - git_basic       # 14 tools - Essential git (status, log, diff, add, commit, push, pull)
+  - gitlab_basic    # 16 tools - MRs, CI/CD basics
+  - jira_basic      # 15 tools - Issue viewing, search, status updates, comments
 
-# Total: ~95 tools
-# Note: jira, lint, dev_workflow available via tool_exec() or persona switch
-# For Jira-heavy work, use: tool_exec("jira_issue_view", '{"issue_key": "AAP-12345"}')
+# Total: ~78 tools ✅
+# Note: git_extra, gitlab_extra, jira_extra available via tool_exec() or persona switch
+# For advanced git: tool_exec("git_rebase", '{"repo": "backend", "onto": "origin/main"}')
 
 skills:
   # Daily workflow

@@ -6,16 +6,17 @@ description: Production incident response and recovery
 persona: personas/incident.md
 
 # Tool modules to load (from tool_modules/aa_*)
-# Target: ~80 tools to stay well under Cursor's 128 limit
+# Using split modules to stay under 100 tools
 tools:
-  - workflow      # 33 tools - Skills, agents, memory (REQUIRED)
-  - k8s           # 28 tools - Kubernetes operations
-  - prometheus    # 15 tools - Metrics and alerts
-  - kibana        # 10 tools - Log search
+  - workflow          # 33 tools - Skills, agents, memory (REQUIRED)
+  - k8s_basic         # 14 tools - Essential k8s (pods, logs, deployments, events)
+  - prometheus_basic  # 8 tools - Metrics, alerts, health checks
+  - kibana            # 10 tools - Log search
+  - jira_basic        # 15 tools - Issue viewing, search, status updates, comments
+  - alertmanager      # 9 tools - Silence management
 
-# Total: ~86 tools
-# Note: alertmanager, jira available via tool_exec() if needed
-# For silencing: tool_exec("alertmanager_create_silence", '{"...": "..."}')
+# Total: ~89 tools ✅
+# Note: k8s_extra, prometheus_extra available via tool_exec() if needed
 
 skills:
   # Investigation

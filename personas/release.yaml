@@ -6,15 +6,17 @@ description: Release management and deployments
 persona: personas/release.md
 
 # Tool modules to load (from tool_modules/aa_*)
-# Target: ~80 tools to stay well under Cursor's 128 limit
+# Using split modules to stay under 100 tools
 tools:
-  - workflow      # 33 tools - Skills, agents, memory (REQUIRED)
-  - konflux       # 36 tools - Builds, pipelines
-  - quay          # 11 tools - Container images
+  - workflow        # 33 tools - Skills, agents, memory (REQUIRED)
+  - konflux_basic   # 18 tools - Pipelines, components, snapshots, status
+  - quay            # 11 tools - Container images
+  - jira_basic      # 15 tools - Issue viewing, search, status updates, comments
+  - git_basic       # 14 tools - Essential git for app-interface changes
 
-# Total: ~80 tools
-# Note: appinterface, git available via tool_exec() if needed
-# For app-interface: tool_exec("appinterface_get_saas", '{"...": "..."}')
+# Total: ~91 tools ✅
+# Note: konflux_extra, appinterface available via tool_exec() if needed
+# For releases: tool_exec("konflux_list_releases", '{"namespace": "aap-aa-tenant"}')
 
 skills:
   # Release workflows
