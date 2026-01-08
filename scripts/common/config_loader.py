@@ -12,7 +12,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 # Add server module to path for utils import
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -245,7 +245,7 @@ def get_gitlab_host() -> str:
     if env_host:
         return env_host
     config = load_config()
-    return config.get("gitlab", {}).get("host", "gitlab.cee.redhat.com")
+    return cast(str, config.get("gitlab", {}).get("host", "gitlab.cee.redhat.com"))
 
 
 def get_gitlab_url() -> str:

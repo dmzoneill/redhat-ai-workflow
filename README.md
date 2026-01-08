@@ -422,3 +422,20 @@ MIT License - See [LICENSE](LICENSE) for details.
 <div align="center">
   <sub>Built with ❤️ for developers who want AI that actually does things</sub>
 </div>
+
+## Type Checking
+
+Due to the monorepo structure with multiple `aa-*` modules containing hyphens (invalid Python package names), mypy cannot be run from the project root with `mypy .`.
+
+Instead, use the provided script to check all modules or specific modules:
+
+```bash
+# Check all modules
+./scripts/check-types.sh
+
+# Check specific module
+./scripts/check-types.sh aa-git
+
+# Or check a module directly
+cd tool_modules/aa-git && mypy --package src --explicit-package-bases
+```

@@ -10,6 +10,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ def load_config(reload: bool = False) -> dict:
     try:
         if config_path.exists():
             with open(config_path) as f:
-                _config_cache = json.load(f)
+                _config_cache = cast(dict, json.load(f))
                 return _config_cache
     except json.JSONDecodeError as e:
         logger.warning(f"Invalid JSON in config.json: {e}")
@@ -187,7 +188,7 @@ def get_section_config(section: str, default: dict | None = None) -> dict:
         Config section dictionary
     """
     config = load_config()
-    return config.get(section, default or {})
+    return cast(dict, config.get(section, default or {}))
 
 
 # ==================== Kubeconfig Handling ====================
@@ -245,14 +246,14 @@ def get_kubeconfig(environment: str, namespace: str = "") -> str:
     if env_lower in namespaces:
         kubeconfig = namespaces[env_lower].get("kubeconfig")
         if kubeconfig:
-            return os.path.expanduser(kubeconfig)
+            return os.path.expanduser(cast(str, kubeconfig))
 
     # Check kubernetes.environments section
     k8s_envs = config.get("kubernetes", {}).get("environments", {})
     if env_lower in k8s_envs:
         kubeconfig = k8s_envs[env_lower].get("kubeconfig")
         if kubeconfig:
-            return os.path.expanduser(kubeconfig)
+            return os.path.expanduser(cast(str, kubeconfig))
 
     # Fall back to standard mapping using kube_base from config
     kube_base = _get_kube_base()
@@ -386,11 +387,11 @@ def get_env_config(environment: str, service: str) -> dict:
     if env_key == "prod":
         env_key = "production"
 
-    env_config = environments.get(env_key, {})
+    env_config = cast(dict, environments.get(env_key, {}))
 
     # Ensure kubeconfig is resolved
     if "kubeconfig" in env_config:
-        env_config["kubeconfig"] = os.path.expanduser(env_config["kubeconfig"])
+        env_config["kubeconfig"] = os.path.expanduser(cast(str, env_config["kubeconfig"]))
     else:
         env_config["kubeconfig"] = get_kubeconfig(environment)
 
@@ -429,7 +430,7 @@ def resolve_repo_path(repo: str) -> str:
     if repo in repositories:
         path = repositories[repo].get("path")
         if path:
-            expanded_path = os.path.expanduser(path)
+            expanded_path = os.path.expanduser(cast(str, path))
             if os.path.isdir(expanded_path):
                 return expanded_path
 
@@ -466,12 +467,12 @@ def get_repo_config(repo: str) -> dict:
 
     # Try exact match
     if repo in repositories:
-        return repositories[repo]
+        return cast(dict, repositories[repo])
 
     # Try matching by path
     for _name, repo_config in repositories.items():
         if repo_config.get("path", "").endswith(repo):
-            return repo_config
+            return cast(dict, repo_config)
 
     return {}
 
@@ -871,7 +872,7 @@ def get_user_config() -> dict:
 def get_username() -> str:
     """Get the current user's username."""
     user_config = get_user_config()
-    return user_config.get("username", os.getenv("USER", "unknown"))
+    return cast(str, user_config.get("username", os.getenv("USER", "unknown")))
 
 
 # ==================== Service URL Helpers ====================
@@ -892,7 +893,7 @@ def get_gitlab_host() -> str:
     if env_host:
         return env_host
     config = load_config()
-    return config.get("gitlab", {}).get("host", "gitlab.cee.redhat.com")
+    return cast(str, config.get("gitlab", {}).get("host", "gitlab.cee.redhat.com"))
 
 
 def get_service_url(service: str, environment: str) -> str:
@@ -909,7 +910,7 @@ def get_service_url(service: str, environment: str) -> str:
         ValueError: If URL not configured
     """
     env_config = get_env_config(environment, service)
-    url = env_config.get("url", "")
+    url = cast(str, env_config.get("url", ""))
 
     if not url:
         # Try environment variable fallback

@@ -5,6 +5,7 @@ Authentication: JIRA_JPAT environment variable.
 """
 
 import logging
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 
@@ -19,7 +20,7 @@ from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds t
 def _get_jira_url() -> str:
     """Get Jira URL from config."""
     config = load_config()
-    return config.get("jira", {}).get("url", "https://issues.redhat.com")
+    return cast(dict, config.get("jira", {})).get("url", "https://issues.redhat.com")
 
 
 logger = logging.getLogger(__name__)

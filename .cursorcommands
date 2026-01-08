@@ -1,0 +1,138 @@
+# Cursor Commands for AI Workflow
+
+## Multi-Agent Code Review
+
+### review-mr-multiagent
+Run comprehensive multi-agent code review with 6 specialized agents (hybrid Claude + Gemini)
+```
+skill_run("review_pr_multiagent", '{"mr_id": <MR_NUMBER>, "post_combined": true}')
+```
+
+**Agents:**
+- Architecture (Claude): Design patterns, SOLID principles, code organization
+- Security (Gemini): Vulnerabilities, auth issues, OWASP Top 10
+- Performance (Claude): Algorithm efficiency, database queries, scalability
+- Testing (Gemini): Test coverage, edge cases, test quality
+- Documentation (Claude): Comments, API docs, README updates
+- Style (Gemini): Naming conventions, formatting, consistency
+
+**Performance:** ~1.8 minutes (parallel execution, 4.2x speedup)
+
+**Default Behavior:**
+- `post_combined: false` - Preview without posting
+- `debug: false` - Concise output
+- All 6 agents enabled
+
+**Options:**
+```bash
+# Post to MR
+{"mr_id": 1483, "post_combined": true}
+
+# Preview only (default)
+{"mr_id": 1483}
+
+# Debug mode (full output)
+{"mr_id": 1483, "debug": true}
+
+# Selective agents
+{"mr_id": 1483, "agents": "security,testing", "post_combined": true}
+```
+
+**Output:** Synthesized review from single engineer perspective (no AI/agent mentions, no emojis)
+
+---
+
+## Code Review Commands
+
+### review
+Single-agent code review (faster, simpler)
+```
+skill_run("review_pr", '{"mr_id": <MR_NUMBER>}')
+```
+
+### review-all-open
+Batch review all open MRs
+```
+skill_run("review_all_prs", '{}')
+```
+
+---
+
+## Workflow Commands
+
+### coffee
+Morning briefing - calendar, email, PRs, alerts
+```
+skill_run("coffee", '{}')
+```
+
+### start-work
+Begin working on a Jira issue
+```
+skill_run("start_work", '{"issue_key": "AAP-XXXXX"}')
+```
+
+### create-mr
+Create merge request with validation
+```
+skill_run("create_mr", '{"issue_key": "AAP-XXXXX"}')
+```
+
+### check-my-prs
+Check your MRs for feedback
+```
+skill_run("check_my_prs", '{}')
+```
+
+---
+
+## Deployment Commands
+
+### deploy
+Deploy MR to ephemeral for testing
+```
+skill_run("test_mr_ephemeral", '{"mr_id": <MR_NUMBER>}')
+```
+
+### debug-prod
+Investigate production issues
+```
+skill_run("debug_prod", '{"namespace": "stage"}')
+```
+
+### investigate-alert
+Systematic alert investigation
+```
+skill_run("investigate_alert", '{"environment": "stage"}')
+```
+
+---
+
+## Memory Commands
+
+### memory
+View current work state
+```
+skill_run("memory_view", '{}')
+```
+
+### beer
+End of day wrap-up and tomorrow prep
+```
+skill_run("beer", '{}')
+```
+
+---
+
+## Quick Reference
+
+**Multi-Agent Review Use Cases:**
+- Full review: All 6 agents (~1.8 min)
+- Security audit: `"agents": "security,architecture"` (~1 min)
+- Hotfix check: `"agents": "security,testing"` (~45s)
+- Docs review: `"agents": "documentation,style"` (~30s)
+
+**Parallel Execution:**
+- All agents run simultaneously
+- Total time = slowest agent (~60s) + synthesis (~60s)
+- 76% faster than sequential execution

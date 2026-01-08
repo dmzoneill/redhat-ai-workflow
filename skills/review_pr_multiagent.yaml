@@ -44,7 +44,7 @@ inputs:
 - name: debug
   type: boolean
   required: false
-  default: true
+  default: false
   description: Debug mode - shows full review output without posting
 - name: model
   type: string
@@ -87,69 +87,82 @@ steps:
     }\n}\n\nresult = {\"enabled\": enabled, \"configs\": {k: configs[k] for k in enabled\
     \ if k in configs}}\n"
   output: agents_config
-- name: run_architecture
-  description: Architecture Agent (Claude)
-  condition: '''architecture'' in agents_config[''enabled'']'
-  compute: "import subprocess\n\ncfg = agents_config[\"configs\"][\"architecture\"\
-    ]\n\nprompt_text = f\"\"\"Review this MR for architecture issues.\n\nMR: {mr_details}\n\
-    \nDiff (first 3000 chars):\n{str(mr_diff)[:3000]}\n\nProvide findings as:\n[CRITICAL]\
-    \ issue\n[WARNING] issue  \n[SUGGESTION] issue\n\"\"\"\n\ntry:\n    proc = subprocess.run(\n\
-    \        [cfg[\"cli\"], \"--model\", inputs.get(\"model\", \"sonnet\")],\n   \
-    \     input=prompt_text,\n        capture_output=True,\n        text=True,\n \
-    \       timeout=300\n    )\n    \n    result = {\n        \"agent\": \"architecture\"\
-    ,\n        \"cli\": cfg[\"cli\"],\n        \"review\": proc.stdout,\n        \"\
-    stderr\": proc.stderr,\n        \"returncode\": proc.returncode\n    }\nexcept\
-    \ Exception as e:\n    result = {\"agent\": \"architecture\", \"error\": str(e)}\n"
-  output: arch_review
-  on_error: continue
-- name: run_security
-  description: Security Agent (Gemini)
-  condition: '''security'' in agents_config[''enabled'']'
-  compute: "import subprocess\n\ncfg = agents_config[\"configs\"][\"security\"]\n\n\
-    prompt_text = f\"\"\"Review this MR for security issues.\n\nMR: {mr_details}\n\
-    \nDiff (first 3000 chars):\n{str(mr_diff)[:3000]}\n\nProvide findings as:\n[CRITICAL]\
-    \ issue\n[WARNING] issue\n[SUGGESTION] issue\n\"\"\"\n\ntry:\n    proc = subprocess.run(\n\
-    \        [cfg[\"cli\"], \"--model\", inputs.get(\"model\", \"sonnet\")],\n   \
-    \     input=prompt_text,\n        capture_output=True,\n        text=True,\n \
-    \       timeout=300\n    )\n    \n    result = {\n        \"agent\": \"security\"\
-    ,\n        \"cli\": cfg[\"cli\"],\n        \"review\": proc.stdout,\n        \"\
-    stderr\": proc.stderr,\n        \"returncode\": proc.returncode\n    }\nexcept\
-    \ Exception as e:\n    result = {\"agent\": \"security\", \"error\": str(e)}\n"
-  output: sec_review
-  on_error: continue
-- name: coordinate
-  description: Combine reviews
-  compute: "reviews = []\nfor agent in agents_config[\"enabled\"]:\n    if agent ==\
-    \ \"architecture\" and \"arch_review\" in dir():\n        reviews.append(arch_review)\n\
-    \    elif agent == \"security\" and \"sec_review\" in dir():\n        reviews.append(sec_review)\n\
-    \n# In debug mode, show full reviews; otherwise truncate\ndebug_mode = inputs.get(\"\
-    debug\", True)\nmax_len = 10000 if debug_mode else 500\n\ncombined = \"## 🤖\
-    \ Multi-Agent Code Review\\n\\n\"\nfor r in reviews:\n    if r and not r.get(\"\
-    error\"):\n        agent_name = r.get('agent', 'unknown')\n        cli = r.get('cli',\
-    \ 'unknown')\n        agent_cfg = agents_config['configs'].get(agent_name, {})\n\
-    \        icon = agent_cfg.get('icon', '')\n        name = agent_cfg.get('name',\
-    \ agent_name)\n        \n        combined += f\"### {icon} {name} ({cli})\\n\"\
-    \n        review_text = r.get('review', '')\n        if review_text:\n       \
-    \     combined += review_text[:max_len] + \"\\n\\n\"\n        else:\n        \
-    \    combined += \"*No output*\\n\\n\"\n\nresult = {\"combined_review\": combined,\
-    \ \"reviews\": reviews}\n"
-  output: coordinated
+- name: run_all_agents_parallel
+  description: Run all agents in parallel
+  compute: "import subprocess\nimport threading\nfrom queue import Queue\n\ndef run_agent(agent_name,\
+    \ config, mr_details, mr_diff, model):\n    \"\"\"Run a single agent review\"\
+    \"\"\n    prompts = {\n        \"architecture\": \"Review this MR for architecture\
+    \ issues.\",\n        \"security\": \"Review this MR for security issues.\",\n\
+    \        \"performance\": \"Review this MR for performance issues.\",\n      \
+    \  \"testing\": \"Review this MR for testing issues.\",\n        \"documentation\"\
+    : \"Review this MR for documentation issues.\",\n        \"style\": \"Review this\
+    \ MR for code style issues.\"\n    }\n    \n    prompt_text = f\"\"\"{prompts.get(agent_name,\
+    \ 'Review this MR.')}\n\nMR: {mr_details}\n\nDiff (first 3000 chars):\n{str(mr_diff)[:3000]}\n\
+    \nProvide findings as:\n[CRITICAL] issue\n[WARNING] issue\n[SUGGESTION] issue\n\
+    \"\"\"\n    \n    try:\n        proc = subprocess.run(\n            [config[\"\
+    cli\"], \"--model\", model],\n            input=prompt_text,\n            capture_output=True,\n\
+    \            text=True,\n            timeout=300\n        )\n        return {\n\
+    \            \"agent\": agent_name,\n            \"cli\": config[\"cli\"],\n \
+    \           \"review\": proc.stdout,\n            \"stderr\": proc.stderr,\n  \
+    \          \"returncode\": proc.returncode\n        }\n    except Exception as\
+    \ e:\n        return {\"agent\": agent_name, \"error\": str(e)}\n\n# Thread worker\n\
+    def worker(queue, results, agent_name, config, mr_details, mr_diff, model):\n\
+    \    result = run_agent(agent_name, config, mr_details, mr_diff, model)\n   \
+    \ results[agent_name] = result\n\n# Start all agents in parallel\nresults = {}\n\
+    threads = []\n\nfor agent_name in agents_config[\"enabled\"]:\n    if agent_name\
+    \ in agents_config[\"configs\"]:\n        config = agents_config[\"configs\"\
+    ][agent_name]\n        thread = threading.Thread(\n            target=worker,\n\
+    \            args=(None, results, agent_name, config, mr_details, mr_diff, inputs.get(\"\
+    model\", \"sonnet\"))\n        )\n        thread.start()\n        threads.append(thread)\n\
+    \n# Wait for all threads to complete\nfor thread in threads:\n    thread.join()\n\
+    \n# Collect results in order\nreviews = []\nfor agent_name in agents_config[\"\
+    enabled\"]:\n    if agent_name in results:\n        reviews.append(results[agent_name])\n\
+    \nresult = reviews\n"
+  output: all_reviews
+- name: synthesize_review
+  description: Synthesize final personalized review
+  compute: "import subprocess\n\n# Collect all review content\nreview_content = \"\
+    \"\nfor r in all_reviews:\n    if r and not r.get(\"error\") and r.get(\"review\"\
+    ):\n        review_content += f\"\\n=== {r.get('agent', 'unknown').upper()} REVIEW\
+    \ ===\\n{r.get('review', '')}\\n\"\n\nprompt_text = f\"\"\"You are reviewing this\
+    \ MR as a senior engineer. Synthesize the following specialized reviews into a\
+    \ single, cohesive code review that sounds like it's coming from one person (not\
+    \ mentioning multiple agents, AI, Claude, or Gemini).\n\nMR Details:\n{mr_details}\n\
+    \nSpecialized Analysis:\n{review_content}\n\nRequirements:\n1. Write as a single\
+    \ engineer (use \"I\" not \"we\")\n2. NO emojis or icons\n3. NO mention of AI,\
+    \ agents, Claude, Gemini, or multi-agent systems\n4. Use markdown headings and\
+    \ code blocks, but NO images\n5. Sound professional and personable\n6. Only include\
+    \ substantive findings - skip empty/unhelpful sections\n7. Organize by: Critical\
+    \ Issues, Warnings, Suggestions\n8. Keep it concise but thorough\n\nProvide a\
+    \ natural-sounding code review.\n\"\"\"\n\ntry:\n    proc = subprocess.run(\n \
+    \       [\"claude\", \"--model\", inputs.get(\"model\", \"sonnet\")],\n       \
+    \ input=prompt_text,\n        capture_output=True,\n        text=True,\n      \
+    \  timeout=300\n    )\n    \n    result = proc.stdout\nexcept Exception as e:\n\
+    \    result = f\"Error synthesizing review: {str(e)}\"\n"
+  output: final_review
 - name: build_summary
   description: Build summary
-  compute: "lines = [\"# Multi-Agent Review\", \"\"]\nfor r in coordinated.get(\"\
-    reviews\", []):\n    agent = r.get(\"agent\", \"unknown\")\n    cli = r.get(\"\
-    cli\", \"unknown\")\n    error = r.get(\"error\")\n    if error:\n        lines.append(f\"\
-    - {agent} ({cli}): ERROR - {error}\")\n    else:\n        lines.append(f\"- {agent}\
-    \ ({cli}): OK\")\n\nresult = \"\\n\".join(lines)\n"
+  compute: "lines = [\"# Multi-Agent Review\", \"\"]\nfor r in all_reviews:\n    agent\
+    \ = r.get(\"agent\", \"unknown\")\n    cli = r.get(\"cli\", \"unknown\")\n   \
+    \ error = r.get(\"error\")\n    if error:\n        lines.append(f\"- {agent} ({cli}):\
+    \ ERROR - {error}\")\n    else:\n        lines.append(f\"- {agent} ({cli}): OK\"\
+    )\n\nresult = \"\\n\".join(lines)\n"
   output: summary
 - name: build_review_output
   description: Build review output
-  compute: "result = coordinated.get(\"combined_review\", \"No review generated\"\
-    )\n"
+  compute: "result = final_review\n"
   output: review
 - name: build_stats_output
   description: Build stats output
-  compute: "result = {\"agent_count\": len(coordinated.get(\"reviews\", [])), \"\
-    successful\": len([r for r in coordinated.get(\"reviews\", []) if not r.get(\"\
-    error\")])}\n"
+  compute: "result = {\"agent_count\": len(all_reviews), \"successful\": len([r for\
+    \ r in all_reviews if not r.get(\"error\")])}\n"
   output: stats
+- name: post_review
+  description: Post review to MR
+  condition: inputs.get("post_combined", False)
+  tool: gitlab_mr_comment
+  args:
+    project: automation-analytics/automation-analytics-backend
+    mr_id: '{{ inputs.mr_id }}'
+    message: '{{ review }}'
+  on_error: continue

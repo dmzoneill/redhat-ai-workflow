@@ -22,6 +22,7 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 
@@ -68,7 +69,7 @@ def load_agent_config(agent_name: str) -> list[str] | None:
 
         with open(agent_file) as f:
             config = yaml.safe_load(f)
-        return config.get("tools", [])
+        return cast(list[str], config.get("tools", []))
     except Exception:
         return None
 

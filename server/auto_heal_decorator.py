@@ -100,9 +100,16 @@ def _guess_cluster(tool_name: str, output: str) -> str:
 
 
 async def _run_kube_login(cluster: str) -> bool:
-    """Run kube_login fix. Returns True if successful."""
+    """Run kube_login fix using kube-clean and kube commands.
+
+    This matches the behavior of the kube_login MCP tool which:
+    1. Runs kube-clean to remove stale credentials
+    2. Runs kube to refresh the kubeconfig via SSO
+
+    Returns True if successful.
+    """
     try:
-        from server.utils import run_cmd_shell
+        from server.utils import run_cmd_full, run_cmd_shell
 
         # Map cluster names to short codes
         cluster_map = {
@@ -119,9 +126,21 @@ async def _run_kube_login(cluster: str) -> bool:
         kubeconfig_suffix = {"s": ".s", "p": ".p", "e": ".e", "k": ".k"}
         kubeconfig = os.path.expanduser(f"~/.kube/config{kubeconfig_suffix.get(short, '.s')}")
 
-        # Run oc login
+        # Step 1: Check if existing credentials are stale
+        if os.path.exists(kubeconfig):
+            test_success, _, _ = await run_cmd_full(
+                ["oc", "--kubeconfig", kubeconfig, "whoami"],
+                timeout=10,
+            )
+            if not test_success:
+                # Credentials are stale, clean them up first
+                logger.info(f"Auto-heal: running kube-clean {short}")
+                await run_cmd_shell(["kube-clean", short], timeout=30)
+
+        # Step 2: Run kube command to refresh credentials (opens browser for SSO)
+        logger.info(f"Auto-heal: running kube {short}")
         success, stdout, stderr = await run_cmd_shell(
-            ["oc", "login", f"--kubeconfig={kubeconfig}"],
+            ["kube", short],
             timeout=120,
         )
 
@@ -130,11 +149,26 @@ async def _run_kube_login(cluster: str) -> bool:
             logger.info(f"Auto-heal: kube_login({cluster}) successful")
             return True
 
+        # Fallback: try oc login directly if kube command not found
+        if "command not found" in output.lower() or "not found" in output.lower():
+            logger.info("Auto-heal: kube command not found, trying oc login")
+            success, stdout, stderr = await run_cmd_shell(
+                ["oc", "login", f"--kubeconfig={kubeconfig}"],
+                timeout=120,
+            )
+            output = stdout + stderr
+            if success or "logged in" in output.lower():
+                logger.info(f"Auto-heal: kube_login({cluster}) via oc login successful")
+                return True
+
         logger.warning(f"Auto-heal: kube_login({cluster}) failed: {output[:200]}")
         return False
 
     except ImportError as e:
         logger.warning(f"Auto-heal: kube_login missing dependency: {e}")
+        return False
+    except FileNotFoundError as e:
+        logger.warning(f"Auto-heal: kube_login({cluster}) command not found: {e}")
         return False
     except OSError as e:
         logger.warning(f"Auto-heal: kube_login({cluster}) OS error: {e}")
@@ -290,9 +324,9 @@ def auto_heal(
             return last_result
 
         # Mark the function as auto-heal enabled for introspection
-        wrapper._auto_heal_enabled = True
-        wrapper._auto_heal_cluster = cluster
-        wrapper._auto_heal_max_retries = max_retries
+        setattr(wrapper, "_auto_heal_enabled", True)  # noqa: B010
+        setattr(wrapper, "_auto_heal_cluster", cluster)  # noqa: B010
+        setattr(wrapper, "_auto_heal_max_retries", max_retries)  # noqa: B010
 
         return wrapper
 

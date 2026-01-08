@@ -98,6 +98,70 @@ class SlackSession:
             base_backoff=base_backoff,
         )
 
+    @classmethod
+    def from_config(cls) -> "SlackSession":
+        """Create session from config.json (preferred) or fall back to environment variables."""
+        import json
+        from pathlib import Path
+
+        # Try to load from config.json first
+        config_paths = [
+            Path(__file__).parent.parent.parent.parent.parent
+            / "config.json",  # tool_modules/aa-slack/src -> project root
+            Path.cwd() / "config.json",
+            Path.home() / "src" / "redhat-ai-workflow" / "config.json",
+        ]
+
+        xoxc_token = ""
+        d_cookie = ""
+        workspace_id = ""
+
+        for config_path in config_paths:
+            if config_path.exists():
+                try:
+                    with open(config_path) as f:
+                        config = json.load(f)
+                    slack_auth = config.get("slack", {}).get("auth", {})
+                    xoxc_token = slack_auth.get("xoxc_token", "")
+                    d_cookie = slack_auth.get("d_cookie", "")
+                    workspace_id = slack_auth.get("workspace_id", "")
+                    if xoxc_token and d_cookie:
+                        logger.info(f"Loaded Slack credentials from {config_path}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Failed to load config from {config_path}: {e}")
+
+        # Fall back to environment variables if config.json doesn't have tokens
+        if not xoxc_token:
+            xoxc_token = os.getenv("SLACK_XOXC_TOKEN", "")
+        if not d_cookie:
+            d_cookie = os.getenv("SLACK_D_COOKIE", "")
+        if not workspace_id:
+            workspace_id = os.getenv("SLACK_WORKSPACE_ID", "")
+
+        if not xoxc_token:
+            raise ValueError(
+                "Slack xoxc_token not found. Run 'python scripts/get_slack_creds.py' to update config.json, "
+                "or set SLACK_XOXC_TOKEN environment variable."
+            )
+
+        if not d_cookie:
+            raise ValueError(
+                "Slack d_cookie not found. Run 'python scripts/get_slack_creds.py' to update config.json, "
+                "or set SLACK_D_COOKIE environment variable."
+            )
+
+        max_retries = int(os.getenv("SLACK_MAX_RETRIES", "5"))
+        base_backoff = float(os.getenv("SLACK_BASE_BACKOFF", "1.0"))
+
+        return cls(
+            xoxc_token=xoxc_token,
+            d_cookie=d_cookie,
+            workspace_id=workspace_id,
+            max_retries=max_retries,
+            base_backoff=base_backoff,
+        )
+
     async def get_client(self) -> httpx.AsyncClient:
         """Get or create the HTTP client."""
         if self._client is None or self._client.is_closed:

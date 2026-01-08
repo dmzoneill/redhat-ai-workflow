@@ -22,6 +22,8 @@ from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
+from typing import cast
+
 from server.utils import load_config
 
 # Setup project path for server imports
@@ -39,7 +41,7 @@ TOOL_MODULES_DIR = _TOOLS_DIR.parent.parent  # tool_modules/
 def _get_slack_config() -> dict:
     """Get Slack configuration from config.json."""
     config = load_config()
-    return config.get("slack", {})
+    return cast(dict, config.get("slack", {}))
 
 
 async def _send_via_dbus(channel_id: str, text: str, thread_ts: str = "") -> dict | None:

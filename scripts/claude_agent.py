@@ -22,7 +22,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 # Add parent to path for config imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -61,7 +61,7 @@ except ImportError:
 try:
     PROJECT_ROOT = Path(__file__).parent.parent
     sys.path.insert(0, str(PROJECT_ROOT))
-    from server.debuggable import _check_known_issues_sync, _format_known_issues
+    from server.debuggable import _check_known_issues_sync, _format_known_issues  # type: ignore[attr-defined]
 
     KNOWN_ISSUES_AVAILABLE = True
 except ImportError:
@@ -1379,7 +1379,7 @@ Please verify the image exists before proceeding."""
 
             # Execute and return result
             result = await executor.execute()
-            return result
+            return cast(str, result)
 
         except Exception as e:
             logger.error(f"Skill execution error for {skill_name}: {e}", exc_info=True)

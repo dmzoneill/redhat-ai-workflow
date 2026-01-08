@@ -99,15 +99,16 @@ def debuggable(func: Callable) -> Callable:
             ]
 
     # Store source info on the wrapper for later retrieval
-    wrapper._debug_info = {
+    debug_info = {
         "source_file": source_file,
         "start_line": start_line,
         "end_line": end_line,
         "func_name": func.__name__,
     }
+    setattr(wrapper, "_debug_info", debug_info)  # noqa: B010
 
     # Register in global registry
-    TOOL_REGISTRY[func.__name__] = wrapper._debug_info
+    TOOL_REGISTRY[func.__name__] = debug_info
 
     return wrapper
 

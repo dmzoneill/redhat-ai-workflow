@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import subprocess
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 def _get_quay_config() -> dict:
     """Get Quay configuration from config.json."""
     config = load_config()
-    return config.get("quay", {})
+    return cast(dict, config.get("quay", {}))
 
 
 _quay_cfg = _get_quay_config()

@@ -5,6 +5,7 @@ Authentication: Uses ~/.kube/config.k for Konflux cluster access.
 """
 
 import os
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 
@@ -21,7 +22,7 @@ from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds t
 def get_konflux_config() -> dict:
     """Get Konflux configuration."""
     config = load_config()
-    return config.get("konflux", {})
+    return cast(dict, config.get("konflux", {}))
 
 
 def get_konflux_kubeconfig() -> str:

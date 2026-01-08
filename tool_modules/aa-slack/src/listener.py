@@ -516,8 +516,8 @@ class SlackListenerManager:
         if self._initialized:
             return
 
-        # Create session from environment
-        self.session = SlackSession.from_env()
+        # Create session from config.json (with env fallback)
+        self.session = SlackSession.from_config()
 
         # Create state database
         self.state_db = SlackStateDB()

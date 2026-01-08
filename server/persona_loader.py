@@ -15,7 +15,7 @@ Usage:
 import importlib.util
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import yaml
 
@@ -76,12 +76,12 @@ class PersonaLoader:
 
         try:
             with open(persona_file) as f:
-                return yaml.safe_load(f)
+                return cast(dict, yaml.safe_load(f))
         except Exception as e:
             logger.error(f"Failed to load persona config {persona_name}: {e}")
             return None
 
-    def _load_tool_module(self, module_name: str) -> list[str]:
+    async def _load_tool_module(self, module_name: str) -> list[str]:
         """Load a tool module and return list of tool names added."""
         module_dir = TOOL_MODULES_DIR / f"aa-{module_name}"
         tools_file = module_dir / "src" / "tools.py"
@@ -98,7 +98,7 @@ class PersonaLoader:
             module = importlib.util.module_from_spec(spec)
 
             # Get tools before loading
-            tools_before = set(self.server.list_tools())
+            tools_before = set(await self.server.list_tools())
 
             # Load the module (registers tools with server)
             spec.loader.exec_module(module)
@@ -107,17 +107,20 @@ class PersonaLoader:
                 module.register_tools(self.server)
 
             # Get tools after loading
-            tools_after = set(self.server.list_tools())
+            tools_after = set(await self.server.list_tools())
             new_tools = tools_after - tools_before
 
-            # Track which tools came from this module
-            for tool_name in new_tools:
+            # Track which tools came from this module and extract names
+            new_tool_names = []
+            for tool in new_tools:
+                tool_name = tool.name if hasattr(tool, "name") else str(tool)
                 self._tool_to_module[tool_name] = module_name
+                new_tool_names.append(tool_name)
 
             self.loaded_modules.add(module_name)
-            logger.info(f"Loaded {module_name}: {len(new_tools)} tools")
+            logger.info(f"Loaded {module_name}: {len(new_tool_names)} tools")
 
-            return list(new_tools)
+            return new_tool_names
 
         except Exception as e:
             logger.error(f"Error loading {module_name}: {e}")
@@ -139,9 +142,9 @@ class PersonaLoader:
         self.loaded_modules.discard(module_name)
         return len(tools_to_remove)
 
-    def _clear_non_core_tools(self) -> int:
+    async def _clear_non_core_tools(self) -> int:
         """Remove all tools except core ones."""
-        all_tools = list(self.server.list_tools())
+        all_tools = list(await self.server.list_tools())
         removed = 0
 
         for tool in all_tools:
@@ -185,7 +188,7 @@ class PersonaLoader:
         tool_modules = config.get("tools", [])
 
         # Clear existing tools (except core)
-        removed = self._clear_non_core_tools()
+        removed = await self._clear_non_core_tools()
         logger.info(f"Removed {removed} tools from previous persona")
 
         # Load new persona's tools
@@ -195,7 +198,7 @@ class PersonaLoader:
                 logger.warning(f"Unknown module: {module_name}")
                 continue
 
-            new_tools = self._load_tool_module(module_name)
+            new_tools = await self._load_tool_module(module_name)
             loaded_tools.extend(new_tools)
 
         self.current_persona = persona_name

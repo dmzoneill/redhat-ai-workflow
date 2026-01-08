@@ -8,6 +8,7 @@ import os
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
@@ -40,7 +41,7 @@ class KibanaEnvironment:
 def _load_kibana_config() -> dict:
     """Load Kibana config from config.json."""
     config = load_config()
-    return config.get("kibana", {}).get("environments", {})
+    return cast(dict, config.get("kibana", {})).get("environments", {})
 
 
 def get_kibana_environment(environment: str) -> "KibanaEnvironment":
