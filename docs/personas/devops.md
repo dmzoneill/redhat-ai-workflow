@@ -21,7 +21,7 @@ Load the devops agent
 | [quay](../tool_modules/quay.md) | 8 | Container images |
 | [gitlab](../tool_modules/gitlab.md) | 35 | MR details for deploy |
 
-**Total:** ~90 tools
+**Total:** ~106 tools (5 modules)
 
 ## Skills Available
 

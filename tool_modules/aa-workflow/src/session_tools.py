@@ -149,6 +149,19 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             except Exception:
                 pass
 
+        # Detect currently loaded persona from persona_loader if available
+        current_persona = None
+        loaded_modules = []
+        try:
+            from server.persona_loader import get_loader
+
+            loader = get_loader()
+            if loader:
+                current_persona = loader.current_persona
+                loaded_modules = list(loader.loaded_modules)
+        except Exception:
+            pass
+
         # Load agent if specified
         if agent:
             agent_file = PERSONAS_DIR / f"{agent}.md"
@@ -159,14 +172,67 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 lines.append(agent_file.read_text())
             else:
                 lines.append(f"*Agent '{agent}' not found. " "Available: devops, developer, incident, release*\n")
+        elif current_persona:
+            # Show currently active persona
+            lines.append(f"## 🤖 Active Persona: {current_persona}\n")
+            if loaded_modules:
+                lines.append(f"**Loaded modules:** {', '.join(sorted(loaded_modules))}\n")
+            lines.append("Use `persona_load(name)` to switch personas.\n")
         else:
-            lines.append("## 💡 Available Personas\n")
-            lines.append("Load one with `persona_load(name)` or `session_start(agent='name')`:\n")
-            lines.append("- **devops** - Infrastructure, monitoring, deployments")
-            lines.append("- **developer** - Coding, PRs, code review")
-            lines.append("- **incident** - Production issues, triage")
-            lines.append("- **release** - Shipping, coordination")
+            # Check if developer tools are loaded (default)
+            if loaded_modules and any(m in loaded_modules for m in ["git", "gitlab", "jira"]):
+                lines.append("## 🤖 Active Persona: developer (default)\n")
+                lines.append(f"**Loaded modules:** {', '.join(sorted(loaded_modules))}\n")
+            else:
+                lines.append("## 💡 Available Personas\n")
+                lines.append("Load one with `persona_load(name)` or `session_start(agent='name')`:\n")
+                lines.append("- **devops** - Infrastructure, monitoring, deployments")
+                lines.append("- **developer** - Coding, PRs, code review")
+                lines.append("- **incident** - Production issues, triage")
+                lines.append("- **release** - Shipping, coordination")
             lines.append("")
+
+        # Load learned patterns summary (for context)
+        patterns_file = MEMORY_DIR / "learned" / "patterns.yaml"
+        if patterns_file.exists():
+            try:
+                with open(patterns_file) as f:
+                    patterns = yaml.safe_load(f) or {}
+
+                # Count patterns by category
+                jira_patterns = patterns.get("jira_cli_patterns", [])
+                error_patterns = patterns.get("error_patterns", [])
+                auth_patterns = patterns.get("auth_patterns", [])
+                bonfire_patterns = patterns.get("bonfire_patterns", [])
+                pipeline_patterns = patterns.get("pipeline_patterns", [])
+
+                total = (
+                    len(jira_patterns)
+                    + len(error_patterns)
+                    + len(auth_patterns)
+                    + len(bonfire_patterns)
+                    + len(pipeline_patterns)
+                )
+
+                if total > 0:
+                    lines.append("## 🧠 Learned Patterns\n")
+                    lines.append(f"*{total} patterns loaded from memory*\n")
+                    if jira_patterns:
+                        lines.append(f"- **Jira CLI**: {len(jira_patterns)} patterns")
+                    if error_patterns:
+                        lines.append(f"- **Error handling**: {len(error_patterns)} patterns")
+                    if auth_patterns:
+                        lines.append(f"- **Authentication**: {len(auth_patterns)} patterns")
+                    if bonfire_patterns:
+                        lines.append(f"- **Bonfire/Ephemeral**: {len(bonfire_patterns)} patterns")
+                    if pipeline_patterns:
+                        lines.append(f"- **Pipelines**: {len(pipeline_patterns)} patterns")
+                    lines.append("")
+                    lines.append("*Use `memory_read('learned/patterns')` for details*")
+                    lines.append("")
+
+            except Exception:
+                pass
 
         # Show available skills
         lines.append("## ⚡ Quick Skills\n")
@@ -177,6 +243,20 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
         lines.append("- **memory_view** - View/manage persistent memory")
         lines.append("- **coffee** - Morning briefing (calendar, email, PRs)")
         lines.append("- **beer** - End of day wrap-up")
+        lines.append("")
+
+        # Show tool usage guidance
+        lines.append("## 🛠️ Tool Usage\n")
+        lines.append("**ALWAYS prefer MCP tools over CLI commands!**\n")
+        lines.append("| Instead of CLI | Use MCP Tool |")
+        lines.append("|---------------|--------------|")
+        lines.append("| `rh-issue set-status ...` | `jira_set_status()` |")
+        lines.append("| `git checkout -b ...` | `git_branch_create()` |")
+        lines.append("| `glab mr create ...` | `gitlab_mr_create()` |")
+        lines.append("| `kubectl get pods ...` | `kubectl_get_pods()` |")
+        lines.append("")
+        lines.append("Use `tool_list()` to see all available tools.")
+        lines.append("Use `check_known_issues(tool, error)` when tools fail.")
         lines.append("")
 
         # Log session start (if function provided)

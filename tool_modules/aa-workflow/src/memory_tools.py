@@ -269,4 +269,271 @@ def register_memory_tools(server: "FastMCP") -> int:
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error logging: {e}")]
 
+    @registry.tool()
+    async def check_known_issues(tool_name: str = "", error_text: str = "") -> list[TextContent]:
+        """
+        Check memory for known fixes before or after an error.
+
+        Searches learned patterns and tool fixes for matching issues.
+        Use this when a tool fails to see if we've solved this before.
+
+        Args:
+            tool_name: Name of the tool that failed (e.g., "bonfire_deploy")
+            error_text: Error message text to match against patterns
+
+        Returns:
+            Known issues and fixes, or empty if none found.
+        """
+        matches = []
+        error_lower = error_text.lower() if error_text else ""
+        tool_lower = tool_name.lower() if tool_name else ""
+
+        # Check learned/patterns.yaml
+        patterns_file = MEMORY_DIR / "learned" / "patterns.yaml"
+        if patterns_file.exists():
+            try:
+                with open(patterns_file) as f:
+                    patterns = yaml.safe_load(f) or {}
+
+                # Check error_patterns
+                for pattern in patterns.get("error_patterns", []):
+                    pattern_text = pattern.get("pattern", "").lower()
+                    if pattern_text and (pattern_text in error_lower or pattern_text in tool_lower):
+                        matches.append(
+                            {
+                                "source": "error_patterns",
+                                "pattern": pattern.get("pattern"),
+                                "meaning": pattern.get("meaning", ""),
+                                "fix": pattern.get("fix", ""),
+                                "commands": pattern.get("commands", []),
+                            }
+                        )
+
+                # Check auth_patterns
+                for pattern in patterns.get("auth_patterns", []):
+                    pattern_text = pattern.get("pattern", "").lower()
+                    if pattern_text and pattern_text in error_lower:
+                        matches.append(
+                            {
+                                "source": "auth_patterns",
+                                "pattern": pattern.get("pattern"),
+                                "meaning": pattern.get("meaning", ""),
+                                "fix": pattern.get("fix", ""),
+                                "commands": pattern.get("commands", []),
+                            }
+                        )
+
+                # Check bonfire_patterns
+                for pattern in patterns.get("bonfire_patterns", []):
+                    pattern_text = pattern.get("pattern", "").lower()
+                    if pattern_text and (pattern_text in error_lower or "bonfire" in tool_lower):
+                        matches.append(
+                            {
+                                "source": "bonfire_patterns",
+                                "pattern": pattern.get("pattern"),
+                                "meaning": pattern.get("meaning", ""),
+                                "fix": pattern.get("fix", ""),
+                                "commands": pattern.get("commands", []),
+                            }
+                        )
+
+                # Check pipeline_patterns
+                for pattern in patterns.get("pipeline_patterns", []):
+                    pattern_text = pattern.get("pattern", "").lower()
+                    if pattern_text and pattern_text in error_lower:
+                        matches.append(
+                            {
+                                "source": "pipeline_patterns",
+                                "pattern": pattern.get("pattern"),
+                                "meaning": pattern.get("meaning", ""),
+                                "fix": pattern.get("fix", ""),
+                                "commands": pattern.get("commands", []),
+                            }
+                        )
+
+                # Check jira_cli_patterns
+                for pattern in patterns.get("jira_cli_patterns", []):
+                    pattern_text = pattern.get("pattern", "").lower()
+                    if pattern_text and (
+                        pattern_text in error_lower or pattern_text in tool_lower or "jira" in tool_lower
+                    ):
+                        matches.append(
+                            {
+                                "source": "jira_cli_patterns",
+                                "pattern": pattern.get("pattern"),
+                                "description": pattern.get("description", ""),
+                                "solution": pattern.get("solution", ""),
+                            }
+                        )
+
+            except Exception:
+                pass
+
+        # Check learned/tool_fixes.yaml
+        fixes_file = MEMORY_DIR / "learned" / "tool_fixes.yaml"
+        if fixes_file.exists():
+            try:
+                with open(fixes_file) as f:
+                    fixes = yaml.safe_load(f) or {}
+
+                for fix in fixes.get("tool_fixes", []):
+                    if tool_name and fix.get("tool_name", "").lower() == tool_lower:
+                        matches.append(
+                            {
+                                "source": "tool_fixes",
+                                "tool_name": fix.get("tool_name"),
+                                "error_pattern": fix.get("error_pattern", ""),
+                                "root_cause": fix.get("root_cause", ""),
+                                "fix_applied": fix.get("fix_applied", ""),
+                                "date_learned": fix.get("date_learned", ""),
+                            }
+                        )
+                    elif error_text:
+                        fix_pattern = fix.get("error_pattern", "").lower()
+                        if fix_pattern and fix_pattern in error_lower:
+                            matches.append(
+                                {
+                                    "source": "tool_fixes",
+                                    "tool_name": fix.get("tool_name"),
+                                    "error_pattern": fix.get("error_pattern", ""),
+                                    "root_cause": fix.get("root_cause", ""),
+                                    "fix_applied": fix.get("fix_applied", ""),
+                                    "date_learned": fix.get("date_learned", ""),
+                                }
+                            )
+
+            except Exception:
+                pass
+
+        if not matches:
+            return [
+                TextContent(
+                    type="text",
+                    text="No known issues found matching your query.\n\n"
+                    "If you fix this issue, save it with:\n"
+                    f"`learn_tool_fix('{tool_name}', '<error_pattern>', '<cause>', '<fix>')`",
+                )
+            ]
+
+        # Format matches
+        lines = ["## 💡 Known Issues Found!\n"]
+        for i, match in enumerate(matches[:5], 1):  # Limit to 5 matches
+            source = match.get("source", "unknown")
+            lines.append(f"### Match {i} (from {source})\n")
+
+            if source == "tool_fixes":
+                lines.append(f"**Tool:** `{match.get('tool_name', '?')}`")
+                lines.append(f"**Pattern:** `{match.get('error_pattern', '?')}`")
+                lines.append(f"**Root cause:** {match.get('root_cause', '?')}")
+                lines.append(f"**Fix:** {match.get('fix_applied', '?')}")
+                if match.get("date_learned"):
+                    lines.append(f"*Learned: {match.get('date_learned')}*")
+            elif source == "jira_cli_patterns":
+                lines.append(f"**Pattern:** {match.get('pattern', '?')}")
+                if match.get("description"):
+                    lines.append(f"\n{match.get('description')}")
+                if match.get("solution"):
+                    lines.append(f"**Solution:** {match.get('solution')}")
+            else:
+                lines.append(f"**Pattern:** `{match.get('pattern', '?')}`")
+                if match.get("meaning"):
+                    lines.append(f"**Meaning:** {match.get('meaning')}")
+                if match.get("fix"):
+                    lines.append(f"**Fix:** {match.get('fix')}")
+                if match.get("commands"):
+                    lines.append("**Commands to try:**")
+                    for cmd in match.get("commands", [])[:3]:
+                        lines.append(f"- `{cmd}`")
+            lines.append("")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
+    async def learn_tool_fix(
+        tool_name: str,
+        error_pattern: str,
+        root_cause: str,
+        fix_description: str,
+    ) -> list[TextContent]:
+        """
+        Save a fix to memory after it works.
+
+        Use this after successfully fixing a tool error to remember the solution.
+        The next time this pattern appears, check_known_issues() will show the fix.
+
+        Args:
+            tool_name: Name of the tool that failed (e.g., "bonfire_deploy")
+            error_pattern: The error pattern to match (e.g., "manifest unknown")
+            root_cause: Why it failed (e.g., "Short SHA doesn't exist in Quay")
+            fix_description: What fixed it (e.g., "Use full 40-char SHA")
+
+        Returns:
+            Confirmation of the saved fix.
+        """
+        fixes_file = MEMORY_DIR / "learned" / "tool_fixes.yaml"
+        fixes_file.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Load existing or create new
+            if fixes_file.exists():
+                with open(fixes_file) as f:
+                    data = yaml.safe_load(f) or {}
+            else:
+                data = {"tool_fixes": [], "common_mistakes": {}}
+
+            if "tool_fixes" not in data:
+                data["tool_fixes"] = []
+
+            # Add new fix
+            new_fix = {
+                "tool_name": tool_name,
+                "error_pattern": error_pattern,
+                "root_cause": root_cause,
+                "fix_applied": fix_description,
+                "date_learned": datetime.now().strftime("%Y-%m-%d"),
+                "times_prevented": 0,
+            }
+
+            # Check for duplicates
+            for existing in data["tool_fixes"]:
+                if existing.get("tool_name") == tool_name and existing.get("error_pattern") == error_pattern:
+                    # Update existing instead of adding duplicate
+                    existing["root_cause"] = root_cause
+                    existing["fix_applied"] = fix_description
+                    existing["date_learned"] = new_fix["date_learned"]
+
+                    with open(fixes_file, "w") as f:
+                        yaml.dump(data, f, default_flow_style=False)
+
+                    return [
+                        TextContent(
+                            type="text",
+                            text=f"✅ Updated existing fix for `{tool_name}`\n\n"
+                            f"**Pattern:** `{error_pattern}`\n"
+                            f"**Root cause:** {root_cause}\n"
+                            f"**Fix:** {fix_description}\n\n"
+                            "Next time this pattern appears, you'll be reminded of the fix.",
+                        )
+                    ]
+
+            data["tool_fixes"].append(new_fix)
+
+            # Write back
+            with open(fixes_file, "w") as f:
+                yaml.dump(data, f, default_flow_style=False)
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"✅ Saved tool fix to memory!\n\n"
+                    f"**Tool:** `{tool_name}`\n"
+                    f"**Pattern:** `{error_pattern}`\n"
+                    f"**Root cause:** {root_cause}\n"
+                    f"**Fix:** {fix_description}\n\n"
+                    "Next time this pattern appears, you'll be reminded of the fix.",
+                )
+            ]
+        except Exception as e:
+            return [TextContent(type="text", text=f"❌ Error saving fix: {e}")]
+
     return registry.count

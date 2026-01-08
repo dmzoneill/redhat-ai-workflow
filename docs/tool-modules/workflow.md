@@ -10,7 +10,7 @@ The `aa-workflow` module provides core tools for session management, skill execu
 
 ## Tool Count
 
-**28 tools**
+**16 tools**
 
 ## Core Tools (Always Available)
 
@@ -34,6 +34,8 @@ The `aa-workflow` module provides core tools for session management, skill execu
 | `memory_update` | Update specific field |
 | `memory_append` | Append to list |
 | `memory_session_log` | Log action to session |
+| `check_known_issues` | Check memory for known fixes |
+| `learn_tool_fix` | Save a fix to memory |
 
 ## Workflow Tools
 

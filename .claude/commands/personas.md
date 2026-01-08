@@ -16,10 +16,10 @@ persona_load("developer")
 
 | Persona | Focus | Tools Loaded |
 |---------|-------|--------------|
-| `developer` | Coding, PRs, reviews | git, gitlab, jira (~106 tools) |
-| `devops` | Deployments, k8s, ephemeral | k8s, bonfire, quay, gitlab (~90 tools) |
-| `incident` | Production issues, logs | k8s, kibana, prometheus, jira (~78 tools) |
-| `release` | Shipping to production | konflux, quay, appinterface, git (~69 tools) |
+| `developer` | Coding, PRs, reviews | git, gitlab, jira, lint, dev-workflow (~106 tools) |
+| `devops` | Deployments, k8s, ephemeral | k8s, bonfire, quay, gitlab (~106 tools) |
+| `incident` | Production issues, logs | k8s, kibana, prometheus, jira (~100 tools) |
+| `release` | Shipping to production | konflux, quay, appinterface, git (~100 tools) |
 
 ## Examples
 
@@ -76,7 +76,3 @@ session_start(agent="devops")
 
 - `/tools` - See what tools are available
 - `/list-skills` - See available skills
-
-
-
-

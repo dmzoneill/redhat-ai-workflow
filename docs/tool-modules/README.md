@@ -8,25 +8,28 @@ Tool modules are MCP plugins that provide specific capabilities. Each module con
 
 | Module | Tools | Description |
 |--------|-------|-------------|
-| [workflow](./workflow.md) | 30 | Core server, agents, skills, memory, vpn_connect, kube_login |
-| [git](./git.md) | 19 | Git operations |
-| [gitlab](./gitlab.md) | 35 | MRs, pipelines, code review |
+| [workflow](./workflow.md) | 16 | Core server, agents, skills, memory, vpn_connect, kube_login |
+| [git](./git.md) | 30 | Git operations |
+| [gitlab](./gitlab.md) | 30 | MRs, pipelines, code review |
 | [jira](./jira.md) | 28 | Issue tracking (including set_summary, set_priority, set_epic) |
-| [k8s](./k8s.md) | 26 | Kubernetes operations |
-| [bonfire](./bonfire.md) | 21 | Ephemeral namespaces |
+| [k8s](./k8s.md) | 28 | Kubernetes operations |
+| [bonfire](./bonfire.md) | 20 | Ephemeral namespaces |
 | [quay](./quay.md) | 8 | Container registry |
 | [prometheus](./prometheus.md) | 13 | Metrics queries |
 | [alertmanager](./alertmanager.md) | 7 | Alert management |
 | [kibana](./kibana.md) | 9 | Log search |
 | [google-calendar](./google-calendar.md) | 6 | Calendar & meetings |
 | [gmail](./gmail.md) | 6 | Email processing |
-| [slack](./slack.md) | 16 | Slack integration (+slack_dm_gitlab_user) |
-| [konflux](./konflux.md) | 40 | Build pipelines |
-| [appinterface](./appinterface.md) | 8 | GitOps config (+appinterface_get_user) |
+| [slack](./slack.md) | 10 | Slack integration |
+| [konflux](./konflux.md) | 35 | Build pipelines |
+| [appinterface](./appinterface.md) | 7 | GitOps config |
+| [lint](./common.md) | 7 | Python/YAML linting, testing |
+| [dev-workflow](./common.md) | 9 | Development workflow helpers |
 
-**Total:** ~260+ tools across 16 modules
+**Total:** ~270 tools across 17 modules
 
-> Plus **45 shared parsers** in `scripts/common/parsers.py` for reusable output parsing (including `extract_web_url`, `extract_mr_url`)
+> Plus **45+ shared parsers** in `scripts/common/parsers.py` for reusable output parsing
+> And **config helpers** in `scripts/common/config_loader.py` for commit format, repo resolution
 
 ## Architecture
 
@@ -127,7 +130,7 @@ Claude: [AgentLoader]
         → Loading: k8s, bonfire, quay, gitlab
         → Notifying Cursor of tool change
 
-        🔧 DevOps agent ready with 90 tools
+        🔧 DevOps agent ready with ~106 tools
 ```
 
 ## Environment Variables

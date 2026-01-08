@@ -161,12 +161,19 @@ steps:
           with open(learned_dir / "patterns.yaml", "w") as f:
               yaml.dump(patterns_template, f, default_flow_style=False)
 
-      # Reset runbooks
+      # Reset runbooks - load commit format from config.json
+      try:
+          from scripts.common.config_loader import get_commit_format
+          commit_cfg = get_commit_format()
+          commit_format_pattern = commit_cfg["pattern"]
+      except ImportError:
+          commit_format_pattern = "{issue_key} - {type}({scope}): {description}"
+
       runbooks_template = {
           "last_updated": datetime.now().isoformat(),
           "runbooks": {},
           "preferences": {
-              "commit_format": "AAP-XXXXX - type: description",
+              "commit_format": commit_format_pattern,
               "branch_format": "aap-xxxxx-short-description",
           },
       }

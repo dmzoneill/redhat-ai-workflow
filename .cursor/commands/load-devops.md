@@ -8,7 +8,7 @@ Call `persona_load("devops")` to load:
 - Quay tools (image inspection)
 - GitLab tools (MR management)
 
-**~90 tools** for ephemeral deployments, monitoring, and infrastructure.
+**~106 tools** for ephemeral deployments, monitoring, and infrastructure.
 
 Use for:
 - Deploy MR to ephemeral

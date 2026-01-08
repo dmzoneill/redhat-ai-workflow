@@ -541,16 +541,33 @@ def register_tools(server: FastMCP) -> int:
 
         Returns:
             Commit result or lint error.
+
+        Commit Format (from config.json):
+            {issue_key} - {type}({scope}): {description}
+
+        Valid types are loaded from config.json commit_format.types.
         """
+        import re
+
         path = resolve_repo_path(repo)
+
+        # Load commit format helpers from config.json
+        try:
+            from scripts.common.config_loader import format_commit_message, get_commit_format
+
+            commit_cfg = get_commit_format()
+            valid_types = commit_cfg["types"]
+            use_config_formatter = True
+        except ImportError:
+            valid_types = ["feat", "fix", "refactor", "docs", "test", "chore", "style", "perf"]
+            use_config_formatter = False
 
         # Auto-detect issue key from branch name if not provided
         if not issue_key:
-            import re
-
             success, branch_name = await run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
             if success and branch_name:
-                match = re.match(r"(AAP-\d{4,6})", branch_name.strip())
+                # Match any project pattern: PROJ-12345 (3-6 digits)
+                match = re.match(r"([A-Z]{2,10}-\d{3,6})", branch_name.strip().upper())
                 if match:
                     issue_key = match.group(1)
 
@@ -566,26 +583,48 @@ def register_tools(server: FastMCP) -> int:
                 # Fallback if lint_utils not available
                 pass
 
-        if issue_key:
-            if not commit_type:
-                msg_lower = message.lower()
-                if any(w in msg_lower for w in ["fix", "bug", "issue", "error"]):
-                    commit_type = "fix"
-                elif any(w in msg_lower for w in ["add", "new", "feature", "implement"]):
-                    commit_type = "feat"
-                elif any(w in msg_lower for w in ["refactor", "clean", "improve"]):
-                    commit_type = "refactor"
-                elif any(w in msg_lower for w in ["doc", "readme", "comment"]):
-                    commit_type = "docs"
-                elif any(w in msg_lower for w in ["test"]):
-                    commit_type = "test"
-                else:
-                    commit_type = "chore"
-
-            if scope:
-                formatted_message = f"{issue_key} - {commit_type}({scope}): {message}"
+        # Auto-detect commit type from message content if not provided
+        if issue_key and not commit_type:
+            msg_lower = message.lower()
+            if any(w in msg_lower for w in ["fix", "bug", "issue", "error", "patch"]):
+                commit_type = "fix"
+            elif any(w in msg_lower for w in ["add", "new", "feature", "implement", "create"]):
+                commit_type = "feat"
+            elif any(w in msg_lower for w in ["refactor", "clean", "improve", "restructure"]):
+                commit_type = "refactor"
+            elif any(w in msg_lower for w in ["doc", "readme", "comment", "documentation"]):
+                commit_type = "docs"
+            elif any(w in msg_lower for w in ["test", "spec", "coverage"]):
+                commit_type = "test"
+            elif any(w in msg_lower for w in ["style", "format", "lint"]):
+                commit_type = "style"
+            elif any(w in msg_lower for w in ["perf", "performance", "optimize", "speed"]):
+                commit_type = "perf"
             else:
-                formatted_message = f"{issue_key} - {commit_type}: {message}"
+                commit_type = "chore"
+
+        # Validate commit type against config
+        if issue_key and commit_type and commit_type not in valid_types:
+            return (
+                f"❌ Invalid commit type '{commit_type}'.\n\n"
+                f"Valid types: {', '.join(valid_types)}\n\n"
+                f"Use one of these types or update config.json commit_format.types"
+            )
+
+        # Format commit message using config pattern
+        if use_config_formatter and issue_key:
+            formatted_message = format_commit_message(
+                description=message,
+                issue_key=issue_key,
+                commit_type=commit_type or "chore",
+                scope=scope,
+            )
+        elif issue_key:
+            # Fallback formatting
+            if scope:
+                formatted_message = f"{issue_key} - {commit_type or 'chore'}({scope}): {message}"
+            else:
+                formatted_message = f"{issue_key} - {commit_type or 'chore'}: {message}"
         else:
             formatted_message = message
 

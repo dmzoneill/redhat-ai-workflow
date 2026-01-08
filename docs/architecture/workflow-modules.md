@@ -12,7 +12,7 @@ The aa-workflow server provides workflow automation tools. The codebase has been
 
 | Module | Purpose | Tools |
 |--------|---------|-------|
-| `tools.py` | Main entry point, imports all modules | Registers 30+ tools |
+| `tools.py` | Main entry point, imports all modules | Registers 16 tools |
 
 ### Tool Modules
 
@@ -49,7 +49,7 @@ The aa-workflow server provides workflow automation tools. The codebase has been
 | `workflow_handle_review` | Prepare to handle MR review feedback |
 | `workflow_daily_standup` | Generate standup summary from git history |
 
-### memory_tools.py (5 tools)
+### memory_tools.py (7 tools)
 
 | Tool | Description |
 |------|-------------|
@@ -58,6 +58,8 @@ The aa-workflow server provides workflow automation tools. The codebase has been
 | `memory_update` | Update specific fields in memory |
 | `memory_append` | Append items to lists in memory |
 | `memory_session_log` | Log actions to session log |
+| `check_known_issues` | Check memory for known fixes |
+| `learn_tool_fix` | Save a fix to memory |
 
 ### agent_tools.py (2 tools)
 

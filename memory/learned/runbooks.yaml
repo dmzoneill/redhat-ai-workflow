@@ -128,7 +128,7 @@ runbooks:
 
 # Team preferences
 preferences:
-  commit_format: "AAP-XXXXX - type: description"
+  commit_format: "{issue_key} - {type}({scope}): {description}"  # From config.json
   branch_format: "aap-xxxxx-short-description"
   mr_description: |
     Include:

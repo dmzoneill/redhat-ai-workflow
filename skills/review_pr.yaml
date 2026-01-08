@@ -441,40 +441,24 @@ steps:
 
   # ==================== VALIDATE FORMAT ====================
 
-  # Step 7: Validate commit title format
+  # Step 7: Validate commit title format using config.json pattern
   - name: validate_commit_format
-    description: "Check commit title matches commitlint config from config.json"
+    description: "Check commit title matches commit_format pattern from config.json"
     compute: |
-      import re
-      from scripts.common.config_loader import load_config
-      from scripts.common.parsers import extract_jira_key
-
-      issues = []
-
-      # Load commit_format from config.json
-      config = load_config()
-      commit_cfg = config.get("commit_format", {})
-
-      # Get valid types from config, with fallback
-      valid_types = commit_cfg.get("types", ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build', 'revert'])
+      from scripts.common.config_loader import get_commit_format, validate_commit_message
 
       # Extract title from MR details (first line usually)
       title_line = mr_details.split('\n')[0] if mr_details else ""
 
-      # Check for Jira key at start using shared parser
-      if not extract_jira_key(title_line):
-        issues.append("Missing Jira key at start of title")
+      # Use the centralized validation function from config_loader
+      is_valid, issues = validate_commit_message(title_line)
 
-      # Check for type(scope): format
-      type_match = re.search(r'- (\w+)(?:\([^)]+\))?\s*:', title_line)
-      if type_match:
-        commit_type = type_match.group(1).lower()
-        if commit_type not in valid_types:
-          issues.append(f"Invalid commit type '{commit_type}' - expected one of: {', '.join(valid_types)}")
+      if is_valid:
+        result = ["Format OK"]
       else:
-        issues.append("Missing conventional commit format: type(scope): description")
-
-      result = issues if issues else ["Format OK"]
+        # Add hint about the expected format
+        commit_cfg = get_commit_format()
+        result = issues + [f"Pattern: {commit_cfg['pattern']}"]
     output: format_issues
 
   # Step 8: Check MR description

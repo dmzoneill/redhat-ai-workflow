@@ -8,7 +8,7 @@ The `aa-gitlab` module provides tools for GitLab operations including merge requ
 
 ## Tool Count
 
-**36 tools**
+**30 tools**
 
 ## Tools
 

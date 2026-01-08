@@ -8,7 +8,7 @@ The `aa-appinterface` module provides tools for managing app-interface (GitOps) 
 
 ## Tool Count
 
-**6 tools**
+**7 tools**
 
 ## Tools
 

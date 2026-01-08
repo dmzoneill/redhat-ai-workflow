@@ -218,10 +218,10 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
    - If won't fix: explain why in a reply
 
 3. **After making changes:**
-   ```bash
-   git add -A
-   git commit -m "Address review feedback"
-   git push
+   ```python
+   git_add(repo=".", files=".")
+   git_commit(repo=".", message="address review feedback", issue_key="AAP-XXXXX")
+   git_push(repo=".")
    ```
 
 4. **Reply to comments:**

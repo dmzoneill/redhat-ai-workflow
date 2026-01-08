@@ -315,20 +315,32 @@ steps:
       files: "{{ cfg.deploy_file }}"
 
   - name: build_commit_message
-    description: "Build commit message"
+    description: "Build commit message following commit lint rules"
     compute: |
-      commit_msg = f"tower-analytics: release {inputs.commit_sha[:12]} to production"
+      # Commit format: {issue_key} - {type}({scope}): {description}
+      # For releases without a specific Jira issue, use the release Jira if available
+      issue_key = jira_issue.get('key', '') if jira_issue else ''
+
+      description = f"release {inputs.commit_sha[:12]} to production"
       if inputs.include_billing:
-        commit_msg += " (including billing)"
-      result = commit_msg
+        description += " (including billing)"
+
+      # The git_commit tool will format this properly with issue_key and commit_type
+      result = {
+        "description": description,
+        "issue_key": issue_key,
+      }
     output: commit_message
 
   - name: commit_changes
-    description: "Commit the release changes"
+    description: "Commit the release changes following commit lint rules"
     tool: git_commit
     args:
       repo: "{{ cfg.appinterface_repo }}"
-      message: "{{ commit_message }}"
+      message: "{{ commit_message.description }}"
+      issue_key: "{{ commit_message.issue_key }}"
+      commit_type: "chore"
+      scope: "release"
 
   # Step 12: Push branch to origin
   - name: push_branch
@@ -340,13 +352,37 @@ steps:
       set_upstream: true
     output: push_result
 
-  # Step 13: Create merge request
+  # Step 13: Build MR title following commit format
+  - name: build_mr_title
+    description: "Build MR title using config.json commit format"
+    compute: |
+      from scripts.common.config_loader import format_commit_message
+
+      issue_key = jira_issue.get('key', '') if jira_issue else ''
+      description = f"release {inputs.commit_sha[:12]} to production"
+
+      if issue_key:
+        # Use the centralized formatter
+        title = format_commit_message(
+          description=description,
+          issue_key=issue_key,
+          commit_type="chore",
+          scope="release",
+        )
+      else:
+        # Fallback if no Jira issue - still follow format pattern
+        title = f"chore(release): tower-analytics {description}"
+
+      result = title
+    output: mr_title
+
+  # Step 14: Create merge request
   - name: create_mr
     description: "Create merge request for team approval"
     tool: gitlab_mr_create
     args:
       project: "app-interface"  # Adjust if different
-      title: "tower-analytics: release {{ inputs.commit_sha[:12] }} to production"
+      title: "{{ mr_title }}"
       description: |
         ## Release: {{ inputs.release_date }} Analytics HCC Service
 

@@ -8,7 +8,7 @@ The `aa-k8s` module provides tools for Kubernetes operations including pod manag
 
 ## Tool Count
 
-**26 tools**
+**28 tools**
 
 ## Tools
 

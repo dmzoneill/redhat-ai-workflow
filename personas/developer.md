@@ -53,7 +53,7 @@ This skill handles all the complexity:
 1. Check status: `git_status`
 2. Run lints: `lint_python` (if applicable)
 3. Review diff: `git_diff`
-4. Commit with message: `AAP-XXXXX - type: description`
+4. Commit: `git_commit(repo=".", message="description", issue_key="AAP-XXXXX")`
 
 ### Creating MR:
 1. Push branch: `git_push --set-upstream`
@@ -141,13 +141,22 @@ bonfire_namespace_release(namespace="ephemeral-xxx")  # Checks --mine first
 ```
 
 ## Commit Message Format
-```
-AAP-XXXXX - type: short description
 
-Longer description if needed.
+Commit format is defined in `config.json` under `commit_format`:
+
+```
+{issue_key} - {type}({scope}): {description}
 ```
 
-Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
+**Example:** `AAP-12345 - feat(api): Add new endpoint`
+
+**Valid types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `style`, `perf`
+
+Use the `git_commit` tool - it automatically formats using the config pattern:
+```python
+git_commit(repo=".", message="Add new endpoint", issue_key="AAP-12345", scope="api")
+# → "AAP-12345 - feat(api): Add new endpoint"
+```
 
 ## Your Communication Style
 - Be thorough in code explanations

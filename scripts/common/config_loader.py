@@ -309,6 +309,111 @@ def get_commit_types() -> List[str]:
     return list(types) if types else []
 
 
+def get_commit_format() -> Dict[str, Any]:
+    """
+    Get commit format configuration from config.json.
+
+    Returns:
+        Dict with 'pattern', 'types', and 'examples' keys.
+    """
+    config = load_config()
+    default_format = {
+        "pattern": "{issue_key} - {type}({scope}): {description}",
+        "types": ["feat", "fix", "refactor", "docs", "test", "chore", "style", "perf"],
+        "examples": [
+            "AAP-12345 - feat(api): Add new endpoint",
+            "AAP-12345 - fix(auth): Handle token expiry",
+        ],
+    }
+    commit_cfg = config.get("commit_format", {})
+    return {
+        "pattern": commit_cfg.get("pattern", default_format["pattern"]),
+        "types": commit_cfg.get("types", default_format["types"]),
+        "examples": commit_cfg.get("examples", default_format["examples"]),
+    }
+
+
+def format_commit_message(
+    description: str,
+    issue_key: str = "",
+    commit_type: str = "chore",
+    scope: str = "",
+) -> str:
+    """
+    Format a commit message using the pattern from config.json.
+
+    Args:
+        description: The commit description/message
+        issue_key: Jira issue key (e.g., AAP-12345)
+        commit_type: Commit type (feat, fix, etc.)
+        scope: Optional scope (e.g., api, auth)
+
+    Returns:
+        Formatted commit message matching config pattern.
+
+    Example:
+        >>> format_commit_message("Add caching", "AAP-123", "feat", "api")
+        'AAP-123 - feat(api): Add caching'
+    """
+    commit_cfg = get_commit_format()
+    valid_types = commit_cfg["types"]
+
+    # Validate commit type
+    if commit_type not in valid_types:
+        commit_type = "chore"  # Default to chore if invalid
+
+    # Build the formatted message based on config pattern:
+    # {issue_key} - {type}({scope}): {description}
+    if issue_key:
+        if scope:
+            # Full format with scope
+            formatted = f"{issue_key} - {commit_type}({scope}): {description}"
+        else:
+            # Format without scope
+            formatted = f"{issue_key} - {commit_type}: {description}"
+    else:
+        # No issue key - just use description
+        formatted = description
+
+    return formatted
+
+
+def validate_commit_message(message: str) -> tuple[bool, List[str]]:
+    """
+    Validate a commit message against the config pattern.
+
+    Args:
+        message: The commit message to validate
+
+    Returns:
+        Tuple of (is_valid, list of issues)
+    """
+    import re
+
+    commit_cfg = get_commit_format()
+    valid_types = commit_cfg["types"]
+    issues = []
+
+    # Pattern: AAP-12345 - type(scope): description  OR  AAP-12345 - type: description
+    pattern = r"^([A-Z]{2,10}-\d{3,6})\s*-\s*(\w+)(?:\(([^)]+)\))?:\s*(.+)$"
+    match = re.match(pattern, message.strip())
+
+    if not match:
+        issues.append(f"Commit message doesn't match format: {commit_cfg['pattern']}")
+        issues.append(f"Examples: {', '.join(commit_cfg['examples'][:2])}")
+        return False, issues
+
+    _issue_key, commit_type, _scope, description = match.groups()
+
+    if commit_type not in valid_types:
+        issues.append(f"Invalid commit type '{commit_type}'. Valid types: {', '.join(valid_types)}")
+
+    if not description or len(description.strip()) < 3:
+        issues.append("Commit description is too short (min 3 characters)")
+
+    return len(issues) == 0, issues
+
+
 def get_default_branch() -> str:
     """Get default branch from config (uses backend repo as default)."""
     config = load_config()

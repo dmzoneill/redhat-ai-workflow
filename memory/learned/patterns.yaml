@@ -1,3 +1,36 @@
+auth_patterns:
+- commands:
+  - vpn_connect()
+  fix: Connect to Red Hat VPN
+  meaning: Cannot reach internal cluster or service
+  pattern: No route to host
+- commands:
+  - kube_login(cluster='e')
+  fix: Refresh ephemeral cluster credentials
+  meaning: Kubernetes authentication expired
+  pattern: token expired
+- commands:
+  - Check DISPLAY, XAUTHORITY environment variables
+  fix: Ensure GUI environment is available for browser-based SSO
+  meaning: Cannot open browser for OAuth
+  pattern: Cannot open display
+bonfire_patterns:
+- commands:
+  - bonfire namespace list --mine
+  - bonfire namespace release <ns> --force
+  fix: Add --force flag for non-interactive mode
+  meaning: Bonfire prompting for confirmation in non-TTY
+  pattern: Output is not a TTY
+- commands:
+  - quay_check_image_exists(tag='<40-char-sha>')
+  fix: Use FULL 40-character commit SHA, not short 8-char SHA
+  meaning: Image tag doesn't exist in Quay registry
+  pattern: image not found
+- commands:
+  - bonfire namespace list --mine
+  fix: Only release namespaces you own
+  meaning: Cannot release namespace owned by another user
+  pattern: namespace not owned
 error_patterns:
 - commands:
   - quay_check_image_exists(image='...', tag='...')
@@ -66,6 +99,17 @@ jira_cli_patterns:
   issue: AAP-61699
   pattern: rh-issue create-issue requires --input-file for stories
   solution: Build temp YAML file with proper fields, use --input-file --no-ai
+- date: '2026-01-08'
+  description: "When user says \"transition AAP-XXXXX to X\" or \"move issue to In\
+    \ Progress/Review/etc\":\n1. This means use rh-issue set-status AAP-XXXXX \"X\"\
+    \n2. Before transitioning, may need to set required fields:\n   - Sprint: rh-issue\
+    \ get-sprint (to find active sprint), then rh-issue add-to-sprint AAP-XXXXX \"\
+    Sprint Name\"\n   - Story Points: rh-issue set-story-points AAP-XXXXX N\n   -\
+    \ Assignee: rh-issue assign AAP-XXXXX user@redhat.com (use full email, not username)\n\
+    3. Common statuses: New, Refinement, Backlog, In Progress, Review, Release Pending,\
+    \ Closed\n4. NEVER use curl for Jira operations - always use rh-issue CLI\n"
+  pattern: transition issue to status
+  solution: Use rh-issue set-status, with add-to-sprint and set-story-points if needed
 last_updated: null
 performance_patterns: []
 pipeline_patterns:
@@ -91,38 +135,3 @@ pipeline_patterns:
   fix: Run kube-clean X && kube X to refresh token
   meaning: Kubernetes token expired
   pattern: Unauthorized
-
-auth_patterns:
-- commands:
-  - vpn_connect()
-  fix: Connect to Red Hat VPN
-  meaning: Cannot reach internal cluster or service
-  pattern: No route to host
-- commands:
-  - kube_login(cluster='e')
-  fix: Refresh ephemeral cluster credentials
-  meaning: Kubernetes authentication expired
-  pattern: token expired
-- commands:
-  - Check DISPLAY, XAUTHORITY environment variables
-  fix: Ensure GUI environment is available for browser-based SSO
-  meaning: Cannot open browser for OAuth
-  pattern: Cannot open display
-
-bonfire_patterns:
-- commands:
-  - bonfire namespace list --mine
-  - bonfire namespace release <ns> --force
-  fix: Add --force flag for non-interactive mode
-  meaning: Bonfire prompting for confirmation in non-TTY
-  pattern: Output is not a TTY
-- commands:
-  - quay_check_image_exists(tag='<40-char-sha>')
-  fix: Use FULL 40-character commit SHA, not short 8-char SHA
-  meaning: Image tag doesn't exist in Quay registry
-  pattern: image not found
-- commands:
-  - bonfire namespace list --mine
-  fix: Only release namespaces you own
-  meaning: Cannot release namespace owned by another user
-  pattern: namespace not owned
