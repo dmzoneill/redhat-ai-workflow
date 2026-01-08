@@ -111,7 +111,7 @@ Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
 
 </details>
 
-> **Default Persona:** The server starts with the `developer` persona loaded by default (~95 tools). Use `persona_load("devops")` to switch.
+> **Default Persona:** The server starts with the `developer` persona loaded by default (~78 tools). Use `persona_load("devops")` to switch.
 
 ### 3️⃣ Restart & Go!
 
@@ -119,7 +119,7 @@ Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
 You: Load the developer persona
 
 Claude: 👨‍💻 Developer Persona Loaded
-        Tools: git, gitlab, jira, lint, dev_workflow, workflow (~95 tools)
+        Tools: workflow, git_basic, gitlab_basic, jira_basic (~78 tools)
 
 You: Start working on AAP-12345
 
@@ -208,11 +208,11 @@ Switch personas to get different tool sets. See [full persona reference](docs/pe
 
 | Persona | Command | Tools | Focus |
 |---------|---------|-------|-------|
-| [👨‍💻 developer](docs/personas/developer.md) | `Load developer persona` | ~106 | Daily coding, PRs |
-| [🔧 devops](docs/personas/devops.md) | `Load devops persona` | ~106 | Deployments, K8s |
-| [🚨 incident](docs/personas/incident.md) | `Load incident persona` | ~100 | Production debugging |
-| [📦 release](docs/personas/release.md) | `Load release persona` | ~100 | Shipping releases |
-| [💬 slack](docs/personas/slack.md) | `Load slack persona` | ~100 | Slack bot daemon |
+| [👨‍💻 developer](docs/personas/developer.md) | `Load developer persona` | ~78 | Daily coding, PRs |
+| [🔧 devops](docs/personas/devops.md) | `Load devops persona` | ~83 | Deployments, K8s |
+| [🚨 incident](docs/personas/incident.md) | `Load incident persona` | ~89 | Production debugging |
+| [📦 release](docs/personas/release.md) | `Load release persona` | ~91 | Shipping releases |
+| [💬 slack](docs/personas/slack.md) | `Load slack persona` | ~85 | Slack bot daemon |
 
 ```mermaid
 graph LR

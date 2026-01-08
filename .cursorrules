@@ -21,7 +21,7 @@ This is a single MCP server that dynamically loads/unloads tools based on the ac
 ```
 You: Load the devops agent
 Claude: [calls agent_load("devops")]
-        Server unloads current tools, loads k8s/bonfire/quay/gitlab (~106 tools)
+        Server unloads current tools, loads k8s_basic/bonfire_basic/jira_basic/quay (~83 tools)
         Cursor receives tools/list_changed notification and refreshes
 ```
 
@@ -29,10 +29,12 @@ Claude: [calls agent_load("devops")]
 
 Load an agent when the task matches their expertise:
 
-- **DevOps tasks** (deployments, ephemeral, k8s): `agent_load("devops")` → k8s, bonfire, quay, gitlab (~106 tools)
-- **Development tasks** (coding, PRs): `agent_load("developer")` → git, gitlab, jira (~106 tools)
-- **Incidents** (production issues): `agent_load("incident")` → k8s, kibana, jira (~100 tools)
-- **Releases** (shipping): `agent_load("release")` → konflux, quay, appinterface, git (~100 tools)
+- **Developer** (coding, PRs): `agent_load("developer")` → git_basic, gitlab_basic, jira_basic (~78 tools)
+- **DevOps** (deployments, ephemeral, k8s): `agent_load("devops")` → k8s_basic, bonfire_basic, jira_basic, quay (~83 tools)
+- **Incident** (production issues): `agent_load("incident")` → k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager (~89 tools)
+- **Release** (shipping): `agent_load("release")` → konflux_basic, quay, jira_basic, git_basic (~91 tools)
+
+> **Note:** All personas include `jira_basic`. Use `tool_exec()` for `_extra` module tools when needed.
 
 ## Available Skills
 

@@ -88,12 +88,12 @@ Instead of chaining tools manually, use pre-built skills:
 ```
 Load the devops agent
 ```
-Tools switch dynamically! You get k8s, bonfire tools (~82 tools).
+Tools switch dynamically! You get k8s_basic, bonfire_basic, jira_basic, quay (~83 tools).
 
 ```
 Load the developer agent
 ```
-Now you have git, gitlab tools (~95 tools).
+Now you have git_basic, gitlab_basic, jira_basic (~78 tools).
 
 ### Run a Skill
 ```
@@ -180,40 +180,44 @@ Personas are tool configuration profiles. **Load one and tools switch dynamicall
 ```
 You: Load the devops agent
 
-[Server unloads current tools, loads k8s/bonfire/quay/gitlab]
+[Server unloads current tools, loads k8s_basic/bonfire_basic/jira_basic/quay]
 [Server sends tools/list_changed to Cursor]
 [Cursor refreshes available tools]
 
-Claude: DevOps persona loaded with ~95 tools!
+Claude: DevOps persona loaded with ~83 tools!
 ```
 
 ### Available Personas
 
 | Persona | Modules | ~Tools | Best For |
 |---------|---------|--------|----------|
-| **devops** | k8s, bonfire, quay, gitlab | ~106 | Ephemeral deployments, K8s ops |
-| **developer** | git, gitlab, jira, lint, dev_workflow | ~106 | Coding, PRs, code review |
-| **incident** | k8s, prometheus, alertmanager, kibana, jira | ~100 | Production debugging |
-| **release** | konflux, quay, appinterface, git, gitlab | ~100 | Shipping releases |
+| **developer** | workflow, git_basic, gitlab_basic, jira_basic | ~78 | Coding, PRs, code review |
+| **devops** | workflow, k8s_basic, bonfire_basic, jira_basic, quay | ~83 | Ephemeral deployments, K8s ops |
+| **incident** | workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager | ~89 | Production debugging |
+| **release** | workflow, konflux_basic, quay, jira_basic, git_basic | ~91 | Shipping releases |
+| **universal** | workflow, git_basic, gitlab_basic, jira_basic, k8s_basic | ~92 | All-in-one |
+| **core** | workflow, git_basic, jira_basic, k8s_basic | ~76 | Essential shared |
 
-### DevOps Persona (`personas/devops.md`)
+> **Note:** All personas include `jira_basic` for issue tracking. Use `tool_exec()` for `_extra` tools.
+
+### DevOps Persona (`personas/devops.md`) ~83 tools
 - Focus: Infrastructure, ephemeral environments, deployments
-- Tools: aa_k8s, aa_bonfire, aa_quay, aa_gitlab
+- Tools: workflow, k8s_basic, bonfire_basic, jira_basic, quay
 - Use when: Deploying to ephemeral, checking namespaces
 
-### Developer Persona (`personas/developer.md`)
+### Developer Persona (`personas/developer.md`) ~78 tools
 - Focus: Coding, PRs, code review
-- Tools: aa_git, aa_gitlab, aa_jira
+- Tools: workflow, git_basic, gitlab_basic, jira_basic
 - Use when: Writing code, creating MRs
 
-### Incident Persona (`personas/incident.md`)
+### Incident Persona (`personas/incident.md`) ~89 tools
 - Focus: Rapid triage, mitigation, recovery
-- Tools: aa_k8s, aa_kibana, aa_jira
+- Tools: workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager
 - Use when: Production incidents
 
-### Release Persona (`personas/release.md`)
+### Release Persona (`personas/release.md`) ~91 tools
 - Focus: Release coordination, deployment
-- Tools: aa_konflux, aa_quay, aa_appinterface, aa_git
+- Tools: workflow, konflux_basic, quay, jira_basic, git_basic
 - Use when: Managing releases
 
 ---

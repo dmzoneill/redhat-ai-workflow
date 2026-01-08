@@ -6,14 +6,15 @@ Personas are **specialized tool configurations** with curated tool sets. Switch 
 
 ## Quick Reference
 
-| Persona | Command | Modules | Focus |
-|---------|---------|---------|-------|
-| [👨‍💻 developer](./developer.md) | `Load developer agent` | 6 | Daily coding, PRs |
-| [🔧 devops](./devops.md) | `Load devops agent` | 5 | Deployments, K8s |
-| [🚨 incident](./incident.md) | `Load incident agent` | 8 | Production debugging |
-| [📦 release](./release.md) | `Load release agent` | 6 | Shipping releases |
-| [💬 slack](./slack.md) | `Load slack agent` | 6 | Slack automation |
-| [🌐 universal](./universal.md) | `Load universal agent` | 10 | All-in-one |
+| Persona | Command | Tools | Focus |
+|---------|---------|-------|-------|
+| [👨‍💻 developer](./developer.md) | `Load developer agent` | ~78 | Daily coding, PRs |
+| [🔧 devops](./devops.md) | `Load devops agent` | ~83 | Deployments, K8s |
+| [🚨 incident](./incident.md) | `Load incident agent` | ~89 | Production debugging |
+| [📦 release](./release.md) | `Load release agent` | ~91 | Shipping releases |
+| [💬 slack](./slack.md) | `Load slack agent` | ~85 | Slack automation |
+| [🌐 universal](./universal.md) | `Load universal agent` | ~92 | All-in-one |
+| [🔹 core](./core.md) | `Load core agent` | ~76 | Essential shared |
 
 ## How Persona Loading Works
 
@@ -40,25 +41,28 @@ You can switch personas at any time:
 
 ```
 You: Load the developer agent
-Claude: 👨‍💻 Developer persona loaded (~95 tools)
+Claude: 👨‍💻 Developer persona loaded (~78 tools)
 
 You: Actually I need to deploy, load devops
-Claude: 🔧 DevOps persona loaded (~95 tools)
+Claude: 🔧 DevOps persona loaded (~83 tools)
         [Tools automatically switch!]
 ```
 
 ## Tool Limit
 
-Each persona is designed to stay under Cursor's 128 tool limit. Tool counts are estimates based on module composition:
+Each persona is designed to stay under Cursor's 128 tool limit. Tool counts are based on split module composition:
 
 | Persona | Modules | Estimated Tools |
 |---------|---------|-----------------|
-| developer | workflow, lint, dev_workflow, git, gitlab, jira | ~106 |
-| devops | workflow, k8s, bonfire, quay, gitlab | ~106 |
-| incident | workflow, k8s, prometheus, alertmanager, kibana, jira, gitlab, slack | ~100 |
-| release | workflow, konflux, quay, appinterface, git, gitlab | ~100 |
-| slack | workflow, slack, jira, k8s, prometheus, alertmanager | ~100 |
-| universal | 10 modules combined | ~120 |
+| developer | workflow, git_basic, gitlab_basic, jira_basic | ~78 |
+| devops | workflow, k8s_basic, bonfire_basic, jira_basic, quay | ~83 |
+| incident | workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager | ~89 |
+| release | workflow, konflux_basic, quay, jira_basic, git_basic | ~91 |
+| slack | workflow, slack, jira_basic, k8s_basic, prometheus_basic | ~85 |
+| universal | workflow, git_basic, gitlab_basic, jira_basic, k8s_basic | ~92 |
+| core | workflow, git_basic, jira_basic, k8s_basic | ~76 |
+
+> **Note:** `_basic` modules contain essential tools. Use `tool_exec()` for `_extra` tools when needed.
 
 ## Persona Tool Modules
 
@@ -66,36 +70,36 @@ All personas include `workflow` module (required for skills/memory).
 
 ```mermaid
 graph TD
-    subgraph Developer["👨‍💻 Developer"]
+    subgraph Developer["👨‍💻 Developer ~78"]
         D_WF[workflow]
-        D_GIT[git]
-        D_GITLAB[gitlab]
-        D_JIRA[jira]
+        D_GIT[git_basic]
+        D_GITLAB[gitlab_basic]
+        D_JIRA[jira_basic]
     end
 
-    subgraph DevOps["🔧 DevOps"]
+    subgraph DevOps["🔧 DevOps ~83"]
         O_WF[workflow]
-        O_K8S[k8s]
-        O_BON[bonfire]
+        O_K8S[k8s_basic]
+        O_BON[bonfire_basic]
+        O_JIRA[jira_basic]
         O_QUAY[quay]
-        O_GITLAB[gitlab]
     end
 
-    subgraph Incident["🚨 Incident"]
+    subgraph Incident["🚨 Incident ~89"]
         I_WF[workflow]
-        I_K8S[k8s]
-        I_PROM[prometheus]
-        I_ALERT[alertmanager]
+        I_K8S[k8s_basic]
+        I_PROM[prometheus_basic]
         I_KIB[kibana]
-        I_JIRA[jira]
+        I_JIRA[jira_basic]
+        I_ALERT[alertmanager]
     end
 
-    subgraph Release["📦 Release"]
+    subgraph Release["📦 Release ~91"]
         R_WF[workflow]
-        R_KON[konflux]
+        R_KON[konflux_basic]
         R_QUAY[quay]
-        R_APP[appinterface]
-        R_GIT[git]
+        R_JIRA[jira_basic]
+        R_GIT[git_basic]
     end
 
     style Developer fill:#3b82f6,stroke:#2563eb,color:#fff
@@ -148,11 +152,15 @@ name: developer
 description: Coding, PRs, and code review
 persona: personas/developer.md
 
+# Using split modules to stay under 100 tools
 tools:
-  - workflow        # 30 tools - REQUIRED for skills/memory
-  - git             # 15 tools
-  - gitlab          # 35 tools
-  - jira            # 24 tools
+  - workflow        # 33 tools - Core (memory, persona, session, skill, infra, meta)
+  - git_basic       # 14 tools - Essential git (status, log, diff, add, commit, push, pull)
+  - gitlab_basic    # 16 tools - MRs, CI/CD basics
+  - jira_basic      # 15 tools - Issue viewing, search, status updates, comments
+
+# Total: ~78 tools ✅
+# Note: git_extra, gitlab_extra, jira_extra available via tool_exec()
 
 skills:
   - coffee

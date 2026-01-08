@@ -6,27 +6,36 @@ Tool modules are MCP plugins that provide specific capabilities. Each module con
 
 ## Quick Reference
 
-| Module | Tools | Description |
-|--------|-------|-------------|
-| [workflow](./workflow.md) | 16 | Core server, agents, skills, memory, vpn_connect, kube_login |
-| [git](./git.md) | 30 | Git operations |
-| [gitlab](./gitlab.md) | 30 | MRs, pipelines, code review |
-| [jira](./jira.md) | 28 | Issue tracking (including set_summary, set_priority, set_epic) |
-| [k8s](./k8s.md) | 28 | Kubernetes operations |
-| [bonfire](./bonfire.md) | 20 | Ephemeral namespaces |
-| [quay](./quay.md) | 8 | Container registry |
-| [prometheus](./prometheus.md) | 13 | Metrics queries |
-| [alertmanager](./alertmanager.md) | 7 | Alert management |
-| [kibana](./kibana.md) | 9 | Log search |
-| [google_calendar](./google_calendar.md) | 6 | Calendar & meetings |
-| [gmail](./gmail.md) | 6 | Email processing |
-| [slack](./slack.md) | 10 | Slack integration |
-| [konflux](./konflux.md) | 35 | Build pipelines |
-| [appinterface](./appinterface.md) | 7 | GitOps config |
-| [lint](./common.md) | 7 | Python/YAML linting, testing |
-| [dev_workflow](./common.md) | 9 | Development workflow helpers |
+Large modules are split into `_basic` and `_extra` variants to allow personas to load only essential tools.
 
-**Total:** ~270 tools across 17 modules
+| Module | Variant | Tools | Description |
+|--------|---------|-------|-------------|
+| [workflow](./workflow.md) | - | 33 | Core: agents, skills, memory, vpn_connect, kube_login |
+| [git](./git.md) | basic | 14 | Essential git (status, log, diff, add, commit, push) |
+| [git](./git.md) | extra | 17 | Advanced git (rebase, merge, reset, docker) |
+| [gitlab](./gitlab.md) | basic | 16 | MRs, CI basics (list, view, create, comment) |
+| [gitlab](./gitlab.md) | extra | 15 | Advanced (approve, merge, rebase, diff) |
+| [jira](./jira.md) | basic | 15 | Essential (view, search, status, comments) |
+| [jira](./jira.md) | extra | 13 | Advanced (sprint, links, flags, priorities) |
+| [k8s](./k8s.md) | basic | 14 | Essential k8s (pods, logs, deployments) |
+| [k8s](./k8s.md) | extra | 14 | Advanced k8s (exec, cp, saas, events) |
+| [bonfire](./bonfire.md) | basic | 10 | Namespace management (reserve, list, release) |
+| [bonfire](./bonfire.md) | extra | 11 | Advanced (deploy, process, full workflow) |
+| [konflux](./konflux.md) | basic | 18 | Pipelines, components, snapshots, status |
+| [konflux](./konflux.md) | extra | 18 | Releases, integration tests, builds |
+| [prometheus](./prometheus.md) | basic | 8 | Queries, alerts, health checks |
+| [prometheus](./prometheus.md) | extra | 5 | Range queries, rules, series |
+| [kibana](./kibana.md) | - | 10 | Log search (not split - already small) |
+| [quay](./quay.md) | - | 11 | Container registry |
+| [alertmanager](./alertmanager.md) | - | 9 | Alert/silence management |
+| [google_calendar](./google_calendar.md) | - | 6 | Calendar & meetings |
+| [gmail](./gmail.md) | - | 6 | Email processing |
+| [slack](./slack.md) | - | 16 | Slack integration |
+| [appinterface](./appinterface.md) | - | 7 | GitOps config |
+| [lint](./common.md) | - | 7 | Python/YAML linting |
+| [dev_workflow](./common.md) | - | 9 | Development helpers |
+
+**Total:** ~270 tools across 17 modules (split into ~30 loadable units)
 
 > Plus **45+ shared parsers** in `scripts/common/parsers.py` for reusable output parsing
 > And **config helpers** in `scripts/common/config_loader.py` for commit format, repo resolution
@@ -126,11 +135,26 @@ Modules are loaded dynamically when you switch agents:
 You: Load devops agent
 
 Claude: [AgentLoader]
-        → Unloading: git, gitlab, jira, google_calendar
-        → Loading: k8s, bonfire, quay, gitlab
+        → Unloading: git_basic, gitlab_basic, jira_basic
+        → Loading: k8s_basic, bonfire_basic, jira_basic, quay
         → Notifying Cursor of tool change
 
-        🔧 DevOps agent ready with ~95 tools
+        🔧 DevOps agent ready with ~83 tools
+```
+
+### Accessing Extra Tools
+
+When you need an advanced tool not in your persona's basic set:
+
+```python
+# Git rebase (in git_extra)
+tool_exec("git_rebase", '{"repo": "backend", "onto": "origin/main"}')
+
+# Jira sprint operations (in jira_extra)
+tool_exec("jira_add_to_sprint", '{"issue_key": "AAP-12345"}')
+
+# Bonfire full deploy (in bonfire_extra)
+tool_exec("bonfire_deploy_aa", '{"namespace": "ephemeral-xxx"}')
 ```
 
 ## Environment Variables
