@@ -11,7 +11,7 @@ CONSTRAINTS:
 
 Setup:
 1. Create OAuth 2.0 credentials in Google Cloud Console
-2. Download credentials.json to ~/.config/google-calendar/credentials.json
+2. Download credentials.json to ~/.config/google_calendar/credentials.json
 3. Run the server once to complete OAuth flow and save token.json
 """
 
@@ -38,7 +38,7 @@ def _get_google_calendar_config_dir() -> Path:
     gc_config = paths_cfg.get("google_calendar_config")
     if gc_config:
         return Path(os.path.expanduser(gc_config))
-    return Path.home() / ".config" / "google-calendar"
+    return Path.home() / ".config" / "google_calendar"
 
 
 # Config paths - use config.json paths section if available

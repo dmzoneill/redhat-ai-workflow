@@ -18,13 +18,13 @@ Tool modules are MCP plugins that provide specific capabilities. Each module con
 | [prometheus](./prometheus.md) | 13 | Metrics queries |
 | [alertmanager](./alertmanager.md) | 7 | Alert management |
 | [kibana](./kibana.md) | 9 | Log search |
-| [google-calendar](./google-calendar.md) | 6 | Calendar & meetings |
+| [google_calendar](./google_calendar.md) | 6 | Calendar & meetings |
 | [gmail](./gmail.md) | 6 | Email processing |
 | [slack](./slack.md) | 10 | Slack integration |
 | [konflux](./konflux.md) | 35 | Build pipelines |
 | [appinterface](./appinterface.md) | 7 | GitOps config |
 | [lint](./common.md) | 7 | Python/YAML linting, testing |
-| [dev-workflow](./common.md) | 9 | Development workflow helpers |
+| [dev_workflow](./common.md) | 9 | Development workflow helpers |
 
 **Total:** ~270 tools across 17 modules
 
@@ -89,7 +89,7 @@ graph TB
 | Module | Purpose |
 |--------|---------|
 | [slack](./slack.md) | Slack message handling |
-| [google-calendar](./google-calendar.md) | Calendar and meetings |
+| [google_calendar](./google_calendar.md) | Calendar and meetings |
 | [gmail](./gmail.md) | Email processing and summarization |
 
 ### 📦 Release
@@ -126,7 +126,7 @@ Modules are loaded dynamically when you switch agents:
 You: Load devops agent
 
 Claude: [AgentLoader]
-        → Unloading: git, gitlab, jira, google-calendar
+        → Unloading: git, gitlab, jira, google_calendar
         → Loading: k8s, bonfire, quay, gitlab
         → Notifying Cursor of tool change
 

@@ -184,7 +184,7 @@ These tools are never unloaded:
 
 | Agent | Modules | Tool Count | Focus |
 |-------|---------|------------|-------|
-| developer | workflow, lint, dev-workflow, git, gitlab, jira | ~106 | Daily coding |
+| developer | workflow, lint, dev_workflow, git, gitlab, jira | ~106 | Daily coding |
 | devops | workflow, k8s, bonfire, quay, gitlab | ~106 | Deployments |
 | incident | workflow, k8s, prometheus, alertmanager, kibana, jira, gitlab, slack | ~100 | Production debugging |
 | release | workflow, konflux, quay, appinterface, git, gitlab | ~100 | Shipping |

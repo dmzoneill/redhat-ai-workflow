@@ -105,5 +105,5 @@ graph LR
 
 ## Related
 
-- [Google Calendar](google-calendar.md) - Shares OAuth credentials
+- [Google Calendar](google_calendar.md) - Shares OAuth credentials
 - [Workflow](workflow.md) - Core workflow tools

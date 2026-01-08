@@ -53,7 +53,7 @@ Each persona is designed to stay under Cursor's 128 tool limit. Tool counts are 
 
 | Persona | Modules | Estimated Tools |
 |---------|---------|-----------------|
-| developer | workflow, lint, dev-workflow, git, gitlab, jira | ~106 |
+| developer | workflow, lint, dev_workflow, git, gitlab, jira | ~106 |
 | devops | workflow, k8s, bonfire, quay, gitlab | ~106 |
 | incident | workflow, k8s, prometheus, alertmanager, kibana, jira, gitlab, slack | ~100 |
 | release | workflow, konflux, quay, appinterface, git, gitlab | ~100 |

@@ -666,7 +666,7 @@
   "google_calendar": {
     "enabled": false,
     "description": "Google Calendar integration for meetings",
-    "config_dir": "~/.config/google-calendar",
+    "config_dir": "~/.config/google_calendar",
     "credentials_file": "credentials.json",
     "token_file": "token.json",
     "timezone": "Europe/Dublin",
@@ -703,7 +703,7 @@
       "3. Enable the Google Calendar API",
       "4. Go to APIs & Services > Credentials",
       "5. Create OAuth 2.0 credentials (Desktop app)",
-      "6. Download and save as ~/.config/google-calendar/credentials.json",
+      "6. Download and save as ~/.config/google_calendar/credentials.json",
       "7. Run google_calendar_status() to complete OAuth"
     ]
   },
@@ -746,7 +746,7 @@
       "3. Enable 'Gmail API'",
       "4. Go to OAuth consent screen > Edit App > Scopes",
       "5. Add gmail.readonly and gmail.modify scopes",
-      "6. Delete ~/.config/google-calendar/token.json",
+      "6. Delete ~/.config/google_calendar/token.json",
       "7. Run google_calendar_status() to re-authenticate"
     ]
   },
@@ -780,7 +780,7 @@
     "kube_base": "/home/YOUR_USER/.kube",
     "docker_config": "/home/YOUR_USER/.docker/config.json",
     "container_auth": "/home/YOUR_USER/.config/containers/auth.json",
-    "google_calendar_config": "/home/YOUR_USER/.config/google-calendar",
+    "google_calendar_config": "/home/YOUR_USER/.config/google_calendar",
     "vpn_connect_script": "/home/YOUR_USER/src/redhatter/src/redhatter_vpn/vpn-connect",
     "workspace_roots": [
       "/home/YOUR_USER/src",

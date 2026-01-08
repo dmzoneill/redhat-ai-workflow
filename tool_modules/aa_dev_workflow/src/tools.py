@@ -552,5 +552,5 @@ gitlab_mr_view(project='{project}', mr_id={mr_id})
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    logger.info(f"Registered {registry.count} dev-workflow tools")
+    logger.info(f"Registered {registry.count} dev_workflow tools")
     return registry.count

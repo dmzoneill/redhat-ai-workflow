@@ -690,7 +690,7 @@ class SkillExecutor:
             "security_": "lint",
             "precommit_": "lint",
             # Dev-workflow module tools (developer-specific)
-            "workflow_": "dev-workflow",
+            "workflow_": "dev_workflow",
             # Core workflow module tools (always loaded)
             "memory_": "workflow",
             "persona_": "workflow",

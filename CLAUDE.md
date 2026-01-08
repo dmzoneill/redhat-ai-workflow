@@ -192,7 +192,7 @@ Claude: DevOps persona loaded with ~106 tools!
 | Persona | Modules | ~Tools | Best For |
 |---------|---------|--------|----------|
 | **devops** | k8s, bonfire, quay, gitlab | ~106 | Ephemeral deployments, K8s ops |
-| **developer** | git, gitlab, jira, lint, dev-workflow | ~106 | Coding, PRs, code review |
+| **developer** | git, gitlab, jira, lint, dev_workflow | ~106 | Coding, PRs, code review |
 | **incident** | k8s, prometheus, alertmanager, kibana, jira | ~100 | Production debugging |
 | **release** | konflux, quay, appinterface, git, gitlab | ~100 | Shipping releases |
 

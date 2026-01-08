@@ -19,7 +19,7 @@ tools:
   - workflow      # 16 - Core (memory, persona, session, skill, infra, meta)
 
 # Total: ~94 tools ✅ UNDER LIMIT
-# Note: Does not include lint/dev-workflow tools - add them for dev work
+# Note: Does not include lint/dev_workflow tools - add them for dev work
 
 # What's available with these tools:
 # ✅ Git operations (status, branch, commit, push)
