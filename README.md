@@ -258,33 +258,46 @@ Skills are reusable multi-step workflows with **built-in auto-healing**. See [fu
 | [✅ close_issue](docs/skills/close_issue.md) | Close issue with summary | ✅ VPN |
 | [📚 update_docs](docs/skills/update_docs.md) | Check/update documentation | ✅ |
 
-### 🔄 Auto-Heal via Python Decorators
+### 🔄 Auto-Heal: Tools + Skills
 
-MCP tools include **auto-healing** via Python decorators (`server/auto_heal_decorator.py`). When a tool fails due to VPN or auth issues:
+**All MCP tools** include auto-healing via Python decorators. **All skills** also auto-retry with VPN/auth fixes.
 
-1. **Checks memory** for known fixes via `check_known_issues()`
-2. **Detects** the failure pattern (network timeout, unauthorized, forbidden)
-3. **Fixes** by calling `vpn_connect()` or `kube_login()`
-4. **Retries** the operation automatically
-5. **Logs** the fix to `memory/learned/tool_failures.yaml` for future reference
+#### Tool-Level Auto-Heal
+
+When a decorated tool fails due to VPN or auth issues:
+
+1. **Detects** the failure pattern (network timeout, unauthorized, forbidden)
+2. **Fixes** by calling `vpn_connect()` or `kube_login()`
+3. **Retries** the operation automatically
+4. **Logs** the fix to `memory/learned/tool_failures.yaml` for learning
 
 ```python
-from server.auto_heal_decorator import auto_heal_k8s
+from server.auto_heal_decorator import auto_heal
 
+@auto_heal()  # Covers all tool types
 @registry.tool()
-@auto_heal_k8s()
-async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
-    """Get pods - auto-heals VPN/auth failures."""
+async def git_push(repo: str, branch: str = "") -> str:
+    """Push commits - auto-heals auth failures."""
     ...
 ```
 
-| Decorator | Use Case |
-|-----------|----------|
-| `@auto_heal_ephemeral()` | Bonfire namespace tools |
-| `@auto_heal_konflux()` | Tekton pipeline tools |
-| `@auto_heal_k8s()` | Kubectl tools |
-| `@auto_heal_jira()` | Jira tools |
-| `@auto_heal_git()` | Git/GitLab tools |
+| Decorator | Use Case | Coverage |
+|-----------|----------|----------|
+| `@auto_heal()` | All tools (auto-detect cluster) | Git, GitLab, Jira + all |
+| `@auto_heal_ephemeral()` | Bonfire namespace tools | Bonfire |
+| `@auto_heal_konflux()` | Tekton pipeline tools | Konflux |
+| `@auto_heal_k8s()` | Kubectl tools | K8s, Prometheus |
+
+#### Skill-Level Auto-Retry
+
+Skills automatically retry failing tools after applying fixes:
+
+1. **Checks memory** for known fixes via `check_known_issues()`
+2. **Detects** auth/network patterns in error output
+3. **Applies** VPN connect or kube_login based on context
+4. **Retries** the tool call once after successful fix
+
+This means skills like `start_work`, `create_mr`, and `deploy_ephemeral` self-heal transparently.
 
 ---
 

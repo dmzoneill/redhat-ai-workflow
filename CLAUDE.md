@@ -417,41 +417,44 @@ ai-workflow/
 7. **Link Jira + GitLab** - Always reference issues in commits/MRs
 8. **Auto-debug on failures** - When a tool fails, call `debug_tool()` to fix it
 
-## 🔧 Auto-Heal: Self-Fixing Skills
+## 🔧 Auto-Heal: Self-Fixing Tools + Skills
 
-Skills now include **auto-heal** capabilities. When a tool fails, the skill:
+**All MCP tools** and **all skills** include auto-heal capabilities.
 
-1. **Detects** the failure pattern (auth, network, registry, etc.)
-2. **Applies** automatic fixes for known issues
-3. **Retries** the operation after fixing
-4. **Logs** the failure to memory for future learning
+### How It Works
+
+**Tool-Level (via `@auto_heal()` decorator):**
+1. Tool fails with auth/network error
+2. Decorator detects pattern and applies fix
+3. Tool is retried automatically
+4. Success logged to memory
+
+**Skill-Level (via `_try_auto_fix()`):**
+1. Skill step fails
+2. Skill engine checks `memory/learned/patterns.yaml` for known fixes
+3. Applies VPN connect or kube_login based on error context
+4. Retries the tool call once
 
 ### Auto-Fixed Error Types
 
 | Error Type | Pattern | Auto-Fix |
 |------------|---------|----------|
-| **auth** | "unauthorized", "401", "forbidden" | `kube_login(cluster)` |
-| **network** | "no route", "timeout", "connection refused" | `vpn_connect()` |
+| **auth** | "unauthorized", "401", "403", "forbidden", "token expired" | `kube_login(cluster)` |
+| **network** | "no route to host", "timeout", "connection refused" | `vpn_connect()` |
 | **registry** | "manifest unknown", "podman login" | Manual: `podman login quay.io` |
 | **tty** | "output is not a tty" | Use `debug_tool()` to add --force |
 
-### Skills with Auto-Heal (15 total)
+### Coverage
 
-- ✅ `test_mr_ephemeral` - bonfire namespace reserve
-- ✅ `deploy_to_ephemeral` - bonfire namespace reserve
-- ✅ `debug_prod` - kubectl get pods
-- ✅ `investigate_alert` - kubectl get pods
-- ✅ `rollout_restart` - kubectl rollout restart
-- ✅ `release_to_prod` - konflux get component
-- ✅ `start_work` - jira view issue
-- ✅ `create_mr` - git push
-- ✅ `konflux_status` - konflux status
-- ✅ `appinterface_check` - appinterface validate
-- ✅ `review_pr` - gitlab mr view
-- ✅ `check_ci_health` - gitlab ci list
-- ✅ `silence_alert` - alertmanager alerts
-- ✅ `extend_ephemeral` - bonfire namespace list
-- ✅ `cancel_pipeline` - tkn pipelinerun list
+| Layer | Coverage | Auto-Heal |
+|-------|----------|-----------|
+| **Git tools** | 31 tools | ✅ All decorated with `@auto_heal()` |
+| **GitLab tools** | 31 tools | ✅ All decorated with `@auto_heal()` |
+| **Jira tools** | 28 tools | ✅ All decorated with `@auto_heal()` |
+| **K8s tools** | 28 tools | ✅ All decorated with `@auto_heal_k8s()` |
+| **Bonfire tools** | 20 tools | ✅ All decorated with `@auto_heal_ephemeral()` |
+| **Konflux tools** | 36 tools | ✅ All decorated with `@auto_heal_konflux()` |
+| **Skills** | 53 skills | ✅ All auto-retry via skill engine |
 
 ### Failure Memory
 
