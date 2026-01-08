@@ -302,7 +302,7 @@ TOOL_REGISTRY = {
         "security_scan",
         "precommit_run",
     ],
-    "dev-workflow": [
+    "dev_workflow": [
         "workflow_start_work",
         "workflow_check_deploy_readiness",
         "workflow_review_feedback",
@@ -314,7 +314,7 @@ TOOL_REGISTRY = {
         "workflow_daily_standup",
     ],
     # === NEW MODULES ===
-    "google-calendar": [
+    "google_calendar": [
         "google_calendar_find_meeting",
         "google_calendar_check_mutual_availability",
         "google_calendar_schedule_meeting",
@@ -375,7 +375,7 @@ MODULE_PREFIXES = {
     "security_": "lint",
     "precommit_": "lint",
     # Dev-workflow module tools (developer-specific)
-    "workflow_": "dev-workflow",
+    "workflow_": "dev_workflow",
     # Core workflow module tools (always loaded)
     "memory_": "workflow",
     "check_known_": "workflow",
@@ -388,7 +388,7 @@ MODULE_PREFIXES = {
     "kube_": "workflow",
     "debug_": "workflow",
     # Google Calendar module
-    "google_calendar_": "google-calendar",
+    "google_calendar_": "google_calendar",
     # Slack module
     "slack_": "slack",
 }

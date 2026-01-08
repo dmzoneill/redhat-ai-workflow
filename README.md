@@ -119,7 +119,7 @@ Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
 You: Load the developer persona
 
 Claude: 👨‍💻 Developer Persona Loaded
-        Tools: git, gitlab, jira, lint, dev-workflow, workflow (~106 tools)
+        Tools: git, gitlab, jira, lint, dev_workflow, workflow (~106 tools)
 
 You: Start working on AAP-12345
 
@@ -335,13 +335,13 @@ async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
 | [prometheus](docs/tool-modules/prometheus.md) | 13 | Metrics queries |
 | [alertmanager](docs/tool-modules/alertmanager.md) | 7 | Alert management |
 | [kibana](docs/tool-modules/kibana.md) | 9 | Log search |
-| [google-calendar](docs/tool-modules/google-calendar.md) | 6 | Calendar & meetings |
+| [google_calendar](docs/tool-modules/google_calendar.md) | 6 | Calendar & meetings |
 | [gmail](docs/tool-modules/gmail.md) | 6 | Email processing |
 | [slack](docs/tool-modules/slack.md) | 10 | Slack integration |
 | [konflux](docs/tool-modules/konflux.md) | 35 | Build pipelines |
 | [appinterface](docs/tool-modules/appinterface.md) | 7 | GitOps config |
 | lint | 7 | Python/YAML linting |
-| dev-workflow | 9 | Development helpers |
+| dev_workflow | 9 | Development helpers |
 
 > Plus **45+ shared parsers** in `scripts/common/parsers.py` and **config helpers** in `scripts/common/config_loader.py`
 

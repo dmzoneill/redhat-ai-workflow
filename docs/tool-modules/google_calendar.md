@@ -1,4 +1,4 @@
-# 📅 google-calendar
+# 📅 google_calendar
 
 > Calendar and meeting management
 

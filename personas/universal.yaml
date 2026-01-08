@@ -9,7 +9,7 @@ persona: personas/developer.md  # Defaults to developer persona, can adopt other
 tools:
   - workflow      # 16 tools - Core (memory, persona, session, skill, infra, meta)
   - lint          # 7 tools - Python/YAML linting, testing
-  - dev-workflow  # 9 tools - Development workflow helpers
+  - dev_workflow  # 9 tools - Development workflow helpers
   - git           # 15 tools - Git operations
   - gitlab        # 35 tools - MRs, CI/CD, pipelines
   - jira          # 24 tools - Issue tracking

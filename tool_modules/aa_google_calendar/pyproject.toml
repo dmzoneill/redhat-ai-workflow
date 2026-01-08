@@ -1,5 +1,5 @@
 [project]
-name = "aa-google-calendar"
+name = "aa-google_calendar"
 version = "0.1.0"
 description = "Google Calendar MCP server for creating meetings"
 requires-python = ">=3.10"

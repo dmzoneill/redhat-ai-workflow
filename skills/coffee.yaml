@@ -102,7 +102,7 @@ steps:
       from datetime import datetime, timedelta
       from zoneinfo import ZoneInfo
 
-      CONFIG_DIR = Path.home() / ".config" / "google-calendar"
+      CONFIG_DIR = Path.home() / ".config" / "google_calendar"
       TOKEN_FILE = CONFIG_DIR / "token.json"
       TIMEZONE = "Europe/Dublin"
       tz = ZoneInfo(TIMEZONE)
@@ -179,7 +179,7 @@ steps:
     compute: |
       from pathlib import Path
 
-      CONFIG_DIR = Path.home() / ".config" / "google-calendar"
+      CONFIG_DIR = Path.home() / ".config" / "google_calendar"
       TOKEN_FILE = CONFIG_DIR / "token.json"
 
       # Get user info for "directed at me" detection

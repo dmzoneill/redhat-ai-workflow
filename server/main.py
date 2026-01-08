@@ -52,9 +52,9 @@ TOOL_MODULES = {
     "appinterface": 7,  # +1 for appinterface_get_user
     "workflow": 28,  # +2 for vpn_connect, kube_login
     "slack": 16,  # +1 for slack_dm_gitlab_user
-    "google-calendar": 5,
+    "google_calendar": 5,
     "lint": 2,
-    "dev-workflow": 2,
+    "dev_workflow": 2,
 }
 
 
@@ -76,7 +76,7 @@ def load_agent_config(agent_name: str) -> list[str] | None:
 
 def get_tool_module(name: str):
     """Dynamically load a tool module."""
-    module_dir = TOOL_MODULES_DIR / f"aa-{name}"
+    module_dir = TOOL_MODULES_DIR / f"aa_{name}"
     if not module_dir.exists():
         return None
 
@@ -146,7 +146,7 @@ def create_mcp_server(
 
         try:
             # Load the module using importlib.util.spec_from_file_location
-            module_dir = TOOL_MODULES_DIR / f"aa-{tool_name}"
+            module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
             tools_file = module_dir / "src" / "tools.py"
 
             if not tools_file.exists():
@@ -168,7 +168,7 @@ def create_mcp_server(
                 loaded_modules.append(tool_name)
                 logger.info(f"Loaded {tool_name} tools")
             else:
-                logger.warning(f"Module aa-{tool_name} has no register_tools function")
+                logger.warning(f"Module aa_{tool_name} has no register_tools function")
 
         except Exception as e:
             logger.error(f"Error loading {tool_name}: {e}")
@@ -181,7 +181,7 @@ def create_mcp_server(
 
         # Register all loaded tools in the debug registry (for source lookup)
         for tool_name in loaded_modules:
-            module_dir = TOOL_MODULES_DIR / f"aa-{tool_name}"
+            module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
             tools_file = module_dir / "src" / "tools.py"
             if tools_file.exists():
                 # Import and register in debug registry

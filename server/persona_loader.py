@@ -45,9 +45,9 @@ TOOL_MODULES = {
     "appinterface": 6,
     "workflow": 16,  # Core only (memory, persona, session, skill, infra, meta)
     "lint": 7,  # Developer-specific linting/testing tools
-    "dev-workflow": 9,  # Developer-specific workflow tools
+    "dev_workflow": 9,  # Developer-specific workflow tools
     "slack": 8,  # Removed: 7 daemon/internal tools
-    "google-calendar": 6,
+    "google_calendar": 6,
 }
 
 # Core tools that should never be removed

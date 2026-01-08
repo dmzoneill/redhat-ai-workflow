@@ -14,9 +14,9 @@ from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect
 
 
 def main():
-    """Run the google-calendar-only MCP server."""
+    """Run the google_calendar-only MCP server."""
     setup_logging()
-    server = create_mcp_server(name="aa_google_calendar", tools=["google-calendar"])
+    server = create_mcp_server(name="aa_google_calendar", tools=["google_calendar"])
     asyncio.run(run_mcp_server(server))
 
 

@@ -19,7 +19,7 @@ Load the developer agent
 | [git](../tool_modules/git.md) | 15 | Git operations |
 | [gitlab](../tool_modules/gitlab.md) | 35 | MRs, pipelines, code review |
 | [jira](../tool_modules/jira.md) | 24 | Issue tracking |
-| [google-calendar](../tool_modules/google-calendar.md) | 6 | Calendar & meetings |
+| [google_calendar](../tool_modules/google_calendar.md) | 6 | Calendar & meetings |
 
 **Total:** ~106 tools (6 modules)
 

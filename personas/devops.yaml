@@ -15,7 +15,7 @@ tools:
 
 # Total: ~106 tools (under 128 limit)
 # Focused on ephemeral deployment and debugging
-# Note: Does not include lint/dev-workflow tools - use developer persona for those
+# Note: Does not include lint/dev_workflow tools - use developer persona for those
 
 skills:
   # Ephemeral environments
