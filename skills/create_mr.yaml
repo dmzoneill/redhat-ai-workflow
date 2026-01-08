@@ -70,6 +70,18 @@ inputs:
     default: false
     description: "Use Slack link format"
 
+  - name: check_docs
+    type: boolean
+    required: false
+    default: true
+    description: "Check documentation for staleness (if docs.check_on_mr=true in config)"
+
+  - name: skip_docs_warning
+    type: boolean
+    required: false
+    default: false
+    description: "Skip documentation warnings (proceed even if docs need updating)"
+
 # jira_url loaded from config.json in load_config step
 
 steps:
@@ -488,6 +500,71 @@ steps:
       )
     output: lint_block
 
+  # ==================== DOCUMENTATION CHECK ====================
+
+  - name: check_docs_config
+    description: "Check if docs should be checked for this repo"
+    condition: "inputs.check_docs"
+    compute: |
+      from scripts.common.config_loader import load_config
+
+      config = load_config()
+      repos = config.get("repositories", {})
+
+      # Find repo config by path
+      docs_config = None
+      for key, cfg in repos.items():
+          if cfg.get("path") == resolved_repo["path"]:
+              docs_config = cfg.get("docs", {})
+              break
+
+      should_check = docs_config and docs_config.get("enabled", False) and docs_config.get("check_on_mr", True)
+
+      result = {
+          "should_check": should_check,
+          "docs_config": docs_config or {},
+      }
+    output: docs_config_check
+
+  - name: run_docs_check
+    description: "Run documentation check skill"
+    condition: "inputs.check_docs and docs_config_check and docs_config_check.should_check"
+    tool: skill_run
+    args:
+      skill_name: update_docs
+      inputs: '{"repo": "{{ resolved_repo.path }}", "issue_key": "{{ inputs.issue_key }}", "check_only": true}'
+      execute: true
+    output: docs_check_result
+    on_error: continue
+
+  - name: parse_docs_result
+    description: "Parse documentation check results"
+    condition: "inputs.check_docs and docs_config_check and docs_config_check.should_check"
+    compute: |
+      result_text = str(docs_check_result) if 'docs_check_result' in dir() and docs_check_result else ""
+
+      needs_attention = "Issues Found" in result_text or "Suggestions" in result_text
+      has_issues = "❌" in result_text
+
+      result = {
+          "needs_attention": needs_attention,
+          "has_issues": has_issues,
+          "warning_shown": needs_attention,
+      }
+    output: docs_result
+
+  - name: warn_about_docs
+    description: "Warn about documentation issues (non-blocking)"
+    condition: "inputs.check_docs and docs_result and docs_result.needs_attention and not inputs.skip_docs_warning"
+    compute: |
+      # This is a warning, not a blocker
+      # The user can proceed but should be aware
+      result = {
+          "warning": "📚 Documentation may need updating. Review the docs check output above.",
+          "action": "Consider updating docs before marking MR as ready for review.",
+      }
+    output: docs_warning
+
   # ==================== JIRA INTEGRATION ====================
 
   - name: get_issue
@@ -785,11 +862,21 @@ outputs:
       | Black | {{ "✅ Passed" if black_result and black_result.passed else "⚠️ " + (black_result.message if black_result else "Skipped") }} |
       | Flake8 | {{ "✅ Passed" if flake8_result and flake8_result.passed else "⚠️ " + (flake8_result.message if flake8_result else "Skipped") }} |
       {% endif %}
+      {% if inputs.check_docs and docs_config_check and docs_config_check.should_check %}
+      | Docs | {{ "⚠️ Needs attention" if docs_result and docs_result.needs_attention else "✅ OK" }} |
+      {% endif %}
 
       {% if not merge_check.mergeable %}
       ---
       ### ⚠️ Action Required
       {{ merge_check.message }}
+      {% endif %}
+
+      {% if docs_warning and docs_warning.warning %}
+      ---
+      ### 📚 Documentation
+      {{ docs_warning.warning }}
+      {{ docs_warning.action }}
       {% endif %}
 
       {% if mr %}

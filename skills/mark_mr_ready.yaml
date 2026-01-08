@@ -45,6 +45,12 @@ inputs:
     default: ""
     description: "Repository path for linting (auto-detected if not provided)"
 
+  - name: check_docs
+    type: boolean
+    required: false
+    default: true
+    description: "Check documentation before marking ready (if docs.check_on_mr=true in config)"
+
 steps:
 
   - name: init_autoheal
@@ -218,6 +224,34 @@ steps:
       )
     output: lint_block
 
+  # ==================== DOCUMENTATION CHECK ====================
+
+  - name: run_docs_check
+    description: "Check documentation before marking ready"
+    condition: "inputs.check_docs and lint_repo and lint_repo.get('path')"
+    tool: skill_run
+    args:
+      skill_name: update_docs
+      inputs: '{"repo": "{{ lint_repo.path }}", "check_only": true}'
+      execute: true
+    output: docs_check_result
+    on_error: continue
+
+  - name: parse_docs_result
+    description: "Parse documentation check results"
+    condition: "inputs.check_docs"
+    compute: |
+      result_text = str(docs_check_result) if 'docs_check_result' in dir() and docs_check_result else ""
+
+      needs_attention = "Issues Found" in result_text or "Suggestions" in result_text
+      skipped = "Skipped" in result_text or "not enabled" in result_text.lower()
+
+      result = {
+          "needs_attention": needs_attention and not skipped,
+          "skipped": skipped,
+      }
+    output: docs_result
+
   # Step 4: Mark as ready (remove draft)
   - name: mark_ready
     description: "Remove draft status from MR"
@@ -312,6 +346,8 @@ outputs:
 
       | Step | Result |
       |------|--------|
+      {% if inputs.run_linting %}| Linting | {{ "✅ Passed" if lint_result and lint_result.passed else "⏭️ Skipped" }} |{% endif %}
+      {% if inputs.check_docs %}| Docs check | {{ "⚠️ Needs attention" if docs_result and docs_result.needs_attention else "✅ OK" if not docs_result.skipped else "⏭️ Skipped" }} |{% endif %}
       | Remove draft | {{ "✅ Done" if "Updated" in str(update_result) else "❌ Failed" }} |
       | Slack notification | {{ "✅ Posted" if slack_result else "⏭️ Skipped" }} |
       {% if mr_info.jira_key %}| Jira status | {{ "✅ Updated" if jira_result else "⏭️ Skipped" }} |{% endif %}
