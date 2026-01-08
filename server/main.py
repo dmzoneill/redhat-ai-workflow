@@ -39,15 +39,38 @@ TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
 
 # Available tool modules - we'll load them dynamically
 # Tool counts updated 2025-01-08
+# Modules with _basic/_extra variants load from tools_basic.py/tools_extra.py
 TOOL_MODULES = {
     "workflow": 33,  # Core: memory, persona, session, skill, infra, meta
-    "git": 31,  # Git operations
-    "jira": 29,  # Issue tracking
-    "gitlab": 31,  # MRs, CI/CD, issues
-    "k8s": 28,  # Kubernetes operations
-    "bonfire": 21,  # Ephemeral namespaces
-    "konflux": 36,  # Builds, pipelines
-    "prometheus": 15,  # Metrics and alerts
+    # Git - split into basic and extra
+    "git": 31,  # All git tools (loads both basic + extra)
+    "git_basic": 14,  # Basic: status, log, diff, add, commit, push, pull, fetch, etc.
+    "git_extra": 17,  # Extra: rebase, merge, reset, clean, docker, make, lint
+    # Jira - split into basic and extra
+    "jira": 29,  # All jira tools
+    "jira_basic": 15,  # Basic: view, search, list, my_issues, set_status, comment
+    "jira_extra": 14,  # Extra: create, clone, links, flags, sprints
+    # GitLab - split into basic and extra
+    "gitlab": 31,  # All gitlab tools
+    "gitlab_basic": 16,  # Basic: mr_list, mr_view, mr_create, ci_status, ci_list
+    "gitlab_extra": 15,  # Extra: mr_approve, mr_merge, ci_run, issues, releases
+    # K8s - split into basic and extra
+    "k8s": 28,  # All k8s tools
+    "k8s_basic": 14,  # Basic: get_pods, logs, describe, deployments
+    "k8s_extra": 14,  # Extra: exec, cp, scale, rollout, secrets
+    # Konflux - split into basic and extra
+    "konflux": 36,  # All konflux tools
+    "konflux_basic": 18,  # Basic: list_pipelines, status, components, snapshots
+    "konflux_extra": 18,  # Extra: releases, builds, integration tests, tkn commands
+    # Bonfire - split into basic and extra
+    "bonfire": 21,  # All bonfire tools
+    "bonfire_basic": 10,  # Basic: reserve, list, describe, release, extend
+    "bonfire_extra": 11,  # Extra: deploy, deploy_aa, process, iqe
+    # Prometheus - split into basic and extra
+    "prometheus": 15,  # All prometheus tools
+    "prometheus_basic": 8,  # Basic: query, alerts, health, targets
+    "prometheus_extra": 7,  # Extra: query_range, rules, series, labels, pre_deploy
+    # Other modules (no split needed)
     "alertmanager": 9,  # Silence management
     "kibana": 10,  # Log search
     "quay": 11,  # Container images
@@ -146,9 +169,20 @@ def create_mcp_server(
             continue
 
         try:
-            # Load the module using importlib.util.spec_from_file_location
-            module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
-            tools_file = module_dir / "src" / "tools.py"
+            # Handle _basic and _extra variants
+            # e.g., "git_basic" -> module "aa_git", file "tools_basic.py"
+            # e.g., "git" -> module "aa_git", file "tools.py" (loads all)
+            if tool_name.endswith("_basic"):
+                base_name = tool_name[:-6]  # Remove "_basic"
+                module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+                tools_file = module_dir / "src" / "tools_basic.py"
+            elif tool_name.endswith("_extra"):
+                base_name = tool_name[:-6]  # Remove "_extra"
+                module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+                tools_file = module_dir / "src" / "tools_extra.py"
+            else:
+                module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
+                tools_file = module_dir / "src" / "tools.py"
 
             if not tools_file.exists():
                 logger.warning(f"Tools file not found: {tools_file}")
@@ -182,8 +216,19 @@ def create_mcp_server(
 
         # Register all loaded tools in the debug registry (for source lookup)
         for tool_name in loaded_modules:
-            module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
-            tools_file = module_dir / "src" / "tools.py"
+            # Handle _basic/_extra variants for debug registry
+            if tool_name.endswith("_basic"):
+                base_name = tool_name[:-6]
+                module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+                tools_file = module_dir / "src" / "tools_basic.py"
+            elif tool_name.endswith("_extra"):
+                base_name = tool_name[:-6]
+                module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+                tools_file = module_dir / "src" / "tools_extra.py"
+            else:
+                module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
+                tools_file = module_dir / "src" / "tools.py"
+
             if tools_file.exists():
                 # Import and register in debug registry
                 import importlib.util
