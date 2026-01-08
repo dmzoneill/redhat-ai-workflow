@@ -20,7 +20,7 @@ Load the slack agent
 | [jira](../tool-modules/jira.md) | 24 | Issue tracking |
 | [gitlab](../tool-modules/gitlab.md) | 35 | MRs and pipelines |
 
-**Total:** ~100 tools (6 modules)
+**Total:** ~80 tools (6 modules)
 
 ## Installation
 

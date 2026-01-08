@@ -22,7 +22,7 @@ Load the incident agent
 | [kibana](../tool_modules/kibana.md) | 9 | Log search |
 | [jira](../tool_modules/jira.md) | 24 | Incident tracking |
 
-**Total:** ~100 tools (8 modules)
+**Total:** ~80 tools (8 modules)
 
 ## Skills Available
 

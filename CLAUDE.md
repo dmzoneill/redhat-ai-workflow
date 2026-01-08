@@ -88,12 +88,12 @@ Instead of chaining tools manually, use pre-built skills:
 ```
 Load the devops agent
 ```
-Tools switch dynamically! You go from ~16 workflow tools to ~106 devops tools.
+Tools switch dynamically! You get k8s, bonfire tools (~82 tools).
 
 ```
 Load the developer agent
 ```
-Now you have git, gitlab, jira tools (~106 tools).
+Now you have git, gitlab tools (~95 tools).
 
 ### Run a Skill
 ```
@@ -184,7 +184,7 @@ You: Load the devops agent
 [Server sends tools/list_changed to Cursor]
 [Cursor refreshes available tools]
 
-Claude: DevOps persona loaded with ~106 tools!
+Claude: DevOps persona loaded with ~95 tools!
 ```
 
 ### Available Personas

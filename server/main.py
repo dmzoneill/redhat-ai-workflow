@@ -38,23 +38,24 @@ PROJECT_DIR = Path(__file__).parent.parent  # ai-workflow root
 TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
 
 # Available tool modules - we'll load them dynamically
+# Tool counts updated 2025-01-08
 TOOL_MODULES = {
-    "git": 15,
-    "jira": 24,
-    "gitlab": 35,
-    "k8s": 26,
-    "prometheus": 13,
-    "alertmanager": 6,
-    "kibana": 9,
-    "konflux": 40,
-    "bonfire": 21,
-    "quay": 8,
-    "appinterface": 7,  # +1 for appinterface_get_user
-    "workflow": 28,  # +2 for vpn_connect, kube_login
-    "slack": 16,  # +1 for slack_dm_gitlab_user
-    "google_calendar": 5,
-    "lint": 2,
-    "dev_workflow": 2,
+    "workflow": 33,  # Core: memory, persona, session, skill, infra, meta
+    "git": 31,  # Git operations
+    "jira": 29,  # Issue tracking
+    "gitlab": 31,  # MRs, CI/CD, issues
+    "k8s": 28,  # Kubernetes operations
+    "bonfire": 21,  # Ephemeral namespaces
+    "konflux": 36,  # Builds, pipelines
+    "prometheus": 15,  # Metrics and alerts
+    "alertmanager": 9,  # Silence management
+    "kibana": 10,  # Log search
+    "quay": 11,  # Container images
+    "appinterface": 7,  # GitOps config
+    "slack": 48,  # Slack messaging
+    "google_calendar": 6,  # Calendar/meetings
+    "lint": 7,  # Linting tools
+    "dev_workflow": 9,  # Development helpers
 }
 
 

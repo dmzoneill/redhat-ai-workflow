@@ -31,7 +31,7 @@ sequenceDiagram
     MCP->>Cursor: tools/list_changed notification
     Cursor->>Cursor: Refresh tool list
     MCP-->>Claude: Persona + tool count
-    Claude-->>User: "🔧 DevOps persona loaded with ~106 tools"
+    Claude-->>User: "🔧 DevOps persona loaded with ~95 tools"
 ```
 
 ## Switching Personas
@@ -40,10 +40,10 @@ You can switch personas at any time:
 
 ```
 You: Load the developer agent
-Claude: 👨‍💻 Developer persona loaded (~106 tools)
+Claude: 👨‍💻 Developer persona loaded (~95 tools)
 
 You: Actually I need to deploy, load devops
-Claude: 🔧 DevOps persona loaded (~106 tools)
+Claude: 🔧 DevOps persona loaded (~95 tools)
         [Tools automatically switch!]
 ```
 

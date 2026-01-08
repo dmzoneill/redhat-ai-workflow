@@ -6,20 +6,19 @@ name: core
 description: Shared tools for all 4 agents with persona switching
 
 # Essential tools covering all workflows
+# Target: ~80 tools - use tool_exec() for other modules
 tools:
-  # Version Control & Issues (developer, all personas)
-  - git           # 15 - Git operations
-  - jira          # 24 - Issue tracking
+  # Version Control (developer, all personas)
+  - git           # 31 - Git operations
 
   # Kubernetes & Monitoring (devops, incident)
-  - k8s           # 26 - Kubernetes operations
-  - prometheus    # 13 - Alerts and metrics
+  - k8s           # 28 - Kubernetes operations
 
   # Orchestration (required - skills, personas, memory)
-  - workflow      # 16 - Core (memory, persona, session, skill, infra, meta)
+  - workflow      # 33 - Core (memory, persona, session, skill, infra, meta)
 
-# Total: ~94 tools ✅ UNDER LIMIT
-# Note: Does not include lint/dev_workflow tools - add them for dev work
+# Total: ~92 tools
+# Note: jira, prometheus available via tool_exec()
 
 # What's available with these tools:
 # ✅ Git operations (status, branch, commit, push)

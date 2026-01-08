@@ -59,11 +59,11 @@ Specialized personas with curated tool sets:
 
 | Agent | Focus | Modules |
 |-------|-------|---------|
-| developer | Coding, PRs | 6 modules (~106 tools) |
-| devops | Deployments, K8s | 5 modules (~106 tools) |
-| incident | Production debugging | 8 modules (~100 tools) |
-| release | Shipping | 6 modules (~100 tools) |
-| slack | Slack bot daemon | 6 modules (~100 tools) |
+| developer | Coding, PRs | 6 modules (~95 tools) |
+| devops | Deployments, K8s | 5 modules (~95 tools) |
+| incident | Production debugging | 8 modules (~80 tools) |
+| release | Shipping | 6 modules (~80 tools) |
+| slack | Slack bot daemon | 6 modules (~80 tools) |
 
 ### ⚡ Skills
 
@@ -114,7 +114,7 @@ sequenceDiagram
     MCP->>Cursor: tools/list_changed notification
     Cursor->>Cursor: Refresh tool list
     Loader-->>MCP: Agent persona
-    MCP-->>Claude: "Loaded ~106 tools"
+    MCP-->>Claude: "Loaded ~95 tools"
 ```
 
 ## Tool Modules

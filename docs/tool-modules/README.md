@@ -130,7 +130,7 @@ Claude: [AgentLoader]
         → Loading: k8s, bonfire, quay, gitlab
         → Notifying Cursor of tool change
 
-        🔧 DevOps agent ready with ~106 tools
+        🔧 DevOps agent ready with ~95 tools
 ```
 
 ## Environment Variables

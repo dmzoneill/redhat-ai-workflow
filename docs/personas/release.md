@@ -21,7 +21,7 @@ Load the release agent
 | [appinterface](../tool_modules/appinterface.md) | 6 | GitOps config |
 | [git](../tool_modules/git.md) | 15 | App-interface changes |
 
-**Total:** ~100 tools (6 modules)
+**Total:** ~80 tools (6 modules)
 
 ## Skills Available
 

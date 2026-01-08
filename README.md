@@ -111,7 +111,7 @@ Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
 
 </details>
 
-> **Default Persona:** The server starts with the `developer` persona loaded by default (~106 tools). Use `persona_load("devops")` to switch.
+> **Default Persona:** The server starts with the `developer` persona loaded by default (~95 tools). Use `persona_load("devops")` to switch.
 
 ### 3️⃣ Restart & Go!
 
@@ -119,7 +119,7 @@ Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
 You: Load the developer persona
 
 Claude: 👨‍💻 Developer Persona Loaded
-        Tools: git, gitlab, jira, lint, dev_workflow, workflow (~106 tools)
+        Tools: git, gitlab, jira, lint, dev_workflow, workflow (~95 tools)
 
 You: Start working on AAP-12345
 
@@ -398,7 +398,7 @@ Claude: 📋 Session Started
            - Jira CLI: 3 patterns
            - Error handling: 5 patterns
            - Authentication: 4 patterns
-        🛠️ Currently Loaded Tools: git, gitlab, jira (~106 tools)
+        🛠️ Currently Loaded Tools: git, gitlab, jira (~95 tools)
 ```
 
 ### Memory Files

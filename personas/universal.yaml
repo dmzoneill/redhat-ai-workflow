@@ -6,18 +6,15 @@ description: Combined developer and devops capabilities for full workflow suppor
 persona: personas/developer.md  # Defaults to developer persona, can adopt others
 
 # Tool modules to load (from tool_modules/aa_*)
+# Target: ~80 tools - use tool_exec() for modules not loaded
 tools:
-  - workflow      # 16 tools - Core (memory, persona, session, skill, infra, meta)
-  - lint          # 7 tools - Python/YAML linting, testing
-  - dev_workflow  # 9 tools - Development workflow helpers
-  - git           # 15 tools - Git operations
-  - gitlab        # 35 tools - MRs, CI/CD, pipelines
-  - jira          # 24 tools - Issue tracking
-  - bonfire       # 21 tools - Ephemeral namespaces + deploys
-  # - quay        # 8 tools - Image checks (use skopeo directly if needed)
-  # - k8s         # 26 tools - Kubernetes (add if you need pod inspection)
+  - workflow      # 33 tools - Core (memory, persona, session, skill, infra, meta)
+  - git           # 31 tools - Git operations
+  - gitlab        # 31 tools - MRs, CI/CD, pipelines
+  # - jira        # 29 tools - Available via tool_exec()
+  # - bonfire     # 21 tools - Available via tool_exec()
 
-# Total: ~127 tools (under 128 limit)
+# Total: ~95 tools
 #
 # Persona switching: Tools are fixed at startup, but persona changes via persona_load().
 # When you say "load devops agent", Claude adopts the devops focus/expertise
