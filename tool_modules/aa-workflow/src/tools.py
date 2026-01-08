@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -216,7 +216,7 @@ run_cmd = run_cmd_full
 def resolve_path(repo: str) -> str:
     """Resolve repo name to path."""
     if repo in REPO_PATHS:
-        return REPO_PATHS[repo]
+        return cast(str, REPO_PATHS[repo])
     # Try shared resolver
     resolved = resolve_repo_path(repo)
     if os.path.isdir(resolved):
@@ -241,13 +241,13 @@ try:
     from .session_tools import register_prompts, register_session_tools
     from .skill_engine import register_skill_tools
 except ImportError:
-    from infra_tools import register_infra_tools
-    from memory_tools import register_memory_tools
-    from meta_tools import register_meta_tools
-    from persona_tools import register_persona_tools
-    from resources import register_resources
-    from session_tools import register_prompts, register_session_tools
-    from skill_engine import register_skill_tools
+    from infra_tools import register_infra_tools  # type: ignore[no-redef]
+    from memory_tools import register_memory_tools  # type: ignore[no-redef]
+    from meta_tools import register_meta_tools  # type: ignore[no-redef]
+    from persona_tools import register_persona_tools  # type: ignore[no-redef]
+    from resources import register_resources  # type: ignore[no-redef]
+    from session_tools import register_prompts, register_session_tools  # type: ignore[no-redef]
+    from skill_engine import register_skill_tools  # type: ignore[no-redef]
 
 
 def register_tools(server: "FastMCP") -> int:
@@ -259,7 +259,7 @@ def register_tools(server: "FastMCP") -> int:
     - persona_tools: 2 tools for persona management
     - session_tools: 1 tool + 3 prompts for session management
     - resources: 8 MCP resources for config/state
-    - skill_engine: 2 tools for skill execution
+    - skill_engine: 2 tools for skill execution (with Claude Code integration)
     - infra_tools: 2 tools for VPN/Kube auth
     - meta_tools: 2 tools for dynamic tool loading
 
@@ -269,13 +269,30 @@ def register_tools(server: "FastMCP") -> int:
     """
     tool_count = 0
 
+    # Detect Claude Code and set up AskUserQuestion integration
+    try:
+        from .claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
+
+        capabilities = get_claude_code_capabilities()
+        logger.info(f"Claude Code detection: {capabilities}")
+
+        # Create AskUserQuestion wrapper if available
+        ask_question_fn = create_ask_question_wrapper(server)
+        if ask_question_fn:
+            logger.info("✅ AskUserQuestion integration enabled - using native Claude Code UI")
+        else:
+            logger.info("ℹ️  AskUserQuestion not available - using CLI fallback for skill errors")
+    except ImportError:
+        logger.debug("Claude Code integration module not available")
+        ask_question_fn = None
+
     # Register CORE tools only
     tool_count += register_memory_tools(server)
     tool_count += register_persona_tools(server)
     tool_count += register_session_tools(server)
     tool_count += register_prompts(server)
     tool_count += register_resources(server, load_config)
-    tool_count += register_skill_tools(server, create_github_issue)
+    tool_count += register_skill_tools(server, create_github_issue, ask_question_fn)
     tool_count += register_infra_tools(server)
     tool_count += register_meta_tools(server, create_github_issue)
 
