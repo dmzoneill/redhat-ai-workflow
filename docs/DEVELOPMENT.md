@@ -121,38 +121,39 @@ pre-commit run --all-files
 ```
 redhat-ai-workflow/
 ├── personas/                    # Agent persona definitions (YAML)
-├── skills/                      # 50 workflow skill definitions (YAML)
+├── skills/                      # 53 workflow skill definitions (YAML)
 ├── memory/                      # Persistent memory storage
 │   ├── state/                   # Active issues, MRs, environments
 │   └── learned/                 # Patterns, tool fixes, runbooks
-├── tool_modules/                # MCP tool modules (16 modules, 260+ tools)
-│   ├── server/                  # Core server, shared utilities
-│   ├── aa-workflow/             # Workflow tools (30 tools)
-│   ├── aa-git/                  # Git operations (19 tools)
-│   ├── aa-gitlab/               # GitLab integration (35 tools)
+├── tool_modules/                # MCP tool modules (17 modules, ~270 tools)
+│   ├── aa-workflow/             # Workflow tools (16 tools)
+│   ├── aa-git/                  # Git operations (30 tools)
+│   ├── aa-gitlab/               # GitLab integration (30 tools)
 │   ├── aa-jira/                 # Jira integration (28 tools)
-│   ├── aa-k8s/                  # Kubernetes operations (26 tools)
-│   ├── aa-bonfire/              # Ephemeral environments (21 tools)
+│   ├── aa-k8s/                  # Kubernetes operations (28 tools)
+│   ├── aa-bonfire/              # Ephemeral environments (20 tools)
 │   ├── aa-quay/                 # Container registry (8 tools)
 │   ├── aa-prometheus/           # Metrics queries (13 tools)
 │   ├── aa-alertmanager/         # Alert management (7 tools)
 │   ├── aa-kibana/               # Log search (9 tools)
 │   ├── aa-google-calendar/      # Calendar integration (6 tools)
 │   ├── aa-gmail/                # Email processing (6 tools)
-│   ├── aa-slack/                # Slack integration (16 tools)
-│   ├── aa-konflux/              # Build pipelines (40 tools)
-│   └── aa-appinterface/         # App-interface config (8 tools)
+│   ├── aa-slack/                # Slack integration (10 tools)
+│   ├── aa-konflux/              # Build pipelines (35 tools)
+│   ├── aa-appinterface/         # App-interface config (7 tools)
+│   ├── aa-lint/                 # Linting tools (7 tools)
+│   └── aa-dev-workflow/         # Dev workflow helpers (9 tools)
 ├── scripts/                     # Python utilities
 │   ├── common/                  # Shared modules
 │   │   ├── config_loader.py     # Configuration loading
-│   │   ├── parsers.py           # Output parsers (44 functions)
+│   │   ├── parsers.py           # Output parsers (45+ functions)
 │   │   └── auto_heal.py         # Skill auto-healing utilities
 │   ├── claude_agent.py          # Slack bot AI agent
 │   └── slack_daemon.py          # Slack bot daemon
 ├── tests/                       # Test suite
 ├── docs/                        # Documentation
 ├── config/                      # Additional config modules
-└── .cursor/commands/            # 63 Cursor slash commands
+└── .cursor/commands/            # 64 Cursor slash commands
 ```
 
 ## Adding New Tools
@@ -518,14 +519,23 @@ If a skill's auto-heal isn't working:
 
 ### Commit Messages
 
-```
-type: brief description
+Follow the format defined in `config.json`:
 
-- Detail 1
-- Detail 2
+```
+{issue_key} - {type}({scope}): {description}
 ```
 
-Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+**Examples:**
+- `AAP-12345 - feat: add user authentication`
+- `AAP-12345 - fix(api): handle null response`
+
+Use the `git_commit` tool for auto-formatting:
+
+```python
+git_commit(repo=".", message="add feature", issue_key="AAP-12345", commit_type="feat")
+```
+
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `style`, `perf`
 
 ### Documentation
 

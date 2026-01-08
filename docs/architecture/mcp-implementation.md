@@ -7,7 +7,7 @@
 1. **Single MCP Server**: One server loads/unloads tools dynamically based on active persona
 2. **Dynamic Persona Loading**: Switch personas mid-session with tools updating automatically
 3. **Tool Modules**: Each domain has tools in a `tools.py` with `register_tools(server)` function
-4. **Auto-Debug**: All tools wrapped with `@debuggable` for self-healing capabilities
+4. **Auto-Heal**: Tools wrapped with `@auto_heal` decorators for VPN/auth recovery
 5. **Dual Mode**: Each module can run standalone OR be loaded as a plugin
 
 ## Quick Start
@@ -34,30 +34,32 @@ Add to your project's `.cursor/mcp.json`:
 server/                           # Core infrastructure
 ├── main.py                       # Main server entry point
 ├── persona_loader.py             # Dynamic persona/tool loading
-├── debuggable.py                 # Auto-debug decorator
+├── auto_heal_decorator.py        # Auto-heal decorators
 └── utils.py                      # Shared utilities
 
 tool_modules/                     # Tool plugins
 │
-├── aa-git/                       # Git operations (19 tools)
+├── aa-git/                       # Git operations (30 tools)
 │   ├── src/
 │   │   ├── tools.py              # register_tools(server) function
 │   │   └── server.py             # Standalone wrapper
 │   └── pyproject.toml
 │
-├── aa-gitlab/                    # GitLab MRs & pipelines (35 tools)
-├── aa-jira/                      # Jira issues (24 tools)
-├── aa-k8s/                       # Kubernetes operations (26 tools)
-├── aa-bonfire/                   # Ephemeral environments (21 tools)
+├── aa-gitlab/                    # GitLab MRs & pipelines (30 tools)
+├── aa-jira/                      # Jira issues (28 tools)
+├── aa-k8s/                       # Kubernetes operations (28 tools)
+├── aa-bonfire/                   # Ephemeral environments (20 tools)
 ├── aa-quay/                      # Container registry (8 tools)
 ├── aa-prometheus/                # Metrics queries (13 tools)
-├── aa-alertmanager/              # Alert management (6 tools)
+├── aa-alertmanager/              # Alert management (7 tools)
 ├── aa-kibana/                    # Log search (9 tools)
 ├── aa-google-calendar/           # Calendar & meetings (6 tools)
 ├── aa-gmail/                     # Email processing (6 tools)
-├── aa-slack/                     # Slack integration (15 tools)
-├── aa-konflux/                   # Build pipelines (40 tools)
-└── aa-appinterface/              # App-interface config (6 tools)
+├── aa-slack/                     # Slack integration (10 tools)
+├── aa-konflux/                   # Build pipelines (35 tools)
+├── aa-appinterface/              # App-interface config (7 tools)
+├── aa-lint/                      # Linting tools (7 tools)
+└── aa-dev-workflow/              # Dev workflow helpers (9 tools)
 ```
 
 ## Tool Module Pattern
@@ -133,7 +135,7 @@ sequenceDiagram
     MCP->>Cursor: tools/list_changed notification
     Cursor->>Cursor: Refresh tool list
     Loader-->>MCP: Agent persona
-    MCP-->>Claude: "Loaded 90 tools"
+    MCP-->>Claude: "Loaded ~106 tools"
     Claude-->>User: "DevOps agent ready!"
 ```
 
@@ -182,45 +184,53 @@ These tools are never unloaded:
 
 | Agent | Modules | Tool Count | Focus |
 |-------|---------|------------|-------|
-| developer | git, gitlab, jira, google-calendar, gmail | ~86 | Daily coding |
-| devops | k8s, bonfire, quay, gitlab | ~90 | Deployments |
-| incident | k8s, kibana, jira | ~78 | Production debugging |
-| release | konflux, quay, appinterface, git | ~69 | Shipping |
+| developer | workflow, lint, dev-workflow, git, gitlab, jira | ~106 | Daily coding |
+| devops | workflow, k8s, bonfire, quay, gitlab | ~106 | Deployments |
+| incident | workflow, k8s, prometheus, alertmanager, kibana, jira, gitlab, slack | ~100 | Production debugging |
+| release | workflow, konflux, quay, appinterface, git, gitlab | ~100 | Shipping |
 
-## Auto-Debug Infrastructure
+## Auto-Heal Infrastructure
 
-All tools are automatically wrapped with debugging support via the `@debuggable` decorator.
+Tools are wrapped with `@auto_heal` decorators for automatic VPN/auth recovery.
 
 ### Flow
 
 ```mermaid
 flowchart LR
-    A[Tool Fails] --> B[Returns ❌ with hint]
-    B --> C["💡 debug_tool('tool_name')"]
-    C --> D[Claude inspects source]
-    D --> E[Proposes fix]
-    E --> F{User confirms?}
-    F -->|Yes| G[Apply & commit]
-    G --> H[Retry operation]
+    A[Tool Call] --> B{Success?}
+    B -->|Yes| C[Return Result]
+    B -->|No| D[@auto_heal Decorator]
+    D --> E{VPN Issue?}
+    E -->|Yes| F[vpn_connect]
+    E -->|No| G{Auth Issue?}
+    G -->|Yes| H[kube_login]
+    G -->|No| I[Return Error]
+    F --> J[Retry Tool]
+    H --> J
+    J --> C
 ```
 
-### The @debuggable Decorator
+### The @auto_heal Decorators
 
 ```python
-# server/src/debuggable.py
+# server/auto_heal_decorator.py
 
-@debuggable
-async def my_tool(param: str) -> str:
-    """My tool description."""
-    result = do_something(param)
-    return result
+from server.auto_heal_decorator import auto_heal_k8s
+
+@registry.tool()
+@auto_heal_k8s()
+async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
+    """Get pods with auto-healing."""
+    ...
 ```
 
-The decorator:
-1. Captures source file and line numbers
-2. Registers tool in `TOOL_REGISTRY`
-3. If tool returns `❌`, appends debug hint
-4. If exception occurs, captures error context
+Available decorators:
+- `@auto_heal_ephemeral()` - Bonfire namespace tools
+- `@auto_heal_konflux()` - Tekton pipeline tools
+- `@auto_heal_k8s()` - Kubectl tools
+- `@auto_heal_stage()` - Prometheus, Alertmanager, Kibana
+- `@auto_heal_jira()` - Jira tools
+- `@auto_heal_git()` - Git/GitLab tools
 
 ### Common Auto-Fixable Bugs
 
@@ -238,14 +248,14 @@ The decorator:
 Start with minimal tools, switch agents dynamically:
 
 ```bash
-python -m src.server  # Starts with workflow tools only (~29)
+python -m src.server  # Starts with developer persona (~106 tools)
 ```
 
 Then in chat:
 ```
 You: Load the devops agent
 Claude: [calls persona_load("devops")]
-        DevOps agent loaded! Now have k8s, bonfire, quay, gitlab (~90 tools)
+        DevOps agent loaded! Now have k8s, bonfire, quay, gitlab (~106 tools)
 ```
 
 ### 2. Static Agent Mode
@@ -253,8 +263,8 @@ Claude: [calls persona_load("devops")]
 Start with a specific agent's tools pre-loaded:
 
 ```bash
-python -m src.server --agent developer  # ~86 tools
-python -m src.server --agent devops     # ~90 tools
+python -m src.server --agent developer  # ~106 tools
+python -m src.server --agent devops     # ~106 tools
 ```
 
 ### 3. Single Tool Module (Standalone)

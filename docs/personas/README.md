@@ -6,14 +6,14 @@ Personas are **specialized tool configurations** with curated tool sets. Switch 
 
 ## Quick Reference
 
-| Persona | Command | Tools | Focus |
-|---------|---------|-------|-------|
-| [👨‍💻 developer](./developer.md) | `Load developer agent` | ~102 | Daily coding, PRs |
-| [🔧 devops](./devops.md) | `Load devops agent` | ~118 | Deployments, K8s |
-| [🚨 incident](./incident.md) | `Load incident agent` | ~106 | Production debugging |
-| [📦 release](./release.md) | `Load release agent` | ~98 | Shipping releases |
-| [💬 slack](./slack.md) | `Load slack agent` | ~103 | Slack automation |
-| [🌐 universal](./universal.md) | `Load universal agent` | ~123 | All-in-one |
+| Persona | Command | Modules | Focus |
+|---------|---------|---------|-------|
+| [👨‍💻 developer](./developer.md) | `Load developer agent` | 6 | Daily coding, PRs |
+| [🔧 devops](./devops.md) | `Load devops agent` | 5 | Deployments, K8s |
+| [🚨 incident](./incident.md) | `Load incident agent` | 8 | Production debugging |
+| [📦 release](./release.md) | `Load release agent` | 6 | Shipping releases |
+| [💬 slack](./slack.md) | `Load slack agent` | 6 | Slack automation |
+| [🌐 universal](./universal.md) | `Load universal agent` | 10 | All-in-one |
 
 ## How Persona Loading Works
 
@@ -31,7 +31,7 @@ sequenceDiagram
     MCP->>Cursor: tools/list_changed notification
     Cursor->>Cursor: Refresh tool list
     MCP-->>Claude: Persona + tool count
-    Claude-->>User: "🔧 DevOps persona loaded with 90 tools"
+    Claude-->>User: "🔧 DevOps persona loaded with ~106 tools"
 ```
 
 ## Switching Personas
@@ -40,25 +40,25 @@ You can switch personas at any time:
 
 ```
 You: Load the developer agent
-Claude: 👨‍💻 Developer persona loaded (~80 tools)
+Claude: 👨‍💻 Developer persona loaded (~106 tools)
 
 You: Actually I need to deploy, load devops
-Claude: 🔧 DevOps persona loaded (~90 tools)
+Claude: 🔧 DevOps persona loaded (~106 tools)
         [Tools automatically switch!]
 ```
 
 ## Tool Limit
 
-Each persona is designed to stay under Cursor's 128 tool limit:
+Each persona is designed to stay under Cursor's 128 tool limit. Tool counts are estimates based on module composition:
 
-| Persona | Tool Count | Headroom |
-|---------|------------|----------|
-| developer | ~102 | 26 |
-| devops | ~118 | 10 |
-| incident | ~106 | 22 |
-| release | ~98 | 30 |
-| slack | ~103 | 25 |
-| universal | ~123 | 5 |
+| Persona | Modules | Estimated Tools |
+|---------|---------|-----------------|
+| developer | workflow, lint, dev-workflow, git, gitlab, jira | ~106 |
+| devops | workflow, k8s, bonfire, quay, gitlab | ~106 |
+| incident | workflow, k8s, prometheus, alertmanager, kibana, jira, gitlab, slack | ~100 |
+| release | workflow, konflux, quay, appinterface, git, gitlab | ~100 |
+| slack | workflow, slack, jira, k8s, prometheus, alertmanager | ~100 |
+| universal | 10 modules combined | ~120 |
 
 ## Persona Tool Modules
 
@@ -121,23 +121,23 @@ These tools are available regardless of which persona is loaded:
 
 ## Persona Variants
 
-Several personas have "slim" variants with fewer tools for combining:
+Several personas have "slim" variants with fewer tool modules for combining:
 
 | Variant | Base Persona | Description |
 |---------|--------------|-------------|
-| `developer-slim` | developer | Core dev tools only (~39 tools) |
-| `devops-slim` | devops | Essential k8s/deploy (~39 tools) |
-| `incident-slim` | incident | Fast incident response (~15 tools) |
-| `release-slim` | release | Streamlined release (~48 tools) |
+| `developer-slim` | developer | Core dev tools only (3 modules) |
+| `devops-slim` | devops | Essential k8s/deploy (3 modules) |
+| `incident-slim` | incident | Fast incident response (4 modules) |
+| `release-slim` | release | Streamlined release (4 modules) |
 
 **Special Personas:**
 
 | Persona | Description |
 |---------|-------------|
-| `core` | Essential shared tools (~106 tools) |
-| `universal` | Developer + DevOps combined (~123 tools) |
+| `core` | Essential shared tools (most modules) |
+| `universal` | Developer + DevOps combined (10 modules) |
 
-> All personas now include `workflow` module for skills, memory, and infrastructure tools
+> All personas include `workflow` module for skills, memory, and infrastructure tools
 
 ## Persona Configuration
 

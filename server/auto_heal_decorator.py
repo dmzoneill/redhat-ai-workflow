@@ -214,6 +214,68 @@ async def _run_vpn_connect() -> bool:
         return False
 
 
+async def _log_auto_heal_to_memory(
+    tool_name: str,
+    failure_type: str,
+    error_snippet: str,
+    fix_applied: str,
+) -> None:
+    """Log a successful auto-heal to memory for learning."""
+    try:
+        from datetime import datetime
+        from pathlib import Path
+
+        import yaml
+
+        # Find memory directory
+        project_root = Path(__file__).parent.parent
+        memory_dir = project_root / "memory" / "learned"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+
+        failures_file = memory_dir / "tool_failures.yaml"
+
+        # Load or create
+        if failures_file.exists():
+            with open(failures_file) as f:
+                data = yaml.safe_load(f) or {}
+        else:
+            data = {"failures": [], "stats": {"total_failures": 0, "auto_fixed": 0, "manual_required": 0}}
+
+        if "failures" not in data:
+            data["failures"] = []
+        if "stats" not in data:
+            data["stats"] = {"total_failures": 0, "auto_fixed": 0, "manual_required": 0}
+
+        # Add entry
+        entry = {
+            "tool": tool_name,
+            "error_type": failure_type,
+            "error_snippet": error_snippet[:100],
+            "fix_applied": fix_applied,
+            "success": True,
+            "timestamp": datetime.now().isoformat(),
+        }
+        data["failures"].append(entry)
+
+        # Update stats
+        data["stats"]["total_failures"] = data["stats"].get("total_failures", 0) + 1
+        data["stats"]["auto_fixed"] = data["stats"].get("auto_fixed", 0) + 1
+
+        # Keep only last 100 entries
+        if len(data["failures"]) > 100:
+            data["failures"] = data["failures"][-100:]
+
+        # Write back
+        with open(failures_file, "w") as f:
+            yaml.dump(data, f, default_flow_style=False)
+
+        logger.debug(f"Logged auto-heal for {tool_name} to memory")
+
+    except Exception as e:
+        # Memory logging is best-effort, don't fail the tool
+        logger.debug(f"Failed to log auto-heal to memory: {e}")
+
+
 def auto_heal(
     cluster: ClusterType = "auto",
     max_retries: int = 1,
@@ -295,6 +357,14 @@ def auto_heal(
                         # Fix failed, return original result
                         logger.warning(f"Auto-heal: fix for {tool_name} failed, giving up")
                         return result
+
+                    # Log successful fix to memory for learning
+                    await _log_auto_heal_to_memory(
+                        tool_name=tool_name,
+                        failure_type=failure_type,
+                        error_snippet=error_snippet,
+                        fix_applied="kube_login" if failure_type == "auth" else "vpn_connect",
+                    )
 
                     # Small delay before retry
                     await asyncio.sleep(1)

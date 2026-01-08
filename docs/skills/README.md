@@ -1,6 +1,6 @@
 # ⚡ Skills Reference
 
-Skills are **reusable multi-step workflows** that chain MCP tools together with logic, conditions, and templating. All 42 production skills include **auto-healing** for VPN and authentication issues.
+Skills are **reusable multi-step workflows** that chain MCP tools together with logic, conditions, and templating. All 53 production skills include **auto-healing** for VPN and authentication issues.
 
 ## Quick Reference
 
@@ -56,11 +56,14 @@ Skills are **reusable multi-step workflows** that chain MCP tools together with 
 
 | Skill | Description |
 |-------|-------------|
-| 📖 [learn_pattern](./learn_pattern.md) | Save learned pattern to memory |
-| 🧹 [memory_cleanup](./memory_cleanup.md) | Clean up old memory entries |
-| ✏️ [memory_edit](./memory_edit.md) | Edit memory entries |
-| 🗄️ [memory_init](./memory_init.md) | Initialize memory structure |
-| 👁️ [memory_view](./memory_view.md) | View memory contents |
+| 📖 learn_pattern | Save learned pattern to memory |
+| 🧹 memory_cleanup | Clean up old memory entries |
+| ✏️ memory_edit | Edit memory entries |
+| 🗄️ memory_init | Initialize memory structure |
+| 👁️ memory_view | View memory contents |
+| 🧪 test_error_recovery | Test skill error recovery |
+| 🤖 review_pr_multiagent | Multi-agent code review |
+| 🤖 review_pr_multiagent_test | Test multi-agent review |
 
 ## 🔄 Auto-Heal Feature
 

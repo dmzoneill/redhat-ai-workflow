@@ -8,8 +8,8 @@ AI Workflow implements auto-healing at two levels:
 
 | Level | Mechanism | Scope |
 |-------|-----------|-------|
-| **Tool-Level** | `@debuggable` decorator + `debug_tool()` | Fixes tool source code |
-| **Skill-Level** | Auto-heal patterns in YAML | Fixes runtime issues (VPN, auth) |
+| **Tool-Level** | `@auto_heal` decorators + `debug_tool()` | Fixes VPN/auth issues & source code |
+| **Memory-Level** | `check_known_issues()` + `learn_tool_fix()` | Remember and apply known fixes |
 
 ## Tool-Level: The Learning Loop
 
@@ -45,9 +45,9 @@ AI Workflow implements auto-healing at two levels:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Skill-Level: Auto-Heal Patterns
+## Auto-Heal via Python Decorators
 
-All 42 production skills include automatic remediation for VPN and auth issues:
+All tools can include automatic remediation for VPN and auth issues via decorators in `server/auto_heal_decorator.py`:
 
 ```mermaid
 graph LR
@@ -75,53 +75,30 @@ graph LR
 | "Forbidden" / "403" | Auth issue | `kube_login(cluster)` |
 | "Token expired" | Auth expired | `kube_login(cluster)` |
 
-### Example Auto-Heal in Skill YAML
+### Example: Tool with Auto-Heal Decorator
 
-```yaml
-# Original tool call
-- name: get_pods
-  tool: kubectl_get_pods
-  args:
-    namespace: "{{ namespace }}"
-    environment: "stage"
-  output: pods_result
-  on_error: continue
+```python
+from server.auto_heal_decorator import auto_heal_k8s
 
-# Detect failure
-- name: detect_failure_pods
-  condition: "pods_result and ('❌' in str(pods_result) or 'error' in str(pods_result).lower())"
-  compute: |
-    error_text = str(pods_result)[:300].lower()
-    result = {
-      "failed": True,
-      "needs_vpn": any(x in error_text for x in ['no route', 'timeout', 'connection refused']),
-      "needs_auth": any(x in error_text for x in ['unauthorized', '401', 'forbidden', '403']),
-    }
-  output: failure_pods
-
-# Auto-fix VPN
-- name: quick_fix_vpn_pods
-  condition: "failure_pods and failure_pods.get('needs_vpn')"
-  tool: vpn_connect
-  on_error: continue
-
-# Auto-fix Auth
-- name: quick_fix_auth_pods
-  condition: "failure_pods and failure_pods.get('needs_auth')"
-  tool: kube_login
-  args:
-    cluster: "stage"
-  on_error: continue
-
-# Retry after fix
-- name: retry_get_pods
-  condition: "failure_pods"
-  tool: kubectl_get_pods
-  args:
-    namespace: "{{ namespace }}"
-    environment: "stage"
-  output: pods_retry_result
+@registry.tool()
+@auto_heal_k8s()
+async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
+    """Get pods - auto-heals VPN/auth failures."""
+    # If this fails with auth/VPN issues, the decorator
+    # automatically runs kube_login or vpn_connect and retries
+    ...
 ```
+
+### Available Decorators
+
+| Decorator | Environment | Use Case |
+|-----------|-------------|----------|
+| `@auto_heal_ephemeral()` | Ephemeral | Bonfire namespace tools |
+| `@auto_heal_konflux()` | Konflux | Tekton pipeline tools |
+| `@auto_heal_k8s()` | Stage/Prod | Kubectl tools |
+| `@auto_heal_stage()` | Stage | Prometheus, Alertmanager, Kibana |
+| `@auto_heal_jira()` | - | Jira tools (auth only) |
+| `@auto_heal_git()` | - | Git/GitLab tools (VPN only) |
 
 ## Tools
 
@@ -266,7 +243,7 @@ The learning loop is integrated into all tool execution paths:
 
 | Path | Auto-Check | Auto-Suggest Learn | Skill Auto-Heal |
 |------|------------|-------------------|-----------------|
-| `@debuggable` decorator | ✅ On failure | ✅ In error output | - |
+| `@auto_heal` decorator | ✅ On failure | ✅ In error output | - |
 | `SkillExecutor._exec_tool` | ✅ On failure | ✅ In error message | ✅ VPN/Auth |
 | `tool_exec` meta tool | ✅ On failure | ✅ In error output | - |
 | Claude Agent (Slack bot) | ✅ On failure | ✅ In error output | - |
@@ -332,6 +309,6 @@ All agents include both levels of auto-healing:
 
 ## See Also
 
-- [Skills Reference](skills/README.md) - All 50 skills with auto-heal
+- [Skills Reference](skills/README.md) - All 53 skills with auto-heal
 - [Skill Auto-Heal Plan](plans/skill-auto-heal.md) - Implementation details
 - [Architecture Overview](architecture/README.md)

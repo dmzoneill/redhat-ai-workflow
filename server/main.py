@@ -320,10 +320,19 @@ Examples:
         tools = [t.strip() for t in args.tools.split(",") if t.strip()]
         server_name = args.name or "aa-workflow"
     else:
-        # Default: start with workflow tools only (dynamic mode)
-        tools = ["workflow"]
-        server_name = args.name or "aa-workflow"
-        logger.info("Starting in dynamic mode - use persona_load() to switch personas")
+        # Default: load developer persona (most common use case)
+        # This provides git, gitlab, jira + workflow tools
+        default_agent = "developer"
+        tools = load_agent_config(default_agent)
+        if tools is None:
+            # Fallback to workflow only if developer persona missing
+            tools = ["workflow"]
+            server_name = args.name or "aa-workflow"
+            logger.info("Starting in dynamic mode - use persona_load() to switch personas")
+        else:
+            server_name = args.name or f"aa-{default_agent}"
+            estimated = sum(TOOL_MODULES.get(t, 0) for t in tools)
+            logger.info(f"Loading default agent '{default_agent}' with ~{estimated} tools: {tools}")
 
     try:
         server = create_mcp_server(name=server_name, tools=tools)

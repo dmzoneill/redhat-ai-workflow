@@ -8,8 +8,8 @@
 [![MCP](https://img.shields.io/badge/MCP-Protocol-6366f1?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDEgMC04LTMuNTktOC04czMuNTktOCA4LTggOCAzLjU5IDggOC0zLjU5IDgtOCA4eiIvPjxjaXJjbGUgZmlsbD0iI2ZmZiIgY3g9IjEyIiBjeT0iMTIiIHI9IjQiLz48L3N2Zz4=)](https://modelcontextprotocol.io/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Cursor](https://img.shields.io/badge/Cursor-IDE-000000?style=for-the-badge&logo=cursor&logoColor=white)](https://cursor.sh/)
-[![Tools](https://img.shields.io/badge/Tools-260+-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#-tool-modules)
-[![Skills](https://img.shields.io/badge/Skills-50-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)](#-skills)
+[![Tools](https://img.shields.io/badge/Tools-270-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#-tool-modules)
+[![Skills](https://img.shields.io/badge/Skills-53-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)](#-skills)
 [![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 **Transform Claude into your personal DevOps engineer, developer assistant, and incident responder.**
@@ -37,6 +37,39 @@ AI Workflow is a **comprehensive MCP (Model Context Protocol) server** that give
 | ⚡ **Run Workflows** | Multi-step skills that chain tools |
 | 🔄 **Auto-Heal** | Detect failures, fix auth/VPN, retry automatically |
 | 🔍 **Self-Debug** | Analyze and fix its own tools |
+
+---
+
+## 🔧 Commit Format (Centralized)
+
+All commits and MR titles follow a standardized format defined in `config.json`:
+
+```
+{issue_key} - {type}({scope}): {description}
+```
+
+| Type | Description |
+|------|-------------|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `refactor` | Code refactoring |
+| `docs` | Documentation |
+| `test` | Tests |
+| `chore` | Maintenance |
+| `style` | Formatting |
+| `perf` | Performance |
+
+**Examples:**
+- `AAP-12345 - feat: add user authentication`
+- `AAP-12345 - fix(api): handle null response`
+- `AAP-12345 - chore(release): release abc123 to production`
+
+The `git_commit` tool automatically formats messages using this pattern:
+
+```python
+git_commit(repo=".", message="add user authentication", issue_key="AAP-12345", commit_type="feat")
+# → AAP-12345 - feat: add user authentication
+```
 
 ---
 
@@ -78,13 +111,15 @@ Create `.cursor/mcp.json` in your project:
 }
 ```
 
+> **Default Persona:** The server starts with the `developer` persona loaded by default (~106 tools). Use `persona_load("devops")` to switch.
+
 ### 3️⃣ Restart Cursor & Go!
 
 ```
 You: Load the developer persona
 
 Claude: 👨‍💻 Developer Persona Loaded
-        Tools: git, gitlab, jira, calendar, gmail (~86 tools)
+        Tools: git, gitlab, jira, lint, dev-workflow, workflow (~106 tools)
 
 You: Start working on AAP-12345
 
@@ -173,11 +208,11 @@ Switch personas to get different tool sets. See [full persona reference](docs/pe
 
 | Persona | Command | Tools | Focus |
 |---------|---------|-------|-------|
-| [👨‍💻 developer](docs/personas/developer.md) | `Load developer persona` | ~86 | Daily coding, PRs |
-| [🔧 devops](docs/personas/devops.md) | `Load devops persona` | ~90 | Deployments, K8s |
-| [🚨 incident](docs/personas/incident.md) | `Load incident persona` | ~78 | Production debugging |
-| [📦 release](docs/personas/release.md) | `Load release persona` | ~69 | Shipping releases |
-| [💬 slack](docs/personas/slack.md) | `Load slack persona` | ~52 | Slack bot daemon |
+| [👨‍💻 developer](docs/personas/developer.md) | `Load developer persona` | ~106 | Daily coding, PRs |
+| [🔧 devops](docs/personas/devops.md) | `Load devops persona` | ~106 | Deployments, K8s |
+| [🚨 incident](docs/personas/incident.md) | `Load incident persona` | ~100 | Production debugging |
+| [📦 release](docs/personas/release.md) | `Load release persona` | ~100 | Shipping releases |
+| [💬 slack](docs/personas/slack.md) | `Load slack persona` | ~100 | Slack bot daemon |
 
 ```mermaid
 graph LR
@@ -226,10 +261,11 @@ Skills are reusable multi-step workflows with **built-in auto-healing**. See [fu
 
 MCP tools include **auto-healing** via Python decorators (`server/auto_heal_decorator.py`). When a tool fails due to VPN or auth issues:
 
-1. **Detects** the failure pattern (network timeout, unauthorized, forbidden)
-2. **Fixes** by calling `vpn_connect()` or `kube_login()`
-3. **Retries** the operation automatically
-4. **Logs** the failure to memory for analysis
+1. **Checks memory** for known fixes via `check_known_issues()`
+2. **Detects** the failure pattern (network timeout, unauthorized, forbidden)
+3. **Fixes** by calling `vpn_connect()` or `kube_login()`
+4. **Retries** the operation automatically
+5. **Logs** the fix to `memory/learned/tool_failures.yaml` for future reference
 
 ```python
 from server.auto_heal_decorator import auto_heal_k8s
@@ -253,7 +289,7 @@ async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
 
 ## 🎯 Cursor Commands
 
-63 slash commands for quick access. See [full commands reference](docs/commands/README.md).
+64 slash commands for quick access. See [full commands reference](docs/commands/README.md).
 
 | Category | Commands |
 |----------|----------|
@@ -285,27 +321,29 @@ async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
 
 ## 🔧 Tool Modules
 
-260+ tools across 16 modules. See [full MCP server reference](docs/tool-modules/README.md).
+~270 tools across 17 modules. See [full MCP server reference](docs/tool-modules/README.md).
 
 | Module | Tools | Description |
 |--------|-------|-------------|
-| [workflow](docs/tool-modules/workflow.md) | 30 | Core workflow, agents, skills, memory |
-| [git](docs/tool-modules/git.md) | 19 | Git operations |
-| [gitlab](docs/tool-modules/gitlab.md) | 35 | MRs, pipelines, code review |
+| [workflow](docs/tool-modules/workflow.md) | 16 | Core workflow, agents, skills, memory |
+| [git](docs/tool-modules/git.md) | 30 | Git operations |
+| [gitlab](docs/tool-modules/gitlab.md) | 30 | MRs, pipelines, code review |
 | [jira](docs/tool-modules/jira.md) | 28 | Issue tracking |
-| [k8s](docs/tool-modules/k8s.md) | 26 | Kubernetes operations |
-| [bonfire](docs/tool-modules/bonfire.md) | 21 | Ephemeral environments |
+| [k8s](docs/tool-modules/k8s.md) | 28 | Kubernetes operations |
+| [bonfire](docs/tool-modules/bonfire.md) | 20 | Ephemeral environments |
 | [quay](docs/tool-modules/quay.md) | 8 | Container registry |
 | [prometheus](docs/tool-modules/prometheus.md) | 13 | Metrics queries |
 | [alertmanager](docs/tool-modules/alertmanager.md) | 7 | Alert management |
 | [kibana](docs/tool-modules/kibana.md) | 9 | Log search |
 | [google-calendar](docs/tool-modules/google-calendar.md) | 6 | Calendar & meetings |
 | [gmail](docs/tool-modules/gmail.md) | 6 | Email processing |
-| [slack](docs/tool-modules/slack.md) | 16 | Slack integration |
-| [konflux](docs/tool-modules/konflux.md) | 40 | Build pipelines |
-| [appinterface](docs/tool-modules/appinterface.md) | 8 | GitOps config |
+| [slack](docs/tool-modules/slack.md) | 10 | Slack integration |
+| [konflux](docs/tool-modules/konflux.md) | 35 | Build pipelines |
+| [appinterface](docs/tool-modules/appinterface.md) | 7 | GitOps config |
+| lint | 7 | Python/YAML linting |
+| dev-workflow | 9 | Development helpers |
 
-> Plus **45 shared parsers** in `scripts/common/parsers.py` for reusable output parsing
+> Plus **45+ shared parsers** in `scripts/common/parsers.py` and **config helpers** in `scripts/common/config_loader.py`
 
 See [MCP Server Architecture](docs/architecture/README.md) for implementation details.
 
@@ -343,6 +381,26 @@ Tool: ❌ Failed to release namespace
 | `debug_tool(tool, error)` | Analyze source and propose fix |
 | `learn_tool_fix(tool, pattern, cause, fix)` | Save fix to memory |
 
+### Session Start with Memory
+
+When you start a session with `session_start()`, the system automatically:
+
+1. **Loads current work state** - Active issues, branches, MRs
+2. **Loads learned patterns** - Shows count of patterns by category
+3. **Shows loaded tools** - Which tool modules are active
+4. **Provides guidance** - Prefer MCP tools over raw CLI commands
+
+```
+You: session_start(agent="developer")
+
+Claude: 📋 Session Started
+        🧠 Learned Patterns: 12 patterns loaded
+           - Jira CLI: 3 patterns
+           - Error handling: 5 patterns
+           - Authentication: 4 patterns
+        🛠️ Currently Loaded Tools: git, gitlab, jira (~106 tools)
+```
+
 ### Memory Files
 
 | File | Purpose |
@@ -350,7 +408,9 @@ Tool: ❌ Failed to release namespace
 | `memory/learned/tool_fixes.yaml` | Tool-specific fixes from auto-remediation |
 | `memory/learned/patterns.yaml` | General error patterns and solutions |
 | `memory/learned/runbooks.yaml` | Operational procedures that worked |
-| `memory/learned/tool_failures.yaml` | Skill auto-heal failure tracking |
+| `memory/learned/tool_failures.yaml` | Auto-heal history with success/failure tracking |
+| `memory/state/current_work.yaml` | Active issues, branches, MRs |
+| `memory/sessions/*.yaml` | Session logs for continuity |
 
 ---
 
@@ -361,11 +421,11 @@ ai-workflow/
 ├── server/              # MCP server infrastructure
 │   ├── main.py          # Server entry point
 │   ├── persona_loader.py # Dynamic persona loading
-│   ├── debuggable.py    # Self-healing tool decorator
+│   ├── auto_heal_decorator.py  # Auto-heal decorators
 │   └── utils.py         # Shared utilities
 ├── tool_modules/        # Tool plugins (aa-git/, aa-jira/, etc.)
 ├── personas/            # Persona configs (developer.yaml, devops.yaml)
-├── skills/              # 50 workflow definitions (start_work.yaml, etc.)
+├── skills/              # 53 workflow definitions (start_work.yaml, etc.)
 ├── memory/              # Persistent context
 │   ├── state/           # Active issues, MRs, environments
 │   └── learned/         # Patterns, tool fixes, runbooks
@@ -374,9 +434,10 @@ ai-workflow/
 ├── docs/                # Documentation
 ├── scripts/             # Python utilities
 │   └── common/
-│       ├── auto_heal.py # Skill auto-healing utilities
-│       └── parsers.py   # 44 shared parser functions
-├── config.json          # Configuration
+│       ├── auto_heal.py   # Skill auto-healing utilities
+│       ├── config_loader.py # Config helpers (commit format, repos)
+│       └── parsers.py     # 44 shared parser functions
+├── config.json          # Configuration (commit format, repos, Slack, etc.)
 └── .cursor/commands/    # 63 Cursor slash commands
 ```
 
@@ -387,9 +448,9 @@ ai-workflow/
 | Document | Description |
 |----------|-------------|
 | [Commands Reference](docs/commands/README.md) | 63 Cursor slash commands |
-| [Skills Reference](docs/skills/README.md) | All 50 available skills |
+| [Skills Reference](docs/skills/README.md) | All 53 available skills |
 | [Personas Reference](docs/personas/README.md) | 5 tool configuration profiles |
-| [Tool Modules Reference](docs/tool-modules/README.md) | 16 tool plugins with 260+ tools |
+| [Tool Modules Reference](docs/tool-modules/README.md) | 17 tool plugins with ~270 tools |
 | [Learning Loop](docs/learning-loop.md) | Auto-remediation + memory |
 | [Skill Auto-Heal](docs/plans/skill-auto-heal.md) | Auto-healing implementation |
 | [IDE Extension](docs/ide-extension.md) | VSCode/Cursor extension |

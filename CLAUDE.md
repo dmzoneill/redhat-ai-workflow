@@ -2,6 +2,47 @@
 
 This is a complete AI-powered development workflow system with **MCP Tools**, **Personas**, **Skills**, and **Memory**.
 
+## ⚠️ CRITICAL: Tool Usage Rules
+
+**ALWAYS prefer MCP tools over CLI commands!** You have ~270 specialized tools - use them.
+
+| ❌ DON'T DO THIS | ✅ DO THIS INSTEAD |
+|------------------|-------------------|
+| `rh-issue set-status AAP-123 "In Progress"` | `jira_set_status(issue_key="AAP-123", status="In Progress")` |
+| `git checkout -b feature-branch` | `git_branch_create(repo="backend", branch_name="feature-branch")` |
+| `glab mr create ...` | `gitlab_mr_create(project="backend", title="...")` |
+| `kubectl get pods -n stage` | `kubectl_get_pods(namespace="stage", environment="stage")` |
+| `bonfire namespace list --mine` | `bonfire_namespace_list(mine_only=True)` |
+| `curl https://issues.redhat.com/...` | `jira_view_issue(issue_key="AAP-123")` |
+
+### Why Use MCP Tools?
+
+1. **Auto-healing**: MCP tools automatically fix VPN/auth issues and retry
+2. **Memory integration**: Failures are logged, patterns are learned
+3. **Consistent output**: Formatted for AI parsing
+4. **Error handling**: Proper error messages with fix suggestions
+5. **Debug support**: `debug_tool()` can fix broken tools
+
+### When CLI Is Acceptable
+
+- Running actual application code (e.g., `python app.py`, `pytest`)
+- No MCP tool exists for the operation
+- User explicitly requests CLI
+
+### Use Skills for Common Workflows
+
+Instead of chaining tools manually, use pre-built skills:
+
+| Task | Skill to Use |
+|------|-------------|
+| Start work on Jira issue | `skill_run("start_work", '{"issue_key": "AAP-123"}')` |
+| Create an MR | `skill_run("create_mr", '{"issue_key": "AAP-123"}')` |
+| Deploy to ephemeral | `skill_run("test_mr_ephemeral", '{"mr_id": 1459}')` |
+| Investigate an alert | `skill_run("investigate_alert", '{"environment": "stage"}')` |
+| Morning briefing | `skill_run("coffee")` |
+
+---
+
 ## Terminology
 
 | Term | Meaning |
@@ -34,7 +75,7 @@ This is a complete AI-powered development workflow system with **MCP Tools**, **
 │  - state/environments.yaml  - learned/runbooks.yaml    │
 ├─────────────────────────────────────────────────────────┤
 │  MCP TOOLS (tool_modules/)                               │
-│  260+ tools across 16 modules                           │
+│  ~270 tools across 17 modules                           │
 │  aa-git, aa-jira, aa-gitlab, aa-k8s, aa-prometheus...  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -47,12 +88,12 @@ This is a complete AI-powered development workflow system with **MCP Tools**, **
 ```
 Load the devops agent
 ```
-Tools switch dynamically! You go from ~29 workflow tools to ~90 devops tools.
+Tools switch dynamically! You go from ~16 workflow tools to ~106 devops tools.
 
 ```
 Load the developer agent
 ```
-Now you have git, gitlab, jira tools (~74 tools).
+Now you have git, gitlab, jira tools (~106 tools).
 
 ### Run a Skill
 ```
@@ -75,13 +116,13 @@ Claude runs the `test_mr_ephemeral` skill automatically.
 
 ---
 
-## MCP Tools (260+ total)
+## MCP Tools (~270 total)
 
 ### Tool Categories
 
 | Module | Tools | Purpose |
 |--------|-------|---------|
-| `aa-workflow` | 30 | Core: agents, skills, memory, vpn, kube_login |
+| `aa-workflow` | 16 | Core: agents, skills, memory, vpn, kube_login |
 | `aa-git` | 19 | Git operations (status, branch, commit, push) |
 | `aa-gitlab` | 35 | GitLab MRs, CI/CD pipelines |
 | `aa-jira` | 28 | Jira issues (view, create, update, transition) |
@@ -143,17 +184,17 @@ You: Load the devops agent
 [Server sends tools/list_changed to Cursor]
 [Cursor refreshes available tools]
 
-Claude: DevOps persona loaded with ~90 tools!
+Claude: DevOps persona loaded with ~106 tools!
 ```
 
 ### Available Personas
 
 | Persona | Modules | ~Tools | Best For |
 |---------|---------|--------|----------|
-| **devops** | k8s, bonfire, quay, gitlab | 90 | Ephemeral deployments, K8s ops |
-| **developer** | git, gitlab, jira | 74 | Coding, PRs, code review |
-| **incident** | k8s, kibana, jira | 78 | Production debugging |
-| **release** | konflux, quay, appinterface, git | 69 | Shipping releases |
+| **devops** | k8s, bonfire, quay, gitlab | ~106 | Ephemeral deployments, K8s ops |
+| **developer** | git, gitlab, jira, lint, dev-workflow | ~106 | Coding, PRs, code review |
+| **incident** | k8s, prometheus, alertmanager, kibana, jira | ~100 | Production debugging |
+| **release** | konflux, quay, appinterface, git, gitlab | ~100 | Shipping releases |
 
 ### DevOps Persona (`personas/devops.md`)
 - Focus: Infrastructure, ephemeral environments, deployments
@@ -420,7 +461,7 @@ For errors that can't be auto-fixed:
 2. **Call debug_tool** → `debug_tool('bonfire_namespace_release', 'error message')`
 3. **Analyze source** → Compare error to code, identify bug
 4. **Propose fix** → Show exact `search_replace` edit
-5. **Apply & commit** → `git commit -m "fix(tool_name): description"`
+5. **Apply & commit** → `git_commit(repo=".", message="description", issue_key="AAP-XXXXX", commit_type="fix", scope="tool_name")`
 
 
 ## ⚠️ Critical Don'ts

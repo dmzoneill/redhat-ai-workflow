@@ -21,7 +21,7 @@ Load the developer agent
 | [jira](../tool_modules/jira.md) | 24 | Issue tracking |
 | [google-calendar](../tool_modules/google-calendar.md) | 6 | Calendar & meetings |
 
-**Total:** ~80 tools
+**Total:** ~106 tools (6 modules)
 
 ## Skills Available
 

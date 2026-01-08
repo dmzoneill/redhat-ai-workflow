@@ -13,7 +13,7 @@ skill_run("review_pr", '{"mr_id": $MR_ID}')
 This will:
 1. Fetch MR details from GitLab
 2. Extract and validate Jira key from title
-3. Check commit format (AAP-XXXXX - type(scope): description)
+3. Check commit format against `config.json` pattern
 4. Verify MR description is adequate
 5. Check GitLab and Konflux pipeline status
 6. Analyze code for security, memory leaks, race conditions

@@ -253,7 +253,7 @@ auto_fixes:
 
 | Metric | Target | Achieved |
 |--------|--------|----------|
-| Skills with auto-heal | 15+ | ✅ 42 |
+| Skills with auto-heal | 15+ | ✅ 45+ |
 | Auto-fix success rate | >80% | ✅ ~95% for VPN/auth |
 | Learned patterns in memory | 20+ | ✅ |
 | Mean time to fix | <30 seconds | ✅ |
@@ -330,7 +330,7 @@ auto_fixes:
 ## Related Files
 
 - `scripts/common/auto_heal.py` - Shared auto-heal utilities
-- `server/debuggable.py` - debug_tool implementation
+- `server/auto_heal_decorator.py` - Python decorators for auto-heal
 - `tool_modules/aa-workflow/src/memory_tools.py` - memory tools
 - `tool_modules/aa-workflow/src/infra_tools.py` - kube_login, vpn_connect
 - `memory/learned/patterns.yaml` - existing pattern storage

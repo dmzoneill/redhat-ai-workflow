@@ -8,7 +8,7 @@ The `aa-bonfire` module provides tools for managing ephemeral Kubernetes namespa
 
 ## Tool Count
 
-**21 tools**
+**20 tools**
 
 ## Tools
 

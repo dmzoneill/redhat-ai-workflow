@@ -2,7 +2,7 @@
 
 Cursor commands are slash commands you can invoke directly in the Cursor IDE chat. Type `/` to see available commands.
 
-**Total: 63 commands** across 10 categories.
+**Total: 64 commands** across 10 categories.
 
 ## Quick Reference
 
@@ -260,6 +260,17 @@ Review an MR and run local tests as part of the review.
 ```
 skill_run("review_pr", '{"mr_id": 1234, "run_tests": true}')
 ```
+
+---
+
+### `/review-mr-multiagent` 🤖
+**Multi-agent code review** using specialized reviewer personas.
+
+```
+skill_run("review_pr_multiagent", '{"mr_id": 1234}')
+```
+
+Uses Security, Performance, and Architecture reviewers in parallel.
 
 ---
 
@@ -559,7 +570,7 @@ tool_list(module='git')
 tool_list(module='gitlab')
 ```
 
-Shows 260+ tools across 16 modules.
+Shows ~270 tools across 17 modules.
 
 ---
 
@@ -757,6 +768,7 @@ All commands are defined in `.cursor/commands/`:
 ├── rebase-pr.md
 ├── release-prod.md
 ├── review-all-open.md
+├── review-mr-multiagent.md
 ├── review-mr-with-tests.md
 ├── review-mr.md
 ├── review.md

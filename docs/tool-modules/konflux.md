@@ -8,7 +8,7 @@ The `aa-konflux` module provides tools for Konflux (Tekton-based) build pipeline
 
 ## Tool Count
 
-**40 tools**
+**35 tools**
 
 ## Tools
 

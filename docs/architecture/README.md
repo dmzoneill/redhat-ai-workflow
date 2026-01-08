@@ -48,33 +48,34 @@ graph TB
 
 Individual MCP tool functions that perform specific actions:
 
-- **260+ tools** across 16 modules
+- **270 tools** across 17 modules
 - Each tool is a simple, focused function
-- Wrapped with `@debuggable` for self-healing
-- Shared utilities in `server/src/utils.py`
+- Wrapped with `@auto_heal` decorators for self-healing
+- Shared utilities in `server/utils.py`
 
 ### 🎭 Agents
 
 Specialized personas with curated tool sets:
 
-| Agent | Focus | Tools |
-|-------|-------|-------|
-| developer | Coding, PRs | ~86 tools |
-| devops | Deployments, K8s | ~90 tools |
-| incident | Production debugging | ~78 tools |
-| release | Shipping | ~69 tools |
-| slack | Slack bot daemon | ~52 tools |
+| Agent | Focus | Modules |
+|-------|-------|---------|
+| developer | Coding, PRs | 6 modules (~106 tools) |
+| devops | Deployments, K8s | 5 modules (~106 tools) |
+| incident | Production debugging | 8 modules (~100 tools) |
+| release | Shipping | 6 modules (~100 tools) |
+| slack | Slack bot daemon | 6 modules (~100 tools) |
 
 ### ⚡ Skills
 
 Multi-step workflows that chain tools:
 
-- YAML-defined workflows (50 skills)
+- YAML-defined workflows (53 skills)
 - Conditional logic and branching
 - Template substitution (Jinja2)
 - Error handling
-- **Auto-heal patterns** for VPN/auth issues
-- **45 shared parsers** in `scripts/common/parsers.py`
+- **Auto-heal via decorators** for VPN/auth issues
+- **45+ shared parsers** in `scripts/common/parsers.py`
+- **Config helpers** in `scripts/common/config_loader.py`
 
 ### 💾 Memory
 
@@ -91,7 +92,7 @@ Two levels of automatic remediation:
 
 | Level | Mechanism | Scope |
 |-------|-----------|-------|
-| **Tool-Level** | `@debuggable` + `debug_tool()` | Fix tool source code |
+| **Tool-Level** | `@auto_heal` decorators + `debug_tool()` | Fix VPN/auth + source code |
 | **Skill-Level** | Auto-heal YAML patterns | Fix VPN/auth at runtime |
 
 ## Dynamic Agent Loading
@@ -113,36 +114,37 @@ sequenceDiagram
     MCP->>Cursor: tools/list_changed notification
     Cursor->>Cursor: Refresh tool list
     Loader-->>MCP: Agent persona
-    MCP-->>Claude: "Loaded 90 tools"
+    MCP-->>Claude: "Loaded ~106 tools"
 ```
 
 ## Tool Modules
 
 ```
 tool_modules/
-├── server/             # Core server, agent loading
-├── aa-workflow/        # Workflow tools (30 tools)
-├── aa-git/             # Git operations (19 tools)
-├── aa-gitlab/          # GitLab MRs, pipelines (35 tools)
+├── aa-workflow/        # Core workflow tools (16 tools)
+├── aa-git/             # Git operations (30 tools)
+├── aa-gitlab/          # GitLab MRs, pipelines (30 tools)
 ├── aa-jira/            # Jira issues (28 tools)
-├── aa-k8s/             # Kubernetes ops (26 tools)
-├── aa-bonfire/         # Ephemeral environments (21 tools)
+├── aa-k8s/             # Kubernetes ops (28 tools)
+├── aa-bonfire/         # Ephemeral environments (20 tools)
 ├── aa-quay/            # Container registry (8 tools)
 ├── aa-prometheus/      # Metrics queries (13 tools)
 ├── aa-alertmanager/    # Alert management (7 tools)
 ├── aa-kibana/          # Log search (9 tools)
 ├── aa-google-calendar/ # Calendar & meetings (6 tools)
 ├── aa-gmail/           # Email processing (6 tools)
-├── aa-slack/           # Slack integration (16 tools)
-├── aa-konflux/         # Build pipelines (40 tools)
-└── aa-appinterface/    # App-interface config (8 tools)
+├── aa-slack/           # Slack integration (10 tools)
+├── aa-konflux/         # Build pipelines (35 tools)
+├── aa-appinterface/    # App-interface config (7 tools)
+├── aa-lint/            # Linting tools (7 tools)
+└── aa-dev-workflow/    # Dev workflow helpers (9 tools)
 ```
 
 ## Auto-Heal Architecture
 
 ### Tool-Level Auto-Debug
 
-All tools support self-healing via the `@debuggable` decorator:
+All tools support self-healing via the `@auto_heal` decorators:
 
 ```mermaid
 flowchart LR
@@ -213,7 +215,7 @@ Common utilities shared across all MCP servers:
 
 ### Shared Parsers (`scripts/common/parsers.py`)
 
-**44 reusable parser functions** to avoid regex duplication in skills:
+**45+ reusable parser functions** to avoid regex duplication in skills:
 
 | Category | Examples |
 |----------|----------|
@@ -241,6 +243,8 @@ Central configuration via `config.json`:
 - Slack channels (team, standup, alerts)
 - Google API settings
 - User preferences (including email aliases)
+- **Commit format** - pattern and valid types for commit messages
+- **MR title format** - follows commit format conventions
 
 ## See Also
 

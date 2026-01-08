@@ -8,7 +8,7 @@ The `aa-slack` module provides tools for Slack integration including message han
 
 ## Tool Count
 
-**15 tools**
+**10 tools**
 
 ## Tools
 

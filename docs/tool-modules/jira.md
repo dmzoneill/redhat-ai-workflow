@@ -8,7 +8,7 @@ The `aa-jira` module provides tools for Jira operations including issue viewing,
 
 ## Tool Count
 
-**25 tools**
+**28 tools**
 
 ## Tools
 

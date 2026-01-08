@@ -594,7 +594,7 @@ outputs:
 
       ### Next Steps
       1. Make your changes
-      2. Commit: `git commit -m "{{ inputs.issue_key }} - feat: description"`
+      2. Commit: `git_commit(repo=".", message="your description", issue_key="{{ inputs.issue_key }}")`
       3. When ready: `skill_run("create_mr", '{"issue_key": "{{ inputs.issue_key }}", "repo": "{{ resolved_repo.path }}"}')`
 
       {% endif %}
