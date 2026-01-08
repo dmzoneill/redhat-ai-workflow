@@ -10,7 +10,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from mcp.server.fastmcp import FastMCP
@@ -37,16 +37,14 @@ sys.path.insert(0, str(PROJECT_DIR))
 
 from server.utils import load_config
 
-# Import known issues checker from debuggable module
-try:
-    from server.debuggable import _check_known_issues_sync, _format_known_issues
-except ImportError:
-    # Fallback if debuggable not available
-    def _check_known_issues_sync(tool_name="", error_text=""):
-        return []
 
-    def _format_known_issues(matches):
-        return ""
+# Fallback stubs for known issues checking (not yet implemented in debuggable)
+def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:  # type: ignore[misc]
+    return []
+
+
+def _format_known_issues(matches: list) -> str:  # type: ignore[misc]
+    return ""
 
 
 class SkillExecutor:
@@ -57,14 +55,18 @@ class SkillExecutor:
         skill: dict,
         inputs: dict,
         debug: bool = False,
-        server: FastMCP = None,
+        server: FastMCP | None = None,  # type: ignore[assignment]
         create_issue_fn=None,
+        ask_question_fn=None,
+        enable_interactive_recovery: bool = True,
     ):
         self.skill = skill
         self.inputs = inputs
         self.debug = debug
         self.server = server
         self.create_issue_fn = create_issue_fn
+        self.ask_question_fn = ask_question_fn
+        self.enable_interactive_recovery = enable_interactive_recovery
         # Load config.json config for compute blocks
         self.config = load_config()
         self.context = {
@@ -73,7 +75,8 @@ class SkillExecutor:
         }
         self.log: list[str] = []
         self.step_results: list[dict] = []
-        self.start_time = None
+        self.start_time: float | None = None
+        self.error_recovery = None  # Initialized when needed
 
     def _debug(self, msg: str):
         """Add debug message."""
@@ -222,14 +225,14 @@ class SkillExecutor:
 
     def _template_dict(self, d: dict) -> dict:
         """Recursively template a dictionary."""
-        result = {}
+        result: dict = {}
         for k, v in d.items():
             if isinstance(v, str):
                 result[k] = self._template(v)
             elif isinstance(v, dict):
-                result[k] = self._template_dict(v)
+                result[k] = self._template_dict(v)  # type: ignore[assignment]
             elif isinstance(v, list):
-                result[k] = [self._template(i) if isinstance(i, str) else i for i in v]
+                result[k] = [self._template(i) if isinstance(i, str) else i for i in v]  # type: ignore[assignment]
             else:
                 result[k] = v
         return result
@@ -292,10 +295,143 @@ class SkillExecutor:
             self._debug(f"  → Jinja eval error: {e}, defaulting to False")
             return False
 
-    def _exec_compute(self, code: str, output_name: str):
-        """Execute a compute block (limited Python)."""
-        self._debug(f"Executing compute block for '{output_name}'")
+    def _try_interactive_recovery(self, code: str, error_msg: str, step_name: str):
+        """
+        Attempt interactive recovery from compute error.
 
+        Returns:
+            The computed result if recovery successful, None if user chose to abort/skip
+        """
+        # Lazy import to avoid circular dependencies
+        if not self.error_recovery:
+            try:
+                from scripts.common.skill_error_recovery import SkillErrorRecovery
+
+                # Pass memory helpers if available
+                memory_helper = None
+                try:
+                    from scripts.common import memory as memory_helpers
+
+                    memory_helper = memory_helpers
+                except ImportError:
+                    pass
+
+                self.error_recovery = SkillErrorRecovery(memory_helper=memory_helper)
+            except ImportError as e:
+                self._debug(f"Could not load error recovery: {e}")
+                return None
+
+        # Detect error pattern
+        error_info = self.error_recovery.detect_error(code, error_msg, step_name)
+        self._debug(f"Error detected: {error_info.get('pattern_id', 'unknown')}")
+
+        # Show error to user and get action
+        import asyncio
+
+        try:
+            # Call ask_question_fn which is already async
+            action_result = asyncio.get_event_loop().run_until_complete(
+                self.error_recovery.prompt_user_for_action(error_info, self.ask_question_fn)
+            )
+        except Exception as e:
+            self._debug(f"Interactive prompt failed: {e}")
+            return None
+
+        action = action_result.get("action")
+        self._debug(f"User chose: {action}")
+
+        # Handle user's choice
+        if action == "auto_fix":
+            fix_code = error_info.get("fix_code")
+            if not fix_code:
+                self._debug("Auto-fix not available despite user selection")
+                return None
+
+            # Re-execute with fixed code
+            try:
+                self._debug("Retrying with fixed code...")
+                # Temporarily update the code and retry
+                fixed_result = self._exec_compute_internal(fix_code, step_name)
+
+                # Log successful fix
+                self.error_recovery.log_fix_attempt(
+                    error_info,
+                    action="auto_fix",
+                    success=not isinstance(fixed_result, str) or not fixed_result.startswith("<compute error:"),
+                    details=f"Auto-fixed {error_info.get('pattern_id')}",
+                )
+
+                return fixed_result
+            except Exception as e:
+                self._debug(f"Auto-fix failed: {e}")
+                self.error_recovery.log_fix_attempt(error_info, action="auto_fix", success=False, details=str(e))
+                return None
+
+        elif action == "edit":
+            # Open skill file for editing (requires manual approach)
+            skill_name = self.skill.get("name", "unknown")
+            skill_path = SKILLS_DIR / f"{skill_name}.yaml"
+
+            print(
+                f"\n🔧 Please edit the skill file: {skill_path}\n"
+                f"   Step: {step_name}\n"
+                f"   Error: {error_msg}\n"
+                f"   Suggestion: {error_info.get('suggestion')}\n"
+            )
+            input("Press Enter after saving your changes...")
+
+            # Log manual edit
+            self.error_recovery.log_fix_attempt(
+                error_info, action="manual_edit", success=True, details="User manually edited skill"
+            )
+
+            # Return None to signal skill should be aborted and re-run
+            return None
+
+        elif action == "skip":
+            # Show manual commands and abort
+            print(f"\n⏭️  Skipping skill execution.\n" f"   Error in step: {step_name}\n")
+
+            self.error_recovery.log_fix_attempt(error_info, action="skip", success=False, details="User chose to skip")
+            return None
+
+        elif action == "abort":
+            # Create GitHub issue if possible
+            if self.create_issue_fn:
+                try:
+                    import asyncio
+
+                    issue_result = asyncio.get_event_loop().run_until_complete(
+                        self.create_issue_fn(
+                            tool="skill_compute",
+                            error=error_msg,
+                            context=f"Skill: {self.skill.get('name')}, Step: {step_name}",
+                            skill=self.skill.get("name", "unknown"),
+                        )
+                    )
+                    if issue_result.get("success"):
+                        print(f"\n🐛 GitHub issue created: {issue_result.get('issue_url')}")
+                except Exception as e:
+                    self._debug(f"Could not create issue: {e}")
+
+            self.error_recovery.log_fix_attempt(
+                error_info, action="abort", success=False, details="User aborted with issue creation"
+            )
+            return None
+
+        elif action == "continue":
+            # Debug mode - let broken data propagate
+            self.error_recovery.log_fix_attempt(
+                error_info, action="continue", success=False, details="User chose to continue with error"
+            )
+            return f"<compute error: {error_msg}>"
+
+        return None
+
+    def _exec_compute_internal(self, code: str, output_name: str):
+        """Internal compute execution without error recovery (used by recovery itself)."""
+        # This is the actual compute logic extracted from _exec_compute
+        # to avoid infinite recursion during auto-fix retries
         local_vars = dict(self.context)
         local_vars["inputs"] = self.inputs
         local_vars["config"] = self.config
@@ -308,7 +444,7 @@ class SkillExecutor:
         try:
             from zoneinfo import ZoneInfo
         except ImportError:
-            ZoneInfo = None
+            ZoneInfo = None  # type: ignore[assignment,misc]
 
         PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
         if str(PROJECT_ROOT) not in sys.path:
@@ -322,23 +458,23 @@ class SkillExecutor:
             from scripts.common.config_loader import load_config as load_skill_config
             from scripts.skill_hooks import emit_event_sync
         except ImportError:
-            parsers = None
-            jira_utils = None
-            load_skill_config = None
-            get_timezone = None
-            emit_event_sync = None
-            memory_helpers = None
-            config_loader = None
-            lint_utils = None
-            repo_utils = None
-            slack_utils = None
+            parsers = None  # type: ignore[assignment]
+            jira_utils = None  # type: ignore[assignment]
+            load_skill_config = None  # type: ignore[assignment]
+            get_timezone = None  # type: ignore[assignment]
+            emit_event_sync = None  # type: ignore[assignment]
+            memory_helpers = None  # type: ignore[assignment]
+            config_loader = None  # type: ignore[assignment]
+            lint_utils = None  # type: ignore[assignment]
+            repo_utils = None  # type: ignore[assignment]
+            slack_utils = None  # type: ignore[assignment]
 
         try:
             from google.oauth2.credentials import Credentials as GoogleCredentials
             from googleapiclient.discovery import build as google_build
         except ImportError:
-            GoogleCredentials = None
-            google_build = None
+            GoogleCredentials = None  # type: ignore[assignment,misc]
+            google_build = None  # type: ignore[assignment]
 
         safe_globals = {
             "__builtins__": {
@@ -404,41 +540,50 @@ class SkillExecutor:
             "slack_utils": slack_utils,
         }
 
-        try:
-            templated_code = self._template(code)
-            self._debug(f"  → Code: {templated_code[:100]}...")
+        templated_code = self._template(code)
+        namespace = {**safe_globals, **local_vars}
+        exec(templated_code, namespace)
 
-            # Merge globals and locals into single namespace to avoid
-            # Python scoping issues with generator expressions/comprehensions
-            # (they create their own scope and can't see separate locals)
-            namespace = {**safe_globals, **local_vars}
-            exec(templated_code, namespace)
-
-            if output_name in namespace:
-                result = namespace[output_name]
-            elif "result" in namespace:
-                result = namespace["result"]
-            elif "return" in templated_code:
-                for line in reversed(templated_code.split("\n")):
-                    if line.strip().startswith("return "):
-                        expr = line.strip()[7:]
-                        result = eval(expr, namespace)
-                        break
-                else:
-                    result = None
+        if output_name in namespace:
+            result = namespace[output_name]
+        elif "result" in namespace:
+            result = namespace["result"]
+        elif "return" in templated_code:
+            for line in reversed(templated_code.split("\n")):
+                if line.strip().startswith("return "):
+                    expr = line.strip()[7:]
+                    result = eval(expr, namespace)
+                    break
             else:
                 result = None
+        else:
+            result = None
 
-            # Update context with any new variables defined in the code
-            for key in namespace:
-                if key not in safe_globals and not key.startswith("_"):
-                    local_vars[key] = namespace[key]
+        # Update context with any new variables defined in the code
+        for key in namespace:
+            if key not in safe_globals and not key.startswith("_"):
+                local_vars[key] = namespace[key]
 
+        return result
+
+    def _exec_compute(self, code: str, output_name: str):
+        """Execute a compute block (limited Python) with error recovery."""
+        self._debug(f"Executing compute block for '{output_name}'")
+
+        try:
+            result = self._exec_compute_internal(code, output_name)
             self._debug(f"  → Result: {str(result)[:100]}")
             return result
 
         except Exception as e:
             self._debug(f"  → Compute error: {e}")
+
+            # Try interactive recovery if enabled
+            if self.enable_interactive_recovery and self.ask_question_fn:
+                recovery_result = self._try_interactive_recovery(code, str(e), output_name)
+                if recovery_result is not None:
+                    return recovery_result
+
             return f"<compute error: {e}>"
 
     async def _exec_tool(self, tool_name: str, args: dict) -> dict:
@@ -603,7 +748,7 @@ class SkillExecutor:
                         templated = self._template_dict(ret) if isinstance(ret, dict) else self._template(str(ret))
                         self._debug(f"Early return: {templated}")
 
-                        total_time = time.time() - self.start_time
+                        total_time = time.time() - (self.start_time or 0.0)
                         output_lines.append(f"✅ **Early Exit**\n{templated}\n")
                         output_lines.append(f"\n---\n⏱️ *Completed in {total_time:.2f}s*")
 
@@ -712,24 +857,25 @@ class SkillExecutor:
                 out_name = out.get("name", "output")
                 if "value" in out:
                     val = out["value"]
+                    output_value: Any
                     if isinstance(val, str):
-                        templated = self._template(val)
+                        output_value = self._template(val)
                     elif isinstance(val, (dict, list)):
-                        templated = (
+                        output_value = (
                             self._template_dict(val)
                             if isinstance(val, dict)
                             else [self._template(i) if isinstance(i, str) else i for i in val]
                         )
                     else:
-                        templated = val
+                        output_value = val
 
-                    self.context[out_name] = templated
-                    output_lines.append(f"**{out_name}:**\n{templated}\n")
+                    self.context[out_name] = output_value  # type: ignore[assignment]
+                    output_lines.append(f"**{out_name}:**\n{output_value}\n")
                 elif "compute" in out:
                     result = self._exec_compute(out["compute"], out_name)
                     output_lines.append(f"**{out_name}:** {result}\n")
 
-        total_time = time.time() - self.start_time
+        total_time = time.time() - (self.start_time or 0.0)
         success_count = sum(1 for r in self.step_results if r.get("success"))
         fail_count = sum(1 for r in self.step_results if not r.get("success"))
 
@@ -745,7 +891,7 @@ class SkillExecutor:
         return "\n".join(output_lines)
 
 
-def register_skill_tools(server: "FastMCP", create_issue_fn=None) -> int:
+def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_fn=None) -> int:
     """Register skill tools with the MCP server."""
     registry = ToolRegistry(server)
 
@@ -869,7 +1015,15 @@ def register_skill_tools(server: "FastMCP", create_issue_fn=None) -> int:
                 lines.append("\n*Run with `execute=True` to execute this plan*")
                 return [TextContent(type="text", text="\n".join(lines))]
 
-            executor = SkillExecutor(skill, input_data, debug=debug, server=server, create_issue_fn=create_issue_fn)
+            executor = SkillExecutor(
+                skill,
+                input_data,
+                debug=debug,
+                server=server,
+                create_issue_fn=create_issue_fn,
+                ask_question_fn=ask_question_fn,
+                enable_interactive_recovery=True,
+            )
             result = await executor.execute()
 
             return [TextContent(type="text", text=result)]
