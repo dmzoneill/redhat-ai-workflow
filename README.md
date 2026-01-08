@@ -256,6 +256,7 @@ Skills are reusable multi-step workflows with **built-in auto-healing**. See [fu
 | [🚨 investigate_alert](docs/skills/investigate_alert.md) | Triage alerts | ✅ VPN + Auth |
 | [🎫 create_jira_issue](docs/skills/create_jira_issue.md) | Create Jira issue | ✅ |
 | [✅ close_issue](docs/skills/close_issue.md) | Close issue with summary | ✅ VPN |
+| [📚 update_docs](docs/skills/update_docs.md) | Check/update documentation | ✅ |
 
 ### 🔄 Auto-Heal via Python Decorators
 
@@ -289,7 +290,7 @@ async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
 
 ## 🎯 Slash Commands
 
-64 slash commands for quick access. See [full commands reference](docs/commands/README.md).
+66 slash commands for quick access. See [full commands reference](docs/commands/README.md).
 
 | Category | Commands |
 |----------|----------|
@@ -299,6 +300,7 @@ async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
 | 🧪 **Testing** | `/deploy-ephemeral` `/test-ephemeral` `/check-namespaces` `/extend-ephemeral` `/run-local-tests` |
 | 🚨 **Operations** | `/investigate-alert` `/debug-prod` `/release-prod` `/env-overview` `/rollout-restart` `/scale-deployment` `/silence-alert` |
 | 📋 **Jira** | `/jira-hygiene` `/create-issue` `/clone-issue` `/sprint-planning` |
+| 📚 **Documentation** | `/check-docs` `/update-docs` |
 | 🔍 **Discovery** | `/tools` `/personas` `/list-skills` `/smoke-tools` `/smoke-skills` `/memory` |
 | 📅 **Calendar** | `/my-calendar` `/schedule-meeting` `/setup-gmail` `/google-reauth` |
 | 🔐 **Infrastructure** | `/vpn` `/konflux-status` `/appinterface-check` `/ci-health` `/cancel-pipeline` `/check-secrets` `/scan-vulns` |
@@ -309,13 +311,40 @@ async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
 /coffee                    # Morning briefing
 /start-work AAP-12345      # Begin work on issue
 # ... code ...
-/create-mr                 # Create merge request
+/update-docs               # Check if docs need updating
+/create-mr                 # Create merge request (auto-checks docs)
 /deploy-ephemeral          # Test in ephemeral
-/mark-ready                # Remove draft, notify team
+/mark-ready                # Remove draft, notify team (auto-checks docs)
 # ... review cycle ...
 /close-issue AAP-12345     # Wrap up
 /beer                      # End of day summary
 ```
+
+---
+
+## 📚 Documentation Checks
+
+Repositories can have automatic documentation checks before creating MRs. Configure in `config.json`:
+
+```json
+"my-repo": {
+  "docs": {
+    "enabled": true,
+    "path": "docs/",
+    "readme": "README.md",
+    "api_docs": "docs/api/",
+    "diagrams": ["docs/architecture/*.md"],
+    "check_on_mr": true
+  }
+}
+```
+
+When enabled, `/create-mr` and `/mark-ready` will:
+- Scan for changed files in the branch
+- Check README.md for broken links
+- Review API docs if endpoints changed
+- Check mermaid diagrams if architecture changed
+- Report issues and suggestions (non-blocking)
 
 ---
 
