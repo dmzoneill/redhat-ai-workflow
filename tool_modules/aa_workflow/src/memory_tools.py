@@ -7,6 +7,7 @@ Provides tools for reading, writing, and managing persistent memory:
 - memory_append: Append to lists
 - memory_query: Query with JSONPath expressions
 - memory_session_log: Log session actions
+- memory_stats: Get memory health and usage statistics
 - check_known_issues: Search for known fixes
 - learn_tool_fix: Save solutions to memory
 """
@@ -623,5 +624,192 @@ def register_memory_tools(server: "FastMCP") -> int:
             ]
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error saving fix: {e}")]
+
+    @registry.tool()
+    async def memory_stats() -> list[TextContent]:
+        """
+        Get memory system statistics and health metrics.
+
+        Provides visibility into:
+        - File sizes and last modified times
+        - Auto-heal success rates
+        - Pattern counts by category
+        - Session activity
+        - Storage usage by directory
+
+        Returns:
+            Comprehensive memory health dashboard.
+        """
+        try:
+            stats = {
+                "files": {},
+                "auto_heal": {},
+                "patterns": {},
+                "sessions": {},
+                "storage": {},
+            }
+
+            # File sizes and metadata
+            total_size = 0
+            for file in MEMORY_DIR.rglob("*.yaml"):
+                relative = file.relative_to(MEMORY_DIR)
+                size_bytes = file.stat().st_size
+                total_size += size_bytes
+                stats["files"][str(relative)] = {
+                    "size_kb": round(size_bytes / 1024, 2),
+                    "modified": datetime.fromtimestamp(file.stat().st_mtime).isoformat(),
+                }
+
+            # Auto-heal statistics
+            failures_file = MEMORY_DIR / "learned" / "tool_failures.yaml"
+            if failures_file.exists():
+                with open(failures_file) as f:
+                    failures_data = yaml.safe_load(f) or {}
+
+                total_failures = failures_data.get("stats", {}).get("total_failures", 0)
+                auto_fixed = failures_data.get("stats", {}).get("auto_fixed", 0)
+                success_rate = (auto_fixed / total_failures) if total_failures > 0 else 0
+
+                stats["auto_heal"] = {
+                    "total_failures": total_failures,
+                    "auto_fixed": auto_fixed,
+                    "manual_required": failures_data.get("stats", {}).get("manual_required", 0),
+                    "success_rate": round(success_rate, 2),
+                    "recent_count": len(failures_data.get("failures", [])),
+                }
+
+                # Daily/weekly stats if available
+                if "daily" in failures_data.get("stats", {}):
+                    stats["auto_heal"]["daily_stats"] = failures_data["stats"]["daily"]
+                if "weekly" in failures_data.get("stats", {}):
+                    stats["auto_heal"]["weekly_stats"] = failures_data["stats"]["weekly"]
+
+            # Pattern statistics
+            patterns_file = MEMORY_DIR / "learned" / "patterns.yaml"
+            if patterns_file.exists():
+                with open(patterns_file) as f:
+                    patterns_data = yaml.safe_load(f) or {}
+
+                pattern_categories = [
+                    "auth_patterns",
+                    "error_patterns",
+                    "bonfire_patterns",
+                    "pipeline_patterns",
+                    "jira_cli_patterns",
+                ]
+
+                by_category = {}
+                total_patterns = 0
+                for cat in pattern_categories:
+                    count = len(patterns_data.get(cat, []))
+                    by_category[cat] = count
+                    total_patterns += count
+
+                stats["patterns"] = {
+                    "total": total_patterns,
+                    "by_category": by_category,
+                }
+
+            # Session activity
+            sessions_dir = MEMORY_DIR / "sessions"
+            if sessions_dir.exists():
+                session_files = list(sessions_dir.glob("*.yaml"))
+                today = datetime.now().strftime("%Y-%m-%d")
+                today_file = sessions_dir / f"{today}.yaml"
+
+                today_actions = 0
+                if today_file.exists():
+                    with open(today_file) as f:
+                        today_data = yaml.safe_load(f) or {}
+                        today_actions = len(today_data.get("entries", []))
+
+                stats["sessions"] = {
+                    "total_session_files": len(session_files),
+                    "today_actions": today_actions,
+                    "today_date": today,
+                }
+
+            # Storage breakdown by directory
+            for subdir in ["state", "learned", "sessions", "backups"]:
+                dir_path = MEMORY_DIR / subdir
+                if dir_path.exists():
+                    dir_size = sum(f.stat().st_size for f in dir_path.rglob("*.yaml"))
+                    stats["storage"][subdir] = round(dir_size / 1024, 2)
+
+            stats["storage"]["total_kb"] = round(total_size / 1024, 2)
+
+            # Format output
+            lines = ["## 📊 Memory System Statistics\n"]
+
+            # Storage summary
+            lines.append("### 💾 Storage Usage")
+            lines.append(f"**Total:** {stats['storage']['total_kb']} KB")
+            for subdir, size_kb in sorted(stats["storage"].items()):
+                if subdir != "total_kb":
+                    lines.append(f"- {subdir}/: {size_kb} KB")
+            lines.append("")
+
+            # Auto-heal summary
+            if stats.get("auto_heal"):
+                ah = stats["auto_heal"]
+                lines.append("### 🔧 Auto-Heal Performance")
+                lines.append(f"**Success Rate:** {ah['success_rate']:.0%}")
+                lines.append(f"**Total Failures:** {ah['total_failures']}")
+                lines.append(f"**Auto-Fixed:** {ah['auto_fixed']}")
+                lines.append(f"**Manual Required:** {ah['manual_required']}")
+                lines.append(f"**Recent Entries:** {ah['recent_count']}")
+                lines.append("")
+
+            # Pattern summary
+            if stats.get("patterns"):
+                p = stats["patterns"]
+                lines.append("### 📋 Learned Patterns")
+                lines.append(f"**Total:** {p['total']} patterns")
+                for cat, count in sorted(p["by_category"].items()):
+                    lines.append(f"- {cat}: {count}")
+                lines.append("")
+
+            # Session summary
+            if stats.get("sessions"):
+                s = stats["sessions"]
+                lines.append("### 📅 Session Activity")
+                lines.append(f"**Today ({s['today_date']}):** {s['today_actions']} actions")
+                lines.append(f"**Total Sessions:** {s['total_session_files']} days")
+                lines.append("")
+
+            # Top 10 largest files
+            lines.append("### 📁 Largest Files")
+            sorted_files = sorted(stats["files"].items(), key=lambda x: x[1]["size_kb"], reverse=True)[:10]
+            for file_path, info in sorted_files:
+                lines.append(f"- {file_path}: {info['size_kb']} KB")
+            lines.append("")
+
+            # Health warnings
+            lines.append("### ⚡ Health Checks")
+            warnings = []
+
+            # Check for large files
+            large_files = [f for f, info in stats["files"].items() if info["size_kb"] > 50]
+            if large_files:
+                warnings.append(f"⚠️ {len(large_files)} files over 50 KB")
+
+            # Check auto-heal rate
+            if stats.get("auto_heal") and stats["auto_heal"]["success_rate"] < 0.7:
+                warnings.append(f"⚠️ Auto-heal success rate low: {stats['auto_heal']['success_rate']:.0%}")
+
+            # Check total storage
+            if stats["storage"]["total_kb"] > 1024:
+                warnings.append(f"⚠️ Total storage over 1 MB: {stats['storage']['total_kb']} KB")
+
+            if warnings:
+                for w in warnings:
+                    lines.append(w)
+            else:
+                lines.append("✅ All checks passed - memory system healthy")
+
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        except Exception as e:
+            return [TextContent(type="text", text=f"❌ Error generating stats: {e}")]
 
     return registry.count
