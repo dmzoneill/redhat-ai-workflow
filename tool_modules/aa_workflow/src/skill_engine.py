@@ -9,6 +9,7 @@ Provides:
 import json
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -169,31 +170,73 @@ class SkillExecutor:
 
         error_lower = error_msg.lower()
 
-        # Check for auth/network issues first (most common)
+        # Check learned patterns from memory
+        matched_pattern = None
+        pattern_category = None
+
+        try:
+            patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
+            if patterns_file.exists():
+                with open(patterns_file) as f:
+                    patterns_data = yaml.safe_load(f) or {}
+
+                # Check each category for matches
+                for cat in ["auth_patterns", "error_patterns", "bonfire_patterns", "pipeline_patterns"]:
+                    for pattern in patterns_data.get(cat, []):
+                        pattern_text = pattern.get("pattern", "").lower()
+                        if pattern_text and pattern_text in error_lower:
+                            matched_pattern = pattern
+                            pattern_category = cat
+                            # Track that pattern was matched
+                            self._update_pattern_usage_stats(cat, pattern_text, matched=True)
+                            break
+                    if matched_pattern:
+                        break
+        except Exception as e:
+            self._debug(f"Pattern lookup failed: {e}")
+
+        # Check for auth/network issues (hardcoded fallback)
         auth_patterns = ["unauthorized", "401", "403", "forbidden", "token expired"]
         network_patterns = ["no route to host", "connection refused", "timeout"]
 
         # Determine which fix to apply
         fix_type = None
-        if any(p in error_lower for p in auth_patterns):
-            fix_type = "auth"
-        elif any(p in error_lower for p in network_patterns):
-            fix_type = "network"
 
-        # Also check matches from known issues
-        for match in matches:
-            fix = match.get("fix", "").lower()
-            if "vpn" in fix or "connect" in fix:
-                fix_type = "network"
-                break
-            if "login" in fix or "auth" in fix or "kube" in fix:
+        # Priority 1: Use matched pattern from learned memory
+        if matched_pattern:
+            commands = matched_pattern.get("commands", [])
+            for cmd in commands:
+                if "vpn" in cmd.lower() or "connect" in cmd.lower():
+                    fix_type = "network"
+                    break
+                if "login" in cmd.lower() or "auth" in cmd.lower() or "kube" in cmd.lower():
+                    fix_type = "auth"
+                    break
+
+        # Priority 2: Hardcoded patterns
+        if not fix_type:
+            if any(p in error_lower for p in auth_patterns):
                 fix_type = "auth"
-                break
+            elif any(p in error_lower for p in network_patterns):
+                fix_type = "network"
+
+        # Priority 3: Check matches from known issues
+        if not fix_type:
+            for match in matches:
+                fix = match.get("fix", "").lower()
+                if "vpn" in fix or "connect" in fix:
+                    fix_type = "network"
+                    break
+                if "login" in fix or "auth" in fix or "kube" in fix:
+                    fix_type = "auth"
+                    break
 
         if not fix_type:
             return False
 
         self._debug(f"  → Detected {fix_type} issue, applying auto-fix")
+
+        fix_success = False
 
         try:
             if fix_type == "network":
@@ -206,7 +249,7 @@ class SkillExecutor:
                 await asyncio.wait_for(proc.wait(), timeout=30)
                 self._debug(f"  → VPN connect result: {proc.returncode}")
                 await asyncio.sleep(2)  # Wait for VPN to establish
-                return True
+                fix_success = True
 
             elif fix_type == "auth":
                 # Try kube login - guess cluster from error
@@ -239,12 +282,84 @@ class SkillExecutor:
                 await asyncio.wait_for(proc.wait(), timeout=30)
                 self._debug(f"  → Kube login result: {proc.returncode}")
                 await asyncio.sleep(1)
-                return proc.returncode == 0
+                fix_success = proc.returncode == 0
 
         except Exception as e:
             self._debug(f"  → Auto-fix failed: {e}")
+            fix_success = False
 
-        return False
+        # Track fix success for matched pattern
+        if fix_success and matched_pattern and pattern_category:
+            pattern_text = matched_pattern.get("pattern", "")
+            self._update_pattern_usage_stats(pattern_category, pattern_text, matched=False, fixed=True)
+
+        return fix_success
+
+    def _update_pattern_usage_stats(
+        self, category: str, pattern_text: str, matched: bool = True, fixed: bool = False
+    ) -> None:
+        """Update usage statistics for a pattern.
+
+        Args:
+            category: Pattern category (e.g., "auth_patterns", "error_patterns")
+            pattern_text: The pattern text to find
+            matched: Whether the pattern was matched (default: True)
+            fixed: Whether the fix succeeded (default: False)
+        """
+        try:
+            import fcntl
+
+            patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
+            if not patterns_file.exists():
+                return
+
+            # Atomic read-modify-write with file locking
+            with open(patterns_file, "r+") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+                try:
+                    f.seek(0)
+                    patterns_data = yaml.safe_load(f.read()) or {}
+
+                    if category not in patterns_data:
+                        return
+
+                    # Find and update the pattern
+                    for pattern in patterns_data[category]:
+                        if pattern.get("pattern", "").lower() == pattern_text.lower():
+                            # Initialize usage_stats if not present
+                            if "usage_stats" not in pattern:
+                                pattern["usage_stats"] = {
+                                    "times_matched": 0,
+                                    "times_fixed": 0,
+                                    "success_rate": 0.0,
+                                }
+
+                            stats = pattern["usage_stats"]
+
+                            # Update counters
+                            if matched:
+                                stats["times_matched"] = stats.get("times_matched", 0) + 1
+                                stats["last_matched"] = datetime.now().isoformat()
+
+                            if fixed:
+                                stats["times_fixed"] = stats.get("times_fixed", 0) + 1
+
+                            # Recalculate success rate
+                            if stats["times_matched"] > 0:
+                                stats["success_rate"] = round(stats["times_fixed"] / stats["times_matched"], 2)
+
+                            # Write back
+                            f.seek(0)
+                            f.truncate()
+                            yaml.dump(patterns_data, f, default_flow_style=False, sort_keys=False)
+                            break
+
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+        except Exception as e:
+            self._debug(f"Failed to update pattern stats: {e}")
 
     def _check_error_patterns(self, error: str) -> str | None:
         """Check if error matches known patterns and return fix suggestion."""
@@ -262,6 +377,9 @@ class SkillExecutor:
             for pattern in error_patterns:
                 pattern_text = pattern.get("pattern", "").lower()
                 if pattern_text and pattern_text in error_lower:
+                    # Track pattern match
+                    self._update_pattern_usage_stats("error_patterns", pattern_text, matched=True)
+
                     fix = pattern.get("fix", "")
                     meaning = pattern.get("meaning", "")
                     commands = pattern.get("commands", [])
