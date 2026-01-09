@@ -7,7 +7,6 @@ It rebuilds tools_basic.py and tools_extra.py from tools.py for each module.
 """
 
 import ast
-import re
 import shutil
 from pathlib import Path
 from typing import Dict, Set
@@ -103,7 +102,7 @@ def split_tools_file(module_name: str, used_tools: Set[str], unused_tools: Set[s
     tools_file = module_dir / "tools.py"
 
     if not tools_file.exists():
-        print(f"   ⚠️  No tools.py found, skipping")
+        print("   ⚠️  No tools.py found, skipping")
         return False
 
     # Read the source file
@@ -182,7 +181,7 @@ def split_tools_file(module_name: str, used_tools: Set[str], unused_tools: Set[s
 
     # Remove old tools.py
     tools_file.unlink()
-    print(f"   🗑️  Removed tools.py (backed up to backup/)")
+    print("   🗑️  Removed tools.py (backed up to backup/)")
 
     return True
 
@@ -205,7 +204,7 @@ def update_module_imports(module_name: str):
         if updated != content:
             with open(server_file, "w") as f:
                 f.write(updated)
-            print(f"   ✅ Updated server.py imports")
+            print("   ✅ Updated server.py imports")
 
 
 def main():

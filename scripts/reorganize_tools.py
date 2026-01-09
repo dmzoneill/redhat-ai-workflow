@@ -15,7 +15,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 # Project root
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -141,12 +141,12 @@ def split_module_tools(module_name: str, used_tools: Set[str], unused_tools: Set
     print(f"   Used tools: {len(used_tools)}, Unused tools: {len(unused_tools)}")
 
     if has_basic_extra:
-        print(f"   ℹ️  Already has basic/extra split - skipping reorganization")
-        print(f"      (Manual review recommended to verify correct split)")
+        print("   ℹ️  Already has basic/extra split - skipping reorganization")
+        print("      (Manual review recommended to verify correct split)")
         return
 
     if has_single_tools:
-        print(f"   🔧 Splitting tools.py into basic/extra")
+        print("   🔧 Splitting tools.py into basic/extra")
 
         # Read the current tools.py
         tools_file = module_dir / "tools.py"
@@ -156,11 +156,9 @@ def split_module_tools(module_name: str, used_tools: Set[str], unused_tools: Set
         # Extract header/imports section (everything before first @tool decorator)
         lines = content.split("\n")
         header_lines = []
-        first_tool_idx = None
 
-        for i, line in enumerate(lines):
+        for line in lines:
             if "@mcp.tool()" in line or "@registry.tool()" in line:
-                first_tool_idx = i
                 break
             header_lines.append(line)
 
@@ -209,11 +207,11 @@ def split_module_tools(module_name: str, used_tools: Set[str], unused_tools: Set
         # Backup original tools.py
         backup_file = module_dir / "tools.py.backup"
         shutil.copy(tools_file, backup_file)
-        print(f"      📁 Backed up original to tools.py.backup")
+        print("      📁 Backed up original to tools.py.backup")
 
         # Remove original tools.py
         os.remove(tools_file)
-        print(f"      🗑️  Removed tools.py")
+        print("      🗑️  Removed tools.py")
 
 
 def update_server_py(module_name: str):
@@ -235,7 +233,7 @@ def update_server_py(module_name: str):
     if updated != content:
         with open(server_file, "w") as f:
             f.write(updated)
-        print(f"      ✅ Updated server.py imports")
+        print("      ✅ Updated server.py imports")
 
 
 def main():

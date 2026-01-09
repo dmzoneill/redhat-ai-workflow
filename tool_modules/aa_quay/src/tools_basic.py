@@ -156,10 +156,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal()
-
     # ==================== TOOLS USED IN SKILLS ====================
-
     @auto_heal()
     @registry.tool()
     async def quay_check_image_exists(

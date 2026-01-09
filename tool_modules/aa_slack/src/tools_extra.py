@@ -124,7 +124,6 @@ def register_tools(server: FastMCP) -> int:
     registry = ToolRegistry(server)
 
     # ==================== MCP Resources ====================
-
     @server.resource("slack://pending_messages")
     async def pending_messages_resource() -> str:
         """
@@ -178,11 +177,7 @@ def register_tools(server: FastMCP) -> int:
             return json.dumps({"error": str(e), "status": "error"})
 
     # ==================== Message Tools ====================
-
-    @auto_heal()
-
     # ==================== TOOLS NOT USED IN SKILLS ====================
-
     @auto_heal()
     @registry.tool()
     async def slack_add_reaction(

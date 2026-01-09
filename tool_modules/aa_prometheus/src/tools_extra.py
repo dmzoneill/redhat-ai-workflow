@@ -5,7 +5,6 @@ Provides 14 tools for Prometheus queries, alerts, targets, and metrics.
 
 import logging
 import os
-from datetime import datetime, timedelta
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -13,12 +12,14 @@ from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_stage
 from server.http_client import prometheus_client
-from server.timeouts import parse_duration_to_minutes
 from server.tool_registry import ToolRegistry
 from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
+
+# Import from basic module
+from .tools_basic import prometheus_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +63,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal_stage()
-
     # ==================== TOOLS NOT USED IN SKILLS ====================
-
     @auto_heal_stage()
     @registry.tool()
     async def prometheus_check_health(

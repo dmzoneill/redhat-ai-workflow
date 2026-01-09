@@ -4,16 +4,12 @@ Provides 5 tools for Alertmanager silences and status.
 """
 
 import logging
-import os
-from datetime import datetime, timedelta
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_stage
 from server.http_client import alertmanager_client
-from server.timeouts import parse_duration_to_minutes
 from server.tool_registry import ToolRegistry
 from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
 
@@ -69,10 +65,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal_stage()
-
     # ==================== TOOLS NOT USED IN SKILLS ====================
-
     @auto_heal_stage()
     @registry.tool()
     async def alertmanager_receivers(

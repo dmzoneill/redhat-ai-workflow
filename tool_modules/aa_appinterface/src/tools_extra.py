@@ -72,10 +72,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal()
-
     # ==================== TOOLS NOT USED IN SKILLS ====================
-
     @auto_heal()
     @registry.tool()
     async def appinterface_clusters(path: str = "") -> list[TextContent]:

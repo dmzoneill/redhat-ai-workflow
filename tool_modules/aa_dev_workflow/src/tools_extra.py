@@ -59,10 +59,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register development workflow tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal()
-
     # ==================== TOOLS NOT USED IN SKILLS ====================
-
     @auto_heal()
     @registry.tool()
     async def workflow_check_deploy_readiness(
