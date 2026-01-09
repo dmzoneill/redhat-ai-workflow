@@ -76,68 +76,32 @@ def atomic_append_to_list(key, list_path, item, match_key=None):
 
 ---
 
-### 2. Missing Memory Backup Strategy
+### ✅ 2. Missing Memory Backup Strategy - IMPLEMENTED
 
-**Problem:** No automated backups of critical learned patterns.
+**Status:** ✅ Completed (2026-01-09)
 
-**Risk:**
-- User accidentally runs `memory_init` → **ALL learned patterns lost**
-- File corruption → **20 patterns gone**
-- No recovery mechanism
+**Implementation:** Added `backup_before_init` step to `skills/memory_init.yaml`.
 
-**Solution:**
+**What was added:**
+- Timestamped backup creation (YYYYMMDD_HHMMSS format)
+- Backs up 8 critical memory files:
+  - state/current_work.yaml
+  - state/environments.yaml
+  - learned/patterns.yaml
+  - learned/tool_fixes.yaml
+  - learned/tool_failures.yaml
+  - learned/runbooks.yaml
+  - learned/service_quirks.yaml
+  - learned/teammate_preferences.yaml
+- Keeps last 10 backups automatically (deletes older ones)
+- Shows backup location and file count in output
+- Backup happens BEFORE any files are wiped (critical!)
 
-```python
-# scripts/backup_memory.py
-from datetime import datetime
-from pathlib import Path
-import shutil
+**Location:** `memory/backups/YYYYMMDD_HHMMSS/`
 
-MEMORY_DIR = Path.home() / "src/redhat-ai-workflow/memory"
-BACKUP_DIR = MEMORY_DIR / "backups"
+**Impact:** Prevents data loss from accidental memory_init. User can restore from `memory/backups/` if needed.
 
-def backup_memory():
-    """Create timestamped backup of critical memory files."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = BACKUP_DIR / timestamp
-    backup_path.mkdir(parents=True, exist_ok=True)
-
-    critical_files = [
-        "learned/patterns.yaml",
-        "learned/tool_fixes.yaml",
-        "learned/runbooks.yaml",
-        "state/current_work.yaml",
-    ]
-
-    for file in critical_files:
-        src = MEMORY_DIR / file
-        if src.exists():
-            dst = backup_path / file
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
-
-    # Keep only last 10 backups
-    backups = sorted(BACKUP_DIR.iterdir(), reverse=True)
-    for old in backups[10:]:
-        shutil.rmtree(old)
-
-    return backup_path
-
-# Add to memory_init skill BEFORE wiping
-- name: backup_before_init
-  compute: |
-    from scripts.backup_memory import backup_memory
-    backup_path = backup_memory()
-    result = str(backup_path)
-  output: backup_location
-```
-
-**Also add pre-commit hook:**
-```bash
-#!/bin/bash
-# .git/hooks/pre-commit
-python scripts/backup_memory.py
-```
+**Note:** Pre-commit hook for automatic backups not implemented yet (P2 priority).
 
 ---
 

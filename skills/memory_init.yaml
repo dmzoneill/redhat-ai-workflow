@@ -46,6 +46,58 @@ steps:
           result = {"proceed": True}
     output: confirmation
 
+  - name: backup_before_init
+    description: "Create timestamped backup of all memory files before wiping"
+    condition: "confirmation.proceed"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import shutil
+      import yaml
+
+      memory_dir = Path.home() / "src/redhat-ai-workflow/memory"
+      backup_dir = memory_dir / "backups"
+
+      # Create timestamped backup directory
+      timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+      backup_path = backup_dir / timestamp
+      backup_path.mkdir(parents=True, exist_ok=True)
+
+      # Critical files to backup
+      critical_files = [
+          "state/current_work.yaml",
+          "state/environments.yaml",
+          "learned/patterns.yaml",
+          "learned/tool_fixes.yaml",
+          "learned/tool_failures.yaml",
+          "learned/runbooks.yaml",
+          "learned/service_quirks.yaml",
+          "learned/teammate_preferences.yaml",
+      ]
+
+      backed_up = []
+      for file_path in critical_files:
+          src = memory_dir / file_path
+          if src.exists():
+              dst = backup_path / file_path
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dst)
+              backed_up.append(file_path)
+
+      # Keep only last 10 backups
+      backups = sorted(backup_dir.iterdir(), reverse=True)
+      for old_backup in backups[10:]:
+          if old_backup.is_dir():
+              shutil.rmtree(old_backup)
+
+      result = {
+          "backup_location": str(backup_path),
+          "timestamp": timestamp,
+          "files_backed_up": backed_up,
+          "total_backups": min(len(backups), 10)
+      }
+    output: backup_info
+
   - name: backup_patterns
     description: "Backup patterns if preserving them"
     condition: "confirmation.proceed and inputs.preserve_patterns"
@@ -242,6 +294,21 @@ outputs:
 
       {% else %}
       ## ✅ Memory Initialized
+
+      ### 💾 Backup Created
+      **Location:** `{{ backup_info.backup_location }}`
+      **Timestamp:** {{ backup_info.timestamp }}
+      **Files backed up:** {{ backup_info.files_backed_up | length }}
+      **Total backups:** {{ backup_info.total_backups }} (keeping last 10)
+
+      {% if backup_info.files_backed_up %}
+      Backed up files:
+      {% for file in backup_info.files_backed_up %}
+      - `{{ file }}`
+      {% endfor %}
+      {% endif %}
+
+      ---
 
       ### State Files Reset
       - ✅ `state/current_work.yaml` - Active issues, MRs, follow-ups cleared
