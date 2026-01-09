@@ -79,3 +79,6 @@ test-results
 # Temporary debug scripts (use temp_*.py or debug_*.py naming)
 scripts/temp_*.py
 scripts/debug_*.py
+
+# Super-linter output
+.super-linter-output/

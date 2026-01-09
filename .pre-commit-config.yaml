@@ -1,5 +1,7 @@
 # Pre-commit hooks for code quality
-# Run: pre-commit install && pre-commit run --all-files
+# Run: pre-commit install && pre-commit install --hook-type pre-push
+# Test all hooks: pre-commit run --all-files
+# Test pre-push hooks: pre-commit run --hook-stage pre-push --all-files
 
 repos:
   # Code formatting
@@ -57,6 +59,16 @@ repos:
     hooks:
       - id: yamllint
         args: ["-c", ".yamllint.yaml"]
+
+  # GitHub Super-Linter (runs via Docker)
+  - repo: local
+    hooks:
+      - id: super-linter
+        name: Super-Linter
+        entry: ./scripts/run-super-linter.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
 
 # Configuration
 ci:
