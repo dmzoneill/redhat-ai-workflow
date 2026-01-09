@@ -54,6 +54,25 @@ appinterface_get_ref(
 appinterface_get_alerts(namespace="tower-analytics-prod")
 ```
 
+## Process Flow
+
+```mermaid
+flowchart LR
+    START([Query Request]) --> GET[Get Config/Ref]
+    GET --> PARSE[Parse YAML]
+    PARSE --> VALIDATE{Valid?}
+    VALIDATE -->|Yes| RETURN[Return Data]
+    VALIDATE -->|No| ERROR[❌ Error]
+
+    UPDATE([Update Request]) --> MODIFY[Modify YAML]
+    MODIFY --> COMMIT[Commit to Repo]
+    COMMIT --> MR[Create MR]
+
+    style START fill:#6366f1,stroke:#4f46e5,color:#fff
+    style RETURN fill:#10b981,stroke:#059669,color:#fff
+    style ERROR fill:#ef4444,stroke:#dc2626,color:#fff
+```
+
 ## Loaded By
 
 - [📦 Release Persona](../personas/release.md)

@@ -77,6 +77,26 @@ URLs and kubeconfig paths are defined in `config.json`:
 }
 ```
 
+## Alert Management Flow
+
+```mermaid
+flowchart TD
+    GET([Get Alerts]) --> AUTH[Authenticate]
+    AUTH --> FETCH[Fetch from API]
+    FETCH --> PARSE[Parse Alerts]
+    PARSE --> RETURN([Return Alert List])
+
+    SILENCE([Create Silence]) --> BUILD[Build Silence Spec]
+    BUILD --> POST[POST to Alertmanager]
+    POST --> VERIFY[Verify Created]
+    VERIFY --> CONFIRM([Silence Active])
+
+    style GET fill:#6366f1,stroke:#4f46e5,color:#fff
+    style SILENCE fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style RETURN fill:#10b981,stroke:#059669,color:#fff
+    style CONFIRM fill:#10b981,stroke:#059669,color:#fff
+```
+
 ## Loaded By
 
 - [🚨 Incident Persona](../personas/incident.md)

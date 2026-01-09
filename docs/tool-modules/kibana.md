@@ -57,6 +57,26 @@ kibana_count(
 )
 ```
 
+## Search Flow
+
+```mermaid
+flowchart LR
+    START([Log Search]) --> ENV{Environment?}
+    ENV -->|Stage| STAGE[Stage Kibana]
+    ENV -->|Production| PROD[Prod Kibana]
+
+    STAGE --> QUERY[Build ES Query]
+    PROD --> QUERY
+
+    QUERY --> SEARCH[Execute Search]
+    SEARCH --> PARSE[Parse Logs]
+    PARSE --> FILTER[Filter & Format]
+    FILTER --> RETURN([Return Logs])
+
+    style START fill:#6366f1,stroke:#4f46e5,color:#fff
+    style RETURN fill:#10b981,stroke:#059669,color:#fff
+```
+
 ## Loaded By
 
 - [🚨 Incident Persona](../personas/incident.md)
