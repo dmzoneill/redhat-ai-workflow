@@ -117,7 +117,7 @@ GITHUB_ISSUES_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
 
 ## 📊 Complete Coverage Matrix
 
-### 1. Memory Access Methods (6 Total)
+### 1. Memory Access Methods (7 Total) - UPDATED!
 
 | Method | Files | Lines | Purpose | Examples |
 |--------|-------|-------|---------|----------|
@@ -127,6 +127,7 @@ GITHUB_ISSUES_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
 | **4. MCP Resources** | resources.py | 141 | Read-only URIs for Claude | memory://state/current_work |
 | **5. Auto-Heal Logging** | auto_heal_decorator.py | 420 | Automatic failure logs | _log_auto_heal_to_memory |
 | **6. Skill Context** | skill_engine.py | 150 | `memory` object in compute | memory.read_memory("patterns") |
+| **7. Slack SQLite DB** | aa_slack/persistence.py | 345 | Slack listener state (separate from YAML) | SlackStateDB.add_pending_message() |
 
 ### 2. Memory Files (10+ Total)
 
@@ -145,8 +146,10 @@ GITHUB_ISSUES_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
 | - skill_error_patterns.yaml | 1 | ~5 KB | Error patterns | skill_error_recovery |
 | **sessions/** | 200+ | ~600 KB | Daily logs | memory_session_log |
 | - YYYY-MM-DD.yaml | Many | ~3 KB each | Daily actions | memory_session_log (39 skills) |
-| **backups/** | 10 | Variable | Backups | Proposed (not implemented) |
+| **backups/** | 10 | Variable | Backups | memory_init (auto-created) |
 | **archives/** | Many | Compressed | Old sessions | Proposed (not implemented) |
+| **Slack SQLite** | 1 DB | Variable | Slack listener state (SEPARATE) | SlackStateDB |
+| - slack_state.db | 1 | ~100 KB | Channel state, pending messages, users | Slack tools/listener |
 
 ### 3. Integration Points (8 Total)
 
@@ -506,6 +509,100 @@ memory  # Memory helper object (scripts.common.memory module)
 
 ---
 
+### Access Method 7: Slack SQLite Persistence
+
+**Location:** `tool_modules/aa_slack/src/persistence.py` (345 lines)
+
+**Setup:**
+```python
+class SlackStateDB:
+    def __init__(self, db_path: str | None = None):
+        self.db_path = db_path or os.getenv("SLACK_STATE_DB_PATH", "./slack_state.db")
+        self._db: aiosqlite.Connection | None = None
+        self._lock = asyncio.Lock()
+```
+
+**Database Schema:**
+```sql
+-- Channel tracking (last processed message per channel)
+CREATE TABLE channel_state (
+    channel_id TEXT PRIMARY KEY,
+    last_processed_ts TEXT NOT NULL,
+    channel_name TEXT,
+    updated_at REAL NOT NULL
+);
+
+-- Message queue (pending messages for LLM processing)
+CREATE TABLE pending_messages (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    data TEXT NOT NULL,  -- JSON serialized PendingMessage
+    created_at REAL NOT NULL,
+    processed_at REAL
+);
+
+-- User cache (avoid repeated Slack API calls)
+CREATE TABLE user_cache (
+    user_id TEXT PRIMARY KEY,
+    user_name TEXT NOT NULL,
+    display_name TEXT,
+    real_name TEXT,
+    updated_at REAL NOT NULL
+);
+
+-- Listener metadata
+CREATE TABLE listener_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+```
+
+**Key Operations:**
+```python
+# Channel state
+await db.get_last_processed_ts(channel_id) -> str | None
+await db.set_last_processed_ts(channel_id, timestamp, channel_name)
+await db.get_all_channel_states() -> dict[str, str]
+
+# Pending messages
+await db.add_pending_message(message: PendingMessage)
+await db.get_pending_messages(limit=50, channel_id=None) -> list[PendingMessage]
+await db.mark_message_processed(message_id)
+await db.get_pending_count() -> int
+await db.clear_old_messages(older_than_hours=24)
+
+# User cache
+await db.cache_user(user_id, user_name, display_name, real_name)
+await db.get_user_name(user_id) -> str | None
+await db.get_all_cached_users() -> dict
+
+# Metadata
+await db.get_meta(key, default="") -> str
+await db.set_meta(key, value)
+```
+
+**Key Differences from YAML Memory:**
+- **Technology:** SQLite (not YAML files)
+- **Async:** Uses aiosqlite with asyncio.Lock for concurrency
+- **Structure:** Relational tables with indexes
+- **Scope:** Slack integration only (separate from main memory/)
+- **Retention:** Auto-cleanup of old processed messages (24hr TTL)
+- **Persistence:** Survives server restarts
+- **Location:** Configurable via `SLACK_STATE_DB_PATH` env var
+
+**Used By:**
+- Slack listener (scripts/claude_agent.py)
+- Slack MCP tools (aa_slack module)
+
+**Purpose:**
+This is a **completely separate persistence layer** from the YAML-based memory system. It handles Slack-specific state that needs to survive server restarts:
+- Which messages have been processed (avoid duplicates)
+- Pending messages waiting for LLM processing
+- Cached user information (reduce Slack API calls)
+
+---
+
 ## 📈 Complete Statistics
 
 ### Memory Operations per Day
@@ -579,15 +676,15 @@ By Operation:
 
 ### What I've Documented
 
-1. **6 memory access methods** - Complete coverage
+1. **7 memory access methods** - Complete coverage (YAML + SQLite)
 2. **8 MCP resources** - NEW discovery
 3. **5 MCP tools** - Fully documented
 4. **15+ Python helpers** - All functions listed
-5. **10+ memory files** - Complete reference
-6. **22 Python files** - All analyzed
+5. **10+ memory files + 1 SQLite DB** - Complete reference
+6. **23 Python files** - All analyzed (added persistence.py)
 7. **54 skill files** - All categorized
 8. **239+ tools** - 100% auto-heal coverage
-9. **13 improvements** - Prioritized roadmap
+9. **13 improvements** - Prioritized roadmap (2 implemented)
 10. **Critical gaps** - Validation issues identified
 
 ### Coverage Completeness
