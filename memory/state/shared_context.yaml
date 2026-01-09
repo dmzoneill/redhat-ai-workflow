@@ -1,0 +1,15 @@
+# Shared Context Memory - Cross-skill communication
+#
+# This file allows skills to share context with each other.
+# When one skill discovers important information, it can save it here
+# for other skills to use without re-discovering.
+#
+# Context expires after 1 hour by default to prevent stale data.
+
+current_investigation:
+  started_by: ""
+  started_at: ""
+  context: {}
+  expires_at: ""
+
+last_updated: "2026-01-09T00:00:00"
