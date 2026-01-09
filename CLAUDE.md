@@ -75,8 +75,9 @@ Instead of chaining tools manually, use pre-built skills:
 │  - state/environments.yaml  - learned/runbooks.yaml    │
 ├─────────────────────────────────────────────────────────┤
 │  MCP TOOLS (tool_modules/)                               │
-│  ~261 tools across 17 modules                           │
+│  245 tools: 170 basic (used) + 75 extra (unused)       │
 │  aa_git, aa_jira, aa_gitlab, aa_k8s, aa_prometheus...  │
+│  30% context reduction with basic-only loading         │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -116,28 +117,36 @@ Claude runs the `test_mr_ephemeral` skill automatically.
 
 ---
 
-## MCP Tools (~261 total)
+## MCP Tools (245 total: 170 basic + 75 extra)
+
+### Tool Organization
+
+**All tools are split into `_basic` (used in skills) and `_extra` (rarely used) to reduce context window by 30%.**
+
+> **Data-Driven:** Analyzed 55 skills to identify which 170 tools are actually used. See `.claude/skill-tool-usage-report.md` for details.
 
 ### Tool Categories
 
-| Module | Tools | Purpose |
-|--------|-------|---------|
-| `aa_workflow` | 16 | Core: agents, skills, memory, vpn, kube_login |
-| `aa_git` | 30 | Git operations (14 basic + 16 extra) |
-| `aa_gitlab` | 30 | GitLab MRs, CI/CD pipelines (16 basic + 14 extra) |
-| `aa_jira` | 28 | Jira issues (15 basic + 13 extra) |
-| `aa_k8s` | 28 | Kubernetes (14 basic + 14 extra) |
-| `aa_bonfire` | 20 | Ephemeral namespace management (10 basic + 10 extra) |
-| `aa_quay` | 7 | Container registry, vulnerabilities |
-| `aa_prometheus` | 13 | Prometheus queries, alerts (9 basic + 4 extra) |
-| `aa_alertmanager` | 7 | Silences, alert management |
-| `aa_kibana` | 9 | Log search and analysis |
-| `aa_konflux` | 35 | Konflux builds, Tekton (18 basic + 17 extra) |
-| `aa_appinterface` | 7 | App-Interface validation |
-| `aa_google_calendar` | 6 | Calendar & meetings |
-| `aa_slack` | 9 | Slack integration |
-| `aa_lint` | 7 | Code linting and testing |
-| `aa_dev_workflow` | 9 | Development workflow helpers |
+| Module | Total | Basic (Used) | Extra (Unused) | Purpose |
+|--------|-------|--------------|----------------|---------|
+| `aa_workflow` | 16 | 16 | 0 | Core: agents, skills, memory, vpn, kube_login |
+| `aa_git` | 30 | 27 | 3 | Git operations (90% usage) |
+| `aa_gitlab` | 30 | 16 | 14 | GitLab MRs, CI/CD pipelines (53% usage) |
+| `aa_jira` | 28 | 17 | 11 | Jira issues (61% usage) |
+| `aa_k8s` | 28 | 22 | 6 | Kubernetes (79% usage) |
+| `aa_bonfire` | 20 | 10 | 10 | Ephemeral namespace management (50% usage) |
+| `aa_quay` | 7 | 5 | 2 | Container registry, vulnerabilities (71% usage) |
+| `aa_prometheus` | 13 | 5 | 8 | Prometheus queries, alerts (38% usage) |
+| `aa_alertmanager` | 7 | 4 | 3 | Silences, alert management (57% usage) |
+| `aa_kibana` | 9 | 1 | 8 | Log search and analysis (11% usage) |
+| `aa_konflux` | 35 | 22 | 13 | Konflux builds, Tekton (63% usage) |
+| `aa_appinterface` | 7 | 4 | 3 | App-Interface validation (57% usage) |
+| `aa_google_calendar` | 6 | 6 | 0 | Calendar & meetings (100% usage) |
+| `aa_slack` | 9 | 6 | 3 | Slack integration (67% usage) |
+| `aa_lint` | 7 | 1 | 6 | Code linting and testing (14% usage) |
+| `aa_dev_workflow` | 9 | 0 | 9 | Development workflow helpers (0% usage) |
+
+**Total:** 245 tools (170 basic used in skills, 75 extra rarely used)
 
 ### Most-Used Tools
 
@@ -183,7 +192,7 @@ You: Load the devops agent
 [Server sends tools/list_changed to Cursor]
 [Cursor refreshes available tools]
 
-Claude: DevOps persona loaded with ~83 tools!
+Claude: DevOps persona loaded with ~62 tools!
 ```
 
 ### Available Personas

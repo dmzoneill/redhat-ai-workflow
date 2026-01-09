@@ -9,6 +9,6 @@ This module can be used in two ways:
    python -m aa_common.server --tools git
 """
 
-from .tools import register_tools
+from .tools_basic import register_tools
 
 __all__ = ["register_tools"]
