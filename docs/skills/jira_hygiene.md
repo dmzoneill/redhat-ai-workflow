@@ -1,130 +1,181 @@
-# 📋 jira_hygiene
+# ⚡ jira_hygiene
 
-> Validate and fix Jira issue quality
+> Check and fix Jira issue hygiene - ensures issues have proper details,
+acceptance criteria, priority, labels, epic links, and formatting
 
 ## Overview
 
-The `jira_hygiene` skill validates that a Jira issue has all required fields properly filled out, and can auto-fix common issues.
+Check and fix Jira issue hygiene - ensures issues have proper details,
+acceptance criteria, priority, labels, epic links, and formatting.
+Transitions New issues to Refinement when complete.
+
+Resolves project and component from issue_key prefix or repo_name.
+
+**Version:** 1.2
 
 ## Quick Start
 
-```
+```bash
 skill_run("jira_hygiene", '{"issue_key": "AAP-12345"}')
-```
-
-With auto-fix:
-
-```
-skill_run("jira_hygiene", '{"issue_key": "AAP-12345", "auto_fix": true}')
 ```
 
 ## Inputs
 
 | Input | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `issue_key` | string | ✅ Yes | - | Jira issue key |
-| `auto_fix` | boolean | No | `false` | Auto-fix issues |
-| `auto_transition` | boolean | No | `false` | Auto-transition New→Refinement |
+| `issue_key` | string | ✅ Yes | `-` | Jira issue key to check (e.g., AAP-12345) |
+| `repo_name` | string | No | `-` | Repository name from config to determine component |
+| `auto_fix` | boolean | No | `True` | Automatically fix issues where possible |
+| `auto_transition` | boolean | No | `True` | Auto-transition New → Refinement when ready |
+| `epic_key` | string | No | `-` | Epic key to link issue to (e.g., AAP-50000). If provided with auto_fix, will set epic. |
+| `story_points` | integer | No | `-` | Story points to set (e.g., 3). If provided with auto_fix, will set points. |
+| `priority` | string | No | `-` | Priority to set (e.g., 'Major'). If provided with auto_fix, will set priority. |
 
-## Flow
+## Process Flow
 
 ```mermaid
 flowchart TD
-    START([Start]) --> GET[Get Issue Details]
-    GET --> DESC[Check Description]
-    DESC --> AC[Check Acceptance Criteria]
-    AC --> PRIORITY[Check Priority]
-    PRIORITY --> LABELS[Check Labels/Components]
-
-    LABELS --> TYPE{Issue Type?}
-    TYPE -->|Story| EPIC[Check Epic Link]
-    TYPE -->|Bug/Task| SKIP_EPIC[Skip Epic Check]
-
-    EPIC --> VERSION
-    SKIP_EPIC --> VERSION
-
-    VERSION[Check Fix Version] --> STATUS{In Progress?}
-    STATUS -->|Yes| POINTS[Check Story Points]
-    STATUS -->|No| MARKUP
-    POINTS --> MARKUP
-
-    MARKUP[Check Jira Markup] --> COMPILE[Compile Issues]
-
-    COMPILE --> FIX{Auto-fix?}
-    FIX -->|Yes| APPLY[Apply Fixes]
-    FIX -->|No| REPORT[Report Only]
-
-    APPLY --> TRANSITION{New + Complete?}
-    REPORT --> TRANSITION
-
-    TRANSITION -->|Yes| MOVE[→ Refinement]
-    TRANSITION -->|No| DONE
-    MOVE --> DONE([📋 Done])
+    START([Start])
+    STEP1[Step 1: Init Autoheal]
+    START --> STEP1
+    STEP2[Step 2: Resolve Context]
+    STEP1 --> STEP2
+    STEP3[Step 3: Get Issue]
+    STEP2 --> STEP3
+    STEP4[Step 4: Parse Issue]
+    STEP3 --> STEP4
+    STEP5[Step 5: Validate Issue]
+    STEP4 --> STEP5
+    STEP6[Step 6: Prepare Fixes]
+    STEP5 --> STEP6
+    STEP7[Step 7: Apply Status Transition]
+    STEP6 --> STEP7
+    STEP8[Step 8: Apply Priority Fix]
+    STEP7 --> STEP8
+    STEP9[Step 9: Apply Epic Fix]
+    STEP8 --> STEP9
+    STEP10[Step 10: Apply Story Points Fix]
+    STEP9 --> STEP10
+    STEP11[Step 11: Collect Fix Results]
+    STEP10 --> STEP11
+    STEP12[Step 12: Build Report]
+    STEP11 --> STEP12
+    STEP13[Step 13: Log Hygiene Check]
+    STEP12 --> STEP13
+    STEP14[Step 14: Create Followup If Needed]
+    STEP13 --> STEP14
+    STEP14 --> DONE([Complete])
 
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
-    style APPLY fill:#10b981,stroke:#059669,color:#fff
 ```
 
-## Checks Performed
+## Detailed Steps
 
-| Check | Required For | Auto-Fixable |
-|-------|--------------|--------------|
-| Description | All | ⚠️ Template only |
-| Acceptance Criteria | Stories | ⚠️ Template only |
-| Priority | All | ✅ Default to Medium |
-| Labels | All | ❌ |
-| Components | All | ❌ |
-| Epic Link | Stories | ❌ |
-| Fix Version | All | ❌ |
-| Story Points | In Progress Stories | ❌ |
-| Jira Markup | All | ✅ Convert from Markdown |
+### Step 1: Init Autoheal
 
-## MCP Tools Used
+**Description:** Initialize failure tracking
 
-- `jira_view_issue` - Get issue details
-- `jira_view_issue_json` - Get raw fields
-- `jira_update_issue` - Apply fixes
+**Tool:** `compute`
 
-## Example Output
+### Step 2: Resolve Context
 
-```
-You: Check hygiene for AAP-12345
+**Description:** Determine Jira project and default component from issue key
 
-Claude: 📋 Jira Hygiene Check: AAP-12345
+**Tool:** `compute`
 
-        Issue: "Implement new REST API endpoint"
-        Type: Story | Status: New
+### Step 3: Get Issue
 
-        ────────────────────────────────
+**Description:** Fetch issue details from Jira
 
-        ## Checks
+**Tool:** `jira_view_issue_json`
 
-        | Field | Status | Issue |
-        |-------|--------|-------|
-        | Description | ✅ | - |
-        | Acceptance Criteria | ✅ | - |
-        | Priority | ⚠️ | Not set |
-        | Labels | ✅ | analytics |
-        | Components | ✅ | Backend |
-        | Epic Link | ❌ | Missing |
-        | Fix Version | ⚠️ | Not set |
+### Step 4: Parse Issue
 
-        ────────────────────────────────
+**Description:** Parse issue fields for validation using shared parser
 
-        ## Summary
+**Tool:** `compute`
 
-        - ✅ 4 checks passed
-        - ⚠️ 2 warnings (fixable)
-        - ❌ 1 error (needs manual fix)
+### Step 5: Validate Issue
 
-        **Auto-fixable:** Priority (→ Medium)
+**Description:** Check issue against hygiene rules
 
-        **Needs manual fix:**
-        - Epic Link: Add to appropriate epic
-```
+**Tool:** `compute`
+
+### Step 6: Prepare Fixes
+
+**Description:** Determine which fixes to apply automatically
+
+**Tool:** `compute`
+
+**Condition:** `{{ inputs.auto_fix }}`
+
+### Step 7: Apply Status Transition
+
+**Description:** Transition issue status to Refinement
+
+**Tool:** `jira_set_status`
+
+**Condition:** `{{ fixes_to_apply.status }}`
+
+### Step 8: Apply Priority Fix
+
+**Description:** Set missing priority
+
+**Tool:** `jira_set_priority`
+
+**Condition:** `{{ fixes_to_apply.priority }}`
+
+### Step 9: Apply Epic Fix
+
+**Description:** Link issue to epic
+
+**Tool:** `jira_set_epic`
+
+**Condition:** `{{ fixes_to_apply.epic }}`
+
+### Step 10: Apply Story Points Fix
+
+**Description:** Set story points
+
+**Tool:** `jira_set_story_points`
+
+**Condition:** `{{ fixes_to_apply.story_points }}`
+
+### Step 11: Collect Fix Results
+
+**Description:** Summarize what was fixed
+
+**Tool:** `compute`
+
+### Step 12: Build Report
+
+**Tool:** `compute`
+
+### Step 13: Log Hygiene Check
+
+**Description:** Log hygiene check to session
+
+**Tool:** `memory_session_log`
+
+### Step 14: Create Followup If Needed
+
+**Description:** Create follow-up task if issues need manual input
+
+**Tool:** `compute`
+
+**Condition:** `validation.needs_input`
+
+
+## MCP Tools Used (6 total)
+
+- `jira_set_epic`
+- `jira_set_priority`
+- `jira_set_status`
+- `jira_set_story_points`
+- `jira_view_issue_json`
+- `memory_session_log`
 
 ## Related Skills
 
-- [create_mr](./create_mr.md) - Runs hygiene before MR
-- [start_work](./start_work.md) - Check when starting
+_(To be determined based on skill relationships)_

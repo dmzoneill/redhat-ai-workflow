@@ -1,132 +1,241 @@
-# 🚨 investigate_slack_alert
+# ⚡ investigate_slack_alert
 
-> Handle Prometheus alerts received via Slack
+> Investigate Prometheus alerts from Slack and create/link Jira issues
 
 ## Overview
 
-The `investigate_slack_alert` skill processes Prometheus alert messages from Slack, investigates the issue, and creates or links Jira issues for tracking.
+Investigate Prometheus alerts from Slack and create/link Jira issues.
 
 ## Trigger
+Called when a message from app-sre-alerts is detected in alert channels:
+- C01CPSKFG0P (stage alerts)
+- C01L1K82AP5 (prod alerts)
 
-This skill is triggered automatically by the Slack daemon when it detects an alert message in monitored channels.
+## Behavior
+1. Immediately reply to acknowledge ("Looking into this...")
+2. Parse alert name, namespace, severity from Slack message
+3. Check pod status and logs for errors
+4. Search for existing Jira issues matching the alert
+5. If no match, create a new Jira issue
+6. For billing alerts: use special "BillingEvent XXXXX" format
+7. Reply with Jira link and investigation summary
 
-## Flow
+## Billing Alert Special Handling
+Billing alerts (containing "billing", "subscription", "vcpu", etc.) get:
+- Higher priority
+- Special Jira format: "BillingEvent XXXXX - [Processor] Error: ..."
+- Numbered sequentially from existing billing events
+
+**Version:** 1.0
+
+## Quick Start
+
+```bash
+skill_run("investigate_slack_alert", '{"issue_key": "AAP-12345"}')
+```
+
+## Inputs
+
+| Input | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `channel_id` | string | ✅ Yes | `-` | Slack channel ID where alert was posted |
+| `message_ts` | string | ✅ Yes | `-` | Slack message timestamp (for threading replies) |
+| `message_text` | string | ✅ Yes | `-` | The alert message content (HTML or text) |
+| `alert_url` | string | No | `-` | URL to AlertManager (extracted from message) |
+
+## Process Flow
 
 ```mermaid
 flowchart TD
-    START([🚨 Alert Message]) --> PARSE[Parse Alert Details]
+    START([Start])
+    STEP1[Step 1: Init Autoheal]
+    START --> STEP1
+    STEP2[Step 2: Load Config]
+    STEP1 --> STEP2
+    STEP3[Step 3: Parse Alert Message]
+    STEP2 --> STEP3
+    STEP4[Step 4: Acknowledge Alert]
+    STEP3 --> STEP4
+    STEP5[Step 5: Get Kubeconfig]
+    STEP4 --> STEP5
+    STEP6[Step 6: Check Pods]
+    STEP5 --> STEP6
+    STEP7[Step 7: Analyze Pod Status]
+    STEP6 --> STEP7
+    STEP8[Step 8: Get Recent Errors]
+    STEP7 --> STEP8
+    STEP9[Step 9: Extract Error Patterns]
+    STEP8 --> STEP9
+    STEP10[Step 10: Search Existing Jira]
+    STEP9 --> STEP10
+    STEP11[Step 11: Search Billing Issues]
+    STEP10 --> STEP11
+    STEP12[Step 12: Analyze Existing Issues]
+    STEP11 --> STEP12
+    STEP13[Step 13: Build Jira Summary]
+    STEP12 --> STEP13
+    STEP14[Step 14: Build Jira Description]
+    STEP13 --> STEP14
+    STEP15[Step 15: Create Jira Issue]
+    STEP14 --> STEP15
+    STEP16[Step 16: Get Jira Key]
+    STEP15 --> STEP16
+    STEP17[Step 17: Build Response]
+    STEP16 --> STEP17
+    STEP18[Step 18: Reply With Findings]
+    STEP17 --> STEP18
+    STEP19[Step 19: Update Environment Status]
+    STEP18 --> STEP19
+    STEP20[Step 20: Log Slack Investigation]
+    STEP19 --> STEP20
+    STEP20 --> DONE([Complete])
 
-    PARSE --> EXTRACT[Extract Alert Info]
-    EXTRACT --> ENV[Determine Environment]
-    ENV --> NS[Determine Namespace]
-
-    NS --> ACK[Acknowledge in Slack]
-    ACK --> INVESTIGATE[Run Investigation]
-
-    INVESTIGATE --> PODS[Check Pod Status]
-    PODS --> LOGS[Get Error Logs]
-    LOGS --> EVENTS[Check K8s Events]
-
-    EVENTS --> BILLING{Billing Alert?}
-
-    BILLING -->|Yes| BILLING_FLOW[Special Billing Flow]
-    BILLING -->|No| NORMAL[Normal Flow]
-
-    BILLING_FLOW --> SEARCH_BILLING[Search Existing Billing Issues]
-    SEARCH_BILLING --> FOUND_BILLING{Found?}
-    FOUND_BILLING -->|Yes| LINK_BILLING[Link Existing Issue]
-    FOUND_BILLING -->|No| CREATE_BILLING[Create New Billing Issue]
-
-    NORMAL --> SEARCH[Search Existing Issues]
-    SEARCH --> FOUND{Found?}
-    FOUND -->|Yes| LINK[Link Existing Issue]
-    FOUND -->|No| CREATE[Create New Issue]
-
-    LINK --> RESPOND
-    CREATE --> RESPOND
-    LINK_BILLING --> RESPOND
-    CREATE_BILLING --> RESPOND
-
-    RESPOND[Respond in Slack Thread] --> DONE([✅ Alert Handled])
-
-    style START fill:#ef4444,stroke:#dc2626,color:#fff
+    style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
-    style ACK fill:#3b82f6,stroke:#2563eb,color:#fff
 ```
 
-## Alert Detection
+## Detailed Steps
 
-The skill identifies alerts by:
+### Step 1: Init Autoheal
 
-- Channel ID (configured in `config.json`)
-- Message format (Prometheus alert structure)
-- Keywords: "FIRING", "alert", severity indicators
+**Description:** Initialize failure tracking
 
-## Billing Alert Handling
+**Tool:** `compute`
 
-Billing alerts get special treatment:
+### Step 2: Load Config
 
-1. **Search pattern:** `BillingEvent XXXXX - Processor`
-2. **Auto-increment:** Find highest issue number, increment
-3. **Title format:** `BillingEvent 00002 - Processor] Error: Processing skipped`
-4. **Include:** Slack thread link in issue
+**Description:** Load alert channel configuration
 
-## MCP Tools Used
+**Tool:** `compute`
 
-- `kubectl_get_pods` - Pod status
-- `kubectl_logs` - Error logs
-- `kubectl_get_events` - K8s events
-- `jira_search` - Find existing issues
-- `jira_create_issue` - Create tracking issue
-- `slack_send_message` - Respond in thread
+### Step 3: Parse Alert Message
 
-## Example Interaction
+**Description:** Extract alert details from Slack message using shared parser
 
-```
-# Prometheus Alert in #alerts-aa
-[FIRING:1] HighMemoryUsage
-Namespace: tower-analytics-prod
-Pod: analytics-api-7d8f9
-Value: 95%
+**Tool:** `compute`
 
-# Bot Response (in thread)
-👀 Looking into this alert...
+### Step 4: Acknowledge Alert
 
-🔍 Investigation Summary:
-- Pod: analytics-api-7d8f9 (95% memory)
-- Status: Running, 3 restarts in last hour
-- Recent logs: OutOfMemoryError in ReportProcessor
+**Description:** Reply to Slack thread to acknowledge we're looking into it
 
-📋 Linked to existing issue: AAP-61245
-   "High memory usage in analytics-api"
-   https://issues.redhat.com/browse/AAP-61245
+**Tool:** `slack_send_message`
 
-🛠️ Suggested action: Consider restarting pod
-   or increasing memory limits.
-```
+### Step 5: Get Kubeconfig
 
-## Configuration
+**Description:** Determine correct kubeconfig for environment
 
-In `config.json`:
+**Tool:** `compute`
 
-```json
-{
-  "slack": {
-    "alert_channels": {
-      "C07TN7T5KV1": {
-        "name": "prometheus-alerts",
-        "environment": "stage"
-      },
-      "C07V3QQCKPV": {
-        "name": "automation-analytics-alerts",
-        "environment": "production"
-      }
-    }
-  }
-}
-```
+### Step 6: Check Pods
+
+**Description:** Get pod status in the affected namespace
+
+**Tool:** `kubectl_get_pods`
+
+### Step 7: Analyze Pod Status
+
+**Description:** Identify unhealthy pods using shared parser
+
+**Tool:** `compute`
+
+### Step 8: Get Recent Errors
+
+**Description:** Get recent error logs from processor pods
+
+**Tool:** `kubectl_logs`
+
+**Condition:** `{{ pod_analysis.get('error_pods') or alert_info.get('alert_name', '').lower().find('processor') >= 0 }}`
+
+### Step 9: Extract Error Patterns
+
+**Description:** Extract error patterns from logs using shared parser
+
+**Tool:** `compute`
+
+### Step 10: Search Existing Jira
+
+**Description:** Search for existing Jira issues matching this alert
+
+**Tool:** `jira_search`
+
+### Step 11: Search Billing Issues
+
+**Description:** Search for billing event issues if this is a billing alert
+
+**Tool:** `jira_search`
+
+**Condition:** `{{ alert_info.is_billing }}`
+
+### Step 12: Analyze Existing Issues
+
+**Description:** Determine if we have a matching issue or need to create one using shared parsers
+
+**Tool:** `compute`
+
+### Step 13: Build Jira Summary
+
+**Description:** Build the Jira issue summary
+
+**Tool:** `compute`
+
+**Condition:** `{{ not jira_analysis.has_existing }}`
+
+### Step 14: Build Jira Description
+
+**Description:** Build the Jira issue description
+
+**Tool:** `compute`
+
+**Condition:** `{{ not jira_analysis.has_existing }}`
+
+### Step 15: Create Jira Issue
+
+**Description:** Create a new Jira issue for this alert
+
+**Tool:** `jira_create_issue`
+
+**Condition:** `{{ not jira_analysis.has_existing }}`
+
+### Step 16: Get Jira Key
+
+**Description:** Extract the Jira issue key using shared parser
+
+**Tool:** `compute`
+
+### Step 17: Build Response
+
+**Description:** Build the Slack response with findings
+
+**Tool:** `compute`
+
+### Step 18: Reply With Findings
+
+**Description:** Reply to Slack with investigation findings
+
+**Tool:** `slack_send_message`
+
+### Step 19: Update Environment Status
+
+**Description:** Update environment status after investigation
+
+**Tool:** `compute`
+
+### Step 20: Log Slack Investigation
+
+**Description:** Log Slack alert investigation to session
+
+**Tool:** `memory_session_log`
+
+
+## MCP Tools Used (6 total)
+
+- `jira_create_issue`
+- `jira_search`
+- `kubectl_get_pods`
+- `kubectl_logs`
+- `memory_session_log`
+- `slack_send_message`
 
 ## Related Skills
 
-- [investigate_alert](./investigate_alert.md) - Manual alert triage
-- [debug_prod](./debug_prod.md) - Deep investigation
+_(To be determined based on skill relationships)_

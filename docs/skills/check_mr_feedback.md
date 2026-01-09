@@ -1,120 +1,195 @@
-# 💬 check_mr_feedback
+# ⚡ check_mr_feedback
 
-> Check your MRs for reviewer feedback
+> Check your open Merge Requests for feedback that needs your attention
 
 ## Overview
 
-The `check_mr_feedback` skill scans your open merge requests for human feedback that needs a response. It filters out bot comments and highlights actionable feedback.
+Check your open Merge Requests for feedback that needs your attention.
+
+Scans for:
+- Human reviewer comments (filters out bot/CI comments)
+- Meeting requests (can trigger Google Calendar invite)
+- Code change requests
+- Questions requiring answers
+- Approval status
+
+Optionally creates Google Meet invitations when meetings are requested.
+
+Uses MCP tools: gitlab_mr_list, gitlab_mr_comments
+
+**Version:** 1.2
 
 ## Quick Start
 
-```
-skill_run("check_mr_feedback", '{}')
+```bash
+skill_run("check_mr_feedback", '{"issue_key": "AAP-12345"}')
 ```
 
 ## Inputs
 
 | Input | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `project` | string | No | From config | GitLab project path |
+| `project` | string | No | `automation-analytics/automation-analytics-backend` | GitLab project path |
+| `create_meetings` | boolean | No | `False` | Automatically create Google Meet invites for meeting requests |
+| `mr_ids` | array | No | `-` | Specific MR IDs to check (optional - defaults to all open MRs) |
+| `slack_format` | boolean | No | `False` | Use Slack link format in summary |
 
-## Flow
+## Process Flow
 
 ```mermaid
 flowchart TD
-    START([Start]) --> CONFIG[Load Configuration]
-    CONFIG --> LIST[List My Open MRs]
-    LIST --> LOOP[For Each MR]
-
-    LOOP --> COMMENTS[Get Comments]
-    COMMENTS --> FILTER[Filter Bot Comments]
-
-    FILTER --> HUMAN{Human Comments?}
-
-    HUMAN -->|No| NEXT[Next MR]
-    HUMAN -->|Yes| ANALYZE[Analyze Feedback]
-
-    ANALYZE --> MEETING{Meeting Requested?}
-
-    MEETING -->|Yes| SCHEDULE[Suggest Meeting Slot]
-    MEETING -->|No| RECORD[Record Feedback]
-
-    SCHEDULE --> RECORD
-    RECORD --> NEXT
-
-    NEXT --> MORE{More MRs?}
-    MORE -->|Yes| LOOP
-    MORE -->|No| SUMMARY[Generate Summary]
-
-    SUMMARY --> DONE([📋 Feedback Report])
+    START([Start])
+    STEP1[Step 1: Get My Mrs]
+    START --> STEP1
+    STEP2[Step 2: Parse Open Mrs]
+    STEP1 --> STEP2
+    STEP3[Step 3: Prepare Mr Ids]
+    STEP2 --> STEP3
+    STEP4[Step 4: Get Mr1 Comments]
+    STEP3 --> STEP4
+    STEP5[Step 5: Get Mr2 Comments]
+    STEP4 --> STEP5
+    STEP6[Step 6: Get Mr3 Comments]
+    STEP5 --> STEP6
+    STEP7[Step 7: Get Mr4 Comments]
+    STEP6 --> STEP7
+    STEP8[Step 8: Get Mr5 Comments]
+    STEP7 --> STEP8
+    STEP9[Step 9: Check Comments]
+    STEP8 --> STEP9
+    STEP10[Step 10: Check Existing Meetings]
+    STEP9 --> STEP10
+    STEP11[Step 11: Create Meeting Invites]
+    STEP10 --> STEP11
+    STEP12[Step 12: Format Summary]
+    STEP11 --> STEP12
+    STEP13[Step 13: Build Memory Context]
+    STEP12 --> STEP13
+    STEP14[Step 14: Log Session Feedback Check]
+    STEP13 --> STEP14
+    STEP15[Step 15: Create Followups For Feedback]
+    STEP14 --> STEP15
+    STEP15 --> DONE([Complete])
 
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
-    style SCHEDULE fill:#f59e0b,stroke:#d97706,color:#fff
 ```
 
-## Bot Filtering
+## Detailed Steps
 
-The skill automatically filters out comments from:
+### Step 1: Get My Mrs
 
-| Pattern | Example |
-|---------|---------|
-| `group_*_bot` | group_123_bot |
-| `konflux` | konflux-build |
-| CI messages | "Starting Pipelinerun..." |
-| Commands | `/retest`, `/approve` |
+**Description:** Fetch all open MRs authored by the current user
 
-## MCP Tools Used
+**Tool:** `gitlab_mr_list`
 
-- `gitlab_mr_list` - Get your MRs
-- `gitlab_mr_comments` - Get comments
-- `google_calendar_schedule_meeting` - Schedule follow-ups
+### Step 2: Parse Open Mrs
 
-## Example Output
+**Description:** Parse MR list output
 
-```
-You: Check my MRs for feedback
+**Tool:** `compute`
 
-Claude: 💬 Checking your MRs for feedback...
+### Step 3: Prepare Mr Ids
 
-        ## MRs With Human Feedback
+**Description:** Prepare MR IDs for individual tool calls
 
-        ### !456: AAP-12345 - feat(api): Add validation
+**Tool:** `compute`
 
-        **From jsmith (2h ago):**
-        > Consider adding input sanitization here
+### Step 4: Get Mr1 Comments
 
-        **From mwilson (1h ago):**
-        > Can we schedule a quick call to discuss the approach?
+**Description:** Get comments for first MR
 
-        📅 *Meeting requested* - scheduling for tomorrow 3-4pm Irish time
+**Tool:** `gitlab_mr_comments`
 
-        ### !458: AAP-12348 - fix(db): Handle nulls
+**Condition:** `{{ mr_data.ids|length > 0 }}`
 
-        **From bthomas (yesterday):**
-        > LGTM with minor nit - optional null check on line 45
+### Step 5: Get Mr2 Comments
 
-        ────────────────────────────────
+**Description:** Get comments for second MR
 
-        ## Summary
+**Tool:** `gitlab_mr_comments`
 
-        | MR | Feedback | Action Needed |
-        |----|----------|---------------|
-        | !456 | 2 comments | Respond + Meeting |
-        | !458 | 1 comment | Minor fix |
-```
+**Condition:** `{{ mr_data.ids|length > 1 }}`
 
-## Meeting Scheduling
+### Step 6: Get Mr3 Comments
 
-When someone requests a meeting, the skill can automatically:
+**Description:** Get comments for third MR
 
-1. Check your calendar availability
-2. Find the reviewer's email
-3. Find mutual free slot (Irish time, 3-7pm)
-4. Create calendar event with Google Meet
+**Tool:** `gitlab_mr_comments`
+
+**Condition:** `{{ mr_data.ids|length > 2 }}`
+
+### Step 7: Get Mr4 Comments
+
+**Description:** Get comments for fourth MR
+
+**Tool:** `gitlab_mr_comments`
+
+**Condition:** `{{ mr_data.ids|length > 3 }}`
+
+### Step 8: Get Mr5 Comments
+
+**Description:** Get comments for fifth MR
+
+**Tool:** `gitlab_mr_comments`
+
+**Condition:** `{{ mr_data.ids|length > 4 }}`
+
+### Step 9: Check Comments
+
+**Description:** Analyze comments from all MRs using shared parsers
+
+**Tool:** `compute`
+
+### Step 10: Check Existing Meetings
+
+**Description:** Check if meetings already exist for meeting requests
+
+**Tool:** `compute`
+
+**Condition:** `{{ feedback_analysis }}`
+
+### Step 11: Create Meeting Invites
+
+**Description:** Create Google Meet invitations for meeting requests
+
+**Tool:** `compute`
+
+**Condition:** `{{ inputs.create_meetings and feedback_with_calendar_check }}`
+
+### Step 12: Format Summary
+
+**Description:** Create human-readable summary
+
+**Tool:** `compute`
+
+### Step 13: Build Memory Context
+
+**Description:** Build context for memory updates
+
+**Tool:** `compute`
+
+### Step 14: Log Session Feedback Check
+
+**Description:** Log feedback check to session
+
+**Tool:** `memory_session_log`
+
+### Step 15: Create Followups For Feedback
+
+**Description:** Create follow-up tasks for MRs needing response
+
+**Tool:** `compute`
+
+**Condition:** `feedback_analysis`
+
+
+## MCP Tools Used (3 total)
+
+- `gitlab_mr_comments`
+- `gitlab_mr_list`
+- `memory_session_log`
 
 ## Related Skills
 
-- [check_my_prs](./check_my_prs.md) - Broader PR status check
-- [review_all_prs](./review_all_prs.md) - Review others' PRs
-- [coffee](./coffee.md) - Includes feedback check
+_(To be determined based on skill relationships)_

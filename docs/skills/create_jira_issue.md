@@ -1,132 +1,165 @@
-# 📋 create_jira_issue
+# ⚡ create_jira_issue
 
-> Create a Jira issue with Markdown support
+> Create a new Jira issue with proper linking and assignment
 
 ## Overview
 
-The `create_jira_issue` skill creates Jira issues with proper formatting, automatically converting Markdown to Jira wiki markup and handling field normalization.
+Create a new Jira issue with proper linking and assignment.
+
+Use for:
+- Creating bug reports
+- Creating feature requests
+- Creating sub-tasks
+- Linking related issues
+
+The skill will:
+1. Create the issue
+2. Assign to specified user (or self)
+3. Link to related issues
+4. Transition to appropriate status
+
+**Version:** 1.0
 
 ## Quick Start
 
-```
-skill_run("create_jira_issue", '{
-  "summary": "Implement new feature",
-  "issue_type": "story",
-  "description": "## Overview\n\nWe need to...",
-  "labels": "backend,api"
-}')
+```bash
+skill_run("create_jira_issue", '{"issue_key": "AAP-12345"}')
 ```
 
 ## Inputs
 
 | Input | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `summary` | string | ✅ Yes | - | Issue title |
-| `issue_type` | string | ✅ Yes | - | bug, story, task, epic |
-| `description` | string | No | - | Detailed description (Markdown OK) |
-| `acceptance_criteria` | string | No | - | Acceptance criteria (Markdown OK) |
-| `labels` | string | No | - | Comma-separated labels |
-| `components` | string | No | - | Comma-separated components |
-| `story_points` | integer | No | - | Story points (for stories) |
+| `summary` | string | ✅ Yes | `-` | Issue summary/title |
+| `description` | string | No | `""` | Issue description (markdown supported) |
+| `issue_type` | string | No | `Task` | Issue type: 'Bug', 'Task', 'Story', 'Sub-task' |
 | `project` | string | No | `AAP` | Jira project key |
+| `assignee` | string | No | `-` | Assign to user (leave empty for self) |
+| `labels` | string | No | `-` | Comma-separated labels |
+| `priority` | string | No | `Medium` | Priority: 'Highest', 'High', 'Medium', 'Low', 'Lowest' |
+| `link_to` | string | No | `-` | Issue key to link to (e.g., AAP-12345) |
+| `link_type` | string | No | `relates to` | Link type: 'relates to', 'blocks', 'is blocked by', 'duplicates' |
+| `start_progress` | boolean | No | `False` | Immediately transition to In Progress |
+| `slack_format` | boolean | No | `False` | Use Slack link format in report |
 
-## Flow
+## Process Flow
 
 ```mermaid
 flowchart TD
-    START([Start]) --> NORMALIZE[Normalize Inputs]
-
-    NORMALIZE --> TYPE[Normalize Issue Type]
-    TYPE --> MD[Convert Markdown to Jira]
-    MD --> FIELDS[Normalize Field Names]
-
-    FIELDS --> BUILD[Build Issue JSON]
-    BUILD --> CREATE[Create via MCP Tool]
-
-    CREATE --> SUCCESS{Success?}
-    SUCCESS -->|Yes| DONE([✅ Issue Created])
-    SUCCESS -->|No| ERROR[Show Error Details]
+    START([Start])
+    STEP1[Step 1: Init Autoheal]
+    START --> STEP1
+    STEP2[Step 2: Create Issue]
+    STEP1 --> STEP2
+    STEP3[Step 3: Parse Create Result]
+    STEP2 --> STEP3
+    STEP4[Step 4: Assign Issue]
+    STEP3 --> STEP4
+    STEP5[Step 5: Link Issues]
+    STEP4 --> STEP5
+    STEP6[Step 6: Parse Link]
+    STEP5 --> STEP6
+    STEP7[Step 7: Update Issue]
+    STEP6 --> STEP7
+    STEP8[Step 8: Transition To Progress]
+    STEP7 --> STEP8
+    STEP9[Step 9: Get Issue]
+    STEP8 --> STEP9
+    STEP10[Step 10: Log Creation]
+    STEP9 --> STEP10
+    STEP10 --> DONE([Complete])
 
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
 ```
 
-## Markdown Conversion
+## Detailed Steps
 
-The skill converts Markdown to Jira wiki markup:
+### Step 1: Init Autoheal
 
-| Markdown | Jira Wiki |
-|----------|-----------|
-| `# Heading` | `h1. Heading` |
-| `**bold**` | `*bold*` |
-| `*italic*` | `_italic_` |
-| `` `code` `` | `{{code}}` |
-| `[text](url)` | `[text\|url]` |
-| `- item` | `* item` |
-| `1. item` | `# item` |
-| ` ``` ` | `{code}` |
+**Description:** Initialize failure tracking
 
-## MCP Tools Used
+**Tool:** `compute`
 
-- `jira_create_issue` - Create the issue
+### Step 2: Create Issue
 
-## Example Output
+**Description:** Create the Jira issue
 
-```
-You: Create a story for implementing caching
+**Tool:** `jira_create_issue`
 
-Claude: 📋 Creating Jira issue...
+### Step 3: Parse Create Result
 
-        **Input:**
-        - Summary: Implement Redis caching
-        - Type: Story
-        - Description: (converted from Markdown)
+**Description:** Parse issue creation result
 
-        ✅ Created: AAP-12360
+**Tool:** `compute`
 
-        **Issue Details:**
-        - Key: AAP-12360
-        - Summary: Implement Redis caching
-        - Type: Story
-        - Status: New
-        - Labels: backend, performance
+### Step 4: Assign Issue
 
-        View: https://issues.redhat.com/browse/AAP-12360
-```
+**Description:** Assign the issue
 
-## Input Example
+**Tool:** `jira_assign`
 
-```yaml
-summary: "Implement Redis caching for API responses"
-issue_type: "story"
-description: |
-  ## Overview
+**Condition:** `create_status.issue_key`
 
-  We need to add Redis caching to reduce database load.
+### Step 5: Link Issues
 
-  ## Technical Details
+**Description:** Link to related issue
 
-  - Use `redis-py` client
-  - Cache TTL: 5 minutes
-  - Keys: `api:v1:{endpoint}:{params_hash}`
+**Tool:** `jira_link_issues`
 
-  ## Endpoints to Cache
+**Condition:** `create_status.issue_key and inputs.link_to`
 
-  1. `/api/reports/summary`
-  2. `/api/hosts/list`
-  3. `/api/metrics/overview`
+### Step 6: Parse Link
 
-acceptance_criteria: |
-  - [ ] Redis connection established
-  - [ ] Cache hit rate > 80%
-  - [ ] No stale data served
+**Description:** Parse link result
 
-labels: "backend,performance,caching"
-components: "Automation Analytics"
-story_points: 5
-```
+**Tool:** `compute`
+
+**Condition:** `link_result`
+
+### Step 7: Update Issue
+
+**Description:** Update issue with additional fields
+
+**Tool:** `jira_update_issue`
+
+**Condition:** `create_status.issue_key and inputs.labels`
+
+### Step 8: Transition To Progress
+
+**Description:** Transition to In Progress
+
+**Tool:** `jira_transition`
+
+**Condition:** `create_status.issue_key and inputs.start_progress`
+
+### Step 9: Get Issue
+
+**Description:** Get the created issue details
+
+**Tool:** `jira_view_issue`
+
+**Condition:** `create_status.issue_key`
+
+### Step 10: Log Creation
+
+**Description:** Log issue creation
+
+**Tool:** `memory_session_log`
+
+**Condition:** `create_status.success`
+
+
+## MCP Tools Used (7 total)
+
+- `jira_assign`
+- `jira_create_issue`
+- `jira_link_issues`
+- `jira_transition`
+- `jira_update_issue`
+- `jira_view_issue`
+- `memory_session_log`
 
 ## Related Skills
 
-- [start_work](./start_work.md) - Start working on the issue
-- [jira_hygiene](./jira_hygiene.md) - Validate issue quality
+_(To be determined based on skill relationships)_
