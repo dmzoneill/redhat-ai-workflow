@@ -23,7 +23,8 @@
         docs-serve docs-check list-skills list-tools \
         sync-commands sync-commands-dry sync-commands-reverse \
         sync-config-example sync-config-example-fix \
-        ext-build ext-install ext-watch ext-clean ext-package
+        ext-build ext-install ext-watch ext-clean ext-package \
+        super-lint
 
 # Use bash for proper escape sequence handling
 SHELL := /bin/bash
@@ -84,6 +85,7 @@ help:
 	@printf "  \033[32mmake install-dev\033[0m        Install dev dependencies (pytest, black, etc)\n"
 	@printf "  \033[32mmake test\033[0m               Run unit tests\n"
 	@printf "  \033[32mmake lint\033[0m               Run linters (flake8, black --check)\n"
+	@printf "  \033[32mmake super-lint\033[0m         Run GitHub Super-Linter (via Docker)\n"
 	@printf "  \033[32mmake format\033[0m             Auto-format code with black\n"
 	@printf "  \033[32mmake check-env\033[0m          Validate Slack configuration\n"
 	@printf "\n"
@@ -356,6 +358,11 @@ lint:
 	cd $(PROJECT_ROOT) && flake8 scripts/ tool_modules/ --max-line-length=120 --ignore=E501,W503,E402,C901,E203
 	cd $(PROJECT_ROOT) && black --check scripts/ tool_modules/ --line-length=120
 	@printf "\033[32m✅ Linting passed\033[0m\n"
+
+super-lint:
+	@printf "\033[36mRunning Super-Linter (via Docker)...\033[0m\n"
+	$(PROJECT_ROOT)/scripts/run-super-linter.sh
+	@printf "\033[32m✅ Super-Linter passed\033[0m\n"
 
 format:
 	@printf "\033[36mFormatting code...\033[0m\n"
