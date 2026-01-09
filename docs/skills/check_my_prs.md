@@ -1,141 +1,176 @@
-# 📝 check_my_prs
+# ⚡ check_my_prs
 
-> Check your open PRs for feedback and status
+> Check your open MRs for feedback from reviewers
 
 ## Overview
 
-The `check_my_prs` skill gives you a quick overview of all your open merge requests, highlighting those that need attention (feedback to address, failed pipelines, conflicts).
+Check your open MRs for feedback from reviewers.
+
+Shows:
+- MRs with unaddressed feedback (need your response)
+- MRs awaiting review (no feedback yet)
+- MRs ready to merge (approved)
+
+Helps you respond to reviewer comments.
+
+Resolves project from repo_name or issue_key if not explicitly provided.
+
+**Version:** 1.2
 
 ## Quick Start
 
-```
-skill_run("check_my_prs", '{}')
-```
-
-With auto-actions:
-
-```
-skill_run("check_my_prs", '{"auto_rebase": true, "auto_merge": true}')
+```bash
+skill_run("check_my_prs", '{"issue_key": "AAP-12345"}')
 ```
 
 ## Inputs
 
 | Input | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `project` | string | No | From config | GitLab project |
-| `show_approved` | boolean | No | `true` | Include approved MRs |
-| `auto_merge` | boolean | No | `false` | Auto-merge approved MRs |
-| `auto_rebase` | boolean | No | `false` | Auto-rebase conflicting MRs |
+| `project` | string | No | `""` | GitLab project path (resolved from repo_name if not provided) |
+| `repo_name` | string | No | `-` | Repository name from config (e.g., 'automation-analytics-backend') |
+| `show_approved` | boolean | No | `True` | Include approved MRs in output |
+| `auto_merge` | boolean | No | `False` | Automatically merge approved MRs (asks first if false) |
+| `auto_rebase` | boolean | No | `False` | Automatically rebase MRs with merge conflicts |
+| `slack_format` | boolean | No | `False` | Use Slack link format in summary |
 
-## Flow
+## Process Flow
 
 ```mermaid
 flowchart TD
-    START([Start]) --> USER[Get My Username]
-    USER --> LIST[List My Open MRs]
-    LIST --> LOOP[For Each MR]
-
-    LOOP --> CONFLICT{Has Conflicts?}
-
-    CONFLICT -->|Yes| REBASE_CHECK{Auto-rebase?}
-    REBASE_CHECK -->|Yes| REBASE[Call rebase_pr]
-    REBASE_CHECK -->|No| SHOW_REBASE[Show Rebase Prompt]
-
-    CONFLICT -->|No| FEEDBACK{Has Feedback?}
-
-    FEEDBACK -->|Yes| APPROVED{Approved?}
-    FEEDBACK -->|No| WAITING[Awaiting Review]
-
-    APPROVED -->|Yes| MERGE_CHECK{Auto-merge?}
-    APPROVED -->|No| NEEDS_RESPONSE[Needs Response]
-
-    MERGE_CHECK -->|Yes| MERGE[Merge MR]
-    MERGE_CHECK -->|No| READY[Ready to Merge]
-
-    REBASE --> NEXT
-    SHOW_REBASE --> NEXT
-    WAITING --> NEXT
-    NEEDS_RESPONSE --> NEXT
-    MERGE --> NEXT
-    READY --> NEXT
-
-    NEXT{More MRs?}
-    NEXT -->|Yes| LOOP
-    NEXT -->|No| SUMMARY[Show Summary]
-
-    SUMMARY --> DONE([📋 Status Complete])
+    START([Start])
+    STEP1[Step 1: Init Autoheal]
+    START --> STEP1
+    STEP2[Step 2: Resolve Project]
+    STEP1 --> STEP2
+    STEP3[Step 3: Get Username]
+    STEP2 --> STEP3
+    STEP4[Step 4: List My Mrs]
+    STEP3 --> STEP4
+    STEP5[Step 5: Parse My Mrs]
+    STEP4 --> STEP5
+    STEP6[Step 6: Check First Mr]
+    STEP5 --> STEP6
+    STEP7[Step 7: Analyze First Mr]
+    STEP6 --> STEP7
+    STEP8[Step 8: Get Feedback Details]
+    STEP7 --> STEP8
+    STEP9[Step 9: Auto Rebase Mr]
+    STEP8 --> STEP9
+    STEP10[Step 10: Build Summary]
+    STEP9 --> STEP10
+    STEP11[Step 11: Update Summary With Merge]
+    STEP10 --> STEP11
+    STEP12[Step 12: Update Mr Status In Memory]
+    STEP11 --> STEP12
+    STEP13[Step 13: Log Check Prs]
+    STEP12 --> STEP13
+    STEP13 --> DONE([Complete])
 
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
-    style READY fill:#10b981,stroke:#059669,color:#fff
-    style NEEDS_RESPONSE fill:#f59e0b,stroke:#d97706,color:#fff
 ```
 
-## Status Categories
+## Detailed Steps
 
-| Status | Emoji | Meaning |
-|--------|-------|---------|
-| Needs Rebase | 🔄 | Has merge conflicts |
-| Needs Response | 🔴 | Reviewers left feedback |
-| Pipeline Failed | 🔴 | CI needs fixing |
-| Awaiting Review | 🟡 | No feedback yet |
-| Approved | 🟢 | Ready to merge! |
+### Step 1: Init Autoheal
 
-## MCP Tools Used
+**Description:** Initialize failure tracking
 
-- `gitlab_mr_list` - Get your MRs
-- `gitlab_mr_view` - Get details
-- `gitlab_mr_comments` - Get feedback
-- `gitlab_pipeline_status` - Check CI
-- `gitlab_mr_merge` - Merge MR
+**Tool:** `compute`
 
-## Example Output
+### Step 2: Resolve Project
 
-```
-You: Check my PRs
+**Description:** Determine which GitLab project to check
 
-Claude: 📋 Your Open MRs
+**Tool:** `compute`
 
-        **User:** daoneill
-        **Open MRs:** 4
+### Step 3: Get Username
 
-        ────────────────────────────────
+**Description:** Get current system username
 
-        ### 🔄 Needs Rebase (1)
+**Tool:** `compute`
 
-        **!456**: AAP-12345 - feat(api): Add validation
-        └── ⚠️ Has 3 conflicting files
-        └── Run: `/rebase !456`
+### Step 4: List My Mrs
 
-        ### 🔴 Needs Your Response (1)
+**Description:** Fetch my open MRs from GitLab
 
-        **!458**: AAP-12348 - fix(db): Handle nulls
-        └── Feedback from: jsmith, mwilson
-        └── ⚠️ 2 unresolved discussions
+**Tool:** `gitlab_mr_list`
 
-        ### 🟡 Awaiting Review (1)
+### Step 5: Parse My Mrs
 
-        **!460**: AAP-12350 - docs: Update README
-        └── Requested: bthomas, sjones
-        └── Pipeline: Passed ✅
+**Description:** Parse MR list using shared parser
 
-        ### 🟢 Approved - Ready to Merge (1)
+**Tool:** `compute`
 
-        **!462**: AAP-12352 - test: Add coverage ✅
-        └── Approved by: mwilson
-        └── Pipeline: Passed ✅
+### Step 6: Check First Mr
 
-        ────────────────────────────────
+**Description:** Get details of first MR
 
-        ## Actions Suggested
+**Tool:** `gitlab_mr_view`
 
-        1. Rebase !456 to resolve conflicts
-        2. Respond to feedback on !458
-        3. Merge !462 (already approved)
-```
+**Condition:** `len(my_mrs) > 0`
+
+### Step 7: Analyze First Mr
+
+**Description:** Analyze feedback status of first MR using shared parser
+
+**Tool:** `compute`
+
+**Condition:** `len(my_mrs) > 0 and first_mr_details`
+
+### Step 8: Get Feedback Details
+
+**Description:** Get detailed comments if MR needs response
+
+**Tool:** `gitlab_mr_view`
+
+**Condition:** `first_mr_status and first_mr_status.get('status') == 'needs_response'`
+
+### Step 9: Auto Rebase Mr
+
+**Description:** Automatically rebase MR with conflicts
+
+**Tool:** `skill_run`
+
+**Condition:** `inputs.auto_rebase and first_mr_status and first_mr_status.get('needs_rebase')`
+
+### Step 10: Build Summary
+
+**Description:** Compile status of all my MRs
+
+**Tool:** `compute`
+
+### Step 11: Update Summary With Merge
+
+**Description:** Update summary if MR was merged
+
+**Tool:** `compute`
+
+**Condition:** `merge_result`
+
+### Step 12: Update Mr Status In Memory
+
+**Description:** Update open MRs in memory with current status
+
+**Tool:** `compute`
+
+**Condition:** `mr_statuses`
+
+### Step 13: Log Check Prs
+
+**Description:** Log PR check to session
+
+**Tool:** `memory_session_log`
+
+
+## MCP Tools Used (4 total)
+
+- `gitlab_mr_list`
+- `gitlab_mr_view`
+- `memory_session_log`
+- `skill_run`
 
 ## Related Skills
 
-- [check_mr_feedback](./check_mr_feedback.md) - Detailed feedback check
-- [rebase_pr](./rebase_pr.md) - Resolve conflicts
-- [create_mr](./create_mr.md) - Create new MR
+_(To be determined based on skill relationships)_

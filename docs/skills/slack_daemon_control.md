@@ -1,98 +1,82 @@
-# 🤖 slack_daemon_control
+# ⚡ slack_daemon_control
 
-> Control the Slack daemon process
+> Control the autonomous Slack daemon via D-Bus IPC
 
 ## Overview
 
-The `slack_daemon_control` skill manages the Slack daemon, allowing you to start, stop, restart, and check status via D-Bus IPC.
+Control the autonomous Slack daemon via D-Bus IPC.
+
+Actions:
+- start: Launch daemon in background with nohup
+- stop: Gracefully shutdown the daemon
+- status: Get daemon status and stats
+- pending: List messages awaiting approval
+- approve <id>: Approve and send a pending message
+- approve_all: Approve all pending messages
+- reject <id>: Reject a pending message
+- history: Get message history with filters
+- send: Send a direct message to Slack
+- reload: Reload configuration
+
+**Version:** 1.0
 
 ## Quick Start
 
-```
-skill_run("slack_daemon_control", '{"action": "status"}')
+```bash
+skill_run("slack_daemon_control", '{"issue_key": "AAP-12345"}')
 ```
 
 ## Inputs
 
 | Input | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `action` | string | ✅ Yes | - | start, stop, status, pending, approve, approve_all, reject, history, send, reload |
-| `message_id` | string | No | - | Message ID for approve/reject actions |
-| `target` | string | No | - | Target for send: Channel (C123), User ID (U123), or @username |
-| `message` | string | No | - | Message text for send action |
-| `thread` | string | No | - | Thread timestamp for send action |
-| `limit` | integer | No | `50` | Number of history entries to show |
-| `enable_llm` | boolean | No | `false` | Enable Claude AI for autonomous responses |
-| `verbose` | boolean | No | `false` | Enable verbose logging |
+| `action` | string | ✅ Yes | `-` | Action to perform: start, stop, status, pending, approve, approve_all, reject, history, send, reload |
+| `message_id` | string | No | `-` | Message ID for approve/reject actions |
+| `target` | string | No | `-` | Target for send action: Channel (C123), User ID (U123), or @username |
+| `channel` | string | No | `-` | Alias for target (deprecated, use target instead) |
+| `message` | string | No | `-` | Message text for send action |
+| `thread` | string | No | `-` | Thread timestamp for send action |
+| `limit` | integer | No | `50` | Limit for history query (default: 50) |
+| `filter_channel` | string | No | `-` | Channel ID filter for history |
+| `filter_user` | string | No | `-` | User ID filter for history |
+| `filter_status` | string | No | `-` | Status filter for history (pending, sent, skipped, etc.) |
+| `enable_llm` | boolean | No | `False` | Enable LLM for start action |
+| `verbose` | boolean | No | `False` | Enable verbose output for start action |
 
-## Actions
-
-| Action | Description |
-|--------|-------------|
-| `start` | Start the daemon in background with nohup |
-| `stop` | Gracefully shutdown the daemon |
-| `status` | Get daemon status and stats |
-| `pending` | List messages awaiting approval |
-| `approve` | Approve a specific pending message |
-| `approve_all` | Approve all pending messages |
-| `reject` | Reject a specific message |
-| `history` | View message history |
-| `send` | Send a message to Slack |
-| `reload` | Reload configuration |
-
-## Flow
+## Process Flow
 
 ```mermaid
 flowchart TD
-    START([Start]) --> ACTION{Action?}
-
-    ACTION -->|start| START_SVC[nohup daemon.py]
-    ACTION -->|stop| STOP_SVC[Send SIGTERM]
-    ACTION -->|status| STATUS_SVC[Query D-Bus]
-    ACTION -->|pending| PENDING[Get pending msgs]
-    ACTION -->|send| SEND_MSG[Send via D-Bus]
-
-    START_SVC --> CHECK[Check PID]
-    STOP_SVC --> CHECK
-    STATUS_SVC --> SHOW[Show Status]
-    PENDING --> SHOW_PENDING[List Messages]
-    SEND_MSG --> CONFIRM[Confirm Sent]
-
-    CHECK --> DONE([✅ Done])
-    SHOW --> DONE
-    SHOW_PENDING --> DONE
-    CONFIRM --> DONE
+    START([Start])
+    STEP1[Step 1: Validate Action]
+    START --> STEP1
+    STEP2[Step 2: Run Action]
+    STEP1 --> STEP2
+    STEP2 --> DONE([Complete])
 
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
 ```
 
-## Example Output
+## Detailed Steps
 
-```
-You: Check slack daemon status
+### Step 1: Validate Action
 
-Claude: 🤖 Slack Daemon Status
+**Description:** Validate the action and required parameters
 
-        ✅ Daemon running (PID: 12345)
-        D-Bus: com.aiworkflow.SlackAgent
+**Tool:** `compute`
 
-        📊 Stats:
-        - Uptime: 4h 23m
-        - Messages processed: 47
-        - Responses sent: 35
-        - Errors: 0
+### Step 2: Run Action
 
-        📡 Watching:
-        - #aleets (alerts)
-        - #aa-api-team
-        - #aa-api-team-test
-```
+**Description:** Execute the daemon control action
+
+**Tool:** `compute`
+
+
+## MCP Tools Used (0 total)
+
+No external tools (compute-only skill)
 
 ## Related Skills
 
-This is a control skill, not typically used directly. The Slack daemon runs independently and uses other skills like:
-
-- [investigate_slack_alert](./investigate_slack_alert.md) - Handle alerts
-- [start_work](./start_work.md) - Start work from Slack
-- [check_my_prs](./check_my_prs.md) - Check PRs from Slack
+_(To be determined based on skill relationships)_
