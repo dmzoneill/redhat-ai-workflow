@@ -118,7 +118,7 @@ def main():
 
         if only_in_basic or only_in_extra or missing_from_basic or missing_from_extra:
             mismatches.append(module_name)
-            print(f"   ⚠️  MISMATCH DETECTED:")
+            print("   ⚠️  MISMATCH DETECTED:")
 
             if only_in_basic:
                 print(f"      - In basic but should be extra: {only_in_basic}")
@@ -129,7 +129,7 @@ def main():
             if missing_from_extra:
                 print(f"      - Missing from extra: {missing_from_extra}")
         else:
-            print(f"   ✅ Split matches analysis")
+            print("   ✅ Split matches analysis")
 
         print()
 

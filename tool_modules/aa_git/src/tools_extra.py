@@ -5,13 +5,12 @@ by the shared server infrastructure.
 """
 
 import logging
-import os
 
 from mcp.server.fastmcp import FastMCP
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
-from server.utils import resolve_repo_path, run_cmd, truncate_output
+from server.utils import resolve_repo_path, run_cmd
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
@@ -43,10 +42,7 @@ def register_tools(server: FastMCP) -> int:
 
     # ==================== STATUS & INFO ====================
 
-    @auto_heal()
-
-    # ==================== TOOLS NOT USED IN SKILLS ====================
-
+        # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal()
     @registry.tool()
     async def docker_compose_down(

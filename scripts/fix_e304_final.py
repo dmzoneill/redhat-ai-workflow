@@ -28,7 +28,10 @@ def fix_e304_in_file(file_path: Path) -> int:
 
     # Pattern: decorator + blank line + comment separator
     # Remove the decorator and blank line before the comment separator
-    pattern = r"(\n    )@(?:auto_heal|auto_heal_stage|auto_heal_konflux|auto_heal_ephemeral)\([^\)]*\)[^\n]*\n\n(    # =+.*?=+\n)"
+    pattern = (
+        r"(\n    )@(?:auto_heal|auto_heal_stage|auto_heal_konflux|"
+        r"auto_heal_ephemeral)\([^\)]*\)[^\n]*\n\n(    # =+.*?=+\n)"
+    )
 
     new_content = re.sub(pattern, r"\1\2", content)
 

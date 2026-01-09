@@ -59,18 +59,18 @@ def main():
         # Update __init__.py
         init_file = src_dir / "__init__.py"
         if update_file_imports(init_file):
-            print(f"   ✅ Updated __init__.py")
+            print("   ✅ Updated __init__.py")
             updated_files.append(str(init_file))
         else:
-            print(f"   ℹ️  __init__.py already correct or doesn't exist")
+            print("   ℹ️  __init__.py already correct or doesn't exist")
 
         # Update server.py
         server_file = src_dir / "server.py"
         if update_file_imports(server_file):
-            print(f"   ✅ Updated server.py")
+            print("   ✅ Updated server.py")
             updated_files.append(str(server_file))
         else:
-            print(f"   ℹ️  server.py already correct or doesn't exist")
+            print("   ℹ️  server.py already correct or doesn't exist")
 
     print("\n" + "=" * 70)
     print(f"✅ Updated {len(updated_files)} files")

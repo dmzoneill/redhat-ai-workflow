@@ -11,7 +11,7 @@ from mcp.server.fastmcp import FastMCP
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
-from server.utils import get_kubeconfig, run_kubectl, truncate_output
+from server.utils import get_kubeconfig, run_kubectl
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
@@ -23,10 +23,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal()  # Cluster determined from environment param
-
-    # ==================== TOOLS NOT USED IN SKILLS ====================
-
+        # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal()
     @registry.tool()
     async def k8s_list_deployments(

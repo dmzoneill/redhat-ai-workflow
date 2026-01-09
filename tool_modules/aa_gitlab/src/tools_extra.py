@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
-from server.utils import get_gitlab_host, get_section_config, truncate_output
+from server.utils import get_gitlab_host, get_section_config
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
@@ -148,10 +148,7 @@ def register_tools(server: "FastMCP") -> int:
 
     # REMOVED: gitlab_view_url - low value, just returns URL content
 
-    @auto_heal()
-
-    # ==================== TOOLS NOT USED IN SKILLS ====================
-
+        # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal()
     @registry.tool()
     async def gitlab_ci_cancel(project: str, pipeline_id: int = 0) -> str:

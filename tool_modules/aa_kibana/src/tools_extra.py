@@ -7,7 +7,6 @@ import logging
 import os
 import urllib.parse
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from typing import cast
 
 from mcp.server.fastmcp import FastMCP
@@ -183,10 +182,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal_stage()
-
-    # ==================== TOOLS NOT USED IN SKILLS ====================
-
+        # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal_stage()
     @registry.tool()
     async def kibana_error_link(

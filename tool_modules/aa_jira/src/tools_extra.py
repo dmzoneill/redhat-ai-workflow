@@ -11,7 +11,7 @@ from mcp.server.fastmcp import FastMCP
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
-from server.utils import get_project_root, load_config, run_cmd_shell
+from server.utils import  load_config, run_cmd_shell
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
@@ -70,10 +70,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal()
-
-    # ==================== TOOLS NOT USED IN SKILLS ====================
-
+        # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal()
     @registry.tool()
     async def jira_add_flag(issue_key: str) -> str:
