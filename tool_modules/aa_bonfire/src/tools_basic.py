@@ -1,15 +1,12 @@
-"""Bonfire Basic Tools - Essential bonfire operations.
+"""Bonfire MCP Server - Ephemeral namespace management and ClowdApp deployment.
 
-For advanced operations, see tools_extra.py.
-
-Tools included (~10):
-- bonfire_namespace_reserve, bonfire_namespace_list, bonfire_namespace_describe, ...
+Provides 21 tools for managing ephemeral namespaces and deploying apps.
 """
 
 import asyncio
 import logging
 import os
-import re  # noqa: F401
+import re
 import subprocess
 
 from mcp.server.fastmcp import FastMCP
@@ -154,227 +151,17 @@ async def run_bonfire(
 # ==================== VERSION / INFO ====================
 
 
-def register_tools(server: FastMCP) -> int:
-    """Register basic bonfire tools with the MCP server."""
+def register_tools(server: "FastMCP") -> int:
+    """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_namespace_reserve(
-        duration: str = "1h",
-        pool: str = "default",
-        requester: str = "",
-        name: str = "",
-        timeout: int = 600,
-        force: bool = True,
-    ) -> list[TextContent]:
-        """
-        Reserve an ephemeral namespace for testing.
+    # REMOVED: bonfire_version - low value, rarely needed
 
-        Args:
-            duration: How long to reserve (e.g., "1h", "4h", "8h")
-            pool: Namespace pool to use (default: "default")
-            requester: Your username (for tracking)
-            name: Identifier for the reservation
-            timeout: Timeout in seconds to wait for resources
-            force: Don't prompt if reservations exist for user
-
-        Returns:
-            Reserved namespace name.
-        """
-        args = ["namespace", "reserve"]
-        args.extend(["--duration", duration])
-        args.extend(["--pool", pool])
-        args.extend(["--timeout", str(timeout)])
-
-        if requester:
-            args.extend(["--requester", requester])
-        if name:
-            args.extend(["--name", name])
-        if force:
-            args.append("--force")
-
-        success, output = await run_bonfire(args, timeout=timeout + 60)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to reserve namespace:\n\n{output}")]
-
-        lines = [
-            "## ✅ Namespace Reserved",
-            "",
-            f"**Duration:** {duration}",
-            f"**Pool:** {pool}",
-            "",
-            "```",
-            output,
-            "```",
-            "",
-            "**Next steps:**",
-            "1. Deploy your app: `bonfire_deploy(app='...', namespace='...')`",
-            "2. Monitor: `kubectl_get_pods(namespace='...', environment='ephemeral')`",
-            "3. Release when done: `bonfire_namespace_release(namespace='...')`",
-        ]
-
-        return [TextContent(type="text", text="\n".join(lines))]
+    # ==================== NAMESPACE MANAGEMENT ====================
 
     @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_namespace_list(mine_only: bool = True) -> list[TextContent]:
-        """
-        List current ephemeral namespace reservations.
 
-        Args:
-            mine_only: If True (default), only show namespaces owned by current user.
-                      ALWAYS use True unless explicitly asked to see all namespaces.
-
-        Returns:
-            List of reserved namespaces with status.
-        """
-        args = ["namespace", "list"]
-        if mine_only:
-            args.append("--mine")
-
-        success, output = await run_bonfire(args)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to list namespaces:\n\n{output}")]
-
-        title = "My Ephemeral Namespaces" if mine_only else "All Ephemeral Namespaces"
-        return [TextContent(type="text", text=f"## {title}\n\n```\n{output}\n```")]
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_namespace_describe(namespace: str) -> list[TextContent]:
-        """
-        Get detailed info about a namespace reservation.
-
-        Args:
-            namespace: Namespace to describe
-
-        Returns:
-            Namespace details including requester, expiry, etc.
-        """
-        success, output = await run_bonfire(["namespace", "describe", namespace])
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to describe namespace:\n\n{output}")]
-
-        return [TextContent(type="text", text=f"## Namespace: `{namespace}`\n\n```\n{output}\n```")]
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_namespace_release(namespace: str, force: bool = False) -> list[TextContent]:
-        """
-        Release an ephemeral namespace reservation.
-
-        SAFETY: Only releases namespaces owned by the current user unless force=True.
-
-        Args:
-            namespace: Namespace to release
-            force: If False (default), verify ownership before release.
-                   Only set True if you're absolutely sure.
-
-        Returns:
-            Confirmation of release.
-        """
-        # First verify ownership by checking --mine list
-        if not force:
-            check_success, check_output = await run_bonfire(["namespace", "list", "--mine"])
-
-            if check_success and namespace not in check_output:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"""❌ **Cannot release namespace `{namespace}`**
-
-This namespace is not owned by you (not in `bonfire namespace list --mine`).
-
-Your namespaces:
-```
-{check_output}
-```
-
-If you're sure you want to release it, call with `force=True` (not recommended).""",
-                    )
-                ]
-
-        # Always use --force to skip interactive confirmation (non-TTY safe)
-        success, output = await run_bonfire(["namespace", "release", namespace, "--force"])
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to release namespace:\n\n{output}")]
-
-        return [TextContent(type="text", text=f"✅ Namespace `{namespace}` released\n\n{output}")]
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_namespace_extend(
-        namespace: str,
-        duration: str = "1h",
-    ) -> list[TextContent]:
-        """
-        Extend an ephemeral namespace reservation.
-
-        Args:
-            namespace: Namespace to extend
-            duration: Additional time (e.g., "1h", "2h")
-
-        Returns:
-            New expiration time.
-        """
-        success, output = await run_bonfire(["namespace", "extend", namespace, "--duration", duration])
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to extend namespace:\n\n{output}")]
-
-        return [TextContent(type="text", text=f"✅ Namespace `{namespace}` extended by {duration}\n\n{output}")]
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_namespace_wait(
-        namespace: str,
-        timeout: int = 300,
-    ) -> list[TextContent]:
-        """
-        Wait for resources to be ready in a namespace.
-
-        Args:
-            namespace: Namespace to wait on
-            timeout: Timeout in seconds
-
-        Returns:
-            Status when ready or timeout.
-        """
-        success, output = await run_bonfire(
-            ["namespace", "wait-on-resources", namespace, "--timeout", str(timeout)],
-            timeout=timeout + 60,
-        )
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Wait failed:\n\n{output}")]
-
-        return [TextContent(type="text", text=f"✅ Resources ready in `{namespace}`\n\n{output}")]
-
-    # ==================== APPS ====================
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_apps_list(target_env: str = "insights-ephemeral") -> list[TextContent]:
-        """
-        List all deployable apps.
-
-        Args:
-            target_env: Target environment (default: insights-ephemeral)
-
-        Returns:
-            List of available apps.
-        """
-        success, output = await run_bonfire(["apps", "list", "--target-env", target_env])
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to list apps:\n\n{output}")]
-
-        return [TextContent(type="text", text=f"## Deployable Apps\n\n```\n{output}\n```")]
+    # ==================== TOOLS USED IN SKILLS ====================
 
     @auto_heal_ephemeral()
     @registry.tool()
@@ -394,26 +181,6 @@ If you're sure you want to release it, call with `force=True` (not recommended).
             return [TextContent(type="text", text=f"❌ Failed to check dependencies:\n\n{output}")]
 
         return [TextContent(type="text", text=f"## Apps depending on `{component}`\n\n```\n{output}\n```")]
-
-    # ==================== DEPLOYMENT ====================
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_pool_list() -> list[TextContent]:
-        """
-        List available namespace pool types.
-
-        Returns:
-            List of pool types.
-        """
-        success, output = await run_bonfire(["pool", "list"])
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to list pools:\n\n{output}")]
-
-        return [TextContent(type="text", text=f"## Namespace Pools\n\n```\n{output}\n```")]
-
-    # ==================== AUTOMATION ANALYTICS HELPERS ====================
 
     @auto_heal_ephemeral()
     @registry.tool()
@@ -496,4 +263,459 @@ If you're sure you want to release it, call with `force=True` (not recommended).
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    return registry.count
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_deploy_aa(
+        namespace: str,
+        template_ref: str,
+        image_tag: str,
+        billing: bool = False,
+        timeout: int = 900,
+    ) -> list[TextContent]:
+        """
+        Deploy Automation Analytics to ephemeral namespace (matches ITS pattern exactly).
+
+        Command format (billing=false):
+        KUBECONFIG=~/.kube/config.e bonfire deploy \\
+          --source=appsre --ref-env insights-production \\
+          --namespace ephemeral-xxx --timeout 900 \\
+          --optional-deps-method hybrid --frontends false \\
+          --component tower-analytics-clowdapp \\
+          --no-remove-resources all \\
+          --set-template-ref tower-analytics-clowdapp=<40-char-git-sha> \\
+          --set-parameter tower-analytics-clowdapp/IMAGE=quay.io/.../image@sha256 \\
+          --set-parameter tower-analytics-clowdapp/IMAGE_TAG=<64-char-sha256-digest> \\
+          tower-analytics
+
+        Args:
+            namespace: Target ephemeral namespace (e.g., "ephemeral-uhfivg")
+            template_ref: Full 40-char git commit SHA for template
+            image_tag: 64-char sha256 digest from Quay (NOT git SHA!)
+                       Get this from quay_get_tag output: "Manifest Digest: sha256:..."
+            billing: If True, deploy tower-analytics-billing-clowdapp
+                     If False, deploy tower-analytics-clowdapp
+            timeout: Deployment timeout in seconds
+
+        Returns:
+            Deployment status.
+        """
+        # Load app config from config.json
+        app_cfg = get_app_config(billing=billing)
+        component = app_cfg["component"]
+        image_base = app_cfg["image_base"]
+        app_name = app_cfg["app_name"]
+        ref_env = app_cfg["ref_env"]
+
+        if not image_base:
+            return [
+                TextContent(
+                    type="text",
+                    text="❌ image_base not configured in config.json bonfire.apps section",
+                )
+            ]
+
+        # VALIDATE template_ref: Must be FULL 40-char git commit SHA
+        if len(template_ref) != 40:
+            err_msg = (
+                f"❌ **Invalid template_ref: `{template_ref}` "
+                f"({len(template_ref)} chars)**\n\n"
+                f"template_ref must be a FULL 40-character git commit SHA.\n\n"
+                f"**Fix:** Get the full SHA:\n"
+                f"```bash\ngit rev-parse {template_ref}\n```"
+            )
+            return [TextContent(type="text", text=err_msg)]
+
+        # Strip sha256: prefix if present
+        digest = image_tag
+        if digest.startswith("sha256:"):
+            digest = digest[7:]
+
+        # VALIDATE image_tag: Must be 64-char sha256 digest
+        if len(digest) != 64:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"""❌ **Invalid image_tag: `{image_tag}` ({len(digest)} chars)**
+
+image_tag must be the 64-char sha256 digest from the built image (NOT the git SHA).
+
+**How to get it:**
+1. Call `quay_get_tag(repository='...', tag='{template_ref}')`
+2. Look for "Manifest Digest: sha256:XXXX..."
+3. Use the 64-char hex part after "sha256:"
+
+**Or via CLI:**
+```bash
+skopeo inspect docker://{image_base}:{template_ref} | jq -r '.Digest' | cut -d: -f2
+```""",
+                )
+            ]
+
+        # Validate digest is hex
+        if not all(c in "0123456789abcdef" for c in digest.lower()):
+            return [
+                TextContent(
+                    type="text",
+                    text=f"""❌ **Invalid digest format: `{digest}`**
+
+Expected 64 hex characters (0-9, a-f). Got non-hex characters.""",
+                )
+            ]
+
+        # HARD STOP: Check if image exists in Quay before deploying
+        repository = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
+        image_ref = f"docker://quay.io/redhat-user-workloads/{repository}:{template_ref}"
+
+        logger.info(f"Checking if image exists: {image_ref}")
+
+        try:
+            check_result = await asyncio.to_thread(
+                subprocess.run,
+                ["skopeo", "inspect", "--raw", image_ref],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            check_output = check_result.stdout + check_result.stderr
+
+            if check_result.returncode != 0 or "manifest unknown" in check_output.lower():
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"""❌ **STOP: Image not found in Quay**
+
+The image for commit `{template_ref[:12]}...` does not exist in redhat-user-workloads.
+
+**Image checked:** `{image_base}:{template_ref}`
+
+**Possible causes:**
+1. Konflux hasn't built the image yet (check pipeline status)
+2. The commit SHA is incorrect
+3. The build failed
+
+**What to do:**
+1. Check Konflux build status for this commit
+2. Wait for the build to complete
+3. Retry once the image is available
+
+**DO NOT** proceed with deployment - it will fail with ImagePullBackOff.""",
+                    )
+                ]
+
+        except subprocess.TimeoutExpired:
+            return [
+                TextContent(
+                    type="text",
+                    text="❌ Image check timed out. Verify image exists before retrying.",
+                )
+            ]
+        except FileNotFoundError:
+            logger.warning("skopeo not found, skipping image check")
+            # Continue without check if skopeo not installed
+
+        logger.info("Image verified, proceeding with deploy")
+
+        # Build the exact command matching ITS pattern
+        # Example:
+        # KUBECONFIG=~/.kube/config.e bonfire deploy \
+        #   --source=appsre --ref-env insights-production \
+        #   --namespace ephemeral-cr3t3n --timeout 900 \
+        #   --optional-deps-method hybrid --frontends false \
+        #   --component tower-analytics-clowdapp \
+        #   --no-remove-resources all \
+        #   --set-template-ref tower-analytics-clowdapp=1244ec49e6... \
+        #   --set-parameter tower-analytics-clowdapp/IMAGE=quay.io/.../image@sha256 \
+        #   --set-parameter tower-analytics-clowdapp/IMAGE_TAG=20a4c976... \
+        #   tower-analytics
+
+        args = [
+            "deploy",
+            "--source=appsre",
+            "--ref-env",
+            ref_env,
+            "--namespace",
+            namespace,
+            "--timeout",
+            str(timeout),
+            "--optional-deps-method",
+            "hybrid",
+            "--frontends",
+            "false",
+            "--component",
+            component,
+            "--no-remove-resources",
+            "all",
+            "--set-template-ref",
+            f"{component}={template_ref}",
+            "--set-parameter",
+            f"{component}/IMAGE={image_base}@sha256",
+            "--set-parameter",
+            f"{component}/IMAGE_TAG={digest}",
+            app_name,
+        ]
+
+        # Log the full command for debugging
+        kubeconfig = get_ephemeral_kubeconfig()
+        cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
+        logger.info(f"Deploying AA: {cmd_preview}")
+
+        success, output = await run_bonfire(args, timeout=timeout + 120)
+
+        if not success:
+            # Include the command in error output for debugging
+            return [
+                TextContent(
+                    type="text",
+                    text=f"""❌ AA {'billing' if billing else 'main'} deployment failed
+
+**Command:**
+```bash
+{cmd_preview}
+```
+
+**Output:**
+```
+{output}
+```""",
+                )
+            ]
+
+        display_output = truncate_output(output, 5000, mode="tail")
+
+        lines = [
+            f"## ✅ Deployed Automation Analytics ({'billing' if billing else 'main'})",
+            "",
+            f"**Namespace:** `{namespace}`",
+            f"**Component:** `{component}`",
+            f"**Template Ref:** `{template_ref}`",
+            f"**Image Digest:** `{digest[:16]}...`",
+            "",
+            "**Command used:**",
+            "```bash",
+            cmd_preview,
+            "```",
+            "",
+            "**Output:**",
+            "```",
+            display_output,
+            "```",
+            "",
+            "**Next steps:**",
+            f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`",
+            f"- Run IQE tests: `bonfire_deploy_iqe_cji(namespace='{namespace}')`",
+        ]
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_namespace_describe(namespace: str) -> list[TextContent]:
+        """
+        Get detailed info about a namespace reservation.
+
+        Args:
+            namespace: Namespace to describe
+
+        Returns:
+            Namespace details including requester, expiry, etc.
+        """
+        success, output = await run_bonfire(["namespace", "describe", namespace])
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to describe namespace:\n\n{output}")]
+
+        return [TextContent(type="text", text=f"## Namespace: `{namespace}`\n\n```\n{output}\n```")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_namespace_extend(
+        namespace: str,
+        duration: str = "1h",
+    ) -> list[TextContent]:
+        """
+        Extend an ephemeral namespace reservation.
+
+        Args:
+            namespace: Namespace to extend
+            duration: Additional time (e.g., "1h", "2h")
+
+        Returns:
+            New expiration time.
+        """
+        success, output = await run_bonfire(["namespace", "extend", namespace, "--duration", duration])
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to extend namespace:\n\n{output}")]
+
+        return [TextContent(type="text", text=f"✅ Namespace `{namespace}` extended by {duration}\n\n{output}")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_namespace_list(mine_only: bool = True) -> list[TextContent]:
+        """
+        List current ephemeral namespace reservations.
+
+        Args:
+            mine_only: If True (default), only show namespaces owned by current user.
+                      ALWAYS use True unless explicitly asked to see all namespaces.
+
+        Returns:
+            List of reserved namespaces with status.
+        """
+        args = ["namespace", "list"]
+        if mine_only:
+            args.append("--mine")
+
+        success, output = await run_bonfire(args)
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to list namespaces:\n\n{output}")]
+
+        title = "My Ephemeral Namespaces" if mine_only else "All Ephemeral Namespaces"
+        return [TextContent(type="text", text=f"## {title}\n\n```\n{output}\n```")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_namespace_release(namespace: str, force: bool = False) -> list[TextContent]:
+        """
+        Release an ephemeral namespace reservation.
+
+        SAFETY: Only releases namespaces owned by the current user unless force=True.
+
+        Args:
+            namespace: Namespace to release
+            force: If False (default), verify ownership before release.
+                   Only set True if you're absolutely sure.
+
+        Returns:
+            Confirmation of release.
+        """
+        # First verify ownership by checking --mine list
+        if not force:
+            check_success, check_output = await run_bonfire(["namespace", "list", "--mine"])
+
+            if check_success and namespace not in check_output:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"""❌ **Cannot release namespace `{namespace}`**
+
+This namespace is not owned by you (not in `bonfire namespace list --mine`).
+
+Your namespaces:
+```
+{check_output}
+```
+
+If you're sure you want to release it, call with `force=True` (not recommended).""",
+                    )
+                ]
+
+        # Always use --force to skip interactive confirmation (non-TTY safe)
+        success, output = await run_bonfire(["namespace", "release", namespace, "--force"])
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to release namespace:\n\n{output}")]
+
+        return [TextContent(type="text", text=f"✅ Namespace `{namespace}` released\n\n{output}")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_namespace_reserve(
+        duration: str = "1h",
+        pool: str = "default",
+        requester: str = "",
+        name: str = "",
+        timeout: int = 600,
+        force: bool = True,
+    ) -> list[TextContent]:
+        """
+        Reserve an ephemeral namespace for testing.
+
+        Args:
+            duration: How long to reserve (e.g., "1h", "4h", "8h")
+            pool: Namespace pool to use (default: "default")
+            requester: Your username (for tracking)
+            name: Identifier for the reservation
+            timeout: Timeout in seconds to wait for resources
+            force: Don't prompt if reservations exist for user
+
+        Returns:
+            Reserved namespace name.
+        """
+        args = ["namespace", "reserve"]
+        args.extend(["--duration", duration])
+        args.extend(["--pool", pool])
+        args.extend(["--timeout", str(timeout)])
+
+        if requester:
+            args.extend(["--requester", requester])
+        if name:
+            args.extend(["--name", name])
+        if force:
+            args.append("--force")
+
+        success, output = await run_bonfire(args, timeout=timeout + 60)
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to reserve namespace:\n\n{output}")]
+
+        lines = [
+            "## ✅ Namespace Reserved",
+            "",
+            f"**Duration:** {duration}",
+            f"**Pool:** {pool}",
+            "",
+            "```",
+            output,
+            "```",
+            "",
+            "**Next steps:**",
+            "1. Deploy your app: `bonfire_deploy(app='...', namespace='...')`",
+            "2. Monitor: `kubectl_get_pods(namespace='...', environment='ephemeral')`",
+            "3. Release when done: `bonfire_namespace_release(namespace='...')`",
+        ]
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_namespace_wait(
+        namespace: str,
+        timeout: int = 300,
+    ) -> list[TextContent]:
+        """
+        Wait for resources to be ready in a namespace.
+
+        Args:
+            namespace: Namespace to wait on
+            timeout: Timeout in seconds
+
+        Returns:
+            Status when ready or timeout.
+        """
+        success, output = await run_bonfire(
+            ["namespace", "wait-on-resources", namespace, "--timeout", str(timeout)],
+            timeout=timeout + 60,
+        )
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Wait failed:\n\n{output}")]
+
+        return [TextContent(type="text", text=f"✅ Resources ready in `{namespace}`\n\n{output}")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_pool_list() -> list[TextContent]:
+        """
+        List available namespace pool types.
+
+        Returns:
+            List of pool types.
+        """
+        success, output = await run_bonfire(["pool", "list"])
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to list pools:\n\n{output}")]
+
+        return [TextContent(type="text", text=f"## Namespace Pools\n\n```\n{output}\n```")]

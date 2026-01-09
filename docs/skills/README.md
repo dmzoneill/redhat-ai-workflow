@@ -1,6 +1,8 @@
 # ⚡ Skills Reference
 
-Skills are **reusable multi-step workflows** that chain MCP tools together with logic, conditions, and templating. All 53 production skills include **auto-healing** for VPN and authentication issues.
+Skills are **reusable multi-step workflows** that chain MCP tools together with logic, conditions, and templating. All 55 production skills include **auto-healing** for VPN and authentication issues.
+
+> **Tool Usage:** Skills drive the tool organization - the 170 "basic" tools are those used in at least one skill. See [Tool Organization](../tool-organization.md) for details.
 
 ## Quick Reference
 

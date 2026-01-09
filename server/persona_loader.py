@@ -32,6 +32,7 @@ PERSONAS_DIR = PROJECT_DIR / "personas"
 # Tool counts per module
 # Removed duplicates, low-value, and interactive-only tools
 TOOL_MODULES = {
+    # Legacy names (deprecated, use _basic variants)
     "git": 15,
     "jira": 23,  # Removed: jira_open_browser (interactive)
     "gitlab": 29,  # Removed: 2 interactive + 4 duplicates/low-value
@@ -48,6 +49,35 @@ TOOL_MODULES = {
     "dev_workflow": 9,  # Developer-specific workflow tools
     "slack": 8,  # Removed: 7 daemon/internal tools
     "google_calendar": 6,
+    # New basic/extra split (based on skill usage analysis)
+    "git_basic": 27,  # Tools used in skills
+    "git_extra": 3,  # Tools not used in skills
+    "jira_basic": 17,
+    "jira_extra": 11,
+    "gitlab_basic": 16,
+    "gitlab_extra": 14,
+    "k8s_basic": 22,
+    "k8s_extra": 6,
+    "prometheus_basic": 5,
+    "prometheus_extra": 8,
+    "alertmanager_basic": 4,
+    "alertmanager_extra": 3,
+    "kibana_basic": 1,
+    "kibana_extra": 8,
+    "konflux_basic": 22,
+    "konflux_extra": 13,
+    "bonfire_basic": 10,
+    "bonfire_extra": 10,
+    "quay_basic": 5,
+    "quay_extra": 2,
+    "appinterface_basic": 4,
+    "appinterface_extra": 3,
+    "lint_basic": 1,
+    "lint_extra": 6,
+    "dev_workflow_extra": 9,  # No basic (all unused)
+    "slack_basic": 6,
+    "slack_extra": 3,
+    "google_calendar_basic": 6,  # No extra (all used)
 }
 
 # Core tools that should never be removed

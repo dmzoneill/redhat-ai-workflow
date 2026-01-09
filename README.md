@@ -9,8 +9,8 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Claude](https://img.shields.io/badge/Claude-Anthropic-FF6B6B?style=for-the-badge&logo=anthropic&logoColor=white)](https://anthropic.com/)
 [![Cursor](https://img.shields.io/badge/Cursor-IDE-000000?style=for-the-badge&logo=cursor&logoColor=white)](https://cursor.sh/)
-[![Tools](https://img.shields.io/badge/Tools-261-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#-tool-modules)
-[![Skills](https://img.shields.io/badge/Skills-53-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)](#-skills)
+[![Tools](https://img.shields.io/badge/Tools-245-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#-tool-modules)
+[![Skills](https://img.shields.io/badge/Skills-55-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)](#-skills)
 [![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 **Transform Claude into your personal DevOps engineer, developer assistant, and incident responder.**
@@ -111,7 +111,9 @@ Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
 
 </details>
 
-> **Default Persona:** The server starts with the `developer` persona loaded by default (~78 tools). Use `persona_load("devops")` to switch.
+> **Default Persona:** The server starts with the `developer` persona loaded by default (~61 tools). Use `persona_load("devops")` to switch.
+>
+> **Tool Organization:** Tools are split into `_basic` (used in skills, 170 tools) and `_extra` (rarely used, 75 tools) to reduce context window usage by 30%.
 
 ### 3️⃣ Restart & Go!
 
@@ -119,7 +121,7 @@ Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
 You: Load the developer persona
 
 Claude: 👨‍💻 Developer Persona Loaded
-        Tools: workflow, git_basic, gitlab_basic, jira_basic (~78 tools)
+        Tools: workflow, git_basic, gitlab_basic, jira_basic (~61 tools)
 
 You: Start working on AAP-12345
 
@@ -363,26 +365,28 @@ When enabled, `/create-mr` and `/mark-ready` will:
 
 ## 🔧 Tool Modules
 
-~261 tools across 17 modules. See [full MCP server reference](docs/tool-modules/README.md).
+**245 tools** across 16 modules, split into **170 basic** (used in skills, 69%) and **75 extra** (rarely used, 31%). See [full MCP server reference](docs/tool-modules/README.md).
 
-| Module | Tools | Description |
-|--------|-------|-------------|
-| [workflow](docs/tool-modules/workflow.md) | 16 | Core: agents, skills, memory, vpn, kube_login |
-| [git](docs/tool-modules/git.md) | 30 | Git operations (14 basic + 16 extra) |
-| [gitlab](docs/tool-modules/gitlab.md) | 30 | MRs, pipelines, code review (16 basic + 14 extra) |
-| [jira](docs/tool-modules/jira.md) | 28 | Issue tracking (15 basic + 13 extra) |
-| [k8s](docs/tool-modules/k8s.md) | 28 | Kubernetes operations (14 basic + 14 extra) |
-| [bonfire](docs/tool-modules/bonfire.md) | 20 | Ephemeral environments (10 basic + 10 extra) |
-| [konflux](docs/tool-modules/konflux.md) | 35 | Build pipelines (18 basic + 17 extra) |
-| [prometheus](docs/tool-modules/prometheus.md) | 13 | Metrics queries (9 basic + 4 extra) |
-| [kibana](docs/tool-modules/kibana.md) | 9 | Log search |
-| [alertmanager](docs/tool-modules/alertmanager.md) | 7 | Alert management |
-| [quay](docs/tool-modules/quay.md) | 7 | Container registry |
-| [slack](docs/tool-modules/slack.md) | 9 | Slack integration |
-| [google_calendar](docs/tool-modules/google_calendar.md) | 6 | Calendar & meetings |
-| [appinterface](docs/tool-modules/appinterface.md) | 7 | GitOps config |
-| [lint](docs/tool-modules/common.md) | 7 | Python/YAML linting |
-| [dev_workflow](docs/tool-modules/common.md) | 9 | Development helpers |
+> **Performance:** Loading basic tools only reduces context window usage by **30%** while maintaining full functionality for common workflows.
+
+| Module | Total | Basic (Used) | Extra (Unused) | Description |
+|--------|-------|--------------|----------------|-------------|
+| [workflow](docs/tool-modules/workflow.md) | 16 | 16 | 0 | Core: agents, skills, memory, vpn, kube_login |
+| [git](docs/tool-modules/git.md) | 30 | 27 | 3 | Git operations (90% usage) |
+| [gitlab](docs/tool-modules/gitlab.md) | 30 | 16 | 14 | MRs, pipelines, code review (53% usage) |
+| [jira](docs/tool-modules/jira.md) | 28 | 17 | 11 | Issue tracking (61% usage) |
+| [k8s](docs/tool-modules/k8s.md) | 28 | 22 | 6 | Kubernetes operations (79% usage) |
+| [bonfire](docs/tool-modules/bonfire.md) | 20 | 10 | 10 | Ephemeral environments (50% usage) |
+| [konflux](docs/tool-modules/konflux.md) | 35 | 22 | 13 | Build pipelines (63% usage) |
+| [prometheus](docs/tool-modules/prometheus.md) | 13 | 5 | 8 | Metrics queries (38% usage) |
+| [kibana](docs/tool-modules/kibana.md) | 9 | 1 | 8 | Log search (11% usage) |
+| [alertmanager](docs/tool-modules/alertmanager.md) | 7 | 4 | 3 | Alert management (57% usage) |
+| [quay](docs/tool-modules/quay.md) | 7 | 5 | 2 | Container registry (71% usage) |
+| [slack](docs/tool-modules/slack.md) | 9 | 6 | 3 | Slack integration (67% usage) |
+| [google_calendar](docs/tool-modules/google_calendar.md) | 6 | 6 | 0 | Calendar & meetings (100% usage) |
+| [appinterface](docs/tool-modules/appinterface.md) | 7 | 4 | 3 | GitOps config (57% usage) |
+| [lint](docs/tool-modules/common.md) | 7 | 1 | 6 | Python/YAML linting (14% usage) |
+| [dev_workflow](docs/tool-modules/common.md) | 9 | 0 | 9 | Development helpers (0% usage) |
 
 > Plus **45+ shared parsers** in `scripts/common/parsers.py` and **config helpers** in `scripts/common/config_loader.py`
 
@@ -490,9 +494,10 @@ ai-workflow/
 | Document | Description |
 |----------|-------------|
 | [Commands Reference](docs/commands/README.md) | 64 slash commands (Claude/Cursor) |
-| [Skills Reference](docs/skills/README.md) | All 53 available skills |
+| [Skills Reference](docs/skills/README.md) | All 55 available skills |
 | [Personas Reference](docs/personas/README.md) | 5 tool configuration profiles |
-| [Tool Modules Reference](docs/tool-modules/README.md) | 17 tool plugins with ~261 tools |
+| [Tool Modules Reference](docs/tool-modules/README.md) | 16 tool plugins with 245 tools (170 basic, 75 extra) |
+| [Tool Organization](docs/tool-organization.md) | Basic vs Extra split strategy |
 | [Learning Loop](docs/learning-loop.md) | Auto-remediation + memory |
 | [Skill Auto-Heal](docs/plans/skill-auto-heal.md) | Auto-healing implementation |
 | [IDE Extension](docs/ide-extension.md) | VSCode/Cursor extension |

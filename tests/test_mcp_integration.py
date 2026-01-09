@@ -144,9 +144,14 @@ class TestWorkflowExtractedModules:
         """Lint tools module should be loadable."""
         import importlib.util
 
+        # Try tools_basic.py first (new structure), fallback to tools.py (legacy)
+        tools_file = TOOL_MODULES_DIR / "aa_lint" / "src" / "tools_basic.py"
+        if not tools_file.exists():
+            tools_file = TOOL_MODULES_DIR / "aa_lint" / "src" / "tools.py"
+
         spec = importlib.util.spec_from_file_location(
             "lint_tools",
-            TOOL_MODULES_DIR / "aa_lint" / "src" / "tools.py",
+            tools_file,
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -172,9 +177,17 @@ class TestWorkflowExtractedModules:
         """Dev workflow tools module should be loadable."""
         import importlib.util
 
+        # Try tools_extra.py first (since dev_workflow has only unused tools)
+        # Fallback to tools_basic.py or tools.py (legacy)
+        tools_file = TOOL_MODULES_DIR / "aa_dev_workflow" / "src" / "tools_extra.py"
+        if not tools_file.exists():
+            tools_file = TOOL_MODULES_DIR / "aa_dev_workflow" / "src" / "tools_basic.py"
+        if not tools_file.exists():
+            tools_file = TOOL_MODULES_DIR / "aa_dev_workflow" / "src" / "tools.py"
+
         spec = importlib.util.spec_from_file_location(
             "dev_workflow_tools",
-            TOOL_MODULES_DIR / "aa_dev_workflow" / "src" / "tools.py",
+            tools_file,
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

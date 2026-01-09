@@ -1,9 +1,7 @@
-"""Konflux Extra Tools - Advanced konflux operations.
+"""AA Konflux MCP Server - Konflux/Tekton CI/CD operations.
 
-For basic operations, see tools_basic.py.
-
-Tools included (~17):
-- konflux_list_integration_tests, konflux_get_test_results, konflux_list_releases, ...
+Konflux is a cloud-native software factory using Kubernetes and Tekton.
+Authentication: Uses ~/.kube/config.k for Konflux cluster access.
 """
 
 import os
@@ -64,159 +62,32 @@ run_cmd = run_konflux_cmd
 # ==================== PIPELINE RUNS ====================
 
 
-def register_tools(server: FastMCP) -> int:
-    """Register extra konflux tools with the MCP server."""
+def register_tools(server: "FastMCP") -> int:
+    """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
     @auto_heal_konflux()
-    @registry.tool()
-    async def konflux_list_integration_tests(namespace: str = DEFAULT_NAMESPACE, application: str = "") -> str:
-        """List IntegrationTestScenarios in a namespace."""
-        args = ["kubectl", "get", "integrationtestscenarios", "-n", namespace, "-o", "wide"]
-        if application:
-            args.extend(["-l", f"appstudio.openshift.io/application={application}"])
-        success, output = await run_cmd(args)
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Integration Tests: {namespace}\n\n```\n{output}\n```"
+
+    # ==================== TOOLS NOT USED IN SKILLS ====================
 
     @auto_heal_konflux()
     @registry.tool()
-    async def konflux_get_test_results(namespace: str = DEFAULT_NAMESPACE, snapshot: str = "", limit: int = 10) -> str:
-        """Get integration test results from test pipelineruns."""
-        args = [
-            "kubectl",
-            "get",
-            "pipelineruns",
-            "-n",
-            namespace,
-            "-l",
-            "test.appstudio.openshift.io/scenario",
-            "-o",
-            "wide",
-            "--sort-by=.metadata.creationTimestamp",
-        ]
-        if snapshot:
-            args = [
-                "kubectl",
-                "get",
-                "pipelineruns",
-                "-n",
-                namespace,
-                "-l",
-                f"appstudio.openshift.io/snapshot={snapshot}",
-                "-o",
-                "wide",
-            ]
-        success, output = await run_cmd(args)
+    async def konflux_get_application(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+        """Get detailed information about a Konflux application."""
+        success, output = await run_cmd(["kubectl", "get", "application", name, "-n", namespace, "-o", "yaml"])
         if not success:
             return f"❌ Failed: {output}"
-        # Limit output to recent results
-        lines = output.strip().split("\n")
-        if len(lines) > limit + 1:
-            lines = lines[:1] + lines[-(limit):]
-        return f"## Test Results: {namespace}\n\n```\n" + "\n".join(lines) + "\n```"
-
-    # ==================== RELEASES ====================
+        return f"## Application: {name}\n\n```yaml\n{truncate_output(output, max_length=10000)}\n```"
 
     @auto_heal_konflux()
     @registry.tool()
-    async def konflux_list_releases(namespace: str = DEFAULT_NAMESPACE, limit: int = 10) -> str:
-        """List Konflux releases."""
-        success, output = await run_cmd(
-            [
-                "kubectl",
-                "get",
-                "releases",
-                "-n",
-                namespace,
-                "-o",
-                "wide",
-                "--sort-by=.metadata.creationTimestamp",
-            ]
-        )
+    async def konflux_get_pipeline(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+        """Get details of a specific pipeline run."""
+        success, output = await run_cmd(["kubectl", "get", "pipelinerun", name, "-n", namespace, "-o", "yaml"])
         if not success:
             return f"❌ Failed: {output}"
-        lines = output.strip().split("\n")
-        if len(lines) > limit + 1:
-            lines = lines[:1] + lines[-(limit):]
-        return f"## Releases: {namespace}\n\n```\n" + "\n".join(lines) + "\n```"
 
-    @auto_heal_konflux()
-    @registry.tool()
-    async def konflux_get_release(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
-        """Get detailed information about a Konflux release."""
-        success, output = await run_cmd(["kubectl", "get", "release", name, "-n", namespace, "-o", "yaml"])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Release: {name}\n\n```yaml\n{truncate_output(output, max_length=10000)}\n```"
-
-    @auto_heal_konflux()
-    @registry.tool()
-    async def konflux_list_release_plans(namespace: str = DEFAULT_NAMESPACE) -> str:
-        """List Konflux release plans."""
-        success, output = await run_cmd(["kubectl", "get", "releaseplans", "-n", namespace, "-o", "wide"])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Release Plans: {namespace}\n\n```\n{output}\n```"
-
-    # ==================== BUILDS ====================
-
-    @auto_heal_konflux()
-    @registry.tool()
-    async def konflux_list_builds(namespace: str = DEFAULT_NAMESPACE, component: str = "", limit: int = 10) -> str:
-        """List build PipelineRuns for components."""
-        args = [
-            "kubectl",
-            "get",
-            "pipelineruns",
-            "-n",
-            namespace,
-            "-l",
-            "pipelines.appstudio.openshift.io/type=build",
-            "-o",
-            "wide",
-            "--sort-by=.metadata.creationTimestamp",
-        ]
-        if component:
-            args = [
-                "kubectl",
-                "get",
-                "pipelineruns",
-                "-n",
-                namespace,
-                "-l",
-                f"appstudio.openshift.io/component={component}",
-                "-o",
-                "wide",
-                "--sort-by=.metadata.creationTimestamp",
-            ]
-        success, output = await run_cmd(args)
-        if not success:
-            return f"❌ Failed: {output}"
-        lines = output.strip().split("\n")
-        if len(lines) > limit + 1:
-            lines = lines[:1] + lines[-(limit):]
-        return f"## Builds: {namespace}\n\n```\n" + "\n".join(lines) + "\n```"
-
-    @auto_heal_konflux()
-    @registry.tool()
-    async def konflux_get_build_logs(build_name: str, namespace: str = DEFAULT_NAMESPACE, task: str = "") -> str:
-        """Get logs from a build PipelineRun using tkn CLI."""
-        args = ["tkn", "pipelinerun", "logs", build_name, "-n", namespace]
-        if task:
-            args.extend(["--task", task])
-        else:
-            args.append("--all")
-        success, output = await run_cmd(args, timeout=120)
-        if not success:
-            return f"❌ Failed: {output}"
-        output = truncate_output(
-            output, max_length=20000, mode="tail", suffix="... (truncated, showing last 20000 chars)"
-        )
-        return f"## Build Logs: {build_name}\n\n```\n{output}\n```"
-
-    # ==================== ENVIRONMENTS ====================
+        return f"## Pipeline: {name}\n\n```yaml\n{truncate_output(output, max_length=10000)}\n```"
 
     @auto_heal_konflux()
     @registry.tool()
@@ -234,21 +105,84 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal_konflux()
     @registry.tool()
-    async def tkn_pipelinerun_delete(run_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
-        """Delete a pipeline run."""
-        success, output = await run_cmd(["tkn", "pipelinerun", "delete", run_name, "-n", namespace, "-f"])
+    async def konflux_list_release_plans(namespace: str = DEFAULT_NAMESPACE) -> str:
+        """List Konflux release plans."""
+        success, output = await run_cmd(["kubectl", "get", "releaseplans", "-n", namespace, "-o", "wide"])
         if not success:
             return f"❌ Failed: {output}"
-        return f"✅ Pipeline run deleted: {run_name}"
+        return f"## Release Plans: {namespace}\n\n```\n{output}\n```"
 
     @auto_heal_konflux()
     @registry.tool()
-    async def tkn_taskrun_list(namespace: str = DEFAULT_NAMESPACE, limit: int = 10) -> str:
-        """List task runs in a namespace."""
-        success, output = await run_cmd(["tkn", "taskrun", "list", "-n", namespace, f"--limit={limit}"])
+    async def tkn_describe_pipelinerun(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+        """Describe a Tekton pipeline run."""
+        success, output = await run_cmd(["tkn", "pipelinerun", "describe", name, "-n", namespace])
         if not success:
             return f"❌ Failed: {output}"
-        return f"## Task Runs: {namespace}\n\n```\n{output}\n```"
+        return f"## Pipeline Run: {name}\n\n```\n{truncate_output(output, max_length=10000)}\n```"
+
+    @auto_heal_konflux()
+    @registry.tool()
+    async def tkn_logs(name: str, namespace: str = DEFAULT_NAMESPACE, task: str = "") -> str:
+        """Get logs from a Tekton pipeline run."""
+        args = ["tkn", "pipelinerun", "logs", name, "-n", namespace]
+        if task:
+            args.extend(["--task", task])
+
+        success, output = await run_cmd(args, timeout=120)
+        if not success:
+            return f"❌ Failed: {output}"
+
+        return f"## Logs: {name}\n\n```\n{truncate_output(output, max_length=15000, mode='tail')}\n```"
+
+    @auto_heal_konflux()
+    @registry.tool()
+    async def tkn_pipeline_describe(pipeline_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+        """Describe a pipeline definition."""
+        success, output = await run_cmd(["tkn", "pipeline", "describe", pipeline_name, "-n", namespace])
+        if not success:
+            return f"❌ Failed: {output}"
+        return f"## Pipeline: {pipeline_name}\n\n```\n{output}\n```"
+
+    @auto_heal_konflux()
+    @registry.tool()
+    async def tkn_pipeline_list(namespace: str = DEFAULT_NAMESPACE) -> str:
+        """List available pipelines in a namespace."""
+        success, output = await run_cmd(["tkn", "pipeline", "list", "-n", namespace])
+        if not success:
+            return f"❌ Failed: {output}"
+        return f"## Pipelines: {namespace}\n\n```\n{output}\n```"
+
+    @auto_heal_konflux()
+    @registry.tool()
+    async def tkn_pipeline_start(pipeline_name: str, namespace: str = DEFAULT_NAMESPACE, params: str = "") -> str:
+        """Start a pipeline run."""
+        args = ["tkn", "pipeline", "start", pipeline_name, "-n", namespace]
+        if params:
+            for p in params.split(","):
+                args.extend(["--param", p.strip()])
+        success, output = await run_cmd(args)
+        if not success:
+            return f"❌ Failed: {output}"
+        return f"✅ Pipeline started: {pipeline_name}\n\n{output}"
+
+    @auto_heal_konflux()
+    @registry.tool()
+    async def tkn_task_describe(task_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+        """Describe a task definition."""
+        success, output = await run_cmd(["tkn", "task", "describe", task_name, "-n", namespace])
+        if not success:
+            return f"❌ Failed: {output}"
+        return f"## Task: {task_name}\n\n```\n{output}\n```"
+
+    @auto_heal_konflux()
+    @registry.tool()
+    async def tkn_task_list(namespace: str = DEFAULT_NAMESPACE) -> str:
+        """List available tasks in a namespace."""
+        success, output = await run_cmd(["tkn", "task", "list", "-n", namespace])
+        if not success:
+            return f"❌ Failed: {output}"
+        return f"## Tasks: {namespace}\n\n```\n{output}\n```"
 
     @auto_heal_konflux()
     @registry.tool()
@@ -267,58 +201,3 @@ def register_tools(server: FastMCP) -> int:
         if not success:
             return f"❌ Failed: {output}"
         return f"## Logs: {run_name}\n\n```\n{truncate_output(output, max_length=15000, mode='tail')}\n```"
-
-    @auto_heal_konflux()
-    @registry.tool()
-    async def tkn_pipeline_list(namespace: str = DEFAULT_NAMESPACE) -> str:
-        """List available pipelines in a namespace."""
-        success, output = await run_cmd(["tkn", "pipeline", "list", "-n", namespace])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Pipelines: {namespace}\n\n```\n{output}\n```"
-
-    @auto_heal_konflux()
-    @registry.tool()
-    async def tkn_pipeline_describe(pipeline_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
-        """Describe a pipeline definition."""
-        success, output = await run_cmd(["tkn", "pipeline", "describe", pipeline_name, "-n", namespace])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Pipeline: {pipeline_name}\n\n```\n{output}\n```"
-
-    @auto_heal_konflux()
-    @registry.tool()
-    async def tkn_pipeline_start(pipeline_name: str, namespace: str = DEFAULT_NAMESPACE, params: str = "") -> str:
-        """Start a pipeline run."""
-        args = ["tkn", "pipeline", "start", pipeline_name, "-n", namespace]
-        if params:
-            for p in params.split(","):
-                args.extend(["--param", p.strip()])
-        success, output = await run_cmd(args)
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"✅ Pipeline started: {pipeline_name}\n\n{output}"
-
-    @auto_heal_konflux()
-    @registry.tool()
-    async def tkn_task_list(namespace: str = DEFAULT_NAMESPACE) -> str:
-        """List available tasks in a namespace."""
-        success, output = await run_cmd(["tkn", "task", "list", "-n", namespace])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Tasks: {namespace}\n\n```\n{output}\n```"
-
-    @auto_heal_konflux()
-    @registry.tool()
-    async def tkn_task_describe(task_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
-        """Describe a task definition."""
-        success, output = await run_cmd(["tkn", "task", "describe", task_name, "-n", namespace])
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Task: {task_name}\n\n```\n{output}\n```"
-
-    # REMOVED: tkn_clustertask_list - low value, rarely used
-    # REMOVED: tkn_triggertemplate_list - low value, rarely used
-    # REMOVED: tkn_eventlistener_list - low value, rarely used
-
-    return registry.count

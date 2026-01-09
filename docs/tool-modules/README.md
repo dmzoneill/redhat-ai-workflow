@@ -6,35 +6,45 @@ Tool modules are MCP plugins that provide specific capabilities. Each module con
 
 ## Quick Reference
 
-Large modules are split into `_basic` and `_extra` variants to allow personas to load only essential tools.
+**245 tools** across **16 modules**, split into **170 basic** (used in skills, 69%) and **75 extra** (rarely used, 31%).
 
-| Module | Variant | Tools | Description |
-|--------|---------|-------|-------------|
-| [workflow](./workflow.md) | - | 16 | Core: agents, skills, memory, vpn_connect, kube_login |
-| [git](./git.md) | basic | 14 | Essential git (status, log, diff, add, commit, push) |
-| [git](./git.md) | extra | 16 | Advanced git (rebase, merge, reset, docker) |
-| [gitlab](./gitlab.md) | basic | 16 | MRs, CI basics (list, view, create, comment) |
-| [gitlab](./gitlab.md) | extra | 14 | Advanced (approve, merge, rebase, diff) |
-| [jira](./jira.md) | basic | 15 | Essential (view, search, status, comments) |
-| [jira](./jira.md) | extra | 13 | Advanced (sprint, links, flags, priorities) |
-| [k8s](./k8s.md) | basic | 14 | Essential k8s (pods, logs, deployments) |
-| [k8s](./k8s.md) | extra | 14 | Advanced k8s (exec, cp, saas, events) |
-| [bonfire](./bonfire.md) | basic | 10 | Namespace management (reserve, list, release) |
-| [bonfire](./bonfire.md) | extra | 10 | Advanced (deploy, process, full workflow) |
-| [konflux](./konflux.md) | basic | 18 | Pipelines, components, snapshots, status |
-| [konflux](./konflux.md) | extra | 17 | Releases, integration tests, builds |
-| [prometheus](./prometheus.md) | basic | 9 | Queries, alerts, health checks |
-| [prometheus](./prometheus.md) | extra | 4 | Range queries, rules, series |
-| [kibana](./kibana.md) | - | 9 | Log search (not split - already small) |
-| [quay](./quay.md) | - | 7 | Container registry |
-| [alertmanager](./alertmanager.md) | - | 7 | Alert/silence management |
-| [google_calendar](./google_calendar.md) | - | 6 | Calendar & meetings |
-| [slack](./slack.md) | - | 9 | Slack integration |
-| [appinterface](./appinterface.md) | - | 7 | GitOps config |
-| [lint](./common.md) | - | 7 | Python/YAML linting |
-| [dev_workflow](./common.md) | - | 9 | Development helpers |
+> **Performance:** Loading basic tools only reduces context window usage by **30%**. See [Tool Organization](../tool-organization.md) for details.
 
-**Total:** ~261 tools across 17 modules (split into ~30 loadable units)
+| Module | Variant | Tools | Usage % | Description |
+|--------|---------|-------|---------|-------------|
+| [workflow](./workflow.md) | basic | 16 | 100% | Core: agents, skills, memory, vpn_connect, kube_login |
+| [git](./git.md) | basic | 27 | 90% | Essential git (status, log, diff, add, commit, push, rebase, merge) |
+| [git](./git.md) | extra | 3 | - | Rarely used (clean, remote_info, docker_compose_down) |
+| [gitlab](./gitlab.md) | basic | 16 | 53% | MRs, CI basics (list, view, create, comment, lint) |
+| [gitlab](./gitlab.md) | extra | 14 | - | Advanced (approve, merge, rebase, issues, releases) |
+| [jira](./jira.md) | basic | 17 | 61% | Essential (view, search, status, comments, create, clone) |
+| [jira](./jira.md) | extra | 11 | - | Advanced (sprint, links, flags, lint, ai_helper) |
+| [k8s](./k8s.md) | basic | 22 | 79% | Essential k8s (pods, logs, deployments, exec, cp, scale) |
+| [k8s](./k8s.md) | extra | 6 | - | Advanced k8s (list helpers, delete, saas logs) |
+| [bonfire](./bonfire.md) | basic | 10 | 50% | Used in deploy workflows (reserve, list, release, deploy) |
+| [bonfire](./bonfire.md) | extra | 10 | - | Specialized deploys (process, local, snapshot, test workflow) |
+| [konflux](./konflux.md) | basic | 22 | 63% | Pipelines, components, snapshots, builds, releases |
+| [konflux](./konflux.md) | extra | 13 | - | Releases plans, environments, low-level tkn tools |
+| [prometheus](./prometheus.md) | basic | 5 | 38% | Queries, alerts, rules, pod health |
+| [prometheus](./prometheus.md) | extra | 8 | - | Range queries, namespace metrics, targets, labels |
+| [kibana](./kibana.md) | basic | 1 | 11% | Log search (kibana_search_logs) |
+| [kibana](./kibana.md) | extra | 8 | - | URL gen, index patterns, dashboards, trace (interactive) |
+| [quay](./quay.md) | basic | 5 | 71% | Image ops (check exists, get tag, manifest, vulnerabilities) |
+| [quay](./quay.md) | extra | 2 | - | Repository management (get_repository, list_tags) |
+| [alertmanager](./alertmanager.md) | basic | 4 | 57% | Alerts, silences, create/delete |
+| [alertmanager](./alertmanager.md) | extra | 3 | - | Receivers, status |
+| [google_calendar](./google_calendar.md) | basic | 6 | 100% | Calendar & meetings (all used in skills) |
+| [slack](./slack.md) | basic | 6 | 67% | Messaging, channels, user lookup |
+| [slack](./slack.md) | extra | 3 | - | Reactions, get_channels, list_messages |
+| [appinterface](./appinterface.md) | basic | 4 | 57% | Core validation (diff, get_saas, resources, validate) |
+| [appinterface](./appinterface.md) | extra | 3 | - | Clusters, user, search |
+| [lint](./common.md) | basic | 1 | 14% | lint_python (used in pre-MR checks) |
+| [lint](./common.md) | extra | 6 | - | dockerfile, yaml, precommit, security, test coverage |
+| [dev_workflow](./common.md) | extra | 9 | 0% | All workflow helpers (manual invocation only) |
+
+**Total:** 245 tools (**170 basic**, **75 extra**) across 16 modules
+
+> **Data-Driven Split:** Based on analysis of 55 skills. See `.claude/skill-tool-usage-report.md` for full details.
 
 > Plus **45+ shared parsers** in `scripts/common/parsers.py` for reusable output parsing
 > And **config helpers** in `scripts/common/config_loader.py` for commit format, repo resolution

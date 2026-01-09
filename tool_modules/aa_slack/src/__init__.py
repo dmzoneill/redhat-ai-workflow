@@ -7,6 +7,6 @@ This server provides event-based Slack monitoring with:
 - State persistence for restart survival
 """
 
-from .tools import register_tools
+from .tools_basic import register_tools
 
 __all__ = ["register_tools"]

@@ -1,9 +1,6 @@
-"""Bonfire Extra Tools - Advanced bonfire operations.
+"""Bonfire MCP Server - Ephemeral namespace management and ClowdApp deployment.
 
-For basic operations, see tools_basic.py.
-
-Tools included (~10):
-- bonfire_deploy_with_reserve, bonfire_process, bonfire_deploy_env, ...
+Provides 21 tools for managing ephemeral namespaces and deploying apps.
 """
 
 import asyncio
@@ -154,708 +151,36 @@ async def run_bonfire(
 # ==================== VERSION / INFO ====================
 
 
-def register_tools(server: FastMCP) -> int:
-    """Register extra bonfire tools with the MCP server."""
+def register_tools(server: "FastMCP") -> int:
+    """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
+    # REMOVED: bonfire_version - low value, rarely needed
+
+    # ==================== NAMESPACE MANAGEMENT ====================
+
     @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_deploy_with_reserve(
-        app: str,
-        duration: str = "1h",
-        pool: str = "default",
-        requester: str = "",
-        timeout: int = 600,
-    ) -> list[TextContent]:
-        """
-        Reserve a namespace AND deploy app in one step.
 
-        Args:
-            app: Application name(s) to deploy
-            duration: Namespace reservation duration
-            pool: Namespace pool
-            requester: Your username
-            timeout: Deployment timeout
-
-        Returns:
-            Namespace and deployment status.
-        """
-        apps = app.split() if " " in app else [app]
-        args = ["deploy"] + apps
-
-        args.append("--reserve")
-        args.extend(["--duration", duration])
-        args.extend(["--pool", pool])
-        args.extend(["--timeout", str(timeout)])
-        args.append("--force")
-        args.append("--single-replicas")
-
-        if requester:
-            args.extend(["--requester", requester])
-
-        success, output = await run_bonfire(args, timeout=timeout + 120)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Deploy with reserve failed:\n\n```\n{output}\n```")]
-
-        display_output = truncate_output(output, 5000, mode="tail")
-
-        return [TextContent(type="text", text=f"## ✅ Reserved & Deployed `{app}`\n\n```\n{display_output}\n```")]
-
-    # ==================== PROCESS (DRY-RUN) ====================
+    # ==================== TOOLS NOT USED IN SKILLS ====================
 
     @auto_heal_ephemeral()
     @registry.tool()
-    async def bonfire_process(
-        app: str,
-        namespace: str = "",
-        source: str = "appsre",
-        target_env: str = "insights-ephemeral",
-        set_image_tag: str = "",
-        component: str = "",
-        no_get_dependencies: bool = False,
-    ) -> list[TextContent]:
+    async def bonfire_apps_list(target_env: str = "insights-ephemeral") -> list[TextContent]:
         """
-        Process and show the rendered ClowdApp template (dry-run, no deploy).
+        List all deployable apps.
 
         Args:
-            app: Application name
-            namespace: Namespace to render for
-            source: Config source
-            target_env: Target environment
-            set_image_tag: Override image tag
-            component: Specific component
-            no_get_dependencies: Don't fetch dependencies
+            target_env: Target environment (default: insights-ephemeral)
 
         Returns:
-            Rendered ClowdApp YAML.
+            List of available apps.
         """
-        apps = app.split() if " " in app else [app]
-        args = ["process"] + apps
-
-        args.extend(["--source", source])
-        args.extend(["--target-env", target_env])
-
-        if namespace:
-            args.extend(["--namespace", namespace])
-        if set_image_tag:
-            args.extend(["--set-image-tag", set_image_tag])
-        if component:
-            args.extend(["--component", component])
-        if no_get_dependencies:
-            args.append("--no-get-dependencies")
-
-        success, output = await run_bonfire(args)
+        success, output = await run_bonfire(["apps", "list", "--target-env", target_env])
 
         if not success:
-            return [TextContent(type="text", text=f"❌ Failed to process template:\n\n{output}")]
+            return [TextContent(type="text", text=f"❌ Failed to list apps:\n\n{output}")]
 
-        output = truncate_output(output, max_length=15000, suffix="\n\n... (truncated, output too large)")
-        return [TextContent(type="text", text=f"## ClowdApp Template: `{app}`\n\n```yaml\n{output}\n```")]
-
-    # ==================== CLOWDENV ====================
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_deploy_env(
-        namespace: str,
-        timeout: int = 300,
-    ) -> list[TextContent]:
-        """
-        Deploy a ClowdEnvironment to a namespace.
-
-        Args:
-            namespace: Target namespace
-            timeout: Timeout in seconds
-
-        Returns:
-            Deployment status.
-        """
-        args = ["deploy-env", "--namespace", namespace, "--timeout", str(timeout)]
-
-        success, output = await run_bonfire(args, timeout=timeout + 60)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to deploy ClowdEnv:\n\n{output}")]
-
-        return [TextContent(type="text", text=f"✅ ClowdEnvironment deployed to `{namespace}`\n\n{output}")]
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_process_env(namespace: str) -> list[TextContent]:
-        """
-        Process ClowdEnv template and show output (dry-run).
-
-        Args:
-            namespace: Target namespace
-
-        Returns:
-            Rendered ClowdEnvironment YAML.
-        """
-        args = ["process-env", "--namespace", namespace]
-
-        success, output = await run_bonfire(args)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to process ClowdEnv:\n\n{output}")]
-
-        output = truncate_output(output, max_length=10000)
-        return [TextContent(type="text", text=f"## ClowdEnvironment: `{namespace}`\n\n```yaml\n{output}\n```")]
-
-    # ==================== IQE CJI ====================
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_deploy_iqe_cji(
-        namespace: str,
-        cji_name: str = "",
-        marker: str = "",
-        filter_expr: str = "",
-        env: str = "",
-        timeout: int = 600,
-    ) -> list[TextContent]:
-        """
-        Deploy IQE ClowdJobInvocation for integration tests.
-
-        Args:
-            namespace: Target namespace
-            cji_name: Name for the CJI
-            marker: pytest marker expression
-            filter_expr: pytest filter expression
-            env: Additional env vars (comma-separated KEY=VALUE)
-            timeout: Timeout in seconds
-
-        Returns:
-            CJI deployment status.
-        """
-        args = ["deploy-iqe-cji", "--namespace", namespace, "--timeout", str(timeout)]
-
-        if cji_name:
-            args.extend(["--cji-name", cji_name])
-        if marker:
-            args.extend(["--marker", marker])
-        if filter_expr:
-            args.extend(["--filter", filter_expr])
-        if env:
-            for e in env.split(","):
-                args.extend(["--env", e.strip()])
-
-        success, output = await run_bonfire(args, timeout=timeout + 120)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to deploy IQE CJI:\n\n{output}")]
-
-        return [TextContent(type="text", text=f"✅ IQE CJI deployed to `{namespace}`\n\n```\n{output}\n```")]
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_process_iqe_cji(
-        namespace: str,
-        marker: str = "",
-        filter_expr: str = "",
-    ) -> list[TextContent]:
-        """
-        Process IQE CJI template (dry-run).
-
-        Args:
-            namespace: Target namespace
-            marker: pytest marker expression
-            filter_expr: pytest filter expression
-
-        Returns:
-            Rendered CJI YAML.
-        """
-        args = ["process-iqe-cji", "--namespace", namespace]
-
-        if marker:
-            args.extend(["--marker", marker])
-        if filter_expr:
-            args.extend(["--filter", filter_expr])
-
-        success, output = await run_bonfire(args)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to process IQE CJI:\n\n{output}")]
-
-        output = truncate_output(output, max_length=8000)
-        return [TextContent(type="text", text=f"## IQE CJI Template\n\n```yaml\n{output}\n```")]
-
-    # ==================== POOL ====================
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_deploy_aa(
-        namespace: str,
-        template_ref: str,
-        image_tag: str,
-        billing: bool = False,
-        timeout: int = 900,
-    ) -> list[TextContent]:
-        """
-        Deploy Automation Analytics to ephemeral namespace (matches ITS pattern exactly).
-
-        Command format (billing=false):
-        KUBECONFIG=~/.kube/config.e bonfire deploy \\
-          --source=appsre --ref-env insights-production \\
-          --namespace ephemeral-xxx --timeout 900 \\
-          --optional-deps-method hybrid --frontends false \\
-          --component tower-analytics-clowdapp \\
-          --no-remove-resources all \\
-          --set-template-ref tower-analytics-clowdapp=<40-char-git-sha> \\
-          --set-parameter tower-analytics-clowdapp/IMAGE=quay.io/.../image@sha256 \\
-          --set-parameter tower-analytics-clowdapp/IMAGE_TAG=<64-char-sha256-digest> \\
-          tower-analytics
-
-        Args:
-            namespace: Target ephemeral namespace (e.g., "ephemeral-uhfivg")
-            template_ref: Full 40-char git commit SHA for template
-            image_tag: 64-char sha256 digest from Quay (NOT git SHA!)
-                       Get this from quay_get_tag output: "Manifest Digest: sha256:..."
-            billing: If True, deploy tower-analytics-billing-clowdapp
-                     If False, deploy tower-analytics-clowdapp
-            timeout: Deployment timeout in seconds
-
-        Returns:
-            Deployment status.
-        """
-        # Load app config from config.json
-        app_cfg = get_app_config(billing=billing)
-        component = app_cfg["component"]
-        image_base = app_cfg["image_base"]
-        app_name = app_cfg["app_name"]
-        ref_env = app_cfg["ref_env"]
-
-        if not image_base:
-            return [
-                TextContent(
-                    type="text",
-                    text="❌ image_base not configured in config.json bonfire.apps section",
-                )
-            ]
-
-        # VALIDATE template_ref: Must be FULL 40-char git commit SHA
-        if len(template_ref) != 40:
-            err_msg = (
-                f"❌ **Invalid template_ref: `{template_ref}` "
-                f"({len(template_ref)} chars)**\n\n"
-                f"template_ref must be a FULL 40-character git commit SHA.\n\n"
-                f"**Fix:** Get the full SHA:\n"
-                f"```bash\ngit rev-parse {template_ref}\n```"
-            )
-            return [TextContent(type="text", text=err_msg)]
-
-        # Strip sha256: prefix if present
-        digest = image_tag
-        if digest.startswith("sha256:"):
-            digest = digest[7:]
-
-        # VALIDATE image_tag: Must be 64-char sha256 digest
-        if len(digest) != 64:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"""❌ **Invalid image_tag: `{image_tag}` ({len(digest)} chars)**
-
-image_tag must be the 64-char sha256 digest from the built image (NOT the git SHA).
-
-**How to get it:**
-1. Call `quay_get_tag(repository='...', tag='{template_ref}')`
-2. Look for "Manifest Digest: sha256:XXXX..."
-3. Use the 64-char hex part after "sha256:"
-
-**Or via CLI:**
-```bash
-skopeo inspect docker://{image_base}:{template_ref} | jq -r '.Digest' | cut -d: -f2
-```""",
-                )
-            ]
-
-        # Validate digest is hex
-        if not all(c in "0123456789abcdef" for c in digest.lower()):
-            return [
-                TextContent(
-                    type="text",
-                    text=f"""❌ **Invalid digest format: `{digest}`**
-
-Expected 64 hex characters (0-9, a-f). Got non-hex characters.""",
-                )
-            ]
-
-        # HARD STOP: Check if image exists in Quay before deploying
-        repository = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
-        image_ref = f"docker://quay.io/redhat-user-workloads/{repository}:{template_ref}"
-
-        logger.info(f"Checking if image exists: {image_ref}")
-
-        try:
-            check_result = await asyncio.to_thread(
-                subprocess.run,
-                ["skopeo", "inspect", "--raw", image_ref],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            check_output = check_result.stdout + check_result.stderr
-
-            if check_result.returncode != 0 or "manifest unknown" in check_output.lower():
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"""❌ **STOP: Image not found in Quay**
-
-The image for commit `{template_ref[:12]}...` does not exist in redhat-user-workloads.
-
-**Image checked:** `{image_base}:{template_ref}`
-
-**Possible causes:**
-1. Konflux hasn't built the image yet (check pipeline status)
-2. The commit SHA is incorrect
-3. The build failed
-
-**What to do:**
-1. Check Konflux build status for this commit
-2. Wait for the build to complete
-3. Retry once the image is available
-
-**DO NOT** proceed with deployment - it will fail with ImagePullBackOff.""",
-                    )
-                ]
-
-        except subprocess.TimeoutExpired:
-            return [
-                TextContent(
-                    type="text",
-                    text="❌ Image check timed out. Verify image exists before retrying.",
-                )
-            ]
-        except FileNotFoundError:
-            logger.warning("skopeo not found, skipping image check")
-            # Continue without check if skopeo not installed
-
-        logger.info("Image verified, proceeding with deploy")
-
-        # Build the exact command matching ITS pattern
-        # Example:
-        # KUBECONFIG=~/.kube/config.e bonfire deploy \
-        #   --source=appsre --ref-env insights-production \
-        #   --namespace ephemeral-cr3t3n --timeout 900 \
-        #   --optional-deps-method hybrid --frontends false \
-        #   --component tower-analytics-clowdapp \
-        #   --no-remove-resources all \
-        #   --set-template-ref tower-analytics-clowdapp=1244ec49e6... \
-        #   --set-parameter tower-analytics-clowdapp/IMAGE=quay.io/.../image@sha256 \
-        #   --set-parameter tower-analytics-clowdapp/IMAGE_TAG=20a4c976... \
-        #   tower-analytics
-
-        args = [
-            "deploy",
-            "--source=appsre",
-            "--ref-env",
-            ref_env,
-            "--namespace",
-            namespace,
-            "--timeout",
-            str(timeout),
-            "--optional-deps-method",
-            "hybrid",
-            "--frontends",
-            "false",
-            "--component",
-            component,
-            "--no-remove-resources",
-            "all",
-            "--set-template-ref",
-            f"{component}={template_ref}",
-            "--set-parameter",
-            f"{component}/IMAGE={image_base}@sha256",
-            "--set-parameter",
-            f"{component}/IMAGE_TAG={digest}",
-            app_name,
-        ]
-
-        # Log the full command for debugging
-        kubeconfig = get_ephemeral_kubeconfig()
-        cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
-        logger.info(f"Deploying AA: {cmd_preview}")
-
-        success, output = await run_bonfire(args, timeout=timeout + 120)
-
-        if not success:
-            # Include the command in error output for debugging
-            return [
-                TextContent(
-                    type="text",
-                    text=f"""❌ AA {'billing' if billing else 'main'} deployment failed
-
-**Command:**
-```bash
-{cmd_preview}
-```
-
-**Output:**
-```
-{output}
-```""",
-                )
-            ]
-
-        display_output = truncate_output(output, 5000, mode="tail")
-
-        lines = [
-            f"## ✅ Deployed Automation Analytics ({'billing' if billing else 'main'})",
-            "",
-            f"**Namespace:** `{namespace}`",
-            f"**Component:** `{component}`",
-            f"**Template Ref:** `{template_ref}`",
-            f"**Image Digest:** `{digest[:16]}...`",
-            "",
-            "**Command used:**",
-            "```bash",
-            cmd_preview,
-            "```",
-            "",
-            "**Output:**",
-            "```",
-            display_output,
-            "```",
-            "",
-            "**Next steps:**",
-            f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`",
-            f"- Run IQE tests: `bonfire_deploy_iqe_cji(namespace='{namespace}')`",
-        ]
-
-        return [TextContent(type="text", text="\n".join(lines))]
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_deploy_aa_local(
-        namespace: str,
-        billing: bool = False,
-        timeout: int = 900,
-    ) -> list[TextContent]:
-        """
-        Deploy Automation Analytics for local development (uses default refs from ref-env).
-
-        This is for quick local testing without specifying a specific commit.
-        For MR testing, use bonfire_deploy_aa with specific template_ref and image_tag.
-
-        Args:
-            namespace: Target ephemeral namespace
-            billing: If True, deploy tower-analytics-billing-clowdapp
-            timeout: Deployment timeout
-
-        Returns:
-            Deployment status.
-        """
-        # Load app config from config.json
-        app_cfg = get_app_config(billing=billing)
-        component = app_cfg["component"]
-        app_name = app_cfg["app_name"]
-        ref_env = app_cfg["ref_env"]
-
-        # Local deploy without image overrides - uses defaults from ref-env
-        args = [
-            "deploy",
-            "--source=appsre",
-            "--ref-env",
-            ref_env,
-            "--namespace",
-            namespace,
-            "--timeout",
-            str(timeout),
-            "--optional-deps-method",
-            "hybrid",
-            "--frontends",
-            "false",
-            "--component",
-            component,
-            "--no-remove-resources",
-            "all",
-            app_name,
-        ]
-
-        kubeconfig = get_ephemeral_kubeconfig()
-        cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
-        logger.info(f"Local deploy: {cmd_preview}")
-
-        success, output = await run_bonfire(args, timeout=timeout + 120)
-
-        if not success:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"""❌ Local deploy failed
-
-**Command:**
-```bash
-{cmd_preview}
-```
-
-**Output:**
-```
-{output}
-```""",
-                )
-            ]
-
-        display_output = truncate_output(output, 5000, mode="tail")
-
-        return [
-            TextContent(
-                type="text",
-                text=f"""## ✅ Local Deploy: {app_name} ({'billing' if billing else 'main'})
-
-**Namespace:** `{namespace}`
-**Component:** `{component}`
-
-**Command:**
-```bash
-{cmd_preview}
-```
-
-**Output:**
-```
-{display_output}
-```""",
-            )
-        ]
-
-    @auto_heal_ephemeral()
-    @registry.tool()
-    async def bonfire_full_test_workflow(
-        duration: str = "2h",
-        billing: bool = False,
-        run_iqe: bool = True,
-        iqe_marker: str = "smoke",
-    ) -> list[TextContent]:
-        """
-        Complete test workflow: reserve namespace, deploy AA, optionally run IQE.
-
-        Args:
-            duration: Namespace reservation duration
-            billing: If True, deploy billing component
-            run_iqe: If True, also deploy IQE CJI after app deploy
-            iqe_marker: pytest marker for IQE tests (e.g., "smoke", "regression")
-
-        Returns:
-            Workflow status with namespace info.
-        """
-        lines = ["## 🚀 Full Test Workflow", ""]
-
-        # Step 1: Reserve namespace
-        lines.append("### Step 1: Reserving namespace...")
-        reserve_args = [
-            "namespace",
-            "reserve",
-            "--duration",
-            duration,
-            "--pool",
-            "default",
-            "--timeout",
-            "600",
-            "--force",
-        ]
-
-        success, output = await run_bonfire(reserve_args, timeout=660)
-
-        if not success:
-            lines.append(f"❌ Failed to reserve namespace:\n```\n{output}\n```")
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        # Try to extract namespace from output
-        namespace = None
-        for line in output.split("\n"):
-            if "ephemeral-" in line.lower():
-                match = re.search(r"(ephemeral-[a-z0-9]+)", line.lower())
-                if match:
-                    namespace = match.group(1)
-                    break
-
-        if not namespace:
-            lines.append(f"⚠️ Namespace reserved but couldn't parse name:\n```\n{output}\n```")
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        lines.append(f"✅ Reserved: `{namespace}`")
-        lines.append("")
-
-        # Step 2: Deploy the app
-        app_cfg = get_app_config(billing=billing)
-        component = app_cfg["component"]
-        app_name = app_cfg["app_name"]
-        ref_env = app_cfg["ref_env"]
-
-        lines.append(f"### Step 2: Deploying {app_name} ({component})...")
-
-        deploy_args = [
-            "deploy",
-            "--source=appsre",
-            "--ref-env",
-            ref_env,
-            "--namespace",
-            namespace,
-            "--timeout",
-            "900",
-            "--optional-deps-method",
-            "hybrid",
-            "--frontends",
-            "false",
-            "--component",
-            component,
-            "--no-remove-resources",
-            "all",
-            app_name,
-        ]
-
-        success, output = await run_bonfire(deploy_args, timeout=960)
-
-        if not success:
-            lines.append(f"❌ Deployment failed:\n```\n{truncate_output(output, 2000, mode='tail')}\n```")
-            lines.append(
-                f"\n⚠️ Namespace `{namespace}` still reserved. "
-                f"Release with: `bonfire_namespace_release(namespace='{namespace}')`"
-            )
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        lines.append(f"✅ Deployed `{component}`")
-        lines.append("")
-
-        # Step 3: Run IQE (optional)
-        if run_iqe:
-            lines.append(f"### Step 3: Running IQE tests (marker: {iqe_marker})...")
-
-            iqe_args = [
-                "deploy-iqe-cji",
-                "--namespace",
-                namespace,
-                "--timeout",
-                "600",
-            ]
-            if iqe_marker:
-                iqe_args.extend(["--marker", iqe_marker])
-
-            success, output = await run_bonfire(iqe_args, timeout=660)
-
-            if not success:
-                truncated = truncate_output(output, 1000, mode="tail")
-                lines.append(f"⚠️ IQE deployment failed (app is still running):\n```\n{truncated}\n```")
-            else:
-                lines.append("✅ IQE CJI deployed")
-
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-        lines.append(f"**Namespace:** `{namespace}`")
-        lines.append(f"**Duration:** {duration}")
-        lines.append("")
-        lines.append("**Useful commands:**")
-        lines.append(f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`")
-        lines.append(
-            f"- Get logs: `kubectl_logs(pod_name='...', " f"namespace='{namespace}', environment='ephemeral')`"
-        )
-        lines.append(f"- Extend time: `bonfire_namespace_extend(namespace='{namespace}', duration='1h')`")
-        lines.append(f"- Release: `bonfire_namespace_release(namespace='{namespace}')`")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return [TextContent(type="text", text=f"## Deployable Apps\n\n```\n{output}\n```")]
 
     @auto_heal_ephemeral()
     @registry.tool()
@@ -1001,6 +326,449 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    # ==================== ENTRY POINT ====================
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_deploy_aa_local(
+        namespace: str,
+        billing: bool = False,
+        timeout: int = 900,
+    ) -> list[TextContent]:
+        """
+        Deploy Automation Analytics for local development (uses default refs from ref-env).
 
-    return registry.count
+        This is for quick local testing without specifying a specific commit.
+        For MR testing, use bonfire_deploy_aa with specific template_ref and image_tag.
+
+        Args:
+            namespace: Target ephemeral namespace
+            billing: If True, deploy tower-analytics-billing-clowdapp
+            timeout: Deployment timeout
+
+        Returns:
+            Deployment status.
+        """
+        # Load app config from config.json
+        app_cfg = get_app_config(billing=billing)
+        component = app_cfg["component"]
+        app_name = app_cfg["app_name"]
+        ref_env = app_cfg["ref_env"]
+
+        # Local deploy without image overrides - uses defaults from ref-env
+        args = [
+            "deploy",
+            "--source=appsre",
+            "--ref-env",
+            ref_env,
+            "--namespace",
+            namespace,
+            "--timeout",
+            str(timeout),
+            "--optional-deps-method",
+            "hybrid",
+            "--frontends",
+            "false",
+            "--component",
+            component,
+            "--no-remove-resources",
+            "all",
+            app_name,
+        ]
+
+        kubeconfig = get_ephemeral_kubeconfig()
+        cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
+        logger.info(f"Local deploy: {cmd_preview}")
+
+        success, output = await run_bonfire(args, timeout=timeout + 120)
+
+        if not success:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"""❌ Local deploy failed
+
+**Command:**
+```bash
+{cmd_preview}
+```
+
+**Output:**
+```
+{output}
+```""",
+                )
+            ]
+
+        display_output = truncate_output(output, 5000, mode="tail")
+
+        return [
+            TextContent(
+                type="text",
+                text=f"""## ✅ Local Deploy: {app_name} ({'billing' if billing else 'main'})
+
+**Namespace:** `{namespace}`
+**Component:** `{component}`
+
+**Command:**
+```bash
+{cmd_preview}
+```
+
+**Output:**
+```
+{display_output}
+```""",
+            )
+        ]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_deploy_env(
+        namespace: str,
+        timeout: int = 300,
+    ) -> list[TextContent]:
+        """
+        Deploy a ClowdEnvironment to a namespace.
+
+        Args:
+            namespace: Target namespace
+            timeout: Timeout in seconds
+
+        Returns:
+            Deployment status.
+        """
+        args = ["deploy-env", "--namespace", namespace, "--timeout", str(timeout)]
+
+        success, output = await run_bonfire(args, timeout=timeout + 60)
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to deploy ClowdEnv:\n\n{output}")]
+
+        return [TextContent(type="text", text=f"✅ ClowdEnvironment deployed to `{namespace}`\n\n{output}")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_deploy_iqe_cji(
+        namespace: str,
+        cji_name: str = "",
+        marker: str = "",
+        filter_expr: str = "",
+        env: str = "",
+        timeout: int = 600,
+    ) -> list[TextContent]:
+        """
+        Deploy IQE ClowdJobInvocation for integration tests.
+
+        Args:
+            namespace: Target namespace
+            cji_name: Name for the CJI
+            marker: pytest marker expression
+            filter_expr: pytest filter expression
+            env: Additional env vars (comma-separated KEY=VALUE)
+            timeout: Timeout in seconds
+
+        Returns:
+            CJI deployment status.
+        """
+        args = ["deploy-iqe-cji", "--namespace", namespace, "--timeout", str(timeout)]
+
+        if cji_name:
+            args.extend(["--cji-name", cji_name])
+        if marker:
+            args.extend(["--marker", marker])
+        if filter_expr:
+            args.extend(["--filter", filter_expr])
+        if env:
+            for e in env.split(","):
+                args.extend(["--env", e.strip()])
+
+        success, output = await run_bonfire(args, timeout=timeout + 120)
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to deploy IQE CJI:\n\n{output}")]
+
+        return [TextContent(type="text", text=f"✅ IQE CJI deployed to `{namespace}`\n\n```\n{output}\n```")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_deploy_with_reserve(
+        app: str,
+        duration: str = "1h",
+        pool: str = "default",
+        requester: str = "",
+        timeout: int = 600,
+    ) -> list[TextContent]:
+        """
+        Reserve a namespace AND deploy app in one step.
+
+        Args:
+            app: Application name(s) to deploy
+            duration: Namespace reservation duration
+            pool: Namespace pool
+            requester: Your username
+            timeout: Deployment timeout
+
+        Returns:
+            Namespace and deployment status.
+        """
+        apps = app.split() if " " in app else [app]
+        args = ["deploy"] + apps
+
+        args.append("--reserve")
+        args.extend(["--duration", duration])
+        args.extend(["--pool", pool])
+        args.extend(["--timeout", str(timeout)])
+        args.append("--force")
+        args.append("--single-replicas")
+
+        if requester:
+            args.extend(["--requester", requester])
+
+        success, output = await run_bonfire(args, timeout=timeout + 120)
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Deploy with reserve failed:\n\n```\n{output}\n```")]
+
+        display_output = truncate_output(output, 5000, mode="tail")
+
+        return [TextContent(type="text", text=f"## ✅ Reserved & Deployed `{app}`\n\n```\n{display_output}\n```")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_full_test_workflow(
+        duration: str = "2h",
+        billing: bool = False,
+        run_iqe: bool = True,
+        iqe_marker: str = "smoke",
+    ) -> list[TextContent]:
+        """
+        Complete test workflow: reserve namespace, deploy AA, optionally run IQE.
+
+        Args:
+            duration: Namespace reservation duration
+            billing: If True, deploy billing component
+            run_iqe: If True, also deploy IQE CJI after app deploy
+            iqe_marker: pytest marker for IQE tests (e.g., "smoke", "regression")
+
+        Returns:
+            Workflow status with namespace info.
+        """
+        lines = ["## 🚀 Full Test Workflow", ""]
+
+        # Step 1: Reserve namespace
+        lines.append("### Step 1: Reserving namespace...")
+        reserve_args = [
+            "namespace",
+            "reserve",
+            "--duration",
+            duration,
+            "--pool",
+            "default",
+            "--timeout",
+            "600",
+            "--force",
+        ]
+
+        success, output = await run_bonfire(reserve_args, timeout=660)
+
+        if not success:
+            lines.append(f"❌ Failed to reserve namespace:\n```\n{output}\n```")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        # Try to extract namespace from output
+        namespace = None
+        for line in output.split("\n"):
+            if "ephemeral-" in line.lower():
+                match = re.search(r"(ephemeral-[a-z0-9]+)", line.lower())
+                if match:
+                    namespace = match.group(1)
+                    break
+
+        if not namespace:
+            lines.append(f"⚠️ Namespace reserved but couldn't parse name:\n```\n{output}\n```")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        lines.append(f"✅ Reserved: `{namespace}`")
+        lines.append("")
+
+        # Step 2: Deploy the app
+        app_cfg = get_app_config(billing=billing)
+        component = app_cfg["component"]
+        app_name = app_cfg["app_name"]
+        ref_env = app_cfg["ref_env"]
+
+        lines.append(f"### Step 2: Deploying {app_name} ({component})...")
+
+        deploy_args = [
+            "deploy",
+            "--source=appsre",
+            "--ref-env",
+            ref_env,
+            "--namespace",
+            namespace,
+            "--timeout",
+            "900",
+            "--optional-deps-method",
+            "hybrid",
+            "--frontends",
+            "false",
+            "--component",
+            component,
+            "--no-remove-resources",
+            "all",
+            app_name,
+        ]
+
+        success, output = await run_bonfire(deploy_args, timeout=960)
+
+        if not success:
+            lines.append(f"❌ Deployment failed:\n```\n{truncate_output(output, 2000, mode='tail')}\n```")
+            lines.append(
+                f"\n⚠️ Namespace `{namespace}` still reserved. "
+                f"Release with: `bonfire_namespace_release(namespace='{namespace}')`"
+            )
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        lines.append(f"✅ Deployed `{component}`")
+        lines.append("")
+
+        # Step 3: Run IQE (optional)
+        if run_iqe:
+            lines.append(f"### Step 3: Running IQE tests (marker: {iqe_marker})...")
+
+            iqe_args = [
+                "deploy-iqe-cji",
+                "--namespace",
+                namespace,
+                "--timeout",
+                "600",
+            ]
+            if iqe_marker:
+                iqe_args.extend(["--marker", iqe_marker])
+
+            success, output = await run_bonfire(iqe_args, timeout=660)
+
+            if not success:
+                truncated = truncate_output(output, 1000, mode="tail")
+                lines.append(f"⚠️ IQE deployment failed (app is still running):\n```\n{truncated}\n```")
+            else:
+                lines.append("✅ IQE CJI deployed")
+
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        lines.append(f"**Namespace:** `{namespace}`")
+        lines.append(f"**Duration:** {duration}")
+        lines.append("")
+        lines.append("**Useful commands:**")
+        lines.append(f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`")
+        lines.append(
+            f"- Get logs: `kubectl_logs(pod_name='...', " f"namespace='{namespace}', environment='ephemeral')`"
+        )
+        lines.append(f"- Extend time: `bonfire_namespace_extend(namespace='{namespace}', duration='1h')`")
+        lines.append(f"- Release: `bonfire_namespace_release(namespace='{namespace}')`")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_process(
+        app: str,
+        namespace: str = "",
+        source: str = "appsre",
+        target_env: str = "insights-ephemeral",
+        set_image_tag: str = "",
+        component: str = "",
+        no_get_dependencies: bool = False,
+    ) -> list[TextContent]:
+        """
+        Process and show the rendered ClowdApp template (dry-run, no deploy).
+
+        Args:
+            app: Application name
+            namespace: Namespace to render for
+            source: Config source
+            target_env: Target environment
+            set_image_tag: Override image tag
+            component: Specific component
+            no_get_dependencies: Don't fetch dependencies
+
+        Returns:
+            Rendered ClowdApp YAML.
+        """
+        apps = app.split() if " " in app else [app]
+        args = ["process"] + apps
+
+        args.extend(["--source", source])
+        args.extend(["--target-env", target_env])
+
+        if namespace:
+            args.extend(["--namespace", namespace])
+        if set_image_tag:
+            args.extend(["--set-image-tag", set_image_tag])
+        if component:
+            args.extend(["--component", component])
+        if no_get_dependencies:
+            args.append("--no-get-dependencies")
+
+        success, output = await run_bonfire(args)
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to process template:\n\n{output}")]
+
+        output = truncate_output(output, max_length=15000, suffix="\n\n... (truncated, output too large)")
+        return [TextContent(type="text", text=f"## ClowdApp Template: `{app}`\n\n```yaml\n{output}\n```")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_process_env(namespace: str) -> list[TextContent]:
+        """
+        Process ClowdEnv template and show output (dry-run).
+
+        Args:
+            namespace: Target namespace
+
+        Returns:
+            Rendered ClowdEnvironment YAML.
+        """
+        args = ["process-env", "--namespace", namespace]
+
+        success, output = await run_bonfire(args)
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to process ClowdEnv:\n\n{output}")]
+
+        output = truncate_output(output, max_length=10000)
+        return [TextContent(type="text", text=f"## ClowdEnvironment: `{namespace}`\n\n```yaml\n{output}\n```")]
+
+    @auto_heal_ephemeral()
+    @registry.tool()
+    async def bonfire_process_iqe_cji(
+        namespace: str,
+        marker: str = "",
+        filter_expr: str = "",
+    ) -> list[TextContent]:
+        """
+        Process IQE CJI template (dry-run).
+
+        Args:
+            namespace: Target namespace
+            marker: pytest marker expression
+            filter_expr: pytest filter expression
+
+        Returns:
+            Rendered CJI YAML.
+        """
+        args = ["process-iqe-cji", "--namespace", namespace]
+
+        if marker:
+            args.extend(["--marker", marker])
+        if filter_expr:
+            args.extend(["--filter", filter_expr])
+
+        success, output = await run_bonfire(args)
+
+        if not success:
+            return [TextContent(type="text", text=f"❌ Failed to process IQE CJI:\n\n{output}")]
+
+        output = truncate_output(output, max_length=8000)
+        return [TextContent(type="text", text=f"## IQE CJI Template\n\n```yaml\n{output}\n```")]
