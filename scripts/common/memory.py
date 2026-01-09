@@ -19,6 +19,7 @@ Memory directory structure:
 """
 
 import fcntl
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,6 +28,8 @@ import yaml
 
 # Memory directory - relative to project root
 MEMORY_DIR = Path.home() / "src/redhat-ai-workflow/memory"
+
+logger = logging.getLogger(__name__)
 
 
 def get_memory_path(key: str) -> Path:
@@ -64,18 +67,37 @@ def read_memory(key: str) -> Dict[str, Any]:
     return {}
 
 
-def write_memory(key: str, data: Dict[str, Any]) -> bool:
+def write_memory(key: str, data: Dict[str, Any], validate: bool = True) -> bool:
     """
-    Write a memory file.
+    Write a memory file with optional schema validation.
 
     Args:
         key: Memory key like "state/current_work"
         data: Dict to write
+        validate: Whether to validate against schema (default: True)
 
     Returns:
         True if successful, False otherwise
     """
     path = get_memory_path(key)
+
+    # Validate against schema before writing (if requested)
+    if validate:
+        try:
+            from scripts.common.memory_schemas import validate_memory
+
+            # Normalize key (remove .yaml extension for schema lookup)
+            schema_key = key.replace(".yaml", "")
+
+            if not validate_memory(schema_key, data):
+                logger.warning(f"Schema validation failed for {key} - writing anyway")
+                # Still write, but log the validation failure
+        except ImportError:
+            # Schema validation not available, skip
+            pass
+        except Exception as e:
+            logger.debug(f"Schema validation error: {e}")
+
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         data["last_updated"] = datetime.now().isoformat()
@@ -425,3 +447,74 @@ def remove_open_mr(mr_id: int) -> bool:
         True if removed
     """
     return remove_from_list("state/current_work", "open_mrs", "id", mr_id) > 0
+
+
+def save_shared_context(skill_name: str, context: Dict[str, Any], ttl_hours: int = 1) -> bool:
+    """
+    Save context for sharing between skills with expiry.
+
+    This allows one skill to save important discoveries for other skills to use
+    without re-discovering the same information.
+
+    Args:
+        skill_name: Name of the skill saving the context
+        context: Dict of context data to share
+        ttl_hours: Time-to-live in hours (default: 1)
+
+    Returns:
+        True if successful
+
+    Example:
+        # In investigate_alert skill:
+        save_shared_context("investigate_alert", {
+            "environment": "stage",
+            "pod_name": "tower-analytics-api-123",
+            "issue": "High CPU",
+        })
+
+        # In debug_prod skill:
+        ctx = load_shared_context()
+        if ctx and ctx.get("pod_name"):
+            # Use the pod name from investigation
+            pod = ctx["pod_name"]
+    """
+    from datetime import timedelta
+
+    now = datetime.now()
+    expires = now + timedelta(hours=ttl_hours)
+
+    data = read_memory("state/shared_context")
+    data["current_investigation"] = {
+        "started_by": skill_name,
+        "started_at": now.isoformat(),
+        "context": context,
+        "expires_at": expires.isoformat(),
+    }
+
+    return write_memory("state/shared_context", data)
+
+
+def load_shared_context() -> Optional[Dict[str, Any]]:
+    """
+    Load shared context if not expired.
+
+    Returns:
+        Dict of shared context, or None if expired/not found
+    """
+    data = read_memory("state/shared_context")
+    investigation = data.get("current_investigation", {})
+
+    if not investigation or not investigation.get("expires_at"):
+        return None
+
+    # Check expiry
+    try:
+        expires_at = datetime.fromisoformat(investigation["expires_at"].replace("Z", "+00:00"))
+        if datetime.now().replace(tzinfo=None) > expires_at.replace(tzinfo=None):
+            # Expired
+            return None
+    except (ValueError, KeyError):
+        return None
+
+    context: Optional[Dict[str, Any]] = investigation.get("context")
+    return context
