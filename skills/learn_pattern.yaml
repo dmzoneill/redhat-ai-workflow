@@ -70,9 +70,75 @@ steps:
           result = []
     output: command_list
 
+  - name: validate_tool_existence
+    description: "Check if tools in commands actually exist"
+    condition: "command_list"
+    compute: |
+      # Known tools from all modules (partial list for basic validation)
+      known_tools = [
+        # Workflow
+        "vpn_connect", "kube_login", "session_start", "persona_load",
+        "memory_read", "memory_write", "memory_append", "memory_update",
+        "check_known_issues", "learn_tool_fix", "debug_tool",
+        # Git
+        "git_status", "git_branch_create", "git_checkout", "git_commit",
+        "git_push", "git_pull", "git_log", "git_diff",
+        # GitLab
+        "gitlab_mr_list", "gitlab_mr_view", "gitlab_mr_create", "gitlab_mr_update",
+        "gitlab_ci_status", "gitlab_ci_view", "gitlab_ci_run",
+        # Jira
+        "jira_view_issue", "jira_set_status", "jira_assign", "jira_add_comment",
+        "jira_my_issues", "jira_search", "jira_lint",
+        # K8s
+        "kubectl_get_pods", "kubectl_describe_pod", "kubectl_logs",
+        "kubectl_get_events", "kubectl_get_deployments", "kubectl_rollout_restart",
+        "k8s_namespace_health", "kubectl_top_pods",
+        # Bonfire
+        "bonfire_namespace_list", "bonfire_namespace_reserve",
+        "bonfire_namespace_release", "bonfire_deploy", "bonfire_namespace_describe",
+        # Prometheus
+        "prometheus_query", "prometheus_alerts", "prometheus_query_range",
+        # Konflux
+        "konflux_list_builds", "konflux_list_snapshots", "konflux_get_build_logs",
+        # Quay
+        "quay_get_tag", "quay_get_vulnerabilities", "quay_list_tags",
+        # Others
+        "kibana_get_errors", "kibana_search_logs",
+        "alertmanager_list_silences", "alertmanager_create_silence",
+      ]
+
+      invalid_tools = []
+      warnings = []
+
+      for cmd in command_list:
+        # Extract tool name (before first '(' or whitespace)
+        tool_name = cmd.split('(')[0].strip()
+
+        if tool_name and tool_name not in known_tools:
+          # Check if it might be a kubectl/oc command (allowed)
+          if tool_name.startswith(('kubectl', 'oc', 'bonfire', 'git', 'glab')):
+            warnings.append(f"'{tool_name}' appears to be a CLI command - consider using MCP tool instead")
+          else:
+            invalid_tools.append(tool_name)
+
+      if invalid_tools:
+        result = {
+          "valid": False,
+          "unknown_tools": invalid_tools,
+          "suggestion": "Double-check tool names. Unknown tools: " + ", ".join(invalid_tools)
+        }
+      elif warnings:
+        result = {
+          "valid": True,
+          "warnings": warnings
+        }
+      else:
+        result = {"valid": True}
+    output: tool_check
+
   - name: save_pattern
     description: "Save pattern to memory"
-    condition: "validation.valid"
+    condition: "validation.valid and tool_check.get('valid', True)"
     compute: |
       from pathlib import Path
       from datetime import datetime
@@ -148,6 +214,18 @@ outputs:
 
       {{ validation.error }}
 
+      {% elif tool_check and not tool_check.valid %}
+      ## ❌ Tool Validation Failed
+
+      {{ tool_check.suggestion }}
+
+      **Unknown tools:**
+      {% for tool in tool_check.unknown_tools %}
+      - `{{ tool }}`
+      {% endfor %}
+
+      **Fix:** Verify tool names exist in the MCP tool registry. Use `tool_list()` to see available tools.
+
       {% elif save_result.success %}
       ## ✅ Pattern {{ save_result.action | title }}
 
@@ -160,6 +238,13 @@ outputs:
       **Commands:**
       {% for cmd in command_list %}
       - `{{ cmd }}`
+      {% endfor %}
+      {% endif %}
+
+      {% if tool_check.warnings %}
+      ### ⚠️ Warnings
+      {% for warning in tool_check.warnings %}
+      - {{ warning }}
       {% endfor %}
       {% endif %}
 
