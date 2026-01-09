@@ -42,11 +42,7 @@ def register_tools(server: FastMCP) -> int:
     registry = ToolRegistry(server)
 
     # ==================== STATUS & INFO ====================
-
-    @auto_heal()
-
     # ==================== TOOLS USED IN SKILLS ====================
-
     @auto_heal()
     @registry.tool()
     async def code_format(

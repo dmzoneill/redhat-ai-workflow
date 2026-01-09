@@ -3,7 +3,6 @@
 Analyze all skills to extract tool usage and categorize tools into basic/extra.
 """
 
-import os
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -36,7 +35,6 @@ def extract_tools_from_skill(skill_path: Path) -> Set[str]:
 
         # Tool calls in compute blocks (less common but possible)
         if "compute" in step:
-            compute_code = step["compute"]
             # Look for patterns like tool_name(...) or "tool_name"
             # This is heuristic-based
             # Common pattern: tool: function_name in YAML or call in Python
@@ -198,7 +196,7 @@ def main():
         f.write(report)
 
     print(f"\n✅ Report saved to: {output_file}")
-    print(f"\n📊 Quick Stats:")
+    print("\n📊 Quick Stats:")
     print(f"   - Skills analyzed: {len(analysis['skills'])}")
     print(f"   - Unique tools used: {len(analysis['all_tools'])}")
     print(f"   - Modules found: {len(all_tools)}")

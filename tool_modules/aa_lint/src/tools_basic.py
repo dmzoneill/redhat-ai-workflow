@@ -10,7 +10,6 @@ Provides tools for:
 - precommit_run: Run pre-commit hooks
 """
 
-import json
 import logging
 import os
 from pathlib import Path
@@ -59,9 +58,7 @@ def register_tools(server: "FastMCP") -> int:
     def resolve_path(repo: str) -> str:
         return _resolve_repo_path_local(repo, repo_paths)
 
-    @auto_heal()
-
-    # ==================== TOOLS USED IN SKILLS ====================
+        # ==================== TOOLS USED IN SKILLS ====================
 
     @auto_heal()
     @registry.tool()

@@ -148,10 +148,7 @@ def register_tools(server: "FastMCP") -> int:
 
     # REMOVED: gitlab_view_url - low value, just returns URL content
 
-    @auto_heal()
-
     # ==================== TOOLS USED IN SKILLS ====================
-
     @auto_heal()
     @registry.tool()
     async def gitlab_ci_lint(project: str) -> str:

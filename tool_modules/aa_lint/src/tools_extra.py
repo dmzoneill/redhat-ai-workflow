@@ -59,9 +59,7 @@ def register_tools(server: "FastMCP") -> int:
     def resolve_path(repo: str) -> str:
         return _resolve_repo_path_local(repo, repo_paths)
 
-    @auto_heal()
-
-    # ==================== TOOLS NOT USED IN SKILLS ====================
+        # ==================== TOOLS NOT USED IN SKILLS ====================
 
     @auto_heal()
     @registry.tool()

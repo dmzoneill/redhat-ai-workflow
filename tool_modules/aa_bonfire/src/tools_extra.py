@@ -158,11 +158,7 @@ def register_tools(server: "FastMCP") -> int:
     # REMOVED: bonfire_version - low value, rarely needed
 
     # ==================== NAMESPACE MANAGEMENT ====================
-
-    @auto_heal_ephemeral()
-
     # ==================== TOOLS NOT USED IN SKILLS ====================
-
     @auto_heal_ephemeral()
     @registry.tool()
     async def bonfire_apps_list(target_env: str = "insights-ephemeral") -> list[TextContent]:

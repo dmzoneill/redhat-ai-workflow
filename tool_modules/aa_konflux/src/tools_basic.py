@@ -66,10 +66,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-    @auto_heal_konflux()
-
     # ==================== TOOLS USED IN SKILLS ====================
-
     @auto_heal_konflux()
     @registry.tool()
     async def konflux_failed_pipelines(namespace: str = DEFAULT_NAMESPACE, limit: int = 5) -> str:

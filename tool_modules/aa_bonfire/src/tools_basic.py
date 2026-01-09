@@ -6,7 +6,6 @@ Provides 21 tools for managing ephemeral namespaces and deploying apps.
 import asyncio
 import logging
 import os
-import re
 import subprocess
 
 from mcp.server.fastmcp import FastMCP
@@ -158,11 +157,7 @@ def register_tools(server: "FastMCP") -> int:
     # REMOVED: bonfire_version - low value, rarely needed
 
     # ==================== NAMESPACE MANAGEMENT ====================
-
-    @auto_heal_ephemeral()
-
     # ==================== TOOLS USED IN SKILLS ====================
-
     @auto_heal_ephemeral()
     @registry.tool()
     async def bonfire_apps_dependencies(component: str) -> list[TextContent]:

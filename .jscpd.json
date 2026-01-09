@@ -1,0 +1,18 @@
+{
+  "threshold": 15,
+  "reporters": ["html", "console"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/__pycache__/**",
+    "**/backup/**",
+    "**/*.pyc",
+    "**/.git/**",
+    "**/dist/**",
+    "**/build/**"
+  ],
+  "format": ["python", "javascript", "typescript"],
+  "min-lines": 10,
+  "min-tokens": 50
+}
