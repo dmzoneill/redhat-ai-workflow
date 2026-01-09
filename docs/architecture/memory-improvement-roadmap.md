@@ -232,63 +232,80 @@ async def memory_query(key: str, query: str) -> list[TextContent]:
 
 ---
 
-### 6. Pattern Effectiveness Tracking
+### ✅ 6. Pattern Effectiveness Tracking - IMPLEMENTED
 
-**Problem:** No way to know which patterns are useful.
+**Status:** ✅ Completed (2026-01-09)
 
-**Current State:**
+**Implementation:** Added pattern usage tracking to `tool_modules/aa_workflow/src/skill_engine.py`.
+
+**What was added:**
+- New method: `_update_pattern_usage_stats()` with file locking
+- Modified `_check_error_patterns()` to track pattern matches
+- Modified `_try_auto_fix()` to:
+  - Check learned patterns from patterns.yaml
+  - Track when patterns match
+  - Track when fixes succeed
+  - Calculate success rates
+
+**Tracked metrics per pattern:**
 ```yaml
-# learned/patterns.yaml
 auth_patterns:
   - pattern: "token expired"
     fix: "Refresh credentials"
     commands: ["kube_login(cluster='e')"]
-    # ← No usage tracking!
-```
-
-**Proposed:**
-```yaml
-auth_patterns:
-  - pattern: "token expired"
-    fix: "Refresh credentials"
-    commands: ["kube_login(cluster='e')"]
-    # NEW:
     usage_stats:
-      times_matched: 47
-      times_fixed: 45
-      success_rate: 0.96
-      last_matched: "2026-01-09T14:23:15"
-      avg_fix_time_ms: 1250
+      times_matched: 47      # How often pattern matched
+      times_fixed: 45        # How often fix succeeded
+      success_rate: 0.96     # Percentage success (times_fixed / times_matched)
+      last_matched: "2026-01-09T14:23:15"  # Last time matched
 ```
 
-**Implementation:**
+**How it works:**
+1. **Pattern matching**: When `_check_error_patterns()` finds a match, it increments `times_matched` and sets `last_matched`
+2. **Fix success**: When `_try_auto_fix()` successfully applies a fix, it increments `times_fixed`
+3. **Success rate**: Automatically calculated as `times_fixed / times_matched`
+4. **Thread-safe**: Uses fcntl file locking for atomic updates
 
+**Implementation details:**
 ```python
-# tool_modules/aa_workflow/src/skill_engine.py
+def _update_pattern_usage_stats(
+    self, category: str, pattern_text: str, matched: bool = True, fixed: bool = False
+) -> None:
+    """Update usage statistics for a pattern with file locking."""
+    with open(patterns_file, "r+") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock
 
-def _check_error_patterns(self, error: str) -> str | None:
-    patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
+        try:
+            patterns_data = yaml.safe_load(f.read()) or {}
 
-    # ... existing matching logic ...
+            # Find pattern and update stats
+            for pattern in patterns_data[category]:
+                if pattern["pattern"].lower() == pattern_text.lower():
+                    if "usage_stats" not in pattern:
+                        pattern["usage_stats"] = {"times_matched": 0, "times_fixed": 0}
 
-    for pattern in error_patterns:
-        if pattern["pattern"].lower() in error_lower:
-            # NEW: Track usage
-            if "usage_stats" not in pattern:
-                pattern["usage_stats"] = {
-                    "times_matched": 0,
-                    "times_fixed": 0,
-                    "success_rate": 0.0,
-                }
+                    if matched:
+                        pattern["usage_stats"]["times_matched"] += 1
+                        pattern["usage_stats"]["last_matched"] = datetime.now().isoformat()
 
-            pattern["usage_stats"]["times_matched"] += 1
-            pattern["usage_stats"]["last_matched"] = datetime.now().isoformat()
+                    if fixed:
+                        pattern["usage_stats"]["times_fixed"] += 1
 
-            # Write back (async to not block)
-            asyncio.create_task(self._update_pattern_stats(patterns_file, pattern))
+                    # Recalculate success rate
+                    pattern["usage_stats"]["success_rate"] = round(
+                        pattern["usage_stats"]["times_fixed"] / pattern["usage_stats"]["times_matched"], 2
+                    )
 
-            return pattern.get("fix", "")
+                    # Write back
+                    f.seek(0)
+                    f.truncate()
+                    yaml.dump(patterns_data, f, default_flow_style=False)
+                    break
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # Release lock
 ```
+
+**Impact:** Enables data-driven decisions about which patterns are effective, identifies patterns that need improvement, provides visibility into auto-remediation performance over time.
 
 ---
 
