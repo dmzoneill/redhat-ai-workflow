@@ -68,51 +68,34 @@ def append_to_list(key, list_path, item, match_key=None):
 
 ---
 
-### 3. tool_failures.yaml Growing Unbounded
+### ✅ 3. tool_failures.yaml Growing Unbounded - IMPLEMENTED
 
-**Problem:** Rolling window keeps "last 100", but stats grow forever.
+**Status:** ✅ Completed (2026-01-09)
 
-**Current State:**
+**Implementation:** Added rolling stats window with time-based breakdowns in `server/auto_heal_decorator.py`.
+
+**What was added:**
+- Capped global stats at 1000 (was unbounded)
+- Added daily stats (keeps last 30 days only)
+- Added weekly stats (keeps last 12 weeks only)
+- Auto-cleanup of old daily/weekly stats
+
+**New stats structure:**
 ```yaml
-failures: [...]  # ← Capped at 100
 stats:
-  total_failures: 127    # ← Grows forever
-  auto_fixed: 98         # ← Grows forever
-  manual_required: 29    # ← Grows forever
+  total_failures: 1000  # Capped at 1000 (was unbounded)
+  auto_fixed: 850       # Capped at 1000 (was unbounded)
+  daily:
+    "2026-01-09": {total: 15, auto_fixed: 12}
+    "2026-01-08": {total: 18, auto_fixed: 14}
+    # ... keeps last 30 days only
+  weekly:
+    "2026-W02": {total: 120, auto_fixed: 95}
+    "2026-W01": {total: 115, auto_fixed: 90}
+    # ... keeps last 12 weeks only
 ```
 
-**After 1 year:**
-```yaml
-stats:
-  total_failures: 36,500  # ~100/day
-  auto_fixed: 28,105
-  manual_required: 8,395
-```
-
-**Solution:**
-
-```python
-# server/auto_heal_decorator.py:260-270
-# Add daily/weekly stats breakdown
-
-data["stats"] = {
-    "total_failures": data["stats"].get("total_failures", 0) + 1,
-    "auto_fixed": data["stats"].get("auto_fixed", 0) + 1,
-
-    # Add time-based stats
-    "today": {
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "total": data["stats"].get("today", {}).get("total", 0) + 1,
-        "auto_fixed": data["stats"].get("today", {}).get("auto_fixed", 0) + 1,
-    },
-    "this_week": {
-        "week": datetime.now().strftime("%Y-W%U"),
-        "total": ...,
-        "auto_fixed": ...,
-    },
-    # Archive old daily/weekly stats
-}
-```
+**Impact:** Prevents unbounded growth of stats. File size now stable instead of growing 36,500 entries/year.
 
 ---
 
