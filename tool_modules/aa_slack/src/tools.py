@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 from typing import cast
 
+from server.auto_heal_decorator import auto_heal
+from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
 # Setup project path for server imports
@@ -119,6 +121,7 @@ def register_tools(server: FastMCP) -> int:
     Returns:
         Number of tools registered
     """
+    registry = ToolRegistry(server)
 
     # ==================== MCP Resources ====================
 
@@ -176,7 +179,8 @@ def register_tools(server: FastMCP) -> int:
 
     # ==================== Message Tools ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def slack_list_messages(
         channel_id: str,
         limit: int = 20,
@@ -249,7 +253,8 @@ def register_tools(server: FastMCP) -> int:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def slack_send_message(
         target: str,
         text: str,
@@ -354,7 +359,8 @@ def register_tools(server: FastMCP) -> int:
         except Exception as e:
             return json.dumps({"error": str(e), "success": False})
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def slack_get_channels() -> str:
         """
         Get configured Slack channels from config.json.
@@ -414,7 +420,8 @@ def register_tools(server: FastMCP) -> int:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def slack_post_team(
         text: str,
         thread_ts: str = "",
@@ -492,7 +499,8 @@ def register_tools(server: FastMCP) -> int:
         except Exception as e:
             return json.dumps({"error": str(e), "success": False})
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def slack_dm_gitlab_user(
         gitlab_username: str,
         text: str,
@@ -574,7 +582,8 @@ def register_tools(server: FastMCP) -> int:
         except Exception as e:
             return json.dumps({"error": str(e), "success": False})
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def slack_get_user(user_id: str) -> str:
         """
         Get information about a Slack user.
@@ -610,7 +619,8 @@ def register_tools(server: FastMCP) -> int:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def slack_search_messages(
         query: str,
         count: int = 10,
@@ -655,7 +665,8 @@ def register_tools(server: FastMCP) -> int:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def slack_add_reaction(
         channel_id: str,
         timestamp: str,
@@ -698,7 +709,8 @@ def register_tools(server: FastMCP) -> int:
 
     # ==================== Utility Tools ====================
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def slack_list_channels(
         types: str = "public_channel,private_channel",
         limit: int = 100,
@@ -745,5 +757,4 @@ def register_tools(server: FastMCP) -> int:
 
     # REMOVED: slack_validate_session - internal check, not workflow tool
 
-    # Return count of registered tools
-    return 16  # +1 for slack_dm_gitlab_user
+    return registry.count

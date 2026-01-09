@@ -10,6 +10,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 from server.utils import run_cmd_full as run_cmd
@@ -71,6 +72,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
+    @auto_heal()
     @registry.tool()
     async def appinterface_validate(path: str = "") -> list[TextContent]:
         """
@@ -114,6 +116,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def appinterface_get_saas(
         service_name: str,
@@ -178,6 +181,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def appinterface_diff(path: str = "") -> list[TextContent]:
         """
@@ -216,6 +220,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def appinterface_resources(
         namespace: str,
@@ -286,6 +291,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def appinterface_search(
         query: str,
@@ -343,6 +349,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def appinterface_get_user(
         username: str,
@@ -437,6 +444,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def appinterface_clusters(path: str = "") -> list[TextContent]:
         """

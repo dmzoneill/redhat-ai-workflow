@@ -14,7 +14,9 @@ from typing import cast
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+from server.auto_heal_decorator import auto_heal
 from server.http_client import quay_client
+from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
 # Setup project path for server imports
@@ -152,8 +154,10 @@ def get_full_image_ref(repository: str, tag_or_digest: str = "") -> str:
 
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
+    registry = ToolRegistry(server)
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def quay_get_repository(
         repository: str,
         namespace: str = "",
@@ -202,7 +206,8 @@ def register_tools(server: "FastMCP") -> int:
         ]
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def quay_list_tags(
         repository: str,
         namespace: str = "",
@@ -260,7 +265,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def quay_get_tag(
         repository: str,
         tag: str,
@@ -326,7 +332,8 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def quay_check_image_exists(
         repository: str,
         tag_or_digest: str,
@@ -384,7 +391,8 @@ The Konflux build may still be in progress, or the tag doesn't exist.
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def quay_get_vulnerabilities(
         repository: str,
         digest: str,
@@ -473,7 +481,8 @@ The Konflux build may still be in progress, or the tag doesn't exist.
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def quay_get_manifest(
         repository: str,
         tag_or_digest: str,
@@ -529,7 +538,8 @@ The Konflux build may still be in progress, or the tag doesn't exist.
 
     # REMOVED: quay_check_aa_image - duplicate of quay_check_image_exists
 
-    @server.tool()
+    @auto_heal()
+    @registry.tool()
     async def quay_list_aa_tags(
         limit: int = 10,
         filter_tag: str = "",
@@ -591,4 +601,4 @@ The Konflux build may still be in progress, or the tag doesn't exist.
 
         return [TextContent(type="text", text="\n".join(lines))]
 
-    return 8  # Number of tools registered
+    return registry.count

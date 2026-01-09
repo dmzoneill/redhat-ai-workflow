@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 # Setup project path for server imports
+from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config, resolve_repo_path, run_cmd_full, truncate_output
 from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
@@ -58,6 +59,7 @@ def register_tools(server: "FastMCP") -> int:
     def resolve_path(repo: str) -> str:
         return _resolve_repo_path_local(repo, repo_paths)
 
+    @auto_heal()
     @registry.tool()
     async def lint_python(
         repo: str,
@@ -154,6 +156,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def lint_yaml(
         repo: str,
@@ -198,6 +201,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def lint_dockerfile(
         repo: str,
@@ -241,6 +245,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def test_run(
         repo: str,
@@ -313,6 +318,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def test_coverage(repo: str) -> list[TextContent]:
         """
@@ -363,6 +369,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def security_scan(repo: str) -> list[TextContent]:
         """
@@ -412,6 +419,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @auto_heal()
     @registry.tool()
     async def precommit_run(
         repo: str,
