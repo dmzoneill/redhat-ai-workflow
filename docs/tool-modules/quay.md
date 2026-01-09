@@ -72,6 +72,27 @@ quay_list_tags(
 | SHA256 Digest | `sha256:20a4c976...` | 71 chars |
 | Short SHA | `abc123` | ❌ NOT SUPPORTED |
 
+## Image Verification Flow
+
+```mermaid
+flowchart LR
+    START([Check Image]) --> SKOPEO[skopeo inspect]
+    SKOPEO --> FOUND{Image Exists?}
+    FOUND -->|Yes| DIGEST[Get SHA256 Digest]
+    FOUND -->|No| ERROR[❌ Manifest Unknown]
+
+    DIGEST --> VULN{Check Vulns?}
+    VULN -->|Yes| SCAN[Get Vulnerability Report]
+    VULN -->|No| RETURN
+
+    SCAN --> PARSE[Parse CVEs]
+    PARSE --> RETURN([Return Status])
+
+    style START fill:#6366f1,stroke:#4f46e5,color:#fff
+    style RETURN fill:#10b981,stroke:#059669,color:#fff
+    style ERROR fill:#ef4444,stroke:#dc2626,color:#fff
+```
+
 ## Loaded By
 
 - [🔧 DevOps Persona](../personas/devops.md)

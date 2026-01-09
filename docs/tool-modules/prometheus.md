@@ -62,6 +62,26 @@ Uses kubeconfig for authentication:
 | Stage | `~/.kube/config.s` |
 | Production | `~/.kube/config.p` |
 
+## Query Flow
+
+```mermaid
+flowchart TD
+    START([PromQL Query]) --> AUTH[Get Kubeconfig Token]
+    AUTH --> ENV{Environment?}
+    ENV -->|Stage| STAGE_URL[Stage Prometheus URL]
+    ENV -->|Production| PROD_URL[Prod Prometheus URL]
+
+    STAGE_URL --> QUERY[Execute Query]
+    PROD_URL --> QUERY
+
+    QUERY --> PARSE[Parse JSON Response]
+    PARSE --> FORMAT[Format Results]
+    FORMAT --> RETURN([Return Metrics])
+
+    style START fill:#6366f1,stroke:#4f46e5,color:#fff
+    style RETURN fill:#10b981,stroke:#059669,color:#fff
+```
+
 ## Loaded By
 
 - [🚨 Incident Persona](../personas/incident.md)
