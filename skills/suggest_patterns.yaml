@@ -1,0 +1,82 @@
+# Skill: Suggest Patterns
+# Auto-discover error patterns from tool failure history
+
+name: suggest_patterns
+description: |
+  Auto-discover error patterns from tool failure history.
+
+  Analyzes memory/learned/tool_failures.yaml to find frequently occurring
+  errors that aren't already captured in patterns.yaml.
+
+  Groups similar errors together and suggests new patterns when an error
+  occurs 5+ times.
+
+  Use this periodically to discover new patterns worth adding to memory.
+
+version: "1.0"
+
+inputs: []
+
+steps:
+  - name: mine_patterns
+    description: "Analyze tool failures to discover new patterns"
+    compute: |
+      from pathlib import Path
+      import sys
+
+      # Add project root to path
+      project_root = Path.home() / "src/redhat-ai-workflow"
+      if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
+      from scripts.pattern_miner import mine_patterns_from_failures
+
+      suggestions = mine_patterns_from_failures()
+      result = suggestions
+    output: pattern_suggestions
+
+outputs:
+  - name: summary
+    value: |
+      ## 🔍 Pattern Discovery Results
+
+      {% if pattern_suggestions and pattern_suggestions | length > 0 %}
+      Found **{{ pattern_suggestions | length }}** potential new patterns!
+
+      {% for suggestion in pattern_suggestions[:10] %}
+      ### {{ loop.index }}. {{ suggestion.pattern }}
+
+      **Frequency:** {{ suggestion.frequency }} occurrences
+      **Recommended category:** `{{ suggestion.recommended_category }}`
+      **Tools affected:** {{ suggestion.tools | join(", ") }}
+
+      **Example errors:**
+      {% for example in suggestion.examples %}
+      - `{{ example }}`
+      {% endfor %}
+
+      **To add this pattern:**
+      ```
+      skill_run("learn_pattern", '{
+        "pattern": "{{ suggestion.pattern }}",
+        "category": "{{ suggestion.recommended_category }}",
+        "meaning": "...",
+        "fix": "...",
+        "commands": ["..."]
+      }')
+      ```
+
+      ---
+      {% endfor %}
+
+      {% if pattern_suggestions | length > 10 %}
+      *Showing top 10 of {{ pattern_suggestions | length }} suggestions*
+      {% endif %}
+
+      {% else %}
+      ✅ **No new patterns to suggest!**
+
+      All common errors (5+ occurrences) are already captured in your learned patterns.
+
+      This means your pattern library is comprehensive for your current failure patterns.
+      {% endif %}
