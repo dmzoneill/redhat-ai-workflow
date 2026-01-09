@@ -196,10 +196,10 @@ SPLITS = {
             "prometheus_namespace_metrics",
             "prometheus_error_rate",
             "prometheus_pod_health",
+            "prometheus_pre_deploy_check",  # Depends on prometheus_check_health
         ],
         "extra": [
             "prometheus_query_range",
-            "prometheus_pre_deploy_check",
             "prometheus_rules",
             "prometheus_labels",
             "prometheus_series",
@@ -211,8 +211,13 @@ SPLITS = {
 def extract_function_code(content: str, func_name: str) -> str | None:
     """Extract a function definition from the content."""
     # Find the decorator + function pattern - handles various @auto_heal variants
-    # Also handles functions that may span to another decorator or end of file
-    pattern = rf"(\s*@auto_heal[^\n]*\n\s*@registry\.tool\(\).*?\n\s*async def {func_name}\(.*?(?=\n\s*@auto_heal|\n\s*return registry\.count|\Z))"
+    # Match from @auto_heal through the function body until the next @auto_heal or return registry.count
+    # The key is to match the SPECIFIC function name exactly
+    pattern = (
+        rf"(    @auto_heal[^\n]*\n    @registry\.tool\(\)\n    "
+        rf"async def {func_name}\([^)]*\)[^:]*:.*?)"
+        rf"(?=\n    @auto_heal|\n    return registry\.count|\Z)"
+    )
     match = re.search(pattern, content, re.DOTALL)
     if match:
         return match.group(1).rstrip()
@@ -223,12 +228,12 @@ def get_module_header(module_name: str, variant: str, tool_count: int, tool_list
     """Generate the header for a tools file."""
     if variant == "basic":
         desc = f"{module_name.capitalize()} Basic Tools - Essential {module_name} operations."
-        detail = f"For advanced operations, see tools_extra.py."
+        detail = "For advanced operations, see tools_extra.py."
     else:
         desc = f"{module_name.capitalize()} Extra Tools - Advanced {module_name} operations."
-        detail = f"For basic operations, see tools_basic.py."
+        detail = "For basic operations, see tools_basic.py."
 
-    tools_str = ", ".join(tool_list[:5]) + (", ..." if len(tool_list) > 5 else "")
+    tools_str = ", ".join(tool_list[:3]) + (", ..." if len(tool_list) > 3 else "")
 
     return f'''"""{desc}
 
@@ -274,7 +279,11 @@ def split_module(module_name: str):
         # Build the new file
         new_content = get_module_header(module_name, variant, len(tools), tools)
         new_content += imports_section.strip() + "\n\n\n"
-        new_content += f'def register_tools(server: FastMCP) -> int:\n    """Register {variant} {module_name} tools with the MCP server."""\n    registry = ToolRegistry(server)\n\n'
+        new_content += (
+            f"def register_tools(server: FastMCP) -> int:\n"
+            f'    """Register {variant} {module_name} tools with the MCP server."""\n'
+            f"    registry = ToolRegistry(server)\n\n"
+        )
 
         # Extract each function
         for func_name in tools:
