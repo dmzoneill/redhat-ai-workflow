@@ -8,14 +8,14 @@ persona: personas/incident.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using split modules to stay under 100 tools
 tools:
-  - workflow          # 33 tools - Skills, agents, memory (REQUIRED)
+  - workflow          # 16 tools - Skills, agents, memory (REQUIRED)
   - k8s_basic         # 14 tools - Essential k8s (pods, logs, deployments, events)
-  - prometheus_basic  # 8 tools - Metrics, alerts, health checks
-  - kibana            # 10 tools - Log search
+  - prometheus_basic  # 9 tools - Metrics, alerts, health checks
+  - kibana            # 9 tools - Log search
   - jira_basic        # 15 tools - Issue viewing, search, status updates, comments
-  - alertmanager      # 9 tools - Silence management
+  - alertmanager      # 7 tools - Silence management
 
-# Total: ~89 tools ✅
+# Total: ~70 tools ✅
 # Note: k8s_extra, prometheus_extra available via tool_exec() if needed
 
 skills:

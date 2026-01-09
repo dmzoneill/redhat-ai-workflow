@@ -8,13 +8,13 @@ persona: personas/devops.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using split modules to stay under 100 tools
 tools:
-  - workflow        # 33 tools - Core (memory, persona, session, skill, infra, meta)
+  - workflow        # 16 tools - Core (memory, persona, session, skill, infra, meta)
   - k8s_basic       # 14 tools - Essential k8s (pods, logs, deployments, events)
   - bonfire_basic   # 10 tools - Namespace management (reserve, list, release, extend)
   - jira_basic      # 15 tools - Issue viewing, search, status updates, comments
-  - quay            # 11 tools - Container image checks
+  - quay            # 7 tools - Container image checks
 
-# Total: ~83 tools ✅
+# Total: ~62 tools ✅
 # Note: k8s_extra, bonfire_extra available via tool_exec() if needed
 # For deploy: tool_exec("bonfire_deploy_aa", '{"namespace": "ephemeral-xxx"}')
 

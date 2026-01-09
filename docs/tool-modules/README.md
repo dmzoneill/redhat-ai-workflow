@@ -10,32 +10,31 @@ Large modules are split into `_basic` and `_extra` variants to allow personas to
 
 | Module | Variant | Tools | Description |
 |--------|---------|-------|-------------|
-| [workflow](./workflow.md) | - | 33 | Core: agents, skills, memory, vpn_connect, kube_login |
+| [workflow](./workflow.md) | - | 16 | Core: agents, skills, memory, vpn_connect, kube_login |
 | [git](./git.md) | basic | 14 | Essential git (status, log, diff, add, commit, push) |
-| [git](./git.md) | extra | 17 | Advanced git (rebase, merge, reset, docker) |
+| [git](./git.md) | extra | 16 | Advanced git (rebase, merge, reset, docker) |
 | [gitlab](./gitlab.md) | basic | 16 | MRs, CI basics (list, view, create, comment) |
-| [gitlab](./gitlab.md) | extra | 15 | Advanced (approve, merge, rebase, diff) |
+| [gitlab](./gitlab.md) | extra | 14 | Advanced (approve, merge, rebase, diff) |
 | [jira](./jira.md) | basic | 15 | Essential (view, search, status, comments) |
 | [jira](./jira.md) | extra | 13 | Advanced (sprint, links, flags, priorities) |
 | [k8s](./k8s.md) | basic | 14 | Essential k8s (pods, logs, deployments) |
 | [k8s](./k8s.md) | extra | 14 | Advanced k8s (exec, cp, saas, events) |
 | [bonfire](./bonfire.md) | basic | 10 | Namespace management (reserve, list, release) |
-| [bonfire](./bonfire.md) | extra | 11 | Advanced (deploy, process, full workflow) |
+| [bonfire](./bonfire.md) | extra | 10 | Advanced (deploy, process, full workflow) |
 | [konflux](./konflux.md) | basic | 18 | Pipelines, components, snapshots, status |
-| [konflux](./konflux.md) | extra | 18 | Releases, integration tests, builds |
-| [prometheus](./prometheus.md) | basic | 8 | Queries, alerts, health checks |
-| [prometheus](./prometheus.md) | extra | 5 | Range queries, rules, series |
-| [kibana](./kibana.md) | - | 10 | Log search (not split - already small) |
-| [quay](./quay.md) | - | 11 | Container registry |
-| [alertmanager](./alertmanager.md) | - | 9 | Alert/silence management |
+| [konflux](./konflux.md) | extra | 17 | Releases, integration tests, builds |
+| [prometheus](./prometheus.md) | basic | 9 | Queries, alerts, health checks |
+| [prometheus](./prometheus.md) | extra | 4 | Range queries, rules, series |
+| [kibana](./kibana.md) | - | 9 | Log search (not split - already small) |
+| [quay](./quay.md) | - | 7 | Container registry |
+| [alertmanager](./alertmanager.md) | - | 7 | Alert/silence management |
 | [google_calendar](./google_calendar.md) | - | 6 | Calendar & meetings |
-| [gmail](./gmail.md) | - | 6 | Email processing |
-| [slack](./slack.md) | - | 16 | Slack integration |
+| [slack](./slack.md) | - | 9 | Slack integration |
 | [appinterface](./appinterface.md) | - | 7 | GitOps config |
 | [lint](./common.md) | - | 7 | Python/YAML linting |
 | [dev_workflow](./common.md) | - | 9 | Development helpers |
 
-**Total:** ~270 tools across 17 modules (split into ~30 loadable units)
+**Total:** ~261 tools across 17 modules (split into ~30 loadable units)
 
 > Plus **45+ shared parsers** in `scripts/common/parsers.py` for reusable output parsing
 > And **config helpers** in `scripts/common/config_loader.py` for commit format, repo resolution

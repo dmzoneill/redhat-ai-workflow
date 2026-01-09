@@ -9,7 +9,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Claude](https://img.shields.io/badge/Claude-Anthropic-FF6B6B?style=for-the-badge&logo=anthropic&logoColor=white)](https://anthropic.com/)
 [![Cursor](https://img.shields.io/badge/Cursor-IDE-000000?style=for-the-badge&logo=cursor&logoColor=white)](https://cursor.sh/)
-[![Tools](https://img.shields.io/badge/Tools-270-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#-tool-modules)
+[![Tools](https://img.shields.io/badge/Tools-261-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#-tool-modules)
 [![Skills](https://img.shields.io/badge/Skills-53-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)](#-skills)
 [![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
@@ -208,11 +208,11 @@ Switch personas to get different tool sets. See [full persona reference](docs/pe
 
 | Persona | Command | Tools | Focus |
 |---------|---------|-------|-------|
-| [👨‍💻 developer](docs/personas/developer.md) | `Load developer persona` | ~78 | Daily coding, PRs |
-| [🔧 devops](docs/personas/devops.md) | `Load devops persona` | ~83 | Deployments, K8s |
-| [🚨 incident](docs/personas/incident.md) | `Load incident persona` | ~89 | Production debugging |
-| [📦 release](docs/personas/release.md) | `Load release persona` | ~91 | Shipping releases |
-| [💬 slack](docs/personas/slack.md) | `Load slack persona` | ~85 | Slack bot daemon |
+| [👨‍💻 developer](docs/personas/developer.md) | `Load developer persona` | ~61 | Daily coding, PRs |
+| [🔧 devops](docs/personas/devops.md) | `Load devops persona` | ~62 | Deployments, K8s |
+| [🚨 incident](docs/personas/incident.md) | `Load incident persona` | ~70 | Production debugging |
+| [📦 release](docs/personas/release.md) | `Load release persona` | ~70 | Shipping releases |
+| [💬 slack](docs/personas/slack.md) | `Load slack persona` | ~70 | Slack bot daemon |
 
 ```mermaid
 graph LR
@@ -363,24 +363,23 @@ When enabled, `/create-mr` and `/mark-ready` will:
 
 ## 🔧 Tool Modules
 
-~270 tools across 17 modules. See [full MCP server reference](docs/tool-modules/README.md).
+~261 tools across 17 modules. See [full MCP server reference](docs/tool-modules/README.md).
 
 | Module | Tools | Description |
 |--------|-------|-------------|
-| [workflow](docs/tool-modules/workflow.md) | 33 | Core: agents, skills, memory, vpn, kube_login |
-| [git](docs/tool-modules/git.md) | 31 | Git operations (14 basic + 17 extra) |
-| [gitlab](docs/tool-modules/gitlab.md) | 31 | MRs, pipelines, code review (16 basic + 15 extra) |
+| [workflow](docs/tool-modules/workflow.md) | 16 | Core: agents, skills, memory, vpn, kube_login |
+| [git](docs/tool-modules/git.md) | 30 | Git operations (14 basic + 16 extra) |
+| [gitlab](docs/tool-modules/gitlab.md) | 30 | MRs, pipelines, code review (16 basic + 14 extra) |
 | [jira](docs/tool-modules/jira.md) | 28 | Issue tracking (15 basic + 13 extra) |
 | [k8s](docs/tool-modules/k8s.md) | 28 | Kubernetes operations (14 basic + 14 extra) |
-| [bonfire](docs/tool-modules/bonfire.md) | 21 | Ephemeral environments (10 basic + 11 extra) |
-| [konflux](docs/tool-modules/konflux.md) | 36 | Build pipelines (18 basic + 18 extra) |
-| [prometheus](docs/tool-modules/prometheus.md) | 13 | Metrics queries (8 basic + 5 extra) |
-| [kibana](docs/tool-modules/kibana.md) | 10 | Log search |
-| [alertmanager](docs/tool-modules/alertmanager.md) | 9 | Alert management |
-| [quay](docs/tool-modules/quay.md) | 11 | Container registry |
-| [slack](docs/tool-modules/slack.md) | 16 | Slack integration |
+| [bonfire](docs/tool-modules/bonfire.md) | 20 | Ephemeral environments (10 basic + 10 extra) |
+| [konflux](docs/tool-modules/konflux.md) | 35 | Build pipelines (18 basic + 17 extra) |
+| [prometheus](docs/tool-modules/prometheus.md) | 13 | Metrics queries (9 basic + 4 extra) |
+| [kibana](docs/tool-modules/kibana.md) | 9 | Log search |
+| [alertmanager](docs/tool-modules/alertmanager.md) | 7 | Alert management |
+| [quay](docs/tool-modules/quay.md) | 7 | Container registry |
+| [slack](docs/tool-modules/slack.md) | 9 | Slack integration |
 | [google_calendar](docs/tool-modules/google_calendar.md) | 6 | Calendar & meetings |
-| [gmail](docs/tool-modules/gmail.md) | 6 | Email processing |
 | [appinterface](docs/tool-modules/appinterface.md) | 7 | GitOps config |
 | [lint](docs/tool-modules/common.md) | 7 | Python/YAML linting |
 | [dev_workflow](docs/tool-modules/common.md) | 9 | Development helpers |
@@ -493,7 +492,7 @@ ai-workflow/
 | [Commands Reference](docs/commands/README.md) | 64 slash commands (Claude/Cursor) |
 | [Skills Reference](docs/skills/README.md) | All 53 available skills |
 | [Personas Reference](docs/personas/README.md) | 5 tool configuration profiles |
-| [Tool Modules Reference](docs/tool-modules/README.md) | 17 tool plugins with ~270 tools |
+| [Tool Modules Reference](docs/tool-modules/README.md) | 17 tool plugins with ~261 tools |
 | [Learning Loop](docs/learning-loop.md) | Auto-remediation + memory |
 | [Skill Auto-Heal](docs/plans/skill-auto-heal.md) | Auto-healing implementation |
 | [IDE Extension](docs/ide-extension.md) | VSCode/Cursor extension |

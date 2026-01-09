@@ -21,7 +21,7 @@ This is a single MCP server that dynamically loads/unloads tools based on the ac
 ```
 You: Load the devops agent
 Claude: [calls agent_load("devops")]
-        Server unloads current tools, loads k8s_basic/bonfire_basic/jira_basic/quay (~83 tools)
+        Server unloads current tools, loads k8s_basic/bonfire_basic/jira_basic/quay (~62 tools)
         Cursor receives tools/list_changed notification and refreshes
 ```
 
@@ -29,10 +29,10 @@ Claude: [calls agent_load("devops")]
 
 Load an agent when the task matches their expertise:
 
-- **Developer** (coding, PRs): `agent_load("developer")` → git_basic, gitlab_basic, jira_basic (~78 tools)
-- **DevOps** (deployments, ephemeral, k8s): `agent_load("devops")` → k8s_basic, bonfire_basic, jira_basic, quay (~83 tools)
-- **Incident** (production issues): `agent_load("incident")` → k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager (~89 tools)
-- **Release** (shipping): `agent_load("release")` → konflux_basic, quay, jira_basic, git_basic (~91 tools)
+- **Developer** (coding, PRs): `agent_load("developer")` → workflow, git_basic, gitlab_basic, jira_basic (~61 tools)
+- **DevOps** (deployments, ephemeral, k8s): `agent_load("devops")` → workflow, k8s_basic, bonfire_basic, jira_basic, quay (~62 tools)
+- **Incident** (production issues): `agent_load("incident")` → workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager (~70 tools)
+- **Release** (shipping): `agent_load("release")` → workflow, konflux_basic, quay, jira_basic, git_basic (~70 tools)
 
 > **Note:** All personas include `jira_basic`. Use `tool_exec()` for `_extra` module tools when needed.
 

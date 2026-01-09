@@ -4,7 +4,7 @@ This is a complete AI-powered development workflow system with **MCP Tools**, **
 
 ## ⚠️ CRITICAL: Tool Usage Rules
 
-**ALWAYS prefer MCP tools over CLI commands!** You have ~270 specialized tools - use them.
+**ALWAYS prefer MCP tools over CLI commands!** You have ~261 specialized tools - use them.
 
 | ❌ DON'T DO THIS | ✅ DO THIS INSTEAD |
 |------------------|-------------------|
@@ -75,7 +75,7 @@ Instead of chaining tools manually, use pre-built skills:
 │  - state/environments.yaml  - learned/runbooks.yaml    │
 ├─────────────────────────────────────────────────────────┤
 │  MCP TOOLS (tool_modules/)                               │
-│  ~270 tools across 17 modules                           │
+│  ~261 tools across 17 modules                           │
 │  aa_git, aa_jira, aa_gitlab, aa_k8s, aa_prometheus...  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -88,12 +88,12 @@ Instead of chaining tools manually, use pre-built skills:
 ```
 Load the devops agent
 ```
-Tools switch dynamically! You get k8s_basic, bonfire_basic, jira_basic, quay (~83 tools).
+Tools switch dynamically! You get k8s_basic, bonfire_basic, jira_basic, quay (~62 tools).
 
 ```
 Load the developer agent
 ```
-Now you have git_basic, gitlab_basic, jira_basic (~78 tools).
+Now you have git_basic, gitlab_basic, jira_basic (~61 tools).
 
 ### Run a Skill
 ```
@@ -116,27 +116,26 @@ Claude runs the `test_mr_ephemeral` skill automatically.
 
 ---
 
-## MCP Tools (~270 total)
+## MCP Tools (~261 total)
 
 ### Tool Categories
 
 | Module | Tools | Purpose |
 |--------|-------|---------|
 | `aa_workflow` | 16 | Core: agents, skills, memory, vpn, kube_login |
-| `aa_git` | 19 | Git operations (status, branch, commit, push) |
-| `aa_gitlab` | 35 | GitLab MRs, CI/CD pipelines |
-| `aa_jira` | 28 | Jira issues (view, create, update, transition) |
-| `aa_k8s` | 26 | Kubernetes (pods, deployments, logs) |
-| `aa_bonfire` | 21 | Ephemeral namespace management |
-| `aa_quay` | 8 | Container registry, vulnerabilities |
-| `aa_prometheus` | 13 | Prometheus queries, alerts, metrics |
+| `aa_git` | 30 | Git operations (14 basic + 16 extra) |
+| `aa_gitlab` | 30 | GitLab MRs, CI/CD pipelines (16 basic + 14 extra) |
+| `aa_jira` | 28 | Jira issues (15 basic + 13 extra) |
+| `aa_k8s` | 28 | Kubernetes (14 basic + 14 extra) |
+| `aa_bonfire` | 20 | Ephemeral namespace management (10 basic + 10 extra) |
+| `aa_quay` | 7 | Container registry, vulnerabilities |
+| `aa_prometheus` | 13 | Prometheus queries, alerts (9 basic + 4 extra) |
 | `aa_alertmanager` | 7 | Silences, alert management |
 | `aa_kibana` | 9 | Log search and analysis |
-| `aa_konflux` | 40 | Konflux builds, Tekton, snapshots |
-| `aa_appinterface` | 8 | App-Interface validation |
+| `aa_konflux` | 35 | Konflux builds, Tekton (18 basic + 17 extra) |
+| `aa_appinterface` | 7 | App-Interface validation |
 | `aa_google_calendar` | 6 | Calendar & meetings |
-| `aa-gmail` | 6 | Email processing |
-| `aa_slack` | 16 | Slack integration |
+| `aa_slack` | 9 | Slack integration |
 | `aa_lint` | 7 | Code linting and testing |
 | `aa_dev_workflow` | 9 | Development workflow helpers |
 
@@ -191,33 +190,33 @@ Claude: DevOps persona loaded with ~83 tools!
 
 | Persona | Modules | ~Tools | Best For |
 |---------|---------|--------|----------|
-| **developer** | workflow, git_basic, gitlab_basic, jira_basic | ~78 | Coding, PRs, code review |
-| **devops** | workflow, k8s_basic, bonfire_basic, jira_basic, quay | ~83 | Ephemeral deployments, K8s ops |
-| **incident** | workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager | ~89 | Production debugging |
-| **release** | workflow, konflux_basic, quay, jira_basic, git_basic | ~91 | Shipping releases |
-| **universal** | workflow, git_basic, gitlab_basic, jira_basic, k8s_basic | ~92 | All-in-one |
-| **core** | workflow, git_basic, jira_basic, k8s_basic | ~76 | Essential shared |
+| **developer** | workflow, git_basic, gitlab_basic, jira_basic | ~61 | Coding, PRs, code review |
+| **devops** | workflow, k8s_basic, bonfire_basic, jira_basic, quay | ~62 | Ephemeral deployments, K8s ops |
+| **incident** | workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager | ~70 | Production debugging |
+| **release** | workflow, konflux_basic, quay, jira_basic, git_basic | ~70 | Shipping releases |
+| **universal** | workflow, git_basic, gitlab_basic, jira_basic, k8s_basic | ~75 | All-in-one |
+| **core** | workflow, git_basic, jira_basic, k8s_basic | ~59 | Essential shared |
 
 > **Note:** All personas include `jira_basic` for issue tracking. Use `tool_exec()` for `_extra` tools.
 
-### DevOps Persona (`personas/devops.md`) ~83 tools
+### DevOps Persona (`personas/devops.md`) ~62 tools
 - Focus: Infrastructure, ephemeral environments, deployments
-- Tools: workflow, k8s_basic, bonfire_basic, jira_basic, quay
+- Tools: workflow (16), k8s_basic (14), bonfire_basic (10), jira_basic (15), quay (7)
 - Use when: Deploying to ephemeral, checking namespaces
 
-### Developer Persona (`personas/developer.md`) ~78 tools
+### Developer Persona (`personas/developer.md`) ~61 tools
 - Focus: Coding, PRs, code review
-- Tools: workflow, git_basic, gitlab_basic, jira_basic
+- Tools: workflow (16), git_basic (14), gitlab_basic (16), jira_basic (15)
 - Use when: Writing code, creating MRs
 
-### Incident Persona (`personas/incident.md`) ~89 tools
+### Incident Persona (`personas/incident.md`) ~70 tools
 - Focus: Rapid triage, mitigation, recovery
-- Tools: workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager
+- Tools: workflow (16), k8s_basic (14), prometheus_basic (9), kibana (9), jira_basic (15), alertmanager (7)
 - Use when: Production incidents
 
-### Release Persona (`personas/release.md`) ~91 tools
+### Release Persona (`personas/release.md`) ~70 tools
 - Focus: Release coordination, deployment
-- Tools: workflow, konflux_basic, quay, jira_basic, git_basic
+- Tools: workflow (16), konflux_basic (18), quay (7), jira_basic (15), git_basic (14)
 - Use when: Managing releases
 
 ---
@@ -448,12 +447,14 @@ ai-workflow/
 
 | Layer | Coverage | Auto-Heal |
 |-------|----------|-----------|
-| **Git tools** | 31 tools | ✅ All decorated with `@auto_heal()` |
-| **GitLab tools** | 31 tools | ✅ All decorated with `@auto_heal()` |
+| **Git tools** | 30 tools | ✅ All decorated with `@auto_heal()` |
+| **GitLab tools** | 30 tools | ✅ All decorated with `@auto_heal()` |
 | **Jira tools** | 28 tools | ✅ All decorated with `@auto_heal()` |
-| **K8s tools** | 28 tools | ✅ All decorated with `@auto_heal_k8s()` |
+| **K8s tools** | 28 tools | ✅ All decorated with `@auto_heal()` |
 | **Bonfire tools** | 20 tools | ✅ All decorated with `@auto_heal_ephemeral()` |
-| **Konflux tools** | 36 tools | ✅ All decorated with `@auto_heal_konflux()` |
+| **Konflux tools** | 35 tools | ✅ All decorated with `@auto_heal_konflux()` |
+| **Prometheus tools** | 13 tools | ✅ All decorated with `@auto_heal()` |
+| **Other modules** | ~55 tools | ✅ All decorated with `@auto_heal()` |
 | **Skills** | 53 skills | ✅ All auto-retry via skill engine |
 
 ### Failure Memory
