@@ -4,75 +4,38 @@
 
 ## 🔴 Critical Issues (Fix Now)
 
-### 1. Race Conditions in Memory Writes
+### ✅ 1. Race Conditions in Memory Writes - IMPLEMENTED
 
-**Problem:**
-```python
-# scripts/common/memory.py:88-119
-def append_to_list(key, list_path, item, match_key=None):
-    data = read_memory(key)  # ← Read
-    # ... modify data ...
-    data[list_path].append(item)
-    return write_memory(key, data)  # ← Write
-```
+**Status:** ✅ Completed (2026-01-09)
 
-**Issue:** Two concurrent skill executions could lose updates.
+**Implementation:** Added fcntl file locking to 3 critical functions in `scripts/common/memory.py`:
+- `append_to_list()` - Atomic append/update with exclusive lock
+- `remove_from_list()` - Atomic remove with exclusive lock
+- `update_field()` - Atomic field update with exclusive lock
 
-**Example Scenario:**
-```
-Time  Skill A                    Skill B                    File State
-0     read current_work          -                          {issues: [AAP-1]}
-1     -                          read current_work          {issues: [AAP-1]}
-2     add AAP-2                  -                          {issues: [AAP-1]}
-3     write {issues: [AAP-1, AAP-2]}  -                    {issues: [AAP-1, AAP-2]}
-4     -                          add AAP-3                  {issues: [AAP-1, AAP-2]}
-5     -                          write {issues: [AAP-1, AAP-3]}  {issues: [AAP-1, AAP-3]}
-                                                            ^^^ AAP-2 LOST!
-```
-
-**Solution:**
+**How it works:**
 ```python
 import fcntl
-from pathlib import Path
 
-def atomic_append_to_list(key, list_path, item, match_key=None):
-    """Thread-safe append with file locking."""
+def append_to_list(key, list_path, item, match_key=None):
     path = get_memory_path(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Acquire exclusive lock
     with open(path, 'r+' if path.exists() else 'w+') as f:
+        # Acquire exclusive lock (blocks until available)
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
         try:
-            data = yaml.safe_load(f) or {}
-
-            if list_path not in data:
-                data[list_path] = []
-
-            # Check for duplicate
-            if match_key and item.get(match_key):
-                for i, existing in enumerate(data[list_path]):
-                    if existing.get(match_key) == item.get(match_key):
-                        data[list_path][i] = item
-                        f.seek(0)
-                        f.truncate()
-                        yaml.dump(data, f, default_flow_style=False)
-                        return True
-
-            data[list_path].append(item)
-            data["last_updated"] = datetime.now().isoformat()
-
+            # Atomic read-modify-write
+            data = yaml.safe_load(f.read()) or {}
+            # ... modify data ...
             f.seek(0)
             f.truncate()
-            yaml.dump(data, f, default_flow_style=False)
-            return True
-
+            yaml.dump(data, f)
         finally:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 ```
 
-**Impact:** Prevents data loss in concurrent skill executions.
+**Impact:** Prevents data loss in concurrent skill executions. Multiple skills can now safely modify memory files simultaneously without overwriting each other's changes.
 
 ---
 

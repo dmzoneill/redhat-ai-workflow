@@ -18,6 +18,7 @@ Memory directory structure:
       └── YYYY-MM-DD.yaml    - Session logs
 """
 
+import fcntl
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -87,7 +88,7 @@ def write_memory(key: str, data: Dict[str, Any]) -> bool:
 
 def append_to_list(key: str, list_path: str, item: Dict[str, Any], match_key: Optional[str] = None) -> bool:
     """
-    Append an item to a list in a memory file.
+    Atomically append an item to a list in a memory file with file locking.
 
     If match_key is provided and an item with the same key exists, it will be updated.
 
@@ -100,28 +101,61 @@ def append_to_list(key: str, list_path: str, item: Dict[str, Any], match_key: Op
     Returns:
         True if successful, False otherwise
     """
-    data = read_memory(key)
+    path = get_memory_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    if list_path not in data:
-        data[list_path] = []
+    # Atomic read-modify-write with exclusive lock
+    try:
+        with open(path, "r+" if path.exists() else "w+") as f:
+            # Acquire exclusive lock (blocks until available)
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
-    if not isinstance(data[list_path], list):
+            try:
+                # Read current data
+                f.seek(0)
+                content = f.read()
+                data = yaml.safe_load(content) if content else {}
+
+                if list_path not in data:
+                    data[list_path] = []
+
+                if not isinstance(data[list_path], list):
+                    return False
+
+                # Check for existing item if match_key provided
+                if match_key and item.get(match_key):
+                    for i, existing in enumerate(data[list_path]):
+                        if existing.get(match_key) == item.get(match_key):
+                            data[list_path][i] = item
+                            # Write back
+                            data["last_updated"] = datetime.now().isoformat()
+                            f.seek(0)
+                            f.truncate()
+                            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+                            return True
+
+                # Append new item
+                data[list_path].append(item)
+                data["last_updated"] = datetime.now().isoformat()
+
+                # Write back
+                f.seek(0)
+                f.truncate()
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+                return True
+
+            finally:
+                # Release lock
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    except Exception as e:
+        print(f"Error in append_to_list: {e}")
         return False
-
-    # Check for existing item if match_key provided
-    if match_key and item.get(match_key):
-        for i, existing in enumerate(data[list_path]):
-            if existing.get(match_key) == item.get(match_key):
-                data[list_path][i] = item
-                return write_memory(key, data)
-
-    data[list_path].append(item)
-    return write_memory(key, data)
 
 
 def remove_from_list(key: str, list_path: str, match_key: str, match_value: Any) -> int:
     """
-    Remove items from a list in a memory file.
+    Atomically remove items from a list in a memory file with file locking.
 
     Args:
         key: Memory file key (e.g., "state/current_work")
@@ -132,24 +166,46 @@ def remove_from_list(key: str, list_path: str, match_key: str, match_value: Any)
     Returns:
         Number of items removed
     """
-    data = read_memory(key)
+    path = get_memory_path(key)
 
-    if list_path not in data or not isinstance(data[list_path], list):
+    if not path.exists():
         return 0
 
-    original_len = len(data[list_path])
-    data[list_path] = [item for item in data[list_path] if str(item.get(match_key, "")) != str(match_value)]
+    try:
+        with open(path, "r+") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
-    removed = original_len - len(data[list_path])
-    if removed > 0:
-        write_memory(key, data)
+            try:
+                f.seek(0)
+                content = f.read()
+                data = yaml.safe_load(content) if content else {}
 
-    return removed
+                if list_path not in data or not isinstance(data[list_path], list):
+                    return 0
+
+                original_len = len(data[list_path])
+                data[list_path] = [item for item in data[list_path] if str(item.get(match_key, "")) != str(match_value)]
+
+                removed = original_len - len(data[list_path])
+                if removed > 0:
+                    data["last_updated"] = datetime.now().isoformat()
+                    f.seek(0)
+                    f.truncate()
+                    yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+                return removed
+
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    except Exception as e:
+        print(f"Error in remove_from_list: {e}")
+        return 0
 
 
 def update_field(key: str, field_path: str, value: Any) -> bool:
     """
-    Update a specific field in a memory file.
+    Atomically update a specific field in a memory file with file locking.
 
     Args:
         key: Memory file key (e.g., "state/environments")
@@ -159,18 +215,42 @@ def update_field(key: str, field_path: str, value: Any) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    data = read_memory(key)
-    parts = field_path.split(".")
+    path = get_memory_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Navigate to parent
-    obj = data
-    for part in parts[:-1]:
-        if part not in obj:
-            obj[part] = {}
-        obj = obj[part]
+    try:
+        with open(path, "r+" if path.exists() else "w+") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
-    obj[parts[-1]] = value
-    return write_memory(key, data)
+            try:
+                f.seek(0)
+                content = f.read()
+                data = yaml.safe_load(content) if content else {}
+
+                parts = field_path.split(".")
+
+                # Navigate to parent
+                obj = data
+                for part in parts[:-1]:
+                    if part not in obj:
+                        obj[part] = {}
+                    obj = obj[part]
+
+                obj[parts[-1]] = value
+                data["last_updated"] = datetime.now().isoformat()
+
+                # Write back
+                f.seek(0)
+                f.truncate()
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+                return True
+
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    except Exception as e:
+        print(f"Error in update_field: {e}")
+        return False
 
 
 def get_timestamp() -> str:
