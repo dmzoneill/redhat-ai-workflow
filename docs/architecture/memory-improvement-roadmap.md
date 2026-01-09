@@ -163,100 +163,72 @@ async def memory_query(key: str, query: str) -> list[TextContent]:
 
 ---
 
-### 5. Memory Analytics Dashboard
+### ✅ 5. Memory Analytics Dashboard - IMPLEMENTED
 
-**Problem:** No visibility into memory health/usage.
+**Status:** ✅ Completed (2026-01-09)
 
-**Proposed Tool:**
+**Implementation:** Added `memory_stats()` MCP tool to `tool_modules/aa_workflow/src/memory_tools.py`.
 
-```python
-@registry.tool()
-async def memory_stats() -> list[TextContent]:
-    """
-    Get memory system statistics.
+**What was added:**
+- New MCP tool: `memory_stats()`
+- Comprehensive dashboard with 5 sections:
+  - 💾 Storage usage by directory
+  - 🔧 Auto-heal performance metrics
+  - 📋 Learned patterns count
+  - 📅 Session activity
+  - ⚡ Health checks with warnings
 
-    Returns:
-        - File sizes and growth trends
-        - Most-read/written files
-        - Auto-heal success rates
-        - Pattern match frequency
-        - Memory fragmentation analysis
-    """
-    stats = {
-        "files": {},
-        "auto_heal": {},
-        "patterns": {},
-        "sessions": {},
-    }
+**Features:**
+- File sizes and modification times for all memory files
+- Auto-heal success rates (includes daily/weekly breakdowns)
+- Pattern counts by category (auth, error, bonfire, pipeline, jira)
+- Session activity (today's actions + total session files)
+- Top 10 largest files
+- Automated health warnings:
+  - Files over 50 KB
+  - Auto-heal success rate < 70%
+  - Total storage over 1 MB
 
-    # File sizes
-    for file in MEMORY_DIR.rglob("*.yaml"):
-        relative = file.relative_to(MEMORY_DIR)
-        stats["files"][str(relative)] = {
-            "size_kb": file.stat().st_size / 1024,
-            "modified": datetime.fromtimestamp(file.stat().st_mtime).isoformat(),
-        }
+**Output sections:**
+```
+## 📊 Memory System Statistics
 
-    # Auto-heal stats
-    failures = read_memory("learned/tool_failures")
-    stats["auto_heal"] = {
-        "total": failures.get("stats", {}).get("total_failures", 0),
-        "auto_fixed": failures.get("stats", {}).get("auto_fixed", 0),
-        "success_rate": ...,
-        "recent_failures": failures.get("failures", [])[-10:],
-    }
+### 💾 Storage Usage
+**Total:** 123.45 KB
+- state/: 5.2 KB
+- learned/: 53.1 KB
+- sessions/: 65.0 KB
+- backups/: 0.15 KB
 
-    # Pattern usage
-    patterns = read_memory("learned/patterns")
-    stats["patterns"] = {
-        "total": sum(len(patterns.get(cat, [])) for cat in [
-            "auth_patterns", "error_patterns", "bonfire_patterns",
-            "pipeline_patterns", "jira_cli_patterns"
-        ]),
-        "by_category": {...},
-    }
+### 🔧 Auto-Heal Performance
+**Success Rate:** 85%
+**Total Failures:** 1000
+**Auto-Fixed:** 850
+**Manual Required:** 150
+**Recent Entries:** 100
 
-    # Session activity
-    today = datetime.now().strftime("%Y-%m-%d")
-    session = read_memory(f"sessions/{today}")
-    stats["sessions"] = {
-        "today_actions": len(session.get("actions", [])),
-        "total_session_files": len(list((MEMORY_DIR / "sessions").glob("*.yaml"))),
-    }
+### 📋 Learned Patterns
+**Total:** 20 patterns
+- auth_patterns: 5
+- bonfire_patterns: 4
+- error_patterns: 6
+- jira_cli_patterns: 3
+- pipeline_patterns: 2
 
-    return [TextContent(type="text", text=yaml.dump(stats))]
+### 📅 Session Activity
+**Today (2026-01-09):** 15 actions
+**Total Sessions:** 200 days
+
+### 📁 Largest Files
+- learned/tool_failures.yaml: 15.2 KB
+- sessions/2026-01-09.yaml: 3.5 KB
+...
+
+### ⚡ Health Checks
+✅ All checks passed - memory system healthy
 ```
 
-**Skill:**
-```yaml
-# skills/memory_health.yaml
-name: memory_health
-description: Check memory system health
-
-steps:
-  - name: get_stats
-    tool: memory_stats
-    output: stats
-
-  - name: check_large_files
-    compute: |
-      large = [f for f, info in stats["files"].items()
-               if info["size_kb"] > 50]
-      if large:
-        result = f"⚠️ Large files: {large}"
-      else:
-        result = "✅ All files normal size"
-    output: size_check
-
-  - name: check_success_rate
-    compute: |
-      rate = stats["auto_heal"]["success_rate"]
-      if rate < 0.7:
-        result = f"⚠️ Success rate low: {rate:.0%}"
-      else:
-        result = f"✅ Success rate: {rate:.0%}"
-    output: rate_check
-```
+**Impact:** Provides instant visibility into memory health, helps identify issues before they become problems, tracks auto-heal effectiveness over time.
 
 ---
 
