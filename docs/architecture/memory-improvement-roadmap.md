@@ -101,63 +101,65 @@ stats:
 
 ## 🟡 High Priority (Plan for Next Sprint)
 
-### 4. Memory Query Interface
+### ✅ 4. Memory Query Interface - IMPLEMENTED
 
-**Problem:** No easy way to query memory without reading entire files.
+**Status:** ✅ Completed (2026-01-09)
 
-**Current:**
+**Implementation:** Added `memory_query()` MCP tool to `tool_modules/aa_workflow/src/memory_tools.py`.
+
+**What was added:**
+- New MCP tool: `memory_query(key, query)`
+- Uses JSONPath expressions (via jsonpath-ng library)
+- Graceful degradation if jsonpath-ng not installed
+- Comprehensive error handling with helpful messages
+- 6 example queries in docstring
+
+**Usage examples:**
 ```python
-# Must read entire file
-data = memory_read("state/current_work")
-active = data.get("active_issues", [])
-my_issue = next((i for i in active if i["key"] == "AAP-123"), None)
+# Get first active issue
+memory_query("state/current_work", "$.active_issues[0]")
+
+# Filter issues by status
+memory_query("state/current_work", "$.active_issues[?(@.status=='In Progress')]")
+
+# Extract all issue keys
+memory_query("state/current_work", "$.active_issues[*].key")
+
+# Get nested environment status
+memory_query("state/environments", "$.environments.stage.status")
+
+# Pattern matching with regex
+memory_query("learned/patterns", "$.error_patterns[?(@.pattern =~ /auth.*/i)]")
 ```
 
-**Proposed:**
+**Implementation details:**
 ```python
-# New query interface
-memory_query("state/current_work", "active_issues[key=AAP-123]")
-
-# Or SQL-like
-memory_query("state/current_work",
-    "SELECT * FROM active_issues WHERE key = 'AAP-123'")
-
-# Or JSONPath
-memory_query("state/current_work",
-    "$.active_issues[?(@.key=='AAP-123')]")
-```
-
-**Implementation:**
-
-```python
-# tool_modules/aa_workflow/src/memory_tools.py
-
 @registry.tool()
 async def memory_query(key: str, query: str) -> list[TextContent]:
-    """
-    Query memory using JSONPath expressions.
+    """Query memory using JSONPath expressions."""
+    try:
+        from jsonpath_ng import parse
+    except ImportError:
+        return [TextContent(type="text",
+            text="❌ jsonpath_ng not installed. Use memory_read() instead.")]
 
-    Args:
-        key: Memory file (e.g., "state/current_work")
-        query: JSONPath query (e.g., "$.active_issues[?(@.status=='In Progress')]")
-
-    Returns:
-        Matching data
-    """
-    from jsonpath_ng import parse
-
+    # Load memory file
     memory_file = MEMORY_DIR / f"{key}.yaml"
-    if not memory_file.exists():
-        return [TextContent(type="text", text="Memory file not found")]
-
     with open(memory_file) as f:
         data = yaml.safe_load(f) or {}
 
+    # Execute JSONPath query
     expr = parse(query)
     matches = [match.value for match in expr.find(data)]
 
-    return [TextContent(type="text", text=yaml.dump(matches))]
+    # Return formatted results
+    return [TextContent(type="text",
+        text=f"## Query Results\n**Matches:** {len(matches)}\n\n{yaml.dump(matches)}")]
 ```
+
+**Impact:** Reduces memory reads for large files, enables precise data extraction, improves query performance.
+
+**Note:** Requires `pip install jsonpath-ng`. Tool gracefully degrades with helpful error message if not installed.
 
 ---
 

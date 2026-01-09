@@ -5,7 +5,10 @@ Provides tools for reading, writing, and managing persistent memory:
 - memory_write: Write complete memory files
 - memory_update: Update specific fields
 - memory_append: Append to lists
+- memory_query: Query with JSONPath expressions
 - memory_session_log: Log session actions
+- check_known_issues: Search for known fixes
+- learn_tool_fix: Save solutions to memory
 """
 
 from datetime import datetime
@@ -220,6 +223,91 @@ def register_memory_tools(server: "FastMCP") -> int:
             return [TextContent(type="text", text=f"✅ Appended to {key}: {list_path}")]
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error appending to memory: {e}")]
+
+    @registry.tool()
+    async def memory_query(key: str, query: str) -> list[TextContent]:
+        """
+        Query memory using JSONPath expressions.
+
+        This allows querying specific data without reading entire memory files.
+        Useful for filtering large lists or extracting nested values.
+
+        Args:
+            key: Memory file (e.g., "state/current_work", "learned/patterns")
+            query: JSONPath query expression
+
+        JSONPath Examples:
+            - `$.active_issues[0]` - First active issue
+            - `$.active_issues[?(@.status=='In Progress')]` - Issues in progress
+            - `$.active_issues[*].key` - All issue keys
+            - `$.environments.stage.status` - Stage environment status
+            - `$.error_patterns[?(@.pattern =~ /auth.*/i)]` - Patterns matching regex
+
+        Returns:
+            Matching data as YAML.
+        """
+        try:
+            from jsonpath_ng import parse
+        except ImportError:
+            return [
+                TextContent(
+                    type="text",
+                    text="❌ jsonpath_ng not installed.\n\n"
+                    "Install with: `pip install jsonpath-ng`\n\n"
+                    "For now, use memory_read() instead.",
+                )
+            ]
+
+        # Handle with or without .yaml extension
+        if not key.endswith(".yaml"):
+            key = f"{key}.yaml"
+
+        memory_file = MEMORY_DIR / key
+        if not memory_file.exists():
+            return [TextContent(type="text", text=f"❌ Memory not found: {key}")]
+
+        try:
+            # Load memory file
+            with open(memory_file) as f:
+                data = yaml.safe_load(f) or {}
+
+            # Parse and execute JSONPath query
+            expr = parse(query)
+            matches = [match.value for match in expr.find(data)]
+
+            if not matches:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"No matches found for query: `{query}`\n\n"
+                        f"**File:** {key}\n\n"
+                        "Try a different JSONPath expression or use memory_read() to see full contents.",
+                    )
+                ]
+
+            # Format results
+            result_yaml = yaml.dump(matches, default_flow_style=False)
+            return [
+                TextContent(
+                    type="text",
+                    text=f"## Query Results: {key}\n\n"
+                    f"**Query:** `{query}`\n"
+                    f"**Matches:** {len(matches)}\n\n"
+                    f"```yaml\n{result_yaml}```",
+                )
+            ]
+        except Exception as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Query error: {e}\n\n"
+                    "**Common issues:**\n"
+                    "- Invalid JSONPath syntax\n"
+                    "- Path doesn't exist in data\n"
+                    "- Check query with simpler expressions first\n\n"
+                    f"Use memory_read('{key.replace('.yaml', '')}') to see full structure.",
+                )
+            ]
 
     @registry.tool()
     async def memory_session_log(action: str, details: str = "") -> list[TextContent]:
