@@ -7,28 +7,27 @@ set -e
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-printf "${CYAN}Running Super-Linter...${NC}\n"
+printf '%b%s%b\n' "${CYAN}" "Running Super-Linter..." "${NC}"
 
 # Check if Docker is available
 if ! command -v docker &> /dev/null; then
-    printf "${RED}❌ Docker is not installed or not in PATH${NC}\n"
+    printf '%b%s%b\n' "${RED}" "❌ Docker is not installed or not in PATH" "${NC}"
     exit 1
 fi
 
 # Check if Docker daemon is running
 if ! docker info &> /dev/null; then
-    printf "${RED}❌ Docker daemon is not running${NC}\n"
+    printf '%b%s%b\n' "${RED}" "❌ Docker daemon is not running" "${NC}"
     exit 1
 fi
 
 # Get the repo root (works whether called from repo root or subdirectory)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-printf "${CYAN}Linting: ${REPO_ROOT}${NC}\n"
+printf '%b%s%s%b\n' "${CYAN}" "Linting: " "${REPO_ROOT}" "${NC}"
 
 # Run Super-Linter with slim image (fewer linters, faster)
 # Focus on linters that work well with project defaults
@@ -47,4 +46,4 @@ docker run --rm \
     -v "${REPO_ROOT}":/tmp/lint \
     ghcr.io/super-linter/super-linter:slim-latest
 
-printf "${GREEN}✅ Super-Linter passed${NC}\n"
+printf '%b%s%b\n' "${GREEN}" "✅ Super-Linter passed" "${NC}"
