@@ -204,6 +204,56 @@ steps:
       }
     output: cleanup_result
 
+  - name: archive_old_sessions
+    description: "Archive session logs older than 90 days"
+    compute: |
+      from datetime import datetime, timedelta
+      from pathlib import Path
+      import gzip
+      import shutil
+
+      memory_dir = Path.home() / "src/redhat-ai-workflow/memory"
+      sessions_dir = memory_dir / "sessions"
+      archive_dir = sessions_dir / "archive"
+      archive_dir.mkdir(exist_ok=True)
+
+      cutoff = datetime.now() - timedelta(days=90)
+
+      archived = 0
+      archived_files = []
+      errors = []
+
+      if sessions_dir.exists():
+        for session_file in sessions_dir.glob("*.yaml"):
+          date_str = session_file.stem  # YYYY-MM-DD
+          try:
+            file_date = datetime.strptime(date_str, "%Y-%m-%d")
+            if file_date < cutoff:
+              # Compress and move
+              archive_path = archive_dir / f"{session_file.name}.gz"
+
+              if not inputs.dry_run:
+                with open(session_file, 'rb') as f_in:
+                  with gzip.open(archive_path, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+                session_file.unlink()
+
+              archived += 1
+              archived_files.append(date_str)
+          except ValueError:
+            # Not a valid date format, skip
+            pass
+          except Exception as e:
+            errors.append(f"{session_file.name}: {e}")
+
+      result = {
+        "archived": archived,
+        "archived_files": archived_files[:10],  # First 10 for display
+        "errors": errors,
+        "dry_run": inputs.dry_run,
+      }
+    output: archive_result
+
   - name: log_cleanup
     description: "Log cleanup to session"
     condition: "not inputs.dry_run and analysis.total > 0"
@@ -232,6 +282,20 @@ outputs:
       {% for item in analysis.summary %}
       - {{ item }}
       {% endfor %}
+      {% endif %}
+
+      {% if archive_result and archive_result.archived > 0 %}
+      ### Session Log Archival
+      📦 {{ "Would archive" if archive_result.dry_run else "Archived" }} {{ archive_result.archived }} session logs older than 90 days
+      {% if archive_result.archived_files %}
+      First archived: {{ archive_result.archived_files | join(", ") }}
+      {% endif %}
+      {% if archive_result.errors %}
+      ⚠️ Archival errors:
+      {% for err in archive_result.errors %}
+      - {{ err }}
+      {% endfor %}
+      {% endif %}
       {% endif %}
 
       {% if inputs.dry_run %}
