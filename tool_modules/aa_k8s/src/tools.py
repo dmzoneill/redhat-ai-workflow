@@ -212,6 +212,7 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== EVENTS & DEBUGGING ====================
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_get_events(namespace: str, environment: str = "stage", field_selector: str = "") -> str:
         """Get events in a namespace (useful for debugging)."""
@@ -227,6 +228,7 @@ def register_tools(server: "FastMCP") -> int:
             output = "\n".join(lines[:50]) + f"\n\n... ({len(lines) - 50} more events)"
         return f"## Events\n\n```\n{output}\n```"
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_top_pods(namespace: str, environment: str = "stage") -> str:
         """Show resource usage (CPU/memory) for pods."""
@@ -236,6 +238,7 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== GENERIC ====================
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_get(
         resource: str,
@@ -256,6 +259,7 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed: {output}"
         return f"## {resource.title()}\n\n```\n{truncate_output(output, max_length=15000)}\n```"
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_exec(
         pod_name: str,
@@ -288,6 +292,7 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace, timeout=timeout)
         return f"## Exec: {command}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_cp(
         source: str,
@@ -337,6 +342,7 @@ def register_tools(server: "FastMCP") -> int:
             return f"✅ Copied {direction}: {source} → {destination}"
         return f"❌ Copy failed: {output}"
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_get_secret_value(
         secret_name: str,
@@ -382,6 +388,7 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== SAAS PIPELINES ====================
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_saas_pipelines(namespace: str = "") -> str:
         """List SaaS deployment pipelines on the App-SRE cluster."""
@@ -392,6 +399,7 @@ def register_tools(server: "FastMCP") -> int:
             return f"❌ Failed: {output}\n\nRun: `kube ap` to authenticate"
         return f"## SaaS Pipelines\n\n```\n{output}\n```"
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_saas_deployments(namespace: str) -> str:
         """List deployments on the SaaS/App-SRE cluster."""
@@ -401,6 +409,7 @@ def register_tools(server: "FastMCP") -> int:
         )
         return f"## SaaS Deployments: {namespace}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_saas_pods(namespace: str) -> str:
         """List pods on the SaaS/App-SRE cluster."""
@@ -408,6 +417,7 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_kubectl(["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace)
         return f"## SaaS Pods: {namespace}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
+    @auto_heal()
     @registry.tool()
     async def kubectl_saas_logs(pod_name: str, namespace: str, container: str = "", tail: int = 100) -> str:
         """Get logs from a pod on the SaaS/App-SRE cluster."""
@@ -420,6 +430,7 @@ def register_tools(server: "FastMCP") -> int:
 
     # ==================== ADDITIONAL TOOLS (from kubernetes_tools) ====================
 
+    @auto_heal()
     @registry.tool()
     async def k8s_namespace_health(
         namespace: str,
@@ -487,6 +498,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return "\n".join(lines)
 
+    @auto_heal()
     @registry.tool()
     async def k8s_list_pods(
         namespace: str,
@@ -506,6 +518,7 @@ def register_tools(server: "FastMCP") -> int:
         success, output = await run_kubectl(["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace)
         return f"## Pods in {namespace}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
+    @auto_heal()
     @registry.tool()
     async def k8s_list_deployments(
         namespace: str,
@@ -527,6 +540,7 @@ def register_tools(server: "FastMCP") -> int:
         )
         return f"## Deployments in {namespace}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
+    @auto_heal()
     @registry.tool()
     async def k8s_environment_summary(
         environment: str = "",
@@ -568,6 +582,7 @@ def register_tools(server: "FastMCP") -> int:
 
         return "\n".join(lines)
 
+    @auto_heal()
     @registry.tool()
     async def k8s_list_ephemeral_namespaces() -> str:
         """
