@@ -1,6 +1,7 @@
 """Tests for server.config module."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from server.config import get_token_from_kubeconfig
 
 
@@ -10,9 +11,7 @@ class TestGetTokenFromKubeconfig:
     @patch("subprocess.run")
     def test_get_token_from_oc_whoami(self, mock_run):
         """Test getting token from oc whoami -t."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="sha256~test_token_12345", stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="sha256~test_token_12345", stderr="")
 
         token = get_token_from_kubeconfig("~/.kube/config.s")
 
@@ -62,5 +61,3 @@ class TestGetTokenFromKubeconfig:
         token = get_token_from_kubeconfig("~/.kube/config.s")
 
         assert token == ""
-
-

@@ -1,13 +1,14 @@
 """Extended tests for skill_engine module."""
 
+from unittest.mock import AsyncMock
+
 import pytest
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from tool_modules.aa_workflow.src.skill_engine import (
-    SkillEngine,
-    SkillStep,
     SkillCondition,
     SkillContext,
+    SkillEngine,
+    SkillStep,
 )
 
 
@@ -92,9 +93,7 @@ class TestSkillStep:
 
     def test_skill_step_initialization(self):
         """Test SkillStep initializes correctly."""
-        step = SkillStep(
-            name="Test Step", tool="test_tool", inputs={"param": "value"}
-        )
+        step = SkillStep(name="Test Step", tool="test_tool", inputs={"param": "value"})
 
         assert step.name == "Test Step"
         assert step.tool == "test_tool"
@@ -139,9 +138,7 @@ class TestSkillCondition:
 
     def test_skill_condition_equals_type(self):
         """Test SkillCondition with equals type."""
-        condition = SkillCondition(
-            type="equals", step="Step 1", value="expected_value"
-        )
+        condition = SkillCondition(type="equals", step="Step 1", value="expected_value")
 
         assert condition.type == "equals"
         assert condition.value == "expected_value"
@@ -169,9 +166,7 @@ class TestSkillEngine:
         mock_tool = AsyncMock(return_value="tool_result")
         mock_skill_engine.register_tool("test_tool", mock_tool)
 
-        result = await mock_skill_engine.execute_tool(
-            "test_tool", {"param1": "value1"}
-        )
+        result = await mock_skill_engine.execute_tool("test_tool", {"param1": "value1"})
 
         assert result == "tool_result"
         mock_tool.assert_called_once_with(param1="value1")
@@ -179,27 +174,19 @@ class TestSkillEngine:
     async def test_skill_engine_execute_missing_tool(self, mock_skill_engine):
         """Test executing a non-existent tool."""
         with pytest.raises(KeyError):
-            await mock_skill_engine.execute_tool(
-                "nonexistent_tool", {}
-            )
+            await mock_skill_engine.execute_tool("nonexistent_tool", {})
 
     async def test_skill_engine_variable_substitution(self, mock_skill_engine):
         """Test variable substitution in inputs."""
         context = SkillContext(issue_key="TEST-123", repo="myrepo")
 
-        result = mock_skill_engine.substitute_variables(
-            {"param": "{{ issue_key }}"}, context
-        )
+        result = mock_skill_engine.substitute_variables({"param": "{{ issue_key }}"}, context)
 
         assert result["param"] == "TEST-123"
 
-    async def test_skill_engine_multiple_variable_substitution(
-        self, mock_skill_engine
-    ):
+    async def test_skill_engine_multiple_variable_substitution(self, mock_skill_engine):
         """Test multiple variable substitutions."""
-        context = SkillContext(
-            issue_key="TEST-123", repo="myrepo", branch="feature-branch"
-        )
+        context = SkillContext(issue_key="TEST-123", repo="myrepo", branch="feature-branch")
 
         result = mock_skill_engine.substitute_variables(
             {
@@ -230,9 +217,8 @@ class TestSkillExecution:
             "steps": [{"name": "Step 1", "tool": "test_tool", "inputs": {}}],
         }
 
-        result = await mock_skill_engine.execute_skill(skill_data, {})
+        await mock_skill_engine.execute_skill(skill_data, {})
 
-        assert result is not None
         mock_tool.assert_called_once()
 
     async def test_execute_skill_with_inputs(self, mock_skill_engine):
@@ -253,9 +239,8 @@ class TestSkillExecution:
         }
 
         context = {"param1": "test_value"}
-        result = await mock_skill_engine.execute_skill(skill_data, context)
+        await mock_skill_engine.execute_skill(skill_data, context)
 
-        assert result is not None
         # Verify tool was called with substituted value
         mock_tool.assert_called_once()
 

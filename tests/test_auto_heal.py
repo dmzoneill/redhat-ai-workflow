@@ -1,12 +1,14 @@
 """Tests for server.auto_heal_decorator module."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from server.auto_heal_decorator import (
     auto_heal,
-    auto_heal_stage,
-    auto_heal_konflux,
     auto_heal_ephemeral,
+    auto_heal_konflux,
+    auto_heal_stage,
 )
 
 
@@ -118,7 +120,7 @@ class TestAutoHealStage:
 
         with patch("server.auto_heal_decorator.kube_login") as mock_kube_login:
             mock_kube_login.return_value = AsyncMock(return_value=(True, "Logged in to stage"))
-            result = await mock_tool()
+            await mock_tool()
 
         assert call_count == 2
         # Verify kube_login was called with "stage"
@@ -143,7 +145,7 @@ class TestAutoHealKonflux:
 
         with patch("server.auto_heal_decorator.kube_login") as mock_kube_login:
             mock_kube_login.return_value = AsyncMock(return_value=(True, "Logged in to konflux"))
-            result = await mock_tool()
+            await mock_tool()
 
         assert call_count == 2
 
@@ -166,7 +168,7 @@ class TestAutoHealEphemeral:
 
         with patch("server.auto_heal_decorator.kube_login") as mock_kube_login:
             mock_kube_login.return_value = AsyncMock(return_value=(True, "Logged in to ephemeral"))
-            result = await mock_tool()
+            await mock_tool()
 
         assert call_count == 2
 
