@@ -266,7 +266,7 @@ class TestSkillExecution:
             ],
         }
 
-        result = await mock_skill_engine.execute_skill(skill_data, {})
+        await mock_skill_engine.execute_skill(skill_data, {})
 
         # Both tools should be called since Step 1 succeeded
         assert mock_tool1.call_count == 1
