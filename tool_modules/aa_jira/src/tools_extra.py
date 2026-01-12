@@ -11,7 +11,7 @@ from mcp.server.fastmcp import FastMCP
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
-from server.utils import  load_config, run_cmd_shell
+from server.utils import load_config, run_cmd_shell
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
@@ -66,95 +66,55 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
 # ==================== READ OPERATIONS ====================
 
 
-def register_tools(server: "FastMCP") -> int:
-    """Register tools with the MCP server."""
-    registry = ToolRegistry(server)
+# ==================== TOOL IMPLEMENTATIONS ====================
 
-        # ==================== TOOLS NOT USED IN SKILLS ====================
-    @auto_heal()
-    @registry.tool()
-    async def jira_add_flag(issue_key: str) -> str:
-        """
-        Add a flag (impediment) to a Jira issue.
 
-        Args:
-            issue_key: The Jira issue key (e.g., AAP-12345)
+async def _jira_add_flag_impl(issue_key: str) -> str:
+    """Implementation of jira_add_flag tool."""
+    success, output = await run_rh_issue(["add-flag", issue_key])
+    if not success:
+        return f"❌ Failed to add flag: {output}"
+    return f"🚩 Flag added to {issue_key}\n\n{output}"
 
-        Returns:
-            Confirmation of the flag.
-        """
-        success, output = await run_rh_issue(["add-flag", issue_key])
 
-        if not success:
-            return f"❌ Failed to add flag: {output}"
+async def _jira_add_to_sprint_impl(issue_key: str, sprint_id: str) -> str:
+    """Implementation of jira_add_to_sprint tool."""
+    args = ["add-to-sprint", issue_key]
+    if sprint_id:
+        args.extend(["--sprint", sprint_id])
+    success, output = await run_rh_issue(args)
+    if not success:
+        return f"❌ Failed to add to sprint: {output}"
+    return f"✅ {issue_key} added to sprint\n\n{output}"
 
-        return f"🚩 Flag added to {issue_key}\n\n{output}"
 
-    @auto_heal()
-    @registry.tool()
-    async def jira_add_to_sprint(issue_key: str, sprint_id: str = "") -> str:
-        """
-        Add an issue to a sprint.
+async def _jira_ai_helper_impl(issue_key: str, action: str) -> str:
+    """Implementation of jira_ai_helper tool."""
+    import re
 
-        Args:
-            issue_key: The Jira issue key (e.g., AAP-12345)
-            sprint_id: Sprint ID (optional, uses current sprint if not specified)
+    success, output = await run_rh_issue(["view-issue", issue_key])
+    if not success:
+        return f"❌ Failed to get issue: {output}"
 
-        Returns:
-            Confirmation of sprint assignment.
-        """
-        args = ["add-to-sprint", issue_key]
-        if sprint_id:
-            args.extend(["--sprint", sprint_id])
+    issue = {}
+    for line in output.split("\n"):
+        match = re.match(r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$", line.strip(), re.IGNORECASE)
+        if match:
+            key = match.group(1).strip().lower().replace(" ", "_").replace("/", "_")
+            value = match.group(2).strip()
+            issue[key] = value
 
-        success, output = await run_rh_issue(args)
+    desc_match = re.search(r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL)
+    if desc_match:
+        issue["description"] = desc_match.group(1).strip()
 
-        if not success:
-            return f"❌ Failed to add to sprint: {output}"
+    summary = issue.get("summary", "No summary")
+    status = issue.get("status", "Unknown")
+    description = issue.get("description", "No description")[:500]
+    acceptance = issue.get("acceptance_criteria", "")[:300]
 
-        return f"✅ {issue_key} added to sprint\n\n{output}"
-
-    @auto_heal()
-    @registry.tool()
-    async def jira_ai_helper(issue_key: str, action: str = "summarize") -> str:
-        """
-        AI helper for Jira issues - provides structured analysis.
-
-        Args:
-            issue_key: The Jira issue key (e.g., AAP-12345)
-            action: What to do - "summarize", "next_steps", "blockers"
-
-        Returns:
-            AI-assisted analysis of the issue.
-        """
-        import re
-
-        # Get issue details (using view-issue, no JSON output available)
-        success, output = await run_rh_issue(["view-issue", issue_key])
-        if not success:
-            return f"❌ Failed to get issue: {output}"
-
-        # Parse key-value pairs from output
-        issue = {}
-        for line in output.split("\n"):
-            match = re.match(r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$", line.strip(), re.IGNORECASE)
-            if match:
-                key = match.group(1).strip().lower().replace(" ", "_").replace("/", "_")
-                value = match.group(2).strip()
-                issue[key] = value
-
-        # Extract description section if present
-        desc_match = re.search(r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL)
-        if desc_match:
-            issue["description"] = desc_match.group(1).strip()
-
-        summary = issue.get("summary", "No summary")
-        status = issue.get("status", "Unknown")
-        description = issue.get("description", "No description")[:500]
-        acceptance = issue.get("acceptance_criteria", "")[:300]
-
-        if action == "summarize":
-            return f"""## Issue Summary: {issue_key}
+    if action == "summarize":
+        return f"""## Issue Summary: {issue_key}
 
 **Title:** {summary}
 **Status:** {status}
@@ -165,174 +125,83 @@ def register_tools(server: "FastMCP") -> int:
 **Acceptance Criteria:**
 {acceptance if acceptance else 'Not defined'}
 """
-        elif action == "next_steps":
-            steps = []
-            if status == "Open" or status == "New":
-                steps = [
-                    "1. Review requirements",
-                    "2. Create feature branch",
-                    "3. Start implementation",
-                ]
-            elif status == "In Progress":
-                steps = [
-                    "1. Continue implementation",
-                    "2. Run local tests",
-                    "3. Create MR when ready",
-                ]
-            elif status == "In Review" or status == "Review":
-                steps = ["1. Address review feedback", "2. Update MR", "3. Get approval"]
-            else:
-                steps = ["1. Check issue status", "2. Determine next action"]
+    elif action == "next_steps":
+        steps = []
+        if status == "Open" or status == "New":
+            steps = ["1. Review requirements", "2. Create feature branch", "3. Start implementation"]
+        elif status == "In Progress":
+            steps = ["1. Continue implementation", "2. Run local tests", "3. Create MR when ready"]
+        elif status == "In Review" or status == "Review":
+            steps = ["1. Address review feedback", "2. Update MR", "3. Get approval"]
+        else:
+            steps = ["1. Check issue status", "2. Determine next action"]
 
-            return f"""## Next Steps for {issue_key}
+        return f"""## Next Steps for {issue_key}
 
 **Current Status:** {status}
 
 **Suggested Steps:**
 {chr(10).join(steps)}
 """
-        elif action == "blockers":
-            return f"""## Blocker Analysis: {issue_key}
+    elif action == "blockers":
+        return f"""## Blocker Analysis: {issue_key}
 
 **Status:** {status}
 
 Use `jira_list_blocked()` to see all blocked issues.
 Use `jira_view_issue({issue_key})` for full details including linked issues.
 """
-        else:
-            return f"Unknown action: {action}. Use: summarize, next_steps, blockers"
+    else:
+        return f"Unknown action: {action}. Use: summarize, next_steps, blockers"
 
-    @auto_heal()
-    @registry.tool()
-    async def jira_block(issue_key: str, blocked_by: str, reason: str = "") -> str:
-        """
-        Mark a Jira issue as blocked by another issue.
 
-        Args:
-            issue_key: The issue that is blocked (e.g., AAP-12345)
-            blocked_by: The issue that is blocking (e.g., AAP-12346)
-            reason: Optional reason for the block
+async def _jira_block_impl(issue_key: str, blocked_by: str, reason: str) -> str:
+    """Implementation of jira_block tool."""
+    args = ["block", issue_key, blocked_by]
+    if reason:
+        args.append(reason)
+    success, output = await run_rh_issue(args)
+    if not success:
+        return f"❌ Failed to block: {output}"
+    return f"🚧 {issue_key} blocked by {blocked_by}\n\n{output}"
 
-        Returns:
-            Confirmation of the block.
-        """
-        args = ["block", issue_key, blocked_by]
-        if reason:
-            args.append(reason)
 
-        success, output = await run_rh_issue(args)
+async def _jira_lint_impl(issue_key: str) -> str:
+    """Implementation of jira_lint tool."""
+    success, output = await run_rh_issue(["lint", issue_key], timeout=60)
+    return output
 
-        if not success:
-            return f"❌ Failed to block: {output}"
 
-        return f"🚧 {issue_key} blocked by {blocked_by}\n\n{output}"
+async def _jira_remove_flag_impl(issue_key: str) -> str:
+    """Implementation of jira_remove_flag tool."""
+    success, output = await run_rh_issue(["remove-flag", issue_key])
+    if not success:
+        return f"❌ Failed to remove flag: {output}"
+    return f"✅ Flag removed from {issue_key}\n\n{output}"
 
-    @auto_heal()
-    @registry.tool()
-    async def jira_lint(issue_key: str) -> str:
-        """
-        Lint a Jira issue for quality and completeness.
 
-        Checks issue for:
-        - Description quality and formatting
-        - Acceptance criteria presence and clarity
-        - Epic link assignment
-        - Story points (for in-progress issues)
-        - Labels and components
+async def _jira_remove_sprint_impl(issue_key: str) -> str:
+    """Implementation of jira_remove_sprint tool."""
+    success, output = await run_rh_issue(["remove-sprint", issue_key])
+    if not success:
+        return f"❌ Failed to remove from sprint: {output}"
+    return f"✅ {issue_key} removed from sprint\n\n{output}"
 
-        Note: The rh-issue CLI does not support auto-fix. Use jira_set_*
-        tools to fix issues found by lint.
 
-        Args:
-            issue_key: The Jira issue key (e.g., AAP-12345)
+async def _jira_set_summary_impl(issue_key: str, summary: str) -> str:
+    """Implementation of jira_set_summary tool."""
+    success, output = await run_rh_issue(["set-summary", issue_key, summary])
+    if not success:
+        return f"❌ Failed to set summary: {output}"
+    return f"✅ Summary for {issue_key} updated to: **{summary}**\n\n{output}"
 
-        Returns:
-            Quality report and any issues found.
-        """
-        args = ["lint", issue_key]
 
-        success, output = await run_rh_issue(args, timeout=60)
+async def _jira_show_template_impl(issue_type: str) -> str:
+    """Implementation of jira_show_template tool."""
+    issue_type = issue_type.lower().strip()
 
-        # Lint may return non-zero if issues found, but still useful output
-        return output
-
-    @auto_heal()
-    @registry.tool()
-    async def jira_remove_flag(issue_key: str) -> str:
-        """
-        Remove a flag from a Jira issue.
-
-        Args:
-            issue_key: The Jira issue key (e.g., AAP-12345)
-
-        Returns:
-            Confirmation of flag removal.
-        """
-        success, output = await run_rh_issue(["remove-flag", issue_key])
-
-        if not success:
-            return f"❌ Failed to remove flag: {output}"
-
-        return f"✅ Flag removed from {issue_key}\n\n{output}"
-
-    @auto_heal()
-    @registry.tool()
-    async def jira_remove_sprint(issue_key: str) -> str:
-        """
-        Remove an issue from its current sprint.
-
-        Args:
-            issue_key: The Jira issue key (e.g., AAP-12345)
-
-        Returns:
-            Confirmation of removal.
-        """
-        success, output = await run_rh_issue(["remove-sprint", issue_key])
-
-        if not success:
-            return f"❌ Failed to remove from sprint: {output}"
-
-        return f"✅ {issue_key} removed from sprint\n\n{output}"
-
-    @auto_heal()
-    @registry.tool()
-    async def jira_set_summary(issue_key: str, summary: str) -> str:
-        """
-        Update the summary (title) of a Jira issue.
-
-        Args:
-            issue_key: The Jira issue key (e.g., AAP-12345)
-            summary: The new summary text for the issue
-
-        Returns:
-            Confirmation of the summary update.
-        """
-        success, output = await run_rh_issue(["set-summary", issue_key, summary])
-
-        if not success:
-            return f"❌ Failed to set summary: {output}"
-
-        return f"✅ Summary for {issue_key} updated to: **{summary}**\n\n{output}"
-
-    @auto_heal()
-    @registry.tool()
-    async def jira_show_template(issue_type: str = "story") -> str:
-        """
-        Show the expected YAML template for creating Jira issues.
-
-        This helps understand the exact field names and format expected
-        by the rh-issue CLI's --input-file option.
-
-        Args:
-            issue_type: Issue type to show template for (story, bug, task, epic)
-
-        Returns:
-            YAML template with all supported fields.
-        """
-        issue_type = issue_type.lower().strip()
-
-        templates = {
-            "story": """# YAML Template for Story
+    templates = {
+        "story": """# YAML Template for Story
 # Save this to a file and use with: rh-issue create-issue story "Summary" --input-file story.yaml
 
 Summary: "Add feature X to improve Y"
@@ -378,7 +247,7 @@ Components:
 
 "Epic Link": AAP-12345
 """,
-            "bug": """# YAML Template for Bug
+        "bug": """# YAML Template for Bug
 # Save this to a file and use with: rh-issue create-issue bug "Summary" --input-file bug.yaml
 
 Summary: "API returns 500 on empty request body"
@@ -416,7 +285,7 @@ Components:
 
 Priority: High
 """,
-            "task": """# YAML Template for Task
+        "task": """# YAML Template for Task
 # Save this to a file and use with: rh-issue create-issue task "Summary" --input-file task.yaml
 
 Summary: "Update dependencies to latest versions"
@@ -435,40 +304,216 @@ Description: |
 
 Labels:
   - maintenance
-  - dependencies
+  - technical-debt
 
 Components:
   - Automation Analytics
+
+"Story Points": 2
 """,
-        }
+        "epic": """# YAML Template for Epic
+# Save this to a file and use with: rh-issue create-issue epic "Summary" --input-file epic.yaml
 
-        template = templates.get(issue_type, templates["story"])
+Summary: "Modernize Automation Analytics UI"
 
-        return f"""## Jira YAML Template: {issue_type.capitalize()}
+Description: |
+  h2. Epic Overview
 
-{template}
+  Complete overhaul of the Automation Analytics UI to use modern design patterns.
 
----
+  h3. Goals
 
-## Important Notes
+  * Improve user experience
+  * Reduce page load times
+  * Modernize visual design
 
-**Field Names:** Must use Title Case with spaces in quotes:
-- ✅ `"User Story":`
-- ✅ `"Acceptance Criteria":`
-- ❌ `user_story:` (won't work)
-- ❌ `acceptance_criteria:` (won't work)
+  h3. Success Criteria
 
-**Markup:** Use Jira wiki markup, NOT Markdown:
-- `h2. Heading` not `## Heading`
-- `*bold*` not `**bold**`
-- `{{code}}` not `` `code` ``
-- `* item` not `- item`
+  * 50% faster load times
+  * 90% positive user feedback
+  * All WCAG 2.1 AA requirements met
 
-**Tip:** Use the `create_jira_issue` skill to auto-convert Markdown:
-```
-skill_run("create_jira_issue", '{{"summary": "...", "description": "## Markdown works here!"}}'
-```
+Labels:
+  - epic
+  - ui-ux
+
+Components:
+  - Automation Analytics
+
+"Start Date": 2024-Q1
+"Target End": 2024-Q2
+""",
+    }
+
+    if issue_type not in templates:
+        return f"""❌ Unknown issue type: {issue_type}
+
+Available types:
+  - story
+  - bug
+  - task
+  - epic
+
+Usage: jira_show_template("story")
 """
+
+    return templates[issue_type]
+
+
+async def _jira_unassign_impl(issue_key: str) -> str:
+    """Implementation of jira_unassign tool."""
+    success, output = await run_rh_issue(["unassign", issue_key])
+    if not success:
+        return f"❌ Failed to unassign: {output}"
+    return f"✅ {issue_key} unassigned\n\n{output}"
+
+
+async def _jira_unblock_impl(issue_key: str, blocked_by: str) -> str:
+    """Implementation of jira_unblock tool."""
+    success, output = await run_rh_issue(["unblock", issue_key, blocked_by])
+    if not success:
+        return f"❌ Failed to unblock: {output}"
+    return f"✅ {issue_key} unblocked from {blocked_by}\n\n{output}"
+
+
+def register_tools(server: "FastMCP") -> int:
+    """Register tools with the MCP server."""
+    registry = ToolRegistry(server)
+
+    # ==================== TOOLS NOT USED IN SKILLS ====================
+    @auto_heal()
+    @registry.tool()
+    async def jira_add_flag(issue_key: str) -> str:
+        """
+        Add a flag (impediment) to a Jira issue.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+
+        Returns:
+            Confirmation of the flag.
+        """
+        return await _jira_add_flag_impl(issue_key)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_add_to_sprint(issue_key: str, sprint_id: str = "") -> str:
+        """
+        Add an issue to a sprint.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+            sprint_id: Sprint ID (optional, uses current sprint if not specified)
+
+        Returns:
+            Confirmation of sprint assignment.
+        """
+        return await _jira_add_to_sprint_impl(issue_key, sprint_id)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_ai_helper(issue_key: str, action: str = "summarize") -> str:
+        """
+        AI helper for Jira issues - provides structured analysis.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+            action: What to do - "summarize", "next_steps", "blockers"
+
+        Returns:
+            AI-assisted analysis of the issue.
+        """
+        return await _jira_ai_helper_impl(issue_key, action)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_block(issue_key: str, blocked_by: str, reason: str = "") -> str:
+        """
+        Mark an issue as blocked by another issue.
+
+        Args:
+            issue_key: The issue to mark as blocked (e.g., AAP-12345)
+            blocked_by: The issue causing the block (e.g., AAP-12346)
+            reason: Optional reason for the block
+
+        Returns:
+            Confirmation of the block relationship.
+        """
+        return await _jira_block_impl(issue_key, blocked_by, reason)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_lint(issue_key: str) -> str:
+        """
+        Run quality checks on a Jira issue (check description, acceptance criteria, etc.).
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+
+        Returns:
+            Lint results and suggestions.
+        """
+        return await _jira_lint_impl(issue_key)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_remove_flag(issue_key: str) -> str:
+        """
+        Remove a flag from a Jira issue.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+
+        Returns:
+            Confirmation of flag removal.
+        """
+        return await _jira_remove_flag_impl(issue_key)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_remove_sprint(issue_key: str) -> str:
+        """
+        Remove an issue from its current sprint.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+
+        Returns:
+            Confirmation of removal.
+        """
+        return await _jira_remove_sprint_impl(issue_key)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_set_summary(issue_key: str, summary: str) -> str:
+        """
+        Update the summary (title) of a Jira issue.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+            summary: The new summary text for the issue
+
+        Returns:
+            Confirmation of the summary update.
+        """
+        return await _jira_set_summary_impl(issue_key, summary)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_show_template(issue_type: str = "story") -> str:
+        """
+        Show the expected YAML template for creating Jira issues.
+
+        This helps understand the exact field names and format expected
+        by the rh-issue CLI's --input-file option.
+
+        Args:
+            issue_type: Issue type to show template for (story, bug, task, epic)
+
+        Returns:
+            YAML template with all supported fields.
+        """
+        return await _jira_show_template_impl(issue_type)
 
     @auto_heal()
     @registry.tool()
@@ -482,12 +527,7 @@ skill_run("create_jira_issue", '{{"summary": "...", "description": "## Markdown 
         Returns:
             Confirmation of the unassignment.
         """
-        success, output = await run_rh_issue(["unassign", issue_key])
-
-        if not success:
-            return f"❌ Failed to unassign: {output}"
-
-        return f"✅ {issue_key} unassigned\n\n{output}"
+        return await _jira_unassign_impl(issue_key)
 
     @auto_heal()
     @registry.tool()
@@ -502,9 +542,6 @@ skill_run("create_jira_issue", '{{"summary": "...", "description": "## Markdown 
         Returns:
             Confirmation of the unblock.
         """
-        success, output = await run_rh_issue(["unblock", issue_key, blocked_by])
+        return await _jira_unblock_impl(issue_key, blocked_by)
 
-        if not success:
-            return f"❌ Failed to unblock: {output}"
-
-        return f"✅ {issue_key} unblocked from {blocked_by}\n\n{output}"
+    return registry.count
