@@ -17,19 +17,18 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
-
-logger = logging.getLogger(__name__)
-
-from typing import cast
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
-# Setup project path for server imports
+# Setup project path for server imports FIRST
 from tool_modules.common import PROJECT_ROOT, setup_path  # noqa: F401 - side effect: adds to sys.path
+
+logger = logging.getLogger(__name__)
 
 # Add current directory to sys.path to support both relative and absolute imports
 # when loaded via spec_from_file_location
@@ -109,6 +108,132 @@ async def get_manager():
 
             _manager = SlackListenerManager()
         return _manager
+
+
+async def _slack_add_reaction_impl(channel_id: str, timestamp: str, emoji: str) -> str:
+    """Implementation of slack_add_reaction tool."""
+    try:
+        manager = await get_manager()
+        await manager.initialize()
+
+        await manager.session.add_reaction(channel_id, timestamp, emoji)
+
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Added :{emoji}: reaction",
+            }
+        )
+
+    except Exception as e:
+        return json.dumps({"error": str(e), "success": False})
+
+
+async def _slack_get_channels_impl() -> str:
+    """Implementation of slack_get_channels tool."""
+    try:
+        config = _get_slack_config()
+
+        # Get named channels
+        channels_config = config.get("channels", {})
+        channels = {}
+        for name, info in channels_config.items():
+            if isinstance(info, dict):
+                channels[name] = {
+                    "id": info.get("id", ""),
+                    "name": info.get("name", name),
+                    "description": info.get("description", ""),
+                }
+            elif isinstance(info, str):
+                # Legacy format: just channel ID
+                channels[name] = {"id": info, "name": name, "description": ""}
+
+        # Get alert channels
+        listener_config = config.get("listener", {})
+        alert_channels = listener_config.get("alert_channels", {})
+        alerts = {}
+        for channel_id, info in alert_channels.items():
+            alerts[info.get("name", channel_id)] = {
+                "id": channel_id,
+                "environment": info.get("environment", ""),
+                "severity": info.get("severity", ""),
+                "auto_investigate": info.get("auto_investigate", False),
+            }
+
+        # Get watched channels
+        watched = listener_config.get("watched_channels", [])
+
+        return json.dumps(
+            {
+                "channels": channels,
+                "alert_channels": alerts,
+                "watched_channels": watched,
+                "team_channel_id": channels.get("team", {}).get("id", ""),
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+async def _slack_list_messages_impl(channel_id: str, limit: int, include_threads: bool) -> str:
+    """Implementation of slack_list_messages tool."""
+    try:
+        manager = await get_manager()
+        await manager.initialize()
+
+        messages = await manager.session.get_channel_history(
+            channel_id=channel_id,
+            limit=min(limit, 100),
+        )
+
+        result = []
+        for msg in messages:
+            user_id = msg.get("user", "")
+            user_name = await manager.state_db.get_user_name(user_id) or user_id
+
+            result.append(
+                {
+                    "ts": msg.get("ts", ""),
+                    "user": user_name,
+                    "text": msg.get("text", ""),
+                    "thread_ts": msg.get("thread_ts"),
+                    "reply_count": msg.get("reply_count", 0),
+                }
+            )
+
+            # Optionally fetch thread replies
+            if include_threads and msg.get("reply_count", 0) > 0:
+                try:
+                    thread_ts = msg.get("thread_ts") or msg.get("ts")
+                    replies = await manager.session.get_thread_replies(channel_id, thread_ts)
+                    for reply in replies[1:]:  # Skip first (parent)
+                        reply_user = reply.get("user", "")
+                        reply_name = await manager.state_db.get_user_name(reply_user) or reply_user
+                        result.append(
+                            {
+                                "ts": reply.get("ts", ""),
+                                "user": reply_name,
+                                "text": reply.get("text", ""),
+                                "thread_ts": thread_ts,
+                                "is_reply": True,
+                            }
+                        )
+                except Exception as e:
+                    logger.warning(f"Could not fetch thread: {e}")
+
+        return json.dumps(
+            {
+                "channel_id": channel_id,
+                "count": len(result),
+                "messages": result,
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 def register_tools(server: FastMCP) -> int:
@@ -196,21 +321,7 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Confirmation
         """
-        try:
-            manager = await get_manager()
-            await manager.initialize()
-
-            await manager.session.add_reaction(channel_id, timestamp, emoji)
-
-            return json.dumps(
-                {
-                    "success": True,
-                    "message": f"Added :{emoji}: reaction",
-                }
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e), "success": False})
+        return await _slack_add_reaction_impl(channel_id, timestamp, emoji)
 
     @auto_heal()
     @registry.tool()
@@ -228,50 +339,7 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             JSON with configured channels and their IDs
         """
-        try:
-            config = _get_slack_config()
-
-            # Get named channels
-            channels_config = config.get("channels", {})
-            channels = {}
-            for name, info in channels_config.items():
-                if isinstance(info, dict):
-                    channels[name] = {
-                        "id": info.get("id", ""),
-                        "name": info.get("name", name),
-                        "description": info.get("description", ""),
-                    }
-                elif isinstance(info, str):
-                    # Legacy format: just channel ID
-                    channels[name] = {"id": info, "name": name, "description": ""}
-
-            # Get alert channels
-            listener_config = config.get("listener", {})
-            alert_channels = listener_config.get("alert_channels", {})
-            alerts = {}
-            for channel_id, info in alert_channels.items():
-                alerts[info.get("name", channel_id)] = {
-                    "id": channel_id,
-                    "environment": info.get("environment", ""),
-                    "severity": info.get("severity", ""),
-                    "auto_investigate": info.get("auto_investigate", False),
-                }
-
-            # Get watched channels
-            watched = listener_config.get("watched_channels", [])
-
-            return json.dumps(
-                {
-                    "channels": channels,
-                    "alert_channels": alerts,
-                    "watched_channels": watched,
-                    "team_channel_id": channels.get("team", {}).get("id", ""),
-                },
-                indent=2,
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return await _slack_get_channels_impl()
 
     @auto_heal()
     @registry.tool()
@@ -291,58 +359,6 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Recent messages with sender, text, and timestamp
         """
-        try:
-            manager = await get_manager()
-            await manager.initialize()
+        return await _slack_list_messages_impl(channel_id, limit, include_threads)
 
-            messages = await manager.session.get_channel_history(
-                channel_id=channel_id,
-                limit=min(limit, 100),
-            )
-
-            result = []
-            for msg in messages:
-                user_id = msg.get("user", "")
-                user_name = await manager.state_db.get_user_name(user_id) or user_id
-
-                result.append(
-                    {
-                        "ts": msg.get("ts", ""),
-                        "user": user_name,
-                        "text": msg.get("text", ""),
-                        "thread_ts": msg.get("thread_ts"),
-                        "reply_count": msg.get("reply_count", 0),
-                    }
-                )
-
-                # Optionally fetch thread replies
-                if include_threads and msg.get("reply_count", 0) > 0:
-                    try:
-                        thread_ts = msg.get("thread_ts") or msg.get("ts")
-                        replies = await manager.session.get_thread_replies(channel_id, thread_ts)
-                        for reply in replies[1:]:  # Skip first (parent)
-                            reply_user = reply.get("user", "")
-                            reply_name = await manager.state_db.get_user_name(reply_user) or reply_user
-                            result.append(
-                                {
-                                    "ts": reply.get("ts", ""),
-                                    "user": reply_name,
-                                    "text": reply.get("text", ""),
-                                    "thread_ts": thread_ts,
-                                    "is_reply": True,
-                                }
-                            )
-                    except Exception as e:
-                        logger.warning(f"Could not fetch thread: {e}")
-
-            return json.dumps(
-                {
-                    "channel_id": channel_id,
-                    "count": len(result),
-                    "messages": result,
-                },
-                indent=2,
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+    return registry.count
