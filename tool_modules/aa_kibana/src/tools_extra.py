@@ -21,6 +21,8 @@ from server.utils import get_kubeconfig, load_config
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
+from .tools_basic import kibana_search_logs
+
 logger = logging.getLogger(__name__)
 
 
@@ -178,11 +180,122 @@ def build_kibana_url(
 # ==================== SEARCH TOOLS ====================
 
 
+async def _kibana_get_link_impl(environment: str, query: str, namespace: str, time_range: str) -> list[TextContent]:
+    """Implementation of kibana_get_link tool."""
+    env_config = get_cached_kibana_config(environment)
+    if not env_config:
+        return [TextContent(type="text", text=f"❌ Unknown environment: {environment}")]
+
+    ns = namespace or env_config.namespace
+    link = build_kibana_url(environment, query, ns, f"now-{time_range}", "now")
+
+    lines = [
+        f"## Kibana Link: {environment}",
+        "",
+        f"**Query:** `{query}`",
+        f"**Namespace:** `{ns}`",
+        f"**Time Range:** Last {time_range}",
+        "",
+        f"**URL:** {link}",
+        "",
+        "Copy this link to share or open in browser.",
+    ]
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _kibana_index_patterns_impl(environment: str) -> list[TextContent]:
+    """Implementation of kibana_index_patterns tool."""
+    success, result = await kibana_request(
+        environment,
+        "/api/saved_objects/_find?type=index-pattern&per_page=100",
+    )
+
+    if not success:
+        return [TextContent(type="text", text=f"❌ Failed to list index patterns: {result}")]
+
+    patterns = result.get("saved_objects", [])
+
+    lines = [f"## Index Patterns: {environment}", ""]
+
+    if not patterns:
+        lines.append("No index patterns found.")
+    else:
+        lines.append("| Pattern | Title |")
+        lines.append("|---------|-------|")
+        for p in patterns:
+            attrs = p.get("attributes", {})
+            title = attrs.get("title", "N/A")
+            lines.append(f"| `{title}` | {attrs.get('name', title)} |")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _kibana_list_dashboards_impl(environment: str, search: str) -> list[TextContent]:
+    """Implementation of kibana_list_dashboards tool."""
+    endpoint = "/api/saved_objects/_find?type=dashboard&per_page=50"
+    if search:
+        endpoint += f"&search={urllib.parse.quote(search)}"
+
+    success, result = await kibana_request(environment, endpoint)
+
+    if not success:
+        return [TextContent(type="text", text=f"❌ Failed to list dashboards: {result}")]
+
+    dashboards = result.get("saved_objects", [])
+    env_config = get_cached_kibana_config(environment)
+
+    lines = [f"## Dashboards: {environment}", ""]
+
+    if not dashboards:
+        lines.append("No dashboards found.")
+    else:
+        for d in dashboards[:20]:
+            dash_id = d.get("id", "")
+            title = d.get("attributes", {}).get("title", "Untitled")
+            url = f"{env_config.url}/app/dashboards#/view/{dash_id}"
+            lines.append(f"- **{title}**: [Open]({url})")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _kibana_status_impl(environment: str) -> list[TextContent]:
+    """Implementation of kibana_status tool."""
+    envs = [environment] if environment else ["stage", "production"]
+
+    lines = ["## Kibana Status", ""]
+
+    for env in envs:
+        env_config = get_cached_kibana_config(env)
+        if not env_config:
+            lines.append(f"**{env}:** ❌ Unknown environment")
+            continue
+
+        token = get_token(env_config.kubeconfig)
+
+        if not token:
+            kube_suffix = env_config.kubeconfig.split(".")[-1]
+            lines.append(f"**{env}:** ⚠️ Not authenticated - run `kube {kube_suffix}`")
+            continue
+
+        success, result = await kibana_request(env, "/api/status")
+
+        if success:
+            status = result.get("status", {}).get("overall", {}).get("state", "unknown")
+            version = result.get("version", {}).get("number", "unknown")
+            lines.append(f"**{env}:** ✅ Connected (v{version}, status: {status})")
+            lines.append(f"  URL: {env_config.url}")
+        else:
+            lines.append(f"**{env}:** ❌ {result}")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-        # ==================== TOOLS NOT USED IN SKILLS ====================
+    # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal_stage()
     @registry.tool()
     async def kibana_error_link(
@@ -253,26 +366,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Clickable Kibana URL.
         """
-        env_config = get_cached_kibana_config(environment)
-        if not env_config:
-            return [TextContent(type="text", text=f"❌ Unknown environment: {environment}")]
-
-        ns = namespace or env_config.namespace
-        link = build_kibana_url(environment, query, ns, f"now-{time_range}", "now")
-
-        lines = [
-            f"## Kibana Link: {environment}",
-            "",
-            f"**Query:** `{query}`",
-            f"**Namespace:** `{ns}`",
-            f"**Time Range:** Last {time_range}",
-            "",
-            f"**URL:** {link}",
-            "",
-            "Copy this link to share or open in browser.",
-        ]
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _kibana_get_link_impl(environment, query, namespace, time_range)
 
     @auto_heal_stage()
     @registry.tool()
@@ -307,9 +401,7 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_stage()
     @registry.tool()
-    async def kibana_index_patterns(
-        environment: str,
-    ) -> list[TextContent]:
+    async def kibana_index_patterns(environment: str) -> list[TextContent]:
         """
         List available index patterns in Kibana.
 
@@ -319,36 +411,11 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of index patterns.
         """
-        success, result = await kibana_request(
-            environment,
-            "/api/saved_objects/_find?type=index-pattern&per_page=100",
-        )
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to list index patterns: {result}")]
-
-        patterns = result.get("saved_objects", [])
-
-        lines = [f"## Index Patterns: {environment}", ""]
-
-        if not patterns:
-            lines.append("No index patterns found.")
-        else:
-            lines.append("| Pattern | Title |")
-            lines.append("|---------|-------|")
-            for p in patterns:
-                attrs = p.get("attributes", {})
-                title = attrs.get("title", "N/A")
-                lines.append(f"| `{title}` | {attrs.get('name', title)} |")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _kibana_index_patterns_impl(environment)
 
     @auto_heal_stage()
     @registry.tool()
-    async def kibana_list_dashboards(
-        environment: str,
-        search: str = "",
-    ) -> list[TextContent]:
+    async def kibana_list_dashboards(environment: str, search: str = "") -> list[TextContent]:
         """
         List saved dashboards in Kibana.
 
@@ -359,36 +426,11 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of available dashboards with links.
         """
-        endpoint = "/api/saved_objects/_find?type=dashboard&per_page=50"
-        if search:
-            endpoint += f"&search={urllib.parse.quote(search)}"
-
-        success, result = await kibana_request(environment, endpoint)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to list dashboards: {result}")]
-
-        dashboards = result.get("saved_objects", [])
-        env_config = get_cached_kibana_config(environment)
-
-        lines = [f"## Dashboards: {environment}", ""]
-
-        if not dashboards:
-            lines.append("No dashboards found.")
-        else:
-            for d in dashboards[:20]:
-                dash_id = d.get("id", "")
-                title = d.get("attributes", {}).get("title", "Untitled")
-                url = f"{env_config.url}/app/dashboards#/view/{dash_id}"
-                lines.append(f"- **{title}**: [Open]({url})")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _kibana_list_dashboards_impl(environment, search)
 
     @auto_heal_stage()
     @registry.tool()
-    async def kibana_status(
-        environment: str = "",
-    ) -> list[TextContent]:
+    async def kibana_status(environment: str = "") -> list[TextContent]:
         """
         Check Kibana connectivity and authentication status.
 
@@ -398,34 +440,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Connection status for each environment.
         """
-        envs = [environment] if environment else ["stage", "production"]
-
-        lines = ["## Kibana Status", ""]
-
-        for env in envs:
-            env_config = get_cached_kibana_config(env)
-            if not env_config:
-                lines.append(f"**{env}:** ❌ Unknown environment")
-                continue
-
-            token = get_token(env_config.kubeconfig)
-
-            if not token:
-                kube_suffix = env_config.kubeconfig.split(".")[-1]
-                lines.append(f"**{env}:** ⚠️ Not authenticated - run `kube {kube_suffix}`")
-                continue
-
-            success, result = await kibana_request(env, "/api/status")
-
-            if success:
-                status = result.get("status", {}).get("overall", {}).get("state", "unknown")
-                version = result.get("version", {}).get("number", "unknown")
-                lines.append(f"**{env}:** ✅ Connected (v{version}, status: {status})")
-                lines.append(f"  URL: {env_config.url}")
-            else:
-                lines.append(f"**{env}:** ❌ {result}")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _kibana_status_impl(environment)
 
     @auto_heal_stage()
     @registry.tool()
@@ -458,3 +473,5 @@ def register_tools(server: "FastMCP") -> int:
             time_range=time_range,
             size=500,
         )
+
+    return registry.count
