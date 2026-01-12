@@ -142,58 +142,256 @@ async def run_glab(
 # ==================== MERGE REQUESTS ====================
 
 
-def register_tools(server: "FastMCP") -> int:
-    """Register tools with the MCP server."""
-    registry = ToolRegistry(server)
+# ==================== TOOL IMPLEMENTATIONS ====================
 
-    # REMOVED: gitlab_view_url - low value, just returns URL content
 
-    # ==================== TOOLS USED IN SKILLS ====================
+async def _gitlab_ci_lint_impl(project: str) -> str:
+    """Implementation of gitlab_ci_lint tool."""
+    success, output = await run_glab(["ci", "lint"], repo=project)
+    return f"✅ CI Config Valid\n\n{output}" if success else f"❌ Lint failed:\n\n{output}"
+
+
+async def _gitlab_ci_list_impl(project: str, status: str = "", page: int = 1) -> str:
+    """Implementation of gitlab_ci_list tool."""
+    args = ["ci", "list", "--page", str(page)]
+    if status:
+        args.extend(["--status", status])
+    success, output = await run_glab(args, repo=project)
+    return output if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_ci_status_impl(project: str, branch: str = "") -> str:
+    """Implementation of gitlab_ci_status tool."""
+    args = ["ci", "status"]
+    if branch:
+        args.extend(["--branch", branch])
+    success, output = await run_glab(args, repo=project)
+    return output if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_ci_trace_impl(project: str, job_id: int) -> str:
+    """Implementation of gitlab_ci_trace tool."""
+    success, output = await run_glab(["ci", "trace", str(job_id)], repo=project, timeout=120)
+    if not success:
+        return f"❌ Failed: {output}"
+    return f"## Job {job_id} Log\n\n```\n{truncate_output(output, max_length=15000, mode='tail')}\n```"
+
+
+async def _gitlab_ci_view_impl(project: str, branch: str = "") -> str:
+    """Implementation of gitlab_ci_view tool."""
+    args = ["ci", "view"]
+    if branch:
+        args.append(branch)
+    success, output = await run_glab(args, repo=project)
+    return output if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_list_mrs_impl(
+    project: str,
+    state: str = "opened",
+    author: str = "",
+) -> str:
+    """Implementation of gitlab_list_mrs tool."""
+    # glab uses flags instead of --state: --closed, --merged, --all
+    args = ["mr", "list"]
+    if state == "closed":
+        args.append("--closed")
+    elif state == "merged":
+        args.append("--merged")
+    elif state == "all":
+        args.append("--all")
+    # "opened" is the default, no flag needed
+
+    if author:
+        args.extend(["--author", author])
+    success, output = await run_glab(args, repo=project)
+    if not success:
+        return f"❌ Failed: {output}"
+    return f"## MRs in {project}\n\n{output}"
+
+
+async def _gitlab_mr_approve_impl(project: str, mr_id: int) -> str:
+    """Implementation of gitlab_mr_approve tool."""
+    success, output = await run_glab(["mr", "approve", str(mr_id)], repo=project)
+    return f"✅ MR !{mr_id} Approved" if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_mr_approvers_impl(project: str, mr_id: int) -> str:
+    """Implementation of gitlab_mr_approvers tool."""
+    success, output = await run_glab(["mr", "approvers", str(mr_id)], repo=project)
+    return output if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_mr_close_impl(project: str, mr_id: int) -> str:
+    """Implementation of gitlab_mr_close tool."""
+    success, output = await run_glab(["mr", "close", str(mr_id)], repo=project)
+    return f"✅ MR !{mr_id} Closed" if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_mr_comment_impl(project: str, mr_id: int, message: str) -> str:
+    """Implementation of gitlab_mr_comment tool."""
+    success, output = await run_glab(["mr", "note", str(mr_id), "--message", message], repo=project)
+    return f"✅ Comment added to !{mr_id}" if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_mr_comments_impl(project: str, mr_id: int) -> str:
+    """Implementation of gitlab_mr_comments tool."""
+    # glab doesn't have a direct comments command, so we use mr view which includes discussions
+    success, output = await run_glab(["mr", "view", str(mr_id), "--comments"], repo=project)
+    if not success:
+        # Fallback to basic view
+        success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
+    return f"## Comments on !{mr_id}\n\n{output}" if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_mr_create_impl(
+    project: str,
+    title: str = "",
+    description: str = "",
+    source_branch: str = "",
+    target_branch: str = "main",
+    draft: bool = False,
+    labels: str = "",
+    assignee: str = "",
+    reviewer: str = "",
+) -> str:
+    """Implementation of gitlab_mr_create tool."""
+    args = ["mr", "create", "--target-branch", target_branch]
+    if title:
+        args.extend(["--title", title])
+    else:
+        args.append("--fill")
+    if description:
+        args.extend(["--description", description])
+    if source_branch:
+        args.extend(["--source-branch", source_branch])
+    if draft:
+        args.append("--draft")
+    if labels:
+        args.extend(["--label", labels])
+    if assignee:
+        args.extend(["--assignee", assignee])
+    if reviewer:
+        args.extend(["--reviewer", reviewer])
+    args.append("--yes")
+    success, output = await run_glab(args, repo=project)
+    return f"✅ MR Created\n\n{output}" if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_mr_diff_impl(project: str, mr_id: int) -> str:
+    """Implementation of gitlab_mr_diff tool."""
+    success, output = await run_glab(["mr", "diff", str(mr_id)], repo=project, timeout=120)
+    if not success:
+        return f"❌ Failed: {output}"
+    return f"## Diff for !{mr_id}\n\n```diff\n{truncate_output(output, max_length=10000)}\n```"
+
+
+async def _gitlab_mr_list_impl(
+    project: str,
+    state: str = "opened",
+    author: str = "",
+    assignee: str = "",
+    reviewer: str = "",
+    label: str = "",
+) -> str:
+    """Implementation of gitlab_mr_list tool."""
+    # glab uses flags instead of --state: --closed, --merged, --all
+    args = ["mr", "list"]
+    if state == "closed":
+        args.append("--closed")
+    elif state == "merged":
+        args.append("--merged")
+    elif state == "all":
+        args.append("--all")
+    # "opened" is the default, no flag needed
+
+    if author:
+        args.extend(["--author", author])
+    if assignee:
+        args.extend(["--assignee", assignee])
+    if reviewer:
+        args.extend(["--reviewer", reviewer])
+    if label:
+        args.extend(["--label", label])
+    success, output = await run_glab(args, repo=project)
+    return output if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_mr_update_impl(
+    project: str,
+    mr_id: int,
+    title: str = "",
+    description: str = "",
+    add_label: str = "",
+    remove_label: str = "",
+    assignee: str = "",
+    reviewer: str = "",
+    draft: bool | None = None,
+) -> str:
+    """Implementation of gitlab_mr_update tool."""
+    args = ["mr", "update", str(mr_id)]
+    if title:
+        args.extend(["--title", title])
+    if description:
+        args.extend(["--description", description])
+    if add_label:
+        args.extend(["--label", add_label])
+    if remove_label:
+        args.extend(["--unlabel", remove_label])
+    if assignee:
+        args.extend(["--assignee", assignee])
+    if reviewer:
+        args.extend(["--reviewer", reviewer])
+    if draft is True:
+        args.append("--draft")
+    elif draft is False:
+        args.append("--ready")
+    success, output = await run_glab(args, repo=project)
+    return f"✅ MR !{mr_id} Updated\n\n{output}" if success else f"❌ Failed: {output}"
+
+
+async def _gitlab_mr_view_impl(project: str, mr_id: int) -> str:
+    """Implementation of gitlab_mr_view tool."""
+    success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
+    return output if success else f"❌ Failed: {output}"
+
+
+def _register_ci_tools(registry: ToolRegistry) -> None:
+    """Register GitLab CI/CD tools."""
+
     @auto_heal()
     @registry.tool()
     async def gitlab_ci_lint(project: str) -> str:
         """Lint/validate the .gitlab-ci.yml file."""
-        success, output = await run_glab(["ci", "lint"], repo=project)
-        return f"✅ CI Config Valid\n\n{output}" if success else f"❌ Lint failed:\n\n{output}"
+        return await _gitlab_ci_lint_impl(project)
 
     @auto_heal()
     @registry.tool()
     async def gitlab_ci_list(project: str, status: str = "", page: int = 1) -> str:
         """List CI/CD pipelines for a project."""
-        args = ["ci", "list", "--page", str(page)]
-        if status:
-            args.extend(["--status", status])
-        success, output = await run_glab(args, repo=project)
-        return output if success else f"❌ Failed: {output}"
+        return await _gitlab_ci_list_impl(project, status, page)
 
     @auto_heal()
     @registry.tool()
     async def gitlab_ci_status(project: str, branch: str = "") -> str:
         """Get the status of the latest pipeline on a branch."""
-        args = ["ci", "status"]
-        if branch:
-            args.extend(["--branch", branch])
-        success, output = await run_glab(args, repo=project)
-        return output if success else f"❌ Failed: {output}"
+        return await _gitlab_ci_status_impl(project, branch)
 
     @auto_heal()
     @registry.tool()
     async def gitlab_ci_trace(project: str, job_id: int) -> str:
         """Get the log output from a CI/CD job."""
-        success, output = await run_glab(["ci", "trace", str(job_id)], repo=project, timeout=120)
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Job {job_id} Log\n\n```\n{truncate_output(output, max_length=15000, mode='tail')}\n```"
+        return await _gitlab_ci_trace_impl(project, job_id)
 
     @auto_heal()
     @registry.tool()
     async def gitlab_ci_view(project: str, branch: str = "") -> str:
         """View detailed pipeline information with all jobs."""
-        args = ["ci", "view"]
-        if branch:
-            args.append(branch)
-        success, output = await run_glab(args, repo=project)
-        return output if success else f"❌ Failed: {output}"
+        return await _gitlab_ci_view_impl(project, branch)
+
+
+def _register_mr_tools(registry: ToolRegistry) -> None:
+    """Register GitLab Merge Request tools."""
 
     @auto_heal()
     @registry.tool()
@@ -213,50 +411,31 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of merge requests.
         """
-        # glab uses flags instead of --state: --closed, --merged, --all
-        args = ["mr", "list"]
-        if state == "closed":
-            args.append("--closed")
-        elif state == "merged":
-            args.append("--merged")
-        elif state == "all":
-            args.append("--all")
-        # "opened" is the default, no flag needed
-
-        if author:
-            args.extend(["--author", author])
-        success, output = await run_glab(args, repo=project)
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## MRs in {project}\n\n{output}"
+        return await _gitlab_list_mrs_impl(project, state, author)
 
     @auto_heal()
     @registry.tool()
     async def gitlab_mr_approve(project: str, mr_id: int) -> str:
         """Approve a merge request."""
-        success, output = await run_glab(["mr", "approve", str(mr_id)], repo=project)
-        return f"✅ MR !{mr_id} Approved" if success else f"❌ Failed: {output}"
+        return await _gitlab_mr_approve_impl(project, mr_id)
 
     @auto_heal()
     @registry.tool()
     async def gitlab_mr_approvers(project: str, mr_id: int) -> str:
         """List eligible approvers for a merge request."""
-        success, output = await run_glab(["mr", "approvers", str(mr_id)], repo=project)
-        return output if success else f"❌ Failed: {output}"
+        return await _gitlab_mr_approvers_impl(project, mr_id)
 
     @auto_heal()
     @registry.tool()
     async def gitlab_mr_close(project: str, mr_id: int) -> str:
         """Close a merge request without merging."""
-        success, output = await run_glab(["mr", "close", str(mr_id)], repo=project)
-        return f"✅ MR !{mr_id} Closed" if success else f"❌ Failed: {output}"
+        return await _gitlab_mr_close_impl(project, mr_id)
 
     @auto_heal()
     @registry.tool()
     async def gitlab_mr_comment(project: str, mr_id: int, message: str) -> str:
         """Add a comment to a merge request."""
-        success, output = await run_glab(["mr", "note", str(mr_id), "--message", message], repo=project)
-        return f"✅ Comment added to !{mr_id}" if success else f"❌ Failed: {output}"
+        return await _gitlab_mr_comment_impl(project, mr_id, message)
 
     @auto_heal()
     @registry.tool()
@@ -271,12 +450,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of comments on the MR.
         """
-        # glab doesn't have a direct comments command, so we use mr view which includes discussions
-        success, output = await run_glab(["mr", "view", str(mr_id), "--comments"], repo=project)
-        if not success:
-            # Fallback to basic view
-            success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
-        return f"## Comments on !{mr_id}\n\n{output}" if success else f"❌ Failed: {output}"
+        return await _gitlab_mr_comments_impl(project, mr_id)
 
     @auto_heal()
     @registry.tool()
@@ -292,35 +466,15 @@ def register_tools(server: "FastMCP") -> int:
         reviewer: str = "",
     ) -> str:
         """Create a new merge request."""
-        args = ["mr", "create", "--target-branch", target_branch]
-        if title:
-            args.extend(["--title", title])
-        else:
-            args.append("--fill")
-        if description:
-            args.extend(["--description", description])
-        if source_branch:
-            args.extend(["--source-branch", source_branch])
-        if draft:
-            args.append("--draft")
-        if labels:
-            args.extend(["--label", labels])
-        if assignee:
-            args.extend(["--assignee", assignee])
-        if reviewer:
-            args.extend(["--reviewer", reviewer])
-        args.append("--yes")
-        success, output = await run_glab(args, repo=project)
-        return f"✅ MR Created\n\n{output}" if success else f"❌ Failed: {output}"
+        return await _gitlab_mr_create_impl(
+            project, title, description, source_branch, target_branch, draft, labels, assignee, reviewer
+        )
 
     @auto_heal()
     @registry.tool()
     async def gitlab_mr_diff(project: str, mr_id: int) -> str:
         """View the diff/changes in a merge request."""
-        success, output = await run_glab(["mr", "diff", str(mr_id)], repo=project, timeout=120)
-        if not success:
-            return f"❌ Failed: {output}"
-        return f"## Diff for !{mr_id}\n\n```diff\n{truncate_output(output, max_length=10000)}\n```"
+        return await _gitlab_mr_diff_impl(project, mr_id)
 
     @auto_heal()
     @registry.tool()
@@ -342,26 +496,7 @@ def register_tools(server: "FastMCP") -> int:
             reviewer: Filter by reviewer username
             label: Filter by label name
         """
-        # glab uses flags instead of --state: --closed, --merged, --all
-        args = ["mr", "list"]
-        if state == "closed":
-            args.append("--closed")
-        elif state == "merged":
-            args.append("--merged")
-        elif state == "all":
-            args.append("--all")
-        # "opened" is the default, no flag needed
-
-        if author:
-            args.extend(["--author", author])
-        if assignee:
-            args.extend(["--assignee", assignee])
-        if reviewer:
-            args.extend(["--reviewer", reviewer])
-        if label:
-            args.extend(["--label", label])
-        success, output = await run_glab(args, repo=project)
-        return output if success else f"❌ Failed: {output}"
+        return await _gitlab_mr_list_impl(project, state, author, assignee, reviewer, label)
 
     @auto_heal()
     @registry.tool()
@@ -377,29 +512,27 @@ def register_tools(server: "FastMCP") -> int:
         draft: bool | None = None,
     ) -> str:
         """Update an existing merge request."""
-        args = ["mr", "update", str(mr_id)]
-        if title:
-            args.extend(["--title", title])
-        if description:
-            args.extend(["--description", description])
-        if add_label:
-            args.extend(["--label", add_label])
-        if remove_label:
-            args.extend(["--unlabel", remove_label])
-        if assignee:
-            args.extend(["--assignee", assignee])
-        if reviewer:
-            args.extend(["--reviewer", reviewer])
-        if draft is True:
-            args.append("--draft")
-        elif draft is False:
-            args.append("--ready")
-        success, output = await run_glab(args, repo=project)
-        return f"✅ MR !{mr_id} Updated\n\n{output}" if success else f"❌ Failed: {output}"
+        return await _gitlab_mr_update_impl(
+            project, mr_id, title, description, add_label, remove_label, assignee, reviewer, draft
+        )
 
     @auto_heal()
     @registry.tool()
     async def gitlab_mr_view(project: str, mr_id: int) -> str:
         """View detailed information about a merge request."""
-        success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
-        return output if success else f"❌ Failed: {output}"
+        return await _gitlab_mr_view_impl(project, mr_id)
+
+
+def register_tools(server: "FastMCP") -> int:
+    """Register tools with the MCP server."""
+    registry = ToolRegistry(server)
+
+    # REMOVED: gitlab_view_url - low value, just returns URL content
+
+    # Register CI tools
+    _register_ci_tools(registry)
+
+    # Register MR tools
+    _register_mr_tools(registry)
+
+    return registry.count
