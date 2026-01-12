@@ -18,6 +18,10 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
+from server.utils import load_config
+
+# Setup project path for server imports (auto-setup on import)
+from tool_modules.common import PROJECT_ROOT
 
 # Support both package import and direct loading
 try:
@@ -32,11 +36,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Add project root to path for server utilities
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_DIR))
+# Layer 5: Usage Pattern Learning integration
+try:
+    from server.usage_pattern_learner import UsagePatternLearner
 
-from server.utils import load_config
+    LAYER5_AVAILABLE = True
+except ImportError:
+    LAYER5_AVAILABLE = False
+    logger.warning("Layer 5 (Usage Pattern Learning) not available - errors won't be learned from")
 
 
 # Known issues checking - loads patterns from memory
@@ -153,6 +160,14 @@ class SkillExecutor:
         self.start_time: float | None = None
         self.error_recovery = None  # Initialized when needed
 
+        # Layer 5: Initialize usage pattern learner
+        self.usage_learner = None
+        if LAYER5_AVAILABLE:
+            try:
+                self.usage_learner = UsagePatternLearner()
+            except Exception as e:
+                logger.warning(f"Failed to initialize Layer 5 learner: {e}")
+
     def _debug(self, msg: str):
         """Add debug message."""
         if self.debug:
@@ -161,131 +176,176 @@ class SkillExecutor:
             elapsed = f"[{time.time() - self.start_time:.2f}s]" if self.start_time else ""
             self.log.append(f"🔍 {elapsed} {msg}")
 
-    async def _try_auto_fix(self, error_msg: str, matches: list) -> bool:
-        """Try to auto-fix based on known patterns.
+    async def _learn_from_error(self, tool_name: str, params: dict, error_msg: str):
+        """Send error to Layer 5 learning system (async).
 
-        Returns True if a fix was applied, False otherwise.
+        This is called when on_error: continue swallows an error.
+        Layer 5 will:
+        1. Classify the error (usage vs infrastructure)
+        2. Extract patterns and prevention steps
+        3. Merge with similar patterns
+        4. Build confidence over time
         """
-        import asyncio
-
-        error_lower = error_msg.lower()
-
-        # Check learned patterns from memory
-        matched_pattern = None
-        pattern_category = None
+        if not self.usage_learner:
+            return
 
         try:
-            patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
-            if patterns_file.exists():
-                with open(patterns_file) as f:
-                    patterns_data = yaml.safe_load(f) or {}
+            # Learn from this error asynchronously
+            await self.usage_learner.learn_from_observation(
+                tool_name=tool_name,
+                params=params,
+                error_message=error_msg,
+                context={},
+                success=False,
+            )
+            self._debug(f"Layer 5: Learned from error in {tool_name}")
+        except Exception as e:
+            # Don't let learning failure break the skill
+            logger.warning(f"Layer 5 learning failed: {e}")
 
-                # Check each category for matches
-                for cat in ["auth_patterns", "error_patterns", "bonfire_patterns", "pipeline_patterns"]:
-                    for pattern in patterns_data.get(cat, []):
-                        pattern_text = pattern.get("pattern", "").lower()
-                        if pattern_text and pattern_text in error_lower:
-                            matched_pattern = pattern
-                            pattern_category = cat
-                            # Track that pattern was matched
-                            self._update_pattern_usage_stats(cat, pattern_text, matched=True)
-                            break
-                    if matched_pattern:
-                        break
+    def _find_matched_pattern(self, error_lower: str) -> tuple[dict | None, str | None]:
+        """Find a matching pattern from memory based on error text.
+
+        Returns:
+            (matched_pattern, pattern_category) tuple or (None, None)
+        """
+        try:
+            patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
+            if not patterns_file.exists():
+                return None, None
+
+            with open(patterns_file) as f:
+                patterns_data = yaml.safe_load(f) or {}
+
+            # Check each category for matches
+            for cat in ["auth_patterns", "error_patterns", "bonfire_patterns", "pipeline_patterns"]:
+                for pattern in patterns_data.get(cat, []):
+                    pattern_text = pattern.get("pattern", "").lower()
+                    if pattern_text and pattern_text in error_lower:
+                        # Track that pattern was matched
+                        self._update_pattern_usage_stats(cat, pattern_text, matched=True)
+                        return pattern, cat
         except Exception as e:
             self._debug(f"Pattern lookup failed: {e}")
 
-        # Check for auth/network issues (hardcoded fallback)
-        auth_patterns = ["unauthorized", "401", "403", "forbidden", "token expired"]
-        network_patterns = ["no route to host", "connection refused", "timeout"]
+        return None, None
 
-        # Determine which fix to apply
-        fix_type = None
+    def _determine_fix_type(self, error_lower: str, matched_pattern: dict | None, matches: list) -> str | None:
+        """Determine which fix type to apply based on patterns.
 
+        Returns:
+            "network", "auth", or None
+        """
         # Priority 1: Use matched pattern from learned memory
         if matched_pattern:
             commands = matched_pattern.get("commands", [])
             for cmd in commands:
                 if "vpn" in cmd.lower() or "connect" in cmd.lower():
-                    fix_type = "network"
-                    break
+                    return "network"
                 if "login" in cmd.lower() or "auth" in cmd.lower() or "kube" in cmd.lower():
-                    fix_type = "auth"
-                    break
+                    return "auth"
 
         # Priority 2: Hardcoded patterns
-        if not fix_type:
-            if any(p in error_lower for p in auth_patterns):
-                fix_type = "auth"
-            elif any(p in error_lower for p in network_patterns):
-                fix_type = "network"
+        auth_patterns = ["unauthorized", "401", "403", "forbidden", "token expired"]
+        network_patterns = ["no route to host", "connection refused", "timeout"]
+
+        if any(p in error_lower for p in auth_patterns):
+            return "auth"
+        elif any(p in error_lower for p in network_patterns):
+            return "network"
 
         # Priority 3: Check matches from known issues
-        if not fix_type:
-            for match in matches:
-                fix = match.get("fix", "").lower()
-                if "vpn" in fix or "connect" in fix:
-                    fix_type = "network"
-                    break
-                if "login" in fix or "auth" in fix or "kube" in fix:
-                    fix_type = "auth"
-                    break
+        for match in matches:
+            fix = match.get("fix", "").lower()
+            if "vpn" in fix or "connect" in fix:
+                return "network"
+            if "login" in fix or "auth" in fix or "kube" in fix:
+                return "auth"
+
+        return None
+
+    async def _apply_network_fix(self) -> bool:
+        """Apply VPN connect fix."""
+        import asyncio
+
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                "nmcli connection up 'Red Hat Global VPN' 2>/dev/null || true",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=30)
+            self._debug(f"  → VPN connect result: {proc.returncode}")
+            await asyncio.sleep(2)  # Wait for VPN to establish
+            return True
+        except Exception as e:
+            self._debug(f"  → Auto-fix failed: {e}")
+            return False
+
+    async def _apply_auth_fix(self, error_lower: str) -> bool:
+        """Apply kube login fix."""
+        import asyncio
+
+        try:
+            # Guess cluster from error
+            cluster = "stage"  # default
+            if "ephemeral" in error_lower or "bonfire" in error_lower:
+                cluster = "ephemeral"
+            elif "konflux" in error_lower or "tekton" in error_lower:
+                cluster = "konflux"
+            elif "prod" in error_lower:
+                cluster = "prod"
+
+            # Call oc login using asyncio subprocess
+            kubeconfig = f"~/.kube/config.{cluster[0]}"
+            cluster_urls = {
+                "stage": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
+                "ephemeral": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
+                "prod": "api.crcp01ue1.o9m8.p1.openshiftapps.com:6443",
+                "konflux": "api.stone-prd-rh01.pg1f.p1.openshiftapps.com:6443",
+            }
+            url = cluster_urls.get(cluster, cluster_urls["stage"])
+
+            proc = await asyncio.create_subprocess_exec(
+                "oc",
+                "login",
+                f"--kubeconfig={kubeconfig}",
+                f"https://{url}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=30)
+            self._debug(f"  → Kube login result: {proc.returncode}")
+            await asyncio.sleep(1)
+            return proc.returncode == 0
+        except Exception as e:
+            self._debug(f"  → Auto-fix failed: {e}")
+            return False
+
+    async def _try_auto_fix(self, error_msg: str, matches: list) -> bool:
+        """Try to auto-fix based on known patterns.
+
+        Returns True if a fix was applied, False otherwise.
+        """
+        error_lower = error_msg.lower()
+
+        # Find matching pattern from memory
+        matched_pattern, pattern_category = self._find_matched_pattern(error_lower)
+
+        # Determine which fix to apply
+        fix_type = self._determine_fix_type(error_lower, matched_pattern, matches)
 
         if not fix_type:
             return False
 
         self._debug(f"  → Detected {fix_type} issue, applying auto-fix")
 
-        fix_success = False
-
-        try:
-            if fix_type == "network":
-                # Try VPN connect using asyncio subprocess
-                proc = await asyncio.create_subprocess_shell(
-                    "nmcli connection up 'Red Hat Global VPN' 2>/dev/null || true",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                await asyncio.wait_for(proc.wait(), timeout=30)
-                self._debug(f"  → VPN connect result: {proc.returncode}")
-                await asyncio.sleep(2)  # Wait for VPN to establish
-                fix_success = True
-
-            elif fix_type == "auth":
-                # Try kube login - guess cluster from error
-                cluster = "stage"  # default
-                if "ephemeral" in error_lower or "bonfire" in error_lower:
-                    cluster = "ephemeral"
-                elif "konflux" in error_lower or "tekton" in error_lower:
-                    cluster = "konflux"
-                elif "prod" in error_lower:
-                    cluster = "prod"
-
-                # Call oc login using asyncio subprocess
-                kubeconfig = f"~/.kube/config.{cluster[0]}"
-                cluster_urls = {
-                    "stage": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
-                    "ephemeral": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
-                    "prod": "api.crcp01ue1.o9m8.p1.openshiftapps.com:6443",
-                    "konflux": "api.stone-prd-rh01.pg1f.p1.openshiftapps.com:6443",
-                }
-                url = cluster_urls.get(cluster, cluster_urls["stage"])
-
-                proc = await asyncio.create_subprocess_exec(
-                    "oc",
-                    "login",
-                    f"--kubeconfig={kubeconfig}",
-                    f"https://{url}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                await asyncio.wait_for(proc.wait(), timeout=30)
-                self._debug(f"  → Kube login result: {proc.returncode}")
-                await asyncio.sleep(1)
-                fix_success = proc.returncode == 0
-
-        except Exception as e:
-            self._debug(f"  → Auto-fix failed: {e}")
+        # Apply the appropriate fix
+        if fix_type == "network":
+            fix_success = await self._apply_network_fix()
+        elif fix_type == "auth":
+            fix_success = await self._apply_auth_fix(error_lower)
+        else:
             fix_success = False
 
         # Track fix success for matched pattern
@@ -361,6 +421,96 @@ class SkillExecutor:
         except Exception as e:
             self._debug(f"Failed to update pattern stats: {e}")
 
+    def _linkify_jira_keys(self, text):
+        """Convert Jira keys to clickable links (Slack or Markdown format)."""
+        import re
+
+        if not text:
+            return text
+
+        is_slack = self.inputs.get("slack_format", False)
+        jira_url = self.config.get("jira", {}).get("url", "https://issues.redhat.com")
+
+        pattern = re.compile(r"\b([A-Z]+-\d+)(-[\w-]+)?\b")
+
+        def replace(match):
+            key = match.group(1)
+            suffix = match.group(2) or ""
+            if is_slack:
+                return f"<{jira_url}/browse/{key}|{key}{suffix}>"
+            return f"[{key}{suffix}]({jira_url}/browse/{key})"
+
+        return pattern.sub(replace, str(text))
+
+    def _linkify_mr_ids(self, text):
+        """Convert MR IDs to clickable links (Slack or Markdown format)."""
+        import re
+
+        if not text:
+            return text
+
+        is_slack = self.inputs.get("slack_format", False)
+        gitlab_url = self.config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
+        project = "automation-analytics/automation-analytics-backend"
+
+        pattern = re.compile(r"!(\d+)")
+
+        def replace(match):
+            mr_id = match.group(1)
+            url = f"{gitlab_url}/{project}/-/merge_requests/{mr_id}"
+            if is_slack:
+                return f"<{url}|!{mr_id}>"
+            return f"[!{mr_id}]({url})"
+
+        return pattern.sub(replace, str(text))
+
+    def _create_jinja_filters(self):
+        """Create Jinja2 custom filters for template rendering."""
+        return {
+            "jira_link": self._linkify_jira_keys,
+            "mr_link": self._linkify_mr_ids,
+            "length": len,
+        }
+
+    def _template_with_regex_fallback(self, text: str) -> str:
+        """Template replacement using regex (fallback when Jinja2 unavailable)."""
+        import re
+
+        def replace_var(match):
+            var_path = match.group(1).strip()
+            try:
+                value = self.context
+                parts = var_path.split(".")
+
+                for part in parts:
+                    array_match = re.match(r"^(\w+)\[(\d+)\]$", part)
+                    if array_match:
+                        var_name, index = array_match.groups()
+                        index = int(index)
+                        if isinstance(value, dict):
+                            value = value.get(var_name)
+                        elif hasattr(value, var_name):
+                            value = getattr(value, var_name)
+                        else:
+                            return match.group(0)
+                        if isinstance(value, (list, tuple)) and index < len(value):
+                            value = value[index]
+                        else:
+                            return match.group(0)
+                    elif isinstance(value, dict):
+                        value = value.get(part, match.group(0))
+                        if value == match.group(0):
+                            return value
+                    elif hasattr(value, part):
+                        value = getattr(value, part)
+                    else:
+                        return match.group(0)
+                return str(value) if value is not None else ""
+            except Exception:
+                return match.group(0)
+
+        return re.sub(r"\{\{\s*([^}]+)\s*\}\}", replace_var, str(text))
+
     def _check_error_patterns(self, error: str) -> str | None:
         """Check if error matches known patterns and return fix suggestion."""
         try:
@@ -408,95 +558,13 @@ class SkillExecutor:
         try:
             from jinja2 import Environment
 
-            # Create a simple environment
-            env = Environment()
-
-            # Add some helpful filters
-            def linkify_jira_keys(text):
-                import re
-
-                if not text:
-                    return text
-
-                is_slack = self.inputs.get("slack_format", False)
-                jira_url = self.config.get("jira", {}).get("url", "https://issues.redhat.com")
-
-                pattern = re.compile(r"\b([A-Z]+-\d+)(-[\w-]+)?\b")
-
-                def replace(match):
-                    key = match.group(1)
-                    suffix = match.group(2) or ""
-                    if is_slack:
-                        return f"<{jira_url}/browse/{key}|{key}{suffix}>"
-                    return f"[{key}{suffix}]({jira_url}/browse/{key})"
-
-                return pattern.sub(replace, str(text))
-
-            def linkify_mr_ids(text):
-                import re
-
-                if not text:
-                    return text
-
-                is_slack = self.inputs.get("slack_format", False)
-                gitlab_url = self.config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
-                project = "automation-analytics/automation-analytics-backend"
-
-                pattern = re.compile(r"!(\d+)")
-
-                def replace(match):
-                    mr_id = match.group(1)
-                    url = f"{gitlab_url}/{project}/-/merge_requests/{mr_id}"
-                    if is_slack:
-                        return f"<{url}|!{mr_id}>"
-                    return f"[!{mr_id}]({url})"
-
-                return pattern.sub(replace, str(text))
-
-            env.filters["jira_link"] = linkify_jira_keys
-            env.filters["mr_link"] = linkify_mr_ids
-            env.filters["length"] = len
+            env = Environment(autoescape=True)
+            env.filters.update(self._create_jinja_filters())
 
             template = env.from_string(text)
             return template.render(**self.context)
         except ImportError:
-            # Fallback to simple regex replacement if Jinja2 not installed
-            import re
-
-            def replace_var(match):
-                var_path = match.group(1).strip()
-                try:
-                    value = self.context
-                    parts = var_path.split(".")
-
-                    for part in parts:
-                        array_match = re.match(r"^(\w+)\[(\d+)\]$", part)
-                        if array_match:
-                            var_name, index = array_match.groups()
-                            index = int(index)
-                            if isinstance(value, dict):
-                                value = value.get(var_name)
-                            elif hasattr(value, var_name):
-                                value = getattr(value, var_name)
-                            else:
-                                return match.group(0)
-                            if isinstance(value, (list, tuple)) and index < len(value):
-                                value = value[index]
-                            else:
-                                return match.group(0)
-                        elif isinstance(value, dict):
-                            value = value.get(part, match.group(0))
-                            if value == match.group(0):
-                                return value
-                        elif hasattr(value, part):
-                            value = getattr(value, part)
-                        else:
-                            return match.group(0)
-                    return str(value) if value is not None else ""
-                except Exception:
-                    return match.group(0)
-
-            return re.sub(r"\{\{\s*([^}]+)\s*\}\}", replace_var, str(text))
+            return self._template_with_regex_fallback(text)
         except Exception as e:
             self._debug(f"Template error: {e}")
             return text
@@ -522,7 +590,7 @@ class SkillExecutor:
         try:
             from jinja2 import Environment
 
-            env = Environment()
+            env = Environment(autoescape=True)
             # Wrap condition in {{ }} if not already there for Jinja evaluation
             if "{{" not in condition:
                 expr = "{{ " + condition + " }}"
@@ -573,6 +641,116 @@ class SkillExecutor:
             self._debug(f"  → Jinja eval error: {e}, defaulting to False")
             return False
 
+    def _handle_auto_fix_action(self, error_info: dict, step_name: str):
+        """Handle auto_fix action for interactive recovery."""
+        fix_code = error_info.get("fix_code")
+        if not fix_code:
+            self._debug("Auto-fix not available despite user selection")
+            return None
+
+        # Re-execute with fixed code
+        try:
+            self._debug("Retrying with fixed code...")
+            fixed_result = self._exec_compute_internal(fix_code, step_name)
+
+            # Log successful fix
+            self.error_recovery.log_fix_attempt(
+                error_info,
+                action="auto_fix",
+                success=not isinstance(fixed_result, str) or not fixed_result.startswith("<compute error:"),
+                details=f"Auto-fixed {error_info.get('pattern_id')}",
+            )
+
+            return fixed_result
+        except Exception as e:
+            self._debug(f"Auto-fix failed: {e}")
+            self.error_recovery.log_fix_attempt(error_info, action="auto_fix", success=False, details=str(e))
+            return None
+
+    def _handle_edit_action(self, error_info: dict, error_msg: str, step_name: str):
+        """Handle edit action for interactive recovery."""
+        skill_name = self.skill.get("name", "unknown")
+        skill_path = SKILLS_DIR / f"{skill_name}.yaml"
+
+        print(
+            f"\n🔧 Please edit the skill file: {skill_path}\n"
+            f"   Step: {step_name}\n"
+            f"   Error: {error_msg}\n"
+            f"   Suggestion: {error_info.get('suggestion')}\n"
+        )
+        input("Press Enter after saving your changes...")
+
+        # Log manual edit
+        self.error_recovery.log_fix_attempt(
+            error_info, action="manual_edit", success=True, details="User manually edited skill"
+        )
+
+        # Return None to signal skill should be aborted and re-run
+        return None
+
+    def _handle_skip_action(self, error_info: dict, step_name: str):
+        """Handle skip action for interactive recovery."""
+        print(f"\n⏭️  Skipping skill execution.\n" f"   Error in step: {step_name}\n")
+
+        self.error_recovery.log_fix_attempt(error_info, action="skip", success=False, details="User chose to skip")
+        return None
+
+    def _handle_abort_action(self, error_info: dict, error_msg: str, step_name: str):
+        """Handle abort action for interactive recovery."""
+        # Create GitHub issue if possible
+        if self.create_issue_fn:
+            try:
+                import asyncio
+
+                issue_result = asyncio.get_event_loop().run_until_complete(
+                    self.create_issue_fn(
+                        tool="skill_compute",
+                        error=error_msg,
+                        context=f"Skill: {self.skill.get('name')}, Step: {step_name}",
+                        skill=self.skill.get("name", "unknown"),
+                    )
+                )
+                if issue_result.get("success"):
+                    print(f"\n🐛 GitHub issue created: {issue_result.get('issue_url')}")
+            except Exception as e:
+                self._debug(f"Could not create issue: {e}")
+
+        self.error_recovery.log_fix_attempt(
+            error_info, action="abort", success=False, details="User aborted with issue creation"
+        )
+        return None
+
+    def _handle_continue_action(self, error_info: dict, error_msg: str):
+        """Handle continue action for interactive recovery."""
+        # Debug mode - let broken data propagate
+        self.error_recovery.log_fix_attempt(
+            error_info, action="continue", success=False, details="User chose to continue with error"
+        )
+        return f"<compute error: {error_msg}>"
+
+    def _initialize_error_recovery(self):
+        """Initialize error recovery system if not already loaded."""
+        if self.error_recovery:
+            return True
+
+        try:
+            from scripts.common.skill_error_recovery import SkillErrorRecovery
+
+            # Pass memory helpers if available
+            memory_helper = None
+            try:
+                from scripts.common import memory as memory_helpers
+
+                memory_helper = memory_helpers
+            except ImportError:
+                pass
+
+            self.error_recovery = SkillErrorRecovery(memory_helper=memory_helper)
+            return True
+        except ImportError as e:
+            self._debug(f"Could not load error recovery: {e}")
+            return False
+
     def _try_interactive_recovery(self, code: str, error_msg: str, step_name: str):
         """
         Attempt interactive recovery from compute error.
@@ -581,23 +759,8 @@ class SkillExecutor:
             The computed result if recovery successful, None if user chose to abort/skip
         """
         # Lazy import to avoid circular dependencies
-        if not self.error_recovery:
-            try:
-                from scripts.common.skill_error_recovery import SkillErrorRecovery
-
-                # Pass memory helpers if available
-                memory_helper = None
-                try:
-                    from scripts.common import memory as memory_helpers
-
-                    memory_helper = memory_helpers
-                except ImportError:
-                    pass
-
-                self.error_recovery = SkillErrorRecovery(memory_helper=memory_helper)
-            except ImportError as e:
-                self._debug(f"Could not load error recovery: {e}")
-                return None
+        if not self._initialize_error_recovery():
+            return None
 
         # Detect error pattern
         error_info = self.error_recovery.detect_error(code, error_msg, step_name)
@@ -618,91 +781,17 @@ class SkillExecutor:
         action = action_result.get("action")
         self._debug(f"User chose: {action}")
 
-        # Handle user's choice
+        # Dispatch to action handlers
         if action == "auto_fix":
-            fix_code = error_info.get("fix_code")
-            if not fix_code:
-                self._debug("Auto-fix not available despite user selection")
-                return None
-
-            # Re-execute with fixed code
-            try:
-                self._debug("Retrying with fixed code...")
-                # Temporarily update the code and retry
-                fixed_result = self._exec_compute_internal(fix_code, step_name)
-
-                # Log successful fix
-                self.error_recovery.log_fix_attempt(
-                    error_info,
-                    action="auto_fix",
-                    success=not isinstance(fixed_result, str) or not fixed_result.startswith("<compute error:"),
-                    details=f"Auto-fixed {error_info.get('pattern_id')}",
-                )
-
-                return fixed_result
-            except Exception as e:
-                self._debug(f"Auto-fix failed: {e}")
-                self.error_recovery.log_fix_attempt(error_info, action="auto_fix", success=False, details=str(e))
-                return None
-
+            return self._handle_auto_fix_action(error_info, step_name)
         elif action == "edit":
-            # Open skill file for editing (requires manual approach)
-            skill_name = self.skill.get("name", "unknown")
-            skill_path = SKILLS_DIR / f"{skill_name}.yaml"
-
-            print(
-                f"\n🔧 Please edit the skill file: {skill_path}\n"
-                f"   Step: {step_name}\n"
-                f"   Error: {error_msg}\n"
-                f"   Suggestion: {error_info.get('suggestion')}\n"
-            )
-            input("Press Enter after saving your changes...")
-
-            # Log manual edit
-            self.error_recovery.log_fix_attempt(
-                error_info, action="manual_edit", success=True, details="User manually edited skill"
-            )
-
-            # Return None to signal skill should be aborted and re-run
-            return None
-
+            return self._handle_edit_action(error_info, error_msg, step_name)
         elif action == "skip":
-            # Show manual commands and abort
-            print(f"\n⏭️  Skipping skill execution.\n" f"   Error in step: {step_name}\n")
-
-            self.error_recovery.log_fix_attempt(error_info, action="skip", success=False, details="User chose to skip")
-            return None
-
+            return self._handle_skip_action(error_info, step_name)
         elif action == "abort":
-            # Create GitHub issue if possible
-            if self.create_issue_fn:
-                try:
-                    import asyncio
-
-                    issue_result = asyncio.get_event_loop().run_until_complete(
-                        self.create_issue_fn(
-                            tool="skill_compute",
-                            error=error_msg,
-                            context=f"Skill: {self.skill.get('name')}, Step: {step_name}",
-                            skill=self.skill.get("name", "unknown"),
-                        )
-                    )
-                    if issue_result.get("success"):
-                        print(f"\n🐛 GitHub issue created: {issue_result.get('issue_url')}")
-                except Exception as e:
-                    self._debug(f"Could not create issue: {e}")
-
-            self.error_recovery.log_fix_attempt(
-                error_info, action="abort", success=False, details="User aborted with issue creation"
-            )
-            return None
-
+            return self._handle_abort_action(error_info, error_msg, step_name)
         elif action == "continue":
-            # Debug mode - let broken data propagate
-            self.error_recovery.log_fix_attempt(
-                error_info, action="continue", success=False, details="User chose to continue with error"
-            )
-            return f"<compute error: {error_msg}>"
+            return self._handle_continue_action(error_info, error_msg)
 
         return None
 
@@ -724,7 +813,7 @@ class SkillExecutor:
         except ImportError:
             ZoneInfo = None  # type: ignore[assignment,misc]
 
-        PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+        # Use module-level PROJECT_ROOT
         if str(PROJECT_ROOT) not in sys.path:
             sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -864,15 +953,8 @@ class SkillExecutor:
 
             return f"<compute error: {e}>"
 
-    async def _exec_tool(self, tool_name: str, args: dict) -> dict:
-        """Execute a tool and return its result."""
-        import time
-
-        start = time.time()
-
-        self._debug(f"Calling tool: {tool_name}")
-        self._debug(f"  → Args: {json.dumps(args)[:200]}")
-
+    def _get_module_for_tool(self, tool_name: str) -> str | None:
+        """Map tool name to module name based on prefix."""
         module_prefixes = {
             "git_": "git",
             "jira_": "jira",
@@ -906,29 +988,36 @@ class SkillExecutor:
             "debug_": "workflow",
         }
 
-        module = None
         for prefix, mod in module_prefixes.items():
             if tool_name.startswith(prefix):
-                module = mod
-                break
+                return mod
+        return None
 
-        if not module:
-            return {"success": False, "error": f"Unknown tool: {tool_name}"}
+    def _format_tool_result(self, result, duration: float) -> dict:
+        """Format tool execution result into standard dict."""
+        if isinstance(result, tuple):
+            result = result[0]
+        if isinstance(result, list) and result:
+            text = result[0].text if hasattr(result[0], "text") else str(result[0])
+            return {"success": True, "result": text, "duration": duration}
+        return {"success": True, "result": str(result), "duration": duration}
 
-        if module == "workflow" and self.server:
-            try:
-                result = await self.server.call_tool(tool_name, args)
-                duration = time.time() - start
-                self._debug(f"  → Completed in {duration:.2f}s")
+    async def _execute_workflow_tool(self, tool_name: str, args: dict, start_time: float) -> dict:
+        """Execute a tool from the workflow module."""
+        import time
 
-                if isinstance(result, tuple):
-                    result = result[0]
-                if isinstance(result, list) and result:
-                    text = result[0].text if hasattr(result[0], "text") else str(result[0])
-                    return {"success": True, "result": text, "duration": duration}
-                return {"success": True, "result": str(result), "duration": duration}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
+        try:
+            result = await self.server.call_tool(tool_name, args)
+            duration = time.time() - start_time
+            self._debug(f"  → Completed in {duration:.2f}s")
+            return self._format_tool_result(result, duration)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _load_and_execute_module_tool(self, module: str, tool_name: str, args: dict, start_time: float) -> dict:
+        """Load a tool module and execute the specified tool."""
+        import importlib.util
+        import time
 
         tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools.py"
 
@@ -936,8 +1025,6 @@ class SkillExecutor:
             return {"success": False, "error": f"Module not found: {module}"}
 
         try:
-            import importlib.util
-
             temp_server = FastMCP(f"skill-{module}")
             spec = importlib.util.spec_from_file_location(f"skill_{module}", tools_file)
             if spec is None or spec.loader is None:
@@ -950,53 +1037,239 @@ class SkillExecutor:
                 loaded_module.register_tools(temp_server)
 
             result = await temp_server.call_tool(tool_name, args)
-            duration = time.time() - start
-
+            duration = time.time() - start_time
             self._debug(f"  → Completed in {duration:.2f}s")
-
-            if isinstance(result, tuple):
-                result = result[0]
-            if isinstance(result, list) and result:
-                text = result[0].text if hasattr(result[0], "text") else str(result[0])
-                return {"success": True, "result": text, "duration": duration}
-
-            return {"success": True, "result": str(result), "duration": duration}
+            return self._format_tool_result(result, duration)
 
         except Exception as e:
-            error_msg = str(e)
-            self._debug(f"  → Error: {error_msg}")
+            return {
+                "success": False,
+                "error": str(e),
+                "_temp_server": temp_server if "temp_server" in locals() else None,
+            }
 
-            # Check for known issues and attempt auto-fix
-            matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
-            known_text = _format_known_issues(matches)
+    async def _exec_tool(self, tool_name: str, args: dict) -> dict:
+        """Execute a tool and return its result."""
+        import time
 
-            if matches:
-                self._debug(f"  → Found {len(matches)} known issue(s), attempting auto-fix")
+        start = time.time()
 
-                # Try auto-fix based on known patterns
-                fix_applied = await self._try_auto_fix(error_msg, matches)
+        self._debug(f"Calling tool: {tool_name}")
+        self._debug(f"  → Args: {json.dumps(args)[:200]}")
 
-                if fix_applied:
-                    self._debug("  → Auto-fix applied, retrying tool")
-                    # Retry the tool once after fix
-                    try:
-                        result = await temp_server.call_tool(tool_name, args)
-                        duration = time.time() - start
-                        self._debug(f"  → Retry completed in {duration:.2f}s")
+        module = self._get_module_for_tool(tool_name)
+        if not module:
+            return {"success": False, "error": f"Unknown tool: {tool_name}"}
 
-                        if isinstance(result, tuple):
-                            result = result[0]
-                        if isinstance(result, list) and result:
-                            text = result[0].text if hasattr(result[0], "text") else str(result[0])
-                            return {"success": True, "result": text, "duration": duration}
-                        return {"success": True, "result": str(result), "duration": duration}
-                    except Exception as retry_e:
-                        error_msg = f"{error_msg}\n\n(Retry after auto-fix also failed: {retry_e})"
+        # Execute workflow tools directly through server
+        if module == "workflow" and self.server:
+            return await self._execute_workflow_tool(tool_name, args, start)
 
-            if known_text:
-                error_msg = f"{error_msg}\n{known_text}"
+        # Execute other module tools with error recovery
+        result = await self._load_and_execute_module_tool(module, tool_name, args, start)
 
-            return {"success": False, "error": error_msg}
+        # If there was an error, try auto-fix and retry
+        if not result.get("success"):
+            error_msg = result["error"]
+            temp_server = result.get("_temp_server")
+
+            if temp_server:
+                self._debug(f"  → Error: {error_msg}")
+
+                # Check for known issues and attempt auto-fix
+                matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
+                known_text = _format_known_issues(matches)
+
+                if matches:
+                    self._debug(f"  → Found {len(matches)} known issue(s), attempting auto-fix")
+                    fix_applied = await self._try_auto_fix(error_msg, matches)
+
+                    if fix_applied:
+                        self._debug("  → Auto-fix applied, retrying tool")
+                        try:
+                            retry_result = await temp_server.call_tool(tool_name, args)
+                            duration = time.time() - start
+                            self._debug(f"  → Retry completed in {duration:.2f}s")
+                            return self._format_tool_result(retry_result, duration)
+                        except Exception as retry_e:
+                            error_msg = f"{error_msg}\n\n(Retry after auto-fix also failed: {retry_e})"
+
+                if known_text:
+                    error_msg = f"{error_msg}\n{known_text}"
+
+                result["error"] = error_msg
+
+        # Remove internal _temp_server key if present
+        result.pop("_temp_server", None)
+        return result
+
+    async def _handle_tool_error(
+        self, tool: str, step: dict, step_name: str, error_msg: str, output_lines: list[str]
+    ) -> bool:
+        """Handle tool execution error.
+
+        Returns:
+            True if processing should continue, False if skill should stop
+        """
+        output_lines.append(f"   ❌ Error: {error_msg}")
+
+        # Check for known error patterns
+        pattern_hint = self._check_error_patterns(error_msg)
+        if pattern_hint:
+            output_lines.append(pattern_hint)
+
+        if self.create_issue_fn:
+            skill_name = self.skill.get("name", "unknown")
+            context = f"Skill: {skill_name}, Step: {step_name}"
+
+            try:
+                issue_result = await self.create_issue_fn(
+                    tool=tool,
+                    error=error_msg,
+                    context=context,
+                    skill=skill_name,
+                )
+
+                if issue_result["success"]:
+                    output_lines.append(f"\n   🐛 **Issue created:** {issue_result['issue_url']}")
+                elif issue_result["issue_url"]:
+                    output_lines.append("\n   💡 **Report this error:**")
+                    output_lines.append(f"   📝 [Create GitHub Issue]({issue_result['issue_url']})")
+            except Exception as e:
+                self._debug(f"Failed to create issue: {e}")
+
+        on_error = step.get("on_error", "fail")
+        if on_error == "continue":
+            output_lines.append("   *Continuing despite error (on_error: continue)*\n")
+
+            # Layer 5: Learn from this error
+            tool_params = {}
+            if "args" in step:
+                args_data = step["args"]
+                if isinstance(args_data, dict):
+                    tool_params = {k: self._template(str(v)) for k, v in args_data.items()}
+
+            await self._learn_from_error(tool_name=tool, params=tool_params, error_msg=error_msg)
+
+            self.step_results.append(
+                {
+                    "step": step_name,
+                    "tool": tool,
+                    "success": False,
+                    "error": error_msg,
+                }
+            )
+            return True
+        else:
+            return False
+
+    def _parse_and_store_tool_result(self, result_text: str, output_name: str):
+        """Parse key:value output from tool result and store in context."""
+        try:
+            if ":" in result_text:
+                parsed = {}
+                for line in result_text.split("\n"):
+                    if ":" in line and not line.strip().startswith("#"):
+                        key, _, val = line.partition(":")
+                        parsed[key.strip().lower().replace(" ", "_")] = val.strip()
+                if parsed:
+                    self.context[f"{output_name}_parsed"] = parsed
+        except Exception:
+            pass
+
+    async def _process_tool_step(self, step: dict, step_num: int, step_name: str, output_lines: list[str]) -> bool:
+        """Process a 'tool' step and append results to output_lines.
+
+        Returns:
+            True if processing should continue, False if skill should stop
+        """
+        tool = step["tool"]
+        raw_args = step.get("args", {})
+        args = self._template_dict(raw_args)
+
+        output_lines.append(f"🔧 **Step {step_num}: {step_name}**")
+        output_lines.append(f"   *Tool: `{tool}`*")
+
+        result = await self._exec_tool(tool, args)
+
+        if result["success"]:
+            output_name = step.get("output", step_name)
+            self.context[output_name] = result["result"]
+
+            # Try to parse key:value output
+            self._parse_and_store_tool_result(result["result"], output_name)
+
+            duration = result.get("duration", 0)
+            output_lines.append(f"   ✅ Success ({duration:.2f}s)")
+
+            result_preview = result["result"][:300]
+            if len(result["result"]) > 300:
+                result_preview += "..."
+            output_lines.append(f"   ```\n   {result_preview}\n   ```\n")
+
+            self.step_results.append({"step": step_name, "tool": tool, "success": True, "duration": duration})
+            return True
+
+        # Handle error
+        should_continue = await self._handle_tool_error(tool, step, step_name, result["error"], output_lines)
+        if not should_continue:
+            output_lines.append(f"\n⛔ **Skill failed at step {step_num}**")
+        return should_continue
+
+    def _format_skill_outputs(self, output_lines: list[str]):
+        """Format and append skill outputs section."""
+        if not self.skill.get("outputs"):
+            return
+
+        output_lines.append("\n### 📤 Outputs\n")
+        for out in self.skill["outputs"]:
+            out_name = out.get("name", "output")
+            if "value" in out:
+                val = out["value"]
+                output_value: Any
+                if isinstance(val, str):
+                    output_value = self._template(val)
+                elif isinstance(val, (dict, list)):
+                    output_value = (
+                        self._template_dict(val)
+                        if isinstance(val, dict)
+                        else [self._template(i) if isinstance(i, str) else i for i in val]
+                    )
+                else:
+                    output_value = val
+
+                self.context[out_name] = output_value  # type: ignore[assignment]
+                output_lines.append(f"**{out_name}:**\n{output_value}\n")
+            elif "compute" in out:
+                result = self._exec_compute(out["compute"], out_name)
+                output_lines.append(f"**{out_name}:** {result}\n")
+
+    def _process_then_block(self, step: dict, output_lines: list[str]) -> str | None:
+        """Process a 'then' block with early return.
+
+        Returns:
+            Final output string if early return, None to continue execution
+        """
+        import time
+
+        self._debug("Processing 'then' block")
+        for then_item in step["then"]:
+            if "return" in then_item:
+                ret = then_item["return"]
+                templated = self._template_dict(ret) if isinstance(ret, dict) else self._template(str(ret))
+                self._debug(f"Early return: {templated}")
+
+                total_time = time.time() - (self.start_time or 0.0)
+                output_lines.append(f"✅ **Early Exit**\n{templated}\n")
+                output_lines.append(f"\n---\n⏱️ *Completed in {total_time:.2f}s*")
+
+                if self.debug and self.log:
+                    output_lines.append("\n\n### 🔍 Debug Log\n```")
+                    output_lines.extend(self.log)
+                    output_lines.append("```")
+
+                return "\n".join(output_lines)
+        return None
 
     async def execute(self) -> str:
         """Execute all steps and return the result."""
@@ -1041,102 +1314,15 @@ class SkillExecutor:
                     continue
 
             if "then" in step:
-                self._debug("Processing 'then' block")
-                for then_item in step["then"]:
-                    if "return" in then_item:
-                        ret = then_item["return"]
-                        templated = self._template_dict(ret) if isinstance(ret, dict) else self._template(str(ret))
-                        self._debug(f"Early return: {templated}")
-
-                        total_time = time.time() - (self.start_time or 0.0)
-                        output_lines.append(f"✅ **Early Exit**\n{templated}\n")
-                        output_lines.append(f"\n---\n⏱️ *Completed in {total_time:.2f}s*")
-
-                        if self.debug and self.log:
-                            output_lines.append("\n\n### 🔍 Debug Log\n```")
-                            output_lines.extend(self.log)
-                            output_lines.append("```")
-
-                        return "\n".join(output_lines)
+                early_return = self._process_then_block(step, output_lines)
+                if early_return is not None:
+                    return early_return
                 continue
 
             if "tool" in step:
-                tool = step["tool"]
-                raw_args = step.get("args", {})
-                args = self._template_dict(raw_args)
-
-                output_lines.append(f"🔧 **Step {step_num}: {step_name}**")
-                output_lines.append(f"   *Tool: `{tool}`*")
-
-                result = await self._exec_tool(tool, args)
-
-                if result["success"]:
-                    output_name = step.get("output", step_name)
-                    self.context[output_name] = result["result"]
-
-                    try:
-                        if ":" in result["result"]:
-                            parsed = {}
-                            for line in result["result"].split("\n"):
-                                if ":" in line and not line.strip().startswith("#"):
-                                    key, _, val = line.partition(":")
-                                    parsed[key.strip().lower().replace(" ", "_")] = val.strip()
-                            if parsed:
-                                self.context[f"{output_name}_parsed"] = parsed
-                    except Exception:
-                        pass
-
-                    duration = result.get("duration", 0)
-                    output_lines.append(f"   ✅ Success ({duration:.2f}s)")
-
-                    result_preview = result["result"][:300]
-                    if len(result["result"]) > 300:
-                        result_preview += "..."
-                    output_lines.append(f"   ```\n   {result_preview}\n   ```\n")
-
-                    self.step_results.append({"step": step_name, "tool": tool, "success": True, "duration": duration})
-                else:
-                    output_lines.append(f"   ❌ Error: {result['error']}")
-
-                    # Check for known error patterns
-                    pattern_hint = self._check_error_patterns(result["error"])
-                    if pattern_hint:
-                        output_lines.append(pattern_hint)
-
-                    if self.create_issue_fn:
-                        skill_name = self.skill.get("name", "unknown")
-                        context = f"Skill: {skill_name}, Step: {step_name}"
-
-                        try:
-                            issue_result = await self.create_issue_fn(
-                                tool=tool,
-                                error=result["error"],
-                                context=context,
-                                skill=skill_name,
-                            )
-
-                            if issue_result["success"]:
-                                output_lines.append(f"\n   🐛 **Issue created:** {issue_result['issue_url']}")
-                            elif issue_result["issue_url"]:
-                                output_lines.append("\n   💡 **Report this error:**")
-                                output_lines.append(f"   📝 [Create GitHub Issue]({issue_result['issue_url']})")
-                        except Exception as e:
-                            self._debug(f"Failed to create issue: {e}")
-
-                    on_error = step.get("on_error", "fail")
-                    if on_error == "continue":
-                        output_lines.append("   *Continuing despite error (on_error: continue)*\n")
-                        self.step_results.append(
-                            {
-                                "step": step_name,
-                                "tool": tool,
-                                "success": False,
-                                "error": result["error"],
-                            }
-                        )
-                    else:
-                        output_lines.append(f"\n⛔ **Skill failed at step {step_num}**")
-                        break
+                should_continue = await self._process_tool_step(step, step_num, step_name, output_lines)
+                if not should_continue:
+                    break
 
             elif "compute" in step:
                 output_name = step.get("output", step_name)
@@ -1151,29 +1337,7 @@ class SkillExecutor:
                 output_lines.append(f"📝 **Step {step_num}: {step_name}** (manual)")
                 output_lines.append(f"   {self._template(step['description'])}\n")
 
-        if self.skill.get("outputs"):
-            output_lines.append("\n### 📤 Outputs\n")
-            for out in self.skill["outputs"]:
-                out_name = out.get("name", "output")
-                if "value" in out:
-                    val = out["value"]
-                    output_value: Any
-                    if isinstance(val, str):
-                        output_value = self._template(val)
-                    elif isinstance(val, (dict, list)):
-                        output_value = (
-                            self._template_dict(val)
-                            if isinstance(val, dict)
-                            else [self._template(i) if isinstance(i, str) else i for i in val]
-                        )
-                    else:
-                        output_value = val
-
-                    self.context[out_name] = output_value  # type: ignore[assignment]
-                    output_lines.append(f"**{out_name}:**\n{output_value}\n")
-                elif "compute" in out:
-                    result = self._exec_compute(out["compute"], out_name)
-                    output_lines.append(f"**{out_name}:** {result}\n")
+        self._format_skill_outputs(output_lines)
 
         total_time = time.time() - (self.start_time or 0.0)
         success_count = sum(1 for r in self.step_results if r.get("success"))
@@ -1191,6 +1355,144 @@ class SkillExecutor:
         return "\n".join(output_lines)
 
 
+def _skill_list_impl() -> list[TextContent]:
+    """Implementation of skill_list tool."""
+    skills = []
+    if SKILLS_DIR.exists():
+        for f in SKILLS_DIR.glob("*.yaml"):
+            if f.name == "README.md":
+                continue
+            try:
+                with open(f) as fp:
+                    data = yaml.safe_load(fp)
+                skills.append(
+                    {
+                        "name": data.get("name", f.stem),
+                        "description": data.get("description", "No description"),
+                        "inputs": [i["name"] for i in data.get("inputs", [])],
+                    }
+                )
+            except Exception as e:
+                skills.append({"name": f.stem, "description": f"Error loading: {e}", "inputs": []})
+
+    if not skills:
+        return [TextContent(type="text", text="No skills found. Create .yaml files in skills/ directory.")]
+
+    lines = ["## Available Skills\n"]
+    for s in skills:
+        inputs = ", ".join(s["inputs"]) if s["inputs"] else "none"
+        lines.append(f"### {s['name']}")
+        lines.append(f"{s['description']}")
+        lines.append(f"**Inputs:** {inputs}\n")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+def _validate_skill_inputs(skill: dict, input_data: dict) -> list[str]:
+    """Validate required skill inputs and return list of missing inputs."""
+    missing = []
+    for inp in skill.get("inputs", []):
+        if inp.get("required", False) and inp["name"] not in input_data:
+            if "default" not in inp:
+                missing.append(inp["name"])
+    return missing
+
+
+def _format_skill_plan(skill: dict, skill_name: str, input_data: dict) -> list[TextContent]:
+    """Format skill execution plan (preview mode)."""
+    lines = [f"## 📋 Skill Plan: {skill.get('name', skill_name)}\n"]
+    lines.append(f"*{skill.get('description', '')}*\n")
+    lines.append("### Inputs")
+    for k, v in input_data.items():
+        lines.append(f"- `{k}`: {v}")
+    lines.append("\n### Steps to Execute\n")
+
+    step_num = 0
+    for step in skill.get("steps", []):
+        step_num += 1
+        name = step.get("name", f"step_{step_num}")
+
+        if "tool" in step:
+            lines.append(f"{step_num}. **{name}** → `{step['tool']}`")
+            if step.get("condition"):
+                lines.append(f"   *Condition: {step['condition']}*")
+        elif "compute" in step:
+            lines.append(f"{step_num}. **{name}** → compute")
+        elif "description" in step:
+            lines.append(f"{step_num}. **{name}** → manual step")
+
+    lines.append("\n*Run with `execute=True` to execute this plan*")
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _skill_run_impl(
+    skill_name: str,
+    inputs: str,
+    execute: bool,
+    debug: bool,
+    server: "FastMCP",
+    create_issue_fn=None,
+    ask_question_fn=None,
+) -> list[TextContent]:
+    """Implementation of skill_run tool."""
+    skill_file = SKILLS_DIR / f"{skill_name}.yaml"
+    if not skill_file.exists():
+        available = [f.stem for f in SKILLS_DIR.glob("*.yaml")] if SKILLS_DIR.exists() else []
+        return [
+            TextContent(
+                type="text",
+                text=f"❌ Skill not found: {skill_name}\n\n" f"Available: {', '.join(available) or 'none'}",
+            )
+        ]
+
+    try:
+        with open(skill_file) as f:
+            skill = yaml.safe_load(f)
+
+        try:
+            input_data = json.loads(inputs) if inputs else {}
+        except json.JSONDecodeError:
+            return [TextContent(type="text", text=f"❌ Invalid inputs JSON: {inputs}")]
+
+        # Validate inputs
+        missing = _validate_skill_inputs(skill, input_data)
+        if missing:
+            lines = [f"❌ Missing required inputs: {', '.join(missing)}\n"]
+            lines.append("### Required Inputs\n")
+            for inp in skill.get("inputs", []):
+                req = "**required**" if inp.get("required") else "optional"
+                default = f" (default: {inp['default']})" if "default" in inp else ""
+                lines.append(f"- `{inp['name']}` ({inp.get('type', 'string')}) - {req}{default}")
+                if inp.get("description"):
+                    lines.append(f"  {inp['description']}")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        # Preview mode: just show the plan
+        if not execute:
+            return _format_skill_plan(skill, skill_name, input_data)
+
+        # Execute mode: run the skill
+        executor = SkillExecutor(
+            skill,
+            input_data,
+            debug=debug,
+            server=server,
+            create_issue_fn=create_issue_fn,
+            ask_question_fn=ask_question_fn,
+            enable_interactive_recovery=True,
+        )
+        result = await executor.execute()
+
+        return [TextContent(type="text", text=result)]
+
+    except Exception as e:
+        import traceback
+
+        if debug:
+            return [TextContent(type="text", text=f"❌ Error: {e}\n\n```\n{traceback.format_exc()}\n```")]
+        return [TextContent(type="text", text=f"❌ Error loading skill: {e}")]
+
+
 def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_fn=None) -> int:
     """Register skill tools with the MCP server."""
     registry = ToolRegistry(server)
@@ -1206,35 +1508,7 @@ def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_f
         Returns:
             List of available skills with descriptions.
         """
-        skills = []
-        if SKILLS_DIR.exists():
-            for f in SKILLS_DIR.glob("*.yaml"):
-                if f.name == "README.md":
-                    continue
-                try:
-                    with open(f) as fp:
-                        data = yaml.safe_load(fp)
-                    skills.append(
-                        {
-                            "name": data.get("name", f.stem),
-                            "description": data.get("description", "No description"),
-                            "inputs": [i["name"] for i in data.get("inputs", [])],
-                        }
-                    )
-                except Exception as e:
-                    skills.append({"name": f.stem, "description": f"Error loading: {e}", "inputs": []})
-
-        if not skills:
-            return [TextContent(type="text", text="No skills found. Create .yaml files in skills/ directory.")]
-
-        lines = ["## Available Skills\n"]
-        for s in skills:
-            inputs = ", ".join(s["inputs"]) if s["inputs"] else "none"
-            lines.append(f"### {s['name']}")
-            lines.append(f"{s['description']}")
-            lines.append(f"**Inputs:** {inputs}\n")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return _skill_list_impl()
 
     @registry.tool()
     async def skill_run(
@@ -1254,85 +1528,6 @@ def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_f
         Returns:
             Execution results or plan preview.
         """
-        skill_file = SKILLS_DIR / f"{skill_name}.yaml"
-        if not skill_file.exists():
-            available = [f.stem for f in SKILLS_DIR.glob("*.yaml")] if SKILLS_DIR.exists() else []
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ Skill not found: {skill_name}\n\n" f"Available: {', '.join(available) or 'none'}",
-                )
-            ]
-
-        try:
-            with open(skill_file) as f:
-                skill = yaml.safe_load(f)
-
-            try:
-                input_data = json.loads(inputs) if inputs else {}
-            except json.JSONDecodeError:
-                return [TextContent(type="text", text=f"❌ Invalid inputs JSON: {inputs}")]
-
-            missing = []
-            for inp in skill.get("inputs", []):
-                if inp.get("required", False) and inp["name"] not in input_data:
-                    if "default" not in inp:
-                        missing.append(inp["name"])
-
-            if missing:
-                lines = [f"❌ Missing required inputs: {', '.join(missing)}\n"]
-                lines.append("### Required Inputs\n")
-                for inp in skill.get("inputs", []):
-                    req = "**required**" if inp.get("required") else "optional"
-                    default = f" (default: {inp['default']})" if "default" in inp else ""
-                    lines.append(f"- `{inp['name']}` ({inp.get('type', 'string')}) - {req}{default}")
-                    if inp.get("description"):
-                        lines.append(f"  {inp['description']}")
-                return [TextContent(type="text", text="\n".join(lines))]
-
-            if not execute:
-                lines = [f"## 📋 Skill Plan: {skill.get('name', skill_name)}\n"]
-                lines.append(f"*{skill.get('description', '')}*\n")
-                lines.append("### Inputs")
-                for k, v in input_data.items():
-                    lines.append(f"- `{k}`: {v}")
-                lines.append("\n### Steps to Execute\n")
-
-                step_num = 0
-                for step in skill.get("steps", []):
-                    step_num += 1
-                    name = step.get("name", f"step_{step_num}")
-
-                    if "tool" in step:
-                        lines.append(f"{step_num}. **{name}** → `{step['tool']}`")
-                        if step.get("condition"):
-                            lines.append(f"   *Condition: {step['condition']}*")
-                    elif "compute" in step:
-                        lines.append(f"{step_num}. **{name}** → compute")
-                    elif "description" in step:
-                        lines.append(f"{step_num}. **{name}** → manual step")
-
-                lines.append("\n*Run with `execute=True` to execute this plan*")
-                return [TextContent(type="text", text="\n".join(lines))]
-
-            executor = SkillExecutor(
-                skill,
-                input_data,
-                debug=debug,
-                server=server,
-                create_issue_fn=create_issue_fn,
-                ask_question_fn=ask_question_fn,
-                enable_interactive_recovery=True,
-            )
-            result = await executor.execute()
-
-            return [TextContent(type="text", text=result)]
-
-        except Exception as e:
-            import traceback
-
-            if debug:
-                return [TextContent(type="text", text=f"❌ Error: {e}\n\n```\n{traceback.format_exc()}\n```")]
-            return [TextContent(type="text", text=f"❌ Error loading skill: {e}")]
+        return await _skill_run_impl(skill_name, inputs, execute, debug, server, create_issue_fn, ask_question_fn)
 
     return registry.count
