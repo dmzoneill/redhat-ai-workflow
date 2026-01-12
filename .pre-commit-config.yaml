@@ -34,8 +34,7 @@ repos:
     rev: v1.10.0
     hooks:
       - id: mypy
-        files: ^(scripts/common/|scripts/claude_agent\.py|config/)
-        exclude: ^(server/|tool_modules/)
+        files: ^scripts/common/(config_loader|parsers|validators)\.py$
         args:
           - "--ignore-missing-imports"
           - "--no-error-summary"

@@ -21,20 +21,20 @@ except ImportError:
     # Pydantic not installed, provide graceful degradation
     PYDANTIC_AVAILABLE = False
 
-    class BaseModel:  # type: ignore[no-redef]
+    class BaseModel:
         """Fallback BaseModel when Pydantic not installed."""
 
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: Any) -> None:
             pass
 
-        def dict(self):
+        def dict(self) -> Dict[str, Any]:
             return {}
 
-    def Field(*args, **kwargs):  # type: ignore[misc]
+    def Field(*args: Any, **kwargs: Any) -> Any:
         """Fallback Field when Pydantic not installed."""
         return None
 
-    def validator(*args, **kwargs):  # type: ignore[misc]
+    def validator(*args: Any, **kwargs: Any) -> Any:
         """Fallback validator when Pydantic not installed."""
         return lambda f: f
 
@@ -46,14 +46,14 @@ class ActiveIssue(BaseModel):
     """An active Jira issue being worked on."""
 
     if PYDANTIC_AVAILABLE:
-        key: str = Field(..., description="Jira issue key (e.g., AAP-12345)")  # type: ignore[misc]
-        summary: str = Field(..., description="Issue summary/title")  # type: ignore[misc]
-        status: str = Field(..., description="Current status (e.g., In Progress)")  # type: ignore[misc]
-        branch: str = Field(..., description="Git branch name")  # type: ignore[misc]
-        repo: str = Field(..., description="Repository name")  # type: ignore[misc]
-        started: str = Field(..., description="ISO timestamp when started")  # type: ignore[misc]
+        key: str = Field(..., description="Jira issue key (e.g., AAP-12345)")
+        summary: str = Field(..., description="Issue summary/title")
+        status: str = Field(..., description="Current status (e.g., In Progress)")
+        branch: str = Field(..., description="Git branch name")
+        repo: str = Field(..., description="Repository name")
+        started: str = Field(..., description="ISO timestamp when started")
 
-        @validator("key")  # type: ignore[misc]
+        @validator("key")
         def validate_key(cls, v):
             """Ensure issue key matches pattern."""
             if not v or "-" not in v:
@@ -65,7 +65,7 @@ class OpenMR(BaseModel):
     """An open merge request."""
 
     if PYDANTIC_AVAILABLE:
-        id: int = Field(..., description="MR ID number")  # type: ignore[misc]
+        id: int = Field(..., description="MR ID number")
     project: str = Field(..., description="GitLab project path")
     title: str = Field(..., description="MR title")
     pipeline_status: Optional[str] = Field(None, description="CI/CD pipeline status")
