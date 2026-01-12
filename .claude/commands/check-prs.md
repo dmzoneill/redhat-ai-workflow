@@ -38,7 +38,3 @@ skill_run("check_my_prs", '{}')
 # Check specific project
 skill_run("check_my_prs", '{"project": "automation-analytics-backend"}')
 ```
-
-
-
-

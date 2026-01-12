@@ -50,7 +50,3 @@ skill_run("silence_alert", '{"delete_id": "abc-123-silence-id"}')
 - During planned maintenance
 - While investigating known issues
 - To reduce noise during deployments
-
-
-
-

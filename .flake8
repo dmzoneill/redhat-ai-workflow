@@ -12,8 +12,10 @@ exclude =
     build,
     dist,
     .claude,
-    extensions,
-    tests
+    extensions/*,
+    tests/*,
+    node_modules,
+    */node_modules/*
 
 # McCabe complexity
 max-complexity = 15

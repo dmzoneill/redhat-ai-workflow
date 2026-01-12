@@ -4,12 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from server.auto_heal_decorator import (
-    auto_heal,
-    auto_heal_ephemeral,
-    auto_heal_konflux,
-    auto_heal_stage,
-)
+from server.auto_heal_decorator import auto_heal, auto_heal_ephemeral, auto_heal_konflux, auto_heal_stage
 
 
 @pytest.mark.asyncio
