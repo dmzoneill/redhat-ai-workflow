@@ -246,13 +246,13 @@ try:
     from .session_tools import register_prompts, register_session_tools
     from .skill_engine import register_skill_tools
 except ImportError:
-    from infra_tools import register_infra_tools  # type: ignore[no-redef]
-    from memory_tools import register_memory_tools  # type: ignore[no-redef]
-    from meta_tools import register_meta_tools  # type: ignore[no-redef]
-    from persona_tools import register_persona_tools  # type: ignore[no-redef]
-    from resources import register_resources  # type: ignore[no-redef]
-    from session_tools import register_prompts, register_session_tools  # type: ignore[no-redef]
-    from skill_engine import register_skill_tools  # type: ignore[no-redef]
+    from infra_tools import register_infra_tools
+    from memory_tools import register_memory_tools
+    from meta_tools import register_meta_tools
+    from persona_tools import register_persona_tools
+    from resources import register_resources
+    from session_tools import register_prompts, register_session_tools
+    from skill_engine import register_skill_tools
 
 
 def register_tools(server: "FastMCP") -> int:

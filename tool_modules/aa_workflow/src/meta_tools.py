@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 # Known issues checking - loads patterns from memory
-def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:  # type: ignore[misc]
+def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
     """Check memory for known issues matching this tool/error."""
     import yaml
 
@@ -92,7 +92,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
     return matches
 
 
-def _format_known_issues(matches: list) -> str:  # type: ignore[misc]
+def _format_known_issues(matches: list) -> str:
     """Format known issues for display."""
     if not matches:
         return ""
