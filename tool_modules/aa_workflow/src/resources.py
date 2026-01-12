@@ -24,6 +24,94 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 
+async def _get_current_work() -> str:
+    """Get current work state resource."""
+    work_file = MEMORY_DIR / "state" / "current_work.yaml"
+    if work_file.exists():
+        return work_file.read_text()
+    return "# No current work tracked\nactive_issues: []\nopen_mrs: []\nfollow_ups: []"
+
+
+async def _get_patterns() -> str:
+    """Get learned error patterns resource."""
+    patterns_file = MEMORY_DIR / "learned" / "patterns.yaml"
+    if patterns_file.exists():
+        return patterns_file.read_text()
+    return "# No patterns recorded yet\npatterns: []"
+
+
+async def _get_runbooks() -> str:
+    """Get learned runbooks resource."""
+    runbooks_file = MEMORY_DIR / "learned" / "runbooks.yaml"
+    if runbooks_file.exists():
+        return runbooks_file.read_text()
+    return "# No runbooks recorded yet\nrunbooks: {}"
+
+
+async def _get_service_quirks() -> str:
+    """Get service quirks resource."""
+    quirks_file = MEMORY_DIR / "learned" / "service_quirks.yaml"
+    if quirks_file.exists():
+        return quirks_file.read_text()
+    return "# No service quirks recorded yet\nservices: {}"
+
+
+async def _get_environments() -> str:
+    """Get environment health status resource."""
+    env_file = MEMORY_DIR / "state" / "environments.yaml"
+    if env_file.exists():
+        return env_file.read_text()
+    return "# No environment state\nenvironments: {}"
+
+
+async def _get_personas() -> str:
+    """Get available persona configurations resource."""
+    personas = []
+    if PERSONAS_DIR.exists():
+        for f in PERSONAS_DIR.glob("*.yaml"):
+            try:
+                with open(f) as fp:
+                    data = yaml.safe_load(fp)
+                personas.append(
+                    {
+                        "name": data.get("name", f.stem),
+                        "description": data.get("description", ""),
+                        "tools": data.get("tools", []),
+                        "skills": data.get("skills", []),
+                    }
+                )
+            except Exception:
+                pass
+    return yaml.dump({"personas": personas}, default_flow_style=False)
+
+
+async def _get_skills() -> str:
+    """Get available skill definitions resource."""
+    skills = []
+    if SKILLS_DIR.exists():
+        for f in SKILLS_DIR.glob("*.yaml"):
+            try:
+                with open(f) as fp:
+                    data = yaml.safe_load(fp)
+                skills.append(
+                    {
+                        "name": data.get("name", f.stem),
+                        "description": data.get("description", ""),
+                        "inputs": [i.get("name") for i in data.get("inputs", [])],
+                    }
+                )
+            except Exception:
+                pass
+    return yaml.dump({"skills": skills}, default_flow_style=False)
+
+
+def _get_repositories(load_config_fn) -> str:
+    """Get configured repositories resource."""
+    config = load_config_fn()
+    repos = config.get("repositories", {})
+    return yaml.dump({"repositories": repos}, default_flow_style=False)
+
+
 def register_resources(server: "FastMCP", load_config_fn) -> int:
     """Register resources with the MCP server.
 
@@ -31,110 +119,45 @@ def register_resources(server: "FastMCP", load_config_fn) -> int:
         server: The FastMCP server instance
         load_config_fn: Function to load config.json
     """
-    resource_count = 0
 
     @server.resource("memory://state/current_work")
     async def resource_current_work() -> str:
         """Current work state - active issues, branches, MRs."""
-        work_file = MEMORY_DIR / "state" / "current_work.yaml"
-        if work_file.exists():
-            return work_file.read_text()
-        return "# No current work tracked\nactive_issues: []\nopen_mrs: []\nfollow_ups: []"
-
-    resource_count += 1
+        return await _get_current_work()
 
     @server.resource("memory://learned/patterns")
     async def resource_patterns() -> str:
         """Known error patterns and solutions."""
-        patterns_file = MEMORY_DIR / "learned" / "patterns.yaml"
-        if patterns_file.exists():
-            return patterns_file.read_text()
-        return "# No patterns recorded yet\npatterns: []"
-
-    resource_count += 1
+        return await _get_patterns()
 
     @server.resource("memory://learned/runbooks")
     async def resource_runbooks() -> str:
         """Learned runbooks and operational procedures."""
-        runbooks_file = MEMORY_DIR / "learned" / "runbooks.yaml"
-        if runbooks_file.exists():
-            return runbooks_file.read_text()
-        return "# No runbooks recorded yet\nrunbooks: {}"
-
-    resource_count += 1
+        return await _get_runbooks()
 
     @server.resource("memory://learned/service_quirks")
     async def resource_service_quirks() -> str:
         """Service quirks and tribal knowledge."""
-        quirks_file = MEMORY_DIR / "learned" / "service_quirks.yaml"
-        if quirks_file.exists():
-            return quirks_file.read_text()
-        return "# No service quirks recorded yet\nservices: {}"
-
-    resource_count += 1
+        return await _get_service_quirks()
 
     @server.resource("memory://state/environments")
     async def resource_environments() -> str:
         """Environment health status (stage, prod, ephemeral)."""
-        env_file = MEMORY_DIR / "state" / "environments.yaml"
-        if env_file.exists():
-            return env_file.read_text()
-        return "# No environment state\nenvironments: {}"
-
-    resource_count += 1
+        return await _get_environments()
 
     @server.resource("config://personas")
     async def resource_personas() -> str:
         """Available persona configurations."""
-        personas = []
-        if PERSONAS_DIR.exists():
-            for f in PERSONAS_DIR.glob("*.yaml"):
-                try:
-                    with open(f) as fp:
-                        data = yaml.safe_load(fp)
-                    personas.append(
-                        {
-                            "name": data.get("name", f.stem),
-                            "description": data.get("description", ""),
-                            "tools": data.get("tools", []),
-                            "skills": data.get("skills", []),
-                        }
-                    )
-                except Exception:
-                    pass
-        return yaml.dump({"personas": personas}, default_flow_style=False)
-
-    resource_count += 1
+        return await _get_personas()
 
     @server.resource("config://skills")
     async def resource_skills() -> str:
         """Available skill definitions."""
-        skills = []
-        if SKILLS_DIR.exists():
-            for f in SKILLS_DIR.glob("*.yaml"):
-                try:
-                    with open(f) as fp:
-                        data = yaml.safe_load(fp)
-                    skills.append(
-                        {
-                            "name": data.get("name", f.stem),
-                            "description": data.get("description", ""),
-                            "inputs": [i.get("name") for i in data.get("inputs", [])],
-                        }
-                    )
-                except Exception:
-                    pass
-        return yaml.dump({"skills": skills}, default_flow_style=False)
-
-    resource_count += 1
+        return await _get_skills()
 
     @server.resource("config://repositories")
     async def resource_repositories() -> str:
         """Configured repositories from config.json."""
-        config = load_config_fn()
-        repos = config.get("repositories", {})
-        return yaml.dump({"repositories": repos}, default_flow_style=False)
+        return _get_repositories(load_config_fn)
 
-    resource_count += 1
-
-    return resource_count
+    return 8  # Number of registered resources
