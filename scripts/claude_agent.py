@@ -779,20 +779,10 @@ class ToolExecutor:
             return await self._run_command([self.rh_issue, "comment", key, comment])
         return f"Unknown Jira tool: {tool_name}"
 
-    async def _execute_gitlab(self, tool_name: str, args: dict[str, Any]) -> str:
-        """
-        Execute GitLab tools.
-
-        Uses ContextResolver to:
-        - Parse GitLab URLs to extract project and MR ID
-        - Resolve GitLab project paths to local directories
-        - Run glab from the correct local repo directory
-
-        This ensures glab has proper git remote context.
-        """
+    def _resolve_gitlab_context(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Resolve GitLab project, MR ID, and execution context from arguments."""
         import re
 
-        # Get URL or MR input
         mr_input = args.get("mr_id", "") or args.get("url", "")
         project = args.get("repo", args.get("project", ""))
         mr_id = ""
@@ -822,106 +812,150 @@ class ToolExecutor:
         if not local_repo_path and project and self.resolver:
             local_repo_path = self.resolver.get_repo_path(project)
 
-        if not project:
-            return "Project/repo is required. Provide a full GitLab URL or specify the project."
-
         # Determine how to run glab
         if local_repo_path and Path(local_repo_path).exists():
-            # Run from local repo directory (preferred - uses git remotes)
             run_cwd = local_repo_path
             use_repo_flag = False
             logger.info(f"Running glab from local repo: {run_cwd}")
         else:
-            # Fall back to --repo flag
             run_cwd = None
             use_repo_flag = True
             logger.info(f"Running glab with --repo flag: {project}")
 
+        return {
+            "project": project,
+            "mr_id": mr_id,
+            "run_cwd": run_cwd,
+            "use_repo_flag": use_repo_flag,
+        }
+
+    async def _gitlab_mr_view(self, mr_id: str, project: str, run_cwd: str | None, use_repo_flag: bool) -> str:
+        """Execute gitlab_mr_view tool."""
+        if not mr_id:
+            return "MR ID is required for gitlab_mr_view"
+        cmd = ["glab", "mr", "view", mr_id, "--web=false"]
+        if use_repo_flag:
+            cmd.extend(["--repo", project])
+        return await self._run_command(cmd, cwd=run_cwd)
+
+    async def _gitlab_mr_list(
+        self, project: str, run_cwd: str | None, use_repo_flag: bool, args: dict[str, Any]
+    ) -> str:
+        """Execute gitlab_mr_list tool."""
+        cmd = ["glab", "mr", "list"]
+        if args.get("author"):
+            cmd.extend(["--author", args["author"]])
+        cmd.extend(["--state", args.get("state", "opened")])
+        if use_repo_flag:
+            cmd.extend(["--repo", project])
+        return await self._run_command(cmd, cwd=run_cwd)
+
+    async def _gitlab_pipeline_status(self, project: str, run_cwd: str | None, use_repo_flag: bool) -> str:
+        """Execute gitlab_pipeline_status tool."""
+        cmd = ["glab", "ci", "status"]
+        if use_repo_flag:
+            cmd.extend(["--repo", project])
+        return await self._run_command(cmd, cwd=run_cwd)
+
+    async def _gitlab_mr_approve(
+        self, mr_id: str, project: str, run_cwd: str | None, use_repo_flag: bool, args: dict[str, Any]
+    ) -> str:
+        """Execute gitlab_mr_approve tool with event emission."""
+        if not mr_id:
+            return "MR ID is required for gitlab_mr_approve"
+        cmd = ["glab", "mr", "approve", mr_id]
+        if use_repo_flag:
+            cmd.extend(["--repo", project])
+        result = await self._run_command(cmd, cwd=run_cwd)
+
+        # Emit approval event
+        if self.hooks and "error" not in result.lower():
+            await self.hooks.emit(
+                "review_approved",
+                {
+                    "mr_id": mr_id,
+                    "author": args.get("author", ""),
+                    "project": project,
+                    "target_branch": args.get("target_branch", "main"),
+                },
+            )
+        return result
+
+    async def _gitlab_mr_comment(
+        self, mr_id: str, project: str, run_cwd: str | None, use_repo_flag: bool, args: dict[str, Any]
+    ) -> str:
+        """Execute gitlab_mr_comment tool with event emission."""
+        if not mr_id:
+            return "MR ID is required for gitlab_mr_comment"
+        comment = args.get("comment", args.get("body", ""))
+        if not comment:
+            return "Comment text is required"
+        cmd = ["glab", "mr", "note", mr_id, "-m", comment]
+        if use_repo_flag:
+            cmd.extend(["--repo", project])
+        result = await self._run_command(cmd, cwd=run_cwd)
+
+        # Emit comment event
+        if self.hooks and "error" not in result.lower():
+            await self.hooks.emit(
+                "review_comment",
+                {"mr_id": mr_id, "author": args.get("author", ""), "project": project},
+            )
+        return result
+
+    async def _gitlab_mr_merge(
+        self, mr_id: str, project: str, run_cwd: str | None, use_repo_flag: bool, args: dict[str, Any]
+    ) -> str:
+        """Execute gitlab_mr_merge tool with event emission."""
+        if not mr_id:
+            return "MR ID is required for gitlab_mr_merge"
+        cmd = ["glab", "mr", "merge", mr_id, "--yes"]
+        if args.get("squash"):
+            cmd.append("--squash")
+        if use_repo_flag:
+            cmd.extend(["--repo", project])
+        result = await self._run_command(cmd, cwd=run_cwd)
+
+        # Emit merge event
+        if self.hooks and "error" not in result.lower():
+            await self.hooks.emit(
+                "mr_merged",
+                {
+                    "mr_id": mr_id,
+                    "author": args.get("author", ""),
+                    "project": project,
+                    "target_branch": args.get("target_branch", "main"),
+                },
+            )
+        return result
+
+    async def _execute_gitlab(self, tool_name: str, args: dict[str, Any]) -> str:
+        """
+        Execute GitLab tools.
+
+        Uses ContextResolver to parse URLs and resolve project paths.
+        """
+        ctx = self._resolve_gitlab_context(args)
+        project = ctx["project"]
+        mr_id = ctx["mr_id"]
+        run_cwd = ctx["run_cwd"]
+        use_repo_flag = ctx["use_repo_flag"]
+
+        if not project:
+            return "Project/repo is required. Provide a full GitLab URL or specify the project."
+
         if tool_name == "gitlab_mr_view":
-            if not mr_id:
-                return "MR ID is required for gitlab_mr_view"
-            cmd = ["glab", "mr", "view", mr_id, "--web=false"]
-            if use_repo_flag:
-                cmd.extend(["--repo", project])
-            return await self._run_command(cmd, cwd=run_cwd)
-
+            return await self._gitlab_mr_view(mr_id, project, run_cwd, use_repo_flag)
         elif tool_name == "gitlab_mr_list":
-            cmd = ["glab", "mr", "list"]
-            if args.get("author"):
-                cmd.extend(["--author", args["author"]])
-            cmd.extend(["--state", args.get("state", "opened")])
-            if use_repo_flag:
-                cmd.extend(["--repo", project])
-            return await self._run_command(cmd, cwd=run_cwd)
-
+            return await self._gitlab_mr_list(project, run_cwd, use_repo_flag, args)
         elif tool_name == "gitlab_pipeline_status":
-            cmd = ["glab", "ci", "status"]
-            if use_repo_flag:
-                cmd.extend(["--repo", project])
-            return await self._run_command(cmd, cwd=run_cwd)
-
+            return await self._gitlab_pipeline_status(project, run_cwd, use_repo_flag)
         elif tool_name == "gitlab_mr_approve":
-            if not mr_id:
-                return "MR ID is required for gitlab_mr_approve"
-            cmd = ["glab", "mr", "approve", mr_id]
-            if use_repo_flag:
-                cmd.extend(["--repo", project])
-            result = await self._run_command(cmd, cwd=run_cwd)
-
-            # Emit approval event
-            if self.hooks and "error" not in result.lower():
-                await self.hooks.emit(
-                    "review_approved",
-                    {
-                        "mr_id": mr_id,
-                        "author": args.get("author", ""),
-                        "project": project,
-                        "target_branch": args.get("target_branch", "main"),
-                    },
-                )
-            return result
-
+            return await self._gitlab_mr_approve(mr_id, project, run_cwd, use_repo_flag, args)
         elif tool_name == "gitlab_mr_comment":
-            if not mr_id:
-                return "MR ID is required for gitlab_mr_comment"
-            comment = args.get("comment", args.get("body", ""))
-            if not comment:
-                return "Comment text is required"
-            cmd = ["glab", "mr", "note", mr_id, "-m", comment]
-            if use_repo_flag:
-                cmd.extend(["--repo", project])
-            result = await self._run_command(cmd, cwd=run_cwd)
-
-            # Emit comment event
-            if self.hooks and "error" not in result.lower():
-                await self.hooks.emit(
-                    "review_comment",
-                    {"mr_id": mr_id, "author": args.get("author", ""), "project": project},
-                )
-            return result
-
+            return await self._gitlab_mr_comment(mr_id, project, run_cwd, use_repo_flag, args)
         elif tool_name == "gitlab_mr_merge":
-            if not mr_id:
-                return "MR ID is required for gitlab_mr_merge"
-            cmd = ["glab", "mr", "merge", mr_id, "--yes"]
-            if args.get("squash"):
-                cmd.append("--squash")
-            if use_repo_flag:
-                cmd.extend(["--repo", project])
-            result = await self._run_command(cmd, cwd=run_cwd)
-
-            # Emit merge event
-            if self.hooks and "error" not in result.lower():
-                await self.hooks.emit(
-                    "mr_merged",
-                    {
-                        "mr_id": mr_id,
-                        "author": args.get("author", ""),
-                        "project": project,
-                        "target_branch": args.get("target_branch", "main"),
-                    },
-                )
-            return result
+            return await self._gitlab_mr_merge(mr_id, project, run_cwd, use_repo_flag, args)
 
         return f"Unknown GitLab tool: {tool_name}"
 
@@ -1200,6 +1234,81 @@ Please verify the image exists before proceeding."""
 
         return f"Unknown Quay tool: {tool_name}"
 
+    def _execute_memory_read(self, key: str, read_memory) -> str:
+        """Execute memory_read tool."""
+        if not key:
+            # List available memory files
+            memory_dir = Path.home() / ".config/aa_workflow/memory"
+            if not memory_dir.exists():
+                return "No memory directory found"
+            files = []
+            for f in memory_dir.rglob("*.yaml"):
+                rel_path = f.relative_to(memory_dir)
+                files.append(str(rel_path).replace(".yaml", ""))
+            return "Available memory files:\n" + "\n".join(f"- {f}" for f in sorted(files))
+
+        data = read_memory(key)
+        if not data:
+            return f"Memory file '{key}' is empty or not found"
+
+        import yaml
+
+        return f"## Memory: {key}\n```yaml\n{yaml.safe_dump(data, default_flow_style=False)}\n```"
+
+    def _execute_memory_append(self, key: str, list_path: str, item_str: Any, append_to_list) -> str:
+        """Execute memory_append tool."""
+        if not key or not list_path:
+            return "Error: key and list_path are required"
+
+        # Parse item
+        try:
+            import yaml
+
+            item = yaml.safe_load(item_str) if isinstance(item_str, str) else item_str
+        except Exception:
+            item = {"value": item_str}
+
+        append_to_list(key, list_path, item)
+        return f"Appended to {key}.{list_path}"
+
+    def _execute_memory_session_log(self, action: str, details: str) -> str:
+        """Execute memory_session_log tool."""
+        if not action:
+            return "Error: action is required"
+
+        # Use session log from memory tools
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+
+            from scripts.common.config_loader import get_timezone
+            from scripts.common.memory import read_memory as read_mem
+            from scripts.common.memory import write_memory
+
+            tz = ZoneInfo(get_timezone())
+            today = datetime.now(tz).strftime("%Y-%m-%d")
+            log_key = f"sessions/{today}"
+
+            # Read existing log
+            log_data = read_mem(log_key)
+            if not log_data:
+                log_data = {"date": today, "entries": []}
+
+            # Add entry
+            entry = {
+                "time": datetime.now(tz).strftime("%H:%M"),
+                "action": action,
+            }
+            if details:
+                entry["details"] = details
+
+            log_data.setdefault("entries", []).append(entry)
+            write_memory(log_key, log_data)
+
+            return f"Logged: {action}"
+        except Exception as e:
+            return f"Failed to log: {e}"
+
     async def _execute_memory(self, tool_name: str, args: dict[str, Any]) -> str:
         """Execute memory tools using scripts.common.memory helpers."""
         try:
@@ -1209,84 +1318,13 @@ Please verify the image exists before proceeding."""
             return "Memory tools not available (scripts.common.memory not found)"
 
         if tool_name == "memory_read":
-            key = args.get("key", "")
-            if not key:
-                # List available memory files
-                memory_dir = Path.home() / ".config/aa_workflow/memory"
-                if not memory_dir.exists():
-                    return "No memory directory found"
-                files = []
-                for f in memory_dir.rglob("*.yaml"):
-                    rel_path = f.relative_to(memory_dir)
-                    files.append(str(rel_path).replace(".yaml", ""))
-                return "Available memory files:\n" + "\n".join(f"- {f}" for f in sorted(files))
-
-            data = read_memory(key)
-            if not data:
-                return f"Memory file '{key}' is empty or not found"
-
-            import yaml
-
-            return f"## Memory: {key}\n```yaml\n{yaml.safe_dump(data, default_flow_style=False)}\n```"
-
+            return self._execute_memory_read(args.get("key", ""), read_memory)
         elif tool_name == "memory_append":
-            key = args.get("key", "")
-            list_path = args.get("list_path", "")
-            item_str = args.get("item", "{}")
-
-            if not key or not list_path:
-                return "Error: key and list_path are required"
-
-            # Parse item
-            try:
-                import yaml
-
-                item = yaml.safe_load(item_str) if isinstance(item_str, str) else item_str
-            except Exception:
-                item = {"value": item_str}
-
-            append_to_list(key, list_path, item)
-            return f"Appended to {key}.{list_path}"
-
+            return self._execute_memory_append(
+                args.get("key", ""), args.get("list_path", ""), args.get("item", "{}"), append_to_list
+            )
         elif tool_name == "memory_session_log":
-            action = args.get("action", "")
-            details = args.get("details", "")
-
-            if not action:
-                return "Error: action is required"
-
-            # Use session log from memory tools
-            try:
-                from datetime import datetime
-                from zoneinfo import ZoneInfo
-
-                from scripts.common.config_loader import get_timezone
-                from scripts.common.memory import read_memory as read_mem
-                from scripts.common.memory import write_memory
-
-                tz = ZoneInfo(get_timezone())
-                today = datetime.now(tz).strftime("%Y-%m-%d")
-                log_key = f"sessions/{today}"
-
-                # Read existing log
-                log_data = read_mem(log_key)
-                if not log_data:
-                    log_data = {"date": today, "entries": []}
-
-                # Add entry
-                entry = {
-                    "time": datetime.now(tz).strftime("%H:%M"),
-                    "action": action,
-                }
-                if details:
-                    entry["details"] = details
-
-                log_data.setdefault("entries", []).append(entry)
-                write_memory(log_key, log_data)
-
-                return f"Logged: {action}"
-            except Exception as e:
-                return f"Failed to log: {e}"
+            return self._execute_memory_session_log(args.get("action", ""), args.get("details", ""))
 
         return f"Unknown memory tool: {tool_name}"
 
@@ -1645,57 +1683,28 @@ KUBECONFIG - the tools handle this automatically:
 
 use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_view. for mr urls use gitlab_mr_view."""
 
-    async def process_message(
-        self,
-        message: str,
-        context: Optional[dict[str, Any]] = None,
-        conversation_id: Optional[str] = None,
-    ) -> str:
-        """
-        Process a message using Claude.
-        """
-        # Load conversation history if we have an ID
-        history = []
-        if conversation_id:
-            history = self._get_conversation_history(conversation_id)
-
-        messages = history + [{"role": "user", "content": message}]
-
-        # Extract repository context from the message
-        resolved_ctx = None
-        if RESOLVER_AVAILABLE:
-            try:
-                resolver = ContextResolver()
-                resolved_ctx = resolver.from_message(message)
-            except Exception as e:
-                logger.warning(f"Failed to resolve context: {e}")
-
-        # Build context string for Claude
+    def _build_context_message(self, message: str, context: Optional[dict], resolved_ctx) -> str:
+        """Build context-enriched message."""
         context_parts = []
         if context:
             context_parts.append(
                 f"User: {context.get('user_name', 'unknown')} in #{context.get('channel_name', 'unknown')}"
             )
 
-            # Add user classification for tone adjustment
             user_category = context.get("user_category", "unknown")
             include_emojis = context.get("include_emojis", True)
 
             if user_category == "concerned":
-                # Manager/stakeholder - be formal and careful
                 context_parts.append(
                     "TONE: formal - this is a manager/stakeholder. "
                     "be professional, clear, no typos, no casual slang. skip emojis."
                 )
             elif user_category == "safe":
-                # Teammate - full casual mode
                 context_parts.append("TONE: casual - teammate, full irish dev mode, typos ok, emojis ok")
             else:
-                # Unknown - balanced professional
                 emoji_note = "emojis ok" if include_emojis else "skip emojis"
                 context_parts.append(f"TONE: professional - clear and helpful, {emoji_note}")
 
-        # Add resolved repo context so Claude knows what repo we're dealing with
         if resolved_ctx and resolved_ctx.is_valid():
             if resolved_ctx.repo_path:
                 context_parts.append(f"Repository: {resolved_ctx.repo_name} at {resolved_ctx.repo_path}")
@@ -1706,13 +1715,68 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
             if resolved_ctx.mr_id:
                 context_parts.append(f"MR: !{resolved_ctx.mr_id}")
         elif resolved_ctx and resolved_ctx.needs_clarification():
-            # Multiple repos match - tell Claude to ask
             repos = ", ".join(a["name"] for a in resolved_ctx.alternatives)
             context_parts.append(f"Ambiguous repo - matches: {repos}. Ask user which one.")
 
         if context_parts:
             context_text = "Context: " + " | ".join(context_parts)
-            messages[0]["content"] = f"{context_text}\n\nMessage: {message}"
+            return f"{context_text}\n\nMessage: {message}"
+        return message
+
+    async def _execute_tool_loop(self, response, messages, tools):
+        """Execute tool calls in a loop until Claude stops requesting tools."""
+        while response.stop_reason == "tool_use":
+            tool_calls = [block for block in response.content if block.type == "tool_use"]
+
+            tool_results = []
+            for tc in tool_calls:
+                result = await self.tool_executor.execute(tc.name, tc.input)
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": result,
+                    }
+                )
+
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": tool_results})
+
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                system=self.system_prompt,
+                tools=tools,
+                messages=messages,
+            )
+        return response
+
+    async def process_message(
+        self,
+        message: str,
+        context: Optional[dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
+    ) -> str:
+        """
+        Process a message using Claude.
+        """
+        # Load conversation history
+        history = []
+        if conversation_id:
+            history = self._get_conversation_history(conversation_id)
+
+        # Extract repository context
+        resolved_ctx = None
+        if RESOLVER_AVAILABLE:
+            try:
+                resolver = ContextResolver()
+                resolved_ctx = resolver.from_message(message)
+            except Exception as e:
+                logger.warning(f"Failed to resolve context: {e}")
+
+        # Build context-enriched message
+        enriched_message = self._build_context_message(message, context, resolved_ctx)
+        messages = history + [{"role": "user", "content": enriched_message}]
 
         # Get available tools
         tools = self.tool_registry.list_tools()
@@ -1726,34 +1790,8 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
             messages=messages,  # type: ignore[arg-type]
         )
 
-        # Process response - may need multiple rounds if Claude calls tools
-        while response.stop_reason == "tool_use":
-            # Extract tool calls
-            tool_calls = [block for block in response.content if block.type == "tool_use"]
-
-            # Execute tools
-            tool_results = []
-            for tc in tool_calls:
-                result = await self.tool_executor.execute(tc.name, tc.input)
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": result,
-                    }
-                )
-
-            # Continue conversation with tool results
-            messages.append({"role": "assistant", "content": response.content})  # type: ignore[dict-item]
-            messages.append({"role": "user", "content": tool_results})  # type: ignore[dict-item]
-
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=self.system_prompt,
-                tools=tools,  # type: ignore[arg-type]
-                messages=messages,  # type: ignore[arg-type]
-            )
+        # Execute tool calls in a loop
+        response = await self._execute_tool_loop(response, messages, tools)
 
         # Extract final text response
         final_response = ""
