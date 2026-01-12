@@ -43,47 +43,52 @@ def is_claude_code_context() -> bool:
     return False
 
 
-def create_ask_question_wrapper(server=None):
-    """
-    Create a wrapper function for AskUserQuestion tool.
-
-    This function returns an async callable that can invoke
-    Claude Code's AskUserQuestion tool if available.
+def _try_server_strategy(server):
+    """Try to get AskUserQuestion from server registry.
 
     Args:
-        server: The FastMCP server instance (may have access to tools)
+        server: FastMCP server instance
 
     Returns:
-        Async function or None if not available
+        Async callable or None
     """
-    # Strategy 1: Try to get tool from server registry
-    if server:
-        try:
-            # Check if server has a way to call tools
-            if hasattr(server, "call_tool"):
+    if not server:
+        return None
 
-                async def ask_via_server(questions_data: dict) -> dict | None:
-                    """Call AskUserQuestion via server."""
-                    try:
-                        result = await server.call_tool("AskUserQuestion", questions_data)
-                        return result
-                    except Exception as e:
-                        logger.debug(f"Server tool call failed: {e}")
-                        return None
+    try:
+        # Check if server has a way to call tools
+        if hasattr(server, "call_tool"):
 
-                return ask_via_server
+            async def ask_via_server(questions_data: dict) -> dict | None:
+                """Call AskUserQuestion via server."""
+                try:
+                    result = await server.call_tool("AskUserQuestion", questions_data)
+                    return result
+                except Exception as e:
+                    logger.debug(f"Server tool call failed: {e}")
+                    return None
 
-            # Check if server has tool registry we can query
-            if hasattr(server, "list_tools"):
-                tools = server.list_tools()
-                tool_names = [t.name if hasattr(t, "name") else str(t) for t in tools]
-                if "AskUserQuestion" in tool_names:
-                    logger.info("AskUserQuestion found in server tools")
-                    # Tool exists but we need server's call mechanism
-        except Exception as e:
-            logger.debug(f"Server tool check failed: {e}")
+            return ask_via_server
 
-    # Strategy 2: Try to import from Claude Code's internal modules
+        # Check if server has tool registry we can query
+        if hasattr(server, "list_tools"):
+            tools = server.list_tools()
+            tool_names = [t.name if hasattr(t, "name") else str(t) for t in tools]
+            if "AskUserQuestion" in tool_names:
+                logger.info("AskUserQuestion found in server tools")
+                # Tool exists but we need server's call mechanism
+    except Exception as e:
+        logger.debug(f"Server tool check failed: {e}")
+
+    return None
+
+
+def _try_import_strategy():
+    """Try to import AskUserQuestion from Claude Code's internal modules.
+
+    Returns:
+        Async callable or None
+    """
     try:
         # This would work if Claude Code exposes its tools
         from claude_code import ask_user_question  # type: ignore
@@ -98,7 +103,15 @@ def create_ask_question_wrapper(server=None):
     except ImportError:
         logger.debug("Could not import claude_code.ask_user_question")
 
-    # Strategy 3: Try to use MCP client to call the tool
+    return None
+
+
+def _try_mcp_client_strategy():
+    """Try to use MCP client to call the tool.
+
+    Returns:
+        Async callable or None
+    """
     try:
         # Check if we can create an MCP client to call tools
         mcp_socket = os.getenv("MCP_SOCKET")
@@ -124,7 +137,14 @@ def create_ask_question_wrapper(server=None):
     except Exception as e:
         logger.debug(f"MCP client strategy failed: {e}")
 
-    # Strategy 4: Check if running as subprocess of Claude Code
+    return None
+
+
+def _check_subprocess_context():
+    """Check if running as subprocess of Claude Code.
+
+    This is informational only - doesn't return a callable.
+    """
     try:
         # Check parent process
         parent_pid = os.getppid()
@@ -138,6 +158,36 @@ def create_ask_question_wrapper(server=None):
             pass
     except Exception:
         pass
+
+
+def create_ask_question_wrapper(server=None):
+    """
+    Create a wrapper function for AskUserQuestion tool.
+
+    This function returns an async callable that can invoke
+    Claude Code's AskUserQuestion tool if available.
+
+    Args:
+        server: The FastMCP server instance (may have access to tools)
+
+    Returns:
+        Async function or None if not available
+    """
+    # Try strategies in order of preference
+    result = _try_server_strategy(server)
+    if result:
+        return result
+
+    result = _try_import_strategy()
+    if result:
+        return result
+
+    result = _try_mcp_client_strategy()
+    if result:
+        return result
+
+    # Check subprocess context (informational only)
+    _check_subprocess_context()
 
     # If all strategies fail, return None (will use CLI fallback)
     logger.info("AskUserQuestion not available - will use CLI fallback")
