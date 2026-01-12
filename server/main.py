@@ -134,6 +134,90 @@ def setup_logging(web_mode: bool = False) -> logging.Logger:
     return logging.getLogger(__name__)
 
 
+def _get_tools_file_path(tool_name: str) -> Path:
+    """
+    Determine the correct tools file path for a tool module name.
+
+    Args:
+        tool_name: Tool module name (e.g., "git", "git_basic", "git_extra")
+
+    Returns:
+        Path to the tools file
+    """
+    if tool_name.endswith("_basic"):
+        base_name = tool_name[:-6]  # Remove "_basic"
+        module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+        return module_dir / "src" / "tools_basic.py"
+    elif tool_name.endswith("_extra"):
+        base_name = tool_name[:-6]  # Remove "_extra"
+        module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+        return module_dir / "src" / "tools_extra.py"
+    else:
+        module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
+        return module_dir / "src" / "tools.py"
+
+
+def _load_single_tool_module(tool_name: str, server: FastMCP) -> bool:
+    """
+    Load a single tool module and register its tools.
+
+    Args:
+        tool_name: Tool module name
+        server: FastMCP server instance
+
+    Returns:
+        True if loaded successfully, False otherwise
+    """
+    logger = logging.getLogger(__name__)
+
+    tools_file = _get_tools_file_path(tool_name)
+
+    if not tools_file.exists():
+        logger.warning(f"Tools file not found: {tools_file}")
+        return False
+
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"aa_{tool_name}_tools", tools_file)
+    if spec is None or spec.loader is None:
+        logger.warning(f"Could not create spec for {tool_name}")
+        return False
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    if hasattr(module, "register_tools"):
+        module.register_tools(server)
+        logger.info(f"Loaded {tool_name} tools")
+        return True
+    else:
+        logger.warning(f"Module aa_{tool_name} has no register_tools function")
+        return False
+
+
+def _register_debug_for_module(server: FastMCP, tool_name: str):
+    """
+    Register debug tools for a single loaded module.
+
+    Args:
+        server: FastMCP server instance
+        tool_name: Tool module name
+    """
+    from .debuggable import wrap_all_tools
+
+    tools_file = _get_tools_file_path(tool_name)
+
+    if not tools_file.exists():
+        return
+
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"aa_{tool_name}_tools_debug", tools_file)
+    if spec and spec.loader:
+        module = importlib.util.module_from_spec(spec)
+        wrap_all_tools(server, module)
+
+
 def create_mcp_server(
     name: str = "aa_workflow",
     tools: list[str] | None = None,
@@ -161,82 +245,28 @@ def create_mcp_server(
     if estimated > 128:
         logger.warning(f"Loading ~{estimated} tools, may exceed Cursor's limit of 128!")
 
+    # Load all requested tool modules
     loaded_modules = []
-
     for tool_name in tools:
         if tool_name not in TOOL_MODULES:
             logger.warning(f"Unknown tool module: {tool_name}. Available: {list(TOOL_MODULES.keys())}")
             continue
 
         try:
-            # Handle _basic and _extra variants
-            # e.g., "git_basic" -> module "aa_git", file "tools_basic.py"
-            # e.g., "git" -> module "aa_git", file "tools.py" (loads all)
-            if tool_name.endswith("_basic"):
-                base_name = tool_name[:-6]  # Remove "_basic"
-                module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-                tools_file = module_dir / "src" / "tools_basic.py"
-            elif tool_name.endswith("_extra"):
-                base_name = tool_name[:-6]  # Remove "_extra"
-                module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-                tools_file = module_dir / "src" / "tools_extra.py"
-            else:
-                module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
-                tools_file = module_dir / "src" / "tools.py"
-
-            if not tools_file.exists():
-                logger.warning(f"Tools file not found: {tools_file}")
-                continue
-
-            import importlib.util
-
-            spec = importlib.util.spec_from_file_location(f"aa_{tool_name}_tools", tools_file)
-            if spec is None or spec.loader is None:
-                logger.warning(f"Could not create spec for {tool_name}")
-                continue
-
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-            if hasattr(module, "register_tools"):
-                module.register_tools(server)
+            if _load_single_tool_module(tool_name, server):
                 loaded_modules.append(tool_name)
-                logger.info(f"Loaded {tool_name} tools")
-            else:
-                logger.warning(f"Module aa_{tool_name} has no register_tools function")
-
         except Exception as e:
             logger.error(f"Error loading {tool_name}: {e}")
 
     # Register debug_tool and wrap all tools with auto-fix hints
     try:
-        from .debuggable import register_debug_tool, wrap_all_tools, wrap_server_tools_runtime
+        from .debuggable import register_debug_tool, wrap_server_tools_runtime
 
         register_debug_tool(server)
 
         # Register all loaded tools in the debug registry (for source lookup)
         for tool_name in loaded_modules:
-            # Handle _basic/_extra variants for debug registry
-            if tool_name.endswith("_basic"):
-                base_name = tool_name[:-6]
-                module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-                tools_file = module_dir / "src" / "tools_basic.py"
-            elif tool_name.endswith("_extra"):
-                base_name = tool_name[:-6]
-                module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-                tools_file = module_dir / "src" / "tools_extra.py"
-            else:
-                module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
-                tools_file = module_dir / "src" / "tools.py"
-
-            if tools_file.exists():
-                # Import and register in debug registry
-                import importlib.util
-
-                spec = importlib.util.spec_from_file_location(f"aa_{tool_name}_tools_debug", tools_file)
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    wrap_all_tools(server, module)
+            _register_debug_for_module(server, tool_name)
 
         # Wrap all tools at runtime to add debug hints on failure
         wrapped_count = wrap_server_tools_runtime(server)
