@@ -234,7 +234,6 @@ def normalize_jira_input(data: Dict[str, Any], convert_markdown: bool = True) ->
 
 def build_jira_yaml(
     summary: str,
-    issue_type: str = "story",  # noqa: ARG001 - reserved for future use
     description: str = "",
     user_story: str = "",
     acceptance_criteria: str = "",

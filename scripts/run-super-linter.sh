@@ -41,7 +41,7 @@ docker run --rm \
     -e VALIDATE_YAML=true \
     -e VALIDATE_JSON=true \
     -e VALIDATE_GITHUB_ACTIONS=true \
-    -e FILTER_REGEX_EXCLUDE="(\.git|node_modules|__pycache__|\.venv|venv|\.mypy_cache|extensions/|\.super-linter).*" \
+    -e FILTER_REGEX_EXCLUDE="(\.git|node_modules|__pycache__|\.venv|venv|\.mypy_cache|extensions/|\.super-linter|\.claude/|backup/|\.new$).*" \
     -e LOG_LEVEL=NOTICE \
     -v "${REPO_ROOT}":/tmp/lint \
     ghcr.io/super-linter/super-linter:slim-latest

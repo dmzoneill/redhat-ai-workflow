@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Runtime imports with fallbacks
 try:
-    import anthropic  # noqa: F401
+    import anthropic
     from anthropic import AnthropicVertex
 
     ANTHROPIC_AVAILABLE = True
@@ -37,8 +37,8 @@ try:
 except ImportError:
     ANTHROPIC_AVAILABLE = False
     VERTEX_AVAILABLE = False
-    anthropic = None  # type: ignore[assignment]
-    AnthropicVertex = None  # type: ignore[assignment, misc]
+    anthropic = None
+    AnthropicVertex = None
 
 try:
     from scripts.common.context_resolver import ContextResolver, ResolvedContext
@@ -46,8 +46,8 @@ try:
     RESOLVER_AVAILABLE = True
 except ImportError:
     RESOLVER_AVAILABLE = False
-    ContextResolver = None  # type: ignore[assignment, misc]
-    ResolvedContext = None  # type: ignore[assignment, misc]
+    ContextResolver = None
+    ResolvedContext = None
 
 try:
     from scripts.skill_hooks import SkillHooks
@@ -55,22 +55,22 @@ try:
     HOOKS_AVAILABLE = True
 except ImportError:
     HOOKS_AVAILABLE = False
-    SkillHooks = None  # type: ignore[assignment, misc]
+    SkillHooks = None
 
 # Import known issues checker for learning loop
 try:
     PROJECT_ROOT = Path(__file__).parent.parent
     sys.path.insert(0, str(PROJECT_ROOT))
-    from server.debuggable import _check_known_issues_sync, _format_known_issues  # type: ignore[attr-defined]
+    from server.debuggable import _check_known_issues_sync, _format_known_issues
 
     KNOWN_ISSUES_AVAILABLE = True
 except ImportError:
     KNOWN_ISSUES_AVAILABLE = False
 
-    def _check_known_issues_sync(tool_name="", error_text=""):  # type: ignore[misc]
+    def _check_known_issues_sync(tool_name="", error_text=""):
         return []
 
-    def _format_known_issues(matches):  # type: ignore[misc]
+    def _format_known_issues(matches):
         return ""
 
 
@@ -90,9 +90,9 @@ try:
     SKILLS_DIR = Path(__file__).parent.parent / "skills"
 except ImportError as e:
     SKILL_EXECUTOR_AVAILABLE = False
-    SkillExecutor = None  # type: ignore[assignment, misc]
-    skill_yaml = None  # type: ignore[assignment]
-    SKILLS_DIR = None  # type: ignore[assignment]
+    SkillExecutor = None
+    skill_yaml = None
+    SKILLS_DIR = None
     logger.debug(f"Skill executor not available: {e}")
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -1588,7 +1588,7 @@ class ClaudeAgent:
                     "  - CLAUDE_CODE_USE_VERTEX=1 + ANTHROPIC_VERTEX_PROJECT_ID (for Vertex)\n"
                     "  - ANTHROPIC_API_KEY (for direct API)"
                 )
-            self.client = anthropic.Anthropic(api_key=api_key)  # type: ignore[union-attr]
+            self.client = anthropic.Anthropic(api_key=api_key)
             self.model = model
             logger.info(f"Using direct Anthropic API with model={self.model}")
 
@@ -1786,8 +1786,8 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
             model=self.model,
             max_tokens=self.max_tokens,
             system=self.system_prompt,
-            tools=tools,  # type: ignore[arg-type]
-            messages=messages,  # type: ignore[arg-type]
+            tools=tools,
+            messages=messages,
         )
 
         # Execute tool calls in a loop
