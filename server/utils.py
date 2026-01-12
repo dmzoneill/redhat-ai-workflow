@@ -575,6 +575,96 @@ async def run_cmd_full(
         return False, "", str(e)
 
 
+def _build_shell_sources(home: Path) -> list[str]:
+    """Build list of shell config source commands.
+
+    Args:
+        home: User home directory
+
+    Returns:
+        List of source commands for bash configs
+    """
+    sources = []
+
+    bashrc = home / ".bashrc"
+    if bashrc.exists():
+        sources.append(f"source {bashrc} 2>/dev/null")
+
+    # Source the bashrc.d loader which loads all scripts.d/*.sh files
+    bashrc_d_loader = home / ".bashrc.d" / "00-loader.sh"
+    if bashrc_d_loader.exists():
+        sources.append(f"source {bashrc_d_loader} 2>/dev/null")
+
+    # IMPORTANT: Also source all .sh files in bashrc.d root directly
+    # These define functions like 'kube' for kubernetes auth
+    # .bashrc conditionally loads these only for interactive+desktop sessions,
+    # so we need to explicitly source them for MCP server context
+    bashrc_d = home / ".bashrc.d"
+    if bashrc_d.is_dir():
+        for script in sorted(bashrc_d.glob("*.sh")):
+            if script.name != "00-loader.sh":  # Already sourced above
+                sources.append(f"source {script} 2>/dev/null")
+
+    return sources
+
+
+def _prepare_shell_environment(home: Path) -> dict[str, str]:
+    """Prepare environment variables for shell execution.
+
+    Args:
+        home: User home directory
+
+    Returns:
+        Environment dict with all necessary variables set
+    """
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["USER"] = home.name
+
+    # CRITICAL: Clear virtualenv variables from MCP server's venv
+    for var in ["VIRTUAL_ENV", "PIPENV_ACTIVE", "PYTHONHOME"]:
+        env.pop(var, None)
+    env["PIPENV_IGNORE_VIRTUALENVS"] = "1"
+
+    # Set up PATH
+    user_bin = str(home / "bin")
+    path_parts = env.get("PATH", "").split(":")
+    path_parts = [p for p in path_parts if ".venv" not in p]
+    if user_bin not in path_parts:
+        path_parts.insert(0, user_bin)
+    env["PATH"] = ":".join(path_parts)
+
+    # GUI environment (DISPLAY, XAUTHORITY)
+    if "DISPLAY" in os.environ:
+        env["DISPLAY"] = os.environ["DISPLAY"]
+    elif "DISPLAY" not in env:
+        env["DISPLAY"] = ":0"
+
+    if "XAUTHORITY" in os.environ:
+        env["XAUTHORITY"] = os.environ["XAUTHORITY"]
+    elif "XAUTHORITY" not in env:
+        xauth_path = home / ".Xauthority"
+        if xauth_path.exists():
+            env["XAUTHORITY"] = str(xauth_path)
+
+    # Wayland environment
+    if "WAYLAND_DISPLAY" in os.environ:
+        env["WAYLAND_DISPLAY"] = os.environ["WAYLAND_DISPLAY"]
+    elif "WAYLAND_DISPLAY" not in env:
+        wayland_sock = Path(f"/run/user/{os.getuid()}/wayland-0")
+        if wayland_sock.exists():
+            env["WAYLAND_DISPLAY"] = "wayland-0"
+
+    if "XDG_RUNTIME_DIR" in os.environ:
+        env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
+    elif "XDG_RUNTIME_DIR" not in env:
+        runtime_dir = f"/run/user/{os.getuid()}"
+        if os.path.isdir(runtime_dir):
+            env["XDG_RUNTIME_DIR"] = runtime_dir
+
+    return env
+
+
 async def run_cmd_shell(
     cmd: list[str],
     cwd: str | None = None,
@@ -597,102 +687,22 @@ async def run_cmd_shell(
     """
     import shlex
 
+    home = Path.home()
+
     # Build the command string with proper quoting
     cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
-
-    # Add cd if cwd is specified
     if cwd:
         cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
 
-    # Explicitly source shell config files to get all environment variables
-    # and functions (like 'kube' for k8s auth)
-    #
-    # .bashrc has conditions (interactive, DESKTOP_SESSION) that won't be met
-    # when running from MCP server, so we source bashrc.d scripts directly.
-    home = Path.home()
-    sources = []
-
-    bashrc = home / ".bashrc"
-    if bashrc.exists():
-        sources.append(f"source {bashrc} 2>/dev/null")
-
-    # Source the bashrc.d loader which loads all scripts.d/*.sh files
-    bashrc_d_loader = home / ".bashrc.d" / "00-loader.sh"
-    if bashrc_d_loader.exists():
-        sources.append(f"source {bashrc_d_loader} 2>/dev/null")
-
-    # IMPORTANT: Also source all .sh files in bashrc.d root directly
-    # These define functions like 'kube' for kubernetes auth
-    # .bashrc conditionally loads these only for interactive+desktop sessions,
-    # so we need to explicitly source them for MCP server context
-    bashrc_d = home / ".bashrc.d"
-    if bashrc_d.is_dir():
-        for script in sorted(bashrc_d.glob("*.sh")):
-            if script.name != "00-loader.sh":  # Already sourced above
-                sources.append(f"source {script} 2>/dev/null")
-
+    # Source shell configs to get environment variables and functions
+    sources = _build_shell_sources(home)
     if sources:
         cmd_str = f"{'; '.join(sources)}; {cmd_str}"
 
     shell_cmd = ["bash", "-c", cmd_str]
 
-    # Ensure critical environment variables are passed
-    # This helps when running from MCP server context
-    env = os.environ.copy()
-    env["HOME"] = str(home)
-    env["USER"] = home.name
-
-    # CRITICAL: Clear virtualenv variables from MCP server's venv
-    # This allows commands like rh-issue (which use pipenv) to work properly
-    # Without this, pipenv gets confused by VIRTUAL_ENV from our project's venv
-    for var in ["VIRTUAL_ENV", "PIPENV_ACTIVE", "PYTHONHOME"]:
-        env.pop(var, None)
-
-    # CRITICAL: Tell pipenv to ignore any detected virtualenv and use its own
-    # This is needed because pipenv detects venvs even after we clear VIRTUAL_ENV
-    env["PIPENV_IGNORE_VIRTUALENVS"] = "1"
-
-    # Ensure user's bin is in PATH (and remove project venv paths)
-    user_bin = str(home / "bin")
-    # Filter out project venv paths from PATH
-    path_parts = env.get("PATH", "").split(":")
-    path_parts = [p for p in path_parts if ".venv" not in p]
-    if user_bin not in path_parts:
-        path_parts.insert(0, user_bin)
-    env["PATH"] = ":".join(path_parts)
-
-    # Pass through DISPLAY/XAUTHORITY for GUI apps (browser-based OAuth)
-    # If not set in MCP server context, try common defaults
-    if "DISPLAY" in os.environ:
-        env["DISPLAY"] = os.environ["DISPLAY"]
-    elif "DISPLAY" not in env:
-        # Default to :0 for local X sessions, or :1 for Wayland with Xwayland
-        env["DISPLAY"] = ":0"
-
-    if "XAUTHORITY" in os.environ:
-        env["XAUTHORITY"] = os.environ["XAUTHORITY"]
-    elif "XAUTHORITY" not in env:
-        # Default location for Xauthority
-        xauth_path = home / ".Xauthority"
-        if xauth_path.exists():
-            env["XAUTHORITY"] = str(xauth_path)
-
-    # For Wayland sessions (Fedora 43 default), also set WAYLAND_DISPLAY
-    if "WAYLAND_DISPLAY" in os.environ:
-        env["WAYLAND_DISPLAY"] = os.environ["WAYLAND_DISPLAY"]
-    elif "WAYLAND_DISPLAY" not in env:
-        # Try common wayland socket
-        wayland_sock = Path(f"/run/user/{os.getuid()}/wayland-0")
-        if wayland_sock.exists():
-            env["WAYLAND_DISPLAY"] = "wayland-0"
-
-    # XDG_RUNTIME_DIR is needed for Wayland
-    if "XDG_RUNTIME_DIR" in os.environ:
-        env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
-    elif "XDG_RUNTIME_DIR" not in env:
-        runtime_dir = f"/run/user/{os.getuid()}"
-        if os.path.isdir(runtime_dir):
-            env["XDG_RUNTIME_DIR"] = runtime_dir
+    # Prepare environment
+    env = _prepare_shell_environment(home)
 
     try:
         result = await asyncio.to_thread(
