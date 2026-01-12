@@ -68,6 +68,56 @@ def get_irish_time() -> datetime:
     return datetime.now(ZoneInfo(TIMEZONE))
 
 
+def _try_load_oauth_token(Credentials, SCOPES):
+    """Try to load OAuth token from file."""
+    if TOKEN_FILE.exists():
+        try:
+            return Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        except Exception:
+            pass
+    return None
+
+
+def _try_refresh_credentials(creds, Request):
+    """Try to refresh expired credentials."""
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            with open(TOKEN_FILE, "w") as f:
+                f.write(creds.to_json())
+            return creds
+        except Exception:
+            pass
+    return None
+
+
+def _try_service_account(service_account, SCOPES):
+    """Try to load service account credentials."""
+    if SERVICE_ACCOUNT_FILE.exists():
+        try:
+            return service_account.Credentials.from_service_account_file(str(SERVICE_ACCOUNT_FILE), scopes=SCOPES)
+        except Exception:
+            pass
+    return None
+
+
+def _try_oauth_flow(SCOPES):
+    """Try to run OAuth flow for new credentials."""
+    if CREDENTIALS_FILE.exists():
+        try:
+            from google_auth_oauthlib.flow import InstalledAppFlow
+
+            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+            creds = flow.run_local_server(port=0)
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            with open(TOKEN_FILE, "w") as f:
+                f.write(creds.to_json())
+            return creds, None
+        except Exception as e:
+            return None, f"OAuth flow failed: {e}"
+    return None, f"No credentials found. Add credentials.json to {CONFIG_DIR}"
+
+
 def get_calendar_service():
     """
     Get authenticated Google Calendar service.
@@ -87,47 +137,19 @@ def get_calendar_service():
             "pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib",
         )
 
-    creds = None
+    # Try OAuth token, refresh if needed, then service account
+    creds = _try_load_oauth_token(Credentials, SCOPES)
+    refreshed = _try_refresh_credentials(creds, Request)
+    if refreshed:
+        creds = refreshed
+    if not creds:
+        creds = _try_service_account(service_account, SCOPES)
 
-    # Try token file first (OAuth2)
-    if TOKEN_FILE.exists():
-        try:
-            creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-        except Exception:
-            pass
-
-    # Refresh if expired
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            with open(TOKEN_FILE, "w") as f:
-                f.write(creds.to_json())
-        except Exception:
-            creds = None
-
-    # Try service account
-    if not creds and SERVICE_ACCOUNT_FILE.exists():
-        try:
-            creds = service_account.Credentials.from_service_account_file(str(SERVICE_ACCOUNT_FILE), scopes=SCOPES)
-        except Exception:
-            pass
-
-    # Need to authenticate
+    # Need to authenticate with OAuth flow
     if not creds or not creds.valid:
-        if CREDENTIALS_FILE.exists():
-            try:
-                from google_auth_oauthlib.flow import InstalledAppFlow
-
-                flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-                creds = flow.run_local_server(port=0)
-                # Save credentials for next run
-                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-                with open(TOKEN_FILE, "w") as f:
-                    f.write(creds.to_json())
-            except Exception as e:
-                return None, f"OAuth flow failed: {e}"
-        else:
-            return None, f"No credentials found. Add credentials.json to {CONFIG_DIR}"
+        creds, error = _try_oauth_flow(SCOPES)
+        if error:
+            return None, error
 
     try:
         service = build("calendar", "v3", credentials=creds)
@@ -357,6 +379,72 @@ def find_existing_meeting(
 # ==================== TOOLS USED IN SKILLS ====================
 
 
+def _parse_check_dates(date: str, days_ahead: int, tz: ZoneInfo, now: datetime) -> list[datetime] | str:
+    """Parse and return dates to check for availability."""
+    if date:
+        try:
+            return [datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=tz)]
+        except ValueError:
+            return f"❌ Invalid date format: {date}. Use YYYY-MM-DD."
+
+    # Check next N business days
+    check_dates = []
+    current = now
+    while len(check_dates) < days_ahead:
+        current += timedelta(days=1)
+        if current.weekday() < 5:
+            check_dates.append(current)
+    return check_dates
+
+
+def _process_day_availability(
+    service,
+    check_date: datetime,
+    calendars_to_check: list[str],
+    attendee_email: str,
+    duration_minutes: int,
+) -> tuple[list[dict], str | None]:
+    """Process availability for a single day. Returns (free_slots, error_message)."""
+    day_start = check_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+
+    busy_info = get_freebusy(service, calendars_to_check, day_start, day_end)
+
+    attendee_error = None
+    if isinstance(busy_info.get(attendee_email), dict) and "error" in busy_info[attendee_email]:
+        attendee_error = busy_info[attendee_email]["error"]
+
+    free_slots = find_free_slots(busy_info, check_date, duration_minutes)
+    return free_slots, attendee_error
+
+
+def _format_availability_output(
+    lines: list[str],
+    all_slots: list[dict],
+    attendee_email: str,
+) -> None:
+    """Format the final availability output."""
+    if not all_slots:
+        lines.append("❌ No mutual free slots found in the meeting window (15:00-19:00 Irish time)")
+        lines.append("")
+        lines.append("Consider:")
+        lines.append("- Checking more days ahead")
+        lines.append("- Using a shorter duration")
+        lines.append("- Scheduling outside the preferred window")
+    else:
+        lines.append("---")
+        lines.append("")
+        lines.append("**To schedule the first available slot:**")
+        first_slot = all_slots[0]
+        lines.append("```")
+        lines.append("google_calendar_schedule_meeting(")
+        lines.append('    title="Your Meeting Title",')
+        lines.append(f'    attendee_email="{attendee_email}",')
+        lines.append(f'    start_time="{first_slot["start"]}"')
+        lines.append(")")
+        lines.append("```")
+
+
 @mcp.tool()
 async def google_calendar_check_mutual_availability(
     attendee_email: str,
@@ -391,20 +479,9 @@ async def google_calendar_check_mutual_availability(
     now = datetime.now(tz)
 
     # Determine dates to check
-    if date:
-        try:
-            check_dates = [datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=tz)]
-        except ValueError:
-            return f"❌ Invalid date format: {date}. Use YYYY-MM-DD."
-    else:
-        # Check next N business days
-        check_dates = []
-        current = now
-        while len(check_dates) < days_ahead:
-            current += timedelta(days=1)
-            # Skip weekends
-            if current.weekday() < 5:
-                check_dates.append(current)
+    check_dates = _parse_check_dates(date, days_ahead, tz, now)
+    if isinstance(check_dates, str):
+        return check_dates
 
     lines = [
         f"# Mutual Availability with {attendee_email}",
@@ -426,19 +503,9 @@ async def google_calendar_check_mutual_availability(
     all_slots = []
 
     for check_date in check_dates:
-        day_start = check_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        day_end = day_start + timedelta(days=1)
-
-        # Query freebusy for both calendars
-        busy_info = get_freebusy(service, calendars_to_check, day_start, day_end)
-
-        # Check for errors
-        attendee_error = None
-        if isinstance(busy_info.get(attendee_email), dict) and "error" in busy_info[attendee_email]:
-            attendee_error = busy_info[attendee_email]["error"]
-
-        # Find free slots
-        free_slots = find_free_slots(busy_info, check_date, duration_minutes)
+        free_slots, attendee_error = _process_day_availability(
+            service, check_date, calendars_to_check, attendee_email, duration_minutes
+        )
 
         if free_slots:
             day_name = check_date.strftime("%A %Y-%m-%d")
@@ -462,26 +529,7 @@ async def google_calendar_check_mutual_availability(
 
             lines.append("")
 
-    if not all_slots:
-        lines.append("❌ No mutual free slots found in the meeting window (15:00-19:00 Irish time)")
-        lines.append("")
-        lines.append("Consider:")
-        lines.append("- Checking more days ahead")
-        lines.append("- Using a shorter duration")
-        lines.append("- Scheduling outside the preferred window")
-    else:
-        lines.append("---")
-        lines.append("")
-        lines.append("**To schedule the first available slot:**")
-        first_slot = all_slots[0]
-        lines.append("```")
-        lines.append("google_calendar_schedule_meeting(")
-        lines.append('    title="Your Meeting Title",')
-        lines.append(f'    attendee_email="{attendee_email}",')
-        lines.append(f'    start_time="{first_slot["start"]}"')
-        lines.append(")")
-        lines.append("```")
-
+    _format_availability_output(lines, all_slots, attendee_email)
     return "\n".join(lines)
 
 
@@ -746,7 +794,137 @@ async def google_calendar_quick_meeting(
         )
 
 
-@mcp.tool()
+def _check_duplicate_meeting(service, title: str, attendee_email: str, skip_duplicate_check: bool) -> str | None:
+    """Check if a meeting for this topic already exists.
+
+    Returns error message if duplicate found, None otherwise.
+    """
+    if skip_duplicate_check:
+        return None
+
+    import re
+
+    # Extract MR ID or Jira key from title
+    search_terms = []
+
+    # Look for MR patterns: !1445, MR 1445, MR-1445
+    mr_match = re.search(r"[!#]?(\d{3,5})", title)
+    if mr_match:
+        mr_num = mr_match.group(1)
+        search_terms.extend([f"!{mr_num}", f"MR {mr_num}", f"MR-{mr_num}"])
+
+    # Look for Jira patterns: AAP-12345
+    jira_match = re.search(r"(AAP-\d+)", title, re.IGNORECASE)
+    if jira_match:
+        search_terms.append(jira_match.group(1).upper())
+
+    # If we have search terms, check for existing meeting
+    if search_terms:
+        existing = find_existing_meeting(service, search_terms, attendee_email)
+
+        if existing and "error" not in existing:
+            return (
+                f"📅 **Meeting Already Scheduled**\n"
+                f"\n"
+                f"A meeting for this topic already exists:\n"
+                f"\n"
+                f"**Title:** {existing['title']}\n"
+                f"**When:** {existing['when']} Irish time\n"
+                f"**Link:** {existing['link']}\n"
+                f"\n"
+                f"⚠️ No new meeting created to avoid duplicate invites.\n"
+                f"\n"
+                f"If you really need a new meeting, use `skip_duplicate_check=True`."
+            )
+    return None
+
+
+def _find_next_available_slot(service, now, attendee_email: str, duration_minutes: int):
+    """Find next available meeting slot.
+
+    Returns datetime of available slot, or None if none found.
+    """
+    # Check next 5 business days
+    check_dates = []
+    current = now
+    for _ in range(7):
+        current += timedelta(days=1)
+        if current.weekday() < 5:  # Skip weekends
+            check_dates.append(current)
+        if len(check_dates) >= 5:
+            break
+
+    # Get my email
+    try:
+        profile = service.calendars().get(calendarId="primary").execute()
+        my_email = profile.get("id", "primary")
+    except Exception:
+        my_email = "primary"
+
+    calendars_to_check = [my_email, attendee_email]
+
+    # Find first available slot
+    for check_date in check_dates:
+        day_start = check_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+
+        busy_info = get_freebusy(service, calendars_to_check, day_start, day_end)
+        free_slots = find_free_slots(busy_info, check_date, duration_minutes)
+
+        if free_slots:
+            return free_slots[0]["start"]
+
+    return None
+
+
+def _parse_and_validate_start_time(start_time: str, now, duration_minutes: int):
+    """Parse start time and validate it's within allowed window.
+
+    Returns (datetime, error_message) tuple. If error, datetime is None.
+    """
+    tz = ZoneInfo(TIMEZONE)
+
+    # Parse provided start time
+    try:
+        if "T" in start_time:
+            start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        else:
+            start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+
+        # Ensure it has timezone
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=tz)
+        else:
+            start_dt = start_dt.astimezone(tz)
+
+    except ValueError:
+        return None, f"❌ Invalid start_time format: {start_time}. Use ISO format or 'YYYY-MM-DD HH:MM'."
+
+    # Validate time is within allowed window
+    if start_dt.hour < MEETING_START_HOUR or start_dt.hour >= MEETING_END_HOUR:
+        return None, (
+            f"❌ Meeting time {start_dt.strftime('%H:%M')} is outside allowed window.\n"
+            f"📍 Meetings must be between {MEETING_START_HOUR}:00 "
+            f"and {MEETING_END_HOUR}:00 Irish time.\n\n"
+            f"Use `google_calendar_check_mutual_availability` to find valid slots."
+        )
+
+    # Check if end time exceeds window
+    end_dt = start_dt + timedelta(minutes=duration_minutes)
+    if end_dt.hour > MEETING_END_HOUR or (end_dt.hour == MEETING_END_HOUR and end_dt.minute > 0):
+        return None, (
+            f"❌ Meeting would end at {end_dt.strftime('%H:%M')}, "
+            f"past the {MEETING_END_HOUR}:00 cutoff.\n"
+            f"Consider a shorter duration or earlier start time."
+        )
+
+    # Validate weekend
+    if start_dt.weekday() >= 5:
+        return None, "❌ Cannot schedule meetings on weekends. Please choose a weekday."
+
+    return start_dt, None
+
+
 async def google_calendar_schedule_meeting(
     title: str,
     attendee_email: str,
@@ -791,75 +969,15 @@ async def google_calendar_schedule_meeting(
     now = datetime.now(tz)
 
     # Check for existing meeting before creating a new one
-    if not skip_duplicate_check:
-        import re
+    duplicate_msg = _check_duplicate_meeting(service, title, attendee_email, skip_duplicate_check)
+    if duplicate_msg:
+        return duplicate_msg
 
-        # Extract MR ID or Jira key from title
-        search_terms = []
-
-        # Look for MR patterns: !1445, MR 1445, MR-1445
-        mr_match = re.search(r"[!#]?(\d{3,5})", title)
-        if mr_match:
-            mr_num = mr_match.group(1)
-            search_terms.extend([f"!{mr_num}", f"MR {mr_num}", f"MR-{mr_num}"])
-
-        # Look for Jira patterns: AAP-12345
-        jira_match = re.search(r"(AAP-\d+)", title, re.IGNORECASE)
-        if jira_match:
-            search_terms.append(jira_match.group(1).upper())
-
-        # If we have search terms, check for existing meeting
-        if search_terms:
-            existing = find_existing_meeting(service, search_terms, attendee_email)
-
-            if existing and "error" not in existing:
-                return (
-                    f"📅 **Meeting Already Scheduled**\n"
-                    f"\n"
-                    f"A meeting for this topic already exists:\n"
-                    f"\n"
-                    f"**Title:** {existing['title']}\n"
-                    f"**When:** {existing['when']} Irish time\n"
-                    f"**Link:** {existing['link']}\n"
-                    f"\n"
-                    f"⚠️ No new meeting created to avoid duplicate invites.\n"
-                    f"\n"
-                    f"If you really need a new meeting, use `skip_duplicate_check=True`."
-                )
-
-    # If no start time, find next available slot
+    # Determine start time
     if not start_time and auto_find_slot:
-        # Check next 5 business days
-        check_dates = []
-        current = now
-        for _ in range(7):
-            current += timedelta(days=1)
-            if current.weekday() < 5:  # Skip weekends
-                check_dates.append(current)
-            if len(check_dates) >= 5:
-                break
-
-        # Get my email
-        try:
-            profile = service.calendars().get(calendarId="primary").execute()
-            my_email = profile.get("id", "primary")
-        except Exception:
-            my_email = "primary"
-
-        calendars_to_check = [my_email, attendee_email]
-
-        # Find first available slot
-        for check_date in check_dates:
-            day_start = check_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end = day_start + timedelta(days=1)
-
-            busy_info = get_freebusy(service, calendars_to_check, day_start, day_end)
-            free_slots = find_free_slots(busy_info, check_date, duration_minutes)
-
-            if free_slots:
-                start_dt = free_slots[0]["start"]
-                break
-        else:
+        # Find next available slot
+        start_dt = _find_next_available_slot(service, now, attendee_email, duration_minutes)
+        if not start_dt:
             return (
                 f"❌ No mutual free slots found in the next 5 business days.\n"
                 f"📍 Meeting window: 15:00-19:00 Irish time\n"
@@ -867,43 +985,13 @@ async def google_calendar_schedule_meeting(
                 f"Use `google_calendar_check_mutual_availability` to see detailed availability."
             )
     else:
-        # Parse provided start time
-        try:
-            if "T" in start_time:
-                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            else:
-                start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+        # Parse and validate provided start time
+        start_dt, error_msg = _parse_and_validate_start_time(start_time, now, duration_minutes)
+        if error_msg:
+            return error_msg
 
-            # Ensure it has timezone
-            if start_dt.tzinfo is None:
-                start_dt = start_dt.replace(tzinfo=tz)
-            else:
-                start_dt = start_dt.astimezone(tz)
-
-        except ValueError:
-            return f"❌ Invalid start_time format: {start_time}. Use ISO format or 'YYYY-MM-DD HH:MM'."
-
-    # Validate time is within allowed window
-    if start_dt.hour < MEETING_START_HOUR or start_dt.hour >= MEETING_END_HOUR:
-        return (
-            f"❌ Meeting time {start_dt.strftime('%H:%M')} is outside allowed window.\n"
-            f"📍 Meetings must be between {MEETING_START_HOUR}:00 "
-            f"and {MEETING_END_HOUR}:00 Irish time.\n\n"
-            f"Use `google_calendar_check_mutual_availability` to find valid slots."
-        )
-
-    # Check if end time exceeds window
+    # Calculate end time
     end_dt = start_dt + timedelta(minutes=duration_minutes)
-    if end_dt.hour > MEETING_END_HOUR or (end_dt.hour == MEETING_END_HOUR and end_dt.minute > 0):
-        return (
-            f"❌ Meeting would end at {end_dt.strftime('%H:%M')}, "
-            f"past the {MEETING_END_HOUR}:00 cutoff.\n"
-            f"Consider a shorter duration or earlier start time."
-        )
-
-    # Validate weekend
-    if start_dt.weekday() >= 5:
-        return "❌ Cannot schedule meetings on weekends. Please choose a weekday."
 
     try:
         # Build event
