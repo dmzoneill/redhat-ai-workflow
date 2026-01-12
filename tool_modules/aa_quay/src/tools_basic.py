@@ -152,6 +152,282 @@ def get_full_image_ref(repository: str, tag_or_digest: str = "") -> str:
 # ==================== Tool Registration ====================
 
 
+async def _quay_check_image_exists_impl(
+    repository: str,
+    tag_or_digest: str,
+    namespace: str = "",
+) -> list[TextContent]:
+    """Implementation of quay_check_image_exists tool."""
+    full_path = resolve_quay_repo(repository, namespace)
+    image_ref = get_full_image_ref(full_path, tag_or_digest)
+
+    success, data = await skopeo_inspect(image_ref)
+
+    if not success:
+        if "manifest unknown" in str(data).lower() or "not found" in str(data).lower():
+            return [
+                TextContent(
+                    type="text",
+                    text=f"""❌ Image NOT found: `{tag_or_digest}`
+
+**Repository:** `{full_path}`
+
+The Konflux build may still be in progress, or the tag doesn't exist.
+
+**Check with:** `podman login quay.io` (or `docker login quay.io`) then retry.""",
+                )
+            ]
+        return [TextContent(type="text", text=f"❌ Error checking image: {data}")]
+
+    digest = data.get("Digest", "N/A")
+    digest_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
+
+    lines = [
+        "## ✅ Image Exists",
+        "",
+        f"**Repository:** `{full_path}`",
+        f"**Tag/Digest:** `{tag_or_digest}`",
+        f"**Full Digest:** `{digest}`",
+        "",
+        "Image is ready for deployment!",
+        "",
+        "**For bonfire:**",
+        "```",
+        f"IMAGE_TAG={digest_hash}",
+        "```",
+    ]
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _quay_get_manifest_impl(
+    repository: str,
+    tag_or_digest: str,
+    namespace: str = "",
+) -> list[TextContent]:
+    """Implementation of quay_get_manifest tool."""
+    full_path = resolve_quay_repo(repository, namespace)
+    image_ref = get_full_image_ref(full_path, tag_or_digest)
+
+    # Get raw manifest
+    success, data = await skopeo_inspect(image_ref, raw=True)
+
+    if not success:
+        return [TextContent(type="text", text=f"❌ Failed to get manifest: {data}")]
+
+    if isinstance(data, dict):
+        media_type = data.get("mediaType", "N/A")
+        schema_version = data.get("schemaVersion", "N/A")
+        layers = data.get("layers", [])
+
+        lines = [
+            f"## Manifest: `{tag_or_digest}`",
+            "",
+            f"**Repository:** `{full_path}`",
+            f"**Media Type:** {media_type}",
+            f"**Schema Version:** {schema_version}",
+            f"**Layers:** {len(layers)}",
+        ]
+    else:
+        lines = [
+            f"## Manifest: `{tag_or_digest}`",
+            "",
+            f"**Repository:** `{full_path}`",
+            "",
+            "```json",
+            str(data)[:1000],
+            "```",
+        ]
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _quay_get_tag_impl(
+    repository: str,
+    tag: str,
+    namespace: str = "",
+) -> list[TextContent]:
+    """Implementation of quay_get_tag tool."""
+    full_path = resolve_quay_repo(repository, namespace)
+    image_ref = get_full_image_ref(full_path, tag)
+
+    # Use skopeo inspect to get digest
+    success, data = await skopeo_inspect(image_ref)
+
+    if not success:
+        if "manifest unknown" in str(data).lower():
+            return [TextContent(type="text", text=f"❌ Tag `{tag}` not found in `{full_path}`")]
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"❌ Failed to get tag: {data}\n\n"
+                    "Ensure you're logged in:\n"
+                    "  `podman login quay.io` or `docker login quay.io`"
+                ),
+            )
+        ]
+
+    digest = data.get("Digest", "N/A")
+    created = data.get("Created", "N/A")
+    arch = data.get("Architecture", "N/A")
+    os_name = data.get("Os", "N/A")
+
+    # Extract just the sha256 hash (without sha256: prefix) for bonfire
+    digest_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
+
+    lines = [
+        f"## Tag: `{tag}`",
+        "",
+        f"**Repository:** `{full_path}`",
+        f"**Digest:** `{digest}`",
+        f"**Created:** {created}",
+        f"**Architecture:** {arch}/{os_name}",
+        "",
+        "**For bonfire deploy:**",
+        "```",
+        f"IMAGE_TAG={digest_hash}",
+        "```",
+        "",
+        "**Full Image Reference:**",
+        "```",
+        f"quay.io/{full_path}@{digest}",
+        "```",
+    ]
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _quay_get_vulnerabilities_impl(
+    repository: str,
+    digest: str,
+    namespace: str = "",
+) -> list[TextContent]:
+    """Implementation of quay_get_vulnerabilities tool."""
+    full_path = resolve_quay_repo(repository, namespace)
+
+    if not digest.startswith("sha256:"):
+        digest = f"sha256:{digest}"
+
+    success, data = await quay_api_request(f"/repository/{full_path}/manifest/{digest}/security")
+
+    if not success:
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"❌ Failed to get vulnerabilities: {data}\n\n"
+                    "Note: Security scans require QUAY_TOKEN environment variable."
+                ),
+            )
+        ]
+
+    status = data.get("status", "unknown")
+
+    if status == "queued":
+        return [TextContent(type="text", text="⏳ Security scan is queued, check back later")]
+    elif status == "scanning":
+        return [TextContent(type="text", text="🔍 Security scan in progress...")]
+    elif status == "unsupported":
+        return [TextContent(type="text", text="⚠️ Security scanning not supported for this image")]
+
+    vulns = data.get("data", {}).get("Layer", {}).get("Features", [])
+
+    severity_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+    critical_vulns = []
+
+    for feature in vulns:
+        for vuln in feature.get("Vulnerabilities", []):
+            severity = vuln.get("Severity", "Unknown")
+            if severity in severity_counts:
+                severity_counts[severity] += 1
+
+            if severity == "Critical":
+                critical_vulns.append(
+                    {
+                        "name": vuln.get("Name"),
+                        "package": feature.get("Name"),
+                        "fixed_by": vuln.get("FixedBy", "N/A"),
+                    }
+                )
+
+    total = sum(severity_counts.values())
+
+    lines = [
+        f"## Security Scan: `{digest[:30]}...`",
+        "",
+        f"**Status:** {status}",
+        f"**Total Vulnerabilities:** {total}",
+        "",
+        "| Severity | Count |",
+        "|----------|-------|",
+        f"| 🔴 Critical | {severity_counts['Critical']} |",
+        f"| 🟠 High | {severity_counts['High']} |",
+        f"| 🟡 Medium | {severity_counts['Medium']} |",
+        f"| 🟢 Low | {severity_counts['Low']} |",
+    ]
+
+    if critical_vulns:
+        lines.extend(["", "### 🔴 Critical Vulnerabilities", ""])
+        for v in critical_vulns[:5]:
+            lines.append(f"- **{v['name']}** in `{v['package']}` (fix: {v['fixed_by']})")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _quay_list_aa_tags_impl(
+    limit: int = 10,
+    filter_tag: str = "",
+) -> list[TextContent]:
+    """Implementation of quay_list_aa_tags tool."""
+    repo = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
+    full_path = f"{QUAY_DEFAULT_NAMESPACE}/{repo}"
+    image_ref = get_full_image_ref(full_path)
+
+    success, tags = await skopeo_list_tags(image_ref)
+
+    if not success:
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    "❌ Failed to list AA tags.\n\n"
+                    "Ensure you're logged in:\n"
+                    "  `podman login quay.io` or `docker login quay.io`"
+                ),
+            )
+        ]
+
+    if not tags:
+        return [TextContent(type="text", text="No tags found for AA repository")]
+
+    # Filter if requested
+    if filter_tag:
+        tags = [t for t in tags if filter_tag in t]
+
+    # Sort descending and limit
+    tags = sorted(tags, reverse=True)[:limit]
+
+    lines = [
+        "## Automation Analytics Images",
+        "",
+        f"**Repository:** `{full_path}`",
+        "",
+    ]
+
+    for tag in tags:
+        lines.append(f"- `{tag}`")
+
+    lines.extend(
+        [
+            "",
+            f"[View on Quay.io](https://quay.io/repository/{full_path}?tab=tags)",
+        ]
+    )
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
@@ -175,46 +451,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Whether the image exists, and its full digest if found.
         """
-        full_path = resolve_quay_repo(repository, namespace)
-        image_ref = get_full_image_ref(full_path, tag_or_digest)
-
-        success, data = await skopeo_inspect(image_ref)
-
-        if not success:
-            if "manifest unknown" in str(data).lower() or "not found" in str(data).lower():
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"""❌ Image NOT found: `{tag_or_digest}`
-
-**Repository:** `{full_path}`
-
-The Konflux build may still be in progress, or the tag doesn't exist.
-
-**Check with:** `podman login quay.io` (or `docker login quay.io`) then retry.""",
-                    )
-                ]
-            return [TextContent(type="text", text=f"❌ Error checking image: {data}")]
-
-        digest = data.get("Digest", "N/A")
-        digest_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
-
-        lines = [
-            "## ✅ Image Exists",
-            "",
-            f"**Repository:** `{full_path}`",
-            f"**Tag/Digest:** `{tag_or_digest}`",
-            f"**Full Digest:** `{digest}`",
-            "",
-            "Image is ready for deployment!",
-            "",
-            "**For bonfire:**",
-            "```",
-            f"IMAGE_TAG={digest_hash}",
-            "```",
-        ]
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _quay_check_image_exists_impl(repository, tag_or_digest, namespace)
 
     @auto_heal()
     @registry.tool()
@@ -234,40 +471,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         Returns:
             Manifest details including layers and config.
         """
-        full_path = resolve_quay_repo(repository, namespace)
-        image_ref = get_full_image_ref(full_path, tag_or_digest)
-
-        # Get raw manifest
-        success, data = await skopeo_inspect(image_ref, raw=True)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to get manifest: {data}")]
-
-        if isinstance(data, dict):
-            media_type = data.get("mediaType", "N/A")
-            schema_version = data.get("schemaVersion", "N/A")
-            layers = data.get("layers", [])
-
-            lines = [
-                f"## Manifest: `{tag_or_digest}`",
-                "",
-                f"**Repository:** `{full_path}`",
-                f"**Media Type:** {media_type}",
-                f"**Schema Version:** {schema_version}",
-                f"**Layers:** {len(layers)}",
-            ]
-        else:
-            lines = [
-                f"## Manifest: `{tag_or_digest}`",
-                "",
-                f"**Repository:** `{full_path}`",
-                "",
-                "```json",
-                str(data)[:1000],
-                "```",
-            ]
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _quay_get_manifest_impl(repository, tag_or_digest, namespace)
 
     @auto_heal()
     @registry.tool()
@@ -287,54 +491,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         Returns:
             Tag details including full sha256 digest for deployment.
         """
-        full_path = resolve_quay_repo(repository, namespace)
-        image_ref = get_full_image_ref(full_path, tag)
-
-        # Use skopeo inspect to get digest
-        success, data = await skopeo_inspect(image_ref)
-
-        if not success:
-            if "manifest unknown" in str(data).lower():
-                return [TextContent(type="text", text=f"❌ Tag `{tag}` not found in `{full_path}`")]
-            return [
-                TextContent(
-                    type="text",
-                    text=(
-                        f"❌ Failed to get tag: {data}\n\n"
-                        "Ensure you're logged in:\n"
-                        "  `podman login quay.io` or `docker login quay.io`"
-                    ),
-                )
-            ]
-
-        digest = data.get("Digest", "N/A")
-        created = data.get("Created", "N/A")
-        arch = data.get("Architecture", "N/A")
-        os_name = data.get("Os", "N/A")
-
-        # Extract just the sha256 hash (without sha256: prefix) for bonfire
-        digest_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
-
-        lines = [
-            f"## Tag: `{tag}`",
-            "",
-            f"**Repository:** `{full_path}`",
-            f"**Digest:** `{digest}`",
-            f"**Created:** {created}",
-            f"**Architecture:** {arch}/{os_name}",
-            "",
-            "**For bonfire deploy:**",
-            "```",
-            f"IMAGE_TAG={digest_hash}",
-            "```",
-            "",
-            "**Full Image Reference:**",
-            "```",
-            f"quay.io/{full_path}@{digest}",
-            "```",
-        ]
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _quay_get_tag_impl(repository, tag, namespace)
 
     @auto_heal()
     @registry.tool()
@@ -356,75 +513,7 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         Returns:
             Vulnerability scan results.
         """
-        full_path = resolve_quay_repo(repository, namespace)
-
-        if not digest.startswith("sha256:"):
-            digest = f"sha256:{digest}"
-
-        success, data = await quay_api_request(f"/repository/{full_path}/manifest/{digest}/security")
-
-        if not success:
-            return [
-                TextContent(
-                    type="text",
-                    text=(
-                        f"❌ Failed to get vulnerabilities: {data}\n\n"
-                        "Note: Security scans require QUAY_TOKEN environment variable."
-                    ),
-                )
-            ]
-
-        status = data.get("status", "unknown")
-
-        if status == "queued":
-            return [TextContent(type="text", text="⏳ Security scan is queued, check back later")]
-        elif status == "scanning":
-            return [TextContent(type="text", text="🔍 Security scan in progress...")]
-        elif status == "unsupported":
-            return [TextContent(type="text", text="⚠️ Security scanning not supported for this image")]
-
-        vulns = data.get("data", {}).get("Layer", {}).get("Features", [])
-
-        severity_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
-        critical_vulns = []
-
-        for feature in vulns:
-            for vuln in feature.get("Vulnerabilities", []):
-                severity = vuln.get("Severity", "Unknown")
-                if severity in severity_counts:
-                    severity_counts[severity] += 1
-
-                if severity == "Critical":
-                    critical_vulns.append(
-                        {
-                            "name": vuln.get("Name"),
-                            "package": feature.get("Name"),
-                            "fixed_by": vuln.get("FixedBy", "N/A"),
-                        }
-                    )
-
-        total = sum(severity_counts.values())
-
-        lines = [
-            f"## Security Scan: `{digest[:30]}...`",
-            "",
-            f"**Status:** {status}",
-            f"**Total Vulnerabilities:** {total}",
-            "",
-            "| Severity | Count |",
-            "|----------|-------|",
-            f"| 🔴 Critical | {severity_counts['Critical']} |",
-            f"| 🟠 High | {severity_counts['High']} |",
-            f"| 🟡 Medium | {severity_counts['Medium']} |",
-            f"| 🟢 Low | {severity_counts['Low']} |",
-        ]
-
-        if critical_vulns:
-            lines.extend(["", "### 🔴 Critical Vulnerabilities", ""])
-            for v in critical_vulns[:5]:
-                lines.append(f"- **{v['name']}** in `{v['package']}` (fix: {v['fixed_by']})")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _quay_get_vulnerabilities_impl(repository, digest, namespace)
 
     @auto_heal()
     @registry.tool()
@@ -442,49 +531,6 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         Returns:
             Recent AA image tags.
         """
-        repo = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
-        full_path = f"{QUAY_DEFAULT_NAMESPACE}/{repo}"
-        image_ref = get_full_image_ref(full_path)
+        return await _quay_list_aa_tags_impl(limit, filter_tag)
 
-        success, tags = await skopeo_list_tags(image_ref)
-
-        if not success:
-            return [
-                TextContent(
-                    type="text",
-                    text=(
-                        "❌ Failed to list AA tags.\n\n"
-                        "Ensure you're logged in:\n"
-                        "  `podman login quay.io` or `docker login quay.io`"
-                    ),
-                )
-            ]
-
-        if not tags:
-            return [TextContent(type="text", text="No tags found for AA repository")]
-
-        # Filter if requested
-        if filter_tag:
-            tags = [t for t in tags if filter_tag in t]
-
-        # Sort descending and limit
-        tags = sorted(tags, reverse=True)[:limit]
-
-        lines = [
-            "## Automation Analytics Images",
-            "",
-            f"**Repository:** `{full_path}`",
-            "",
-        ]
-
-        for tag in tags:
-            lines.append(f"- `{tag}`")
-
-        lines.extend(
-            [
-                "",
-                f"[View on Quay.io](https://quay.io/repository/{full_path}?tab=tags)",
-            ]
-        )
-
-        return [TextContent(type="text", text="\n".join(lines))]
+    return registry.count
