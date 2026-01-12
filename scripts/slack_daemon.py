@@ -29,6 +29,7 @@ Configuration:
 
 import argparse
 import asyncio
+import fcntl
 import logging
 import os
 import signal
@@ -37,22 +38,26 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-# Add project paths (use resolve() to get absolute paths)
-# NOTE: server/ provides shared utils, tool_modules/ for individual modules
-# aa_slack must come LAST in inserts so it's FIRST in sys.path
-# (because insert(0, x) prepends, so last insert = first in list)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))  # For server.utils import
-sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_git"))
-sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_gitlab"))
-sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_jira"))
-sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_slack"))  # Must be first in path
-
+import slack_path_setup  # Sets up sys.path for imports
 from dotenv import load_dotenv
 
+from scripts.common.config_loader import load_config
+
+# Import PROJECT_ROOT after path setup
+PROJECT_ROOT = Path(slack_path_setup.PROJECT_ROOT)
+
+if TYPE_CHECKING:
+    from src.listener import PendingMessage, SlackListener
+    from src.slack_client import SlackSession
+    from src.state_db import SlackStateDB
+
+LOCK_FILE = Path("/tmp/slack-daemon.lock")
+PID_FILE = Path("/tmp/slack-daemon.pid")
+
 # Desktop notifications (optional)
+NOTIFY_AVAILABLE = False
 try:
     import gi
 
@@ -62,13 +67,7 @@ try:
     NOTIFY_AVAILABLE = True
     Notify.init("AI Workflow Slack Persona")
 except (ImportError, ValueError):
-    NOTIFY_AVAILABLE = False
-
-# Single instance lock
-import fcntl
-
-LOCK_FILE = Path("/tmp/slack-daemon.lock")
-PID_FILE = Path("/tmp/slack-daemon.pid")
+    pass
 
 
 class SingleInstance:
@@ -147,17 +146,9 @@ class SingleInstance:
         self.release()
 
 
+# Setup
 load_dotenv(PROJECT_ROOT / "tool_modules" / "aa_slack" / ".env")
 load_dotenv()
-
-from src.listener import ListenerConfig, SlackListener
-from src.persistence import PendingMessage, SlackStateDB
-
-# Import Slack components
-from src.slack_client import SlackSession
-
-# Import load_config from server module
-from server.utils import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +445,36 @@ class ResponseRules:
         self.ignore_unmentioned = self.config.get("ignore_unmentioned", True)
         self.blocked_channels = set(self.config.get("blocked_channels", []))
 
+    def _check_user_mentions(self, mentioned_users: list[str]) -> tuple[bool, str]:
+        """Check if any trigger users are mentioned."""
+        for user_id in mentioned_users:
+            if user_id in self.trigger_user_ids:
+                return True, f"Trigger user {user_id} mentioned"
+        return False, ""
+
+    def _check_group_mentions(self, mentioned_groups: list[str]) -> tuple[bool, str]:
+        """Check if any trigger groups are mentioned."""
+        for group_id in mentioned_groups:
+            if group_id in self.trigger_group_ids:
+                return True, f"Trigger group {group_id} mentioned"
+        return False, ""
+
+    def _check_text_mentions(self, message_text: str) -> tuple[bool, str]:
+        """Check if any trigger mentions appear in text."""
+        text_lower = message_text.lower()
+        for mention in self.trigger_mentions:
+            if mention.lower() in text_lower:
+                return True, f"Trigger mention '{mention}' found"
+        return False, ""
+
+    def _check_keywords(self, message_text: str) -> tuple[bool, str]:
+        """Check if any trigger keywords appear in text."""
+        text_lower = message_text.lower()
+        for keyword in self.trigger_keywords:
+            if keyword.lower() in text_lower:
+                return True, f"Trigger keyword '{keyword}' found"
+        return False, ""
+
     def should_respond(
         self,
         channel_id: str,
@@ -497,27 +518,25 @@ class ResponseRules:
                 return True, "Bot was @mentioned"
 
             # Check trigger user IDs
-            for user_id in mentioned_users:
-                if user_id in self.trigger_user_ids:
-                    return True, f"Trigger user {user_id} mentioned"
+            should_respond, reason = self._check_user_mentions(mentioned_users)
+            if should_respond:
+                return True, reason
 
             # Check trigger group IDs
-            for group_id in mentioned_groups:
-                if group_id in self.trigger_group_ids:
-                    return True, f"Trigger group {group_id} mentioned"
+            should_respond, reason = self._check_group_mentions(mentioned_groups)
+            if should_respond:
+                return True, reason
 
-            # Check trigger mentions in text (e.g., @bitwiseshift)
-            text_lower = message_text.lower()
-            for mention in self.trigger_mentions:
-                if mention.lower() in text_lower:
-                    return True, f"Trigger mention '{mention}' found"
+            # Check trigger mentions in text
+            should_respond, reason = self._check_text_mentions(message_text)
+            if should_respond:
+                return True, reason
 
         # Rule 3: Keywords (if enabled)
         if self.keyword_enabled:
-            text_lower = message_text.lower()
-            for keyword in self.trigger_keywords:
-                if keyword.lower() in text_lower:
-                    return True, f"Trigger keyword '{keyword}' found"
+            should_respond, reason = self._check_keywords(message_text)
+            if should_respond:
+                return True, reason
 
         # Default: ignore unmentioned channel messages
         if self.ignore_unmentioned:
@@ -1043,6 +1062,9 @@ class SlackDaemon:
 
     async def start(self):
         """Initialize and start the daemon."""
+        from src.listener import SlackListener
+        from src.state_db import SlackStateDB
+
         self.ui.print_header()
         self._start_time = time.time()
 
@@ -1053,54 +1075,8 @@ class SlackDaemon:
             self._dbus_handler.start_time = self._start_time
             print("✅ D-Bus IPC enabled (com.aiworkflow.SlackAgent)")
 
-        # Initialize Slack session (config.json with env override)
-        # With automatic credential refresh on failure
-        auth_success = False
-        for attempt in range(2):  # Try twice: once with current creds, once after refresh
-            try:
-                xoxc_token = get_slack_config("auth.xoxc_token", "", "SLACK_XOXC_TOKEN")
-                d_cookie = get_slack_config("auth.d_cookie", "", "SLACK_D_COOKIE")
-                workspace_id = get_slack_config("auth.workspace_id", "", "SLACK_WORKSPACE_ID")
-
-                if not xoxc_token or not d_cookie:
-                    if attempt == 0:
-                        print("⚠️  Missing Slack credentials, attempting to refresh from Chrome...")
-                        if refresh_slack_credentials():
-                            continue  # Retry with refreshed credentials
-                    self.ui.print_error(
-                        "Missing Slack credentials. Set in config.json or environment:\n"
-                        "  SLACK_XOXC_TOKEN and SLACK_D_COOKIE\n"
-                        "Or run: python scripts/get_slack_creds.py"
-                    )
-                    return
-
-                self.session = SlackSession(
-                    xoxc_token=xoxc_token,
-                    d_cookie=d_cookie,
-                    workspace_id=workspace_id,
-                )
-                auth = await self.session.validate_session()
-                print(f"✅ Authenticated as: {auth.get('user', 'unknown')}")
-                auth_success = True
-
-                # Update D-Bus handler with session
-                if self._dbus_handler:
-                    self._dbus_handler.session = self.session
-                break
-
-            except Exception as e:
-                if attempt == 0:
-                    print(f"⚠️  Authentication failed: {e}")
-                    print("   Attempting to refresh credentials from Chrome...")
-                    if refresh_slack_credentials():
-                        continue  # Retry with refreshed credentials
-                self.ui.print_error(
-                    f"Slack authentication failed after retry: {e}\n" "Try running: python scripts/get_slack_creds.py"
-                )
-                return
-
-        if not auth_success:
-            self.ui.print_error("Failed to authenticate with Slack")
+        # Initialize Slack session with automatic credential refresh
+        if not await self._init_slack_auth():
             return
 
         # Initialize state database
@@ -1109,99 +1085,12 @@ class SlackDaemon:
         await self.state_db.connect()
         print("✅ State database connected")
 
-        # Initialize listener with config.json settings
-        watched_channels = get_slack_config("listener.watched_channels", [])
-        if isinstance(watched_channels, str):
-            watched_channels = [c.strip() for c in watched_channels.split(",") if c.strip()]
-
-        watched_keywords = get_slack_config("listener.watched_keywords", [])
-        if isinstance(watched_keywords, str):
-            watched_keywords = [k.strip().lower() for k in watched_keywords.split(",") if k.strip()]
-
-        self_user_id = get_slack_config("listener.self_user_id", "", "SLACK_SELF_USER_ID")
-        poll_interval_min = get_slack_config("listener.poll_interval_min", 5.0)
-        poll_interval_max = get_slack_config("listener.poll_interval_max", 15.0)
-
-        # Allow command line to override
-        if self.poll_interval_min != 5.0:
-            poll_interval_min = self.poll_interval_min
-        if self.poll_interval_max != 15.0:
-            poll_interval_max = self.poll_interval_max
-
-        # Self-DM channel for testing (messages from self in this channel are processed)
-        self_dm_channel = get_slack_config("listener.self_dm_channel", "", "SLACK_SELF_DM_CHANNEL")
-
-        # Alert channels (for auto-investigate - all messages in these channels are processed)
-        alert_channels = get_slack_config("listener.alert_channels", {})
-
-        config = ListenerConfig(
-            poll_interval_min=poll_interval_min,
-            poll_interval_max=poll_interval_max,
-            watched_channels=watched_channels,
-            watched_keywords=watched_keywords,
-            self_user_id=self_user_id,
-            self_dm_channel=self_dm_channel,
-            alert_channels=alert_channels,
-        )
-
+        # Initialize listener configuration
+        config = self._init_listener_config()
         self.listener = SlackListener(self.session, self.state_db, config)
 
-        print(f"✅ Watching {len(config.watched_channels)} channels")
-        print(f"✅ Keywords: {', '.join(config.watched_keywords) or 'none'}")
-        if self_dm_channel:
-            print(f"✅ Self-DM testing enabled: {self_dm_channel}")
-
-        # Show alert channels
-        alert_channels = self.alert_detector.alert_channels
-        if alert_channels:
-            print(f"🚨 Alert channels: {len(alert_channels)} (auto-investigate enabled)")
-            for _channel_id, info in alert_channels.items():
-                env = info.get("environment", "unknown")
-                ns = info.get("namespace", "unknown")
-                auto = "✓" if info.get("auto_investigate") else "✗"
-                print(f"   • {env}: {ns} [{auto}]")
-
-        # Show user classification summary
-        safe_count = len(self.user_classifier.safe_user_ids) + len(self.user_classifier.safe_user_names)
-        concerned_count = len(self.user_classifier.concerned_user_ids) + len(self.user_classifier.concerned_user_names)
-        print(f"✅ User lists: {safe_count} safe, {concerned_count} concerned")
-
-        # Show response rules
-        rules = self.channel_permissions
-        print("✅ Response rules:")
-        if rules.dm_enabled:
-            print("   • DMs: Always respond")
-        else:
-            print("   • DMs: Disabled")
-
-        if rules.mention_enabled:
-            triggers = list(rules.trigger_mentions)[:3]
-            trigger_str = ", ".join(triggers) if triggers else "(bot mention)"
-            print(f"   • Channels: Only when mentioned ({trigger_str})")
-        else:
-            print("   • Channels: All messages")
-
-        if rules.blocked_channels:
-            print(f"   • Blocked: {len(rules.blocked_channels)} channels")
-
-        # Show notification status
-        if self.notifier.enabled:
-            print("✅ Desktop notifications: enabled (libnotify)")
-        else:
-            print("⚠️  Desktop notifications: disabled (install PyGObject)")
-
-        # Show Claude agent status (required for operation)
-        agent = self.response_generator.claude_agent
-        model = agent.model
-        if agent.use_vertex:
-            print(f"🧠 Claude Agent: Vertex AI ({model})")
-        else:
-            print(f"🧠 Claude Agent: Direct API ({model})")
-
-        if self.dry_run:
-            print("⚠️  DRY RUN MODE - no responses will be sent")
-
-        print()
+        # Print startup status
+        self._print_startup_status(config)
 
         # Start listener
         await self.listener.start()
@@ -1393,51 +1282,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
 
         # Handle concerned users - queue for review instead of auto-sending
         if classification.require_review and not self.dry_run:
-            self._pending_reviews.append(
-                {
-                    "message": msg,
-                    "response": response,
-                    "classification": classification,
-                    "intent": "claude",
-                }
-            )
-            print(f"   {self.ui.COLORS['yellow']}⏸️  QUEUED FOR REVIEW (concerned user){self.ui.COLORS['reset']}")
-            print(f"   Pending reviews: {len(self._pending_reviews)}")
-
-            # Desktop notification - awaiting approval
-            self.notifier.awaiting_approval(
-                user_name=msg.user_name,
-                channel_name=msg.channel_name,
-                text=msg.text,
-                pending_count=len(self._pending_reviews),
-            )
-
-            # Record pending message in D-Bus history
-            if self._dbus_handler:
-                from slack_dbus import MessageRecord
-
-                record = MessageRecord(
-                    id=msg.id,
-                    timestamp=msg.timestamp,
-                    channel_id=msg.channel_id,
-                    channel_name=msg.channel_name,
-                    user_id=msg.user_id,
-                    user_name=msg.user_name,
-                    text=msg.text,
-                    intent="claude",
-                    classification=classification.category.value,
-                    response=response,
-                    status="pending",
-                    created_at=time.time(),
-                )
-                self._dbus_handler.history.add(record)
-                self._dbus_handler.emit_pending_approval(record)
-
-            # Optionally notify about concerned user message
-            await self._notify_concerned_message(msg, response)
-
-            # Still mark as processed (we've handled it, just not sent yet)
-            await self.state_db.mark_message_processed(msg.id)
+            await self._handle_concerned_user_review(msg, response, classification)
             return
 
         # Check channel permissions before sending (already computed above)
@@ -1450,31 +1295,91 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                 reason=permission_reason,
             )
             # Record skipped message
-            if self._dbus_handler:
-                from slack_dbus import MessageRecord
-
-                record = MessageRecord(
-                    id=msg.id,
-                    timestamp=msg.timestamp,
-                    channel_id=msg.channel_id,
-                    channel_name=msg.channel_name,
-                    user_id=msg.user_id,
-                    user_name=msg.user_name,
-                    text=msg.text,
-                    intent="claude",
-                    classification=classification.category.value,
-                    response="",
-                    status="skipped",
-                    created_at=time.time(),
-                    processed_at=time.time(),
-                )
-                self._dbus_handler.history.add(record)
+            await self._record_dbus_skipped(msg, classification)
 
             # Still mark as processed
             await self.state_db.mark_message_processed(msg.id)
             return
 
         # Send response (unless dry run or auto_respond is False)
+        await self._send_response_or_skip(msg, response, classification, should_send)
+
+    async def _handle_concerned_user_review(
+        self, msg: PendingMessage, response: str, classification: UserClassification
+    ):
+        """Handle message requiring concerned user review."""
+        self._pending_reviews.append(
+            {
+                "message": msg,
+                "response": response,
+                "classification": classification,
+                "intent": "claude",
+            }
+        )
+        print(f"   {self.ui.COLORS['yellow']}⏸️  QUEUED FOR REVIEW (concerned user){self.ui.COLORS['reset']}")
+        print(f"   Pending reviews: {len(self._pending_reviews)}")
+
+        # Desktop notification - awaiting approval
+        self.notifier.awaiting_approval(
+            user_name=msg.user_name,
+            channel_name=msg.channel_name,
+            text=msg.text,
+            pending_count=len(self._pending_reviews),
+        )
+
+        # Record pending message in D-Bus history
+        if self._dbus_handler:
+            from slack_dbus import MessageRecord
+
+            record = MessageRecord(
+                id=msg.id,
+                timestamp=msg.timestamp,
+                channel_id=msg.channel_id,
+                channel_name=msg.channel_name,
+                user_id=msg.user_id,
+                user_name=msg.user_name,
+                text=msg.text,
+                intent="claude",
+                classification=classification.category.value,
+                response=response,
+                status="pending",
+                created_at=time.time(),
+            )
+            self._dbus_handler.history.add(record)
+            self._dbus_handler.emit_pending_approval(record)
+
+        # Optionally notify about concerned user message
+        await self._notify_concerned_message(msg, response)
+
+        # Still mark as processed (we've handled it, just not sent yet)
+        await self.state_db.mark_message_processed(msg.id)
+
+    async def _record_dbus_skipped(self, msg: PendingMessage, classification: UserClassification):
+        """Record a skipped message in D-Bus history."""
+        if self._dbus_handler:
+            from slack_dbus import MessageRecord
+
+            record = MessageRecord(
+                id=msg.id,
+                timestamp=msg.timestamp,
+                channel_id=msg.channel_id,
+                channel_name=msg.channel_name,
+                user_id=msg.user_id,
+                user_name=msg.user_name,
+                text=msg.text,
+                intent="claude",
+                classification=classification.category.value,
+                response="",
+                status="skipped",
+                created_at=time.time(),
+                processed_at=time.time(),
+            )
+            self._dbus_handler.history.add(record)
+
+    async def _send_response_or_skip(
+        self, msg: PendingMessage, response: str, classification: UserClassification, should_send: bool
+    ):
+        """Send response or record as skipped."""
         success = True
         status = "sent"
         if not self.dry_run and should_send:
@@ -1601,6 +1506,157 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
         # Get final listener stats for shutdown summary
         listener_stats = self.listener.stats if self.listener else {}
         self.ui.print_shutdown(listener_stats)
+
+    async def _init_slack_auth(self) -> bool:
+        """Initialize Slack session with automatic credential refresh on failure."""
+        from src.slack_client import SlackSession
+
+        auth_success = False
+        for attempt in range(2):  # Try twice: once with current creds, once after refresh
+            try:
+                xoxc_token = get_slack_config("auth.xoxc_token", "", "SLACK_XOXC_TOKEN")
+                d_cookie = get_slack_config("auth.d_cookie", "", "SLACK_D_COOKIE")
+                workspace_id = get_slack_config("auth.workspace_id", "", "SLACK_WORKSPACE_ID")
+
+                if not xoxc_token or not d_cookie:
+                    if attempt == 0:
+                        print("⚠️  Missing Slack credentials, attempting to refresh from Chrome...")
+                        if refresh_slack_credentials():
+                            continue  # Retry with refreshed credentials
+                    self.ui.print_error(
+                        "Missing Slack credentials. Set in config.json or environment:\n"
+                        "  SLACK_XOXC_TOKEN and SLACK_D_COOKIE\n"
+                        "Or run: python scripts/get_slack_creds.py"
+                    )
+                    return False
+
+                self.session = SlackSession(
+                    xoxc_token=xoxc_token,
+                    d_cookie=d_cookie,
+                    workspace_id=workspace_id,
+                )
+                auth = await self.session.validate_session()
+                print(f"✅ Authenticated as: {auth.get('user', 'unknown')}")
+                auth_success = True
+
+                # Update D-Bus handler with session
+                if self._dbus_handler:
+                    self._dbus_handler.session = self.session
+                break
+
+            except Exception as e:
+                if attempt == 0:
+                    print(f"⚠️  Authentication failed: {e}")
+                    print("   Attempting to refresh credentials from Chrome...")
+                    if refresh_slack_credentials():
+                        continue  # Retry with refreshed credentials
+                self.ui.print_error(
+                    f"Slack authentication failed after retry: {e}\n" "Try running: python scripts/get_slack_creds.py"
+                )
+                return False
+
+        if not auth_success:
+            self.ui.print_error("Failed to authenticate with Slack")
+            return False
+
+        return True
+
+    def _init_listener_config(self):
+        """Initialize listener configuration from config.json."""
+        from src.listener import ListenerConfig
+
+        watched_channels = get_slack_config("listener.watched_channels", [])
+        if isinstance(watched_channels, str):
+            watched_channels = [c.strip() for c in watched_channels.split(",") if c.strip()]
+
+        watched_keywords = get_slack_config("listener.watched_keywords", [])
+        if isinstance(watched_keywords, str):
+            watched_keywords = [k.strip().lower() for k in watched_keywords.split(",") if k.strip()]
+
+        self_user_id = get_slack_config("listener.self_user_id", "", "SLACK_SELF_USER_ID")
+        poll_interval_min = get_slack_config("listener.poll_interval_min", 5.0)
+        poll_interval_max = get_slack_config("listener.poll_interval_max", 15.0)
+
+        # Allow command line to override
+        if self.poll_interval_min != 5.0:
+            poll_interval_min = self.poll_interval_min
+        if self.poll_interval_max != 15.0:
+            poll_interval_max = self.poll_interval_max
+
+        # Self-DM channel for testing (messages from self in this channel are processed)
+        self_dm_channel = get_slack_config("listener.self_dm_channel", "", "SLACK_SELF_DM_CHANNEL")
+
+        # Alert channels (for auto-investigate - all messages in these channels are processed)
+        alert_channels = get_slack_config("listener.alert_channels", {})
+
+        return ListenerConfig(
+            poll_interval_min=poll_interval_min,
+            poll_interval_max=poll_interval_max,
+            watched_channels=watched_channels,
+            watched_keywords=watched_keywords,
+            self_user_id=self_user_id,
+            self_dm_channel=self_dm_channel,
+            alert_channels=alert_channels,
+        )
+
+    def _print_startup_status(self, config):
+        """Print startup status summary."""
+        print(f"✅ Watching {len(config.watched_channels)} channels")
+        print(f"✅ Keywords: {', '.join(config.watched_keywords) or 'none'}")
+        if config.self_dm_channel:
+            print(f"✅ Self-DM testing enabled: {config.self_dm_channel}")
+
+        # Show alert channels
+        alert_channels = self.alert_detector.alert_channels
+        if alert_channels:
+            print(f"🚨 Alert channels: {len(alert_channels)} (auto-investigate enabled)")
+            for _channel_id, info in alert_channels.items():
+                env = info.get("environment", "unknown")
+                ns = info.get("namespace", "unknown")
+                auto = "✓" if info.get("auto_investigate") else "✗"
+                print(f"   • {env}: {ns} [{auto}]")
+
+        # Show user classification summary
+        safe_count = len(self.user_classifier.safe_user_ids) + len(self.user_classifier.safe_user_names)
+        concerned_count = len(self.user_classifier.concerned_user_ids) + len(self.user_classifier.concerned_user_names)
+        print(f"✅ User lists: {safe_count} safe, {concerned_count} concerned")
+
+        # Show response rules
+        rules = self.channel_permissions
+        print("✅ Response rules:")
+        if rules.dm_enabled:
+            print("   • DMs: Always respond")
+        else:
+            print("   • DMs: Disabled")
+
+        if rules.mention_enabled:
+            triggers = list(rules.trigger_mentions)[:3]
+            trigger_str = ", ".join(triggers) if triggers else "(bot mention)"
+            print(f"   • Channels: Only when mentioned ({trigger_str})")
+        else:
+            print("   • Channels: All messages")
+
+        if rules.blocked_channels:
+            print(f"   • Blocked: {len(rules.blocked_channels)} channels")
+
+        # Show notification status
+        if self.notifier.enabled:
+            print("✅ Desktop notifications: enabled (libnotify)")
+        else:
+            print("⚠️  Desktop notifications: disabled (install PyGObject)")
+
+        # Show Claude agent status (required for operation)
+        agent = self.response_generator.claude_agent
+        model = agent.model
+        if agent.use_vertex:
+            print(f"🧠 Claude Agent: Vertex AI ({model})")
+        else:
+            print(f"🧠 Claude Agent: Direct API ({model})")
+
+        if self.dry_run:
+            print("⚠️  DRY RUN MODE - no responses will be sent")
+
+        print()
 
     def setup_signal_handlers(self):
         """Set up signal handlers for graceful shutdown."""
