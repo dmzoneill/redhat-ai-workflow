@@ -47,7 +47,7 @@ except ImportError:
 
 
 # Known issues checking - loads patterns from memory
-def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:  # type: ignore[misc]
+def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
     """Check memory for known issues matching this tool/error."""
     matches = []
     error_lower = error_text.lower() if error_text else ""
@@ -108,7 +108,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
     return matches
 
 
-def _format_known_issues(matches: list) -> str:  # type: ignore[misc]
+def _format_known_issues(matches: list) -> str:
     """Format known issues for display."""
     if not matches:
         return ""
@@ -137,7 +137,7 @@ class SkillExecutor:
         skill: dict,
         inputs: dict,
         debug: bool = False,
-        server: FastMCP | None = None,  # type: ignore[assignment]
+        server: FastMCP | None = None,
         create_issue_fn=None,
         ask_question_fn=None,
         enable_interactive_recovery: bool = True,
@@ -576,9 +576,9 @@ class SkillExecutor:
             if isinstance(v, str):
                 result[k] = self._template(v)
             elif isinstance(v, dict):
-                result[k] = self._template_dict(v)  # type: ignore[assignment]
+                result[k] = self._template_dict(v)
             elif isinstance(v, list):
-                result[k] = [self._template(i) if isinstance(i, str) else i for i in v]  # type: ignore[assignment]
+                result[k] = [self._template(i) if isinstance(i, str) else i for i in v]
             else:
                 result[k] = v
         return result
@@ -811,7 +811,7 @@ class SkillExecutor:
         try:
             from zoneinfo import ZoneInfo
         except ImportError:
-            ZoneInfo = None  # type: ignore[assignment,misc]
+            ZoneInfo = None
 
         # Use module-level PROJECT_ROOT
         if str(PROJECT_ROOT) not in sys.path:
@@ -825,23 +825,23 @@ class SkillExecutor:
             from scripts.common.config_loader import load_config as load_skill_config
             from scripts.skill_hooks import emit_event_sync
         except ImportError:
-            parsers = None  # type: ignore[assignment]
-            jira_utils = None  # type: ignore[assignment]
-            load_skill_config = None  # type: ignore[assignment]
-            get_timezone = None  # type: ignore[assignment]
-            emit_event_sync = None  # type: ignore[assignment]
-            memory_helpers = None  # type: ignore[assignment]
-            config_loader = None  # type: ignore[assignment]
-            lint_utils = None  # type: ignore[assignment]
-            repo_utils = None  # type: ignore[assignment]
-            slack_utils = None  # type: ignore[assignment]
+            parsers = None
+            jira_utils = None
+            load_skill_config = None
+            get_timezone = None
+            emit_event_sync = None
+            memory_helpers = None
+            config_loader = None
+            lint_utils = None
+            repo_utils = None
+            slack_utils = None
 
         try:
             from google.oauth2.credentials import Credentials as GoogleCredentials
             from googleapiclient.discovery import build as google_build
         except ImportError:
-            GoogleCredentials = None  # type: ignore[assignment,misc]
-            google_build = None  # type: ignore[assignment]
+            GoogleCredentials = None
+            google_build = None
 
         safe_globals = {
             "__builtins__": {
@@ -1238,7 +1238,7 @@ class SkillExecutor:
                 else:
                     output_value = val
 
-                self.context[out_name] = output_value  # type: ignore[assignment]
+                self.context[out_name] = output_value
                 output_lines.append(f"**{out_name}:**\n{output_value}\n")
             elif "compute" in out:
                 result = self._exec_compute(out["compute"], out_name)

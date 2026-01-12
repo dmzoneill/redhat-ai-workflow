@@ -91,7 +91,7 @@ def _try_import_strategy():
     """
     try:
         # This would work if Claude Code exposes its tools
-        from claude_code import ask_user_question  # type: ignore
+        from claude_code import ask_user_question
 
         async def ask_via_import(questions_data: dict) -> dict:
             """Call AskUserQuestion via direct import."""
@@ -122,7 +122,7 @@ def _try_mcp_client_strategy():
                 try:
                     # This would use MCP protocol to call the tool
                     # Implementation depends on MCP client library
-                    from mcp import Client  # type: ignore
+                    from mcp import Client
 
                     async with Client(mcp_socket) as client:
                         result = await client.call_tool("AskUserQuestion", questions_data)
