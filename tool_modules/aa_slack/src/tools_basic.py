@@ -17,19 +17,18 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
-
-logger = logging.getLogger(__name__)
-
-from typing import cast
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
-# Setup project path for server imports
+# Setup project path for server imports FIRST
 from tool_modules.common import PROJECT_ROOT, setup_path  # noqa: F401 - side effect: adds to sys.path
+
+logger = logging.getLogger(__name__)
 
 # Add current directory to sys.path to support both relative and absolute imports
 # when loaded via spec_from_file_location
@@ -109,6 +108,336 @@ async def get_manager():
 
             _manager = SlackListenerManager()
         return _manager
+
+
+# ==================== TOOL IMPLEMENTATIONS ====================
+
+
+async def _slack_dm_gitlab_user_impl(
+    gitlab_username: str,
+    text: str,
+    notification_type: str,
+) -> str:
+    """Implementation of slack_dm_gitlab_user tool."""
+    try:
+        config = _get_slack_config()
+
+        # Get user mapping
+        user_mapping = config.get("user_mapping", {}).get("users", {})
+
+        if gitlab_username not in user_mapping:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"GitLab user '{gitlab_username}' not found in user_mapping",
+                    "hint": "Add this user to config.json: slack.user_mapping.users",
+                    "known_users": list(user_mapping.keys()),
+                }
+            )
+
+        user_info = user_mapping[gitlab_username]
+        slack_id = user_info.get("slack_id")
+
+        if not slack_id:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"No slack_id configured for '{gitlab_username}'",
+                }
+            )
+
+        # Add emoji prefix based on notification type
+        prefix = ""
+        if notification_type == "feedback":
+            prefix = "💬 "
+        elif notification_type == "approval":
+            prefix = "✅ "
+        elif notification_type == "info":
+            prefix = "ℹ️ "
+
+        formatted_text = prefix + text
+
+        manager = await get_manager()
+        await manager.initialize()
+
+        result = await manager.session.send_dm(
+            user_id=slack_id,
+            text=formatted_text,
+            typing_delay=True,
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "gitlab_user": gitlab_username,
+                "slack_user": user_info.get("name", gitlab_username),
+                "slack_id": slack_id,
+                "channel": result.get("channel", ""),
+                "timestamp": result.get("ts", ""),
+                "message": f"DM sent to {user_info.get('name', gitlab_username)}",
+            }
+        )
+
+    except Exception as e:
+        return json.dumps({"error": str(e), "success": False})
+
+
+async def _slack_get_user_impl(user_id: str) -> str:
+    """Implementation of slack_get_user tool."""
+    try:
+        manager = await get_manager()
+        await manager.initialize()
+
+        user_info = await manager.session.get_user_info(user_id)
+
+        profile = user_info.get("profile", {})
+
+        return json.dumps(
+            {
+                "id": user_id,
+                "name": user_info.get("name", ""),
+                "real_name": user_info.get("real_name", ""),
+                "display_name": profile.get("display_name", ""),
+                "title": profile.get("title", ""),
+                "email": profile.get("email", ""),
+                "is_bot": user_info.get("is_bot", False),
+                "timezone": user_info.get("tz", ""),
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+async def _slack_list_channels_impl(types: str, limit: int) -> str:
+    """Implementation of slack_list_channels tool."""
+    try:
+        manager = await get_manager()
+        await manager.initialize()
+
+        channels = await manager.session.get_conversations_list(
+            types=types,
+            limit=limit,
+        )
+
+        return json.dumps(
+            {
+                "count": len(channels),
+                "channels": [
+                    {
+                        "id": c.get("id", ""),
+                        "name": c.get("name", ""),
+                        "is_private": c.get("is_private", False),
+                        "is_member": c.get("is_member", False),
+                        "num_members": c.get("num_members", 0),
+                        "topic": c.get("topic", {}).get("value", "")[:100],
+                    }
+                    for c in channels
+                ],
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+async def _slack_post_team_impl(text: str, thread_ts: str) -> str:
+    """Implementation of slack_post_team tool."""
+    try:
+        config = _get_slack_config()
+        channels_config = config.get("channels", {})
+
+        # Get team channel ID
+        team_info = channels_config.get("team", {})
+        if isinstance(team_info, dict):
+            team_channel = team_info.get("id", "")
+        else:
+            team_channel = team_info  # Legacy string format
+
+        if not team_channel:
+            return json.dumps(
+                {
+                    "error": "Team channel not configured in config.json under slack.channels.team",
+                    "success": False,
+                }
+            )
+
+        # Try D-Bus daemon first (if running with --dbus)
+        dbus_result = await _send_via_dbus(team_channel, text, thread_ts or "")
+        if dbus_result and dbus_result.get("success"):
+            return json.dumps(
+                {
+                    "success": True,
+                    "channel": team_channel,
+                    "channel_name": (team_info.get("name", "team") if isinstance(team_info, dict) else "team"),
+                    "timestamp": dbus_result.get("ts", ""),
+                    "message": "Message posted to team channel (via D-Bus)",
+                    "method": "dbus",
+                }
+            )
+
+        # Fall back to direct API
+        manager = await get_manager()
+        await manager.initialize()
+
+        result = await manager.session.send_message(
+            channel_id=team_channel,
+            text=text,
+            thread_ts=thread_ts if thread_ts else None,
+            typing_delay=True,
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "channel": team_channel,
+                "channel_name": (team_info.get("name", "team") if isinstance(team_info, dict) else "team"),
+                "timestamp": result.get("ts", ""),
+                "message": "Message posted to team channel (direct API)",
+                "method": "direct",
+            }
+        )
+
+    except Exception as e:
+        return json.dumps({"error": str(e), "success": False})
+
+
+async def _slack_search_messages_impl(query: str, count: int) -> str:
+    """Implementation of slack_search_messages tool."""
+    try:
+        manager = await get_manager()
+        await manager.initialize()
+
+        results = await manager.session.search_messages(
+            query=query,
+            count=min(count, 100),
+        )
+
+        return json.dumps(
+            {
+                "query": query,
+                "count": len(results),
+                "matches": [
+                    {
+                        "channel": m.get("channel", {}).get("name", ""),
+                        "user": m.get("username", ""),
+                        "text": m.get("text", "")[:300],
+                        "timestamp": m.get("ts", ""),
+                        "permalink": m.get("permalink", ""),
+                    }
+                    for m in results
+                ],
+            },
+            indent=2,
+        )
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+async def _slack_send_message_impl(
+    target: str,
+    text: str,
+    thread_ts: str,
+    typing_delay: bool,
+) -> str:
+    """Implementation of slack_send_message tool."""
+    try:
+        manager = await get_manager()
+        await manager.initialize()
+
+        # Determine target type and get channel ID
+        target = target.strip()
+
+        if target.startswith("U"):
+            # User ID - open DM first
+            result = await manager.session.send_dm(
+                user_id=target,
+                text=text,
+                typing_delay=typing_delay,
+            )
+            return json.dumps(
+                {
+                    "success": True,
+                    "type": "dm",
+                    "user": target,
+                    "channel": result.get("channel", ""),
+                    "timestamp": result.get("ts", ""),
+                    "message": f"DM sent to {target}",
+                }
+            )
+
+        elif target.startswith("@"):
+            # @username - need to resolve to user ID first
+            username = target[1:]  # Remove @
+            users = await manager.session.get_users_list()
+            user = next((u for u in users if u.get("name") == username), None)
+            if not user:
+                return json.dumps(
+                    {
+                        "error": f"User @{username} not found",
+                        "success": False,
+                    }
+                )
+
+            result = await manager.session.send_dm(
+                user_id=user["id"],
+                text=text,
+                typing_delay=typing_delay,
+            )
+            return json.dumps(
+                {
+                    "success": True,
+                    "type": "dm",
+                    "user": f"@{username}",
+                    "user_id": user["id"],
+                    "channel": result.get("channel", ""),
+                    "timestamp": result.get("ts", ""),
+                    "message": f"DM sent to @{username}",
+                }
+            )
+
+        else:
+            # Channel ID (C...) or DM ID (D...) - try D-Bus first, then direct
+            msg_type = "dm" if target.startswith("D") else "channel"
+
+            # Try D-Bus daemon first (if running with --dbus)
+            dbus_result = await _send_via_dbus(target, text, thread_ts or "")
+            if dbus_result and dbus_result.get("success"):
+                return json.dumps(
+                    {
+                        "success": True,
+                        "type": msg_type,
+                        "channel": dbus_result.get("channel", target),
+                        "timestamp": dbus_result.get("ts", ""),
+                        "message": "Message sent successfully (via D-Bus)",
+                        "method": "dbus",
+                    }
+                )
+
+            # Fall back to direct API
+            result = await manager.session.send_message(
+                channel_id=target,
+                text=text,
+                thread_ts=thread_ts if thread_ts else None,
+                typing_delay=typing_delay,
+            )
+
+            return json.dumps(
+                {
+                    "success": True,
+                    "type": msg_type,
+                    "channel": result.get("channel", target),
+                    "timestamp": result.get("ts", ""),
+                    "message": "Message sent successfully (direct API)",
+                    "method": "direct",
+                }
+            )
+
+    except Exception as e:
+        return json.dumps({"error": str(e), "success": False})
 
 
 def register_tools(server: FastMCP) -> int:
@@ -199,67 +528,7 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Confirmation with message timestamp or error if user not found.
         """
-        try:
-            config = _get_slack_config()
-
-            # Get user mapping
-            user_mapping = config.get("user_mapping", {}).get("users", {})
-
-            if gitlab_username not in user_mapping:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": f"GitLab user '{gitlab_username}' not found in user_mapping",
-                        "hint": "Add this user to config.json: slack.user_mapping.users",
-                        "known_users": list(user_mapping.keys()),
-                    }
-                )
-
-            user_info = user_mapping[gitlab_username]
-            slack_id = user_info.get("slack_id")
-
-            if not slack_id:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": f"No slack_id configured for '{gitlab_username}'",
-                    }
-                )
-
-            # Add emoji prefix based on notification type
-            prefix = ""
-            if notification_type == "feedback":
-                prefix = "💬 "
-            elif notification_type == "approval":
-                prefix = "✅ "
-            elif notification_type == "info":
-                prefix = "ℹ️ "
-
-            formatted_text = prefix + text
-
-            manager = await get_manager()
-            await manager.initialize()
-
-            result = await manager.session.send_dm(
-                user_id=slack_id,
-                text=formatted_text,
-                typing_delay=True,
-            )
-
-            return json.dumps(
-                {
-                    "success": True,
-                    "gitlab_user": gitlab_username,
-                    "slack_user": user_info.get("name", gitlab_username),
-                    "slack_id": slack_id,
-                    "channel": result.get("channel", ""),
-                    "timestamp": result.get("ts", ""),
-                    "message": f"DM sent to {user_info.get('name', gitlab_username)}",
-                }
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e), "success": False})
+        return await _slack_dm_gitlab_user_impl(gitlab_username, text, notification_type)
 
     @auto_heal()
     @registry.tool()
@@ -273,30 +542,7 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             User profile with name, display name, title, etc.
         """
-        try:
-            manager = await get_manager()
-            await manager.initialize()
-
-            user_info = await manager.session.get_user_info(user_id)
-
-            profile = user_info.get("profile", {})
-
-            return json.dumps(
-                {
-                    "id": user_id,
-                    "name": user_info.get("name", ""),
-                    "real_name": user_info.get("real_name", ""),
-                    "display_name": profile.get("display_name", ""),
-                    "title": profile.get("title", ""),
-                    "email": profile.get("email", ""),
-                    "is_bot": user_info.get("is_bot", False),
-                    "timezone": user_info.get("tz", ""),
-                },
-                indent=2,
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return await _slack_get_user_impl(user_id)
 
     @auto_heal()
     @registry.tool()
@@ -314,35 +560,7 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             List of channels with IDs and names
         """
-        try:
-            manager = await get_manager()
-            await manager.initialize()
-
-            channels = await manager.session.get_conversations_list(
-                types=types,
-                limit=limit,
-            )
-
-            return json.dumps(
-                {
-                    "count": len(channels),
-                    "channels": [
-                        {
-                            "id": c.get("id", ""),
-                            "name": c.get("name", ""),
-                            "is_private": c.get("is_private", False),
-                            "is_member": c.get("is_member", False),
-                            "num_members": c.get("num_members", 0),
-                            "topic": c.get("topic", {}).get("value", "")[:100],
-                        }
-                        for c in channels
-                    ],
-                },
-                indent=2,
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return await _slack_list_channels_impl(types, limit)
 
     @auto_heal()
     @registry.tool()
@@ -365,63 +583,7 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             JSON with success status and message timestamp
         """
-        try:
-            config = _get_slack_config()
-            channels_config = config.get("channels", {})
-
-            # Get team channel ID
-            team_info = channels_config.get("team", {})
-            if isinstance(team_info, dict):
-                team_channel = team_info.get("id", "")
-            else:
-                team_channel = team_info  # Legacy string format
-
-            if not team_channel:
-                return json.dumps(
-                    {
-                        "error": "Team channel not configured in config.json under slack.channels.team",
-                        "success": False,
-                    }
-                )
-
-            # Try D-Bus daemon first (if running with --dbus)
-            dbus_result = await _send_via_dbus(team_channel, text, thread_ts or "")
-            if dbus_result and dbus_result.get("success"):
-                return json.dumps(
-                    {
-                        "success": True,
-                        "channel": team_channel,
-                        "channel_name": (team_info.get("name", "team") if isinstance(team_info, dict) else "team"),
-                        "timestamp": dbus_result.get("ts", ""),
-                        "message": "Message posted to team channel (via D-Bus)",
-                        "method": "dbus",
-                    }
-                )
-
-            # Fall back to direct API
-            manager = await get_manager()
-            await manager.initialize()
-
-            result = await manager.session.send_message(
-                channel_id=team_channel,
-                text=text,
-                thread_ts=thread_ts if thread_ts else None,
-                typing_delay=True,
-            )
-
-            return json.dumps(
-                {
-                    "success": True,
-                    "channel": team_channel,
-                    "channel_name": (team_info.get("name", "team") if isinstance(team_info, dict) else "team"),
-                    "timestamp": result.get("ts", ""),
-                    "message": "Message posted to team channel (direct API)",
-                    "method": "direct",
-                }
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e), "success": False})
+        return await _slack_post_team_impl(text, thread_ts)
 
     @auto_heal()
     @registry.tool()
@@ -439,35 +601,7 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Matching messages with context
         """
-        try:
-            manager = await get_manager()
-            await manager.initialize()
-
-            results = await manager.session.search_messages(
-                query=query,
-                count=min(count, 100),
-            )
-
-            return json.dumps(
-                {
-                    "query": query,
-                    "count": len(results),
-                    "matches": [
-                        {
-                            "channel": m.get("channel", {}).get("name", ""),
-                            "user": m.get("username", ""),
-                            "text": m.get("text", "")[:300],
-                            "timestamp": m.get("ts", ""),
-                            "permalink": m.get("permalink", ""),
-                        }
-                        for m in results
-                    ],
-                },
-                indent=2,
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return await _slack_search_messages_impl(query, count)
 
     @auto_heal()
     @registry.tool()
@@ -480,97 +614,6 @@ def register_tools(server: FastMCP) -> int:
         """
         Send a message to a Slack channel or user.
         """
-        try:
-            manager = await get_manager()
-            await manager.initialize()
+        return await _slack_send_message_impl(target, text, thread_ts, typing_delay)
 
-            # Determine target type and get channel ID
-            target = target.strip()
-
-            if target.startswith("U"):
-                # User ID - open DM first
-                result = await manager.session.send_dm(
-                    user_id=target,
-                    text=text,
-                    typing_delay=typing_delay,
-                )
-                return json.dumps(
-                    {
-                        "success": True,
-                        "type": "dm",
-                        "user": target,
-                        "channel": result.get("channel", ""),
-                        "timestamp": result.get("ts", ""),
-                        "message": f"DM sent to {target}",
-                    }
-                )
-
-            elif target.startswith("@"):
-                # @username - need to resolve to user ID first
-                username = target[1:]  # Remove @
-                users = await manager.session.get_users_list()
-                user = next((u for u in users if u.get("name") == username), None)
-                if not user:
-                    return json.dumps(
-                        {
-                            "error": f"User @{username} not found",
-                            "success": False,
-                        }
-                    )
-
-                result = await manager.session.send_dm(
-                    user_id=user["id"],
-                    text=text,
-                    typing_delay=typing_delay,
-                )
-                return json.dumps(
-                    {
-                        "success": True,
-                        "type": "dm",
-                        "user": f"@{username}",
-                        "user_id": user["id"],
-                        "channel": result.get("channel", ""),
-                        "timestamp": result.get("ts", ""),
-                        "message": f"DM sent to @{username}",
-                    }
-                )
-
-            else:
-                # Channel ID (C...) or DM ID (D...) - try D-Bus first, then direct
-                msg_type = "dm" if target.startswith("D") else "channel"
-
-                # Try D-Bus daemon first (if running with --dbus)
-                dbus_result = await _send_via_dbus(target, text, thread_ts or "")
-                if dbus_result and dbus_result.get("success"):
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "type": msg_type,
-                            "channel": dbus_result.get("channel", target),
-                            "timestamp": dbus_result.get("ts", ""),
-                            "message": "Message sent successfully (via D-Bus)",
-                            "method": "dbus",
-                        }
-                    )
-
-                # Fall back to direct API
-                result = await manager.session.send_message(
-                    channel_id=target,
-                    text=text,
-                    thread_ts=thread_ts if thread_ts else None,
-                    typing_delay=typing_delay,
-                )
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        "type": msg_type,
-                        "channel": result.get("channel", target),
-                        "timestamp": result.get("ts", ""),
-                        "message": "Message sent successfully (direct API)",
-                        "method": "direct",
-                    }
-                )
-
-        except Exception as e:
-            return json.dumps({"error": str(e), "success": False})
+    return registry.count
