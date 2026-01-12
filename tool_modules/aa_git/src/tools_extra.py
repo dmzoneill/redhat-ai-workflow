@@ -42,7 +42,7 @@ def register_tools(server: FastMCP) -> int:
 
     # ==================== STATUS & INFO ====================
 
-        # ==================== TOOLS NOT USED IN SKILLS ====================
+    # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal()
     @registry.tool()
     async def docker_compose_down(

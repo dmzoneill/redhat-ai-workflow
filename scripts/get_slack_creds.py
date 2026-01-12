@@ -30,9 +30,8 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 
-# Add scripts/common to path for shared utilities
+# Add scripts/common to path for shared utilities - must be before imports
 sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "common"))
-from config_loader import load_config
 
 # Try pycookiecheat for Chrome cookie extraction
 try:
@@ -45,6 +44,8 @@ except ImportError:
 
 def get_slack_url() -> str:
     """Get Slack URL from config or default."""
+    from config_loader import load_config
+
     config = load_config()
     host = config.get("slack", {}).get("auth", {}).get("host", "")
     if host:
@@ -54,6 +55,8 @@ def get_slack_url() -> str:
 
 def get_chrome_settings() -> tuple[Path, list[str]]:
     """Get Chrome user data dir and profiles from config."""
+    from config_loader import load_config
+
     config = load_config()
     creds_config = config.get("slack", {}).get("credentials_extraction", {})
 
@@ -171,6 +174,8 @@ def save_config(config: dict):
 
 def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = False):
     """Update config.json with the new credentials."""
+    from config_loader import load_config
+
     config = load_config()
 
     # Ensure slack.auth section exists (daemon reads from slack.auth.*)

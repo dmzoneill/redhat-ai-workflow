@@ -26,11 +26,13 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from slack_dbus import DBUS_AVAILABLE, SlackAgentClient
+if TYPE_CHECKING:
+    from slack_dbus import SlackAgentClient
 
 # Colors for terminal output
 COLORS = {
@@ -325,7 +327,8 @@ async def cmd_watch(client: SlackAgentClient, args):
                 current_count = len(pending)
                 if current_count > last_count:
                     # New pending messages
-                    new_messages = pending[-(current_count - last_count) :]
+                    n = current_count - last_count
+                    new_messages = pending[-n:]
                     for msg in new_messages:
                         print(f"\n{COLORS['yellow']}🔔 NEW MESSAGE{COLORS['reset']}")
                         print(format_message(msg))
@@ -355,6 +358,8 @@ async def cmd_watch(client: SlackAgentClient, args):
 
 async def main_async(args, cmd_func):
     """Run async command."""
+    from slack_dbus import SlackAgentClient
+
     client = SlackAgentClient()
 
     if not await client.connect():
@@ -368,6 +373,8 @@ async def main_async(args, cmd_func):
 
 
 def main():
+    from slack_dbus import DBUS_AVAILABLE
+
     parser = argparse.ArgumentParser(
         description="Slack Daemon Control CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,

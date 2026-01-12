@@ -166,31 +166,51 @@ steps:
     compute: |
       from scripts.common.parsers import parse_kubectl_pods
 
-      # Use shared parser to get structured pod data
-      pods = parse_kubectl_pods(str(pod_status) if pod_status else "")
+      # Check if kubectl_get_pods failed
+      pod_status_str = str(pod_status) if pod_status else ""
+      tool_failed = (
+          not pod_status or
+          "error" in pod_status_str.lower()[:200] or
+          "forbidden" in pod_status_str.lower() or
+          "unauthorized" in pod_status_str.lower() or
+          "connection refused" in pod_status_str.lower()
+      )
 
-      # Filter unhealthy pods
-      unhealthy = []
-      error_pods = []
+      if tool_failed:
+          result = {
+              "unhealthy_pods": [],
+              "error_pods": [],
+              "total_issues": 0,
+              "tool_failed": True,
+              "error_reason": pod_status_str[:300] if pod_status_str else "kubectl_get_pods returned no data"
+          }
+      else:
+          # Use shared parser to get structured pod data
+          pods = parse_kubectl_pods(pod_status_str)
 
-      for pod in pods:
-          if not pod.get("healthy"):
-              unhealthy.append({
-                  "pod": pod["name"],
-                  "status": pod["status"],
-                  "ready": pod.get("ready", "?/?")
-              })
+          # Filter unhealthy pods
+          unhealthy = []
+          error_pods = []
 
-          # Find pods related to alert that have errors
-          if any(term in pod["name"].lower() for term in ['processor', 'api', 'rollup', 'exporter']):
-              if 'error' in pod["status"].lower() or 'crash' in pod["status"].lower():
-                  error_pods.append(pod["name"])
+          for pod in pods:
+              if not pod.get("healthy"):
+                  unhealthy.append({
+                      "pod": pod["name"],
+                      "status": pod["status"],
+                      "ready": pod.get("ready", "?/?")
+                  })
 
-      result = {
-          "unhealthy_pods": unhealthy[:5],
-          "error_pods": error_pods[:3],
-          "total_issues": len(unhealthy)
-      }
+              # Find pods related to alert that have errors
+              if any(term in pod["name"].lower() for term in ['processor', 'api', 'rollup', 'exporter']):
+                  if 'error' in pod["status"].lower() or 'crash' in pod["status"].lower():
+                      error_pods.append(pod["name"])
+
+          result = {
+              "unhealthy_pods": unhealthy[:5],
+              "error_pods": error_pods[:3],
+              "total_issues": len(unhealthy),
+              "tool_failed": False
+          }
     output: pod_analysis
 
   - name: get_recent_errors
@@ -212,13 +232,31 @@ steps:
 
       logs = str(recent_logs) if recent_logs else ""
 
-      # Use shared parser for error extraction
-      errors_found = parse_error_logs(logs, max_errors=5)
+      # Check if kubectl_logs failed
+      tool_failed = (
+          not recent_logs or
+          "error" in logs.lower()[:200] or
+          "forbidden" in logs.lower() or
+          "unauthorized" in logs.lower() or
+          "no pod found" in logs.lower()
+      )
 
-      result = {
-          "errors": errors_found,
-          "has_errors": len(errors_found) > 0
-      }
+      if tool_failed:
+          result = {
+              "errors": [],
+              "has_errors": False,
+              "tool_failed": True,
+              "error_reason": logs[:300] if logs else "kubectl_logs returned no data"
+          }
+      else:
+          # Use shared parser for error extraction
+          errors_found = parse_error_logs(logs, max_errors=5)
+
+          result = {
+              "errors": errors_found,
+              "has_errors": len(errors_found) > 0,
+              "tool_failed": False
+          }
     output: error_analysis
 
   # ==================== SEARCH JIRA ====================
@@ -395,13 +433,23 @@ steps:
       response += f"**Namespace:** `{alert.get('namespace', 'unknown')}`\n\n"
 
       # Pod status
-      if pods.get("unhealthy_pods"):
+      if pods.get("tool_failed"):
+          response += f"⚠️ **Unable to check pod status**\n"
+          response += f"Error: {pods.get('error_reason', 'kubectl_get_pods failed')[:150]}\n"
+          response += f"\nCommon causes:\n"
+          response += f"- VPN disconnected\n"
+          response += f"- Kubeconfig expired (run `kube_login {cfg.get('environment', 'stage')}`)\n"
+          response += f"- Wrong namespace\n"
+      elif pods.get("unhealthy_pods"):
           response += f"⚠️ **{pods.get('total_issues', 0)} unhealthy pods detected**\n"
       else:
           response += "✅ All pods appear healthy\n"
 
       # Errors
-      if errors.get("has_errors"):
+      if errors.get("tool_failed"):
+          response += f"⚠️ **Unable to get pod logs**\n"
+          response += f"Error: {errors.get('error_reason', 'kubectl_logs failed')[:150]}\n"
+      elif errors.get("has_errors"):
           response += f"❌ Found {len(errors.get('errors', []))} error pattern(s) in logs\n"
 
       response += "\n"

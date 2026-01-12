@@ -1,0 +1,102 @@
+usage_patterns:
+- id: bonfire_deploy_parameter_format_7c4c425a
+  tool: bonfire_deploy
+  error_category: PARAMETER_FORMAT
+  mistake_pattern:
+    error_regex: manifest unknown|image not found
+    parameter: image_tag
+    validation:
+      expected: 40-character full git SHA
+      check: len(image_tag) < 40
+      regex: ^[a-f0-9]{40}$
+    common_mistakes:
+    - using 8-char short SHA
+    - using 7-char abbreviated SHA
+  root_cause: 'Claude used wrong format for ''image_tag'' (expected: 40-character
+    full git SHA)'
+  prevention_steps:
+  - action: validate_parameter
+    parameter: image_tag
+    validation:
+      regex: ^[a-f0-9]{40}$
+      error_message: Must be full 40-character SHA
+    reason: Ensure full 40-char SHA, not short SHA
+  - action: call_tool_if_invalid
+    tool: git_rev_parse
+    args:
+      ref: <short_sha>
+    reason: Expand short SHA to full 40-char SHA
+  - action: use_expanded_value
+    parameter: image_tag
+    reason: Use full SHA
+  observations: 201
+  success_after_prevention: 0
+  confidence: 0.95
+  first_seen: '2026-01-12T14:57:01.332525'
+  last_seen: '2026-01-12T15:22:17.384608'
+  related_patterns: []
+- id: bonfire_namespace_release_incorrect_parameter_eb089ff1
+  tool: bonfire_namespace_release
+  error_category: INCORRECT_PARAMETER
+  mistake_pattern:
+    error_regex: ownership_mismatch
+    parameter: not
+    common_mistakes:
+    - using incorrect value for not
+  root_cause: Claude used incorrect value for 'not' parameter
+  prevention_steps:
+  - action: call_tool_first
+    tool: bonfire_namespace_list
+    args:
+      mine_only: true
+    reason: Get list of YOUR owned namespaces
+  - action: extract_from_result
+    field: namespaces[0].name
+    validate: namespace exists in result
+    reason: Verify namespace is owned by you
+  - action: use_extracted_value
+    parameter: namespace
+    reason: Use verified owned namespace
+  observations: 15
+  success_after_prevention: 0
+  confidence: 0.75
+  first_seen: '2026-01-12T15:22:17.046666'
+  last_seen: '2026-01-12T15:22:17.101090'
+  related_patterns: []
+- id: gitlab_mr_create_workflow_sequence_8c55bf20
+  tool: gitlab_mr_create
+  error_category: WORKFLOW_SEQUENCE
+  mistake_pattern:
+    error_regex: branch.*not.*on.*remote|nothing to push
+    missing_step:
+    - git_push
+    correct_sequence:
+    - git_commit
+    - git_push
+    - gitlab_mr_create
+  root_cause: Claude called gitlab_mr_create without first calling git_push
+  prevention_steps:
+  - action: call_tool_first
+    tool: git_push
+    reason: 'Required prerequisite: git_push must be called first'
+  - action: verify_prerequisite_success
+    reason: Ensure prerequisite completed successfully
+  observations: 8
+  success_after_prevention: 0
+  confidence: 0.7
+  first_seen: '2026-01-12T15:22:17.102693'
+  last_seen: '2026-01-12T15:22:17.138873'
+  related_patterns: []
+stats:
+  total_usage_patterns: 3
+  high_confidence: 1
+  medium_confidence: 2
+  low_confidence: 0
+  by_category:
+    INCORRECT_PARAMETER: 1
+    PARAMETER_FORMAT: 1
+    MISSING_PREREQUISITE: 0
+    WORKFLOW_SEQUENCE: 1
+    WRONG_TOOL_SELECTION: 0
+  prevention_success_rate: 0.0
+  last_updated: '2026-01-12T15:22:17.384619'

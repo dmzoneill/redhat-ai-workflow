@@ -10,23 +10,10 @@ exclude =
     .pytest_cache,
     *.egg-info,
     build,
-    dist
-
-# Ignore specific errors
-ignore =
-    # E402: module level import not at top - intentional for path setup
-    E402,
-    # W503: line break before binary operator - conflicts with Black
-    W503,
-    # E203: whitespace before ':' - conflicts with Black
-    E203,
-    # C901: function too complex - register_tools functions are large by design
-    C901
-
-# Per-file ignores
-per-file-ignores =
-    # D-Bus type annotations are valid but misinterpreted
-    scripts/slack_dbus.py: F821
+    dist,
+    .claude,
+    extensions,
+    tests
 
 # McCabe complexity
 max-complexity = 15

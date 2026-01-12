@@ -14,11 +14,14 @@ def fix_e501_line_length(file_path: Path) -> bool:
 
     # Split the long regex pattern across multiple lines
     if "fix_e304_final.py" in str(file_path):
-        old_pattern = r'    pattern = r"(\n    )@(?:auto_heal|auto_heal_stage|auto_heal_konflux|auto_heal_ephemeral)\([^\)]*\)[^\n]*\n\n(    # =+.*?=+\n)"'
-        new_pattern = '''    pattern = (
+        old_pattern = (
+            r'    pattern = r"(\n    )@(?:auto_heal|auto_heal_stage|'
+            r'auto_heal_konflux|auto_heal_ephemeral)\([^\)]*\)[^\n]*\n\n(    # =+.*?=+\n)"'
+        )
+        new_pattern = """    pattern = (
         r"(\\n    )@(?:auto_heal|auto_heal_stage|auto_heal_konflux|"
         r"auto_heal_ephemeral)\\([^\\)]*\\)[^\\n]*\\n\\n(    # =+.*?=+\\n)"
-    )'''
+    )"""
         content = content.replace(old_pattern, new_pattern)
 
     if content != original:
@@ -85,12 +88,15 @@ def fix_e304_blank_lines(file_path: Path) -> bool:
     original = content
 
     # Remove stray decorator before comment separator
-    pattern1 = r'(\n    )@(?:auto_heal|auto_heal_stage|auto_heal_konflux|auto_heal_ephemeral)\([^\)]*\)[^\n]*\n\n(    # =+.*?=+\n)'
-    content = re.sub(pattern1, r'\1\2', content)
+    pattern1 = (
+        r"(\n    )@(?:auto_heal|auto_heal_stage|auto_heal_konflux|"
+        r"auto_heal_ephemeral)\([^\)]*\)[^\n]*\n\n(    # =+.*?=+\n)"
+    )
+    content = re.sub(pattern1, r"\1\2", content)
 
     # Remove blank line between comment separator and decorator
-    pattern2 = r'(    # =+.*?=+)\n\n(    @(?:auto_heal|registry))'
-    content = re.sub(pattern2, r'\1\n\2', content)
+    pattern2 = r"(    # =+.*?=+)\n\n(    @(?:auto_heal|registry))"
+    content = re.sub(pattern2, r"\1\n\2", content)
 
     if content != original:
         file_path.write_text(content)
@@ -179,7 +185,7 @@ def main():
     kibana_file = PROJECT_ROOT / "tool_modules/aa_kibana/src/tools_extra.py"
     if kibana_file.exists():
         if add_missing_import(kibana_file, "from .tools_basic import kibana_search_logs"):
-            print(f"✅ Added kibana_search_logs import to tools_extra.py")
+            print("✅ Added kibana_search_logs import to tools_extra.py")
             fixes_applied += 1
 
     print(f"\n✅ Total fixes applied: {fixes_applied}")

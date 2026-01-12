@@ -124,7 +124,8 @@ def claude_to_cursor(content: str) -> str:
                 break
 
     if frontmatter_end > 0:
-        return "\n".join(lines[frontmatter_end + 1 :]).strip() + "\n"
+        start_idx = frontmatter_end + 1
+        return "\n".join(lines[start_idx:]).strip() + "\n"
 
     return content
 

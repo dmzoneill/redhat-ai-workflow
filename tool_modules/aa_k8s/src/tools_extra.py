@@ -23,7 +23,7 @@ def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
 
-        # ==================== TOOLS NOT USED IN SKILLS ====================
+    # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal()
     @registry.tool()
     async def k8s_list_deployments(
