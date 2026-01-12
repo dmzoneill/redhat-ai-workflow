@@ -4,8 +4,6 @@ Provides 14 tools for Prometheus queries, alerts, targets, and metrics.
 """
 
 import logging
-import os
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
@@ -17,9 +15,6 @@ from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_s
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
-
-# Import from basic module
-from .tools_basic import prometheus_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +54,365 @@ async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
 # ==================== INSTANT QUERIES ====================
 
 
+# ==================== TOOL IMPLEMENTATIONS ====================
+
+
+async def _prometheus_check_health_impl(
+    namespace: str,
+    environment: str = "stage",
+) -> list[TextContent]:
+    """Implementation of prometheus_check_health tool."""
+    url, token = await get_prometheus_config(environment)
+
+    success, result = await prometheus_api_request(url, "/api/v1/alerts", token=token)
+
+    if not success:
+        return [TextContent(type="text", text=f"❌ Failed to check health: {result}")]
+
+    alerts = result.get("data", {}).get("alerts", [])
+
+    # Filter to namespace and non-info severity
+    critical_alerts = []
+    for alert in alerts:
+        labels = alert.get("labels", {})
+        if namespace not in labels.get("namespace", ""):
+            continue
+        if alert.get("state") != "firing":
+            continue
+        if labels.get("severity") in ["info"]:
+            continue
+        critical_alerts.append(alert)
+
+    if not critical_alerts:
+        return [
+            TextContent(
+                type="text",
+                text=f"## ✅ {namespace} is healthy\n\nNo critical or warning alerts in {environment}.",
+            )
+        ]
+
+    lines = [
+        f"## ⚠️ {namespace} has issues",
+        f"Found {len(critical_alerts)} alert(s) in {environment}:",
+        "",
+    ]
+
+    for alert in critical_alerts:
+        labels = alert.get("labels", {})
+        annotations = alert.get("annotations", {})
+        name = labels.get("alertname", "Unknown")
+        sev = labels.get("severity", "unknown")
+        msg = annotations.get("message") or annotations.get("summary") or ""
+        icon = "🔴" if sev == "critical" else "🟠"
+        lines.append(f"- {icon} **{name}** ({sev})")
+        if msg:
+            lines.append(f"  {msg[:100]}")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _prometheus_error_rate_impl(
+    namespace: str,
+    environment: str = "stage",
+    window: str = "5m",
+) -> list[TextContent]:
+    """Implementation of prometheus_error_rate tool."""
+    url, token = await get_prometheus_config(environment)
+
+    query = f"""
+        sum(rate(http_requests_total{{namespace="{namespace}",code=~"5.."}}[{window}])) by (code)
+        /
+        sum(rate(http_requests_total{{namespace="{namespace}"}}[{window}]))
+    """
+
+    success, result = await prometheus_api_request(
+        url,
+        "/api/v1/query",
+        params={"query": query},
+        token=token,
+    )
+
+    lines = [
+        f"## Error Rate: `{namespace}`",
+        f"**Window:** {window} | **Environment:** {environment}",
+        "",
+    ]
+
+    if not success or result.get("status") != "success":
+        lines.append("⚠️ Query failed or no data")
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    data = result.get("data", {}).get("result", [])
+    if not data:
+        lines.append("✅ No 5xx errors detected")
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    for item in data:
+        code = item.get("metric", {}).get("code", "unknown")
+        value = item.get("value", [None, "0"])
+        if len(value) >= 2:
+            rate = float(value[1]) * 100  # Convert to percentage
+            lines.append(f"- **{code}:** {rate:.2f}%")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _prometheus_get_alerts_impl(
+    namespace: str,
+    environment: str = "stage",
+) -> list[TextContent]:
+    """Implementation of prometheus_get_alerts tool."""
+    # Re-use prometheus_alerts from tools_basic
+    from .tools_basic import prometheus_alerts
+
+    result = await prometheus_alerts(namespace=namespace, environment=environment)
+    return result
+
+
+async def _prometheus_labels_impl(
+    environment: str = "stage",
+    label: str = "__name__",
+) -> list[TextContent]:
+    """Implementation of prometheus_labels tool."""
+    url, token = await get_prometheus_config(environment)
+
+    success, result = await prometheus_api_request(
+        url,
+        f"/api/v1/label/{label}/values",
+        token=token,
+    )
+
+    if not success:
+        return [TextContent(type="text", text=f"❌ Failed to get labels: {result}")]
+
+    if result.get("status") != "success":
+        return [TextContent(type="text", text="❌ Failed to fetch labels")]
+
+    values = result.get("data", [])
+
+    if not values:
+        return [TextContent(type="text", text=f"No values found for label `{label}`")]
+
+    lines = [
+        f"## Label Values: `{label}`",
+        f"**Environment:** {environment}",
+        f"**Count:** {len(values)}",
+        "",
+    ]
+
+    for value in values[:50]:
+        lines.append(f"- `{value}`")
+
+    if len(values) > 50:
+        lines.append(f"\n... and {len(values) - 50} more")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _prometheus_namespace_metrics_impl(
+    namespace: str,
+    environment: str = "stage",
+) -> list[TextContent]:
+    """Implementation of prometheus_namespace_metrics tool."""
+    url, token = await get_prometheus_config(environment)
+
+    queries = {
+        "CPU Usage": f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}"}}[5m]))',
+        "Memory (GB)": f'sum(container_memory_usage_bytes{{namespace="{namespace}"}}) / 1024 / 1024 / 1024',
+        "Network RX (MB/s)": (
+            f'sum(rate(container_network_receive_bytes_total{{namespace="{namespace}"}}[5m])) ' f"/ 1024 / 1024"
+        ),
+        "Network TX (MB/s)": (
+            f'sum(rate(container_network_transmit_bytes_total{{namespace="{namespace}"}}[5m])) ' f"/ 1024 / 1024"
+        ),
+    }
+
+    lines = [
+        f"## Namespace Metrics: `{namespace}`",
+        f"**Environment:** {environment}",
+        "",
+    ]
+
+    for name, query in queries.items():
+        success, result = await prometheus_api_request(
+            url,
+            "/api/v1/query",
+            params={"query": query},
+            token=token,
+        )
+
+        if success and result.get("status") == "success":
+            data = result.get("data", {}).get("result", [])
+            if data:
+                value = data[0].get("value", [None, "N/A"])
+                if len(value) >= 2:
+                    try:
+                        val = float(value[1])
+                        lines.append(f"- **{name}:** {val:.2f}")
+                    except ValueError:
+                        lines.append(f"- **{name}:** {value[1]}")
+            else:
+                lines.append(f"- **{name}:** No data")
+        else:
+            lines.append(f"- **{name}:** Query failed")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _prometheus_pre_deploy_check_impl(
+    environment: str = "stage",
+) -> list[TextContent]:
+    """Implementation of prometheus_pre_deploy_check tool."""
+    from .tools_basic import prometheus_alerts
+
+    # Load namespace from config.json
+    namespace = ""
+    try:
+        from server.utils import load_config
+
+        config = load_config()
+        namespace = config.get("prometheus", {}).get("namespace", "")
+    except Exception:
+        namespace = ""
+
+    if not namespace:
+        return [
+            TextContent(
+                type="text",
+                text="⚠️ No namespace configured for pre-deploy check. Set 'prometheus.namespace' in config.json.",
+            )
+        ]
+
+    # Check for firing alerts
+    result = await prometheus_alerts(
+        namespace=namespace,
+        state="firing",
+        environment=environment,
+    )
+
+    text = result[0].text if result else ""
+
+    if "No alerts matching filters" in text or "healthy" in text:
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"## ✅ Pre-Deploy Check: PASSED\n\n{namespace} is ready for deployment "
+                    f"in {environment}.\n\nNo firing alerts detected."
+                ),
+            )
+        ]
+    else:
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"## ⚠️ Pre-Deploy Check: WARNING\n\n{namespace} has firing alerts in "
+                    f"{environment}.\n\n{text}\n\n**Recommendation:** Resolve alerts before deploying."
+                ),
+            )
+        ]
+
+
+async def _prometheus_series_impl(
+    match: str,
+    environment: str = "stage",
+    limit: int = 100,
+) -> list[TextContent]:
+    """Implementation of prometheus_series tool."""
+    url, token = await get_prometheus_config(environment)
+
+    params = {"match[]": match, "limit": limit}
+
+    success, result = await prometheus_api_request(
+        url,
+        "/api/v1/series",
+        params=params,
+        token=token,
+    )
+
+    if not success:
+        return [TextContent(type="text", text=f"❌ Failed to get series: {result}")]
+
+    if result.get("status") != "success":
+        return [TextContent(type="text", text="❌ Failed to fetch series")]
+
+    series = result.get("data", [])
+
+    if not series:
+        return [TextContent(type="text", text=f"No series found matching `{match}`")]
+
+    lines = [
+        f"## Series: `{match}`",
+        f"**Environment:** {environment}",
+        f"**Count:** {len(series)}",
+        "",
+    ]
+
+    for item in series[:limit]:
+        metric_str = ", ".join(f'{k}="{v}"' for k, v in item.items())
+        lines.append(f"- `{{{metric_str}}}`")
+
+    if len(series) > limit:
+        lines.append(f"\n... and {len(series) - limit} more")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _prometheus_targets_impl(
+    environment: str = "stage",
+    state: str = "",
+) -> list[TextContent]:
+    """Implementation of prometheus_targets tool."""
+    url, token = await get_prometheus_config(environment)
+
+    success, result = await prometheus_api_request(
+        url,
+        "/api/v1/targets",
+        token=token,
+    )
+
+    if not success:
+        return [TextContent(type="text", text=f"❌ Failed to get targets: {result}")]
+
+    if result.get("status") != "success":
+        return [TextContent(type="text", text="❌ Failed to fetch targets")]
+
+    active_targets = result.get("data", {}).get("activeTargets", [])
+
+    # Filter by state if specified
+    if state:
+        active_targets = [t for t in active_targets if t.get("health") == state]
+
+    if not active_targets:
+        filter_msg = f" with state={state}" if state else ""
+        return [TextContent(type="text", text=f"No active targets{filter_msg} in {environment}")]
+
+    # Count by health
+    up = len([t for t in active_targets if t.get("health") == "up"])
+    down = len([t for t in active_targets if t.get("health") == "down"])
+    unknown = len(active_targets) - up - down
+
+    lines = [
+        f"## Prometheus Targets: {environment}",
+        f"**Up:** {up} | **Down:** {down} | **Unknown:** {unknown}",
+        "",
+    ]
+
+    # Show down targets first
+    down_targets = [t for t in active_targets if t.get("health") == "down"]
+    if down_targets:
+        lines.append("### ⚠️ Down Targets")
+        for target in down_targets[:10]:
+            job = target.get("labels", {}).get("job", "unknown")
+            instance = target.get("labels", {}).get("instance", "unknown")
+            error = target.get("lastError", "No error message")
+            lines.append(f"- **{job}** / `{instance}`")
+            lines.append(f"  Error: {error[:100]}")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
@@ -80,53 +434,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Health status and any firing alerts.
         """
-        url, token = await get_prometheus_config(environment)
-
-        success, result = await prometheus_api_request(url, "/api/v1/alerts", token=token)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to check health: {result}")]
-
-        alerts = result.get("data", {}).get("alerts", [])
-
-        # Filter to namespace and non-info severity
-        critical_alerts = []
-        for alert in alerts:
-            labels = alert.get("labels", {})
-            if namespace not in labels.get("namespace", ""):
-                continue
-            if alert.get("state") != "firing":
-                continue
-            if labels.get("severity") in ["info"]:
-                continue
-            critical_alerts.append(alert)
-
-        if not critical_alerts:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"## ✅ {namespace} is healthy\n\nNo critical or warning alerts in {environment}.",
-                )
-            ]
-
-        lines = [
-            f"## ⚠️ {namespace} has issues",
-            f"Found {len(critical_alerts)} alert(s) in {environment}:",
-            "",
-        ]
-
-        for alert in critical_alerts:
-            labels = alert.get("labels", {})
-            annotations = alert.get("annotations", {})
-            name = labels.get("alertname", "Unknown")
-            sev = labels.get("severity", "unknown")
-            msg = annotations.get("message") or annotations.get("summary") or ""
-            icon = "🔴" if sev == "critical" else "🟠"
-            lines.append(f"- {icon} **{name}** ({sev})")
-            if msg:
-                lines.append(f"  {msg[:100]}")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _prometheus_check_health_impl(namespace, environment)
 
     @auto_heal_stage()
     @registry.tool()
@@ -146,55 +454,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Error rates by status code.
         """
-        url, token = await get_prometheus_config(environment)
-
-        query = f"""
-            sum(rate(http_requests_total{{namespace="{namespace}",code=~"5.."}}[{window}])) by (code)
-            /
-            sum(rate(http_requests_total{{namespace="{namespace}"}}[{window}]))
-        """
-
-        success, result = await prometheus_api_request(
-            url,
-            "/api/v1/query",
-            params={"query": query},
-            token=token,
-        )
-
-        lines = [
-            f"## Error Rate: `{namespace}`",
-            f"**Environment:** {environment} | **Window:** {window}",
-            "",
-        ]
-
-        if not success:
-            lines.append(f"⚠️ Query failed: {result}")
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        data = result.get("data", {}).get("result", [])
-
-        if not data:
-            lines.append("✅ No errors detected (or no HTTP metrics available)")
-        else:
-            total_error_rate = 0.0
-            for item in data:
-                code = item.get("metric", {}).get("code", "5xx")
-                value = item.get("value", [None, "0"])
-                try:
-                    rate = float(value[1]) * 100
-                    total_error_rate += rate
-                    icon = "🔴" if rate > 1 else "🟡" if rate > 0.1 else "🟢"
-                    lines.append(f"{icon} **{code}**: {rate:.2f}%")
-                except (ValueError, IndexError):
-                    pass
-
-            lines.append("")
-            if total_error_rate > 1:
-                lines.append(f"⚠️ **Total error rate: {total_error_rate:.2f}%**")
-            else:
-                lines.append(f"✅ Total error rate: {total_error_rate:.2f}%")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _prometheus_error_rate_impl(namespace, environment, window)
 
     @auto_heal_stage()
     @registry.tool()
@@ -212,7 +472,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of firing alerts.
         """
-        return await prometheus_alerts(environment=environment, state="firing", namespace=namespace)
+        return await _prometheus_get_alerts_impl(namespace, environment)
 
     @auto_heal_stage()
     @registry.tool()
@@ -230,38 +490,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Label names or values.
         """
-        url, token = await get_prometheus_config(environment)
-
-        if label:
-            endpoint = f"/api/v1/label/{label}/values"
-        else:
-            endpoint = "/api/v1/labels"
-
-        success, result = await prometheus_api_request(url, endpoint, token=token)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to get labels: {result}")]
-
-        if result.get("status") != "success":
-            return [TextContent(type="text", text="❌ Failed to fetch labels")]
-
-        data = result.get("data", [])
-
-        if label:
-            lines = [
-                f"## Values for label `{label}` in {environment}",
-                f"**Count:** {len(data)}",
-                "",
-            ]
-        else:
-            lines = [f"## Labels in {environment}", f"**Count:** {len(data)}", ""]
-
-        for val in data[:100]:
-            lines.append(f"- `{val}`")
-        if len(data) > 100:
-            lines.append(f"... and {len(data) - 100} more")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _prometheus_labels_impl(environment, label)
 
     @auto_heal_stage()
     @registry.tool()
@@ -279,52 +508,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             CPU, memory, and request metrics for the namespace.
         """
-        url, token = await get_prometheus_config(environment)
-
-        queries = {
-            "CPU Usage": f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}"}}[5m])) by (pod)',
-            "Memory Usage (MB)": f'sum(container_memory_usage_bytes{{namespace="{namespace}"}}) by (pod) / 1024 / 1024',
-            "Pod Restarts": f'sum(kube_pod_container_status_restarts_total{{namespace="{namespace}"}}) by (pod)',
-            "Request Rate": f'sum(rate(http_requests_total{{namespace="{namespace}"}}[5m])) by (pod)',
-        }
-
-        lines = [f"## Namespace Metrics: `{namespace}`", f"**Environment:** {environment}", ""]
-
-        for name, query in queries.items():
-            success, result = await prometheus_api_request(
-                url,
-                "/api/v1/query",
-                params={"query": query},
-                token=token,
-            )
-
-            lines.append(f"### {name}")
-
-            if not success:
-                lines.append(f"⚠️ Query failed: {result}")
-                continue
-
-            if result.get("status") != "success":
-                lines.append("⚠️ No data")
-                continue
-
-            data = result.get("data", {}).get("result", [])
-            if not data:
-                lines.append("No data")
-            else:
-                for item in data[:10]:
-                    pod = item.get("metric", {}).get("pod", "unknown")
-                    value = item.get("value", [None, "N/A"])
-                    if len(value) >= 2:
-                        try:
-                            val = float(value[1])
-                            lines.append(f"- `{pod}`: **{val:.2f}**")
-                        except ValueError:
-                            lines.append(f"- `{pod}`: **{value[1]}**")
-
-            lines.append("")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _prometheus_namespace_metrics_impl(namespace, environment)
 
     @auto_heal_stage()
     @registry.tool()
@@ -340,36 +524,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Whether it's safe to deploy based on current alerts.
         """
-        # Load namespace from config.json
-        namespace = ""
-        try:
-            # Path: tools.py -> src -> aa_prometheus -> tool_modules -> redhat-ai-workflow
-            config_path = Path(__file__).parent.parent.parent.parent / "config.json"
-            if config_path.exists():
-                import json
-
-                with open(config_path) as f:
-                    config = json.load(f)
-                env_key = "production" if environment.lower() == "prod" else environment.lower()
-                namespace = config.get("prometheus", {}).get("environments", {}).get(env_key, {}).get("namespace", "")
-        except Exception:
-            pass
-
-        if not namespace:
-            namespace = os.getenv(f"K8S_NAMESPACE_{environment.upper()}", "default")
-
-        result = await prometheus_check_health(namespace=namespace, environment=environment)
-
-        # Modify the output for pre-deploy context
-        text = result[0].text
-        if "is healthy" in text:
-            text = text.replace("is healthy", "Pre-deploy check PASSED")
-            text += "\n\nNo critical or warning alerts detected. Safe to proceed with deployment."
-        else:
-            text = text.replace("has issues", "Pre-deploy check FAILED")
-            text += "\n\n⚠️ **Recommendation:** Resolve these alerts before deploying."
-
-        return [TextContent(type="text", text=text)]
+        return await _prometheus_pre_deploy_check_impl(environment)
 
     @auto_heal_stage()
     @registry.tool()
@@ -389,37 +544,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Matching time series.
         """
-        url, token = await get_prometheus_config(environment)
-
-        success, result = await prometheus_api_request(
-            url,
-            "/api/v1/series",
-            params={"match[]": match},
-            token=token,
-        )
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to get series: {result}")]
-
-        if result.get("status") != "success":
-            return [TextContent(type="text", text="❌ Failed to fetch series")]
-
-        data = result.get("data", [])
-
-        lines = [
-            f"## Series matching `{match}` in {environment}",
-            f"**Found:** {len(data)} series",
-            "",
-        ]
-
-        for series in data[:limit]:
-            metric_str = ", ".join(f'{k}="{v}"' for k, v in series.items())
-            lines.append(f"- `{{{metric_str}}}`")
-
-        if len(data) > limit:
-            lines.append(f"... and {len(data) - limit} more")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _prometheus_series_impl(match, environment, limit)
 
     @auto_heal_stage()
     @registry.tool()
@@ -437,52 +562,6 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of targets with health status.
         """
-        url, token = await get_prometheus_config(environment)
+        return await _prometheus_targets_impl(environment, state)
 
-        success, result = await prometheus_api_request(url, "/api/v1/targets", token=token)
-
-        if not success:
-            return [TextContent(type="text", text=f"❌ Failed to get targets: {result}")]
-
-        if result.get("status") != "success":
-            return [TextContent(type="text", text="❌ Failed to fetch targets")]
-
-        active = result.get("data", {}).get("activeTargets", [])
-        dropped = result.get("data", {}).get("droppedTargets", [])
-
-        if state:
-            active = [t for t in active if t.get("health") == state]
-
-        up = len([t for t in active if t.get("health") == "up"])
-        down = len([t for t in active if t.get("health") == "down"])
-
-        lines = [
-            f"## Targets in {environment}",
-            f"**Up:** {up} | **Down:** {down} | **Dropped:** {len(dropped)}",
-            "",
-        ]
-
-        down_targets = [t for t in active if t.get("health") == "down"]
-        if down_targets:
-            lines.append("### 🔴 Down Targets")
-            for t in down_targets[:10]:
-                job = t.get("labels", {}).get("job", "unknown")
-                instance = t.get("labels", {}).get("instance", "unknown")
-                error = t.get("lastError", "")
-                lines.append(f"- **{job}** / `{instance}`")
-                if error:
-                    lines.append(f"  Error: {error[:100]}")
-            lines.append("")
-
-        up_targets = [t for t in active if t.get("health") == "up"]
-        if up_targets:
-            lines.append("### 🟢 Healthy Targets (by job)")
-            jobs = {}
-            for t in up_targets:
-                job = t.get("labels", {}).get("job", "unknown")
-                jobs[job] = jobs.get(job, 0) + 1
-
-            for job, count in sorted(jobs.items()):
-                lines.append(f"- **{job}**: {count} targets")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+    return registry.count
