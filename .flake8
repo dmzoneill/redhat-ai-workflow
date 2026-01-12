@@ -20,11 +20,6 @@ exclude =
 # McCabe complexity
 max-complexity = 15
 
-# Ignore codes:
-# - B010: setattr with constant is necessary for decorator introspection
-# - W503: line break before binary operator (PEP 8 recommended style)
-ignore = B010,W503
-
 # Show source code for errors
 show-source = true
 

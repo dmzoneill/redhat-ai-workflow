@@ -454,9 +454,9 @@ def auto_heal(
             return last_result
 
         # Mark the function as auto-heal enabled for introspection
-        setattr(wrapper, "_auto_heal_enabled", True)
-        setattr(wrapper, "_auto_heal_cluster", cluster)
-        setattr(wrapper, "_auto_heal_max_retries", max_retries)
+        wrapper.__dict__["_auto_heal_enabled"] = True
+        wrapper.__dict__["_auto_heal_cluster"] = cluster
+        wrapper.__dict__["_auto_heal_max_retries"] = max_retries
 
         return wrapper
 

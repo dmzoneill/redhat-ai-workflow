@@ -105,7 +105,7 @@ def debuggable(func: Callable) -> Callable:
         "end_line": end_line,
         "func_name": func.__name__,
     }
-    setattr(wrapper, "_debug_info", debug_info)
+    wrapper.__dict__["_debug_info"] = debug_info
 
     # Register in global registry
     TOOL_REGISTRY[func.__name__] = debug_info
