@@ -37,7 +37,3 @@ skill_run("konflux_status", '{}')
 # Specific namespace
 skill_run("konflux_status", '{"namespace": "aap-aa-tenant"}')
 ```
-
-
-
-

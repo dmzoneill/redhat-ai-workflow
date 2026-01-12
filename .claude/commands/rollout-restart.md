@@ -45,7 +45,3 @@ skill_run("rollout_restart", '{"deployment": "tower-analytics-api", "namespace":
 ## ⚠️ Caution
 
 Use carefully in production. Consider silencing alerts first with `/silence-alert`.
-
-
-
-

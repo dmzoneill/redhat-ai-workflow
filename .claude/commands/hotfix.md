@@ -50,7 +50,3 @@ After hotfix is created:
 2. Get emergency review
 3. Merge and deploy
 4. Consider backporting to main
-
-
-
-

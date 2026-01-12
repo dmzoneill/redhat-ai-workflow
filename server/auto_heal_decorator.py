@@ -214,6 +214,51 @@ async def _run_vpn_connect() -> bool:
         return False
 
 
+def _update_rolling_stats(data: dict, today: str, this_week: str) -> None:
+    """Update daily and weekly rolling stats."""
+    if "stats" not in data:
+        data["stats"] = {}
+
+    # Total counters (only for recent window)
+    data["stats"]["total_failures"] = min(data["stats"].get("total_failures", 0) + 1, 1000)
+    data["stats"]["auto_fixed"] = min(data["stats"].get("auto_fixed", 0) + 1, 1000)
+
+    # Daily stats
+    if "daily" not in data["stats"]:
+        data["stats"]["daily"] = {}
+    if today not in data["stats"]["daily"]:
+        data["stats"]["daily"][today] = {"total": 0, "auto_fixed": 0}
+    data["stats"]["daily"][today]["total"] += 1
+    data["stats"]["daily"][today]["auto_fixed"] += 1
+
+    # Weekly stats
+    if "weekly" not in data["stats"]:
+        data["stats"]["weekly"] = {}
+    if this_week not in data["stats"]["weekly"]:
+        data["stats"]["weekly"][this_week] = {"total": 0, "auto_fixed": 0}
+    data["stats"]["weekly"][this_week]["total"] += 1
+    data["stats"]["weekly"][this_week]["auto_fixed"] += 1
+
+
+def _cleanup_old_stats(data: dict) -> None:
+    """Remove old stats to keep memory bounded."""
+    # Keep only last 30 days of daily stats
+    if "daily" in data.get("stats", {}) and len(data["stats"]["daily"]) > 30:
+        sorted_days = sorted(data["stats"]["daily"].keys())
+        for old_day in sorted_days[:-30]:
+            del data["stats"]["daily"][old_day]
+
+    # Keep only last 12 weeks of weekly stats
+    if "weekly" in data.get("stats", {}) and len(data["stats"]["weekly"]) > 12:
+        sorted_weeks = sorted(data["stats"]["weekly"].keys())
+        for old_week in sorted_weeks[:-12]:
+            del data["stats"]["weekly"][old_week]
+
+    # Keep only last 100 failure entries
+    if len(data.get("failures", [])) > 100:
+        data["failures"] = data["failures"][-100:]
+
+
 async def _log_auto_heal_to_memory(
     tool_name: str,
     failure_type: str,
@@ -257,54 +302,13 @@ async def _log_auto_heal_to_memory(
         }
         data["failures"].append(entry)
 
-        # Update rolling stats (last 1000 only, not unbounded)
+        # Update rolling stats
         now = datetime.now()
         today = now.strftime("%Y-%m-%d")
         this_week = now.strftime("%Y-W%U")
 
-        # Global rolling stats (capped at representing ~1000 failures)
-        if "stats" not in data:
-            data["stats"] = {}
-
-        # Total counters (only for recent window)
-        data["stats"]["total_failures"] = min(data["stats"].get("total_failures", 0) + 1, 1000)
-        data["stats"]["auto_fixed"] = min(data["stats"].get("auto_fixed", 0) + 1, 1000)
-
-        # Daily stats
-        if "daily" not in data["stats"]:
-            data["stats"]["daily"] = {}
-
-        if today not in data["stats"]["daily"]:
-            data["stats"]["daily"][today] = {"total": 0, "auto_fixed": 0}
-
-        data["stats"]["daily"][today]["total"] += 1
-        data["stats"]["daily"][today]["auto_fixed"] += 1
-
-        # Weekly stats
-        if "weekly" not in data["stats"]:
-            data["stats"]["weekly"] = {}
-
-        if this_week not in data["stats"]["weekly"]:
-            data["stats"]["weekly"][this_week] = {"total": 0, "auto_fixed": 0}
-
-        data["stats"]["weekly"][this_week]["total"] += 1
-        data["stats"]["weekly"][this_week]["auto_fixed"] += 1
-
-        # Keep only last 30 days of daily stats
-        if len(data["stats"]["daily"]) > 30:
-            sorted_days = sorted(data["stats"]["daily"].keys())
-            for old_day in sorted_days[:-30]:
-                del data["stats"]["daily"][old_day]
-
-        # Keep only last 12 weeks of weekly stats
-        if len(data["stats"]["weekly"]) > 12:
-            sorted_weeks = sorted(data["stats"]["weekly"].keys())
-            for old_week in sorted_weeks[:-12]:
-                del data["stats"]["weekly"][old_week]
-
-        # Keep only last 100 failure entries
-        if len(data["failures"]) > 100:
-            data["failures"] = data["failures"][-100:]
+        _update_rolling_stats(data, today, this_week)
+        _cleanup_old_stats(data)
 
         # Write back
         with open(failures_file, "w") as f:
@@ -315,6 +319,55 @@ async def _log_auto_heal_to_memory(
     except Exception as e:
         # Memory logging is best-effort, don't fail the tool
         logger.debug(f"Failed to log auto-heal to memory: {e}")
+
+
+def _convert_result_to_string(result: any) -> str:
+    """Convert tool result to string for pattern matching."""
+    if hasattr(result, "__iter__") and not isinstance(result, str):
+        # Handle list[TextContent] or similar
+        try:
+            return str(result[0].text if hasattr(result[0], "text") else result[0])
+        except (IndexError, TypeError):
+            return str(result)
+    return str(result)
+
+
+async def _apply_auto_heal_fix(failure_type: str, cluster: ClusterType, tool_name: str, result_str: str) -> bool:
+    """Apply auto-heal fix based on failure type."""
+    if failure_type == "auth":
+        target_cluster = cluster if cluster != "auto" else _guess_cluster(tool_name, result_str)
+        logger.info(f"Auto-heal: {tool_name} auth failure, running kube_login({target_cluster})")
+        return await _run_kube_login(target_cluster)
+    elif failure_type == "network":
+        logger.info(f"Auto-heal: {tool_name} network failure, running vpn_connect()")
+        return await _run_vpn_connect()
+    return False
+
+
+async def _handle_retry_with_heal(
+    tool_name: str,
+    failure_type: str,
+    error_snippet: str,
+    cluster: ClusterType,
+    result_str: str,
+) -> bool:
+    """Handle retry with auto-heal fix application and logging."""
+    fix_applied = await _apply_auto_heal_fix(failure_type, cluster, tool_name, result_str)
+
+    if not fix_applied:
+        logger.warning(f"Auto-heal: fix for {tool_name} failed, giving up")
+        return False
+
+    # Log successful fix to memory
+    await _log_auto_heal_to_memory(
+        tool_name=tool_name,
+        failure_type=failure_type,
+        error_snippet=error_snippet,
+        fix_applied="kube_login" if failure_type == "auth" else "vpn_connect",
+    )
+
+    await asyncio.sleep(1)
+    return True
 
 
 def auto_heal(
@@ -356,14 +409,7 @@ def auto_heal(
                     last_result = result
 
                     # Convert result to string for pattern matching
-                    if hasattr(result, "__iter__") and not isinstance(result, str):
-                        # Handle list[TextContent] or similar
-                        try:
-                            result_str = str(result[0].text if hasattr(result[0], "text") else result[0])
-                        except (IndexError, TypeError):
-                            result_str = str(result)
-                    else:
-                        result_str = str(result)
+                    result_str = _convert_result_to_string(result)
 
                     # Check for soft failures (error messages in successful return)
                     failure_type, error_snippet = _detect_failure_type(result_str)
@@ -382,33 +428,13 @@ def auto_heal(
                         logger.warning(f"Auto-heal: {tool_name} failed after {attempt + 1} attempts")
                         return result
 
-                    # Apply fix based on failure type
-                    fix_applied = False
-
-                    if failure_type == "auth":
-                        target_cluster = cluster if cluster != "auto" else _guess_cluster(tool_name, result_str)
-                        logger.info(f"Auto-heal: {tool_name} auth failure, running kube_login({target_cluster})")
-                        fix_applied = await _run_kube_login(target_cluster)
-
-                    elif failure_type == "network":
-                        logger.info(f"Auto-heal: {tool_name} network failure, running vpn_connect()")
-                        fix_applied = await _run_vpn_connect()
-
-                    if not fix_applied:
-                        # Fix failed, return original result
-                        logger.warning(f"Auto-heal: fix for {tool_name} failed, giving up")
-                        return result
-
-                    # Log successful fix to memory for learning
-                    await _log_auto_heal_to_memory(
-                        tool_name=tool_name,
-                        failure_type=failure_type,
-                        error_snippet=error_snippet,
-                        fix_applied="kube_login" if failure_type == "auth" else "vpn_connect",
+                    # Apply fix and log
+                    fix_success = await _handle_retry_with_heal(
+                        tool_name, failure_type, error_snippet, cluster, result_str
                     )
 
-                    # Small delay before retry
-                    await asyncio.sleep(1)
+                    if not fix_success:
+                        return result
                     logger.info(f"Auto-heal: retrying {tool_name} (attempt {attempt + 2}/{max_retries + 1})")
 
                 except Exception as e:
@@ -417,14 +443,7 @@ def auto_heal(
                     failure_type, _ = _detect_failure_type(error_str)
 
                     if failure_type in retry_on and attempt < max_retries:
-                        if failure_type == "auth":
-                            target_cluster = cluster if cluster != "auto" else _guess_cluster(tool_name, error_str)
-                            fix_applied = await _run_kube_login(target_cluster)
-                        elif failure_type == "network":
-                            fix_applied = await _run_vpn_connect()
-                        else:
-                            fix_applied = False
-
+                        fix_applied = await _apply_auto_heal_fix(failure_type, cluster, tool_name, error_str)
                         if fix_applied:
                             await asyncio.sleep(1)
                             continue

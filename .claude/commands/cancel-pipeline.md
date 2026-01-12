@@ -43,7 +43,3 @@ skill_run("cancel_pipeline", '{"pipeline_run": "backend-build-abc123", "delete":
 ## Finding Pipelines
 
 Use `/konflux-status` to see running pipelines.
-
-
-
-
