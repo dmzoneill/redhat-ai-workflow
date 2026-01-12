@@ -9,12 +9,15 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
+# Setup project path for server imports (must be before server imports)
+from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+
+__project_root__ = PROJECT_ROOT  # Module initialization
+
+
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import resolve_repo_path, run_cmd, truncate_output
-
-# Setup project path for server imports
-from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +166,9 @@ async def _docker_compose_status_impl(
     Returns:
         Container status.
     """
-    _path = resolve_repo_path(repo)  # noqa: F841 - may be used for validation
+    # Validate repo path exists
+
+    resolve_repo_path(repo)
 
     cmd = ["docker", "ps", "--format", "{{.Names}}|{{.Status}}|{{.Ports}}"]
     if filter_name:

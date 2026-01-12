@@ -14,10 +14,15 @@ from mcp.types import TextContent
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
+# Setup project path for server imports (must be before server imports)
+from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+
+__project_root__ = PROJECT_ROOT  # Module initialization
+
+
 # Setup project path for server imports
 from server.tool_registry import ToolRegistry
 from server.utils import load_config, run_cmd_full, run_cmd_shell, truncate_output
-from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 
 async def _vpn_connect_impl() -> list[TextContent]:

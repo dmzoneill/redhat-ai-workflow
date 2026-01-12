@@ -6,11 +6,16 @@ It only specifies which tool modules to load.
 
 import asyncio
 
+# Setup project path for server imports
+from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+
+__project_root__ = PROJECT_ROOT  # Module initialization
+
+
 # Now server is importable
 from server.main import create_mcp_server, run_mcp_server, setup_logging
 
 # Setup path FIRST - adds project root to sys.path
-from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect
 
 
 def main():

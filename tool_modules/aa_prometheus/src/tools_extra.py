@@ -6,6 +6,12 @@ Provides 14 tools for Prometheus queries, alerts, targets, and metrics.
 import logging
 
 from mcp.server.fastmcp import FastMCP
+
+# Setup project path for server imports (must be before server imports)
+from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+
+__project_root__ = PROJECT_ROOT  # Module initialization
+
 from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_stage
@@ -14,7 +20,7 @@ from server.tool_registry import ToolRegistry
 from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
 
 # Setup project path for server imports
-from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
+
 
 logger = logging.getLogger(__name__)
 

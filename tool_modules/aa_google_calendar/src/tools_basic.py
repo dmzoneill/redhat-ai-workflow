@@ -22,10 +22,16 @@ from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP
 
+# Setup project path for server imports (must be before server imports)
+from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+
+__project_root__ = PROJECT_ROOT  # Module initialization
+
+
 from server.utils import load_config
 
 # Setup project path for server imports
-from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
+
 
 # Initialize FastMCP
 mcp = FastMCP("aa_google_calendar")

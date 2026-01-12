@@ -22,9 +22,14 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
+# Setup project path for server imports (must be before server imports)
+from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+
+__project_root__ = PROJECT_ROOT  # Module initialization
+
+
 # Setup project path for server imports
 from server.utils import load_config, resolve_repo_path, run_cmd_full
-from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
 
 logger = logging.getLogger(__name__)
 

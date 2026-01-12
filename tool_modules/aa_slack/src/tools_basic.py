@@ -26,7 +26,10 @@ from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
 # Setup project path for server imports FIRST
-from tool_modules.common import PROJECT_ROOT, setup_path  # noqa: F401 - side effect: adds to sys.path
+from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+
+__project_root__ = PROJECT_ROOT  # Module initialization
+
 
 logger = logging.getLogger(__name__)
 

@@ -16,12 +16,18 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+# Setup project path for server imports (must be before server imports)
+from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+
+__project_root__ = PROJECT_ROOT  # Module initialization
+
+
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import get_gitlab_host, get_section_config
 
 # Setup project path for server imports
-from tool_modules.common import PROJECT_ROOT  # noqa: F401 - side effect: adds to sys.path
+
 
 # Use shared implementation from utils
 GITLAB_HOST = get_gitlab_host()
