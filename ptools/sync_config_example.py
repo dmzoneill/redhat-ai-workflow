@@ -80,6 +80,37 @@ def set_value_at_path(obj: dict, path: str, value: Any) -> None:
         current[final_key] = value
 
 
+def _get_string_placeholder(key_lower: str, actual_value: str) -> str:
+    """Get placeholder string based on key name patterns."""
+    if "token" in key_lower:
+        return "YOUR_TOKEN_HERE"
+    elif "cookie" in key_lower:
+        return "YOUR_COOKIE_HERE"
+    elif "password" in key_lower or "secret" in key_lower:
+        return "YOUR_SECRET_HERE"
+    elif "key" in key_lower and "api" in key_lower:
+        return "YOUR_API_KEY_HERE"
+    elif "url" in key_lower:
+        return "https://example.com"
+    elif "path" in key_lower:
+        return "/path/to/something"
+    elif "id" in key_lower:
+        return "YOUR_ID_HERE"
+    elif "email" in key_lower:
+        return "user@example.com"
+    elif "name" in key_lower:
+        return "example-name"
+    elif "host" in key_lower:
+        return "example.com"
+    elif "description" in key_lower:
+        return actual_value  # Keep descriptions as-is
+    elif len(actual_value) > 20 and re.match(r"^[a-zA-Z0-9_\-]+$", actual_value):
+        # Mask actual value if it looks like a credential
+        return "YOUR_VALUE_HERE"
+    else:
+        return actual_value
+
+
 def generate_placeholder(key: str, actual_value: Any) -> Any:
     """Generate a placeholder value based on the key name and actual value type."""
     key_lower = key.lower()
@@ -96,34 +127,7 @@ def generate_placeholder(key: str, actual_value: Any) -> Any:
     elif isinstance(actual_value, dict):
         return {}
     elif isinstance(actual_value, str):
-        # Generate meaningful placeholders based on key name
-        if "token" in key_lower:
-            return "YOUR_TOKEN_HERE"
-        elif "cookie" in key_lower:
-            return "YOUR_COOKIE_HERE"
-        elif "password" in key_lower or "secret" in key_lower:
-            return "YOUR_SECRET_HERE"
-        elif "key" in key_lower and "api" in key_lower:
-            return "YOUR_API_KEY_HERE"
-        elif "url" in key_lower:
-            return "https://example.com"
-        elif "path" in key_lower:
-            return "/path/to/something"
-        elif "id" in key_lower:
-            return "YOUR_ID_HERE"
-        elif "email" in key_lower:
-            return "user@example.com"
-        elif "name" in key_lower:
-            return "example-name"
-        elif "host" in key_lower:
-            return "example.com"
-        elif "description" in key_lower:
-            return actual_value  # Keep descriptions as-is
-        else:
-            # Mask actual value if it looks like a credential
-            if len(actual_value) > 20 and re.match(r"^[a-zA-Z0-9_\-]+$", actual_value):
-                return "YOUR_VALUE_HERE"
-            return actual_value
+        return _get_string_placeholder(key_lower, actual_value)
     else:
         return None
 

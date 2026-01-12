@@ -2,7 +2,7 @@ health_checks:
   gitlab_token:
     details: GitLab token invalid (glab auth login needed)
     healthy: false
-    last_checked: '2026-01-12T17:39:28.041209'
+    last_checked: '2026-01-12T17:46:41.829229'
   kubeconfigs:
     details:
       ephemeral:
@@ -19,19 +19,19 @@ health_checks:
         valid: false
       stage:
         expires: '2026-01-12T16:48:11.918689'
-        remaining_minutes: -51
+        remaining_minutes: -58
         valid: true
     healthy: false
-    last_checked: '2026-01-12T17:39:25.218701'
+    last_checked: '2026-01-12T17:46:39.166895'
   quay_auth:
     details: Quay auth invalid (podman login quay.io needed)
     healthy: false
-    last_checked: '2026-01-12T17:39:27.220174'
+    last_checked: '2026-01-12T17:46:41.378976'
   vpn:
     details: VPN disconnected (cannot reach internal clusters)
     healthy: false
-    last_checked: '2026-01-12T17:39:20.221553'
+    last_checked: '2026-01-12T17:46:33.986479'
 last_checks:
   kubeconfig_stage_expires: '2026-01-12T16:48:11.918689'
-  vpn_last_checked: '2026-01-12T17:39:28.042462'
+  vpn_last_checked: '2026-01-12T17:46:41.830505'
   vpn_status: disconnected
