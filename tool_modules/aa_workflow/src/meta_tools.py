@@ -394,6 +394,156 @@ MODULE_PREFIXES = {
 }
 
 
+async def _tool_list_impl(module: str) -> list[TextContent]:
+    """Implementation of tool_list tool."""
+    if module:
+        if module not in TOOL_REGISTRY:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Unknown module: {module}\n\n" f"Available: {', '.join(TOOL_REGISTRY.keys())}",
+                )
+            ]
+
+        tools = TOOL_REGISTRY[module]
+        lines = [f"## Module: {module}\n", f"**{len(tools)} tools available:**\n"]
+        for t in tools:
+            lines.append(f"- `{t}`")
+        lines.append(f"\n*Use `tool_exec('{tools[0]}', '{{}}')` to run*")
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    # List all modules
+    lines = ["## Available Tool Modules\n"]
+    total = 0
+    for mod, tools in TOOL_REGISTRY.items():
+        lines.append(f"- **{mod}**: {len(tools)} tools")
+        total += len(tools)
+    lines.append(f"\n**Total: {total} tools**")
+    lines.append("\nUse `tool_list(module='git')` to see tools in a module")
+    lines.append("\n**💡 TIP:** After loading an agent, call tools DIRECTLY by name:")
+    lines.append("   `bonfire_namespace_list(mine_only=True)`  ← Cursor shows actual name")
+    lines.append("   NOT: `tool_exec('bonfire_namespace_list', ...)`  ← Shows as 'tool_exec'")
+    lines.append("\nUse `tool_exec()` only for tools from non-loaded agents.")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+def _extract_tool_result(result) -> list[TextContent]:
+    """Extract text content from tool execution result.
+
+    Args:
+        result: Tool execution result (various types)
+
+    Returns:
+        TextContent list
+    """
+    if isinstance(result, tuple):
+        result = result[0]
+    if isinstance(result, list) and len(result) > 0:
+        if hasattr(result[0], "text"):
+            return [TextContent(type="text", text=result[0].text)]
+        return [TextContent(type="text", text=str(result[0]))]
+
+    return [TextContent(type="text", text=str(result))]
+
+
+async def _handle_tool_exec_error(tool_name: str, error_msg: str, args: str, create_issue_fn) -> list[TextContent]:
+    """Handle tool execution error with known issues check and GitHub issue creation.
+
+    Args:
+        tool_name: Name of the tool that failed
+        error_msg: Error message
+        args: Tool arguments (JSON string)
+        create_issue_fn: Function to create GitHub issues
+
+    Returns:
+        Error message with hints and issue link
+    """
+    lines = [f"❌ Error executing {tool_name}: {error_msg}"]
+
+    # Check for known issues from memory
+    matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
+    known_text = _format_known_issues(matches)
+    if known_text:
+        lines.append(known_text)
+    else:
+        lines.append("")
+        lines.append(f"💡 **Auto-fix:** `debug_tool('{tool_name}')`")
+        lines.append(f"📚 **After fixing:** `learn_tool_fix('{tool_name}', '<pattern>', '<cause>', '<fix>')`")
+
+    # Auto-create GitHub issue for all tool failures
+    if create_issue_fn:
+        try:
+            issue_result = await create_issue_fn(tool=tool_name, error=error_msg, context=f"Args: {args}")
+
+            if issue_result["success"]:
+                lines.append("")
+                lines.append(f"🐛 **Issue created:** {issue_result['issue_url']}")
+            elif issue_result["issue_url"]:
+                lines.append("")
+                lines.append("💡 **Report this error:**")
+                lines.append(f"📝 [Create GitHub Issue]({issue_result['issue_url']})")
+        except Exception as issue_err:
+            logger.debug(f"Failed to create GitHub issue: {issue_err}")
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _tool_exec_impl(tool_name: str, args: str, create_issue_fn) -> list[TextContent]:
+    """Implementation of tool_exec tool."""
+    # Determine which module the tool belongs to
+    module = None
+    for prefix, mod in MODULE_PREFIXES.items():
+        if tool_name.startswith(prefix):
+            module = mod
+            break
+
+    if not module:
+        return [
+            TextContent(
+                type="text",
+                text=f"❌ Unknown tool: {tool_name}\n\nUse tool_list() to see available tools.",
+            )
+        ]
+
+    # Parse arguments
+    try:
+        tool_args = json.loads(args) if args else {}
+    except json.JSONDecodeError as e:
+        return [TextContent(type="text", text=f"❌ Invalid JSON args: {e}")]
+
+    # Load and execute the tool module
+    tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools.py"
+
+    if not tools_file.exists():
+        return [TextContent(type="text", text=f"❌ Module not found: {module}")]
+
+    try:
+        # Create a temporary server to register tools
+        temp_server = FastMCP(f"temp-{module}")
+
+        # Load the module
+        spec = importlib.util.spec_from_file_location(f"aa_{module}_tools_exec", tools_file)
+        if spec is None or spec.loader is None:
+            return [TextContent(type="text", text=f"❌ Could not load module: {module}")]
+
+        loaded_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded_module)
+
+        # Register tools with temp server
+        if hasattr(loaded_module, "register_tools"):
+            loaded_module.register_tools(temp_server)
+
+        # Execute the tool
+        result = await temp_server.call_tool(tool_name, tool_args)
+
+        # Extract text from result
+        return _extract_tool_result(result)
+
+    except Exception as e:
+        return await _handle_tool_exec_error(tool_name, str(e), args, create_issue_fn)
+
+
 def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
     """Register meta tools with the MCP server."""
     registry = ToolRegistry(server)
@@ -413,36 +563,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         Returns:
             List of available tools and their descriptions.
         """
-        if module:
-            if module not in TOOL_REGISTRY:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"❌ Unknown module: {module}\n\n" f"Available: {', '.join(TOOL_REGISTRY.keys())}",
-                    )
-                ]
-
-            tools = TOOL_REGISTRY[module]
-            lines = [f"## Module: {module}\n", f"**{len(tools)} tools available:**\n"]
-            for t in tools:
-                lines.append(f"- `{t}`")
-            lines.append(f"\n*Use `tool_exec('{tools[0]}', '{{}}')` to run*")
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        # List all modules
-        lines = ["## Available Tool Modules\n"]
-        total = 0
-        for mod, tools in TOOL_REGISTRY.items():
-            lines.append(f"- **{mod}**: {len(tools)} tools")
-            total += len(tools)
-        lines.append(f"\n**Total: {total} tools**")
-        lines.append("\nUse `tool_list(module='git')` to see tools in a module")
-        lines.append("\n**💡 TIP:** After loading an agent, call tools DIRECTLY by name:")
-        lines.append("   `bonfire_namespace_list(mine_only=True)`  ← Cursor shows actual name")
-        lines.append("   NOT: `tool_exec('bonfire_namespace_list', ...)`  ← Shows as 'tool_exec'")
-        lines.append("\nUse `tool_exec()` only for tools from non-loaded agents.")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await _tool_list_impl(module)
 
     @registry.tool()
     async def tool_exec(tool_name: str, args: str = "{}") -> list[TextContent]:
@@ -462,91 +583,6 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         Example:
             tool_exec("gitlab_mr_list", '{"project": "your-backend"}')
         """
-        # Determine which module the tool belongs to
-        module = None
-        for prefix, mod in MODULE_PREFIXES.items():
-            if tool_name.startswith(prefix):
-                module = mod
-                break
-
-        if not module:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ Unknown tool: {tool_name}\n\nUse tool_list() to see available tools.",
-                )
-            ]
-
-        # Parse arguments
-        try:
-            tool_args = json.loads(args) if args else {}
-        except json.JSONDecodeError as e:
-            return [TextContent(type="text", text=f"❌ Invalid JSON args: {e}")]
-
-        # Load and execute the tool module
-        tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools.py"
-
-        if not tools_file.exists():
-            return [TextContent(type="text", text=f"❌ Module not found: {module}")]
-
-        try:
-            # Create a temporary server to register tools
-            temp_server = FastMCP(f"temp-{module}")
-
-            # Load the module
-            spec = importlib.util.spec_from_file_location(f"aa_{module}_tools_exec", tools_file)
-            if spec is None or spec.loader is None:
-                return [TextContent(type="text", text=f"❌ Could not load module: {module}")]
-
-            loaded_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(loaded_module)
-
-            # Register tools with temp server
-            if hasattr(loaded_module, "register_tools"):
-                loaded_module.register_tools(temp_server)
-
-            # Execute the tool
-            result = await temp_server.call_tool(tool_name, tool_args)
-
-            # Extract text from result
-            if isinstance(result, tuple):
-                result = result[0]
-            if isinstance(result, list) and len(result) > 0:
-                if hasattr(result[0], "text"):
-                    return [TextContent(type="text", text=result[0].text)]
-                return [TextContent(type="text", text=str(result[0]))]
-
-            return [TextContent(type="text", text=str(result))]
-
-        except Exception as e:
-            error_msg = str(e)
-            lines = [f"❌ Error executing {tool_name}: {error_msg}"]
-
-            # Check for known issues from memory
-            matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
-            known_text = _format_known_issues(matches)
-            if known_text:
-                lines.append(known_text)
-            else:
-                lines.append("")
-                lines.append(f"💡 **Auto-fix:** `debug_tool('{tool_name}')`")
-                lines.append(f"📚 **After fixing:** `learn_tool_fix('{tool_name}', '<pattern>', '<cause>', '<fix>')`")
-
-            # Auto-create GitHub issue for all tool failures
-            if create_issue_fn:
-                try:
-                    issue_result = await create_issue_fn(tool=tool_name, error=error_msg, context=f"Args: {args}")
-
-                    if issue_result["success"]:
-                        lines.append("")
-                        lines.append(f"🐛 **Issue created:** {issue_result['issue_url']}")
-                    elif issue_result["issue_url"]:
-                        lines.append("")
-                        lines.append("💡 **Report this error:**")
-                        lines.append(f"📝 [Create GitHub Issue]({issue_result['issue_url']})")
-                except Exception as issue_err:
-                    logger.debug(f"Failed to create GitHub issue: {issue_err}")
-
-            return [TextContent(type="text", text="\n".join(lines))]
+        return await _tool_exec_impl(tool_name, args, create_issue_fn)
 
     return registry.count
