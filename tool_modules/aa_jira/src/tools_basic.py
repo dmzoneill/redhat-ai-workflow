@@ -434,7 +434,7 @@ async def _jira_list_issues_impl(
     Returns:
         List of issues matching the filters.
     """
-    args = ["list-issues", project]
+    args = ["list-issues", "-p", project]
     if status:
         args.extend(["--status", status])
     if assignee:

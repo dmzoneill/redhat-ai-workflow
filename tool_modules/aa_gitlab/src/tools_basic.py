@@ -157,9 +157,10 @@ async def _gitlab_ci_trace_impl(project: str, job_id: int) -> str:
 
 async def _gitlab_ci_view_impl(project: str, branch: str = "") -> str:
     """Implementation of gitlab_ci_view tool."""
-    args = ["ci", "view"]
+    # Use 'ci get' with job details instead of interactive 'ci view'
+    args = ["ci", "get", "--with-job-details", "-F", "text"]
     if branch:
-        args.append(branch)
+        args.extend(["-b", branch])
     success, output = await run_glab(args, repo=project)
     return output if success else f"❌ Failed: {output}"
 
