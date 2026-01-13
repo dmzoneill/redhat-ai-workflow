@@ -118,6 +118,19 @@ steps:
       # Get automation-analytics-backend config
       aa_config = repos.get("automation-analytics-backend", {})
 
+      # Resolve repo path (for git operations)
+      repo_path = aa_config.get("path", "")
+      if not repo_path:
+        # Fallback: try common locations
+        for candidate in [
+          Path.home() / "src" / "automation-analytics-backend",
+          Path.home() / "src" / "aa-backend",
+          Path("/home/daoneill/src/automation-analytics-backend"),
+        ]:
+          if candidate.exists():
+            repo_path = str(candidate)
+            break
+
       result = {
           "gitlab_project": aa_config.get("gitlab", "automation-analytics/automation-analytics-backend"),
           "konflux_namespace": aa_config.get("konflux_namespace", "aap-aa-tenant"),
@@ -125,6 +138,7 @@ steps:
           "quay_pr_namespace": quay_config.get("default_namespace", "redhat-user-workloads"),
           "quay_release_namespace": "redhat-services-prod",
           "ephemeral_kubeconfig": bonfire_config.get("kubeconfig", str(Path.home() / ".kube/config.e")),
+          "repo_path": repo_path,
       }
     output: cfg
 
@@ -162,18 +176,50 @@ steps:
 
   # ==================== GET COMMIT SHA ====================
 
-  # Step 1: Get MR info from GitLab (if mr_id provided)
-  - name: get_mr_info
-    description: "Get MR details from GitLab including short SHA"
+  # Step 1: Get full 40-char SHA directly from GitLab API (if mr_id provided)
+  - name: get_mr_sha
+    description: "Get full 40-char commit SHA from GitLab MR"
     condition: "{{ inputs.mr_id and not inputs.commit_sha }}"
-    tool: gitlab_mr_view
+    tool: gitlab_mr_sha
     args:
-      project: "{{ cfg.gitlab.backend_project }}"
+      project: "{{ cfg.gitlab_project }}"
       mr_id: "{{ inputs.mr_id }}"
-    output: mr_view_raw
+    output: mr_sha_raw
     on_error: continue
 
-  # Step 1b: Check GitLab CI pipeline status
+  # Step 1b: Parse SHA from gitlab_mr_sha output
+  - name: parse_mr_sha
+    description: "Extract SHA from gitlab_mr_sha response"
+    condition: "{{ inputs.mr_id and not inputs.commit_sha }}"
+    compute: |
+      import re
+
+      sha_text = str(mr_sha_raw) if 'mr_sha_raw' in dir() and mr_sha_raw else ""
+
+      # Check for error
+      if sha_text.startswith("❌"):
+        raise ValueError(f"Failed to get MR SHA: {sha_text}")
+
+      # Extract 40-char SHA from output
+      sha_match = re.search(r'\*\*SHA:\*\*\s*`([a-f0-9]{40})`', sha_text)
+      if sha_match:
+        sha = sha_match.group(1)
+      else:
+        # Try to find any 40-char hex string
+        hex_match = re.search(r'([a-f0-9]{40})', sha_text)
+        if hex_match:
+          sha = hex_match.group(1)
+        else:
+          raise ValueError(f"Could not extract 40-char SHA from: {sha_text[:200]}")
+
+      # Extract branch if present
+      branch_match = re.search(r'\*\*Branch:\*\*\s*`([^`]+)`', sha_text)
+      branch = branch_match.group(1) if branch_match else ""
+
+      result = {"sha": sha, "branch": branch}
+    output: mr_info
+
+  # Step 1c: Check GitLab CI pipeline status
   - name: check_gitlab_ci
     description: "Check GitLab CI pipeline status for MR"
     condition: "{{ inputs.mr_id }}"
@@ -213,63 +259,6 @@ steps:
     output: gitlab_ci_status
     on_error: continue
 
-  # Step 1c: Auto-retry failed GitLab CI
-
-  - name: parse_mr_info
-    description: "Extract SHA and branch from MR info"
-    condition: "{{ inputs.mr_id and not inputs.commit_sha }}"
-    compute: |
-      import json
-      from scripts.common.parsers import extract_git_sha, extract_branch_from_mr
-
-      mr_text = str(mr_view_raw) if mr_view_raw else ""
-      short_sha = None
-      source_branch = None
-
-      # Try to parse as JSON first
-      try:
-        mr_data = json.loads(mr_text)
-        short_sha = mr_data.get("sha", "")
-        source_branch = mr_data.get("source_branch", "")
-      except:
-        # Parse from markdown output using shared parsers
-        short_sha = extract_git_sha(mr_text)
-        source_branch = extract_branch_from_mr(mr_text)
-
-      if not short_sha:
-        raise ValueError(f"Could not get SHA for MR {inputs.mr_id}")
-
-      result = {"short_sha": short_sha, "branch": source_branch}
-    output: mr_parsed
-
-  # Step 1b: Expand short SHA to full 40-char using git_rev_parse
-  - name: expand_sha
-    description: "Expand short SHA to full 40-char SHA"
-    condition: "{{ mr_parsed and mr_parsed.short_sha }}"
-    tool: git_rev_parse
-    args:
-      repo: "{{ cfg.repositories.backend.path }}"
-      ref: "{{ mr_parsed.short_sha }}"
-    output: full_sha_raw
-    on_error: continue
-
-  - name: build_mr_info
-    description: "Build mr_info from expanded SHA"
-    condition: "{{ mr_parsed }}"
-    compute: |
-      sha_output = str(full_sha_raw) if full_sha_raw else ""
-
-      # Extract SHA (it's the output directly, or in error message)
-      sha = sha_output.strip()
-      if sha.startswith("❌"):
-        raise ValueError(f"Could not expand SHA: {sha}")
-
-      if len(sha) != 40:
-        raise ValueError(f"Expected 40-char SHA, got: {sha}")
-
-      result = {"sha": sha, "branch": mr_parsed.get("branch", "")}
-    output: mr_info
-
   # Step 2: Determine final commit SHA
   - name: resolve_commit
     compute: |
@@ -296,9 +285,10 @@ steps:
   # Step 3a: Get commit message using git_show
   - name: get_commit_message
     description: "Get commit message for Jira key extraction"
+    condition: "{{ cfg.repo_path }}"
     tool: git_show
     args:
-      repo: "{{ resolved_repo.path }}"
+      repo: "{{ cfg.repo_path }}"
       commit: "{{ commit_sha }}"
       format: "%s%n%b"
     output: commit_message_raw
@@ -376,9 +366,10 @@ steps:
   # Step 3d: Get files changed in commit
   - name: get_changed_files
     description: "Get list of files changed in this commit"
+    condition: "{{ cfg.repo_path }}"
     tool: git_diff_tree
     args:
-      repo: "{{ resolved_repo.path }}"
+      repo: "{{ cfg.repo_path }}"
       commit: "{{ commit_sha }}"
       name_only: true
     output: changed_files_raw
@@ -431,17 +422,20 @@ steps:
         # Auto-detect based on signals
         signals = []
 
-        # Signal 1: Commit message mentions billing
-        if commit_info.get('commit_mentions_billing'):
+        # Signal 1: Commit message mentions billing (safe access)
+        commit_info_safe = commit_info if 'commit_info' in dir() and commit_info else {}
+        if commit_info_safe.get('commit_mentions_billing'):
           signals.append("commit_message")
 
-        # Signal 2: Jira issue mentions billing
-        if jira_billing_check.get('is_billing'):
-          signals.append(f"jira_issue({', '.join(jira_billing_check.get('signals', [])[:2])})")
+        # Signal 2: Jira issue mentions billing (safe access - may not exist)
+        jira_billing_safe = jira_billing_check if 'jira_billing_check' in dir() and jira_billing_check else {}
+        if jira_billing_safe.get('is_billing'):
+          signals.append(f"jira_issue({', '.join(jira_billing_safe.get('signals', [])[:2])})")
 
-        # Signal 3: Commit changes billing files
-        if diff_billing_check.get('has_billing_changes'):
-          signals.append(f"files({len(diff_billing_check.get('billing_files_changed', []))} billing files)")
+        # Signal 3: Commit changes billing files (safe access)
+        diff_billing_safe = diff_billing_check if 'diff_billing_check' in dir() and diff_billing_check else {}
+        if diff_billing_safe.get('has_billing_changes'):
+          signals.append(f"files({len(diff_billing_safe.get('billing_files_changed', []))} billing files)")
 
         use_billing = len(signals) > 0
         reason = f"Auto-detected: {', '.join(signals)}" if signals else "No billing signals found, using main"
@@ -459,17 +453,17 @@ steps:
         "clowdapp": clowdapp,
         "template": template,
         "reason": reason,
-        "jira_key": commit_info.get('jira_key'),
-        "billing_files": diff_billing_check.get('billing_files_changed', [])[:5]
+        "jira_key": commit_info_safe.get('jira_key') if 'commit_info_safe' in dir() else None,
+        "billing_files": diff_billing_safe.get('billing_files_changed', [])[:5] if 'diff_billing_safe' in dir() else []
       }
     output: clowdapp_selection
 
   # ==================== CHECK IMAGE EXISTS ====================
 
-  # Step 4: Check if image exists in PR repo (redhat-user-workloads)
+  # Step 4: Check if image exists and get sha256 digest using skopeo
   - name: check_quay_image
-    description: "Verify the image was built and pushed to Quay (PR repo)"
-    tool: quay_get_tag
+    description: "Verify the image was built and get sha256 digest for bonfire"
+    tool: skopeo_get_digest
     args:
       repository: "{{ cfg.quay_pr_repo }}"
       tag: "{{ commit_sha }}"
@@ -652,21 +646,34 @@ steps:
   # Step 6: Validate image availability and extract sha256 digest
   - name: validate_image
     compute: |
-      from scripts.common.parsers import parse_quay_manifest
+      import re
 
-      quay_output = str(quay_result) if quay_result else ""
+      quay_output = str(quay_result) if 'quay_result' in dir() and quay_result else ""
 
-      # Use shared parser to extract digest
-      manifest = parse_quay_manifest(quay_output)
+      # Check for success indicator from skopeo_get_digest
+      if "✅ Image Digest" in quay_output:
+        # Extract the 64-char sha256 hash (without sha256: prefix)
+        # Look for the IMAGE_TAG line which has just the hash
+        hash_match = re.search(r'For bonfire deploy.*?\n```\n([a-f0-9]{64})\n```', quay_output, re.DOTALL)
+        if hash_match:
+          digest_hash = hash_match.group(1)
+        else:
+          # Fallback: extract from full digest line
+          digest_match = re.search(r'\*\*Digest:\*\*\s*`sha256:([a-f0-9]{64})`', quay_output)
+          digest_hash = digest_match.group(1) if digest_match else None
 
-      if manifest:
-        result = {
-          "available": True,
-          "status": "Image ready in Quay",
-          "sha256_digest": manifest["digest"]
-        }
-      else:
+        if digest_hash:
+          result = {
+            "available": True,
+            "status": "Image ready in Quay",
+            "sha256_digest": f"sha256:{digest_hash}"
+          }
+        else:
+          result = {"available": False, "status": "Could not parse digest from Quay response"}
+      elif "❌" in quay_output:
         result = {"available": False, "status": "Image not found - build may be in progress"}
+      else:
+        result = {"available": False, "status": "Unknown Quay response"}
     output: image_status
 
   # Step 6b: HARD STOP if image not available

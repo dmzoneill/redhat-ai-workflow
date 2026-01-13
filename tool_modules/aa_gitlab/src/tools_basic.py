@@ -335,6 +335,48 @@ async def _gitlab_mr_view_impl(project: str, mr_id: int) -> str:
     return output if success else f"❌ Failed: {output}"
 
 
+async def _gitlab_mr_sha_impl(project: str, mr_id: int) -> str:
+    """Implementation of gitlab_mr_sha tool - get full commit SHA for an MR."""
+    # Use glab api to get the MR details including sha
+    # glab api projects/:id/merge_requests/:mr_iid
+    # URL encode the project path
+    encoded_project = project.replace("/", "%2F")
+    endpoint = f"projects/{encoded_project}/merge_requests/{mr_id}"
+
+    success, output = await run_glab(["api", endpoint], repo=project)
+    if not success:
+        return f"❌ Failed to get MR SHA: {output}"
+
+    # Parse JSON response to get sha
+    import json
+
+    try:
+        data = json.loads(output)
+        sha = data.get("sha", "")
+        source_branch = data.get("source_branch", "")
+        title = data.get("title", "")
+
+        if not sha:
+            return "❌ No SHA found in MR response"
+
+        # Verify it's a full 40-char SHA
+        if len(sha) != 40:
+            return f"⚠️ SHA is not 40 chars: {sha}"
+
+        return f"""## MR !{mr_id} Commit
+
+**SHA:** `{sha}`
+**Branch:** `{source_branch}`
+**Title:** {title}
+
+**For deployment:**
+```
+commit_sha={sha}
+```"""
+    except json.JSONDecodeError:
+        return f"❌ Failed to parse MR response: {output[:500]}"
+
+
 def _register_ci_tools(registry: ToolRegistry) -> None:
     """Register GitLab CI/CD tools."""
 
@@ -500,6 +542,22 @@ def _register_mr_tools(registry: ToolRegistry) -> None:
     async def gitlab_mr_view(project: str, mr_id: int) -> str:
         """View detailed information about a merge request."""
         return await _gitlab_mr_view_impl(project, mr_id)
+
+    @auto_heal()
+    @registry.tool()
+    async def gitlab_mr_sha(project: str, mr_id: int) -> str:
+        """Get the full 40-char commit SHA for a merge request.
+
+        Use this to get the exact commit for Konflux/Quay image lookup.
+
+        Args:
+            project: GitLab project path (e.g., "automation-analytics/automation-analytics-backend")
+            mr_id: Merge request ID
+
+        Returns:
+            Full 40-char commit SHA for the MR's head commit.
+        """
+        return await _gitlab_mr_sha_impl(project, mr_id)
 
 
 def register_tools(server: "FastMCP") -> int:

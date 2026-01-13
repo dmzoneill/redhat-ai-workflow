@@ -1,35 +1,44 @@
-# Tool Fixes - Learned from auto-remediation
-# Each entry captures: what broke, why, how we fixed it
-# Agent consults this BEFORE making tool calls to avoid known pitfalls
-
-tool_fixes: []
-# Example entry:
-# - tool_name: bonfire_namespace_release
-#   error_pattern: "Output is not a TTY"
-#   root_cause: "Bonfire prompts for confirmation in non-interactive mode"
-#   fix_applied: "Added --force flag to command"
-#   file_changed: tool_modules/aa_bonfire/src/tools.py
-#   date_learned: "2026-01-03"
-#   times_prevented: 0  # Incremented when we skip this mistake
-
-# Aggregated insights for common mistake patterns
 common_mistakes:
-  missing_flags:
-    description: "CLI tools often need --yes/--force/--no-interactive for automation"
-    examples:
-      - bonfire: "--force"
-      - glab: "--yes"
-      - rh-issue: "--no-ai"
-
-  wrong_formats:
-    description: "Image tags, SHAs, and IDs have specific format requirements"
-    examples:
-      - "Git SHA must be full 40-char, not short 8-char"
-      - "IMAGE_TAG for ITS deploy needs sha256 digest, not git SHA"
-
   auth_issues:
-    description: "Many tools need fresh credentials"
+    description: Many tools need fresh credentials
     examples:
-      - "VPN required for internal clusters"
-      - "kube_login for expired tokens"
-      - "SSO browser for OAuth flows"
+    - VPN required for internal clusters
+    - kube_login for expired tokens
+    - SSO browser for OAuth flows
+  missing_flags:
+    description: CLI tools often need --yes/--force/--no-interactive for automation
+    examples:
+    - bonfire: --force
+    - glab: --yes
+    - rh-issue: --no-ai
+  wrong_formats:
+    description: Image tags, SHAs, and IDs have specific format requirements
+    examples:
+    - Git SHA must be full 40-char, not short 8-char
+    - IMAGE_TAG for ITS deploy needs sha256 digest, not git SHA
+tool_fixes:
+- date_learned: '2026-01-13'
+  error_pattern: Could not get SHA for MR / 'dict' object has no attribute 'commit_sha'
+  fix_applied: Added gitlab_mr_sha tool that uses GitLab API to get full 40-char SHA
+    directly. Fixed config path references in skill.
+  root_cause: Skill used gitlab_mr_view which returns markdown text, not structured
+    data with SHA. Also used wrong config path (cfg.gitlab.backend_project vs cfg.gitlab_project)
+  times_prevented: 0
+  tool_name: test_mr_ephemeral skill
+- date_learned: '2026-01-13'
+  error_pattern: manifest unknown / unauthorized / failed to get digest
+  fix_applied: Added skopeo_get_digest tool that explicitly returns the sha256 hash
+    needed for bonfire IMAGE_TAG parameter. Updated skill to use this tool and parse
+    its output.
+  root_cause: quay_get_tag returned text output that wasn't being parsed correctly
+    to extract sha256 digest for bonfire deploy
+  times_prevented: 0
+  tool_name: quay_get_tag
+- date_learned: '2026-01-13'
+  error_pattern: 'cd: {{ resolved_repo.path }}: No such file or directory'
+  fix_applied: Added repo_path to cfg in load_config step. Changed git_show and git_diff_tree
+    steps to use cfg.repo_path with condition to skip if not available.
+  root_cause: Skill referenced resolved_repo.path but this variable was never defined.
+    Config loading step didn't include repo_path.
+  times_prevented: 0
+  tool_name: test_mr_ephemeral skill

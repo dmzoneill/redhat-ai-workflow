@@ -359,6 +359,64 @@ async def _quay_get_vulnerabilities_impl(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
+async def _skopeo_get_digest_impl(
+    repository: str,
+    tag: str,
+    namespace: str = "",
+) -> list[TextContent]:
+    """Implementation of skopeo_get_digest tool - get sha256 digest for bonfire deploy."""
+    full_path = resolve_quay_repo(repository, namespace)
+    image_ref = get_full_image_ref(full_path, tag)
+
+    success, data = await skopeo_inspect(image_ref)
+
+    if not success:
+        if "manifest unknown" in str(data).lower():
+            return [
+                TextContent(
+                    type="text",
+                    text=f"""❌ Image NOT found: `{tag}`
+
+**Repository:** `{full_path}`
+
+The Konflux build may still be in progress. Check:
+- Konflux pipeline status
+- Quay.io repository tags
+
+**Wait for build to complete before deploying.**""",
+                )
+            ]
+        return [TextContent(type="text", text=f"❌ Failed to get digest: {data}")]
+
+    digest = data.get("Digest", "")
+    if not digest:
+        return [TextContent(type="text", text="❌ No digest found in image metadata")]
+
+    # Extract just the hash (without sha256: prefix) for bonfire
+    digest_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
+
+    return [
+        TextContent(
+            type="text",
+            text=f"""## ✅ Image Digest
+
+**Repository:** `{full_path}`
+**Tag:** `{tag}`
+**Digest:** `{digest}`
+
+**For bonfire deploy (IMAGE_TAG):**
+```
+{digest_hash}
+```
+
+**Full image reference:**
+```
+quay.io/{full_path}@{digest}
+```""",
+        )
+    ]
+
+
 async def _quay_list_aa_tags_impl(
     limit: int = 10,
     filter_tag: str = "",
@@ -516,5 +574,28 @@ def register_tools(server: "FastMCP") -> int:
             Recent AA image tags.
         """
         return await _quay_list_aa_tags_impl(limit, filter_tag)
+
+    @auto_heal()
+    @registry.tool()
+    async def skopeo_get_digest(
+        repository: str,
+        tag: str,
+        namespace: str = "",
+    ) -> list[TextContent]:
+        """
+        Get sha256 digest for an image tag using skopeo.
+
+        Use this to get the IMAGE_TAG value needed for bonfire deploy.
+        Returns the 64-char sha256 hash (without 'sha256:' prefix).
+
+        Args:
+            repository: Repository path (e.g., "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main")
+            tag: Image tag (typically a 40-char git commit SHA)
+            namespace: Optional namespace override (default: redhat-user-workloads)
+
+        Returns:
+            The sha256 digest for bonfire IMAGE_TAG parameter.
+        """
+        return await _skopeo_get_digest_impl(repository, tag, namespace)
 
     return registry.count
