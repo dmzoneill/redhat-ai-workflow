@@ -4,8 +4,6 @@ Unit tests for Usage Pattern Classifier (Layer 5).
 Tests the classification of errors as usage errors vs infrastructure errors.
 """
 
-import pytest
-
 from server.usage_pattern_classifier import classify_error_type, is_infrastructure_error, is_learnable_error
 
 

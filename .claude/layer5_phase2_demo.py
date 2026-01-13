@@ -120,7 +120,7 @@ async def demo_prevention_tracking():
     patterns = learner.storage.get_patterns_for_tool("gitlab_mr_create")
     pattern = patterns[0]
 
-    print(f"\nInitial state:")
+    print("\nInitial state:")
     print(f"  Observations: {pattern['observations']}")
     print(f"  Confidence: {pattern['confidence']:.0%}")
     print(f"  Successes: {pattern['success_after_prevention']}")
@@ -133,7 +133,7 @@ async def demo_prevention_tracking():
     # Get updated pattern
     pattern = learner.storage.get_pattern(pattern["id"])
 
-    print(f"\nAfter preventions:")
+    print("\nAfter preventions:")
     print(f"  Observations: {pattern['observations']}")
     print(f"  Confidence: {pattern['confidence']:.0%}")
     print(f"  Successes: {pattern['success_after_prevention']}")
@@ -184,11 +184,11 @@ async def demo_learning_stats():
     print(f"  Total patterns: {stats['total_patterns']}")
     print(f"  Total observations: {stats['total_observations']}")
     print(f"  Average confidence: {stats['average_confidence']:.0%}")
-    print(f"\nBy confidence level:")
+    print("\nBy confidence level:")
     print(f"  High (>= 85%): {stats['high_confidence_patterns']}")
     print(f"  Medium (70-84%): {stats['medium_confidence_patterns']}")
     print(f"  Low (< 70%): {stats['low_confidence_patterns']}")
-    print(f"\nBy category:")
+    print("\nBy category:")
     for category, count in stats["by_category"].items():
         if count > 0:
             print(f"  {category}: {count}")
@@ -213,7 +213,6 @@ async def demo_confidence_threshold():
 
     print("\nSimulating errors until pattern reaches each threshold...\n")
 
-    pattern_id = None
     last_threshold_passed = 0.0
 
     for i in range(1, 101):
@@ -223,7 +222,6 @@ async def demo_confidence_threshold():
             result="❌ Error: manifest unknown",
         )
 
-        pattern_id = result["id"]
         confidence = result["confidence"]
 
         # Check if we crossed a threshold

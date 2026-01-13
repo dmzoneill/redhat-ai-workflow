@@ -57,7 +57,7 @@ def demo_example_1():
 
     print(f"  Pattern ID: {pattern['id']}")
     print(f"  Root cause: {pattern['root_cause']}")
-    print(f"  Prevention steps:")
+    print("  Prevention steps:")
     for i, step in enumerate(pattern["prevention_steps"], 1):
         print(f"    {i}. {step['action']}: {step.get('reason', 'N/A')}")
 
@@ -100,7 +100,7 @@ def demo_example_2():
     print(f"  Pattern ID: {pattern['id']}")
     print(f"  Root cause: {pattern['root_cause']}")
     print(f"  Expected format: {pattern['mistake_pattern'].get('validation', {}).get('expected')}")
-    print(f"  Prevention steps:")
+    print("  Prevention steps:")
     for i, step in enumerate(pattern["prevention_steps"], 1):
         print(f"    {i}. {step['action']}: {step.get('reason', 'N/A')}")
 
@@ -143,7 +143,7 @@ def demo_example_3():
     print(f"  Pattern ID: {pattern['id']}")
     print(f"  Root cause: {pattern['root_cause']}")
     print(f"  Correct sequence: {pattern['mistake_pattern'].get('correct_sequence')}")
-    print(f"  Prevention steps:")
+    print("  Prevention steps:")
     for i, step in enumerate(pattern["prevention_steps"], 1):
         print(f"    {i}. {step['action']}: {step.get('reason', 'N/A')}")
 
@@ -169,13 +169,13 @@ def demo_storage_operations():
     patterns = data.get("usage_patterns", [])
 
     print(f"\nTotal patterns: {len(patterns)}")
-    print(f"\nStatistics:")
+    print("\nStatistics:")
     stats = data.get("stats", {})
     print(f"  High confidence (>=0.85): {stats.get('high_confidence', 0)}")
     print(f"  Medium confidence (0.70-0.84): {stats.get('medium_confidence', 0)}")
     print(f"  Low confidence (<0.70): {stats.get('low_confidence', 0)}")
 
-    print(f"\nBy category:")
+    print("\nBy category:")
     by_cat = stats.get("by_category", {})
     for cat, count in by_cat.items():
         if count > 0:
@@ -183,7 +183,7 @@ def demo_storage_operations():
 
     # Show high-confidence patterns
     high_conf = storage.get_high_confidence_patterns(min_confidence=0.75)
-    print(f"\nHigh-confidence patterns (>= 75%):")
+    print("\nHigh-confidence patterns (>= 75%):")
     for pattern in high_conf[:5]:  # Show first 5
         print(f"  - {pattern['tool']}: {pattern['root_cause']}")
         print(f"    Confidence: {pattern['confidence']:.0%}, Observations: {pattern['observations']}")

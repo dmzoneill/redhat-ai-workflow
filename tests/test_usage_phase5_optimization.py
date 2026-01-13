@@ -104,7 +104,7 @@ class TestPatternCaching:
         checker = UsagePatternChecker(storage=temp_storage)
 
         # First call - cache miss (will load from storage)
-        result1 = checker.check_before_call(
+        checker.check_before_call(
             tool_name="test_tool",
             params={},
             min_confidence=0.75,
@@ -119,7 +119,7 @@ class TestPatternCaching:
         checker = UsagePatternChecker(storage=temp_storage)
 
         # First call - cache miss
-        result1 = checker.check_before_call(
+        checker.check_before_call(
             tool_name="test_tool",
             params={},
             min_confidence=0.75,
@@ -128,7 +128,7 @@ class TestPatternCaching:
         # Second call - should hit cache
         cache_timestamp_before = checker._cache_timestamp
 
-        result2 = checker.check_before_call(
+        checker.check_before_call(
             tool_name="test_tool",
             params={},
             min_confidence=0.75,
@@ -142,7 +142,7 @@ class TestPatternCaching:
         checker = UsagePatternChecker(storage=temp_storage, cache_ttl=1)  # 1 second TTL
 
         # First call
-        result1 = checker.check_before_call(
+        checker.check_before_call(
             tool_name="test_tool",
             params={},
             min_confidence=0.75,
@@ -154,7 +154,7 @@ class TestPatternCaching:
         # Second call - cache should be expired
         cache_timestamp_before = checker._cache_timestamp
 
-        result2 = checker.check_before_call(
+        checker.check_before_call(
             tool_name="test_tool",
             params={},
             min_confidence=0.75,

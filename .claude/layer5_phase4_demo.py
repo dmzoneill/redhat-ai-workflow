@@ -13,7 +13,6 @@ Run: python .claude/layer5_phase4_demo.py
 
 import asyncio
 import sys
-import tempfile
 from pathlib import Path
 
 # Add project root to path
@@ -109,9 +108,9 @@ def setup_demo_patterns(storage):
     storage.add_pattern(pattern_high2)
 
     print("✅ Created 3 demo patterns")
-    print(f"   - bonfire_deploy: 95% confidence (WILL BLOCK)")
-    print(f"   - gitlab_mr_create: 80% confidence (will warn)")
-    print(f"   - bonfire_namespace_release: 92% confidence (strong warning)")
+    print("   - bonfire_deploy: 95% confidence (WILL BLOCK)")
+    print("   - gitlab_mr_create: 80% confidence (will warn)")
+    print("   - bonfire_namespace_release: 92% confidence (strong warning)")
     print()
 
     return pattern_high, pattern_medium, pattern_high2
@@ -246,7 +245,7 @@ async def demo_false_positive_detection(storage):
         usage_check=usage_check,
     )
 
-    print(f"Analysis:")
+    print("Analysis:")
     print(f"  - False positive: {analysis['false_positive']}")
     print(f"  - Patterns affected: {analysis['patterns_affected']}")
     print(f"  - Reason: {analysis['reason']}")

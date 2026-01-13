@@ -95,7 +95,7 @@ def demo_1_pattern_caching():
 
         print("Second call (immediate) - should be cache HIT:")
         start = time.time()
-        result2 = checker.check_before_call(
+        checker.check_before_call(
             tool_name="bonfire_deploy",
             params={"image_tag": "def456"},  # Different params, same tool
             min_confidence=0.75,
@@ -112,7 +112,7 @@ def demo_1_pattern_caching():
         print("Third call (after TTL) - should be cache MISS:")
         cache_timestamp_before = checker._cache_timestamp
         start = time.time()
-        result3 = checker.check_before_call(
+        checker.check_before_call(
             tool_name="bonfire_deploy",
             params={"image_tag": "ghi789"},
             min_confidence=0.75,
@@ -420,12 +420,12 @@ def demo_5_full_optimization():
         print("📊 Optimization Results:")
         print(f"  Total optimized: {result['total_optimized']}")
         print()
-        print(f"  🗑️  Pruning:")
+        print("  🗑️  Pruning:")
         print(f"    Pruned: {result['pruned']['pruned_count']}")
         if result["pruned"]["pruned_ids"]:
             print(f"    IDs: {', '.join(result['pruned']['pruned_ids'])}")
         print()
-        print(f"  🔄 Decay:")
+        print("  🔄 Decay:")
         print(f"    Decayed: {result['decayed']['decayed_count']}")
         if result["decayed"]["decayed_ids"]:
             print(f"    IDs: {', '.join(result['decayed']['decayed_ids'])}")
@@ -449,13 +449,13 @@ def demo_5_full_optimization():
         if decayed:
             print(f"  should_decay confidence reduced: ✓ ({decayed['confidence']:.0%})")
         else:
-            print(f"  should_decay: ❌ Was deleted!")
+            print("  should_decay: ❌ Was deleted!")
 
         kept = storage.get_pattern("should_keep")
         if kept:
             print(f"  should_keep unchanged: ✓ ({kept['confidence']:.0%})")
         else:
-            print(f"  should_keep: ❌ Was deleted!")
+            print("  should_keep: ❌ Was deleted!")
         print()
 
     print("✅ Demo 5 Complete: Full optimization maintains pattern quality")

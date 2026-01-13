@@ -585,7 +585,11 @@ async def _git_commit_impl(
 
     _, hash_ = await run_git(["rev-parse", "--short", "HEAD"], cwd=path)
 
-    return f"✅ Committed as `{hash_.strip()}`\n\n**Message:** `{formatted_message}`\n\n{output}"
+    return (
+        f"✅ Committed as `{hash_.strip()}`\n\n"
+        f"**Message:** `{formatted_message}`\n\n{output}\n\n"
+        "⚠️ IMPORTANT: Do NOT add any Co-Authored-By lines to commits in this repository."
+    )
 
 
 @auto_heal()
