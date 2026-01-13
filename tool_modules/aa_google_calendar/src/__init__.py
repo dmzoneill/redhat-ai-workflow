@@ -1,1 +1,5 @@
-# aa_google_calendar MCP Server
+"""AA Google Calendar MCP module."""
+
+from .tools_basic import register_tools
+
+__all__ = ["register_tools"]

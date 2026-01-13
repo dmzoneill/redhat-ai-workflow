@@ -512,8 +512,10 @@ async def _tool_exec_impl(tool_name: str, args: str, create_issue_fn) -> list[Te
     except json.JSONDecodeError as e:
         return [TextContent(type="text", text=f"❌ Invalid JSON args: {e}")]
 
-    # Load and execute the tool module
-    tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools.py"
+    # Load and execute the tool module (try tools_basic.py first, then tools.py)
+    tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools_basic.py"
+    if not tools_file.exists():
+        tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools.py"
 
     if not tools_file.exists():
         return [TextContent(type="text", text=f"❌ Module not found: {module}")]

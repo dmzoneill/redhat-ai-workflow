@@ -1,4 +1,4 @@
-"""AA GitLab MCP Server - GitLab operations via glab CLI.
+"""AA GitLab MCP Server - GitLab operations via glab CLI (extra tools).
 
 Authentication: glab auth login or GITLAB_TOKEN environment variable.
 
@@ -8,10 +8,7 @@ Supports:
 - Direct project paths with --repo flag
 """
 
-import asyncio
-import os
 import re
-import subprocess
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -24,10 +21,7 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
-from server.utils import get_gitlab_host, get_section_config
-
-# Setup project path for server imports
-
+from server.utils import get_gitlab_host, get_section_config, run_cmd
 
 # Use shared implementation from utils
 GITLAB_HOST = get_gitlab_host()
@@ -119,30 +113,8 @@ async def run_glab(
         else:
             cmd.extend(["--repo", repo])
 
-    env = os.environ.copy()
-    env["GITLAB_HOST"] = GITLAB_HOST
-
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-            cwd=run_cwd,
-        )
-        output = result.stdout
-        if result.returncode != 0:
-            output = result.stderr or result.stdout or "Command failed"
-            return False, output
-        return True, output
-    except subprocess.TimeoutExpired:
-        return False, f"Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "glab CLI not found. Install with: brew install glab"
-    except Exception as e:
-        return False, str(e)
+    # Use unified run_cmd with GITLAB_HOST env var
+    return await run_cmd(cmd, cwd=run_cwd, env={"GITLAB_HOST": GITLAB_HOST}, timeout=timeout)
 
 
 # ==================== MERGE REQUESTS ====================

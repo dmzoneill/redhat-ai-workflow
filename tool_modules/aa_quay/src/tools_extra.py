@@ -1,14 +1,12 @@
-"""Quay.io MCP Server - Container image management tools.
+"""Quay.io MCP Server - Container image management tools (extra tools).
 
-Provides 8 tools for checking images, tags, and security scans.
+Provides additional tools for checking images, tags, and security scans.
 Uses skopeo (with podman/docker auth) as primary method, API as fallback.
 """
 
-import asyncio
 import json
 import logging
 import os
-import subprocess
 from typing import cast
 
 from mcp.server.fastmcp import FastMCP
@@ -23,10 +21,7 @@ from mcp.types import TextContent
 from server.auto_heal_decorator import auto_heal
 from server.http_client import quay_client
 from server.tool_registry import ToolRegistry
-from server.utils import load_config
-
-# Setup project path for server imports
-
+from server.utils import load_config, run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -54,25 +49,8 @@ async def run_skopeo(args: list[str], timeout: int = 30) -> tuple[bool, str]:
     cmd = ["skopeo"] + args
     logger.info(f"Running: {' '.join(cmd)}")
 
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-
-        if result.returncode == 0:
-            return True, result.stdout
-        else:
-            return False, result.stderr or result.stdout
-    except subprocess.TimeoutExpired:
-        return False, "Command timed out"
-    except FileNotFoundError:
-        return False, "skopeo not installed"
-    except Exception as e:
-        return False, str(e)
+    # Use unified run_cmd
+    return await run_cmd(cmd, timeout=timeout)
 
 
 async def skopeo_inspect(

@@ -152,32 +152,34 @@ def _search_for_tool(tool_name: str) -> dict | None:
     if not tool_modules_dir.exists():
         return None
 
-    # Search all tools.py files
-    for tools_file in tool_modules_dir.glob("*/src/tools.py"):
-        try:
-            with open(tools_file) as f:
-                content = f.read()
+    # Search all tools files (tools_basic.py, tools_extra.py, and legacy tools.py)
+    tools_patterns = ["*/src/tools_basic.py", "*/src/tools_extra.py", "*/src/tools.py"]
+    for pattern in tools_patterns:
+        for tools_file in tool_modules_dir.glob(pattern):
+            try:
+                with open(tools_file) as f:
+                    content = f.read()
 
-            # Look for function definition
-            pattern = rf"async def {tool_name}\s*\("
-            match = re.search(pattern, content)
+                # Look for function definition
+                func_pattern = rf"async def {tool_name}\s*\("
+                match = re.search(func_pattern, content)
 
-            if match:
-                # Found it - calculate line number
-                line_num = content[: match.start()].count("\n") + 1
+                if match:
+                    # Found it - calculate line number
+                    line_num = content[: match.start()].count("\n") + 1
 
-                # Extract function to count lines
-                func_source = _extract_function(content, tool_name)
-                end_line = line_num + func_source.count("\n")
+                    # Extract function to count lines
+                    func_source = _extract_function(content, tool_name)
+                    end_line = line_num + func_source.count("\n")
 
-                return {
-                    "source_file": str(tools_file),
-                    "start_line": line_num,
-                    "end_line": end_line,
-                    "func_name": tool_name,
-                }
-        except Exception:
-            continue
+                    return {
+                        "source_file": str(tools_file),
+                        "start_line": line_num,
+                        "end_line": end_line,
+                        "func_name": tool_name,
+                    }
+            except Exception:
+                continue
 
     return None
 

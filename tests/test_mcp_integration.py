@@ -49,7 +49,10 @@ class TestToolModuleLoading:
         """Load a tool module using importlib."""
         import importlib.util
 
-        tools_file = TOOL_MODULES_DIR / f"aa_{module_name}" / "src" / "tools.py"
+        # Try tools_basic.py first (new structure), then tools.py (legacy)
+        tools_file = TOOL_MODULES_DIR / f"aa_{module_name}" / "src" / "tools_basic.py"
+        if not tools_file.exists():
+            tools_file = TOOL_MODULES_DIR / f"aa_{module_name}" / "src" / "tools.py"
         if not tools_file.exists():
             pytest.skip(f"Module aa_{module_name} not found")
 

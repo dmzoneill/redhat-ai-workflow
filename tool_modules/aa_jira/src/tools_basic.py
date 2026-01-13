@@ -17,7 +17,7 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
-from server.utils import get_project_root, load_config, run_cmd_shell
+from server.utils import get_project_root, load_config, run_cmd
 
 # Setup project path for server imports
 
@@ -32,20 +32,15 @@ logger = logging.getLogger(__name__)
 
 
 async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
-    """Run rh-issue command through user's login shell for proper environment.
+    """Run rh-issue command through user's shell environment.
 
-    Uses shared run_cmd_shell to ensure proper environment including:
-    - JIRA_JPAT and other env vars from ~/.bashrc
+    Uses unified run_cmd which sources ~/.bashrc for:
+    - JIRA_JPAT and other env vars
     - pipenv virtualenv access (needs HOME)
     - User's PATH with ~/bin
     """
-    # Use shared run_cmd_shell for proper environment
-    success, stdout, stderr = await run_cmd_shell(
-        ["rh-issue"] + args,
-        timeout=timeout,
-    )
-
-    output = stdout or stderr
+    # Use unified run_cmd (sources shell by default)
+    success, output = await run_cmd(["rh-issue"] + args, timeout=timeout)
 
     if not success:
         # Check for common auth issues
@@ -65,7 +60,7 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
             )
         return False, output
 
-    return True, stdout
+    return True, output
 
 
 # ==================== READ OPERATIONS ====================

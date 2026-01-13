@@ -3,10 +3,7 @@
 Provides 21 tools for managing ephemeral namespaces and deploying apps.
 """
 
-import asyncio
 import logging
-import os
-import subprocess
 
 from mcp.server.fastmcp import FastMCP
 
@@ -19,10 +16,7 @@ from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_ephemeral
 from server.tool_registry import ToolRegistry
-from server.utils import ensure_cluster_auth, get_kubeconfig, get_section_config, truncate_output
-
-# Setup project path for server imports
-
+from server.utils import ensure_cluster_auth, get_kubeconfig, get_section_config, run_cmd, truncate_output
 
 logger = logging.getLogger(__name__)
 
@@ -124,33 +118,13 @@ async def run_bonfire(
 
     logger.info(f"Running: {' '.join(cmd)}")
 
-    run_env = os.environ.copy()
-    # Always set KUBECONFIG for ephemeral cluster
-    run_env["KUBECONFIG"] = kubeconfig
+    # Build env with KUBECONFIG
+    run_env = {"KUBECONFIG": kubeconfig}
     if env:
         run_env.update(env)
 
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=run_env,
-        )
-
-        output = result.stdout + result.stderr
-        if result.returncode != 0:
-            return False, output or "Command failed"
-
-        return True, output
-    except subprocess.TimeoutExpired:
-        return False, f"Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "bonfire not found. Install with: pip install crc-bonfire"
-    except Exception as e:
-        return False, str(e)
+    # Use unified run_cmd
+    return await run_cmd(cmd, env=run_env, timeout=timeout)
 
 
 # ==================== VERSION / INFO ====================
@@ -307,21 +281,25 @@ Expected 64 hex characters (0-9, a-f). Got non-hex characters.""",
 
     logger.info(f"Checking if image exists: {image_ref}")
 
-    try:
-        check_result = await asyncio.to_thread(
-            subprocess.run,
-            ["skopeo", "inspect", "--raw", image_ref],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        check_output = check_result.stdout + check_result.stderr
+    check_success, check_output = await run_cmd(
+        ["skopeo", "inspect", "--raw", image_ref],
+        timeout=30,
+    )
 
-        if check_result.returncode != 0 or "manifest unknown" in check_output.lower():
+    if not check_success or "manifest unknown" in check_output.lower():
+        # Check if it was a timeout
+        if "timed out" in check_output.lower():
             return [
                 TextContent(
                     type="text",
-                    text=f"""❌ **STOP: Image not found in Quay**
+                    text="❌ Image check timed out. Verify image exists before retrying.",
+                )
+            ]
+
+        return [
+            TextContent(
+                type="text",
+                text=f"""❌ **STOP: Image not found in Quay**
 
 The image for commit `{template_ref[:12]}...` does not exist in redhat-user-workloads.
 
@@ -338,19 +316,8 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
 3. Retry once the image is available
 
 **DO NOT** proceed with deployment - it will fail with ImagePullBackOff.""",
-                )
-            ]
-
-    except subprocess.TimeoutExpired:
-        return [
-            TextContent(
-                type="text",
-                text="❌ Image check timed out. Verify image exists before retrying.",
             )
         ]
-    except FileNotFoundError:
-        logger.warning("skopeo not found, skipping image check")
-        # Continue without check if skopeo not installed
 
     logger.info("Image verified, proceeding with deploy")
 

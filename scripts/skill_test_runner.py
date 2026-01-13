@@ -17,8 +17,7 @@ Usage:
 import argparse
 import asyncio
 import json
-import os
-import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +28,12 @@ PROJECT_ROOT = Path(__file__).parent.parent
 SKILLS_DIR = PROJECT_ROOT / "skills"
 TESTS_DIR = PROJECT_ROOT / "tests"
 TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
+
+# Add project root to path for server imports
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from server.utils import run_cmd  # noqa: E402
 
 
 @dataclass
@@ -99,9 +104,10 @@ TEST_PARAMS = {
     "bonfire_namespace_list": {"mine_only": True},
     # Quay - read-only
     "quay_list_tags": {"limit": 3},
-    # K8s - read-only on ephemeral (use bonfire to find current namespace)
-    "kubectl_get_pods": {"namespace": "", "environment": "ephemeral"},  # Will list all accessible
-    "kubectl_get_events": {"namespace": "", "environment": "ephemeral"},
+    # K8s - read-only on stage with correct namespace
+    "kubectl_get_pods": {"namespace": "tower-analytics-stage", "environment": "stage"},
+    "kubectl_get_events": {"namespace": "tower-analytics-stage", "environment": "stage"},
+    "kubectl_get_deployments": {"namespace": "tower-analytics-stage", "environment": "stage"},
 }
 
 
@@ -143,28 +149,15 @@ class ToolExecutor:
             return True, f"SKIPPED (no executor): {tool_name}"
 
     async def _run_cmd(self, cmd: list[str], cwd: str = None, env: dict = None) -> tuple[bool, str]:
-        """Run a shell command."""
-        try:
-            full_env = os.environ.copy()
-            if env:
-                full_env.update(env)
+        """Run a command using the unified run_cmd from server.utils.
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=cwd,
-                env=full_env,
-                timeout=60,
-            )
-
-            output = result.stdout or result.stderr
-            return result.returncode == 0, output[:2000]  # Truncate
-
-        except subprocess.TimeoutExpired:
-            return False, "TIMEOUT after 60s"
-        except Exception as e:
-            return False, f"ERROR: {e}"
+        This ensures commands have access to:
+        - JIRA_JPAT and other env vars from ~/.bashrc
+        - User's PATH with ~/bin
+        - Any shell functions defined in bashrc.d
+        """
+        success, output = await run_cmd(cmd, cwd=cwd, env=env, timeout=60)
+        return success, output[:2000]  # Truncate for display
 
     async def _exec_git(self, tool_name: str, args: dict) -> tuple[bool, str]:
         """Execute git tools."""

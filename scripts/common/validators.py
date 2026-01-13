@@ -7,7 +7,15 @@ Import and use in compute blocks:
 
 import os
 import shutil
-import subprocess
+import sys
+from pathlib import Path
+
+# Add project root to path for server imports
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from server.utils import run_cmd_sync  # noqa: E402
 
 
 def validate_git_repo(repo_path: str = ".") -> dict:
@@ -22,18 +30,17 @@ def validate_git_repo(repo_path: str = ".") -> dict:
     """
     repo = repo_path if repo_path != "." else os.getcwd()
 
-    # Check if git repo
-    result = subprocess.run(
+    # Check if git repo - git doesn't need shell env
+    success, output = run_cmd_sync(
         ["git", "rev-parse", "--git-dir"],
         cwd=repo,
-        capture_output=True,
-        text=True,
+        use_shell=False,
     )
 
-    if result.returncode != 0:
+    if not success:
         raise ValueError(f"Not a git repository: {repo}")
 
-    git_dir = result.stdout.strip()
+    git_dir = output.strip()
     if not git_dir.startswith("/"):
         git_dir = os.path.join(repo, git_dir)
 
@@ -56,13 +63,12 @@ def validate_git_repo(repo_path: str = ".") -> dict:
         issues.append("cherry_pick_in_progress")
 
     # Get current branch
-    result = subprocess.run(
+    success, output = run_cmd_sync(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=repo,
-        capture_output=True,
-        text=True,
+        use_shell=False,
     )
-    current_branch = result.stdout.strip() if result.returncode == 0 else None
+    current_branch = output.strip() if success else None
     is_detached = current_branch == "HEAD"
 
     if is_detached:
@@ -86,17 +92,16 @@ def check_uncommitted_changes(repo_path: str = ".") -> dict:
     """
     repo = repo_path if repo_path != "." else os.getcwd()
 
-    result = subprocess.run(
+    success, output = run_cmd_sync(
         ["git", "status", "--porcelain"],
         cwd=repo,
-        capture_output=True,
-        text=True,
+        use_shell=False,
     )
 
-    if result.returncode != 0:
-        return {"has_changes": False, "error": result.stderr}
+    if not success:
+        return {"has_changes": False, "error": output}
 
-    lines = [ln for ln in result.stdout.strip().split("\n") if ln]
+    lines = [ln for ln in output.strip().split("\n") if ln]
 
     staged = [ln for ln in lines if ln[0] in "MADRC"]
     unstaged = [ln for ln in lines if ln[1] in "MADRC"]
@@ -148,22 +153,22 @@ def check_branch_exists(branch: str, repo_path: str = ".", check_remote: bool = 
     repo = repo_path if repo_path != "." else os.getcwd()
 
     # Check local
-    result = subprocess.run(
+    success, _ = run_cmd_sync(
         ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
         cwd=repo,
-        capture_output=True,
+        use_shell=False,
     )
-    local_exists = result.returncode == 0
+    local_exists = success
 
     # Check remote
     remote_exists = False
     if check_remote:
-        result = subprocess.run(
+        success, _ = run_cmd_sync(
             ["git", "show-ref", "--verify", f"refs/remotes/origin/{branch}"],
             cwd=repo,
-            capture_output=True,
+            use_shell=False,
         )
-        remote_exists = result.returncode == 0
+        remote_exists = success
 
     return {
         "exists": local_exists or remote_exists,
@@ -183,14 +188,13 @@ def check_can_force_push(branch: str, repo_path: str = ".") -> dict:
     repo = repo_path if repo_path != "." else os.getcwd()
 
     # Try dry-run force push
-    result = subprocess.run(
+    success, output = run_cmd_sync(
         ["git", "push", "--dry-run", "--force-with-lease", "origin", branch],
         cwd=repo,
-        capture_output=True,
-        text=True,
+        use_shell=False,
     )
 
-    stderr = result.stderr.lower()
+    stderr = output.lower()
 
     if "protected branch" in stderr:
         return {"allowed": False, "reason": "Branch is protected"}
@@ -239,29 +243,23 @@ def check_commits_ahead_behind(base: str = "origin/main", repo_path: str = ".") 
     repo = repo_path if repo_path != "." else os.getcwd()
 
     # Fetch first
-    subprocess.run(
-        ["git", "fetch", "origin"],
-        cwd=repo,
-        capture_output=True,
-    )
+    run_cmd_sync(["git", "fetch", "origin"], cwd=repo, use_shell=False)
 
     # Get ahead count
-    result = subprocess.run(
+    success, output = run_cmd_sync(
         ["git", "rev-list", "--count", f"{base}..HEAD"],
         cwd=repo,
-        capture_output=True,
-        text=True,
+        use_shell=False,
     )
-    ahead = int(result.stdout.strip()) if result.returncode == 0 else 0
+    ahead = int(output.strip()) if success else 0
 
     # Get behind count
-    result = subprocess.run(
+    success, output = run_cmd_sync(
         ["git", "rev-list", "--count", f"HEAD..{base}"],
         cwd=repo,
-        capture_output=True,
-        text=True,
+        use_shell=False,
     )
-    behind = int(result.stdout.strip()) if result.returncode == 0 else 0
+    behind = int(output.strip()) if success else 0
 
     return {
         "ahead": ahead,
@@ -278,20 +276,19 @@ def estimate_diff_size(base: str = "origin/main", repo_path: str = ".") -> dict:
     Returns:
         dict with keys: lines_added, lines_removed, files_changed, is_large
     """
-    repo = repo_path if repo_path != "." else os.getcwd()
-
-    result = subprocess.run(
-        ["git", "diff", "--stat", base],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    )
-
-    lines = result.stdout.strip().split("\n")
-
-    # Parse last line: "X files changed, Y insertions(+), Z deletions(-)"
     import re
 
+    repo = repo_path if repo_path != "." else os.getcwd()
+
+    success, output = run_cmd_sync(
+        ["git", "diff", "--stat", base],
+        cwd=repo,
+        use_shell=False,
+    )
+
+    lines = output.strip().split("\n") if success else []
+
+    # Parse last line: "X files changed, Y insertions(+), Z deletions(-)"
     files_changed = 0
     lines_added = 0
     lines_removed = 0

@@ -4,12 +4,18 @@ Provides consistent lint checking across tools and skills.
 """
 
 import shutil
-import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from scripts.common.config_loader import get_flake8_ignore_codes, get_flake8_max_line_length
+# Add project root to path for server imports
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.common.config_loader import get_flake8_ignore_codes, get_flake8_max_line_length  # noqa: E402
+from server.utils import run_cmd_sync  # noqa: E402
 
 
 @dataclass
@@ -65,7 +71,7 @@ def run_lint_check(
     black_ok = True
     flake8_ok = True
 
-    # Check black
+    # Check black - doesn't need shell env
     if check_black and shutil.which("black"):
         cmd = ["black", "--check"]
         if files:
@@ -73,25 +79,15 @@ def run_lint_check(
         else:
             cmd.append(".")
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=str(path),
-                timeout=60,
-            )
-            if result.returncode != 0:
-                black_ok = False
+        success, output = run_cmd_sync(cmd, cwd=str(path), timeout=60, use_shell=False)
+        if not success:
+            if "timed out" in output.lower():
+                errors.append("Black: Check timed out")
+            else:
                 errors.append("Black: Code needs formatting (run 'black .')")
-        except subprocess.TimeoutExpired:
-            errors.append("Black: Check timed out")
-            black_ok = False
-        except Exception as e:
-            errors.append(f"Black: Error - {e}")
             black_ok = False
 
-    # Check flake8
+    # Check flake8 - doesn't need shell env
     if check_flake8 and shutil.which("flake8"):
         cmd = [
             "flake8",
@@ -103,24 +99,14 @@ def run_lint_check(
         else:
             cmd.append(".")
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=str(path),
-                timeout=60,
-            )
-            if result.returncode != 0 and result.stdout.strip():
-                flake8_ok = False
-                issue_lines = [line for line in result.stdout.split("\n") if line.strip()]
+        success, output = run_cmd_sync(cmd, cwd=str(path), timeout=60, use_shell=False)
+        if not success and output.strip():
+            if "timed out" in output.lower():
+                errors.append("Flake8: Check timed out")
+            else:
+                issue_lines = [line for line in output.split("\n") if line.strip()]
                 issue_count = len(issue_lines)
                 errors.append(f"Flake8: {issue_count} issue(s) found")
-        except subprocess.TimeoutExpired:
-            errors.append("Flake8: Check timed out")
-            flake8_ok = False
-        except Exception as e:
-            errors.append(f"Flake8: Error - {e}")
             flake8_ok = False
 
     passed = black_ok and flake8_ok

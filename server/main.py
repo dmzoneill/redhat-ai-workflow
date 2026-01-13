@@ -153,7 +153,13 @@ def _get_tools_file_path(tool_name: str) -> Path:
         module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
         return module_dir / "src" / "tools_extra.py"
     else:
+        # For non-suffixed modules, load tools_basic.py (standard)
+        # Use tool_exec() or explicit _extra suffix for extra tools
         module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
+        tools_basic = module_dir / "src" / "tools_basic.py"
+        if tools_basic.exists():
+            return tools_basic
+        # Fallback to legacy tools.py
         return module_dir / "src" / "tools.py"
 
 
@@ -203,14 +209,14 @@ def _register_debug_for_module(server: FastMCP, tool_name: str):
         server: FastMCP server instance
         tool_name: Tool module name
     """
+    import importlib.util
+
     from .debuggable import wrap_all_tools
 
     tools_file = _get_tools_file_path(tool_name)
 
     if not tools_file.exists():
         return
-
-    import importlib.util
 
     spec = importlib.util.spec_from_file_location(f"aa_{tool_name}_tools_debug", tools_file)
     if spec and spec.loader:

@@ -1,4 +1,4 @@
-"""Development Workflow Tools - Extra/advanced tools.
+"""Workflow Tools - Extra/advanced tools.
 
 This module contains additional workflow tools that are not part of the basic set.
 Currently empty - basic tools are in tools_basic.py.
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 def register_tools(server: "FastMCP") -> int:
-    """Register extra dev workflow tools with the MCP server.
+    """Register extra workflow tools with the MCP server.
 
     Args:
         server: FastMCP server instance

@@ -22,12 +22,12 @@ BOT_PATTERNS = [
 ]
 
 
-def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, Any]]:
+def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, Any]]:  # noqa: C901
     """
     Parse gitlab_mr_list output into structured MR data.
 
     Handles multiple output formats:
-    - Single line: "!1452  project!1452  AAP-58394 - feat... (main)"
+    - Single line: "!1452  project!1452  AAP-58394 - feat... (main) ← (branch-name)"
     - Multi-line with IID, Title, Author on separate lines
 
     Args:
@@ -35,7 +35,7 @@ def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, A
         include_author: Whether to extract author from output
 
     Returns:
-        List of dicts with 'iid' (or 'id'), 'title', and optionally 'author' keys
+        List of dicts with 'iid' (or 'id'), 'title', 'branch', and optionally 'author' keys
     """
     mrs: List[Dict[str, Any]] = []
     if not output:
@@ -45,13 +45,31 @@ def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, A
     current_mr: Dict[str, Any] = {}
 
     for line in lines:
-        # Try single-line format first: "!1452  project!1452  Title (main)"
-        single_match = re.search(r"!(\d+)\s+\S+\s+(.+?)\s*\(main\)", line)
+        # Try single-line format first: "!1452  project!1452  Title (main) ← (branch-name)"
+        # The branch is in the format: (target) ← (source)
+        single_match = re.search(r"!(\d+)\s+\S+\s+(.+?)\s*\(main\)\s*←\s*\(([^)]+)\)", line)
         if single_match:
             mr = {
                 "iid": int(single_match.group(1)),
                 "id": int(single_match.group(1)),  # Alias for compatibility
                 "title": single_match.group(2).strip()[:60],
+                "branch": single_match.group(3).strip(),
+            }
+            if include_author:
+                author_match = re.search(r"@(\w+)", line)
+                if author_match:
+                    mr["author"] = author_match.group(1)
+            mrs.append(mr)
+            continue
+
+        # Fallback: Try without branch info (older format)
+        single_match_no_branch = re.search(r"!(\d+)\s+\S+\s+(.+?)\s*\(main\)", line)
+        if single_match_no_branch:
+            mr = {
+                "iid": int(single_match_no_branch.group(1)),
+                "id": int(single_match_no_branch.group(1)),  # Alias for compatibility
+                "title": single_match_no_branch.group(2).strip()[:60],
+                "branch": "",  # No branch info available
             }
             if include_author:
                 author_match = re.search(r"@(\w+)", line)
@@ -67,12 +85,17 @@ def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, A
             if current_mr.get("iid"):
                 mrs.append(current_mr)
             iid = int(iid_match.group(1) or iid_match.group(2) or iid_match.group(3))
-            current_mr = {"iid": iid, "id": iid}  # Both for compatibility
+            current_mr = {"iid": iid, "id": iid, "branch": ""}  # Both for compatibility
 
         # Extract title
         title_match = re.search(r"Title[:\s]+(.+)", line, re.IGNORECASE)
         if title_match and current_mr.get("iid") and not current_mr.get("title"):
             current_mr["title"] = title_match.group(1).strip()[:60]
+
+        # Extract source branch
+        branch_match = re.search(r"[Ss]ource[_ ]?[Bb]ranch[:\s]+(\S+)", line)
+        if branch_match and current_mr.get("iid") and not current_mr.get("branch"):
+            current_mr["branch"] = branch_match.group(1).strip()
 
         # Extract author if requested
         if include_author:

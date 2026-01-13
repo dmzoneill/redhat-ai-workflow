@@ -1019,10 +1019,21 @@ class SkillExecutor:
         import importlib.util
         import time
 
-        tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools.py"
+        self._debug(f"  → Loading module: {module}")
+        self._debug(f"  → TOOL_MODULES_DIR: {TOOL_MODULES_DIR}")
+
+        # Try tools_basic.py first (new structure), then tools.py (legacy)
+        tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools_basic.py"
+        self._debug(f"  → Trying: {tools_file} (exists: {tools_file.exists()})")
+        if not tools_file.exists():
+            tools_file = TOOL_MODULES_DIR / f"aa_{module}" / "src" / "tools.py"
+            self._debug(f"  → Fallback: {tools_file} (exists: {tools_file.exists()})")
 
         if not tools_file.exists():
-            return {"success": False, "error": f"Module not found: {module}"}
+            return {
+                "success": False,
+                "error": f"Module not found: {module} (checked {TOOL_MODULES_DIR / f'aa_{module}' / 'src'})",
+            }
 
         try:
             temp_server = FastMCP(f"skill-{module}")

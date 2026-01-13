@@ -1,13 +1,10 @@
-"""Bonfire MCP Server - Ephemeral namespace management and ClowdApp deployment.
+"""Bonfire MCP Server - Ephemeral namespace management and ClowdApp deployment (extra tools).
 
-Provides 21 tools for managing ephemeral namespaces and deploying apps.
+Provides additional tools for managing ephemeral namespaces and deploying apps.
 """
 
-import asyncio
 import logging
-import os
 import re
-import subprocess
 
 from mcp.server.fastmcp import FastMCP
 
@@ -20,10 +17,7 @@ from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_ephemeral
 from server.tool_registry import ToolRegistry
-from server.utils import ensure_cluster_auth, get_kubeconfig, get_section_config, truncate_output
-
-# Setup project path for server imports
-
+from server.utils import ensure_cluster_auth, get_kubeconfig, get_section_config, run_cmd, truncate_output
 
 logger = logging.getLogger(__name__)
 
@@ -125,33 +119,13 @@ async def run_bonfire(
 
     logger.info(f"Running: {' '.join(cmd)}")
 
-    run_env = os.environ.copy()
-    # Always set KUBECONFIG for ephemeral cluster
-    run_env["KUBECONFIG"] = kubeconfig
+    # Build env with KUBECONFIG
+    run_env = {"KUBECONFIG": kubeconfig}
     if env:
         run_env.update(env)
 
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=run_env,
-        )
-
-        output = result.stdout + result.stderr
-        if result.returncode != 0:
-            return False, output or "Command failed"
-
-        return True, output
-    except subprocess.TimeoutExpired:
-        return False, f"Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "bonfire not found. Install with: pip install crc-bonfire"
-    except Exception as e:
-        return False, str(e)
+    # Use unified run_cmd
+    return await run_cmd(cmd, env=run_env, timeout=timeout)
 
 
 # ==================== VERSION / INFO ====================

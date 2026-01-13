@@ -1141,3 +1141,21 @@ async def google_calendar_status() -> str:
     lines.append("- Have shared their calendar with you")
 
     return "\n".join(lines)
+
+
+def register_tools(server: "FastMCP") -> int:
+    """Register Google Calendar tools with the MCP server.
+
+    Note: This module uses the @mcp.tool() decorator pattern directly.
+    The tools are registered on the module-level 'mcp' instance.
+    This function is provided for compatibility with the skill engine.
+
+    Args:
+        server: FastMCP server instance (not used - tools are on module mcp)
+
+    Returns:
+        Number of tools registered (0 - tools are on module mcp)
+    """
+    # Tools are already registered on the module-level 'mcp' instance
+    # This function exists for compatibility with the skill engine
+    return 0

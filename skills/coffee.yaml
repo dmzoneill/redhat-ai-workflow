@@ -557,62 +557,135 @@ steps:
 
   # ==================== FAILED PIPELINES ====================
 
-  # Get MR details for pipeline status (reusing pr_ids_to_check from earlier)
-  - name: get_mr1_details
-    description: "Get details for first MR"
-    condition: "{{ pr_ids_to_check|length > 0 }}"
-    tool: gitlab_mr_view
+  # Parse .gitlab-ci.yml to identify jobs with allow_failure: true
+  - name: get_allow_failure_jobs
+    description: "Parse .gitlab-ci.yml to find jobs that allow failure"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      allow_failure_jobs = set()
+
+      # Get repo path from config
+      repo_path = ctx.get('config', {}).get('repositories', {}).get('automation-analytics-backend', {}).get('path', '')
+      if not repo_path:
+        repo_path = str(Path.home() / "src/automation-analytics-backend")
+
+      ci_file = Path(repo_path) / ".gitlab-ci.yml"
+
+      if ci_file.exists():
+        try:
+          with open(ci_file) as f:
+            ci_config = yaml.safe_load(f)
+
+          # Find all jobs with allow_failure: true
+          for job_name, job_config in ci_config.items():
+            # Skip non-job keys (stages, default, include, etc.)
+            if job_name in ('stages', 'default', 'include', 'variables', 'workflow'):
+              continue
+            if isinstance(job_config, dict) and job_config.get('allow_failure', False):
+              allow_failure_jobs.add(job_name.lower())
+        except Exception:
+          pass
+
+      result = list(allow_failure_jobs)
+    output: allow_failure_jobs
+
+  # Get branch names for CI status check
+  - name: get_mr_branches
+    description: "Extract branch names from MRs for CI status check"
+    compute: |
+      # Map MR IDs to branch names (from the parsed MR list)
+      mr_branches = {}
+      for pr in (my_prs or [])[:5]:
+        mr_id = pr.get('id')
+        branch = pr.get('branch', '')
+        if mr_id and branch:
+          mr_branches[mr_id] = branch
+      result = mr_branches
+    output: mr_branches
+
+  # Get CI status for MR 1
+  - name: get_mr1_ci_status
+    description: "Get CI status for first MR"
+    condition: "{{ pr_ids_to_check|length > 0 and mr_branches.get(pr_ids_to_check[0]) }}"
+    tool: gitlab_ci_status
     args:
       project: "automation-analytics/automation-analytics-backend"
-      mr_id: "{{ pr_ids_to_check[0] }}"
-    output: mr1_details_raw
+      branch: "{{ mr_branches.get(pr_ids_to_check[0], '') }}"
+    output: mr1_ci_status_raw
     on_error: continue
 
-  - name: get_mr2_details
-    description: "Get details for second MR"
-    condition: "{{ pr_ids_to_check|length > 1 }}"
-    tool: gitlab_mr_view
+  # Get CI status for MR 2
+  - name: get_mr2_ci_status
+    description: "Get CI status for second MR"
+    condition: "{{ pr_ids_to_check|length > 1 and mr_branches.get(pr_ids_to_check[1]) }}"
+    tool: gitlab_ci_status
     args:
       project: "automation-analytics/automation-analytics-backend"
-      mr_id: "{{ pr_ids_to_check[1] }}"
-    output: mr2_details_raw
+      branch: "{{ mr_branches.get(pr_ids_to_check[1], '') }}"
+    output: mr2_ci_status_raw
     on_error: continue
 
-  - name: get_mr3_details
-    description: "Get details for third MR"
-    condition: "{{ pr_ids_to_check|length > 2 }}"
-    tool: gitlab_mr_view
+  # Get CI status for MR 3
+  - name: get_mr3_ci_status
+    description: "Get CI status for third MR"
+    condition: "{{ pr_ids_to_check|length > 2 and mr_branches.get(pr_ids_to_check[2]) }}"
+    tool: gitlab_ci_status
     args:
       project: "automation-analytics/automation-analytics-backend"
-      mr_id: "{{ pr_ids_to_check[2] }}"
-    output: mr3_details_raw
+      branch: "{{ mr_branches.get(pr_ids_to_check[2], '') }}"
+    output: mr3_ci_status_raw
     on_error: continue
 
   - name: check_failed_pipelines
-    description: "Parse MR details for failed pipelines"
+    description: "Parse CI status for failed pipelines, excluding allow_failure jobs"
     compute: |
+      import re
+
       failed_pipelines = []
 
       # Map MR IDs to titles
       mr_titles = {pr['id']: pr.get('title', '')[:40] for pr in (my_prs or [])}
 
-      # Check each MR for failed status
-      mr_details_list = [
-        (pr_ids_to_check[0] if pr_ids_to_check else None, mr1_details_raw if 'mr1_details_raw' in dir() else None),
-        (pr_ids_to_check[1] if len(pr_ids_to_check) > 1 else None, mr2_details_raw if 'mr2_details_raw' in dir() else None),
-        (pr_ids_to_check[2] if len(pr_ids_to_check) > 2 else None, mr3_details_raw if 'mr3_details_raw' in dir() else None),
+      # Get allow_failure jobs (lowercase for comparison)
+      allow_failure_set = set(j.lower() for j in (allow_failure_jobs or []))
+
+      # Check each MR's CI status
+      ci_status_list = [
+        (pr_ids_to_check[0] if pr_ids_to_check else None, mr1_ci_status_raw if 'mr1_ci_status_raw' in dir() else None),
+        (pr_ids_to_check[1] if len(pr_ids_to_check) > 1 else None, mr2_ci_status_raw if 'mr2_ci_status_raw' in dir() else None),
+        (pr_ids_to_check[2] if len(pr_ids_to_check) > 2 else None, mr3_ci_status_raw if 'mr3_ci_status_raw' in dir() else None),
       ]
 
-      for mr_id, details_raw in mr_details_list:
-        if not mr_id or not details_raw:
+      for mr_id, ci_status_raw in ci_status_list:
+        if not mr_id or not ci_status_raw:
           continue
 
-        output = str(details_raw).lower()
-        if 'failed' in output or 'canceled' in output:
+        output = str(ci_status_raw)
+
+        # Parse job statuses from glab ci status output
+        # Format: "(failed) • 00m 28s	extra		safety"
+        # or "(success) • 00m 48s	required		black"
+        failed_jobs = []
+        for line in output.split('\n'):
+          # Match lines like "(failed) • 00m 28s	extra		jobname"
+          match = re.search(r'\((failed|canceled)\)[^a-z]*\w+\s+(\w+)$', line.strip(), re.IGNORECASE)
+          if match:
+            status = match.group(1).lower()
+            job_name = match.group(2).lower()
+
+            # Skip jobs that have allow_failure: true
+            if job_name not in allow_failure_set:
+              failed_jobs.append(job_name)
+
+        # Only report if there are real (non-allow_failure) failures
+        if failed_jobs:
           failed_pipelines.append({
             "mr_id": mr_id,
             "title": mr_titles.get(mr_id, ''),
-            "status": "failed" if 'failed' in output else "canceled"
+            "status": "failed",
+            "failed_jobs": failed_jobs
           })
 
       result = failed_pipelines
@@ -842,13 +915,21 @@ steps:
         lines.append("✅ No pending feedback on your PRs")
       lines.append("")
 
-      # Failed pipelines
+      # Failed pipelines (excluding allow_failure jobs)
       if failed_pipelines:
         lines.append(f"**🔴 Failed Pipelines ({len(failed_pipelines)}):**")
         for fp in failed_pipelines:
           mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fp['mr_id']}"
-          lines.append(f"- {build_link(mr_url, '!' + str(fp['mr_id']))} - {fp['status'].upper()}")
+          failed_jobs_str = ", ".join(fp.get('failed_jobs', [])[:3])
+          if len(fp.get('failed_jobs', [])) > 3:
+            failed_jobs_str += f" +{len(fp['failed_jobs']) - 3} more"
+          lines.append(f"- {build_link(mr_url, '!' + str(fp['mr_id']))} - {failed_jobs_str or fp['status'].upper()}")
         lines.append("")
+      else:
+        # Show that we're filtering allow_failure jobs
+        if allow_failure_jobs:
+          lines.append(f"✅ No blocking pipeline failures (ignoring {len(allow_failure_jobs)} optional jobs)")
+          lines.append("")
 
       # Review requests - PRs assigned to YOU for review
       lines.append("## 👀 Review Requests")

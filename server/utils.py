@@ -486,32 +486,75 @@ async def run_cmd(
     env: dict[str, str] | None = None,
     timeout: int = 60,
     check: bool = False,
+    use_shell: bool = True,
 ) -> tuple[bool, str]:
-    """Run a command asynchronously (simple 2-tuple return).
+    """Run a command asynchronously through user's shell environment.
+
+    This is the STANDARD way to run commands in this project. It ensures:
+    - User's shell environment (~/.bashrc vars like JIRA_JPAT, KUBECONFIG)
+    - Proper PATH with ~/bin
+    - GUI access (DISPLAY, XAUTHORITY) for browser-based auth
 
     Args:
         cmd: Command and arguments as list
         cwd: Working directory
-        env: Environment variables (merged with current)
+        env: Additional environment variables (merged with shell env)
         timeout: Timeout in seconds
         check: Raise exception on non-zero exit
+        use_shell: If True (default), run through bash with sourced configs.
+                   Set to False only for simple commands that don't need shell env.
 
     Returns:
         Tuple of (success, output) - stderr is merged with stdout on failure
+
+    Example:
+        # Standard usage - runs through user's shell
+        success, output = await run_cmd(["rh-issue", "view-issue", "AAP-12345"])
+
+        # With extra env vars
+        success, output = await run_cmd(
+            ["bonfire", "namespace", "list"],
+            env={"KUBECONFIG": "~/.kube/config.e"}
+        )
+
+        # Simple command that doesn't need shell (rare)
+        success, output = await run_cmd(["git", "status"], use_shell=False)
     """
+    import shlex
+
     try:
-        # Merge environment
-        run_env = os.environ.copy()
+        home = Path.home()
+
+        if use_shell:
+            # Build command string with proper quoting
+            cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
+            if cwd:
+                cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
+
+            # Source shell configs
+            sources = _build_shell_sources(home)
+            if sources:
+                cmd_str = f"{'; '.join(sources)}; {cmd_str}"
+
+            shell_cmd = ["bash", "-c", cmd_str]
+            run_env = _prepare_shell_environment(home)
+            run_cwd = None  # cwd is handled in the command string
+        else:
+            shell_cmd = cmd
+            run_env = os.environ.copy()
+            run_cwd = cwd
+
+        # Merge any additional env vars
         if env:
             run_env.update(env)
 
         result = await asyncio.to_thread(
             subprocess.run,
-            cmd,
+            shell_cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=cwd,
+            cwd=run_cwd,
             env=run_env,
         )
 
@@ -538,31 +581,54 @@ async def run_cmd_full(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     timeout: int = 300,
+    use_shell: bool = True,
 ) -> tuple[bool, str, str]:
-    """Run a command asynchronously (full 3-tuple return with separate stderr).
+    """Run a command asynchronously with separate stdout/stderr.
+
+    Same as run_cmd() but returns stdout and stderr separately.
 
     Args:
         cmd: Command and arguments as list
         cwd: Working directory
-        env: Environment variables (merged with current)
+        env: Additional environment variables (merged with shell env)
         timeout: Timeout in seconds
+        use_shell: If True (default), run through bash with sourced configs.
 
     Returns:
         Tuple of (success, stdout, stderr)
     """
+    import shlex
+
     try:
-        # Merge environment
-        run_env = os.environ.copy()
+        home = Path.home()
+
+        if use_shell:
+            cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
+            if cwd:
+                cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
+
+            sources = _build_shell_sources(home)
+            if sources:
+                cmd_str = f"{'; '.join(sources)}; {cmd_str}"
+
+            shell_cmd = ["bash", "-c", cmd_str]
+            run_env = _prepare_shell_environment(home)
+            run_cwd = None
+        else:
+            shell_cmd = cmd
+            run_env = os.environ.copy()
+            run_cwd = cwd
+
         if env:
             run_env.update(env)
 
         result = await asyncio.to_thread(
             subprocess.run,
-            cmd,
+            shell_cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=cwd,
+            cwd=run_cwd,
             env=run_env,
         )
 
@@ -573,6 +639,75 @@ async def run_cmd_full(
         return False, "", f"Command not found: {cmd[0]}"
     except Exception as e:
         return False, "", str(e)
+
+
+def run_cmd_sync(
+    cmd: list[str],
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    timeout: int = 60,
+    use_shell: bool = True,
+) -> tuple[bool, str]:
+    """Synchronous version of run_cmd for non-async contexts.
+
+    Use this in scripts that aren't async. For async code, prefer run_cmd().
+
+    Args:
+        cmd: Command and arguments as list
+        cwd: Working directory
+        env: Additional environment variables (merged with shell env)
+        timeout: Timeout in seconds
+        use_shell: If True (default), run through bash with sourced configs.
+
+    Returns:
+        Tuple of (success, output) - stderr is merged with stdout on failure
+    """
+    import shlex
+
+    try:
+        home = Path.home()
+
+        if use_shell:
+            cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
+            if cwd:
+                cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
+
+            sources = _build_shell_sources(home)
+            if sources:
+                cmd_str = f"{'; '.join(sources)}; {cmd_str}"
+
+            shell_cmd = ["bash", "-c", cmd_str]
+            run_env = _prepare_shell_environment(home)
+            run_cwd = None
+        else:
+            shell_cmd = cmd
+            run_env = os.environ.copy()
+            run_cwd = cwd
+
+        if env:
+            run_env.update(env)
+
+        result = subprocess.run(
+            shell_cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=run_cwd,
+            env=run_env,
+        )
+
+        output = result.stdout
+        if result.returncode != 0:
+            output = result.stderr or result.stdout or "Command failed"
+            return False, output
+
+        return True, output
+    except subprocess.TimeoutExpired:
+        return False, f"Command timed out after {timeout}s"
+    except FileNotFoundError:
+        return False, f"Command not found: {cmd[0]}"
+    except Exception as e:
+        return False, str(e)
 
 
 def _build_shell_sources(home: Path) -> list[str]:
@@ -670,55 +805,11 @@ async def run_cmd_shell(
     cwd: str | None = None,
     timeout: int = 300,
 ) -> tuple[bool, str, str]:
-    """Run a command through user's login shell for full environment access.
+    """DEPRECATED: Use run_cmd_full() instead.
 
-    Use this for commands that need:
-    - User's shell environment (~/.bashrc vars like JIRA_JPAT)
-    - GUI access (DISPLAY, XAUTHORITY) for browser-based auth
-    - Interactive terminal capabilities
-
-    Args:
-        cmd: Command and arguments as list
-        cwd: Working directory
-        timeout: Timeout in seconds
-
-    Returns:
-        Tuple of (success, stdout, stderr)
+    This is kept for backwards compatibility but just calls run_cmd_full().
     """
-    import shlex
-
-    home = Path.home()
-
-    # Build the command string with proper quoting
-    cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
-    if cwd:
-        cmd_str = f"cd {shlex.quote(cwd)} && {cmd_str}"
-
-    # Source shell configs to get environment variables and functions
-    sources = _build_shell_sources(home)
-    if sources:
-        cmd_str = f"{'; '.join(sources)}; {cmd_str}"
-
-    shell_cmd = ["bash", "-c", cmd_str]
-
-    # Prepare environment
-    env = _prepare_shell_environment(home)
-
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            shell_cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-        )
-
-        return result.returncode == 0, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        return False, "", f"Command timed out after {timeout}s"
-    except Exception as e:
-        return False, "", str(e)
+    return await run_cmd_full(cmd, cwd=cwd, timeout=timeout, use_shell=True)
 
 
 def is_auth_error(output: str) -> bool:

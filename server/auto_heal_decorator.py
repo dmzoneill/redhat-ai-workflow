@@ -383,6 +383,10 @@ def auto_heal(
     3. Retry the tool call
     4. Log the result
 
+    Works with both sync and async functions. Sync functions are wrapped
+    but remain sync (no auto-healing retry for sync, just passthrough).
+    Async functions get full auto-healing with retry support.
+
     Args:
         cluster: Cluster hint for auth fixes. "auto" guesses from tool name.
         max_retries: Maximum retry attempts after applying fix (default: 1)
@@ -394,12 +398,31 @@ def auto_heal(
         async def bonfire_namespace_reserve(duration: str = "4h") -> str:
             ...
     """
+    import inspect
+
     if retry_on is None:
         retry_on = ["auth", "network"]
 
     def decorator(func: Callable):
+        # Check if the function is async or sync
+        if not inspect.iscoroutinefunction(func):
+            # For sync functions, just pass through (no auto-healing)
+            # This preserves the sync nature of helper functions
+            @wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            # Mark the function for introspection
+            sync_wrapper.__dict__["_auto_heal_enabled"] = True
+            sync_wrapper.__dict__["_auto_heal_cluster"] = cluster
+            sync_wrapper.__dict__["_auto_heal_max_retries"] = max_retries
+            sync_wrapper.__dict__["_auto_heal_is_sync"] = True
+
+            return sync_wrapper
+
+        # For async functions, provide full auto-healing
         @wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def async_wrapper(*args, **kwargs):
             tool_name = func.__name__
             last_result = None
 
@@ -454,11 +477,12 @@ def auto_heal(
             return last_result
 
         # Mark the function as auto-heal enabled for introspection
-        wrapper.__dict__["_auto_heal_enabled"] = True
-        wrapper.__dict__["_auto_heal_cluster"] = cluster
-        wrapper.__dict__["_auto_heal_max_retries"] = max_retries
+        async_wrapper.__dict__["_auto_heal_enabled"] = True
+        async_wrapper.__dict__["_auto_heal_cluster"] = cluster
+        async_wrapper.__dict__["_auto_heal_max_retries"] = max_retries
+        async_wrapper.__dict__["_auto_heal_is_sync"] = False
 
-        return wrapper
+        return async_wrapper
 
     return decorator
 
