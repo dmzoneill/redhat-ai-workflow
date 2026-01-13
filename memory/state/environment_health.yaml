@@ -1,8 +1,9 @@
 health_checks:
   gitlab_token:
-    details: GitLab token invalid (glab auth login needed)
+    details: "GitLab check failed:           \n   ERROR  \n          \n  Get \"https://gitlab.com/api/v4/user\"\
+      : dial tcp 172.65.251.78:443:"
     healthy: false
-    last_checked: '2026-01-12T22:36:40.805149'
+    last_checked: '2026-01-13T11:32:04.068622'
   kubeconfigs:
     details:
       ephemeral:
@@ -18,20 +19,20 @@ health_checks:
         reason: unauthorized
         valid: false
       stage:
-        expires: '2026-01-12T23:49:06.892272'
-        remaining_minutes: 72
-        valid: true
+        expires: null
+        reason: unauthorized
+        valid: false
     healthy: false
-    last_checked: '2026-01-12T22:36:38.612354'
+    last_checked: '2026-01-13T11:31:49.011827'
   quay_auth:
-    details: Quay auth invalid (podman login quay.io needed)
+    details: 'Quay check failed: Command timed out after 10s'
     healthy: false
-    last_checked: '2026-01-12T22:36:40.427394'
+    last_checked: '2026-01-13T11:31:59.024444'
   vpn:
     details: VPN disconnected (cannot reach internal clusters)
     healthy: false
-    last_checked: '2026-01-12T22:36:32.740229'
+    last_checked: '2026-01-13T11:31:28.980884'
 last_checks:
   kubeconfig_stage_expires: '2026-01-12T23:49:06.892272'
-  vpn_last_checked: '2026-01-12T22:36:40.807904'
+  vpn_last_checked: '2026-01-13T11:32:04.070023'
   vpn_status: disconnected
