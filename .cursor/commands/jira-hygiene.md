@@ -4,7 +4,7 @@ Check and fix Jira issue quality before you start coding.
 
 ## Instructions
 
-```
+```text
 skill_run("jira_hygiene", '{"issue_key": "AAP-XXXXX"}')
 ```
 

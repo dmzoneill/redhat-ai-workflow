@@ -31,7 +31,7 @@ The IDE integration is a **convenience layer**, not a dependency. Users should b
 
 ### Architecture Pattern
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    IDE EXTENSION (Optional)                  │
 │         Status Bar │ Webview │ Notifications                │
@@ -68,7 +68,7 @@ class SkillExecutor:
         result = step.execute()
         await self.ide_extension.update_ui(result)  # Blocks on IDE!
         return result
-```
+```text
 
 ---
 
@@ -146,7 +146,7 @@ class SkillExecutor:
 ┌─────────────────────────────────────────────────────────────┐
 │ [file tabs]                                    │ 🟢 Slack │ AAP-61214 │ ⚡ Stage OK │
 └─────────────────────────────────────────────────────────────┘
-```
+```text
 
 **Components:**
 | Item | Shows | Click Action |
@@ -181,7 +181,7 @@ WORKFLOW EXPLORER
 └── 📬 Recent Messages
     ├── @alice: Can you review MR !1459?
     └── @bob: Deploy looks good
-```
+```text
 
 **Features:**
 - Refresh on demand or auto-refresh
@@ -204,7 +204,7 @@ WORKFLOW EXPLORER
 > AI Workflow: Check Pipeline Status
 > AI Workflow: Investigate Alert
 > AI Workflow: Load DevOps Persona
-```
+```text
 
 **Benefits:**
 - Discoverable (searchable)
@@ -258,7 +258,7 @@ WORKFLOW EXPLORER
 │  • 09:45 - Started work on AAP-61214                      │
 │                                                            │
 └────────────────────────────────────────────────────────────┘
-```
+```text
 
 **Tech:**
 - HTML/CSS/JS webview
@@ -285,7 +285,7 @@ extensions/
     │   └── webview.ts        # Dashboard
     └── media/
         └── dashboard.html
-```
+```text
 
 **Pros:**
 - Full control
@@ -328,7 +328,7 @@ Use existing D-Bus interface (already in slack_daemon):
 # slack_daemon.py already exposes:
 # - com.aiworkflow.SlackAgent.GetStatus
 # - com.aiworkflow.SlackAgent.GetStats
-```
+```text
 
 Extension can query via D-Bus for real-time status.
 
@@ -366,7 +366,7 @@ Week 2:
 Week 3:
 ├── Day 1-2: Notifications (Phase 4)
 └── Day 3-5: Dashboard webview (Phase 5)
-```
+```text
 
 ---
 
@@ -421,7 +421,7 @@ Week 3:
 │ > git checkout -b aap-61214-fix-billing-calculation                 │
 │ > Switched to new branch 'aap-61214-fix-billing-calculation'        │
 └─────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### With Conditional Branches (Decision Tree)
 
@@ -456,7 +456,7 @@ Week 3:
 │   │ 5. Deploy App   │ ⏸️ Pending                                    │
 │   └─────────────────┘                                               │
 └─────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### Display Location Options
 
@@ -476,7 +476,7 @@ Opens as a tab in the editor area, like a file.
 │          │  └──────────────────────────────────────────┘   │
 │          │                                                  │
 └──────────┴──────────────────────────────────────────────────┘
-```
+```text
 
 | Pros | Cons |
 |------|------|
@@ -501,7 +501,7 @@ Like the Terminal, Problems, Output panels.
 ├─────────────────────────────────────────────────────────────┤
 │ start_work: [✅ fetch] → [✅ branch] → [🔄 checkout] → [⏸ context] │
 └─────────────────────────────────────────────────────────────┘
-```
+```text
 
 | Pros | Cons |
 |------|------|
@@ -525,7 +525,7 @@ Opens `http://localhost:PORT/skill-viewer` in a browser.
 │   Can be larger than any IDE panel               │
 │   Shareable URL for team members                 │
 └───────────────────────────────────────────────────┘
-```
+```text
 
 | Pros | Cons |
 |------|------|
@@ -578,7 +578,7 @@ flowchart TD
     C -->|No| D[🔄 Create Branch]
     D --> E[⏸ Switch]
 ```​
-```
+```text
 
 | Pros | Cons |
 |------|------|

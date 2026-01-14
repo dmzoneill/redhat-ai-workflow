@@ -58,7 +58,7 @@ Instead of chaining tools manually, use pre-built skills:
 
 ## Architecture Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │                    Claude Session                        │
 ├─────────────────────────────────────────────────────────┤
@@ -86,30 +86,30 @@ Instead of chaining tools manually, use pre-built skills:
 ## Quick Start
 
 ### Load an Agent (Dynamic!)
-```
+```text
 Load the devops agent
 ```
 Tools switch dynamically! You get k8s_basic, bonfire_basic, jira_basic, quay (~74 tools).
 
-```
+```text
 Load the developer agent
 ```
 Now you have git_basic, gitlab_basic, jira_basic (~78 tools).
 
 ### Run a Skill
-```
+```text
 Run the start_work skill for issue PROJ-12345 in my-backend
 ```
 Claude follows the workflow in `skills/start_work.yaml`.
 
 ### Use Memory
-```
+```text
 What am I currently working on?
 ```
 Claude reads `memory/state/current_work.yaml`.
 
 ### Deploy to Ephemeral
-```
+```text
 Deploy MR 1459 to ephemeral
 Test AAP-61214 in ephemeral
 ```
@@ -176,7 +176,7 @@ kibana_get_errors(environment="stage", time_range="30m")
 konflux_list_snapshots(namespace="your-tenant")
 bonfire_namespace_reserve(duration="2h")
 bonfire_deploy(app="your-app", namespace="ephemeral-xxx")
-```
+```text
 
 ---
 
@@ -184,8 +184,9 @@ bonfire_deploy(app="your-app", namespace="ephemeral-xxx")
 
 Personas are tool configuration profiles. **Load one and tools switch dynamically!**
 
-### How It Works
-```
+### How Persona Loading Works
+
+```text
 You: Load the devops agent
 
 [Server unloads current tools, loads k8s_basic/bonfire_basic/jira_basic/quay]
@@ -300,7 +301,7 @@ oc --kubeconfig=~/.kube/config.e get pods -n ephemeral-xxx
 
 # RIGHT - use KUBECONFIG env for bonfire:
 KUBECONFIG=~/.kube/config.e bonfire namespace list --mine
-```
+```text
 
 ### Namespaces
 | Environment | Namespace |
@@ -342,7 +343,7 @@ All authentication uses system credentials:
 9. gitlab_ci_status → monitor pipeline
 10. gitlab_mr_update draft=false → ready for review
 11. jira_set_status "In Review"
-```
+```text
 
 ### Incident Response
 ```
@@ -354,7 +355,7 @@ All authentication uses system credentials:
 6. kubectl_rollout_restart → if restart needed
 7. prometheus_alerts → verify resolved
 8. jira_create_issue → track incident
-```
+```text
 
 ### Release
 ```
@@ -368,13 +369,13 @@ All authentication uses system credentials:
 8. appinterface_get_saas → check deployment config
 9. [merge to deploy]
 10. prometheus_alerts → monitor post-deploy
-```
+```text
 
 ---
 
 ## Project Structure
 
-```
+```text
 ai-workflow/
 ├── CLAUDE.md              # This file (AI context)
 ├── README.md              # Human documentation
@@ -429,7 +430,7 @@ ai-workflow/
 
 **All MCP tools** and **all skills** include auto-heal capabilities.
 
-### How It Works
+### How Auto-Heal Works
 
 **Tool-Level (via `@auto_heal()` decorator):**
 1. Tool fails with auth/network error

@@ -11,7 +11,7 @@ Diagnose CI/CD pipeline issues.
 
 ## Instructions
 
-```
+```text
 skill_run("check_ci_health", '{"project": "$PROJECT"}')
 ```
 

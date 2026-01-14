@@ -3,7 +3,7 @@
 **Description:** Run comprehensive multi-agent code review with 6 specialized agents (hybrid Claude + Gemini).
 
 **Usage:**
-```
+```text
 skill_run("review_pr_multiagent", '{"mr_id": 1482}')
 ```
 
@@ -32,7 +32,7 @@ Each agent focuses on a specific aspect using Claude or Gemini via Vertex AI:
 ## Options
 
 ### Full Review (Default)
-```
+```text
 skill_run("review_pr_multiagent", '{"mr_id": 1482}')
 ```
 
@@ -40,7 +40,7 @@ skill_run("review_pr_multiagent", '{"mr_id": 1482}')
 Run only specific agents to optimize cost and time:
 
 **Security audit:**
-```
+```text
 skill_run("review_pr_multiagent", '{
   "mr_id": 1482,
   "agents": "security,architecture"
@@ -49,7 +49,7 @@ skill_run("review_pr_multiagent", '{
 Cost: ~$0.05, Time: ~20s
 
 **Hotfix check:**
-```
+```text
 skill_run("review_pr_multiagent", '{
   "mr_id": 1482,
   "agents": "security,testing"
@@ -58,7 +58,7 @@ skill_run("review_pr_multiagent", '{
 Cost: ~$0.03, Time: ~15s
 
 **Documentation review:**
-```
+```text
 skill_run("review_pr_multiagent", '{
   "mr_id": 1482,
   "agents": "documentation,style"
@@ -68,7 +68,7 @@ Cost: ~$0.01, Time: ~10s
 
 ### Preview Mode
 Generate review without posting to MR:
-```
+```text
 skill_run("review_pr_multiagent", '{
   "mr_id": 1482,
   "post_combined": false
@@ -77,7 +77,7 @@ skill_run("review_pr_multiagent", '{
 
 ### Sequential Execution
 For rate limiting or debugging:
-```
+```text
 skill_run("review_pr_multiagent", '{
   "mr_id": 1482,
   "parallel": false
@@ -112,14 +112,14 @@ The coordinator creates a structured review:
 
 ### 📊 Summary
 - Overall assessment and recommendation
-```
+```text
 
 ## Example Workflows
 
 **High-priority feature:**
 ```
 skill_run("review_pr_multiagent", '{"mr_id": 1482}')
-```
+```text
 
 **Production hotfix:**
 ```
@@ -127,7 +127,7 @@ skill_run("review_pr_multiagent", '{
   "mr_id": 1483,
   "agents": "security,testing"
 }')
-```
+```text
 
 **New API endpoint:**
 ```

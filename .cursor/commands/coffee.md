@@ -6,7 +6,7 @@ Your daily standup assistant - everything you need at the start of your work day
 
 Get your morning briefing:
 
-```
+```text
 skill_run("coffee")
 ```
 
@@ -33,7 +33,7 @@ skill_run("coffee", '{"days_back": 7}')
 
 # Full email processing (mark read & archive)
 skill_run("coffee", '{"full_email_scan": true, "auto_archive_email": true}')
-```
+```text
 
 ## First Time Setup
 
@@ -41,7 +41,7 @@ If email isn't working, you need to enable Gmail API:
 
 ```
 /setup-gmail
-```
+```text
 
 This adds Gmail scopes to your existing Google OAuth.
 

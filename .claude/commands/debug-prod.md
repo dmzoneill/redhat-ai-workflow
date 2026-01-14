@@ -10,7 +10,7 @@ Deep investigation of production issues.
 
 ## Instructions
 
-```
+```text
 skill_run("debug_prod")
 ```
 

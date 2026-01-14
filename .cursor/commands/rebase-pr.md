@@ -4,7 +4,7 @@ Rebase a merge request onto latest main.
 
 ## Instructions
 
-```
+```text
 skill_run("rebase_pr", '{"mr_id": $MR_ID}')
 ```
 

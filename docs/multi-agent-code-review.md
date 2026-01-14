@@ -6,7 +6,7 @@ A sophisticated code review system that uses specialized AI agents to perform co
 
 The multi-agent review system coordinates **6 specialized review agents** plus a **coordinator agent** to provide thorough, high-quality code reviews:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    Coordinator Agent                         │
 │        Synthesizes, deduplicates, and prioritizes           │
@@ -428,7 +428,7 @@ echo $ANTHROPIC_API_KEY
 ```yaml
 # In skill, increase coordinator max_tokens:
 max_tokens=4000  # Instead of 3000
-```
+```text
 
 ### Duplicate Findings
 **Symptom:** Same issue reported by multiple agents

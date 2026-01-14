@@ -10,7 +10,7 @@ Review Konflux integration test status.
 
 ## Instructions
 
-```
+```text
 skill_run("check_integration_tests", '{}')
 ```
 

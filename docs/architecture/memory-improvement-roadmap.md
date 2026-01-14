@@ -155,7 +155,7 @@ async def memory_query(key: str, query: str) -> list[TextContent]:
     # Return formatted results
     return [TextContent(type="text",
         text=f"## Query Results\n**Matches:** {len(matches)}\n\n{yaml.dump(matches)}")]
-```
+```text
 
 **Impact:** Reduces memory reads for large files, enables precise data extraction, improves query performance.
 
@@ -456,7 +456,7 @@ ctx = load_shared_context()
 if ctx and ctx.get("pod_name"):
   pod = ctx["pod_name"]  # Reuse discovered pod name
   # Skip re-discovery, go straight to debugging
-```
+```text
 
 **Impact:** Reduces redundant work across skills. When investigating an incident, follow-up skills can reuse discovered information instead of re-querying Kubernetes/Prometheus.
 

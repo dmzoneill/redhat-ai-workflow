@@ -83,7 +83,7 @@ tool_exec("prometheus_alerts", '{"environment": "stage"}')
 tool_exec("alertmanager_alerts", '{"environment": "stage"}')
 tool_exec("kibana_search_logs", '{"query": "error", "environment": "stage", "limit": 2}')
 tool_exec("konflux_list_components", '{"application": "aap-aa-main", "namespace": "aap-aa-tenant"}')
-```
+```text
 
 ## Expected Results
 

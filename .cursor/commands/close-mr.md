@@ -4,7 +4,7 @@ Close a merge request and update linked Jira.
 
 ## Instructions
 
-```
+```text
 skill_run("close_mr", '{"mr_id": $MR_ID, "project": "$PROJECT"}')
 ```
 

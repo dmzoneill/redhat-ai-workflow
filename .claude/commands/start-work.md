@@ -12,7 +12,7 @@ Begin work on a Jira issue - creates branch, sets up environment.
 
 Start working on a Jira issue:
 
-```
+```text
 skill_run("start_work", '{"issue_key": "$JIRA_KEY"}')
 ```
 
@@ -31,7 +31,7 @@ skill_run("start_work", '{"issue_key": "AAP-61214"}')
 
 # With specific repository
 skill_run("start_work", '{"issue_key": "AAP-61214", "repo": "automation-analytics-backend"}')
-```
+```text
 
 ## Branch Naming
 

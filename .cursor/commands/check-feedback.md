@@ -10,7 +10,7 @@ Run the check_mr_feedback skill to scan your open MRs for:
 - Code change requests
 - Questions requiring answers
 
-```
+```text
 skill_run("check_mr_feedback", '{}')
 ```
 
@@ -22,7 +22,7 @@ for mr in $(glab mr list --author=@me -R automation-analytics/automation-analyti
   echo "=== MR !$mr ==="
   glab mr view $mr --comments | grep -A5 -E "^[a-zA-Z].*commented" | grep -v "group_10571_bot\|Konflux\|Starting Pipelinerun"
 done
-```
+```text
 
 ## Meeting Requests
 
@@ -35,7 +35,7 @@ google_calendar_quick_meeting(
   when="tomorrow 10:00",
   duration_minutes=30
 )
-```
+```text
 
 First, check Google Calendar setup:
 ```

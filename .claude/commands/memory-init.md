@@ -11,17 +11,17 @@ Initialize or reset memory files to a clean state.
 ## Usage
 
 **Reset state files only (preserves learned patterns):**
-```
+```text
 skill_run("memory_init", '{"confirm": true}')
 ```
 
 **Full reset (including learned memory):**
-```
+```text
 skill_run("memory_init", '{"confirm": true, "reset_learned": true}')
 ```
 
 **Full reset but keep patterns:**
-```
+```text
 skill_run("memory_init", '{"confirm": true, "reset_learned": true, "preserve_patterns": true}')
 ```
 

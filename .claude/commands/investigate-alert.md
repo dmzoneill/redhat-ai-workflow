@@ -10,7 +10,7 @@ Quick triage of a firing Prometheus alert.
 
 ## Instructions
 
-```
+```text
 skill_run("investigate_alert", '{"environment": "stage"}')
 ```
 

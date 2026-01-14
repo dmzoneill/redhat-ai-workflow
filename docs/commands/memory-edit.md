@@ -68,7 +68,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```bash
 
 For detailed step-by-step process, see the [memory_edit skill documentation](../skills/memory_edit.md).
 
@@ -89,7 +89,7 @@ skill_run("memory_edit", '{
   "match_key": "key",
   "match_value": "AAP-12345"
 }')
-```
+```text
 
 Remove a merged MR from open_mrs:
 ```
@@ -100,7 +100,7 @@ skill_run("memory_edit", '{
   "match_key": "id",
   "match_value": "123"
 }')
-```
+```bash
 
 #
 

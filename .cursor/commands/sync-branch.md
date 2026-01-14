@@ -4,7 +4,7 @@ Quickly rebase your current branch onto main.
 
 ## Instructions
 
-```
+```text
 skill_run("sync_branch")
 ```
 

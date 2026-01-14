@@ -6,7 +6,7 @@ Create a GitLab MR from the current branch with proper formatting.
 
 Create an MR for the current branch:
 
-```
+```text
 skill_run("create_mr", '{"issue_key": "$JIRA_KEY"}')
 ```
 
@@ -27,7 +27,7 @@ skill_run("create_mr", '{"issue_key": "AAP-61214"}')
 
 # Create as draft
 skill_run("create_mr", '{"issue_key": "AAP-61214", "draft": true}')
-```
+```text
 
 ## MR Title Format
 

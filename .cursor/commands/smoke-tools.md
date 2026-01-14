@@ -378,7 +378,7 @@ tool_exec("session_start", '{}')
 tool_exec("skill_list", '{}')
 tool_exec("skill_run", '{"skill_name": "memory_view"}')
 tool_exec("debug_tool", '{"tool_name": "git_status"}')  # SKIP - server-level tool, not in module
-```
+```text
 
 **Safe to test:** memory_read, memory_session_log, check_known_issues, tool_list, tool_exec, persona_list, session_start, skill_list, skill_run (9 tools)
 **Skip (modifies state):** memory_write, memory_update, memory_append, learn_tool_fix, persona_load, vpn_connect, kube_login (7 tools)

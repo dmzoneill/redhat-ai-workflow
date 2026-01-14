@@ -38,7 +38,7 @@ flowchart TD
 
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
-```
+```text
 
 ## Details
 
@@ -62,7 +62,7 @@ Tool: bonfire_deploy
 Error: manifest unknown
 Cause: Short SHA doesn't exist in Quay
 Fix: Use full 40-char SHA
-```
+```text
 
 ## The Learning Loop
 

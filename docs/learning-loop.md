@@ -13,7 +13,7 @@ AI Workflow implements auto-healing at two levels:
 
 ## Tool-Level: The Learning Loop
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Tool Execution                            │
 ├─────────────────────────────────────────────────────────────────┤
@@ -115,7 +115,7 @@ check_known_issues(error_text="manifest unknown")
 
 # Check both
 check_known_issues(tool_name="bonfire_deploy", error_text="manifest unknown")
-```
+```text
 
 **Output:**
 ```
@@ -152,7 +152,7 @@ learn_tool_fix(
     root_cause="Short SHA doesn't exist in Quay",
     fix_description="Use full 40-char SHA instead of 8-char"
 )
-```
+```text
 
 **Output:**
 ```
@@ -235,7 +235,7 @@ failures:
     success: false
     timestamp: "2026-01-04T11:00:00"
     skill: "review_all_prs"
-```
+```text
 
 ## Integration Points
 
@@ -253,7 +253,7 @@ The learning loop is integrated into all tool execution paths:
 ### Tool-Level Fix (Code Change)
 
 1. **Tool fails:**
-   ```
+```
    ❌ bonfire_deploy failed: manifest unknown
 
    💡 Known Issues Found!

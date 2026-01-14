@@ -8,13 +8,13 @@ The `beer` skill is your end-of-day assistant. It summarizes what you accomplish
 
 ## Quick Start
 
-```
+```text
 skill_run("beer", '{}')
 ```
 
 Or use the Cursor command:
 
-```
+```text
 /beer
 ```
 
@@ -65,7 +65,7 @@ flowchart TD
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style NORMAL fill:#f59e0b,stroke:#d97706,color:#fff
-```
+```text
 
 ## Sections
 

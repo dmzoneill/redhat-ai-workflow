@@ -12,7 +12,7 @@ Batch review all open Merge Requests (excluding your own).
 
 Review all open MRs in the repository:
 
-```
+```text
 skill_run("review_all_prs", '{}')
 ```
 

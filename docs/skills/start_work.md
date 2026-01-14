@@ -8,13 +8,13 @@ The `start_work` skill is your entry point for beginning work on any Jira issue.
 
 ## Quick Start
 
-```
+```text
 skill_run("start_work", '{"issue_key": "AAP-12345"}')
 ```
 
 Or with explicit repository:
 
-```
+```text
 skill_run("start_work", '{"issue_key": "AAP-12345", "repo_name": "automation-analytics-backend"}')
 ```
 
@@ -56,7 +56,7 @@ flowchart TD
     style READY fill:#10b981,stroke:#059669,color:#fff
     style CREATE fill:#3b82f6,stroke:#2563eb,color:#fff
     style FEEDBACK fill:#f59e0b,stroke:#d97706,color:#fff
-```
+```text
 
 ## MCP Tools Used
 
@@ -100,7 +100,7 @@ Claude: [Runs start_work skill]
            Status: In Progress
 
         Ready to code! Your branch is set up.
-```
+```text
 
 ### Resuming Existing Work
 

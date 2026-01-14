@@ -8,7 +8,7 @@ The Slack persona is designed for autonomous Slack integration. It monitors chan
 
 ## Quick Load
 
-```
+```text
 Load the slack agent
 ```
 
@@ -164,7 +164,7 @@ make slack-watch
 
 # Reload configuration
 make slack-reload
-```
+```text
 
 ### Log Location
 
@@ -196,14 +196,14 @@ The Slack agent uses concise, Slack-appropriate formatting:
 📋 *AAP-12345*: Add REST endpoint for user preferences
 Status: In Progress | Assignee: @david
 [View in Jira](link)
-```
+```text
 
 **Not Like This:**
 ```
 I found the Jira issue you requested. Here are the details...
 The issue titled "Add REST endpoint for user preferences"...
 (too verbose for Slack)
-```
+```text
 
 ## Intent Detection
 
@@ -237,7 +237,7 @@ Bot: 📋 *AAP-12345*: Implement caching layer
      Status: In Progress 🔄
      Assignee: @jsmith
      [View in Jira](https://issues.redhat.com/browse/AAP-12345)
-```
+```text
 
 ### MR Status
 
@@ -248,7 +248,7 @@ Bot: 🦊 *!456*: AAP-12345 - feat: Add caching
      Author: jsmith | Target: main
      Pipeline: Passed ✅
      [View MR](https://gitlab.../456)
-```
+```text
 
 ### Alert Investigation
 
@@ -273,7 +273,7 @@ Bot: 👀 Investigating alert...
      • Create Jira issue
      • Silence alert (1h)
      • View full logs
-```
+```text
 
 ### Help
 

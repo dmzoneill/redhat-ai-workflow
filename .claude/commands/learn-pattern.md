@@ -14,7 +14,7 @@ Save a new error pattern to memory for future recognition.
 
 When you discover an error pattern and its fix, teach the AI to remember it:
 
-```
+```text
 skill_run("learn_pattern", '{"pattern": "OOMKilled", "meaning": "Container exceeded memory limit", "fix": "Increase memory limits"}')
 ```
 
@@ -27,7 +27,7 @@ skill_run("learn_pattern", '{"pattern": "OOMKilled", "meaning": "Container excee
 
 ## Example
 
-```
+```text
 /learn-pattern
 Pattern: ImagePullBackOff
 Meaning: Kubernetes cannot pull the container image

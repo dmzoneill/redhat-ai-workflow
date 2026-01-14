@@ -4,7 +4,7 @@ Scale a deployment up or down.
 
 ## Instructions
 
-```
+```text
 skill_run("scale_deployment", '{"deployment": "$DEPLOYMENT", "namespace": "$NAMESPACE", "replicas": $COUNT}')
 ```
 

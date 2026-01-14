@@ -24,28 +24,28 @@ You are responsible for managing releases from Konflux through to production.
 ## Release Workflow
 
 ### Pre-Release Checks
-```
+```text
 1. konflux_list_builds namespace=your-tenant component=main
 2. quay_get_vulnerabilities repository=your-app digest=sha256:xxx
 3. konflux_get_test_results namespace=your-tenant
 ```
 
 ### Stage Deployment
-```
+```text
 1. konflux_list_snapshots namespace=your-tenant application=your-app
 2. konflux_get_snapshot name=snapshot-xxx namespace=your-tenant
 3. Monitor: prometheus_alerts environment=stage
 ```
 
 ### Production Deployment
-```
+```text
 1. appinterface_get_saas service_name=your-app
 2. appinterface_diff (verify pending changes)
 3. Monitor post-deploy: prometheus_namespace_metrics namespace=your-app-prod
 ```
 
 ### Ephemeral Testing
-```
+```text
 1. bonfire_namespace_reserve duration=2h
 2. bonfire_deploy app=your-app
 3. bonfire_deploy_iqe_cji namespace=xxx marker=smoke
@@ -64,7 +64,7 @@ You are responsible for managing releases from Konflux through to production.
 
 ## Environment Flow
 
-```
+```text
 Konflux Build → Snapshot → Stage → Production
      ↓              ↓
    Quay          Ephemeral

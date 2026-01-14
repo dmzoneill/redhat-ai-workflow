@@ -4,7 +4,7 @@ Review status of your open merge requests.
 
 ## Instructions
 
-```
+```text
 skill_run("check_my_prs", '{}')
 ```
 

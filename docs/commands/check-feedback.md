@@ -54,7 +54,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```text
 
 For detailed step-by-step process, see the [check_mr_feedback skill documentation](../skills/check_mr_feedback.md).
 
@@ -80,7 +80,7 @@ for mr in $(glab mr list --author=@me -R automation-analytics/automation-analyti
   echo "=== MR !$mr ==="
   glab mr view $mr --comments | grep -A5 -E "^[a-zA-Z].*commented" | grep -v "group_10571_bot\|Konflux\|Starting Pipelinerun"
 done
-```
+```text
 
 ## Meeting Requests
 
@@ -93,7 +93,7 @@ google_calendar_quick_meeting(
   when="tomorrow 10:00",
   duration_minutes=30
 )
-```
+```text
 
 First, check Google Calendar setup:
 ```

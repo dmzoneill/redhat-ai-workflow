@@ -18,19 +18,19 @@ Check repository documentation for staleness and get suggestions for updates.
 
 Check documentation in current repo:
 
-```
+```text
 skill_run("update_docs", '{"check_only": true}')
 ```
 
 Check a specific repository:
 
-```
+```text
 skill_run("update_docs", '{"repo_name": "automation-analytics-backend", "check_only": true}')
 ```
 
 With issue key for potential commits:
 
-```
+```text
 skill_run("update_docs", '{"issue_key": "AAP-12345", "check_only": false}')
 ```
 

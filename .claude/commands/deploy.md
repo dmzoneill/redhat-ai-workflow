@@ -9,16 +9,16 @@ arguments:
 **Description:** Deploy a Merge Request to an ephemeral environment for testing.
 
 **Usage:**
-```
+```text
 skill_run("test_mr_ephemeral", '{"mr_id": 1450}')
 ```
 
 **Options:**
 - `mr_id`: The GitLab MR number (required)
 - `billing`: Deploy billing ClowdApp instead of main (default: false)
-  ```
+  ```text
   skill_run("test_mr_ephemeral", '{"mr_id": 1450, "billing": true}')
-  ```
+```
 - `run_tests`: Run pytest after deployment (default: true)
 
 **What it does:**
@@ -38,7 +38,7 @@ The skill automatically determines whether to deploy the main or billing ClowdAp
 - Files changed (billing controller paths)
 
 **Example:**
-```
+```bash
 # Deploy MR 1450 to ephemeral
 /deploy 1450
 
@@ -53,12 +53,12 @@ skill_run("test_mr_ephemeral", '{"mr_id": 1450, "billing": true}')
 
 **Cleanup:**
 After testing, release the namespace:
-```
+```text
 bonfire_namespace_release("ephemeral-xxxxx")
 ```
 
 Or check your namespaces:
-```
+```text
 /check-namespaces
 ```
 

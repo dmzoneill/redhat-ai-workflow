@@ -47,7 +47,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```text
 
 For detailed step-by-step process, see the [check_my_prs skill documentation](../skills/check_my_prs.md).
 

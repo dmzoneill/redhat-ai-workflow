@@ -4,7 +4,7 @@ Post a review request to the team Slack channel for an existing MR.
 
 ## Instructions
 
-```
+```text
 skill_run("notify_mr", '{"mr_id": "$MR_ID"}')
 ```
 
@@ -41,7 +41,7 @@ skill_run("notify_mr", '{"mr_id": "1459", "reminder": true}')
 
 # With specific project
 skill_run("notify_mr", '{"mr_id": "1459", "project": "automation-analytics/automation-analytics-backend"}')
-```
+```text
 
 ## What Gets Posted
 
@@ -53,7 +53,7 @@ skill_run("notify_mr", '{"mr_id": "1459", "project": "automation-analytics/autom
 📁 *Repo:* automation-analytics-backend
 
 Please review when you have a moment 🙏
-```
+```text
 
 Or as a reminder:
 ```

@@ -26,7 +26,7 @@ Add to your project's `.cursor/mcp.json`:
     }
   }
 }
-```
+```text
 
 ## Directory Structure
 
@@ -249,7 +249,7 @@ Start with minimal tools, switch agents dynamically:
 
 ```bash
 python -m src.server  # Starts with developer persona (~78 tools)
-```
+```text
 
 Then in chat:
 ```
@@ -311,7 +311,7 @@ TOOL_MODULES = {
 ```yaml
 tools:
   - {name}
-```
+```text
 
 ## Special Modules
 

@@ -25,14 +25,14 @@ You have access to all observability tools:
 ## Incident Workflow
 
 ### Phase 1: Triage (first 5 minutes)
-```
+```text
 1. prometheus_alerts environment=production severity=critical
 2. k8s_namespace_health namespace=your-app-prod
 3. kibana_get_errors environment=production time_range=15m
 ```
 
 ### Phase 2: Assess (next 10 minutes)
-```
+```text
 1. prometheus_query "rate(http_requests_total{code=~'5..'}[5m])"
 2. kubectl_get_pods namespace=your-app-prod
 3. kubectl_get_events namespace=your-app-prod
@@ -64,14 +64,14 @@ Update Jira with:
 ## Communication Templates
 
 **Initial assessment:**
-```
+```text
 🔴 INCIDENT: [service] [symptom]
 Impact: [who/what affected]
 Investigating: [what you're checking]
 ```
 
 **Status update:**
-```
+```yaml
 UPDATE: [time]
 Status: [investigating|mitigating|resolved]
 Actions: [what was done]

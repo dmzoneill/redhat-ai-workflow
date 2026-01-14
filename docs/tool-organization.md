@@ -128,7 +128,7 @@ tools:
   - git_extra      # Load all git tools
   - gitlab_basic
   - jira_basic
-```
+```text
 
 ---
 
@@ -138,7 +138,7 @@ tools:
 ```
 tool_modules/aa_git/src/
 └── tools.py              # All 30 tools mixed together
-```
+```text
 
 ### After Reorganization
 ```

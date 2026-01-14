@@ -4,7 +4,7 @@ Clone an existing Jira issue.
 
 ## Instructions
 
-```
+```text
 skill_run("clone_jira_issue", '{"issue_key": "$JIRA_KEY"}')
 ```
 

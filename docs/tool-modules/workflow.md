@@ -76,7 +76,7 @@ tool_list(module="git")
 
 ```python
 debug_tool("bonfire_namespace_release", "Output is not a TTY")
-```
+```text
 
 ## Memory Structure
 

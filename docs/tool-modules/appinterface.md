@@ -23,7 +23,7 @@ The `aa_appinterface` module provides tools for managing app-interface (GitOps) 
 
 ## Key Paths
 
-```
+```text
 app-interface/
 ├── data/services/insights/tower-analytics/
 │   ├── cicd/

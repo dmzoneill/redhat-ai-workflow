@@ -8,13 +8,13 @@ The `test_mr_ephemeral` skill deploys a merge request's Docker image to an ephem
 
 ## Quick Start
 
-```
+```text
 skill_run("test_mr_ephemeral", '{"mr_id": 1450}')
 ```
 
 With billing ClowdApp:
 
-```
+```text
 skill_run("test_mr_ephemeral", '{"mr_id": 1450, "billing": true}')
 ```
 
@@ -101,7 +101,7 @@ flowchart TD
 
     style BILLING fill:#f59e0b,stroke:#d97706,color:#fff
     style MAIN fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```text
 
 Billing indicators:
 - Jira issue mentions "billing"

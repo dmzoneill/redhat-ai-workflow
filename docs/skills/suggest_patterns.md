@@ -12,13 +12,13 @@ The skill groups similar errors together and suggests new patterns when an error
 
 ```python
 skill_run("suggest_patterns", '{}')
-```
+```text
 
 Or via slash command:
 
 ```
 /learn-pattern  # After discovering a pattern, use this to save it
-```
+```text
 
 ## Inputs
 

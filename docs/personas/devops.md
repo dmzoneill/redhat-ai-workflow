@@ -8,7 +8,7 @@ The DevOps persona is focused on infrastructure operations, particularly ephemer
 
 ## Quick Load
 
-```
+```text
 Load the devops agent
 ```
 
@@ -35,7 +35,7 @@ Load the devops agent
 
 ### Deploy MR to Ephemeral
 
-```
+```yaml
 You: Deploy MR 1450 to ephemeral
 
 Claude: 🧪 Deploying MR !1450...
@@ -51,7 +51,7 @@ Claude: 🧪 Deploying MR !1450...
 
 ### Check Your Namespaces
 
-```
+```yaml
 You: List my ephemeral namespaces
 
 Claude: 📦 Your Ephemeral Namespaces:
@@ -64,7 +64,7 @@ Claude: 📦 Your Ephemeral Namespaces:
 
 ### Debug Pod Issues
 
-```
+```yaml
 You: Check pods in ephemeral-nx6n2s
 
 Claude: ☸️ Pods in ephemeral-nx6n2s:
@@ -79,7 +79,7 @@ Claude: ☸️ Pods in ephemeral-nx6n2s:
 
 ### Namespace Management
 
-```
+```text
 bonfire_namespace_list       # List your namespaces
 bonfire_namespace_reserve    # Reserve a new namespace
 bonfire_namespace_release    # Release a namespace
@@ -87,14 +87,14 @@ bonfire_namespace_release    # Release a namespace
 
 ### Deployment
 
-```
+```text
 bonfire_deploy_aa            # Deploy main ClowdApp
 quay_get_tag                 # Check image exists
 ```
 
 ### Kubernetes
 
-```
+```text
 kubectl_get_pods             # List pods
 kubectl_logs                 # Get container logs
 kubectl_describe_pod         # Pod details

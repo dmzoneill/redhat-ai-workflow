@@ -42,7 +42,7 @@ pytest test/test_hello.py -v
 
 # Run tests matching a pattern
 pytest -k "billing" -v
-```
+```text
 
 ## Automated via Skill
 

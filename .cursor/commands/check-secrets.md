@@ -4,7 +4,7 @@ Verify Kubernetes secrets and configmaps.
 
 ## Instructions
 
-```
+```text
 skill_run("check_secrets", '{"namespace": "$NAMESPACE"}')
 ```
 

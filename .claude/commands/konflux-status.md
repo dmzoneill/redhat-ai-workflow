@@ -10,7 +10,7 @@ Get overall Konflux platform health.
 
 ## Instructions
 
-```
+```text
 skill_run("konflux_status", '{}')
 ```
 

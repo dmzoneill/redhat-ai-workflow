@@ -33,7 +33,7 @@ sequenceDiagram
     Cursor->>Cursor: Refresh tool list
     MCP-->>Claude: Persona + tool count
     Claude-->>User: "🔧 DevOps persona loaded with ~74 tools"
-```
+```text
 
 ## Switching Personas
 

@@ -373,7 +373,7 @@ def remove_open_mr(mr_id: int) -> bool
         data = yaml.safe_load(f)
     result = data
   output: memory_data
-```
+```text
 
 ---
 
@@ -391,7 +391,7 @@ memory://state/environments        → environments.yaml
 config://personas                  → List of personas
 config://skills                    → List of skills
 config://repositories              → Repo config
-```
+```text
 
 **Claude Usage:**
 ```
@@ -580,7 +580,7 @@ await db.get_all_cached_users() -> dict
 # Metadata
 await db.get_meta(key, default="") -> str
 await db.set_meta(key, value)
-```
+```text
 
 **Key Differences from YAML Memory:**
 - **Technology:** SQLite (not YAML files)
@@ -620,7 +620,7 @@ Writes: ~145 (37%)
   - memory_session_log: ~30
   - auto_heal logging: ~100
   - State updates: ~15
-```
+```text
 
 ### File Access Frequency
 
@@ -651,7 +651,7 @@ By Module:
   konflux: 35 (100%)
   prometheus: 13 (100%)
   others: 55 (100%)
-```
+```text
 
 ### Skill Coverage
 

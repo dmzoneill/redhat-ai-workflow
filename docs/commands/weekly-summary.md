@@ -47,7 +47,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```text
 
 For detailed step-by-step process, see the [weekly_summary skill documentation](../skills/weekly_summary.md).
 
@@ -58,17 +58,17 @@ For detailed step-by-step process, see the [weekly_summary skill documentation](
 **Default (past 7 days):**
 ```
 skill_run("weekly_summary", '{}')
-```
+```text
 
 **Custom period:**
 ```
 skill_run("weekly_summary", '{"days": 14}')
-```
+```text
 
 **Slack format:**
 ```
 skill_run("weekly_summary", '{"format": "slack"}')
-```
+```text
 
 ## What It Includes
 

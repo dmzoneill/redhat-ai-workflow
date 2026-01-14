@@ -142,7 +142,7 @@ graph LR
 
     style COFFEE fill:#6366f1,stroke:#4f46e5,color:#fff
     style BEER fill:#f59e0b,stroke:#d97706,color:#fff
-```
+```text
 
 ## Skill Categories
 
@@ -225,12 +225,12 @@ graph LR
 **Via Chat:**
 ```
 Run the start_work skill for AAP-12345
-```
+```text
 
 **Via Tool:**
 ```
 skill_run("start_work", '{"issue_key": "AAP-12345"}')
-```
+```text
 
 **Via Cursor Command:**
 ```

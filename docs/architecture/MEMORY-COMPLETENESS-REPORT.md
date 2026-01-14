@@ -31,7 +31,7 @@ This report confirms **100% comprehensive coverage** of all memory and auto-reme
 ### 1. Files Scanned (67 total)
 
 #### Skills (55 files)
-```
+```text
 ✅ 41 active skills (100% scanned)
 ✅ 14 memory/utility skills (100% scanned)
 ```
@@ -40,7 +40,7 @@ This report confirms **100% comprehensive coverage** of all memory and auto-reme
 **Skills without memory operations:** 1/41 (2.5%) - suggest_patterns.yaml (only computes)
 
 #### Tool Modules (7 files)
-```
+```text
 ✅ aa_workflow/src/memory_tools.py
 ✅ aa_workflow/src/skill_engine.py
 ✅ aa_workflow/src/session_tools.py
@@ -51,7 +51,7 @@ This report confirms **100% comprehensive coverage** of all memory and auto-reme
 ```
 
 #### Scripts (4 files)
-```
+```text
 ✅ scripts/claude_agent.py
 ✅ scripts/common/memory.py
 ✅ scripts/common/auto_heal.py
@@ -59,7 +59,7 @@ This report confirms **100% comprehensive coverage** of all memory and auto-reme
 ```
 
 #### Server (1 file)
-```
+```text
 ✅ server/auto_heal_decorator.py
 ```
 
@@ -119,7 +119,7 @@ This report confirms **100% comprehensive coverage** of all memory and auto-reme
 
 All 55 skills have auto-retry via skill engine `_try_auto_fix()`:
 
-```
+```text
 ✅ 55/55 skills (100%) have auto-retry capability
 ✅ 40/55 skills (75%) actively use memory operations
 ✅ 39/55 skills (74%) use session logging

@@ -57,7 +57,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```text
 
 For detailed step-by-step process, see the [mark_mr_ready skill documentation](../skills/mark_mr_ready.md).
 
@@ -89,7 +89,7 @@ skill_run("mark_mr_ready", '{"mr_id": 1459, "issue_key": "AAP-12345"}')
 
 # Mark ready without Jira update
 skill_run("mark_mr_ready", '{"mr_id": 1459, "update_jira": false}')
-```
+```text
 
 ## What It Does
 

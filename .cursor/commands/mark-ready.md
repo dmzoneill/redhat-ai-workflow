@@ -4,7 +4,7 @@ Remove draft status from an MR and notify the team.
 
 ## Instructions
 
-```
+```text
 skill_run("mark_mr_ready", '{"mr_id": 1234}')
 ```
 
@@ -28,7 +28,7 @@ skill_run("mark_mr_ready", '{"mr_id": 1459, "issue_key": "AAP-12345"}')
 
 # Mark ready without Jira update
 skill_run("mark_mr_ready", '{"mr_id": 1459, "update_jira": false}')
-```
+```text
 
 ## What It Does
 

@@ -511,7 +511,7 @@ async def _try_auto_fix(self, error_msg: str, matches: list) -> bool:
         return proc.returncode == 0
 
     return False
-```
+```text
 
 **Key Difference from Tool-Level:**
 
@@ -549,7 +549,7 @@ check_known_issues calls:      ~50/day (skill failures)
 session_log calls:             ~30/day (39 skills)
 
 TOTAL: ~395 memory operations/day
-```
+```text
 
 **Memory Read/Write Ratio:**
 
@@ -717,7 +717,7 @@ def resolve_repo(repo_path, repo_name, issue_key):
     memory.write_memory("learned/patterns", data)
 
 # ... 12 more files
-```
+```text
 
 **Files Initialized:**
 

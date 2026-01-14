@@ -312,7 +312,7 @@ except Exception as e:
     known_text = _format_known_issues(matches)
     if known_text:
         lines.append(known_text)
-```
+```text
 
 **Output format:**
 ```
@@ -637,7 +637,7 @@ CREATE TABLE user_cache (
   ],
   "expiry": "2026-01-09T15:23:15Z"
 }
-```
+```text
 
 **Access frequency:** ~6 reads/day (on calendar operations), ~1 write/day (token refresh)
 
@@ -692,7 +692,7 @@ CREATE TABLE user_cache (
 │    - Updates stats.auto_fixed                           │
 │    - Updates stats.daily["2026-01-09"]                  │
 └─────────────────────────────────────────────────────────┘
-```
+```text
 
 ### Flow 2: Skill Step Failure → Pattern Match → Auto-Fix → Track Stats
 
@@ -765,7 +765,7 @@ CREATE TABLE user_cache (
 │    tool: bonfire_namespace_reserve(duration="2h")       │
 │    → Returns: ✅ Success                                 │
 └─────────────────────────────────────────────────────────┘
-```
+```text
 
 ### Flow 3: Skill Compute Error → Recovery → Log Fix
 

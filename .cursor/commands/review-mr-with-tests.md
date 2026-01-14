@@ -6,7 +6,7 @@ Full code review including checking out the branch and running the test suite lo
 
 Run a comprehensive review with local testing:
 
-```
+```text
 skill_run("review_pr", '{"mr_id": $MR_ID, "run_tests": true}')
 ```
 

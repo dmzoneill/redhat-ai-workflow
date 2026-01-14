@@ -4,7 +4,7 @@ Switch to a specialized persona with relevant tools.
 
 ## Instructions
 
-```
+```text
 persona_load("developer")
 ```
 
@@ -31,7 +31,7 @@ persona_load("incident")
 
 # Releasing to production
 persona_load("release")
-```
+```text
 
 ## What Happens
 

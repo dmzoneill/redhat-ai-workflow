@@ -70,7 +70,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```bash
 
 For detailed step-by-step process, see the [create_jira_issue skill documentation](../skills/create_jira_issue.md).
 
@@ -91,7 +91,7 @@ skill_run("create_jira_issue", '{
 ## Overview\n\nSpeed up test suite with parallel execution.",
   "labels": ["testing", "performance"]
 }')
-```
+```bash
 
 #
 
@@ -110,7 +110,7 @@ skill_run("create_jira_issue", '{
   "story_points": 5,
   "epic_link": "AAP-12000"
 }')
-```
+```bash
 
 #
 
@@ -171,7 +171,7 @@ Case-insensitive: `Story`, `story`, `STORY` all work.
 
 For simpler issues, use the MCP tool directly:
 
-```
+```text
 jira_create_issue(
   issue_type="story",
   summary="Add caching layer",

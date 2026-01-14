@@ -37,7 +37,7 @@ flowchart TD
 
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
-```
+```text
 
 ## Details
 
@@ -45,7 +45,7 @@ flowchart TD
 ```
 check_known_issues(tool_name="bonfire_deploy")
 check_known_issues(error_text="manifest unknown")
-```
+```text
 
 If a fix is known, apply it immediately!
 
@@ -55,12 +55,12 @@ When you see a failure like:
 ```
 ❌ Failed to deploy
 💡 To auto-fix: debug_tool('bonfire_deploy_aa')
-```
+```text
 
 Call debug_tool:
 ```
 debug_tool("bonfire_deploy_aa", "error message here")
-```
+```text
 
 I will:
 1. Load the tool's source code
@@ -79,7 +79,7 @@ learn_tool_fix(
     root_cause="Short SHA doesn't exist",
     fix_description="Use full 40-char SHA"
 )
-```
+```text
 
 This creates a **learning loop** - next time, `check_known_issues()` will find the fix!
 

@@ -9,23 +9,23 @@ arguments:
 **Description:** Generate your daily standup summary from recent activity.
 
 **Usage:**
-```
+```text
 skill_run("standup_summary")
 ```
 
 **Options:**
 - `days`: How many days back to look (default: 1)
-  ```
+  ```text
   skill_run("standup_summary", '{"days": 2}')
-  ```
+```
 - `repo`: Specific repository path
-  ```
+  ```text
   skill_run("standup_summary", '{"repo_name": "automation-analytics-backend"}')
-  ```
+```
 - `issue_key`: Focus on a specific Jira issue
-  ```
+  ```text
   skill_run("standup_summary", '{"issue_key": "AAP-12345"}')
-  ```
+```
 
 **What it generates:**
 
@@ -42,7 +42,7 @@ skill_run("standup_summary")
 - (Manual input - skill prompts if needed)
 
 **Example Output:**
-```
+```text
 ## 📋 Standup Summary
 **Date:** 2025-12-24
 **Author:** Dave O'Neill

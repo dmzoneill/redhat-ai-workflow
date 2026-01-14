@@ -12,7 +12,7 @@ Wind down your work day with a summary of what you accomplished and prep for tom
 
 Get your end of day wrap-up:
 
-```
+```text
 skill_run("beer")
 ```
 
@@ -36,7 +36,7 @@ skill_run("beer", '{"cleanup_prompts": false}')
 
 # Skip standup generation
 skill_run("beer", '{"generate_standup": false}')
-```
+```text
 
 ## Example Output
 

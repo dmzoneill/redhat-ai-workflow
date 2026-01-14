@@ -10,7 +10,7 @@ Close a Jira issue and add a summary comment from commits.
 
 ## Instructions
 
-```
+```text
 skill_run("close_issue", '{"issue_key": "AAP-XXXXX"}')
 ```
 
@@ -30,7 +30,7 @@ skill_run("close_issue", '{"issue_key": "AAP-12345"}')
 
 # Close without adding comment
 skill_run("close_issue", '{"issue_key": "AAP-12345", "add_comment": false}')
-```
+```text
 
 ## What It Does
 

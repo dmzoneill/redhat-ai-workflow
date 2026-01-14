@@ -4,7 +4,7 @@ Guide you through promoting stage → production.
 
 ## Instructions
 
-```
+```text
 skill_run("release_aa_backend_prod", '{"commit_sha": "abc123..."}')
 ```
 

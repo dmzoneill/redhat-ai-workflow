@@ -10,7 +10,7 @@ This directory contains design documents and implementation plans for future fea
 
 ## Plan Lifecycle
 
-```
+```text
 📋 Planning → 🚧 In Progress → ✅ Complete → 📚 Archived
 ```
 

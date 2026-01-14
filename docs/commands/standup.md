@@ -26,15 +26,15 @@ skill_run("standup_summary")
 
 ```bash
 skill_run("standup_summary", '{"days": 2}')
-  ```
+  ```text
 - `repo`: Specific repository path
-  ```
+```
   skill_run("standup_summary", '{"repo_name": "automation-analytics-backend"}')
-  ```
+  ```text
 - `issue_key`: Focus on a specific Jira issue
-  ```
+```
   skill_run("standup_summary", '{"issue_key": "AAP-12345"}')
-  ```
+  ```text
 
 **What it generates:**
 
@@ -68,7 +68,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```bash
 
 For detailed step-by-step process, see the [standup_summary skill documentation](../skills/standup_summary.md).
 

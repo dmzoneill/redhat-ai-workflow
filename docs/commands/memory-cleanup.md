@@ -47,7 +47,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```text
 
 For detailed step-by-step process, see the [memory_cleanup skill documentation](../skills/memory_cleanup.md).
 
@@ -58,12 +58,12 @@ For detailed step-by-step process, see the [memory_cleanup skill documentation](
 **Preview what would be removed (dry run - default):**
 ```
 skill_run("memory_cleanup", '{}')
-```
+```text
 
 **Actually remove stale entries:**
 ```
 skill_run("memory_cleanup", '{"dry_run": false}')
-```
+```text
 
 ## What Gets Cleaned
 

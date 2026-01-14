@@ -11,7 +11,7 @@ Extend the lifetime of an ephemeral namespace.
 
 ## Instructions
 
-```
+```text
 skill_run("extend_ephemeral", '{"namespace": "$NAMESPACE"}')
 ```
 

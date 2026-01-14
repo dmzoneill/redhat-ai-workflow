@@ -778,7 +778,7 @@ args:
 
 # Updates: memory/state/current_work.yaml
 last_updated: "2026-01-09T14:30:00"
-```
+```text
 
 ---
 
@@ -827,7 +827,7 @@ last_updated: "2026-01-09T14:30:00"
 ┌─────────────────────────────────────────────────────────────┐
 │ 7. Return success to Claude                                 │
 └─────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### Example 2: Skill Step Fails → Pattern Match → Fix → Retry
 
@@ -889,7 +889,7 @@ last_updated: "2026-01-09T14:30:00"
 ┌─────────────────────────────────────────────────────────────┐
 │ 9. Skill continues to next step                             │
 └─────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### Example 3: Cross-Skill Context Sharing
 

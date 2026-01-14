@@ -114,7 +114,7 @@ pre-commit install
 
 # Run on all files
 pre-commit run --all-files
-```
+```text
 
 ## Project Structure
 
@@ -476,7 +476,7 @@ python scripts/slack_test.py
 ```python
 import logging
 logging.basicConfig(level=logging.DEBUG)
-```
+```text
 
 ### Common Issues
 

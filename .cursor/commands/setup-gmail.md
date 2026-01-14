@@ -46,7 +46,7 @@ Then run:
 ```python
 # This will open browser for OAuth
 google_calendar_status()
-```
+```text
 
 Sign in and grant the new Gmail permissions.
 

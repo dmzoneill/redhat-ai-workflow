@@ -26,7 +26,7 @@ skill_run("test_mr_ephemeral", '{"mr_id": 1450}')
 
 ```bash
 skill_run("test_mr_ephemeral", '{"mr_id": 1450, "billing": true}')
-  ```
+  ```text
 - `run_tests`: Run pytest after deployment (default: true)
 
 **What it does:**

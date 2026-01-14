@@ -17,7 +17,7 @@ Modify or remove entries from memory.
 ### Remove an Item
 
 Remove a closed issue from active_issues:
-```
+```text
 skill_run("memory_edit", '{
   "file": "state/current_work",
   "action": "remove",
@@ -28,7 +28,7 @@ skill_run("memory_edit", '{
 ```
 
 Remove a merged MR from open_mrs:
-```
+```text
 skill_run("memory_edit", '{
   "file": "state/current_work",
   "action": "remove",
@@ -41,7 +41,7 @@ skill_run("memory_edit", '{
 ### Update a Field
 
 Update environment status:
-```
+```text
 skill_run("memory_edit", '{
   "file": "state/environments",
   "action": "update",

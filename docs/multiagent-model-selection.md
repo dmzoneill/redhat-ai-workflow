@@ -244,7 +244,7 @@ agents_config["architecture"]["model"] = "claude-opus-4-5-20251101"
     else:
         # Standard review for experienced devs
         pass
-```
+```text
 
 ## Cost Analysis
 
@@ -257,7 +257,7 @@ Sonnet 3.7 (1):      1 × $0.015 = $0.015
 Sonnet 4.5 (1):      1 × $0.025 = $0.025
 Coordinator:         1 × $0.025 = $0.025
 Total:                           $0.085
-```
+```text
 
 **Standard Mode** (~$0.12):
 ```
@@ -266,7 +266,7 @@ Sonnet 3.7 (2):      2 × $0.015 = $0.030
 Sonnet 4.5 (2):      2 × $0.025 = $0.050
 Coordinator:         1 × $0.025 = $0.025
 Total:                           $0.115
-```
+```text
 
 **Premium Mode** (~$0.50):
 ```
@@ -275,7 +275,7 @@ Sonnet 4.5 (2):      2 × $0.025 = $0.050
 Opus 4.5 (2):        2 × $0.150 = $0.300
 Coordinator:         1 × $0.025 = $0.025
 Total:                           $0.405
-```
+```text
 
 ### Monthly Cost Projections
 
@@ -297,7 +297,7 @@ Total time = max(agent times) ≈ slowest agent + coordinator
 Economy:  max(2-5s)  + 10s = ~15s
 Standard: max(5-10s) + 10s = ~20s
 Premium:  max(30-60s) + 20s = ~80s
-```
+```text
 
 ### Sequential Execution
 Agents run one at a time (for rate limiting):

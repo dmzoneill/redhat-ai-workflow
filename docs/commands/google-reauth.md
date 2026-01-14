@@ -70,7 +70,7 @@ Then trigger authentication by running:
 
 ```python
 google_calendar_status()
-```
+```text
 
 This will open your browser for OAuth login with the new scopes.
 

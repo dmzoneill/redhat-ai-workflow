@@ -66,7 +66,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```text
 
 For detailed step-by-step process, see the [notify_mr skill documentation](../skills/notify_mr.md).
 
@@ -111,7 +111,7 @@ skill_run("notify_mr", '{"mr_id": "1459", "reminder": true}')
 
 # With specific project
 skill_run("notify_mr", '{"mr_id": "1459", "project": "automation-analytics/automation-analytics-backend"}')
-```
+```text
 
 ## What Gets Posted
 
@@ -123,7 +123,7 @@ skill_run("notify_mr", '{"mr_id": "1459", "project": "automation-analytics/autom
 📁 *Repo:* automation-analytics-backend
 
 Please review when you have a moment 🙏
-```
+```text
 
 Or as a reminder:
 ```

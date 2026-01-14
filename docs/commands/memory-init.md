@@ -47,7 +47,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```text
 
 For detailed step-by-step process, see the [memory_init skill documentation](../skills/memory_init.md).
 
@@ -58,12 +58,12 @@ For detailed step-by-step process, see the [memory_init skill documentation](../
 **Reset state files only (preserves learned patterns):**
 ```
 skill_run("memory_init", '{"confirm": true}')
-```
+```text
 
 **Full reset (including learned memory):**
 ```
 skill_run("memory_init", '{"confirm": true, "reset_learned": true}')
-```
+```text
 
 **Full reset but keep patterns:**
 ```

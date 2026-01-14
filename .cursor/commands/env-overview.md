@@ -4,7 +4,7 @@ Full health check of a Kubernetes environment.
 
 ## Instructions
 
-```
+```text
 skill_run("environment_overview", '{"environment": "stage"}')
 ```
 

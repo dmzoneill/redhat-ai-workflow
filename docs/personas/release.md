@@ -8,7 +8,7 @@ The Release persona is focused on shipping software to production. It provides t
 
 ## Quick Load
 
-```
+```text
 Load the release agent
 ```
 
@@ -33,7 +33,7 @@ Load the release agent
 
 ### Release to Production
 
-```
+```yaml
 You: Release abc123def456 to production
 
 Claude: 📦 Preparing production release...
@@ -58,7 +58,7 @@ Claude: 📦 Preparing production release...
 
 ### Check Konflux Builds
 
-```
+```yaml
 You: Check build status for main branch
 
 Claude: 🔄 Konflux Build Status:
@@ -71,7 +71,7 @@ Claude: 🔄 Konflux Build Status:
 
 ### Verify Image
 
-```
+```yaml
 You: Check if abc123 image exists in Quay
 
 Claude: 📦 Image Check:
@@ -100,7 +100,7 @@ flowchart TD
 
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style AWAIT fill:#f59e0b,stroke:#d97706,color:#fff
-```
+```text
 
 ## Key Commands
 
@@ -110,7 +110,7 @@ flowchart TD
 konflux_pipeline_list        # List pipelines
 konflux_pipeline_status      # Pipeline details
 konflux_build_logs           # Build logs
-```
+```text
 
 ### Quay
 
@@ -118,7 +118,7 @@ konflux_build_logs           # Build logs
 quay_get_tag                 # Check image tag
 quay_list_tags               # List available tags
 quay_get_manifest            # Image manifest
-```
+```text
 
 ### App-Interface
 

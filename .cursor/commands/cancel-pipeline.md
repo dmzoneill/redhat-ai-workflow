@@ -4,7 +4,7 @@ Cancel a running Tekton pipeline.
 
 ## Instructions
 
-```
+```text
 skill_run("cancel_pipeline", '{"pipeline_run": "$PIPELINERUN"}')
 ```
 

@@ -51,7 +51,7 @@ flowchart LR
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style END fill:#10b981,stroke:#059669,color:#fff
     style CALL fill:#3b82f6,stroke:#2563eb,color:#fff
-```
+```text
 
 For detailed step-by-step process, see the [coffee skill documentation](../skills/coffee.md).
 
@@ -88,7 +88,7 @@ skill_run("coffee", '{"days_back": 7}')
 
 # Full email processing (mark read & archive)
 skill_run("coffee", '{"full_email_scan": true, "auto_archive_email": true}')
-```
+```text
 
 ## First Time Setup
 
@@ -96,7 +96,7 @@ If email isn't working, you need to enable Gmail API:
 
 ```
 /setup-gmail
-```
+```text
 
 This adds Gmail scopes to your existing Google OAuth.
 

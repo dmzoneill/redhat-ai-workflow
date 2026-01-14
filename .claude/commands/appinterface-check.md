@@ -11,7 +11,7 @@ Validate app-interface GitOps configuration.
 
 ## Instructions
 
-```
+```text
 skill_run("appinterface_check", '{"saas_file": "$SAAS_FILE"}')
 ```
 

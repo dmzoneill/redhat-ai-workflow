@@ -82,3 +82,7 @@ scripts/debug_*.py
 
 # Super-linter output
 .super-linter-output/
+
+# TypeScript/JavaScript compiled output
+**/out/
+**/dist/

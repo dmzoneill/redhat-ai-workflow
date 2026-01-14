@@ -10,7 +10,7 @@ Analyze backlog for sprint planning.
 
 ## Instructions
 
-```
+```text
 skill_run("sprint_planning", '{"project": "AAP"}')
 ```
 

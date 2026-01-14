@@ -4,7 +4,7 @@ Discover all available MCP tools.
 
 ## Instructions
 
-```
+```text
 tool_list()
 ```
 

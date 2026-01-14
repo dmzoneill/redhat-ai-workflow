@@ -36,7 +36,7 @@ This creates a **self-improving feedback loop** where failures teach the system 
 
 ### Directory Structure
 
-```
+```text
 memory/
 ├── state/                          # Current work state
 │   ├── current_work.yaml          # Active issues, branches, MRs
@@ -545,7 +545,7 @@ def log_fix_attempt(self, error_info, action, success, details=""):
         self.memory.increment("learned/skill_error_fixes", f"stats.{action}_success")
     else:
         self.memory.increment("learned/skill_error_fixes", f"stats.{action}_failed")
-```
+```text
 
 ---
 
@@ -563,7 +563,7 @@ Applies Fix (kube_login/vpn_connect)
 _log_auto_heal_to_memory()
     ↓
 Writes to memory/learned/tool_failures.yaml
-```
+```text
 
 ### 2. Skill → Memory (Pattern Check)
 
@@ -581,7 +581,7 @@ skill_engine._try_auto_fix()
 Applies VPN/Auth Fix
     ↓
 Retries Tool Once
-```
+```text
 
 ### 3. User → Memory (Pattern Learning)
 
@@ -595,7 +595,7 @@ Validates Input
 Writes to memory/learned/patterns.yaml
     ↓
 memory_session_log("Learned pattern: X")
-```
+```text
 
 ### 4. Skill → Memory (Session Logging)
 

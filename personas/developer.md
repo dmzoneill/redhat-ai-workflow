@@ -138,7 +138,7 @@ bonfire namespace list --mine
 
 # The MCP tool automatically verifies ownership before release:
 bonfire_namespace_release(namespace="ephemeral-xxx")  # Checks --mine first
-```
+```text
 
 ## Commit Message Format
 

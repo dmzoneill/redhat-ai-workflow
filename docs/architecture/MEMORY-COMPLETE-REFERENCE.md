@@ -79,7 +79,7 @@ from scripts.common.memory import (
     remove_active_issue,  # Remove issue
     # ... 8 more functions
 )
-```
+```text
 
 ### Auto-Heal Coverage
 
@@ -120,7 +120,7 @@ Logs to memory/learned/tool_failures.yaml
 Retries Tool (max 1 retry)
     ↓
 Returns Result
-```
+```text
 
 **Success Rate:** 77% (98 of 127 failures auto-fixed)
 
@@ -136,7 +136,7 @@ _try_auto_fix() → Applies VPN/auth fix
 Retries Tool (once)
     ↓
 Continues Skill Execution
-```
+```text
 
 **Pattern Categories:**
 - auth_patterns (3) - kube_login fixes
@@ -164,7 +164,7 @@ Writes: ~145/day (35%)
   - memory_session_log: ~30
   - auto_heal logging: ~100
   - skill state updates: ~15
-```
+```text
 
 ### Skill Memory Usage
 

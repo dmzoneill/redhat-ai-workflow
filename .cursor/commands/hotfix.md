@@ -4,7 +4,7 @@ Create an emergency hotfix from production.
 
 ## Instructions
 
-```
+```text
 skill_run("hotfix", '{"commit": "$COMMIT_SHA", "version": "$VERSION"}')
 ```
 

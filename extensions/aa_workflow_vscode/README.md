@@ -94,7 +94,7 @@ npm run lint
 
 # Package for distribution
 npx vsce package
-```
+```text
 
 ## Architecture
 

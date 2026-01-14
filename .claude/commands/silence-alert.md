@@ -12,7 +12,7 @@ Create or manage Alertmanager silences.
 
 ## Instructions
 
-```
+```text
 skill_run("silence_alert", '{"alert_name": "$ALERT", "duration": "$DURATION"}')
 ```
 

@@ -8,7 +8,7 @@ The Incident persona is optimized for responding to production incidents. It pro
 
 ## Quick Load
 
-```
+```text
 Load the incident agent
 ```
 
@@ -35,7 +35,7 @@ Load the incident agent
 
 ### Investigate an Alert
 
-```
+```yaml
 You: Investigate production alerts
 
 Claude: 🚨 Investigating production...
@@ -63,7 +63,7 @@ Claude: 🚨 Investigating production...
 
 ### Search Logs
 
-```
+```yaml
 You: Search for errors in analytics-api
 
 Claude: 📜 Log Search Results:
@@ -75,7 +75,7 @@ Claude: 📜 Log Search Results:
 
 ### Check Metrics
 
-```
+```yaml
 You: Query CPU usage for the last hour
 
 Claude: 📊 CPU Usage (Last Hour):
@@ -90,7 +90,7 @@ Claude: 📊 CPU Usage (Last Hour):
 
 ### Alert Management
 
-```
+```text
 alertmanager_alerts          # List firing alerts
 alertmanager_silence         # Create silence
 prometheus_query             # PromQL query
@@ -99,14 +99,14 @@ prometheus_get_alerts        # Alert rules
 
 ### Log Search
 
-```
+```text
 kibana_search                # Search logs
 kibana_get_errors            # Recent errors
 ```
 
 ### Kubernetes
 
-```
+```text
 kubectl_get_pods             # Pod status
 kubectl_logs                 # Container logs
 kubectl_get_events           # Recent events

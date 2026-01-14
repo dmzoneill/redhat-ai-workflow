@@ -6,7 +6,7 @@ Quick code review of a Merge Request - checks format, description, pipelines, an
 
 Run a static analysis review (no local tests):
 
-```
+```text
 skill_run("review_pr", '{"mr_id": $MR_ID}')
 ```
 

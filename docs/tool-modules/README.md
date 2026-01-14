@@ -74,7 +74,7 @@ graph TB
 
     style MCP fill:#6366f1,stroke:#4f46e5,color:#fff
     style MODULES fill:#10b981,stroke:#059669,color:#fff
-```
+```text
 
 ## Module Categories
 

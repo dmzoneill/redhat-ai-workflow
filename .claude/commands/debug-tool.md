@@ -7,7 +7,7 @@ description: "When a tool fails, use auto-debug to fix it AND save the learning.
 When a tool fails, use auto-debug to fix it AND save the learning.
 
 ## Step 1: Check Known Issues First
-```
+```text
 check_known_issues(tool_name="bonfire_deploy")
 check_known_issues(error_text="manifest unknown")
 ```
@@ -17,13 +17,13 @@ If a fix is known, apply it immediately!
 ## Step 2: If Unknown, Debug the Tool
 
 When you see a failure like:
-```
+```text
 ❌ Failed to deploy
 💡 To auto-fix: debug_tool('bonfire_deploy_aa')
 ```
 
 Call debug_tool:
-```
+```text
 debug_tool("bonfire_deploy_aa", "error message here")
 ```
 
@@ -37,7 +37,7 @@ I will:
 ## Step 3: Save the Learning!
 
 After the fix works:
-```
+```text
 learn_tool_fix(
     tool_name="bonfire_deploy",
     error_pattern="manifest unknown",
@@ -55,7 +55,7 @@ This creates a **learning loop** - next time, `check_known_issues()` will find t
 - Image tag format issues
 
 ## The Learning Loop
-```
+```text
 Fail → check_known_issues() → debug_tool() → fix → learn_tool_fix() → ✓
            ↑                                              |
            └──────────── remembered forever ←─────────────┘

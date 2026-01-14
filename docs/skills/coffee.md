@@ -8,13 +8,13 @@ The `coffee` skill is your morning standup assistant. It gathers information fro
 
 ## Quick Start
 
-```
+```text
 skill_run("coffee", '{}')
 ```
 
 Or use the Cursor command:
 
-```
+```text
 /coffee
 ```
 
@@ -61,7 +61,7 @@ flowchart TD
     style START fill:#6366f1,stroke:#4f46e5,color:#fff
     style DONE fill:#10b981,stroke:#059669,color:#fff
     style PARALLEL fill:#f59e0b,stroke:#d97706,color:#fff
-```
+```text
 
 ## Sections
 

@@ -13,7 +13,7 @@ The system uses multiple strategies to detect Claude Code:
 - CLAUDE_CODE=1
 - MCP_SERVER_NAME=claude-code
 - CLAUDE_CLI_VERSION=X.Y.Z
-```
+```text
 
 ### 2. Server Context
 - Checks if FastMCP server has tool calling capabilities
@@ -79,7 +79,7 @@ server.request_tool_call(
     args={...},
     callback=handle_user_response
 )
-```
+```text
 
 ### Option C: MCP Extensions
 ```
@@ -90,7 +90,7 @@ server.request_tool_call(
   "tool": "AskUserQuestion",
   "args": {...}
 }
-```
+```text
 
 ## Current Recommendation
 
@@ -146,7 +146,7 @@ executor = SkillExecutor(
 ```python
 # Pass None to force CLI even in Claude Code
 register_skill_tools(server, create_issue_fn, ask_question_fn=None)
-```
+```text
 
 ## Logging
 

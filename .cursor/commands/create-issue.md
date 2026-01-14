@@ -6,7 +6,7 @@
 
 ### Quick Story
 
-```
+```text
 skill_run("create_jira_issue", '{
   "summary": "Add pytest-xdist parallelization",
   "issue_type": "story",
@@ -17,7 +17,7 @@ skill_run("create_jira_issue", '{
 
 ### Full Story with All Fields
 
-```
+```text
 skill_run("create_jira_issue", '{
   "summary": "Add pytest-xdist parallelization",
   "issue_type": "story",
@@ -34,7 +34,7 @@ skill_run("create_jira_issue", '{
 
 ### Quick Bug
 
-```
+```text
 skill_run("create_jira_issue", '{
   "summary": "API returns 500 on empty request",
   "issue_type": "bug",
@@ -87,7 +87,7 @@ Case-insensitive: `Story`, `story`, `STORY` all work.
 
 For simpler issues, use the MCP tool directly:
 
-```
+```text
 jira_create_issue(
   issue_type="story",
   summary="Add caching layer",

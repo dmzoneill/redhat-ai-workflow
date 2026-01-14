@@ -115,7 +115,7 @@ sequenceDiagram
     Cursor->>Cursor: Refresh tool list
     Loader-->>MCP: Agent persona
     MCP-->>Claude: "Loaded ~74 tools"
-```
+```text
 
 ## Tool Modules
 

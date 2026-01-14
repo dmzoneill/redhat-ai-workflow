@@ -13,7 +13,7 @@ Restart a deployment and monitor the rollout.
 
 ## Instructions
 
-```
+```text
 skill_run("rollout_restart", '{"deployment": "$DEPLOYMENT", "namespace": "$NAMESPACE"}')
 ```
 

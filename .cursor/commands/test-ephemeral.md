@@ -4,7 +4,7 @@ Deploy and test a merge request in ephemeral environment.
 
 ## Instructions
 
-```
+```text
 skill_run("test_mr_ephemeral", '{"mr_id": $MR_ID}')
 ```
 

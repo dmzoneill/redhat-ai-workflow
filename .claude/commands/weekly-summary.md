@@ -11,17 +11,17 @@ Generate a summary of work from session logs.
 ## Usage
 
 **Default (past 7 days):**
-```
+```text
 skill_run("weekly_summary", '{}')
 ```
 
 **Custom period:**
-```
+```text
 skill_run("weekly_summary", '{"days": 14}')
 ```
 
 **Slack format:**
-```
+```text
 skill_run("weekly_summary", '{"format": "slack"}')
 ```
 
@@ -36,7 +36,7 @@ skill_run("weekly_summary", '{"format": "slack"}')
 
 ## Example
 
-```
+```text
 /weekly-summary
 ```
 

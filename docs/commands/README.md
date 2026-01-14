@@ -26,7 +26,7 @@ Cursor commands are slash commands you can invoke directly in the Cursor IDE cha
 ### `/coffee` ☕
 **Morning briefing** - Everything you need at the start of your work day.
 
-```
+```text
 skill_run("coffee")
 skill_run("coffee", '{"days_back": 7}')
 ```
@@ -49,7 +49,7 @@ skill_run("coffee", '{"days_back": 7}')
 ### `/beer` 🍺
 **End of day wrap-up** - Review what you accomplished and prep for tomorrow.
 
-```
+```text
 skill_run("beer")
 skill_run("beer", '{"generate_standup": true}')
 ```
@@ -69,7 +69,7 @@ skill_run("beer", '{"generate_standup": true}')
 ### `/standup` 📝
 **Generate standup summary** from recent activity.
 
-```
+```text
 skill_run("standup_summary")
 skill_run("standup_summary", '{"days": 2}')
 ```
@@ -81,7 +81,7 @@ Includes: Git commits, Jira issues worked on, MRs created/reviewed, issues close
 ### `/weekly-summary` 📊
 **Generate weekly activity report** for status updates.
 
-```
+```text
 skill_run("weekly_summary")
 ```
 
@@ -92,7 +92,7 @@ skill_run("weekly_summary")
 ### `/start-work` 🚀
 **Begin or resume working on a Jira issue.**
 
-```
+```text
 skill_run("start_work", '{"issue_key": "AAP-12345"}')
 ```
 
@@ -107,7 +107,7 @@ What it does:
 ### `/create-mr` 📤
 **Create a merge request** with full validation.
 
-```
+```text
 skill_run("create_mr", '{"issue_key": "AAP-12345"}')
 skill_run("create_mr", '{"issue_key": "AAP-12345", "draft": false}')
 ```
@@ -124,7 +124,7 @@ What it does:
 ### `/mark-ready` 📢
 **Remove draft status** from an MR and notify the team.
 
-```
+```text
 skill_run("mark_mr_ready", '{"mr_id": 1234}')
 skill_run("mark_mr_ready", '{"mr_id": 1234, "issue_key": "AAP-12345"}')
 ```
@@ -139,7 +139,7 @@ What it does:
 ### `/close-issue` ✅
 **Close a Jira issue** and add a summary comment from commits.
 
-```
+```text
 skill_run("close_issue", '{"issue_key": "AAP-12345"}')
 ```
 
@@ -153,7 +153,7 @@ What it does:
 ### `/sync-branch` 🔄
 **Quickly rebase current branch onto main.**
 
-```
+```text
 skill_run("sync_branch")
 skill_run("sync_branch", '{"force_push": true}')
 ```
@@ -169,7 +169,7 @@ What it does:
 ### `/rebase-pr` 🔄
 **Rebase a PR** with auto-conflict resolution hints.
 
-```
+```text
 skill_run("rebase_pr", '{"mr_id": 1234}')
 ```
 
@@ -178,7 +178,7 @@ skill_run("rebase_pr", '{"mr_id": 1234}')
 ### `/jira-hygiene` 🧹
 **Check and fix Jira issue quality** before you start coding.
 
-```
+```text
 skill_run("jira_hygiene", '{"issue_key": "AAP-12345"}')
 skill_run("jira_hygiene", '{"issue_key": "AAP-12345", "auto_fix": true}')
 ```
@@ -190,7 +190,7 @@ Checks: Description, Acceptance Criteria, Labels, Priority, Epic Link, Story Poi
 ### `/hotfix` 🔥
 **Create an emergency hotfix** branch.
 
-```
+```text
 skill_run("hotfix", '{"issue_key": "AAP-12345"}')
 ```
 
@@ -201,7 +201,7 @@ skill_run("hotfix", '{"issue_key": "AAP-12345"}')
 ### `/review-mr` 👁️
 **Review a single merge request.**
 
-```
+```text
 skill_run("review_pr", '{"mr_id": 1234}')
 skill_run("review_pr", '{"issue_key": "AAP-12345"}')
 ```
@@ -211,7 +211,7 @@ skill_run("review_pr", '{"issue_key": "AAP-12345"}')
 ### `/review-all-open` 👀
 **Review all open MRs** in a project.
 
-```
+```text
 skill_run("review_all_prs")
 skill_run("review_all_prs", '{"limit": 5}')
 ```
@@ -223,7 +223,7 @@ Automatically excludes your own MRs and handles previous feedback.
 ### `/check-feedback` 💬
 **Check your open MRs for feedback** that needs your attention.
 
-```
+```text
 skill_run("check_mr_feedback")
 ```
 
@@ -234,7 +234,7 @@ Scans for: Human reviewer comments, meeting requests, code change requests, ques
 ### `/check-prs` 📋
 **Check status of your open PRs.**
 
-```
+```text
 skill_run("check_my_prs")
 ```
 
@@ -243,7 +243,7 @@ skill_run("check_my_prs")
 ### `/close-mr` ❌
 **Close an abandoned merge request.**
 
-```
+```text
 skill_run("close_mr", '{"mr_id": 1234}')
 ```
 
@@ -257,7 +257,7 @@ General review command - alias for `/review-mr`.
 ### `/review-mr-with-tests` 🧪
 Review an MR and run local tests as part of the review.
 
-```
+```text
 skill_run("review_pr", '{"mr_id": 1234, "run_tests": true}')
 ```
 
@@ -266,7 +266,7 @@ skill_run("review_pr", '{"mr_id": 1234, "run_tests": true}')
 ### `/review-mr-multiagent` 🤖
 **Multi-agent code review** using specialized reviewer personas.
 
-```
+```text
 skill_run("review_pr_multiagent", '{"mr_id": 1234}')
 ```
 
@@ -279,7 +279,7 @@ Uses Security, Performance, and Architecture reviewers in parallel.
 ### `/deploy-ephemeral` 🚀
 **Deploy an MR's image to an ephemeral namespace** for testing.
 
-```
+```text
 skill_run("test_mr_ephemeral", '{"mr_id": 1459}')
 skill_run("test_mr_ephemeral", '{"mr_id": 1459, "billing": true}')
 ```
@@ -301,7 +301,7 @@ Alias for `/deploy-ephemeral`.
 ### `/check-namespaces` 📦
 **List your active ephemeral environments.**
 
-```
+```text
 bonfire_namespace_list(mine_only=True)
 ```
 
@@ -312,7 +312,7 @@ Shows namespace, expiry time, and deployed components.
 ### `/extend-ephemeral` ⏰
 **Extend the TTL of an ephemeral namespace.**
 
-```
+```text
 skill_run("extend_ephemeral", '{"namespace": "ephemeral-abc123"}')
 ```
 
@@ -321,7 +321,7 @@ skill_run("extend_ephemeral", '{"namespace": "ephemeral-abc123"}')
 ### `/run-local-tests` 🧪
 **Run tests locally** before pushing.
 
-```
+```text
 test_run(repo='backend')
 test_run(repo='backend', coverage=True)
 ```
@@ -331,7 +331,7 @@ test_run(repo='backend', coverage=True)
 ### `/integration-tests` 🧪
 **Check Konflux integration test status.**
 
-```
+```text
 skill_run("check_integration_tests")
 ```
 
@@ -342,7 +342,7 @@ skill_run("check_integration_tests")
 ### `/investigate-alert` 🚨
 **Quick triage of a firing Prometheus alert.**
 
-```
+```text
 skill_run("investigate_alert", '{"environment": "stage"}')
 skill_run("investigate_alert", '{"environment": "prod"}')
 ```
@@ -359,7 +359,7 @@ What it does:
 ### `/debug-prod` 🔍
 **Deep investigation of production issues.**
 
-```
+```text
 skill_run("debug_prod")
 skill_run("debug_prod", '{"pod_filter": "processor", "time_range": "6h"}')
 ```
@@ -371,7 +371,7 @@ Gathers: Pod status, recent logs, metrics, alerts, recent deployments, Kubernete
 ### `/release-prod` 🚀
 **Release to production** - guide through stage → prod promotion.
 
-```
+```text
 skill_run("release_aa_backend_prod", '{"commit_sha": "abc123..."}')
 skill_run("release_aa_backend_prod", '{"commit_sha": "abc123...", "include_billing": true}')
 ```
@@ -387,7 +387,7 @@ What it does:
 ### `/env-overview` 🌍
 **Environment health overview** - check stage and prod status.
 
-```
+```text
 skill_run("environment_overview")
 ```
 
@@ -396,7 +396,7 @@ skill_run("environment_overview")
 ### `/rollout-restart` 🔄
 **Restart a deployment** via rollout restart.
 
-```
+```text
 skill_run("rollout_restart", '{"deployment": "api", "environment": "stage"}')
 ```
 
@@ -405,7 +405,7 @@ skill_run("rollout_restart", '{"deployment": "api", "environment": "stage"}')
 ### `/scale-deployment` 📈
 **Scale a deployment** to specified replicas.
 
-```
+```text
 skill_run("scale_deployment", '{"deployment": "api", "replicas": 3}')
 ```
 
@@ -414,7 +414,7 @@ skill_run("scale_deployment", '{"deployment": "api", "replicas": 3}')
 ### `/silence-alert` 🔇
 **Silence a noisy alert** temporarily.
 
-```
+```text
 skill_run("silence_alert", '{"alertname": "HighCPU", "duration": "2h"}')
 ```
 
@@ -423,7 +423,7 @@ skill_run("silence_alert", '{"alertname": "HighCPU", "duration": "2h"}')
 ### `/vpn` 🔐
 **Connect to Red Hat VPN** for internal resources.
 
-```
+```text
 vpn_connect()
 ```
 
@@ -436,7 +436,7 @@ Required for: GitLab, ephemeral clusters, stage cluster, Konflux, internal APIs.
 ### `/create-issue` 🎫
 **Create a Jira issue** with proper formatting.
 
-```
+```text
 skill_run("create_jira_issue", '{
   "summary": "Add feature X",
   "issue_type": "story",
@@ -449,7 +449,7 @@ skill_run("create_jira_issue", '{
 ### `/clone-issue` 📋
 **Clone an existing Jira issue.**
 
-```
+```text
 skill_run("clone_jira_issue", '{"issue_key": "AAP-12345"}')
 ```
 
@@ -458,7 +458,7 @@ skill_run("clone_jira_issue", '{"issue_key": "AAP-12345"}')
 ### `/sprint-planning` 📊
 **Assist with sprint planning.**
 
-```
+```text
 skill_run("sprint_planning")
 ```
 
@@ -469,7 +469,7 @@ skill_run("sprint_planning")
 ### `/my-calendar` 📅
 **Show today's calendar events.**
 
-```
+```text
 google_calendar_list_events()
 ```
 
@@ -478,7 +478,7 @@ google_calendar_list_events()
 ### `/schedule-meeting` 📆
 **Create a Google Calendar event** with Meet link.
 
-```
+```text
 skill_run("schedule_meeting", '{"title": "Sync", "attendees": ["user@example.com"]}')
 ```
 
@@ -501,7 +501,7 @@ Run this first time to add Gmail scopes to your Google OAuth.
 ### `/konflux-status` ⚙️
 **Check Konflux platform status** - builds, pipelines, components.
 
-```
+```text
 skill_run("konflux_status")
 ```
 
@@ -510,7 +510,7 @@ skill_run("konflux_status")
 ### `/appinterface-check` 🔍
 **Check app-interface configuration** with validation and live state comparison.
 
-```
+```text
 skill_run("appinterface_check", '{"saas_file": "tower-analytics-backend"}')
 ```
 
@@ -526,7 +526,7 @@ Features:
 ### `/ci-health` 📊
 **Check CI pipeline health** - recent failures, stuck pipelines.
 
-```
+```text
 skill_run("check_ci_health")
 ```
 
@@ -535,7 +535,7 @@ skill_run("check_ci_health")
 ### `/cancel-pipeline` ❌
 **Cancel a running pipeline.**
 
-```
+```text
 skill_run("cancel_pipeline", '{"pipeline_id": 12345}')
 ```
 
@@ -544,7 +544,7 @@ skill_run("cancel_pipeline", '{"pipeline_id": 12345}')
 ### `/check-secrets` 🔐
 **Check Kubernetes secrets** in a namespace.
 
-```
+```text
 skill_run("check_secrets", '{"namespace": "tower-analytics-stage"}')
 ```
 
@@ -553,7 +553,7 @@ skill_run("check_secrets", '{"namespace": "tower-analytics-stage"}')
 ### `/scan-vulns` 🔍
 **Scan a container image for vulnerabilities.**
 
-```
+```text
 skill_run("scan_vulnerabilities", '{"image": "quay.io/..."}')
 ```
 
@@ -564,7 +564,7 @@ skill_run("scan_vulnerabilities", '{"image": "quay.io/..."}')
 ### `/tools` 🔧
 **Discover all available MCP tools.**
 
-```
+```text
 tool_list()
 tool_list(module='git')
 tool_list(module='gitlab')
@@ -577,7 +577,7 @@ Shows ~263 tools across 16 modules.
 ### `/personas` 🎭
 **List and switch between personas.**
 
-```
+```text
 persona_list()
 persona_load("developer")
 persona_load("devops")
@@ -588,7 +588,7 @@ persona_load("devops")
 ### `/list-skills` 📋
 **List all available skills.**
 
-```
+```text
 skill_list()
 ```
 
@@ -609,7 +609,7 @@ Automatically authenticates to Kubernetes clusters and tests all tool modules.
 ### `/memory` 💾
 **View persistent memory** - current work, learned patterns, session logs.
 
-```
+```text
 memory_read()
 memory_read("state/current_work")
 memory_read("learned/patterns")
@@ -622,7 +622,7 @@ memory_read("learned/patterns")
 ### `/debug-tool` 🔧
 **Debug a failed MCP tool** - analyze source and propose fixes.
 
-```
+```text
 debug_tool('bonfire_namespace_release', 'error message here')
 ```
 
@@ -631,7 +631,7 @@ debug_tool('bonfire_namespace_release', 'error message here')
 ### `/learn-fix` 📚
 **Save a tool fix to memory** for future reference.
 
-```
+```text
 learn_tool_fix(
     tool_name="bonfire_deploy",
     error_pattern="manifest unknown",
@@ -645,7 +645,7 @@ learn_tool_fix(
 ### `/learn-pattern` 📖
 **Save a general error pattern** to memory.
 
-```
+```text
 skill_run("learn_pattern", '{"pattern": "...", "solution": "..."}')
 ```
 
@@ -659,7 +659,7 @@ General deployment command.
 ### `/load-developer` 👨‍💻
 Quick command to load the developer agent.
 
-```
+```text
 persona_load("developer")
 ```
 
@@ -668,7 +668,7 @@ persona_load("developer")
 ### `/load-devops` 🔧
 Quick command to load the devops agent.
 
-```
+```text
 persona_load("devops")
 ```
 
@@ -677,7 +677,7 @@ persona_load("devops")
 ### `/notify-mr` 💬
 **Notify team about an MR** in Slack.
 
-```
+```text
 skill_run("notify_mr", '{"mr_id": 1234}')
 ```
 
@@ -686,7 +686,7 @@ skill_run("notify_mr", '{"mr_id": 1234}')
 ### `/notify-team` 💬
 **Post a message to team Slack channel.**
 
-```
+```text
 skill_run("notify_team", '{"message": "Heads up: deploying to prod"}')
 ```
 
@@ -695,7 +695,7 @@ skill_run("notify_team", '{"message": "Heads up: deploying to prod"}')
 ### `/memory-edit` ✏️
 **Edit a memory entry.**
 
-```
+```text
 skill_run("memory_edit", '{"key": "state/current_work", "path": "notes"}')
 ```
 
@@ -704,7 +704,7 @@ skill_run("memory_edit", '{"key": "state/current_work", "path": "notes"}')
 ### `/memory-cleanup` 🧹
 **Clean up old memory entries.**
 
-```
+```text
 skill_run("memory_cleanup")
 ```
 
@@ -713,7 +713,7 @@ skill_run("memory_cleanup")
 ### `/memory-init` 🗄️
 **Initialize memory structure** for a new project.
 
-```
+```text
 skill_run("memory_init")
 ```
 
@@ -723,7 +723,7 @@ skill_run("memory_init")
 
 All commands are defined in `.cursor/commands/`:
 
-```
+```text
 .cursor/commands/
 ├── appinterface-check.md
 ├── beer.md
@@ -802,7 +802,7 @@ Description of what it does.
 
 ## Instructions
 
-```
+```text
 skill_run("my_skill", '{"param": "value"}')
 ```
 ```

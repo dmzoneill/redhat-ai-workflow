@@ -13,7 +13,7 @@ Send a message to a Slack channel.
 
 ## Instructions
 
-```
+```text
 skill_run("notify_team", '{"channel": "$CHANNEL", "message": "$MESSAGE"}')
 ```
 

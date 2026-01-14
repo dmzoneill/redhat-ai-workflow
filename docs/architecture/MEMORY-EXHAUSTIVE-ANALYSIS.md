@@ -60,7 +60,7 @@
 
 **Skills Using MCP Memory Tools:**
 
-```
+```text
 ✅ cancel_pipeline.yaml           - memory_session_log (1x)
 ✅ check_mr_feedback.yaml          - memory_session_log (1x)
 ✅ check_my_prs.yaml               - memory_session_log (1x)
@@ -699,7 +699,7 @@ result = await kubectl_get_pods(namespace='stage')  # ✅ Success
 patterns_data["auth_patterns"][0]["usage_stats"]["times_matched"] += 1
 patterns_data["auth_patterns"][0]["usage_stats"]["times_fixed"] += 1
 patterns_data["auth_patterns"][0]["usage_stats"]["success_rate"] = 0.96
-```
+```text
 
 ---
 

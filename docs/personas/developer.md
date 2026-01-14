@@ -8,7 +8,7 @@ The Developer persona is your primary tool configuration for day-to-day developm
 
 ## Quick Load
 
-```
+```text
 Load the developer agent
 ```
 
@@ -63,7 +63,7 @@ Load the developer agent
 
 ### Starting Your Day
 
-```
+```yaml
 You: /coffee
 
 Claude: ☕ Good Morning, Dave!
@@ -77,7 +77,7 @@ Claude: ☕ Good Morning, Dave!
 
 ### Working on an Issue
 
-```
+```yaml
 You: Start work on AAP-12345
 
 Claude: [Runs start_work skill]
@@ -87,7 +87,7 @@ Claude: [Runs start_work skill]
 
 ### Creating a Merge Request
 
-```
+```yaml
 You: Create MR for my changes
 
 Claude: [Runs create_mr skill]

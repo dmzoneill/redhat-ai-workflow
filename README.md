@@ -1,3 +1,5 @@
+# AI Workflow
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://capsule-render.vercel.app/api?type=waving&color=0:667eea,100:764ba2&height=200&section=header&text=AI%20Workflow&fontSize=80&fontColor=fff&animation=twinkling&fontAlignY=35&desc=Your%20AI-Powered%20Development%20Command%20Center&descSize=20&descAlignY=55">
   <img src="https://capsule-render.vercel.app/api?type=waving&color=0:667eea,100:764ba2&height=200&section=header&text=AI%20Workflow&fontSize=80&fontColor=fff&animation=twinkling&fontAlignY=35&desc=Your%20AI-Powered%20Development%20Command%20Center&descSize=20&descAlignY=55" alt="AI Workflow Header"/>
@@ -105,7 +107,7 @@ Create `.cursor/mcp.json` in your **project directory**:
     }
   }
 }
-```
+```text
 
 Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
 
@@ -115,9 +117,9 @@ Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
 >
 > **Tool Organization:** Tools are split into `_basic` (used in skills, 188 tools) and `_extra` (rarely used, 75 tools) to reduce context window usage by 30%.
 
-### 3️⃣ Restart & Go!
+### 3️⃣ Restart and Go
 
-```
+```text
 You: Load the developer persona
 
 Claude: 👨‍💻 Developer Persona Loaded
@@ -352,7 +354,7 @@ Repositories can have automatic documentation checks before creating MRs. Config
     "check_on_mr": true
   }
 }
-```
+```text
 
 When enabled, `/create-mr` and `/mark-ready` will:
 - Scan for changed files in the branch
@@ -404,7 +406,7 @@ Tool: ❌ Failed to release namespace
          Previous fix for `bonfire_release`: Add --force flag
 
       💡 Auto-fix: debug_tool('bonfire_namespace_release')
-```
+```text
 
 ### The Learning Loop
 
@@ -416,7 +418,7 @@ Tool: ❌ Failed to release namespace
 │                                              ↓                 │
 │                                    Saved to memory forever     │
 └────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### Key Tools
 
@@ -444,7 +446,7 @@ Claude: 📋 Session Started
            - Error handling: 5 patterns
            - Authentication: 4 patterns
         🛠️ Currently Loaded Tools: git, gitlab, jira (~78 tools)
-```
+```text
 
 ### Memory Files
 
@@ -461,7 +463,7 @@ Claude: 📋 Session Started
 
 ## 📁 Project Structure
 
-```
+```text
 ai-workflow/
 ├── server/              # MCP server infrastructure
 │   ├── main.py          # Server entry point

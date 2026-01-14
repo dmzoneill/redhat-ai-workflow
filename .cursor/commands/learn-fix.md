@@ -15,7 +15,7 @@ After successfully fixing a tool, run this command to save the learning.
 
 ## Example
 
-```
+```text
 /learn-fix
 
 Tool: bonfire_deploy
@@ -26,7 +26,7 @@ Fix: Use full 40-char SHA
 
 ## The Learning Loop
 
-```
+```text
 Tool fails → check_known_issues() → debug_tool() → fix → learn_tool_fix() → ✓
                     ↑                                            |
                     └────────── remembered for next time ←───────┘

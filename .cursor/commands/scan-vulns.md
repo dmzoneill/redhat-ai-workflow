@@ -4,7 +4,7 @@ Check container image for security vulnerabilities.
 
 ## Instructions
 
-```
+```text
 skill_run("scan_vulnerabilities", '{"image": "$IMAGE"}')
 ```
 

@@ -5,12 +5,12 @@ Clean up stale entries from memory.
 ## Usage
 
 **Preview what would be removed (dry run - default):**
-```
+```text
 skill_run("memory_cleanup", '{}')
 ```
 
 **Actually remove stale entries:**
-```
+```text
 skill_run("memory_cleanup", '{"dry_run": false}')
 ```
 
@@ -27,7 +27,7 @@ skill_run("memory_cleanup", '{"dry_run": false}')
 
 ## Example
 
-```
+```text
 /memory-cleanup
 ```
 
