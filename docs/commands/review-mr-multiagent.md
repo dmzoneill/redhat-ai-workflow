@@ -64,7 +64,7 @@ Each agent focuses on a specific aspect using Claude or Gemini via Vertex AI:
 
 **No API Keys Required** - Uses your Claude Code/Gemini CLI setup with Vertex AI!
 
-## Usage
+## Usage Examples
 
 **Basic review (auto-posts to MR):**
 ```bash
@@ -181,4 +181,4 @@ skill_run("review_pr_multiagent", '{"mr_id": 1483, "post_combined": true}')
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*

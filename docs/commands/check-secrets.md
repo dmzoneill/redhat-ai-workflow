@@ -92,4 +92,4 @@ Use `kubectl_get_secret_value` directly to view a specific secret.
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*

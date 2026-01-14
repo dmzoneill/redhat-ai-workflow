@@ -87,4 +87,4 @@ This shows what would be cleaned. Run with `dry_run: false` to apply.
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*

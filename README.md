@@ -11,8 +11,8 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Claude](https://img.shields.io/badge/Claude-Anthropic-FF6B6B?style=for-the-badge&logo=anthropic&logoColor=white)](https://anthropic.com/)
 [![Cursor](https://img.shields.io/badge/Cursor-IDE-000000?style=for-the-badge&logo=cursor&logoColor=white)](https://cursor.sh/)
-[![Tools](https://img.shields.io/badge/Tools-263-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#tool-modules)
-[![Skills](https://img.shields.io/badge/Skills-55-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)](#skills)
+![Tools](https://img.shields.io/badge/Tools-263-10b981?style=for-the-badge&logo=toolbox&logoColor=white)
+![Skills](https://img.shields.io/badge/Skills-55-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)
 [![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 **Transform Claude into your personal DevOps engineer, developer assistant, and incident responder.**

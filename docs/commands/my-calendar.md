@@ -86,4 +86,4 @@ google_calendar_check_mutual_availability(
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*

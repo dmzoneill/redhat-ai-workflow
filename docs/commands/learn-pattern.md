@@ -87,4 +87,4 @@ The pattern will be saved and automatically matched during `investigate_alert` a
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*
