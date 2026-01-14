@@ -85,7 +85,7 @@ The skill intelligently resolves which repository to use:
 
 ### Starting Fresh Work
 
-```
+```text
 You: Start working on AAP-12345
 
 Claude: [Runs start_work skill]
@@ -104,7 +104,7 @@ Claude: [Runs start_work skill]
 
 ### Resuming Existing Work
 
-```
+```text
 You: Resume work on AAP-12345
 
 Claude: [Runs start_work skill]

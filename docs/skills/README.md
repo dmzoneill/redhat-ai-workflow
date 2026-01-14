@@ -223,17 +223,17 @@ graph LR
 ## Running Skills
 
 **Via Chat:**
-```
+```text
 Run the start_work skill for AAP-12345
 ```text
 
 **Via Tool:**
-```
+```text
 skill_run("start_work", '{"issue_key": "AAP-12345"}')
 ```text
 
 **Via Cursor Command:**
-```
+```text
 /deploy
 /coffee
 /standup

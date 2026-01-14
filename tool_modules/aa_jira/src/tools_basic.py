@@ -101,7 +101,7 @@ def _build_story_yaml_fields(
 ) -> dict:
     """Build YAML fields specific to story issues with defaults."""
     return {
-        "User Story": convert_fn(user_story) if user_story else f"As a user, I want {summary.lower()}.",
+        "User Story": (convert_fn(user_story) if user_story else f"As a user, I want {summary.lower()}."),
         "Acceptance Criteria": (
             convert_fn(acceptance_criteria) if acceptance_criteria else "* Functionality works as described"
         ),
@@ -371,7 +371,14 @@ async def _jira_create_issue_impl(
 
     try:
         # Build CLI args
-        args = ["create-issue", issue_type_normalized, summary, "--input-file", input_file, "--no-ai"]
+        args = [
+            "create-issue",
+            issue_type_normalized,
+            summary,
+            "--input-file",
+            input_file,
+            "--no-ai",
+        ]
 
         if story_points is not None and story_points > 0:
             args.extend(["--story-points", str(story_points)])

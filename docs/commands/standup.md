@@ -28,11 +28,11 @@ skill_run("standup_summary")
 skill_run("standup_summary", '{"days": 2}')
   ```text
 - `repo`: Specific repository path
-```
+```text
   skill_run("standup_summary", '{"repo_name": "automation-analytics-backend"}')
   ```text
 - `issue_key`: Focus on a specific Jira issue
-```
+```text
   skill_run("standup_summary", '{"issue_key": "AAP-12345"}')
   ```text
 
@@ -51,7 +51,7 @@ skill_run("standup_summary", '{"days": 2}')
 - (Manual input - skill prompts if needed)
 
 **Example Output:**
-```
+```mermaid
 
 ## Process Flow
 
@@ -115,7 +115,7 @@ For detailed step-by-step process, see the [standup_summary skill documentation]
 
 ## 🚧 Blockers
 - None
-```
+```text
 
 **Quick aliases:**
 - `/standup` - Yesterday's summary (default)

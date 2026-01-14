@@ -118,7 +118,7 @@ pre-commit run --all-files
 
 ## Project Structure
 
-```
+```text
 redhat-ai-workflow/
 ├── personas/                    # Agent persona definitions (YAML)
 ├── skills/                      # 55 workflow skill definitions (YAML)
@@ -521,7 +521,7 @@ If a skill's auto-heal isn't working:
 
 Follow the format defined in `config.json`:
 
-```
+```json
 {issue_key} - {type}({scope}): {description}
 ```
 

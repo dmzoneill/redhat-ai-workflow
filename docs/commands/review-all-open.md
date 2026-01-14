@@ -57,7 +57,7 @@ For detailed step-by-step process, see the [review_all_prs skill documentation](
 
 Review all open MRs in the repository:
 
-```
+```text
 skill_run("review_all_prs", '{}')
 ```
 

@@ -56,17 +56,17 @@ For detailed step-by-step process, see the [weekly_summary skill documentation](
 ## Usage
 
 **Default (past 7 days):**
-```
+```text
 skill_run("weekly_summary", '{}')
 ```text
 
 **Custom period:**
-```
+```text
 skill_run("weekly_summary", '{"days": 14}')
 ```text
 
 **Slack format:**
-```
+```text
 skill_run("weekly_summary", '{"format": "slack"}')
 ```text
 
@@ -81,7 +81,7 @@ skill_run("weekly_summary", '{"format": "slack"}')
 
 ## Example
 
-```
+```text
 /weekly-summary
 ```
 

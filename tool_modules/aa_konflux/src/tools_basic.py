@@ -98,7 +98,12 @@ async def _konflux_get_build_logs_impl(build_name: str, namespace: str = DEFAULT
     success, output = await run_cmd(args, timeout=120)
     if not success:
         return f"❌ Failed: {output}"
-    output = truncate_output(output, max_length=20000, mode="tail", suffix="... (truncated, showing last 20000 chars)")
+    output = truncate_output(
+        output,
+        max_length=20000,
+        mode="tail",
+        suffix="... (truncated, showing last 20000 chars)",
+    )
     return f"## Build Logs: {build_name}\n\n```\n{output}\n```"
 
 
@@ -423,7 +428,10 @@ async def _tkn_pipelinerun_list_impl(namespace: str = DEFAULT_NAMESPACE, limit: 
 
 @auto_heal_konflux()
 async def _tkn_pipelinerun_logs_impl(
-    run_name: str, namespace: str = DEFAULT_NAMESPACE, task: str = "", all_tasks: bool = True
+    run_name: str,
+    namespace: str = DEFAULT_NAMESPACE,
+    task: str = "",
+    all_tasks: bool = True,
 ) -> str:
     """Get logs from a pipeline run."""
     args = ["tkn", "pipelinerun", "logs", run_name, "-n", namespace]
@@ -590,7 +598,10 @@ def _register_tekton_mgmt_tools(registry: ToolRegistry) -> None:
     @auto_heal_konflux()
     @registry.tool()
     async def tkn_pipelinerun_logs(
-        run_name: str, namespace: str = DEFAULT_NAMESPACE, task: str = "", all_tasks: bool = True
+        run_name: str,
+        namespace: str = DEFAULT_NAMESPACE,
+        task: str = "",
+        all_tasks: bool = True,
     ) -> str:
         """Get logs from a pipeline run."""
         return await _tkn_pipelinerun_logs_impl(run_name, namespace, task, all_tasks)

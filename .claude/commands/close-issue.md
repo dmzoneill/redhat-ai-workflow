@@ -42,7 +42,7 @@ skill_run("close_issue", '{"issue_key": "AAP-12345", "add_comment": false}')
 
 ## Workflow Integration
 
-```
+```text
 /start-work AAP-12345     # Begin work
 ... code ...
 /create-mr                # Create merge request

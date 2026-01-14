@@ -45,7 +45,12 @@ REGISTRY_PATTERNS = [
     "pull access denied",
 ]
 
-TTY_PATTERNS = ["output is not a tty", "not a terminal", "aborting", "input is not a terminal"]
+TTY_PATTERNS = [
+    "output is not a tty",
+    "not a terminal",
+    "aborting",
+    "input is not a terminal",
+]
 
 
 def detect_failure(result: str, tool_name: str = "") -> dict:
@@ -201,7 +206,13 @@ def should_retry(failure: dict, retry_count: int = 0, max_retries: int = 2) -> b
     return failure.get("error_type") in ["auth", "network"]
 
 
-def log_failure(tool_name: str, error_text: str, skill_name: str = "", fixed: bool = False, memory_helper=None) -> dict:
+def log_failure(
+    tool_name: str,
+    error_text: str,
+    skill_name: str = "",
+    fixed: bool = False,
+    memory_helper=None,
+) -> dict:
     """
     Log a failure to memory for learning.
 

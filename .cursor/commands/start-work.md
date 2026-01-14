@@ -30,7 +30,7 @@ skill_run("start_work", '{"issue_key": "AAP-61214", "repo": "automation-analytic
 ## Branch Naming
 
 Branch will be created as:
-```
+```text
 aap-61214-short-description-from-jira-title
 ```
 

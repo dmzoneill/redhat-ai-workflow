@@ -56,7 +56,7 @@ For detailed step-by-step process, see the [notify_team skill documentation](../
 
 ## Instructions
 
-```
+```text
 skill_run("notify_team", '{"channel": "$CHANNEL", "message": "$MESSAGE"}')
 ```
 

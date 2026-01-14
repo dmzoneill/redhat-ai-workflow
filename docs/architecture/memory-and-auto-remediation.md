@@ -553,7 +553,7 @@ def log_fix_attempt(self, error_info, action, success, details=""):
 
 ### 1. Tool → Memory (Auto-Heal)
 
-```
+```python
 Tool Fails
     ↓
 @auto_heal() Decorator Detects Failure
@@ -567,7 +567,7 @@ Writes to memory/learned/tool_failures.yaml
 
 ### 2. Skill → Memory (Pattern Check)
 
-```
+```text
 Skill Step Fails
     ↓
 check_known_issues() in meta_tools.py
@@ -585,7 +585,7 @@ Retries Tool Once
 
 ### 3. User → Memory (Pattern Learning)
 
-```
+```text
 User Discovers New Pattern
     ↓
 skill_run("learn_pattern", '{...}')
@@ -599,7 +599,7 @@ memory_session_log("Learned pattern: X")
 
 ### 4. Skill → Memory (Session Logging)
 
-```
+```mermaid
 Skill Executes Action
     ↓
 Calls memory_session_log()

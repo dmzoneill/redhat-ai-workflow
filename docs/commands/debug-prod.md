@@ -64,7 +64,7 @@ For detailed step-by-step process, see the [debug_prod skill documentation](../s
 
 ## Instructions
 
-```
+```text
 skill_run("debug_prod")
 ```
 

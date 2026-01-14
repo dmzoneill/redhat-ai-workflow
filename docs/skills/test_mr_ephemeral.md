@@ -130,7 +130,7 @@ Billing indicators:
 
 ## Example Output
 
-```
+```text
 You: Deploy MR 1450 to ephemeral
 
 Claude: 🧪 Deploying MR !1450 to ephemeral...

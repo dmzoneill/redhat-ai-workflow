@@ -804,7 +804,7 @@ Description of what it does.
 
 ```text
 skill_run("my_skill", '{"param": "value"}')
-```
+```text
 ```
 
 The command name comes from the filename (e.g., `my-command.md` → `/my-command`).

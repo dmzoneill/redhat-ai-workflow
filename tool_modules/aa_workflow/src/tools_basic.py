@@ -67,7 +67,11 @@ def _issue_fingerprint(tool: str, error: str) -> str:
 
 
 async def create_github_issue(
-    tool: str, error: str, context: str = "", skill: str = "", labels: list[str] | None = None
+    tool: str,
+    error: str,
+    context: str = "",
+    skill: str = "",
+    labels: list[str] | None = None,
 ) -> dict:
     """
     Create a GitHub issue for a tool/skill failure.
@@ -148,7 +152,11 @@ async def create_github_issue(
                     "Accept": "application/vnd.github.v3+json",
                     "User-Agent": "AI-Workflow-Error-Reporter",
                 },
-                json={"title": f"[Auto] Tool Error: {tool}", "body": body, "labels": issue_labels},
+                json={
+                    "title": f"[Auto] Tool Error: {tool}",
+                    "body": body,
+                    "labels": issue_labels,
+                },
                 timeout=30.0,
             )
 

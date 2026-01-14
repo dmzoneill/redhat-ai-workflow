@@ -106,7 +106,7 @@ flowchart TD
 
 ### Konflux
 
-```
+```text
 konflux_pipeline_list        # List pipelines
 konflux_pipeline_status      # Pipeline details
 konflux_build_logs           # Build logs
@@ -114,7 +114,7 @@ konflux_build_logs           # Build logs
 
 ### Quay
 
-```
+```text
 quay_get_tag                 # Check image tag
 quay_list_tags               # List available tags
 quay_get_manifest            # Image manifest
@@ -122,7 +122,7 @@ quay_get_manifest            # Image manifest
 
 ### App-Interface
 
-```
+```text
 appinterface_get_config      # Get current config
 appinterface_update_ref      # Update image ref
 ```

@@ -162,7 +162,8 @@ class SlackStateDB:
         async with self._lock:
             await self._connect_unlocked()
             cursor = await self._db.execute(
-                "SELECT last_processed_ts FROM channel_state WHERE channel_id = ?", (channel_id,)
+                "SELECT last_processed_ts FROM channel_state WHERE channel_id = ?",
+                (channel_id,),
             )
             row = await cursor.fetchone()
             return row[0] if row else None

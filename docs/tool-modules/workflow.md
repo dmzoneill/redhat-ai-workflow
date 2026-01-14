@@ -80,7 +80,7 @@ debug_tool("bonfire_namespace_release", "Output is not a TTY")
 
 ## Memory Structure
 
-```
+```text
 memory/
 ├── state/
 │   └── current_work.yaml      # Active issues, branches

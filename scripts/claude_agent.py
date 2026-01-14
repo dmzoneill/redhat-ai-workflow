@@ -187,8 +187,14 @@ class ToolRegistry:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "issue_key": {"type": "string", "description": "Jira issue key"},
-                        "comment": {"type": "string", "description": "Comment text to add"},
+                        "issue_key": {
+                            "type": "string",
+                            "description": "Jira issue key",
+                        },
+                        "comment": {
+                            "type": "string",
+                            "description": "Comment text to add",
+                        },
                     },
                     "required": ["issue_key", "comment"],
                 },
@@ -329,7 +335,12 @@ class ToolRegistry:
                 description="Get git status of a repository.",
                 parameters={
                     "type": "object",
-                    "properties": {"repo_path": {"type": "string", "description": "Path to git repository"}},
+                    "properties": {
+                        "repo_path": {
+                            "type": "string",
+                            "description": "Path to git repository",
+                        }
+                    },
                     "required": [],
                 },
             )
@@ -342,7 +353,10 @@ class ToolRegistry:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "repo_path": {"type": "string", "description": "Path to git repository"},
+                        "repo_path": {
+                            "type": "string",
+                            "description": "Path to git repository",
+                        },
                         "count": {
                             "type": "integer",
                             "description": "Number of commits to show",
@@ -361,7 +375,12 @@ class ToolRegistry:
                 description="List pods in a Kubernetes namespace.",
                 parameters={
                     "type": "object",
-                    "properties": {"namespace": {"type": "string", "description": "Kubernetes namespace"}},
+                    "properties": {
+                        "namespace": {
+                            "type": "string",
+                            "description": "Kubernetes namespace",
+                        }
+                    },
                     "required": ["namespace"],
                 },
             )
@@ -373,7 +392,12 @@ class ToolRegistry:
                 description="Get recent events in a Kubernetes namespace.",
                 parameters={
                     "type": "object",
-                    "properties": {"namespace": {"type": "string", "description": "Kubernetes namespace"}},
+                    "properties": {
+                        "namespace": {
+                            "type": "string",
+                            "description": "Kubernetes namespace",
+                        }
+                    },
                     "required": ["namespace"],
                 },
             )
@@ -386,7 +410,10 @@ class ToolRegistry:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "namespace": {"type": "string", "description": "Kubernetes namespace"},
+                        "namespace": {
+                            "type": "string",
+                            "description": "Kubernetes namespace",
+                        },
                         "pod": {"type": "string", "description": "Pod name"},
                         "tail": {
                             "type": "integer",
@@ -545,8 +572,14 @@ This handles everything: gets SHA, checks image, reserves namespace, deploys."""
                 parameters={
                     "type": "object",
                     "properties": {
-                        "skill_name": {"type": "string", "description": "Name of the skill to run"},
-                        "inputs": {"type": "object", "description": "Inputs for the skill"},
+                        "skill_name": {
+                            "type": "string",
+                            "description": "Name of the skill to run",
+                        },
+                        "inputs": {
+                            "type": "object",
+                            "description": "Inputs for the skill",
+                        },
                     },
                     "required": ["skill_name"],
                 },
@@ -591,9 +624,18 @@ Useful for tracking:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "key": {"type": "string", "description": "Memory file (e.g., 'state/current_work')"},
-                        "list_path": {"type": "string", "description": "Path to list (e.g., 'active_issues')"},
-                        "item": {"type": "string", "description": "Item to add (as YAML/JSON string)"},
+                        "key": {
+                            "type": "string",
+                            "description": "Memory file (e.g., 'state/current_work')",
+                        },
+                        "list_path": {
+                            "type": "string",
+                            "description": "Path to list (e.g., 'active_issues')",
+                        },
+                        "item": {
+                            "type": "string",
+                            "description": "Item to add (as YAML/JSON string)",
+                        },
                     },
                     "required": ["key", "list_path", "item"],
                 },
@@ -608,7 +650,10 @@ Useful for tracking:
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "description": "What was done"},
-                        "details": {"type": "string", "description": "Additional details (optional)"},
+                        "details": {
+                            "type": "string",
+                            "description": "Additional details (optional)",
+                        },
                     },
                     "required": ["action"],
                 },
@@ -654,7 +699,11 @@ Use thread_ts to reply in a thread (REQUIRED for alert replies).""",
     def list_tools(self) -> list[dict[str, Any]]:
         """Get all tools in Anthropic API format."""
         return [
-            {"name": tool.name, "description": tool.description, "input_schema": tool.parameters}
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.parameters,
+            }
             for tool in self.tools.values()
         ]
 
@@ -733,7 +782,10 @@ class ToolExecutor:
                 )
 
     async def _run_command(
-        self, cmd: list[str], cwd: Optional[str] = None, env: Optional[dict[str, str]] = None
+        self,
+        cmd: list[str],
+        cwd: Optional[str] = None,
+        env: Optional[dict[str, str]] = None,
     ) -> str:
         """Run a shell command and return output."""
         try:
@@ -839,7 +891,11 @@ class ToolExecutor:
         return await self._run_command(cmd, cwd=run_cwd)
 
     async def _gitlab_mr_list(
-        self, project: str, run_cwd: str | None, use_repo_flag: bool, args: dict[str, Any]
+        self,
+        project: str,
+        run_cwd: str | None,
+        use_repo_flag: bool,
+        args: dict[str, Any],
     ) -> str:
         """Execute gitlab_mr_list tool."""
         cmd = ["glab", "mr", "list"]
@@ -858,7 +914,12 @@ class ToolExecutor:
         return await self._run_command(cmd, cwd=run_cwd)
 
     async def _gitlab_mr_approve(
-        self, mr_id: str, project: str, run_cwd: str | None, use_repo_flag: bool, args: dict[str, Any]
+        self,
+        mr_id: str,
+        project: str,
+        run_cwd: str | None,
+        use_repo_flag: bool,
+        args: dict[str, Any],
     ) -> str:
         """Execute gitlab_mr_approve tool with event emission."""
         if not mr_id:
@@ -882,7 +943,12 @@ class ToolExecutor:
         return result
 
     async def _gitlab_mr_comment(
-        self, mr_id: str, project: str, run_cwd: str | None, use_repo_flag: bool, args: dict[str, Any]
+        self,
+        mr_id: str,
+        project: str,
+        run_cwd: str | None,
+        use_repo_flag: bool,
+        args: dict[str, Any],
     ) -> str:
         """Execute gitlab_mr_comment tool with event emission."""
         if not mr_id:
@@ -904,7 +970,12 @@ class ToolExecutor:
         return result
 
     async def _gitlab_mr_merge(
-        self, mr_id: str, project: str, run_cwd: str | None, use_repo_flag: bool, args: dict[str, Any]
+        self,
+        mr_id: str,
+        project: str,
+        run_cwd: str | None,
+        use_repo_flag: bool,
+        args: dict[str, Any],
     ) -> str:
         """Execute gitlab_mr_merge tool with event emission."""
         if not mr_id:
@@ -1031,7 +1102,15 @@ class ToolExecutor:
             return await self._run_command(["kubectl", "get", "pods", "-n", namespace], env=env)
         elif tool_name == "k8s_get_events":
             return await self._run_command(
-                ["kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp"], env=env
+                [
+                    "kubectl",
+                    "get",
+                    "events",
+                    "-n",
+                    namespace,
+                    "--sort-by=.lastTimestamp",
+                ],
+                env=env,
             )
         elif tool_name == "k8s_logs":
             pod = args.get("pod", "")
@@ -1321,7 +1400,10 @@ Please verify the image exists before proceeding."""
             return self._execute_memory_read(args.get("key", ""), read_memory)
         elif tool_name == "memory_append":
             return self._execute_memory_append(
-                args.get("key", ""), args.get("list_path", ""), args.get("item", "{}"), append_to_list
+                args.get("key", ""),
+                args.get("list_path", ""),
+                args.get("item", "{}"),
+                append_to_list,
             )
         elif tool_name == "memory_session_log":
             return self._execute_memory_session_log(args.get("action", ""), args.get("details", ""))

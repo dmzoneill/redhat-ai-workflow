@@ -48,7 +48,9 @@ def register_tools(server: "FastMCP") -> int:
         """
         kubeconfig = get_kubeconfig(environment, namespace)
         success, output = await run_kubectl(
-            ["get", "deployments", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
+            ["get", "deployments", "-o", "wide"],
+            kubeconfig=kubeconfig,
+            namespace=namespace,
         )
         return f"## Deployments in {namespace}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 

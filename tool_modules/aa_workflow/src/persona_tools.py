@@ -54,7 +54,12 @@ def _list_personas_impl() -> list[TextContent]:
                 personas.append({"name": f.stem, "title": f.stem, "role": f"Error: {e}"})
 
     if not personas:
-        return [TextContent(type="text", text="No personas found. Create .md files in personas/ directory.")]
+        return [
+            TextContent(
+                type="text",
+                text="No personas found. Create .md files in personas/ directory.",
+            )
+        ]
 
     lines = ["## Available Personas\n"]
     for p in personas:

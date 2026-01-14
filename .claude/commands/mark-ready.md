@@ -45,7 +45,7 @@ skill_run("mark_mr_ready", '{"mr_id": 1459, "update_jira": false}')
 
 ## Workflow
 
-```
+```text
 /create-mr          # Creates as draft by default
 ... self-review ...
 ... fix issues ...

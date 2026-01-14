@@ -382,7 +382,7 @@ def remove_open_mr(mr_id: int) -> bool
 **Location:** `tool_modules/aa_workflow/src/resources.py`
 
 **URIs:**
-```
+```text
 memory://state/current_work        → current_work.yaml
 memory://learned/patterns          → patterns.yaml
 memory://learned/runbooks          → runbooks.yaml
@@ -394,7 +394,7 @@ config://repositories              → Repo config
 ```text
 
 **Claude Usage:**
-```
+```text
 User: "What am I working on?"
 Claude: [Reads memory://state/current_work]
 Response: "You're working on AAP-61661..."
@@ -607,7 +607,7 @@ This is a **completely separate persistence layer** from the YAML-based memory s
 
 ### Memory Operations per Day
 
-```
+```text
 Total: ~395 operations
 
 Reads:  ~250 (63%)
@@ -637,7 +637,7 @@ Writes: ~145 (37%)
 
 ### Tool Coverage
 
-```
+```text
 Total Tools: 239+
 With @auto_heal: 239+ (100%)
 Logging to memory: 239+ (100%)
@@ -655,7 +655,7 @@ By Module:
 
 ### Skill Coverage
 
-```
+```text
 Total Skills: 54
 Using Memory: 46 (85%)
 Not Using: 8 (15%)

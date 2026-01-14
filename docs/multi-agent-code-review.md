@@ -436,7 +436,7 @@ max_tokens=4000  # Instead of 3000
 **Expected:** Coordinator should deduplicate
 
 **If not:** Enhance coordinator prompt:
-```
+```text
 "Carefully remove duplicate findings that describe the same issue,
 even if reported by different agents. Keep only the most detailed version."
 ```

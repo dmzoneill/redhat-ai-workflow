@@ -58,7 +58,7 @@ For detailed step-by-step process, see the [environment_overview skill documenta
 
 ## Instructions
 
-```
+```text
 skill_run("environment_overview", '{"environment": "stage"}')
 ```
 

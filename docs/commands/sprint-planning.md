@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [sprint_planning skill documentation]
 
 ## Instructions
 
-```
+```text
 skill_run("sprint_planning", '{"project": "AAP"}')
 ```
 

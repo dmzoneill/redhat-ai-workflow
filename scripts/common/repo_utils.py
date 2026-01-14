@@ -55,7 +55,11 @@ def _resolve_by_issue_key(issue_key: str, repos: dict) -> tuple[Optional[str], s
             matches.append({"name": rname, "config": cfg})
 
     if len(matches) == 1:
-        return matches[0]["config"].get("path", ""), matches[0]["name"], matches[0]["config"]
+        return (
+            matches[0]["config"].get("path", ""),
+            matches[0]["name"],
+            matches[0]["config"],
+        )
     if len(matches) > 1:
         names = ", ".join(m["name"] for m in matches)
         raise ValueError(f"Multiple repos match {project_prefix}: {names}. Specify repo_name.")

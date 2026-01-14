@@ -60,7 +60,7 @@ For detailed step-by-step process, see the [review_pr skill documentation](../sk
 
 Run a static analysis review (no local tests):
 
-```
+```text
 skill_run("review_pr", '{"mr_id": $MR_ID}')
 ```
 

@@ -40,7 +40,7 @@ class SkillExecutionEmitter:
             "type": event_type,
             "timestamp": datetime.now().isoformat(),
             "skillName": self.skill_name,
-            "stepIndex": self.current_step_index if self.current_step_index >= 0 else None,
+            "stepIndex": (self.current_step_index if self.current_step_index >= 0 else None),
             "stepName": (
                 self.steps[self.current_step_index].get("name")
                 if 0 <= self.current_step_index < len(self.steps)

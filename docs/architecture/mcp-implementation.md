@@ -30,7 +30,7 @@ Add to your project's `.cursor/mcp.json`:
 
 ## Directory Structure
 
-```
+```text
 server/                           # Core infrastructure
 ├── main.py                       # Main server entry point
 ├── persona_loader.py             # Dynamic persona/tool loading
@@ -252,7 +252,7 @@ python -m src.server  # Starts with developer persona (~78 tools)
 ```text
 
 Then in chat:
-```
+```text
 You: Load the devops agent
 Claude: [calls persona_load("devops")]
         DevOps agent loaded! Now have k8s, bonfire, quay, gitlab (~74 tools)
@@ -319,7 +319,7 @@ tools:
 
 The `aa_slack` module implements a **long-running listener** pattern:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  aa_slack MCP Server                                            │
 │                                                                 │

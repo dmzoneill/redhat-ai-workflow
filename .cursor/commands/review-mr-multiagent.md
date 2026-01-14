@@ -117,12 +117,12 @@ The coordinator creates a structured review:
 ## Example Workflows
 
 **High-priority feature:**
-```
+```text
 skill_run("review_pr_multiagent", '{"mr_id": 1482}')
 ```text
 
 **Production hotfix:**
-```
+```text
 skill_run("review_pr_multiagent", '{
   "mr_id": 1483,
   "agents": "security,testing"
@@ -130,7 +130,7 @@ skill_run("review_pr_multiagent", '{
 ```text
 
 **New API endpoint:**
-```
+```text
 skill_run("review_pr_multiagent", '{
   "mr_id": 1484,
   "agents": "security,architecture,performance"

@@ -61,7 +61,7 @@ For detailed step-by-step process, see the [create_mr skill documentation](../sk
 
 Create an MR for the current branch:
 
-```
+```text
 skill_run("create_mr", '{"issue_key": "$JIRA_KEY"}')
 ```
 
@@ -86,7 +86,7 @@ skill_run("create_mr", '{"issue_key": "AAP-61214", "draft": true}')
 
 ## MR Title Format
 
-```
+```text
 AAP-61214 - feat(billing): Add invoice generation
 ```
 

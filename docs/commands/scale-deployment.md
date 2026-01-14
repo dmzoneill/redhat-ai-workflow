@@ -57,7 +57,7 @@ For detailed step-by-step process, see the [scale_deployment skill documentation
 
 ## Instructions
 
-```
+```text
 skill_run("scale_deployment", '{"deployment": "$DEPLOYMENT", "namespace": "$NAMESPACE", "replicas": $COUNT}')
 ```
 

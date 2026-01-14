@@ -126,7 +126,7 @@ pytest -k "billing" -v
 
 For automated testing as part of PR review:
 
-```
+```text
 skill_run("review_pr", '{"mr_id": 1450, "run_tests": true}')
 ```
 

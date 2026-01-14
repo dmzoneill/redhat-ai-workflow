@@ -39,7 +39,7 @@ sequenceDiagram
 
 You can switch personas at any time:
 
-```
+```text
 You: Load the developer agent
 Claude: 👨‍💻 Developer persona loaded (~78 tools)
 

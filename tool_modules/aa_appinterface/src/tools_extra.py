@@ -95,7 +95,8 @@ async def _appinterface_clusters_impl(path: str) -> list[TextContent]:
             lines.append(f"... and {len(clusters) - 30} more")
     else:
         success, stdout, stderr = await run_cmd(
-            ["grep", "-rl", "$schema.*cluster", repo_path, "--include=*.yml"], cwd=repo_path
+            ["grep", "-rl", "$schema.*cluster", repo_path, "--include=*.yml"],
+            cwd=repo_path,
         )
 
         if success and stdout:
@@ -191,7 +192,8 @@ async def _appinterface_search_impl(query: str, file_type: str, path: str) -> li
     lines = [f"## Search: `{query}`", ""]
 
     success, stdout, stderr = await run_cmd(
-        ["grep", "-rn", query, repo_path, f"--include=*.{file_type}", "-l"], cwd=repo_path
+        ["grep", "-rn", query, repo_path, f"--include=*.{file_type}", "-l"],
+        cwd=repo_path,
     )
 
     if not success or not stdout.strip():
@@ -214,7 +216,8 @@ async def _appinterface_search_impl(query: str, file_type: str, path: str) -> li
     lines.append("\n### Sample Matches")
 
     success, stdout, stderr = await run_cmd(
-        ["grep", "-rn", query, repo_path, f"--include=*.{file_type}", "-m", "3"], cwd=repo_path
+        ["grep", "-rn", query, repo_path, f"--include=*.{file_type}", "-m", "3"],
+        cwd=repo_path,
     )
 
     if success and stdout:

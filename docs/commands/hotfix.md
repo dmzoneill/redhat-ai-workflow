@@ -56,7 +56,7 @@ For detailed step-by-step process, see the [hotfix skill documentation](../skill
 
 ## Instructions
 
-```
+```text
 skill_run("hotfix", '{"commit": "$COMMIT_SHA", "version": "$VERSION"}')
 ```
 

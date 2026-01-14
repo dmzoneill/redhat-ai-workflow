@@ -56,7 +56,7 @@ For detailed step-by-step process, see the [close_mr skill documentation](../ski
 
 ## Instructions
 
-```
+```text
 skill_run("close_mr", '{"mr_id": $MR_ID, "project": "$PROJECT"}')
 ```
 

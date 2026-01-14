@@ -144,7 +144,7 @@ bonfire_namespace_release(namespace="ephemeral-xxx")  # Checks --mine first
 
 Commit format is defined in `config.json` under `commit_format`:
 
-```
+```json
 {issue_key} - {type}({scope}): {description}
 ```
 

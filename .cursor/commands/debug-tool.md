@@ -30,7 +30,7 @@ I will:
 4. Ask for confirmation before applying
 5. Commit the fix and retry
 
-## Step 3: Save the Learning!
+## Step 3: Save the Learning
 
 After the fix works:
 ```text
@@ -44,7 +44,7 @@ learn_tool_fix(
 
 This creates a **learning loop** - next time, `check_known_issues()` will find the fix!
 
-## Common fixable bugs:
+## Common Fixable Bugs
 - Missing `--force` flag (TTY errors)
 - Wrong CLI syntax
 - Auth not passed correctly

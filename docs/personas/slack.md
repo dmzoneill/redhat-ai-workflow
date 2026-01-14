@@ -192,14 +192,14 @@ make slack-reload
 The Slack agent uses concise, Slack-appropriate formatting:
 
 **Good Response:**
-```
+```text
 📋 *AAP-12345*: Add REST endpoint for user preferences
 Status: In Progress | Assignee: @david
 [View in Jira](link)
 ```text
 
 **Not Like This:**
-```
+```text
 I found the Jira issue you requested. Here are the details...
 The issue titled "Add REST endpoint for user preferences"...
 (too verbose for Slack)
@@ -230,7 +230,7 @@ The bot automatically detects Prometheus alerts in configured alert channels:
 
 ### Jira Query
 
-```
+```text
 User: What's the status of AAP-12345?
 
 Bot: 📋 *AAP-12345*: Implement caching layer
@@ -241,7 +241,7 @@ Bot: 📋 *AAP-12345*: Implement caching layer
 
 ### MR Status
 
-```
+```text
 User: Check MR 456
 
 Bot: 🦊 *!456*: AAP-12345 - feat: Add caching
@@ -252,7 +252,7 @@ Bot: 🦊 *!456*: AAP-12345 - feat: Add caching
 
 ### Alert Investigation
 
-```
+```text
 AlertManager: [FIRING:1] HighErrorRate - tower-analytics-api
 
 Bot: 👀 Investigating alert...
@@ -277,7 +277,7 @@ Bot: 👀 Investigating alert...
 
 ### Help
 
-```
+```text
 User: @bot help
 
 Bot: 👋 Here's what I can help with:

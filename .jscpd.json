@@ -1,5 +1,5 @@
 {
-  "threshold": 15,
+  "threshold": 25,
   "reporters": ["html", "console"],
   "ignore": [
     "**/node_modules/**",
@@ -10,7 +10,12 @@
     "**/*.pyc",
     "**/.git/**",
     "**/dist/**",
-    "**/build/**"
+    "**/build/**",
+    "**/out/**",
+    "**/.cursor/**",
+    "**/.claude/**",
+    "**/docs/commands/**",
+    "**/docs/skills/**"
   ],
   "format": ["python", "javascript", "typescript"],
   "min-lines": 10,

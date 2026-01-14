@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [rebase_pr skill documentation](../sk
 
 ## Instructions
 
-```
+```text
 skill_run("rebase_pr", '{"mr_id": $MR_ID}')
 ```
 

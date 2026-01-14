@@ -904,7 +904,10 @@ def _parse_and_validate_start_time(start_time: str, now, duration_minutes: int):
             start_dt = start_dt.astimezone(tz)
 
     except ValueError:
-        return None, f"❌ Invalid start_time format: {start_time}. Use ISO format or 'YYYY-MM-DD HH:MM'."
+        return (
+            None,
+            f"❌ Invalid start_time format: {start_time}. Use ISO format or 'YYYY-MM-DD HH:MM'.",
+        )
 
     # Validate time is within allowed window
     if start_dt.hour < MEETING_START_HOUR or start_dt.hour >= MEETING_END_HOUR:

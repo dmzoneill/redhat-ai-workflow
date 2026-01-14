@@ -140,7 +140,7 @@ These are used by skill auto-healing to recover from common failures.
 
 Modules are loaded dynamically when you switch agents:
 
-```
+```text
 You: Load devops agent
 
 Claude: [AgentLoader]

@@ -520,7 +520,11 @@ def analyze_mr_status(details: str, my_username: Optional[str] = None) -> Dict[s
 
     # Check for unresolved discussions
     result["unresolved"] = bool(
-        re.search(r"unresolved|open discussion|needs work|request.*change", details, re.IGNORECASE)
+        re.search(
+            r"unresolved|open discussion|needs work|request.*change",
+            details,
+            re.IGNORECASE,
+        )
     )
 
     # Look for reviewer comments (not from me)
@@ -1272,7 +1276,9 @@ def linkify_jira_keys(text: str, jira_url: Optional[str] = None, slack_format: b
 
 
 def linkify_mr_ids(
-    text: str, project_path: str = "automation-analytics/automation-analytics-backend", slack_format: bool = False
+    text: str,
+    project_path: str = "automation-analytics/automation-analytics-backend",
+    slack_format: bool = False,
 ) -> str:
     """
     Replace MR IDs (!123) in text with markdown links.
@@ -1449,7 +1455,13 @@ def analyze_review_status(details: str, reviewer_username: str, author: str = ""
         author_replied = bool(re.search(rf"{author}.*?commented|replied", details, re.IGNORECASE))
 
     # Check if already approved
-    already_approved = bool(re.search(rf"approved by.*?{reviewer_username}|LGTM|Looks good", details, re.IGNORECASE))
+    already_approved = bool(
+        re.search(
+            rf"approved by.*?{reviewer_username}|LGTM|Looks good",
+            details,
+            re.IGNORECASE,
+        )
+    )
 
     # Determine recommended action
     if already_approved:

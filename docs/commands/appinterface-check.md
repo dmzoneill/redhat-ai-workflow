@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [appinterface_check skill documentati
 
 ## Instructions
 
-```
+```text
 skill_run("appinterface_check", '{"saas_file": "$SAAS_FILE"}')
 ```
 

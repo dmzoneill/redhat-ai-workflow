@@ -119,7 +119,7 @@ sequenceDiagram
 
 ## Tool Modules
 
-```
+```text
 tool_modules/
 ├── aa_workflow/        # Core workflow tools (18 tools)
 ├── aa_git/             # Git operations (30 tools)

@@ -284,7 +284,10 @@ async def _log_auto_heal_to_memory(
             with open(failures_file) as f:
                 data = yaml.safe_load(f) or {}
         else:
-            data = {"failures": [], "stats": {"total_failures": 0, "auto_fixed": 0, "manual_required": 0}}
+            data = {
+                "failures": [],
+                "stats": {"total_failures": 0, "auto_fixed": 0, "manual_required": 0},
+            }
 
         if "failures" not in data:
             data["failures"] = []

@@ -59,13 +59,13 @@ For detailed step-by-step process, see the [update_docs skill documentation](../
 
 Run the update_docs skill to check documentation:
 
-```
+```text
 skill_run("update_docs", '{"repo": ".", "check_only": true}')
 ```text
 
 Or for a specific repository:
 
-```
+```text
 skill_run("update_docs", '{"repo_name": "automation-analytics-backend", "check_only": true}')
 ```
 

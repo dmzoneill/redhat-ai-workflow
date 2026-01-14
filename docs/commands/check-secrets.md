@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [check_secrets skill documentation](.
 
 ## Instructions
 
-```
+```text
 skill_run("check_secrets", '{"namespace": "$NAMESPACE"}')
 ```
 

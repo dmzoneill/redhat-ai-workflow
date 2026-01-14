@@ -65,7 +65,7 @@ For detailed step-by-step process, see the [mark_mr_ready skill documentation](.
 
 ## Instructions
 
-```
+```text
 skill_run("mark_mr_ready", '{"mr_id": 1234}')
 ```
 
@@ -100,7 +100,7 @@ skill_run("mark_mr_ready", '{"mr_id": 1459, "update_jira": false}')
 
 ## Workflow
 
-```
+```text
 /create-mr          # Creates as draft by default
 ... self-review ...
 ... fix issues ...
