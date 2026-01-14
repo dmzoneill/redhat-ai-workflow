@@ -79,7 +79,7 @@ skill_run("silence_alert", '{"alert_name": "$ALERT", "duration": "$DURATION"}')
 | `comment` | Reason for silence | Optional |
 | `delete_id` | Silence ID to delete | Optional |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Silence for 1 hour

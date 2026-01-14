@@ -74,7 +74,7 @@ skill_run("check_secrets", '{"namespace": "$NAMESPACE"}')
 | `deployment` | Specific deployment to check | All |
 | `environment` | Cluster (stage/prod) | `stage` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Check stage secrets

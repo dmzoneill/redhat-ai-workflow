@@ -778,7 +778,7 @@ args:
 
 # Updates: memory/state/current_work.yaml
 last_updated: "2026-01-09T14:30:00"
-```text
+```
 
 ---
 

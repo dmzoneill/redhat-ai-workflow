@@ -76,7 +76,7 @@ skill_run("hotfix", '{"commit": "$COMMIT_SHA", "version": "$VERSION"}')
 | `version` | Hotfix version tag | Required |
 | `base_tag` | Production tag to branch from | Latest release |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Create hotfix

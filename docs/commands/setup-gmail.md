@@ -92,9 +92,7 @@ google_calendar_status()
 
 Gmail uses the same Google OAuth as Calendar, but needs additional scopes.
 
-#
-
-## Step 1: Enable Gmail API in Google Cloud
+### Step 1: Enable Gmail API in Google Cloud
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com)
 2. Select your project (same one used for Calendar)
@@ -102,9 +100,7 @@ Gmail uses the same Google OAuth as Calendar, but needs additional scopes.
 4. Search for **Gmail API**
 5. Click **Enable**
 
-#
-
-## Step 2: Update OAuth Scopes
+### Step 2: Update OAuth Scopes
 
 Your existing OAuth app needs to request Gmail permissions:
 
@@ -115,9 +111,7 @@ Your existing OAuth app needs to request Gmail permissions:
    - `https://www.googleapis.com/auth/gmail.modify`
 4. Save
 
-#
-
-## Step 3: Re-authenticate
+### Step 3: Re-authenticate
 
 Delete the existing token and re-authenticate to get Gmail access:
 
@@ -134,9 +128,7 @@ google_calendar_status()
 
 Sign in and grant the new Gmail permissions.
 
-#
-
-## Step 4: Verify
+### Step 4: Verify
 
 Test email access:
 

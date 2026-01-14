@@ -76,9 +76,7 @@ For detailed step-by-step process, see the [memory_edit skill documentation](../
 
 ## Usage
 
-#
-
-## Remove an Item
+### Remove an Item
 
 Remove a closed issue from active_issues:
 ```text
@@ -102,9 +100,7 @@ skill_run("memory_edit", '{
 }')
 ```bash
 
-#
-
-## Update a Field
+### Update a Field
 
 Update environment status:
 ```text

@@ -75,7 +75,7 @@ skill_run("extend_ephemeral", '{"namespace": "$NAMESPACE"}')
 | `namespace` | Namespace to extend | Auto-detect (if only one) |
 | `hours` | Hours to extend | `4` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Extend your namespace

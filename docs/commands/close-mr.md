@@ -75,7 +75,7 @@ skill_run("close_mr", '{"mr_id": $MR_ID, "project": "$PROJECT"}')
 | `project` | GitLab project | Current repo |
 | `reason` | Closure reason | Optional |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Close an MR

@@ -73,7 +73,7 @@ skill_run("appinterface_check", '{"saas_file": "$SAAS_FILE"}')
 | `saas_file` | SaaS file to check | Auto-detect |
 | `environment` | Environment to validate | All |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Check tower-analytics SaaS

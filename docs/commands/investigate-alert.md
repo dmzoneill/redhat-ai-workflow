@@ -74,7 +74,7 @@ skill_run("investigate_alert", '{"environment": "stage"}')
 | `alert_name` | Specific alert to investigate | All firing |
 | `auto_escalate` | Auto-escalate to debug_prod if serious | `false` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Check stage alerts

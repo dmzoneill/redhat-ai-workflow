@@ -81,7 +81,7 @@ skill_run("test_mr_ephemeral", '{"mr_id": $MR_ID}')
 | `billing` | Deploy billing ClowdApp | `false` |
 | `keep_namespace` | Don't release on completion | `false` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Test an MR

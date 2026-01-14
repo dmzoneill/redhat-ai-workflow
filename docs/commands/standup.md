@@ -79,15 +79,11 @@ For detailed step-by-step process, see the [standup_summary skill documentation]
 - Issues closed (moved to Done)
 - PRs reviewed
 
-#
-
-## 🔄 What I'm Working On
+### 🔄 What I'm Working On
 - Issues in "In Progress" or "In Review" status
 - Open MRs
 
-#
-
-## 🚧 Blockers
+### 🚧 Blockers
 - (Manual input - skill prompts if needed)
 
 **Example Output:**
@@ -97,23 +93,17 @@ For detailed step-by-step process, see the [standup_summary skill documentation]
 **Date:** 2025-12-24
 **Author:** Dave O'Neill
 
-#
-
-## ✅ What I Did
+### ✅ What I Did
 **Commits:** 5
 - `a1b2c3d` AAP-12345 - feat: Add billing integration
 - `e4f5g6h` AAP-12346 - fix: Handle null response
 ...
 
-#
-
-## 🔄 What I'm Working On
+### 🔄 What I'm Working On
 - [AAP-12345] Billing integration feature
 - [AAP-12347] Performance optimization
 
-#
-
-## 🚧 Blockers
+### 🚧 Blockers
 - None
 ```text
 

@@ -74,7 +74,7 @@ skill_run("check_my_prs", '{}')
 | `project` | Specific project to check | All projects |
 | `include_drafts` | Include draft MRs | `true` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Check all your MRs

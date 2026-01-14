@@ -74,8 +74,8 @@ steps:
       mr_id_from_url = None
 
       # Parse URL if provided using shared parser
-      if inputs.url:
-          url_info = extract_mr_id_from_url(inputs.url)
+      if inputs.get('url'):
+          url_info = extract_mr_id_from_url(inputs.get('url'))
           if url_info:
               gitlab_project = url_info["project"]
               mr_id_from_url = url_info["mr_id"]
@@ -86,13 +86,13 @@ steps:
       repos = config.get("repositories", {})
 
       # Repo name from config
-      if inputs.repo_name and inputs.repo_name in repos:
-          cfg = repos[inputs.repo_name]
+      if inputs.get('repo_name') and inputs.get('repo_name') in repos:
+          cfg = repos[inputs.get('repo_name')]
           repo_path = cfg.get("path")
           gitlab_project = cfg.get("gitlab")
       # Resolve from issue key
-      elif inputs.issue_key:
-          project_prefix = inputs.issue_key.split("-")[0].upper()
+      elif inputs.get('issue_key'):
+          project_prefix = inputs.get('issue_key').split("-")[0].upper()
           for name, cfg in repos.items():
               if cfg.get("jira_project") == project_prefix:
                   repo_path = cfg.get("path")
@@ -143,7 +143,7 @@ steps:
     args:
       project: "{{ resolved.gitlab_project }}"
       state: opened
-      search: "{{ inputs.issue_key }}"
+      search: "{{ inputs.get('issue_key', '') }}"
     output: mr_search_results
     on_error: continue
 
@@ -157,16 +157,16 @@ steps:
 
       # Priority 1: Explicit mr_id input
       if inputs.get('mr_id'):
-        resolved_mr_id = inputs.mr_id
+        resolved_mr_id = inputs.get('mr_id')
       # Priority 2: Extracted from URL
       elif resolved.get('mr_id_from_url'):
-        resolved_mr_id = resolved.mr_id_from_url
+        resolved_mr_id = resolved.get('mr_id_from_url')
       else:
         # Parse search results to find MR ID using shared parser
         resolved_mr_id = extract_mr_id_from_text(mr_search_results or "")
 
         if not resolved_mr_id:
-          raise ValueError(f"No MR found for issue {inputs.issue_key}. Please provide mr_id directly.")
+          raise ValueError(f"No MR found for issue {inputs.get('issue_key')}. Please provide mr_id directly.")
 
       result = resolved_mr_id
     output: resolved_mr_id
@@ -176,7 +176,7 @@ steps:
     description: "Set the MR ID for remaining steps"
     compute: |
       if inputs.get('mr_id'):
-        result = inputs.mr_id
+        result = inputs.get('mr_id')
       else:
         result = resolved_mr_id
     output: mr_id
@@ -488,7 +488,7 @@ steps:
   # Step 9a: Extract branch name
   - name: extract_branch_name
     description: "Extract source branch from MR details using shared parser"
-    condition: "{{ inputs.run_tests }}"
+    condition: "{{ inputs.get('run_tests', False) }}"
     compute: |
       from scripts.common.parsers import extract_branch_from_mr
 
@@ -502,7 +502,7 @@ steps:
   # Step 9b: Fetch from origin
   - name: fetch_origin
     description: "Fetch latest from origin"
-    condition: "{{ inputs.run_tests }}"
+    condition: "{{ inputs.get('run_tests', False) }}"
     tool: git_fetch
     args:
       repo: "{{ resolved.path }}"
@@ -512,7 +512,7 @@ steps:
   # Step 9c: Checkout branch
   - name: checkout_branch
     description: "Checkout MR branch locally"
-    condition: "{{ inputs.run_tests }}"
+    condition: "{{ inputs.get('run_tests', False) }}"
     tool: git_checkout
     args:
       repo: "{{ resolved.path }}"
@@ -525,7 +525,7 @@ steps:
   # Step 9d: Fallback - try MR ref
   - name: fetch_mr_ref
     description: "Fallback: fetch MR directly"
-    condition: "{{ inputs.run_tests and checkout_result and 'error' in str(checkout_result).lower() }}"
+    condition: "{{ inputs.get('run_tests', False) and checkout_result and 'error' in str(checkout_result).lower() }}"
     tool: git_fetch
     args:
       repo: "{{ resolved.path }}"
@@ -536,7 +536,7 @@ steps:
   # Step 9e: Checkout after MR fetch
   - name: checkout_mr_branch
     description: "Checkout after MR fetch"
-    condition: "{{ inputs.run_tests and mr_fetch_result }}"
+    condition: "{{ inputs.get('run_tests', False) and mr_fetch_result }}"
     tool: git_checkout
     args:
       repo: "{{ resolved.path }}"
@@ -547,7 +547,7 @@ steps:
   # Step 10: Check if docker-compose is running
   - name: check_docker
     description: "Verify docker-compose is running"
-    condition: "{{ inputs.run_tests }}"
+    condition: "{{ inputs.get('run_tests', False) }}"
     tool: docker_compose_status
     args:
       repo: "{{ resolved.path }}"
@@ -557,7 +557,7 @@ steps:
 
   - name: start_docker_if_needed
     description: "Start docker-compose if containers not running"
-    condition: "{{ inputs.run_tests and ('No containers' in str(docker_status_raw) or not docker_status_raw) }}"
+    condition: "{{ inputs.get('run_tests', False) and ('No containers' in str(docker_status_raw) or not docker_status_raw) }}"
     tool: docker_compose_up
     args:
       repo: "{{ resolved.path }}"
@@ -567,7 +567,7 @@ steps:
 
   - name: set_docker_status
     description: "Set docker status"
-    condition: "{{ inputs.run_tests }}"
+    condition: "{{ inputs.get('run_tests', False) }}"
     compute: |
       if docker_start_result:
         result = str(docker_start_result)
@@ -578,7 +578,7 @@ steps:
   # Step 11: Run migrations
   - name: run_migrations
     description: "Run make migrations"
-    condition: "{{ inputs.run_tests }}"
+    condition: "{{ inputs.get('run_tests', False) }}"
     tool: make_target
     args:
       repo: "{{ resolved.path }}"
@@ -590,7 +590,7 @@ steps:
   # Step 11b: Run data setup
   - name: run_data
     description: "Run make data"
-    condition: "{{ inputs.run_tests }}"
+    condition: "{{ inputs.get('run_tests', False) }}"
     tool: make_target
     args:
       repo: "{{ resolved.path }}"
@@ -601,7 +601,7 @@ steps:
 
   - name: summarize_setup
     description: "Summarize setup results"
-    condition: "{{ inputs.run_tests }}"
+    condition: "{{ inputs.get('run_tests', False) }}"
     compute: |
       mig_ok = "✅" in str(migrations_result) if migrations_result else False
       data_ok = "✅" in str(data_result) if data_result else False
@@ -611,7 +611,7 @@ steps:
   # Step 12: Run pytest in container
   - name: run_tests
     description: "Run pytest in FastAPI container"
-    condition: "{{ inputs.run_tests }}"
+    condition: "{{ inputs.get('run_tests', False) }}"
     compute: |
       import tempfile
       import os
@@ -787,7 +787,7 @@ steps:
         lines.append("")
 
       # Test results
-      if inputs.run_tests:
+      if inputs.get('run_tests'):
         lines.append("### 🧪 Tests")
         if test_result:
           if '✅' in str(test_result):
@@ -803,7 +803,7 @@ steps:
         (format_issues and format_issues != ["Format OK"]) or
         ('Failed' in str(gitlab_pipeline)) or
         (code_issues and any('Security' in str(i) for i in code_issues)) or
-        (inputs.run_tests and test_result and '❌' in str(test_result))
+        (inputs.get('run_tests') and test_result and '❌' in str(test_result))
       )
 
       if has_blockers:
@@ -823,7 +823,7 @@ steps:
       # Check for blockers
       has_security_issues = code_issues and any('Security' in str(i) for i in code_issues)
       has_format_issues = format_issues and format_issues != ["Format OK"]
-      has_test_failures = inputs.run_tests and test_result and '❌' in str(test_result)
+      has_test_failures = inputs.get('run_tests') and test_result and '❌' in str(test_result)
       has_pipeline_failures = 'Failed' in str(gitlab_pipeline) or 'failed' in str(konflux_pipelines).lower()
 
       # Determine action
@@ -869,7 +869,7 @@ steps:
           lines.append(f"- {issue}")
         lines.append("")
 
-      if inputs.run_tests and test_result and '❌' in str(test_result):
+      if inputs.get('run_tests') and test_result and '❌' in str(test_result):
         lines.append("### Tests")
         lines.append("- Local tests are failing. Please investigate.")
         lines.append("")
@@ -1109,7 +1109,7 @@ outputs:
       📋 Jira issue {{ jira_key }} updated with review note.
       {% endif %}
 
-      {% if not inputs.run_tests %}
+      {% if not inputs.get('run_tests', False) %}
       ---
 
       ## 🧪 Want to Run Local Tests?
@@ -1130,5 +1130,5 @@ outputs:
       action: "{{ review_action.get('action') }}"
       has_issues: "{{ code_issues | length > 0 }}"
       format_ok: "{{ format_issues == ['Format OK'] }}"
-      tests_ran: "{{ inputs.run_tests }}"
+      tests_ran: "{{ inputs.get('run_tests', False) }}"
       tests_passed: "{{ '✅' in str(test_result) if test_result else 'not_run' }}"

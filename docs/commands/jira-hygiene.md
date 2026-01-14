@@ -71,7 +71,7 @@ skill_run("jira_hygiene", '{"issue_key": "AAP-XXXXX"}')
 | `auto_fix` | Automatically fix issues | `false` |
 | `auto_transition` | Move New → Refinement when complete | `false` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Check issue hygiene

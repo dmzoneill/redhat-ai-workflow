@@ -78,7 +78,7 @@ skill_run("mark_mr_ready", '{"mr_id": 1234}')
 | `issue_key` | Jira issue to update | - |
 | `update_jira` | Update Jira status to "In Review" | `true` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Mark MR ready

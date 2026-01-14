@@ -74,7 +74,7 @@ skill_run("clone_jira_issue", '{"issue_key": "$JIRA_KEY"}')
 | `project` | Target project | Same as source |
 | `assign_to_me` | Auto-assign clone | `true` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Clone an issue

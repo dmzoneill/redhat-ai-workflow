@@ -76,7 +76,7 @@ skill_run("environment_overview", '{"environment": "stage"}')
 | `environment` | Target environment | `stage` |
 | `namespace` | Specific namespace | Auto-detect |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Stage environment overview

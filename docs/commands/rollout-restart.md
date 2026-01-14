@@ -75,7 +75,7 @@ skill_run("rollout_restart", '{"deployment": "$DEPLOYMENT", "namespace": "$NAMES
 | `namespace` | Kubernetes namespace | Required |
 | `environment` | Cluster (stage/prod/ephemeral) | `stage` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Restart in stage

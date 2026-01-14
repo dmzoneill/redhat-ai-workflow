@@ -149,7 +149,7 @@ Thanks for working on this rollups issue. I've reviewed the changes...
 - **Models**: Hybrid Claude + Gemini via Vertex AI
 - **Speedup**: 4.2x faster than sequential execution
 
-## Examples
+## Additional Examples
 
 **Full review with posting:**
 ```bash

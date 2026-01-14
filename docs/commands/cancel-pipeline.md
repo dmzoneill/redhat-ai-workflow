@@ -74,7 +74,7 @@ skill_run("cancel_pipeline", '{"pipeline_run": "$PIPELINERUN"}')
 | `namespace` | Konflux namespace | `aap-aa-tenant` |
 | `delete` | Delete after cancel | `false` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Cancel a pipeline
