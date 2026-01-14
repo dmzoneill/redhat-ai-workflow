@@ -96,7 +96,7 @@ For detailed step-by-step process, see the [beer skill documentation](../skills/
 
 Get your end of day wrap-up:
 
-```
+```text
 skill_run("beer")
 ```
 
@@ -124,7 +124,7 @@ skill_run("beer", '{"generate_standup": false}')
 
 ## Example Output
 
-```
+```text
 # 🍺 Cheers, Dave!
 
 **Thursday, 2025-12-25** | 17:30 Irish time

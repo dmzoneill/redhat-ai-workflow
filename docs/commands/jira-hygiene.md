@@ -58,7 +58,7 @@ For detailed step-by-step process, see the [jira_hygiene skill documentation](..
 
 ## Instructions
 
-```
+```text
 skill_run("jira_hygiene", '{"issue_key": "AAP-XXXXX"}')
 ```
 

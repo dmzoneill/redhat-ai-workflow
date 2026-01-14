@@ -16,7 +16,7 @@ skill_run("suggest_patterns", '{}')
 
 Or via slash command:
 
-```
+```text
 /learn-pattern  # After discovering a pattern, use this to save it
 ```text
 
@@ -45,7 +45,7 @@ The skill returns pattern suggestions with:
 
 ## Example Output
 
-```
+```text
 ## Pattern Discovery Results
 
 Found **2** potential new patterns!

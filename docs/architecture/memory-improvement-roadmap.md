@@ -190,7 +190,7 @@ async def memory_query(key: str, query: str) -> list[TextContent]:
   - Total storage over 1 MB
 
 **Output sections:**
-```
+```text
 ## 📊 Memory System Statistics
 
 ### 💾 Storage Usage
@@ -467,7 +467,7 @@ if ctx and ctx.get("pod_name"):
 **Problem:** Session logs accumulate forever.
 
 **Current:**
-```
+```text
 memory/sessions/
   2026-01-09.yaml  (3 KB)
   2026-01-08.yaml  (3 KB)

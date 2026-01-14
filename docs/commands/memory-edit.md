@@ -81,7 +81,7 @@ For detailed step-by-step process, see the [memory_edit skill documentation](../
 ## Remove an Item
 
 Remove a closed issue from active_issues:
-```
+```text
 skill_run("memory_edit", '{
   "file": "state/current_work",
   "action": "remove",
@@ -92,7 +92,7 @@ skill_run("memory_edit", '{
 ```text
 
 Remove a merged MR from open_mrs:
-```
+```text
 skill_run("memory_edit", '{
   "file": "state/current_work",
   "action": "remove",
@@ -107,7 +107,7 @@ skill_run("memory_edit", '{
 ## Update a Field
 
 Update environment status:
-```
+```text
 skill_run("memory_edit", '{
   "file": "state/environments",
   "action": "update",

@@ -45,7 +45,7 @@ skill_run("coffee", '{"full_email_scan": true, "auto_archive_email": true}')
 
 If email isn't working, you need to enable Gmail API:
 
-```
+```text
 /setup-gmail
 ```text
 
@@ -55,6 +55,6 @@ This adds Gmail scopes to your existing Google OAuth.
 
 Just want the highlights without the full briefing?
 
-```
+```text
 skill_run("coffee", '{"days_back": 1}')
 ```

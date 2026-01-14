@@ -85,7 +85,15 @@ def main():
 
     analysis = parse_analysis_report()
 
-    modules_with_split = ["aa_bonfire", "aa_git", "aa_gitlab", "aa_jira", "aa_k8s", "aa_konflux", "aa_prometheus"]
+    modules_with_split = [
+        "aa_bonfire",
+        "aa_git",
+        "aa_gitlab",
+        "aa_jira",
+        "aa_k8s",
+        "aa_konflux",
+        "aa_prometheus",
+    ]
 
     print("\nChecking modules that already have basic/extra split...\n")
 

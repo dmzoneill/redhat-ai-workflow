@@ -105,7 +105,7 @@ tool_exec("konflux_list_components", '{"application": "aap-aa-main", "namespace"
 
 Present results as a summary table:
 
-```
+```text
 
 ## 🧪 MCP Tool Smoke Test Results
 

@@ -164,9 +164,15 @@ def split_tools_file(module_name: str, used_tools: Set[str], unused_tools: Set[s
 
     # Backup tools_basic.py and tools_extra.py if they exist
     if (module_dir / "tools_basic.py").exists():
-        shutil.copy(module_dir / "tools_basic.py", backup_dir / f"tools_basic.py.{int(timestamp)}")
+        shutil.copy(
+            module_dir / "tools_basic.py",
+            backup_dir / f"tools_basic.py.{int(timestamp)}",
+        )
     if (module_dir / "tools_extra.py").exists():
-        shutil.copy(module_dir / "tools_extra.py", backup_dir / f"tools_extra.py.{int(timestamp)}")
+        shutil.copy(
+            module_dir / "tools_extra.py",
+            backup_dir / f"tools_extra.py.{int(timestamp)}",
+        )
 
     # Write new files
     if used_tools:

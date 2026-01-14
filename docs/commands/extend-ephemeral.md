@@ -58,7 +58,7 @@ For detailed step-by-step process, see the [extend_ephemeral skill documentation
 
 ## Instructions
 
-```
+```text
 skill_run("extend_ephemeral", '{"namespace": "$NAMESPACE"}')
 ```
 

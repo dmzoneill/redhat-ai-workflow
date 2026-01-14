@@ -786,7 +786,7 @@ last_updated: "2026-01-09T14:30:00"
 
 ### Example 1: Tool Fails → Auto-Heal → Retry → Success
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. Claude calls kubectl_get_pods()                          │
 └─────────────────────────────────────────────────────────────┘
@@ -831,7 +831,7 @@ last_updated: "2026-01-09T14:30:00"
 
 ### Example 2: Skill Step Fails → Pattern Match → Fix → Retry
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. Skill executes step: bonfire_namespace_reserve()         │
 └─────────────────────────────────────────────────────────────┘
@@ -893,7 +893,7 @@ last_updated: "2026-01-09T14:30:00"
 
 ### Example 3: Cross-Skill Context Sharing
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │ SKILL A: investigate_alert                                  │
 └─────────────────────────────────────────────────────────────┘

@@ -613,7 +613,13 @@ async def _check_known_issues_impl(tool_name: str = "", error_text: str = "") ->
     patterns = _load_patterns_from_memory()
 
     # Check all pattern types
-    pattern_types = ["error_patterns", "auth_patterns", "bonfire_patterns", "pipeline_patterns", "jira_cli_patterns"]
+    pattern_types = [
+        "error_patterns",
+        "auth_patterns",
+        "bonfire_patterns",
+        "pipeline_patterns",
+        "jira_cli_patterns",
+    ]
     for pattern_type in pattern_types:
         pattern_matches = _check_pattern_matches(patterns.get(pattern_type, []), pattern_type, error_lower, tool_lower)
         matches.extend(pattern_matches)

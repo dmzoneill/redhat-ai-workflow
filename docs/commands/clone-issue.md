@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [clone_jira_issue skill documentation
 
 ## Instructions
 
-```
+```text
 skill_run("clone_jira_issue", '{"issue_key": "$JIRA_KEY"}')
 ```
 

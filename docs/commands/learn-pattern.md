@@ -60,7 +60,7 @@ For detailed step-by-step process, see the [learn_pattern skill documentation](.
 
 When you discover an error pattern and its fix, teach the AI to remember it:
 
-```
+```text
 skill_run("learn_pattern", '{"pattern": "OOMKilled", "meaning": "Container exceeded memory limit", "fix": "Increase memory limits"}')
 ```text
 
@@ -73,7 +73,7 @@ skill_run("learn_pattern", '{"pattern": "OOMKilled", "meaning": "Container excee
 
 ## Example
 
-```
+```text
 /learn-pattern
 Pattern: ImagePullBackOff
 Meaning: Kubernetes cannot pull the container image

@@ -331,7 +331,7 @@ All authentication uses system credentials:
 ## Workflow Patterns
 
 ### Feature Development
-```
+```text
 1. jira_view_issue → understand requirements
 2. git_branch_create → create feature branch
 3. jira_set_status "In Progress"
@@ -346,7 +346,7 @@ All authentication uses system credentials:
 ```text
 
 ### Incident Response
-```
+```text
 1. prometheus_alerts → see what's firing
 2. k8s_namespace_health → check pod/deployment status
 3. kubectl_get_events → recent events
@@ -358,7 +358,7 @@ All authentication uses system credentials:
 ```text
 
 ### Release
-```
+```text
 1. konflux_list_builds → verify build complete
 2. quay_get_vulnerabilities → security check
 3. konflux_list_snapshots → get snapshot

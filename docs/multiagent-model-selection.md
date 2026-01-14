@@ -251,7 +251,7 @@ agents_config["architecture"]["model"] = "claude-opus-4-5-20251101"
 ### Per-Review Cost Breakdown
 
 **Economy Mode** (~$0.06):
-```
+```text
 Haiku agents (4):    4 × $0.005 = $0.020
 Sonnet 3.7 (1):      1 × $0.015 = $0.015
 Sonnet 4.5 (1):      1 × $0.025 = $0.025
@@ -260,7 +260,7 @@ Total:                           $0.085
 ```text
 
 **Standard Mode** (~$0.12):
-```
+```text
 Haiku agents (2):    2 × $0.005 = $0.010
 Sonnet 3.7 (2):      2 × $0.015 = $0.030
 Sonnet 4.5 (2):      2 × $0.025 = $0.050
@@ -269,7 +269,7 @@ Total:                           $0.115
 ```text
 
 **Premium Mode** (~$0.50):
-```
+```text
 Sonnet 3.7 (2):      2 × $0.015 = $0.030
 Sonnet 4.5 (2):      2 × $0.025 = $0.050
 Opus 4.5 (2):        2 × $0.150 = $0.300
@@ -291,7 +291,7 @@ Total:                           $0.405
 
 ### Parallel Execution (Default)
 All agents run simultaneously:
-```
+```text
 Total time = max(agent times) ≈ slowest agent + coordinator
 
 Economy:  max(2-5s)  + 10s = ~15s
@@ -301,7 +301,7 @@ Premium:  max(30-60s) + 20s = ~80s
 
 ### Sequential Execution
 Agents run one at a time (for rate limiting):
-```
+```text
 Total time = sum(agent times) + coordinator
 
 Economy:  6×5s  + 10s = ~40s

@@ -38,7 +38,7 @@ When running in Claude Code, the error recovery system:
 3. **Falls back gracefully** if native UI unavailable
 
 **Current Behavior**:
-```
+```text
 ✅ Detection works - knows we're in Claude Code
 ⚠️  AskUserQuestion wiring - falls back to CLI
    (This is because AskUserQuestion is called BY Claude, not by the server)
@@ -82,7 +82,7 @@ server.request_tool_call(
 ```text
 
 ### Option C: MCP Extensions
-```
+```text
 # MCP protocol extension for server->client tool calls
 {
   "type": "tool_request",
@@ -96,7 +96,7 @@ server.request_tool_call(
 
 For now, the **CLI fallback provides excellent UX**:
 
-```
+```text
 ======================================================================
 🔴 SKILL ERROR IN STEP: resolve_repo
 ======================================================================
@@ -152,7 +152,7 @@ register_skill_tools(server, create_issue_fn, ask_question_fn=None)
 
 Check logs to see detection results:
 
-```
+```python
 INFO: Claude Code detection: {'is_claude_code': True, 'has_ask_question': False, ...}
 INFO: ℹ️  AskUserQuestion not available - using CLI fallback for skill errors
 ```

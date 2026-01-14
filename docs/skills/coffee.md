@@ -92,7 +92,7 @@ flowchart TD
 
 ## Example Output
 
-```
+```text
 ## ☕ Good Morning, Dave!
 
 📅 **Today's Calendar** (3 meetings)

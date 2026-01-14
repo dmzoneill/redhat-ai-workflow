@@ -189,7 +189,7 @@ class SlackListener:
         """Get listener statistics."""
         return {
             **self._stats,
-            "uptime": time.time() - self._stats["started_at"] if self._stats["started_at"] else 0,
+            "uptime": (time.time() - self._stats["started_at"] if self._stats["started_at"] else 0),
             "running": self._running,
         }
 

@@ -176,7 +176,7 @@ if DBUS_AVAILABLE:
             """JSON stats about the daemon."""
             stats = {
                 "running": self.daemon.is_running,
-                "uptime": time.time() - self.daemon.start_time if self.daemon.start_time else 0,
+                "uptime": (time.time() - self.daemon.start_time if self.daemon.start_time else 0),
                 "messages_processed": self.daemon.messages_processed,
                 "messages_responded": self.daemon.messages_responded,
                 "pending_approvals": len(self.daemon.history.pending_approvals),

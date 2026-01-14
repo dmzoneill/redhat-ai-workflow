@@ -140,7 +140,7 @@ Sign in and grant the new Gmail permissions.
 
 Test email access:
 
-```
+```text
 skill_run("coffee")
 ```
 

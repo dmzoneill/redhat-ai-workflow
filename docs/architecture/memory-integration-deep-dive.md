@@ -540,7 +540,7 @@ async def _try_auto_fix(self, error_msg: str, matches: list) -> bool:
 
 **Total Memory Operations Across System:**
 
-```
+```text
 Direct YAML reads/writes:     55 (10 skills)
 Python helper calls:           ~40 (15 skills)
 MCP tool calls:                ~120 (39 skills)
@@ -553,7 +553,7 @@ TOTAL: ~395 memory operations/day
 
 **Memory Read/Write Ratio:**
 
-```
+```text
 Reads:  ~250/day (65%)
   - session_start: 5 files
   - check_known_issues: 2 files × ~25 calls = 50
@@ -740,7 +740,7 @@ def resolve_repo(repo_path, repo_name, issue_key):
 
 ### Memory Access Layers
 
-```
+```text
 ┌─────────────────────────────────────────────────┐
 │ Layer 1: MCP Tools (memory_tools.py)            │
 │  - memory_read, memory_write, memory_update     │

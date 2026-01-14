@@ -135,7 +135,9 @@ async def run_bonfire(
 
 
 @auto_heal_ephemeral()
-async def _bonfire_apps_list_impl(target_env: str = "insights-ephemeral") -> list[TextContent]:
+async def _bonfire_apps_list_impl(
+    target_env: str = "insights-ephemeral",
+) -> list[TextContent]:
     """
     List all deployable apps.
 
@@ -413,7 +415,12 @@ async def _bonfire_deploy_env_impl(
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to deploy ClowdEnv:\n\n{output}")]
 
-    return [TextContent(type="text", text=f"✅ ClowdEnvironment deployed to `{namespace}`\n\n{output}")]
+    return [
+        TextContent(
+            type="text",
+            text=f"✅ ClowdEnvironment deployed to `{namespace}`\n\n{output}",
+        )
+    ]
 
 
 @auto_heal_ephemeral()
@@ -456,7 +463,12 @@ async def _bonfire_deploy_iqe_cji_impl(
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to deploy IQE CJI:\n\n{output}")]
 
-    return [TextContent(type="text", text=f"✅ IQE CJI deployed to `{namespace}`\n\n```\n{output}\n```")]
+    return [
+        TextContent(
+            type="text",
+            text=f"✅ IQE CJI deployed to `{namespace}`\n\n```\n{output}\n```",
+        )
+    ]
 
 
 @auto_heal_ephemeral()
@@ -496,11 +508,21 @@ async def _bonfire_deploy_with_reserve_impl(
     success, output = await run_bonfire(args, timeout=timeout + 120)
 
     if not success:
-        return [TextContent(type="text", text=f"❌ Deploy with reserve failed:\n\n```\n{output}\n```")]
+        return [
+            TextContent(
+                type="text",
+                text=f"❌ Deploy with reserve failed:\n\n```\n{output}\n```",
+            )
+        ]
 
     display_output = truncate_output(output, 5000, mode="tail")
 
-    return [TextContent(type="text", text=f"## ✅ Reserved & Deployed `{app}`\n\n```\n{display_output}\n```")]
+    return [
+        TextContent(
+            type="text",
+            text=f"## ✅ Reserved & Deployed `{app}`\n\n```\n{display_output}\n```",
+        )
+    ]
 
 
 @auto_heal_ephemeral()
@@ -706,7 +728,12 @@ async def _bonfire_process_env_impl(namespace: str) -> list[TextContent]:
         return [TextContent(type="text", text=f"❌ Failed to process ClowdEnv:\n\n{output}")]
 
     output = truncate_output(output, max_length=10000)
-    return [TextContent(type="text", text=f"## ClowdEnvironment: `{namespace}`\n\n```yaml\n{output}\n```")]
+    return [
+        TextContent(
+            type="text",
+            text=f"## ClowdEnvironment: `{namespace}`\n\n```yaml\n{output}\n```",
+        )
+    ]
 
 
 @auto_heal_ephemeral()
@@ -749,7 +776,9 @@ def register_tools(server: "FastMCP") -> int:
     # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal_ephemeral()
     @registry.tool()
-    async def bonfire_apps_list(target_env: str = "insights-ephemeral") -> list[TextContent]:
+    async def bonfire_apps_list(
+        target_env: str = "insights-ephemeral",
+    ) -> list[TextContent]:
         """
         List all deployable apps.
 
@@ -926,7 +955,13 @@ def register_tools(server: "FastMCP") -> int:
             Rendered ClowdApp YAML.
         """
         return await _bonfire_process_impl(
-            app, namespace, source, target_env, set_image_tag, component, no_get_dependencies
+            app,
+            namespace,
+            source,
+            target_env,
+            set_image_tag,
+            component,
+            no_get_dependencies,
         )
 
     @auto_heal_ephemeral()

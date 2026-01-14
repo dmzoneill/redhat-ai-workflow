@@ -58,7 +58,7 @@ For detailed step-by-step process, see the [test_mr_ephemeral skill documentatio
 
 ## Instructions
 
-```
+```text
 skill_run("test_mr_ephemeral", '{"mr_id": $MR_ID}')
 ```
 

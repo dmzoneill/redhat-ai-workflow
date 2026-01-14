@@ -74,7 +74,7 @@ For detailed step-by-step process, see the [notify_mr skill documentation](../sk
 
 ## Instructions
 
-```
+```text
 skill_run("notify_mr", '{"mr_id": "$MR_ID"}')
 ```
 
@@ -115,7 +115,7 @@ skill_run("notify_mr", '{"mr_id": "1459", "project": "automation-analytics/autom
 
 ## What Gets Posted
 
-```
+```text
 🔀 *MR Ready for Review*
 
 📋 *Jira:* AAP-61661 - Fix billing calculation
@@ -126,7 +126,7 @@ Please review when you have a moment 🙏
 ```text
 
 Or as a reminder:
-```
+```text
 ⏰ *Friendly Reminder: MR Awaiting Review*
 ...
 ```

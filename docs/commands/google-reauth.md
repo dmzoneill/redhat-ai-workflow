@@ -85,7 +85,7 @@ This will open your browser for OAuth login with the new scopes.
 
 After re-authenticating, test email access:
 
-```
+```text
 skill_run("coffee")
 ```
 

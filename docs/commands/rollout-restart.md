@@ -56,7 +56,7 @@ For detailed step-by-step process, see the [rollout_restart skill documentation]
 
 ## Instructions
 
-```
+```text
 skill_run("rollout_restart", '{"deployment": "$DEPLOYMENT", "namespace": "$NAMESPACE"}')
 ```
 

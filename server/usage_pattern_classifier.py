@@ -284,7 +284,11 @@ def classify_error_type(tool_name: str, params: dict, error_message: str, result
             return classification
 
     # Pattern 5: TTY/interactive errors (edge case - might be usage or tool issue)
-    tty_patterns = [r"output is not a tty", r"not a terminal", r"input is not a terminal"]
+    tty_patterns = [
+        r"output is not a tty",
+        r"not a terminal",
+        r"input is not a terminal",
+    ]
     for pattern in tty_patterns:
         if re.search(pattern, error_message, re.I):
             classification["is_usage_error"] = True

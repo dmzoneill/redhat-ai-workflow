@@ -58,7 +58,7 @@ For detailed step-by-step process, see the [release_aa_backend_prod skill docume
 
 ## Instructions
 
-```
+```text
 skill_run("release_aa_backend_prod", '{"commit_sha": "abc123..."}')
 ```
 

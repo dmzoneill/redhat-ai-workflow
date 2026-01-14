@@ -51,7 +51,7 @@ flowchart TD
 
 ## Instructions
 
-```
+```text
 vpn_connect()
 ```text
 
@@ -71,7 +71,7 @@ The VPN is required for:
 
 You need VPN if you see:
 
-```
+```text
 ❌ dial tcp: lookup gitlab.cee.redhat.com: no such host
 ❌ No route to host
 ❌ Connection refused

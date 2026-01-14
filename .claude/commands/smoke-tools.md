@@ -410,7 +410,7 @@ tool_exec("debug_tool", '{"tool_name": "git_status"}')  # SKIP - server-level to
 
 ## Expected Output Format
 
-```
+```text
 ## 🧪 MCP Tool Smoke Test Results
 
 ### Module: git (8/15 tested)

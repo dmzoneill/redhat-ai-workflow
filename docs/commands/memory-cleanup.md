@@ -56,12 +56,12 @@ For detailed step-by-step process, see the [memory_cleanup skill documentation](
 ## Usage
 
 **Preview what would be removed (dry run - default):**
-```
+```text
 skill_run("memory_cleanup", '{}')
 ```text
 
 **Actually remove stale entries:**
-```
+```text
 skill_run("memory_cleanup", '{"dry_run": false}')
 ```text
 
@@ -78,7 +78,7 @@ skill_run("memory_cleanup", '{"dry_run": false}')
 
 ## Example
 
-```
+```text
 /memory-cleanup
 ```
 

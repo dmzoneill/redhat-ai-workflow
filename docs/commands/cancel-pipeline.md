@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [cancel_pipeline skill documentation]
 
 ## Instructions
 
-```
+```text
 skill_run("cancel_pipeline", '{"pipeline_run": "$PIPELINERUN"}')
 ```
 

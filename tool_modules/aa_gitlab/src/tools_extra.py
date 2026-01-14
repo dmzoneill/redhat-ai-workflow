@@ -194,7 +194,11 @@ async def _gitlab_label_list_impl(project: str) -> str:
 
 
 async def _gitlab_mr_merge_impl(
-    project: str, mr_id: int, squash: bool, remove_source_branch: bool, when_pipeline_succeeds: bool
+    project: str,
+    mr_id: int,
+    squash: bool,
+    remove_source_branch: bool,
+    when_pipeline_succeeds: bool,
 ) -> str:
     """Implementation of gitlab_mr_merge tool."""
     args = ["mr", "merge", str(mr_id), "--yes"]
@@ -272,7 +276,11 @@ def register_tools(server: "FastMCP") -> int:
     @auto_heal()
     @registry.tool()
     async def gitlab_issue_create(
-        project: str, title: str, description: str = "", labels: str = "", assignee: str = ""
+        project: str,
+        title: str,
+        description: str = "",
+        labels: str = "",
+        assignee: str = "",
     ) -> str:
         """Create a new GitLab issue."""
         return await _gitlab_issue_create_impl(project, title, description, labels, assignee)

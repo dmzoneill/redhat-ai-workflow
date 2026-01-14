@@ -82,7 +82,14 @@ class TestReport:
     feature_todos: list = field(default_factory=list)  # Discovered improvements
     excluded_skills: list = field(default_factory=list)  # Skills we skipped
 
-    def add_todo(self, category: str, title: str, description: str, source: str, priority: str = "medium"):
+    def add_todo(
+        self,
+        category: str,
+        title: str,
+        description: str,
+        source: str,
+        priority: str = "medium",
+    ):
         """Add a feature todo discovered during testing."""
         self.feature_todos.append(
             FeatureTodo(
@@ -154,11 +161,17 @@ TOOL_TEST_PARAMS = {
     "jira_view_issue": {"issue_key": "AAP-1"},  # Will fail but tests connectivity
     "jira_search": {"jql": "project=AAP AND created >= -1d", "max_results": 3},
     # GitLab tools - read only
-    "gitlab_mr_list": {"project": "automation-analytics/automation-analytics-backend", "limit": 1},
+    "gitlab_mr_list": {
+        "project": "automation-analytics/automation-analytics-backend",
+        "limit": 1,
+    },
     "gitlab_project_info": {"project": "automation-analytics/automation-analytics-backend"},
     # K8s tools - read only, use stage
     "kubectl_get_pods": {"namespace": "tower-analytics-stage", "environment": "stage"},
-    "kubectl_get_deployments": {"namespace": "tower-analytics-stage", "environment": "stage"},
+    "kubectl_get_deployments": {
+        "namespace": "tower-analytics-stage",
+        "environment": "stage",
+    },
     # Bonfire tools - read only
     "bonfire_namespace_list": {"mine_only": True},
     "bonfire_apps_list": {},
@@ -330,7 +343,10 @@ class IntegrationTestRunner:
                 else:
                     # Fallback: look for functions with tool-like names
                     for name in dir(mod):
-                        if not name.startswith("_") and name not in ("register_tools", "FastMCP"):
+                        if not name.startswith("_") and name not in (
+                            "register_tools",
+                            "FastMCP",
+                        ):
                             func = getattr(mod, name)
                             if callable(func) and hasattr(func, "__doc__"):
                                 tools.append(name)
@@ -665,7 +681,12 @@ class IntegrationTestRunner:
             by_category[cat].append(todo)
 
         category_order = ["bug", "enhancement", "optimization", "missing"]
-        icons = {"bug": "🐛", "enhancement": "✨", "missing": "📝", "optimization": "⚡"}
+        icons = {
+            "bug": "🐛",
+            "enhancement": "✨",
+            "missing": "📝",
+            "optimization": "⚡",
+        }
 
         for cat in category_order:
             if cat not in by_category:

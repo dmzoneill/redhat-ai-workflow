@@ -59,7 +59,7 @@ For detailed step-by-step process, see the [silence_alert skill documentation](.
 
 ## Instructions
 
-```
+```text
 skill_run("silence_alert", '{"alert_name": "$ALERT", "duration": "$DURATION"}')
 ```
 

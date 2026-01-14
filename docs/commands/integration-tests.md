@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [check_integration_tests skill docume
 
 ## Instructions
 
-```
+```text
 skill_run("check_integration_tests", '{}')
 ```
 

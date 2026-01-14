@@ -316,7 +316,11 @@ class SkillErrorRecovery:
 
                 action = action_map.get(selected, "abort")
 
-                return {"action": action, "selected_option": selected, "error_info": error_info}
+                return {
+                    "action": action,
+                    "selected_option": selected,
+                    "error_info": error_info,
+                }
 
             except Exception as e:
                 # Fallback to CLI if AskUserQuestion fails
@@ -345,7 +349,11 @@ class SkillErrorRecovery:
                 print(f"Invalid choice. Please enter 1-{len(options)}")
             except (ValueError, KeyboardInterrupt):
                 print("\nAborting...")
-                return {"action": "abort", "selected_option": "Aborted", "error_info": error_info}
+                return {
+                    "action": "abort",
+                    "selected_option": "Aborted",
+                    "error_info": error_info,
+                }
 
         # Map selection to action
         label_to_action = {
@@ -358,7 +366,11 @@ class SkillErrorRecovery:
 
         action = label_to_action.get(selected_opt["label"], "abort")
 
-        return {"action": action, "selected_option": selected_opt["label"], "error_info": error_info}
+        return {
+            "action": action,
+            "selected_option": selected_opt["label"],
+            "error_info": error_info,
+        }
 
     def log_fix_attempt(self, error_info: dict, action: str, success: bool, details: str = "") -> None:
         """
@@ -430,12 +442,21 @@ class SkillErrorRecovery:
                     break
 
             if not step_found:
-                return {"success": False, "error": f"Step '{step_name}' not found in skill"}
+                return {
+                    "success": False,
+                    "error": f"Step '{step_name}' not found in skill",
+                }
 
             # Write back (WARNING: loses YAML comments/formatting)
             # TODO: Use ruamel.yaml to preserve formatting
             with open(skill_path, "w") as f:
-                yaml.dump(skill_data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+                yaml.dump(
+                    skill_data,
+                    f,
+                    default_flow_style=False,
+                    sort_keys=False,
+                    allow_unicode=True,
+                )
 
             return {
                 "success": True,

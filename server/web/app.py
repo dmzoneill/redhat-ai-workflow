@@ -168,7 +168,7 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
                 {
                     "name": tool.name,
                     "description": tool.description or "",
-                    "parameters": tool.inputSchema if hasattr(tool, "inputSchema") else {},
+                    "parameters": (tool.inputSchema if hasattr(tool, "inputSchema") else {}),
                 }
             )
         return {"tools": result, "count": len(result)}

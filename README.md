@@ -400,7 +400,7 @@ See [MCP Server Architecture](docs/architecture/README.md) for implementation de
 
 When tools fail, Claude can fix them **and remember the fix forever**:
 
-```
+```text
 Tool: ❌ Failed to release namespace
       💡 Known Issues Found!
          Previous fix for `bonfire_release`: Add --force flag
@@ -410,7 +410,7 @@ Tool: ❌ Failed to release namespace
 
 ### The Learning Loop
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────┐
 │  Tool fails → Check memory → Apply known fix → ✓              │
 │       ↓                                                        │
@@ -437,7 +437,7 @@ When you start a session with `session_start()`, the system automatically:
 3. **Shows loaded tools** - Which tool modules are active
 4. **Provides guidance** - Prefer MCP tools over raw CLI commands
 
-```
+```text
 You: session_start(agent="developer")
 
 Claude: 📋 Session Started

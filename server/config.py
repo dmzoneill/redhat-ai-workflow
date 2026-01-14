@@ -95,7 +95,14 @@ def get_token_from_kubeconfig(
     # Fallback to kubectl config view (extracts stored token)
     try:
         result = subprocess.run(
-            ["kubectl", "config", "view", "--minify", "-o", "jsonpath={.users[0].user.token}"],
+            [
+                "kubectl",
+                "config",
+                "view",
+                "--minify",
+                "-o",
+                "jsonpath={.users[0].user.token}",
+            ],
             env=env,
             capture_output=True,
             text=True,

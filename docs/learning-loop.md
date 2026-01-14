@@ -118,7 +118,7 @@ check_known_issues(tool_name="bonfire_deploy", error_text="manifest unknown")
 ```text
 
 **Output:**
-```
+```text
 ## 💡 Known Issues Found!
 
 **Previous fix for `bonfire_deploy`:**
@@ -155,7 +155,7 @@ learn_tool_fix(
 ```text
 
 **Output:**
-```
+```text
 ✅ Saved tool fix to memory!
 
 Tool: `bonfire_deploy`
@@ -253,7 +253,7 @@ The learning loop is integrated into all tool execution paths:
 ### Tool-Level Fix (Code Change)
 
 1. **Tool fails:**
-```
+```text
    ❌ bonfire_deploy failed: manifest unknown
 
    💡 Known Issues Found!

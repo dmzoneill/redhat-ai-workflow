@@ -337,7 +337,13 @@ class AlertDetector:
         self.alert_channels = self.config.get("alert_channels", {})
         self.alert_bot_names = ["app-sre-alerts", "alertmanager"]
 
-    def is_alert_message(self, channel_id: str, user_name: str, text: str, raw_message: dict | None = None) -> bool:
+    def is_alert_message(
+        self,
+        channel_id: str,
+        user_name: str,
+        text: str,
+        raw_message: dict | None = None,
+    ) -> bool:
         """
         Check if this message is a Prometheus alert.
 
@@ -373,7 +379,13 @@ class AlertDetector:
                     att_texts.append(att.lower())
             text_lower = " ".join(att_texts)
 
-        alert_indicators = ["firing", "resolved", "alert:", "alertmanager", "prometheus"]
+        alert_indicators = [
+            "firing",
+            "resolved",
+            "alert:",
+            "alertmanager",
+            "prometheus",
+        ]
         has_alert_indicator = any(ind in text_lower for ind in alert_indicators)
 
         is_alert = is_from_alert_bot or (channel_id in self.alert_channels and has_alert_indicator)
@@ -1377,7 +1389,11 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
             self._dbus_handler.history.add(record)
 
     async def _send_response_or_skip(
-        self, msg: PendingMessage, response: str, classification: UserClassification, should_send: bool
+        self,
+        msg: PendingMessage,
+        response: str,
+        classification: UserClassification,
+        should_send: bool,
     ):
         """Send response or record as skipped."""
         success = True

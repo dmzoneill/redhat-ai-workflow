@@ -238,7 +238,14 @@ def register_tools(server: "FastMCP") -> int:
                 "bool": {
                     "must": [
                         {"query_string": {"query": query}},
-                        {"range": {"@timestamp": {"gte": from_time.isoformat(), "lte": now.isoformat()}}},
+                        {
+                            "range": {
+                                "@timestamp": {
+                                    "gte": from_time.isoformat(),
+                                    "lte": now.isoformat(),
+                                }
+                            }
+                        },
                     ]
                 }
             },

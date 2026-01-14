@@ -193,7 +193,9 @@ async def _kubectl_describe_deployment_impl(deployment_name: str, namespace: str
     """Describe a deployment in detail."""
     kubeconfig = get_kubeconfig(environment, namespace)
     success, output = await run_kubectl(
-        ["describe", "deployment", deployment_name], kubeconfig=kubeconfig, namespace=namespace
+        ["describe", "deployment", deployment_name],
+        kubeconfig=kubeconfig,
+        namespace=namespace,
     )
     if not success:
         return f"❌ Failed: {output}"
@@ -308,7 +310,10 @@ async def _kubectl_get_ingress_impl(namespace: str, environment: str = "stage") 
 
 @auto_heal()  # Cluster determined from environment param
 async def _kubectl_get_pods_impl(
-    namespace: str, environment: str = "stage", selector: str = "", all_namespaces: bool = False
+    namespace: str,
+    environment: str = "stage",
+    selector: str = "",
+    all_namespaces: bool = False,
 ) -> str:
     """List pods in a namespace."""
     kubeconfig = get_kubeconfig(environment, namespace)
@@ -468,7 +473,13 @@ async def _kubectl_saas_deployments_impl(namespace: str) -> str:
 async def _kubectl_saas_pipelines_impl(namespace: str = "") -> str:
     """List SaaS deployment pipelines on the App-SRE cluster."""
     kubeconfig = get_kubeconfig("appsre-pipelines")
-    args = ["get", "pipelineruns", "-o", "wide", "--sort-by=.metadata.creationTimestamp"]
+    args = [
+        "get",
+        "pipelineruns",
+        "-o",
+        "wide",
+        "--sort-by=.metadata.creationTimestamp",
+    ]
     success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace if namespace else None)
     if not success:
         return f"❌ Failed: {output}\n\nRun: `kube ap` to authenticate"
@@ -689,7 +700,10 @@ def _register_resource_getters_tools(registry: ToolRegistry) -> None:
     @auto_heal()
     @registry.tool()
     async def kubectl_get_pods(
-        namespace: str, environment: str = "stage", selector: str = "", all_namespaces: bool = False
+        namespace: str,
+        environment: str = "stage",
+        selector: str = "",
+        all_namespaces: bool = False,
     ) -> str:
         """List pods in a namespace."""
         return await _kubectl_get_pods_impl(namespace, environment, selector, all_namespaces)

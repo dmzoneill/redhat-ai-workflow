@@ -135,13 +135,13 @@ tools:
 ## File Structure
 
 ### Before Reorganization
-```
+```text
 tool_modules/aa_git/src/
 └── tools.py              # All 30 tools mixed together
 ```text
 
 ### After Reorganization
-```
+```text
 tool_modules/aa_git/src/
 ├── tools_basic.py        # 27 used tools (git_status, git_push, etc.)
 ├── tools_extra.py        # 3 unused tools (git_clean, git_remote_info, etc.)

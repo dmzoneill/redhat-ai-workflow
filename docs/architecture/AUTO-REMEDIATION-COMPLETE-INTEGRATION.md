@@ -315,7 +315,7 @@ except Exception as e:
 ```text
 
 **Output format:**
-```
+```text
 ❌ Error executing bonfire_deploy: manifest unknown
 
 ## 💡 Known Issues Found!
@@ -647,7 +647,7 @@ CREATE TABLE user_cache (
 
 ### Flow 1: Tool Failure → Auto-Heal → Memory
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │ 1. Tool Execution                                        │
 │    bonfire_namespace_reserve(duration="2h")             │
@@ -696,7 +696,7 @@ CREATE TABLE user_cache (
 
 ### Flow 2: Skill Step Failure → Pattern Match → Auto-Fix → Track Stats
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │ 1. Skill Step Execution                                 │
 │    skill: deploy_ephemeral                              │
@@ -769,7 +769,7 @@ CREATE TABLE user_cache (
 
 ### Flow 3: Skill Compute Error → Recovery → Log Fix
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │ 1. Skill Compute Execution                              │
 │    step: parse_mr_data                                  │

@@ -106,8 +106,14 @@ TEST_PARAMS = {
     "quay_list_tags": {"limit": 3},
     # K8s - read-only on stage with correct namespace
     "kubectl_get_pods": {"namespace": "tower-analytics-stage", "environment": "stage"},
-    "kubectl_get_events": {"namespace": "tower-analytics-stage", "environment": "stage"},
-    "kubectl_get_deployments": {"namespace": "tower-analytics-stage", "environment": "stage"},
+    "kubectl_get_events": {
+        "namespace": "tower-analytics-stage",
+        "environment": "stage",
+    },
+    "kubectl_get_deployments": {
+        "namespace": "tower-analytics-stage",
+        "environment": "stage",
+    },
 }
 
 
@@ -201,7 +207,8 @@ class ToolExecutor:
             )
         elif tool_name == "gitlab_project_info":
             return await self._run_cmd(
-                ["glab", "repo", "view"], cwd=str(Path.home() / "src/automation-analytics-backend")
+                ["glab", "repo", "view"],
+                cwd=str(Path.home() / "src/automation-analytics-backend"),
             )
         else:
             return True, f"SKIPPED: {tool_name} not implemented for testing"

@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [review_pr skill documentation](../sk
 
 Run a comprehensive review with local testing:
 
-```
+```text
 skill_run("review_pr", '{"mr_id": $MR_ID, "run_tests": true}')
 ```
 

@@ -440,7 +440,7 @@ fi
 - Updated output template to show validation errors and warnings
 
 **Example validation error:**
-```
+```text
 ## ❌ Tool Validation Failed
 
 Double-check tool names. Unknown tools: kubectl_refresh_token, kube_loggin

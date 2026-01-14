@@ -52,7 +52,7 @@ skill_run("notify_mr", '{"mr_id": "1459", "project": "automation-analytics/autom
 
 ## What Gets Posted
 
-```
+```text
 🔀 *MR Ready for Review*
 
 📋 *Jira:* AAP-61661 - Fix billing calculation
@@ -63,7 +63,7 @@ Please review when you have a moment 🙏
 ```text
 
 Or as a reminder:
-```
+```text
 ⏰ *Friendly Reminder: MR Awaiting Review*
 ...
 ```

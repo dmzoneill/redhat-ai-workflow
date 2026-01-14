@@ -295,7 +295,10 @@ if __name__ == "__main__":
         hooks = SkillHooks.from_config()
 
         # Test event
-        await hooks.emit("review_approved", {"mr_id": "1449", "author": "daoneill", "target_branch": "main"})
+        await hooks.emit(
+            "review_approved",
+            {"mr_id": "1449", "author": "daoneill", "target_branch": "main"},
+        )
 
         await hooks.close()
 

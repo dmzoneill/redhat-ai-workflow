@@ -140,7 +140,12 @@ async def _bonfire_apps_dependencies_impl(component: str) -> list[TextContent]:
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to check dependencies:\n\n{output}")]
 
-    return [TextContent(type="text", text=f"## Apps depending on `{component}`\n\n```\n{output}\n```")]
+    return [
+        TextContent(
+            type="text",
+            text=f"## Apps depending on `{component}`\n\n```\n{output}\n```",
+        )
+    ]
 
 
 async def _bonfire_deploy_impl(
@@ -422,7 +427,12 @@ async def _bonfire_namespace_extend_impl(
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to extend namespace:\n\n{output}")]
 
-    return [TextContent(type="text", text=f"✅ Namespace `{namespace}` extended by {duration}\n\n{output}")]
+    return [
+        TextContent(
+            type="text",
+            text=f"✅ Namespace `{namespace}` extended by {duration}\n\n{output}",
+        )
+    ]
 
 
 async def _bonfire_namespace_list_impl(mine_only: bool = True) -> list[TextContent]:

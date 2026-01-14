@@ -128,9 +128,17 @@ async def _jira_ai_helper_impl(issue_key: str, action: str) -> str:
     elif action == "next_steps":
         steps = []
         if status == "Open" or status == "New":
-            steps = ["1. Review requirements", "2. Create feature branch", "3. Start implementation"]
+            steps = [
+                "1. Review requirements",
+                "2. Create feature branch",
+                "3. Start implementation",
+            ]
         elif status == "In Progress":
-            steps = ["1. Continue implementation", "2. Run local tests", "3. Create MR when ready"]
+            steps = [
+                "1. Continue implementation",
+                "2. Run local tests",
+                "3. Create MR when ready",
+            ]
         elif status == "In Review" or status == "Review":
             steps = ["1. Address review feedback", "2. Update MR", "3. Get approval"]
         else:

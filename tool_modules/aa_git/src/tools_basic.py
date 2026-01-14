@@ -356,7 +356,10 @@ async def _git_branch_list_impl(
     """
     path = resolve_repo_path(repo)
 
-    args = ["branch", "--format=%(refname:short)|%(upstream:short)|%(committerdate:relative)"]
+    args = [
+        "branch",
+        "--format=%(refname:short)|%(upstream:short)|%(committerdate:relative)",
+    ]
     if all_branches:
         args.append("-a")
     if merged:
@@ -446,7 +449,16 @@ def _load_commit_config():
         valid_types = commit_cfg["types"]
         return valid_types, format_commit_message, True
     except ImportError:
-        valid_types = ["feat", "fix", "refactor", "docs", "test", "chore", "style", "perf"]
+        valid_types = [
+            "feat",
+            "fix",
+            "refactor",
+            "docs",
+            "test",
+            "chore",
+            "style",
+            "perf",
+        ]
         return valid_types, None, False
 
 
@@ -883,14 +895,36 @@ async def _git_log_impl(
         return output.strip()
 
     # Regular log - build args with helper
-    args = _build_log_args(limit, oneline, author, since, until, merges_only, no_merges, numstat, range_spec, branch)
+    args = _build_log_args(
+        limit,
+        oneline,
+        author,
+        since,
+        until,
+        merges_only,
+        no_merges,
+        numstat,
+        range_spec,
+        branch,
+    )
 
     success, output = await run_git(args, cwd=path)
     if not success:
         return f"❌ Failed to get log: {output}"
 
     # Format output with helper
-    return _format_log_output(repo, output, limit, oneline, author, since, until, range_spec, merges_only, no_merges)
+    return _format_log_output(
+        repo,
+        output,
+        limit,
+        oneline,
+        author,
+        since,
+        until,
+        range_spec,
+        merges_only,
+        no_merges,
+    )
 
 
 @auto_heal()
@@ -1624,7 +1658,18 @@ def _register_git_basic_ops_tools(registry: ToolRegistry) -> None:
             git_log(repo, numstat=True, since="1 week ago")  # Lines changed this week
         """
         return await _git_log_impl(
-            repo, limit, oneline, author, since, until, branch, range_spec, merges_only, no_merges, count_only, numstat
+            repo,
+            limit,
+            oneline,
+            author,
+            since,
+            until,
+            branch,
+            range_spec,
+            merges_only,
+            no_merges,
+            count_only,
+            numstat,
         )
 
 

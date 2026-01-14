@@ -92,7 +92,15 @@ async def _konflux_list_environments_impl(namespace: str) -> str:
     if not success:
         # Try snapshotenvironmentbindings as fallback
         success, output = await run_cmd(
-            ["kubectl", "get", "snapshotenvironmentbindings", "-n", namespace, "-o", "wide"]
+            [
+                "kubectl",
+                "get",
+                "snapshotenvironmentbindings",
+                "-n",
+                namespace,
+                "-o",
+                "wide",
+            ]
         )
         if not success:
             return f"❌ Failed: {output}"

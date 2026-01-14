@@ -28,7 +28,7 @@ done
 
 If a reviewer requests a meeting, you can create a Google Calendar invite:
 
-```
+```text
 google_calendar_quick_meeting(
   title="MR !1445 Race Condition Discussion",
   attendee_email="bthomass@redhat.com",
@@ -38,6 +38,6 @@ google_calendar_quick_meeting(
 ```text
 
 First, check Google Calendar setup:
-```
+```text
 google_calendar_status()
 ```

@@ -61,7 +61,7 @@ For detailed step-by-step process, see the [sync_branch skill documentation](../
 
 ## Instructions
 
-```
+```text
 skill_run("sync_branch")
 ```
 

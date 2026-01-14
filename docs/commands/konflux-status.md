@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [konflux_status skill documentation](
 
 ## Instructions
 
-```
+```text
 skill_run("konflux_status", '{}')
 ```
 

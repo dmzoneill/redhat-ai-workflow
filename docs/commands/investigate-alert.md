@@ -61,7 +61,7 @@ For detailed step-by-step process, see the [investigate_alert skill documentatio
 
 ## Instructions
 
-```
+```text
 skill_run("investigate_alert", '{"environment": "stage"}')
 ```
 

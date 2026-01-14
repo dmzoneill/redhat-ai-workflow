@@ -109,7 +109,11 @@ def _extract_pattern(error: str) -> str:
     pattern = re.sub(r"\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}:\d{2}", "[timestamp]", pattern)
 
     # Remove UUIDs/hashes
-    pattern = re.sub(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", "[uuid]", pattern)
+    pattern = re.sub(
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+        "[uuid]",
+        pattern,
+    )
     pattern = re.sub(r"\b[0-9a-f]{40}\b", "[sha]", pattern)
     pattern = re.sub(r"\b[0-9a-f]{64}\b", "[sha256]", pattern)
 
@@ -136,7 +140,13 @@ def _is_pattern_known(pattern_text: str, patterns: dict) -> bool:
     """Check if a pattern is already in patterns.yaml."""
     pattern_lower = pattern_text.lower()
 
-    for category in ["error_patterns", "auth_patterns", "bonfire_patterns", "pipeline_patterns", "jira_cli_patterns"]:
+    for category in [
+        "error_patterns",
+        "auth_patterns",
+        "bonfire_patterns",
+        "pipeline_patterns",
+        "jira_cli_patterns",
+    ]:
         for existing in patterns.get(category, []):
             existing_pattern = existing.get("pattern", "").lower()
             if existing_pattern and existing_pattern in pattern_lower:
@@ -161,7 +171,15 @@ def _recommend_category(pattern_text: str, error_types: set) -> str:
 
     if any(
         word in pattern_lower
-        for word in ["pipeline", "ci", "job", "gitlab-ci", "workflow", "build failed", "test failed"]
+        for word in [
+            "pipeline",
+            "ci",
+            "job",
+            "gitlab-ci",
+            "workflow",
+            "build failed",
+            "test failed",
+        ]
     ):
         return "pipeline_patterns"
 

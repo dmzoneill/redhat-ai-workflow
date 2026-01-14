@@ -64,7 +64,7 @@ Guides stage → prod promotions.
 
 You can also load a persona when starting a session:
 
-```
+```text
 session_start(agent="devops")
 ```
 

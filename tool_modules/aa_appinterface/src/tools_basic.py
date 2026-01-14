@@ -123,7 +123,8 @@ def _format_saas_match(match: Path, repo_path: str) -> list[str]:
 async def _find_namespace_files(namespace: str, repo_path: str) -> list[str]:
     """Find YAML files mentioning namespace."""
     success, stdout, stderr = await run_cmd(
-        ["grep", "-rl", f"name: {namespace}", repo_path, "--include=*.yml"], cwd=repo_path
+        ["grep", "-rl", f"name: {namespace}", repo_path, "--include=*.yml"],
+        cwd=repo_path,
     )
 
     if not success or not stdout.strip():

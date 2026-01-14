@@ -142,7 +142,10 @@ def _extract_sequence_pattern(tool_name: str, error_message: str, context: dict,
 
     elif tool_name == "bonfire_namespace_release":
         pattern["error_regex"] = "namespace.*not owned"
-        pattern["correct_sequence"] = ["bonfire_namespace_list", "bonfire_namespace_release"]
+        pattern["correct_sequence"] = [
+            "bonfire_namespace_list",
+            "bonfire_namespace_release",
+        ]
 
     return pattern
 
@@ -189,7 +192,10 @@ def _generate_format_validation_steps(evidence: dict) -> list[dict]:
             {
                 "action": "validate_parameter",
                 "parameter": "image_tag",
-                "validation": {"regex": "^[a-f0-9]{40}$", "error_message": "Must be full 40-character SHA"},
+                "validation": {
+                    "regex": "^[a-f0-9]{40}$",
+                    "error_message": "Must be full 40-character SHA",
+                },
                 "reason": "Ensure full 40-char SHA, not short SHA",
             }
         )
@@ -201,7 +207,13 @@ def _generate_format_validation_steps(evidence: dict) -> list[dict]:
                 "reason": "Expand short SHA to full 40-char SHA",
             }
         )
-        steps.append({"action": "use_expanded_value", "parameter": "image_tag", "reason": "Use full SHA"})
+        steps.append(
+            {
+                "action": "use_expanded_value",
+                "parameter": "image_tag",
+                "reason": "Use full SHA",
+            }
+        )
 
     return steps
 
@@ -306,7 +318,11 @@ def _generate_root_cause(tool_name: str, classification: dict, mistake_pattern: 
 
 
 def extract_usage_pattern(
-    tool_name: str, params: dict, error_message: str, classification: dict, context: Optional[dict] = None
+    tool_name: str,
+    params: dict,
+    error_message: str,
+    classification: dict,
+    context: Optional[dict] = None,
 ) -> dict:
     """
     Extract a learnable pattern from a usage error.

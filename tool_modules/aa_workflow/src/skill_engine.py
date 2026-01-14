@@ -60,7 +60,12 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
                 patterns = yaml.safe_load(f) or {}
 
             # Check all pattern categories
-            for category in ["error_patterns", "auth_patterns", "bonfire_patterns", "pipeline_patterns"]:
+            for category in [
+                "error_patterns",
+                "auth_patterns",
+                "bonfire_patterns",
+                "pipeline_patterns",
+            ]:
                 for pattern in patterns.get(category, []):
                     pattern_text = pattern.get("pattern", "").lower()
                     if pattern_text and (pattern_text in error_lower or pattern_text in tool_lower):
@@ -256,7 +261,12 @@ class SkillExecutor:
                 patterns_data = yaml.safe_load(f) or {}
 
             # Check each category for matches
-            for cat in ["auth_patterns", "error_patterns", "bonfire_patterns", "pipeline_patterns"]:
+            for cat in [
+                "auth_patterns",
+                "error_patterns",
+                "bonfire_patterns",
+                "pipeline_patterns",
+            ]:
                 for pattern in patterns_data.get(cat, []):
                     pattern_text = pattern.get("pattern", "").lower()
                     if pattern_text and pattern_text in error_lower:
@@ -394,7 +404,11 @@ class SkillExecutor:
         return fix_success
 
     def _update_pattern_usage_stats(
-        self, category: str, pattern_text: str, matched: bool = True, fixed: bool = False
+        self,
+        category: str,
+        pattern_text: str,
+        matched: bool = True,
+        fixed: bool = False,
     ) -> None:
         """Update usage statistics for a pattern.
 
@@ -450,7 +464,12 @@ class SkillExecutor:
                             # Write back
                             f.seek(0)
                             f.truncate()
-                            yaml.dump(patterns_data, f, default_flow_style=False, sort_keys=False)
+                            yaml.dump(
+                                patterns_data,
+                                f,
+                                default_flow_style=False,
+                                sort_keys=False,
+                            )
                             break
 
                 finally:
@@ -720,7 +739,10 @@ class SkillExecutor:
 
         # Log manual edit
         self.error_recovery.log_fix_attempt(
-            error_info, action="manual_edit", success=True, details="User manually edited skill"
+            error_info,
+            action="manual_edit",
+            success=True,
+            details="User manually edited skill",
         )
 
         # Return None to signal skill should be aborted and re-run
@@ -754,7 +776,10 @@ class SkillExecutor:
                 self._debug(f"Could not create issue: {e}")
 
         self.error_recovery.log_fix_attempt(
-            error_info, action="abort", success=False, details="User aborted with issue creation"
+            error_info,
+            action="abort",
+            success=False,
+            details="User aborted with issue creation",
         )
         return None
 
@@ -762,7 +787,10 @@ class SkillExecutor:
         """Handle continue action for interactive recovery."""
         # Debug mode - let broken data propagate
         self.error_recovery.log_fix_attempt(
-            error_info, action="continue", success=False, details="User chose to continue with error"
+            error_info,
+            action="continue",
+            success=False,
+            details="User chose to continue with error",
         )
         return f"<compute error: {error_msg}>"
 
@@ -1132,7 +1160,12 @@ class SkillExecutor:
         return result
 
     async def _handle_tool_error(
-        self, tool: str, step: dict, step_name: str, error_msg: str, output_lines: list[str]
+        self,
+        tool: str,
+        step: dict,
+        step_name: str,
+        error_msg: str,
+        output_lines: list[str],
     ) -> bool:
         """Handle tool execution error.
 
@@ -1449,13 +1482,24 @@ class SkillExecutor:
             return
 
         # Memory read tools
-        memory_read_tools = ["memory_read", "memory_query", "check_known_issues", "memory_stats"]
+        memory_read_tools = [
+            "memory_read",
+            "memory_query",
+            "check_known_issues",
+            "memory_stats",
+        ]
         if any(t in tool_name for t in memory_read_tools):
             key = args.get("key", tool_name)
             self.event_emitter.memory_read(step_index, key)
 
         # Memory write tools
-        memory_write_tools = ["memory_write", "memory_update", "memory_append", "memory_session_log", "learn_tool_fix"]
+        memory_write_tools = [
+            "memory_write",
+            "memory_update",
+            "memory_append",
+            "memory_session_log",
+            "learn_tool_fix",
+        ]
         if any(t in tool_name for t in memory_write_tools):
             key = args.get("key", tool_name)
             self.event_emitter.memory_write(step_index, key)
@@ -1482,7 +1526,12 @@ def _skill_list_impl() -> list[TextContent]:
                 skills.append({"name": f.stem, "description": f"Error loading: {e}", "inputs": []})
 
     if not skills:
-        return [TextContent(type="text", text="No skills found. Create .yaml files in skills/ directory.")]
+        return [
+            TextContent(
+                type="text",
+                text="No skills found. Create .yaml files in skills/ directory.",
+            )
+        ]
 
     lines = ["## Available Skills\n"]
     for s in skills:
@@ -1605,7 +1654,12 @@ async def _skill_run_impl(
         import traceback
 
         if debug:
-            return [TextContent(type="text", text=f"❌ Error: {e}\n\n```\n{traceback.format_exc()}\n```")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Error: {e}\n\n```\n{traceback.format_exc()}\n```",
+                )
+            ]
         return [TextContent(type="text", text=f"❌ Error loading skill: {e}")]
 
 

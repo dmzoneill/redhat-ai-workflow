@@ -58,7 +58,7 @@ For detailed step-by-step process, see the [check_ci_health skill documentation]
 
 ## Instructions
 
-```
+```text
 skill_run("check_ci_health", '{"project": "$PROJECT"}')
 ```
 

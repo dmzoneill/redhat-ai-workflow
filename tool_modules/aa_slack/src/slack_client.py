@@ -229,7 +229,10 @@ class SlackSession:
                     self._rate_limit.retry_count += 1
 
                     # Exponential backoff with jitter
-                    backoff = min(retry_after, self.base_backoff * (2**attempt) + random.uniform(0, 1))
+                    backoff = min(
+                        retry_after,
+                        self.base_backoff * (2**attempt) + random.uniform(0, 1),
+                    )
                     self._rate_limit.backoff_until = time.time() + backoff
 
                     logger.warning(
@@ -345,7 +348,10 @@ class SlackSession:
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Get replies in a thread."""
-        result = await self._request("conversations.replies", {"channel": channel_id, "ts": thread_ts, "limit": limit})
+        result = await self._request(
+            "conversations.replies",
+            {"channel": channel_id, "ts": thread_ts, "limit": limit},
+        )
         return result.get("messages", [])
 
     # ==================== Message Methods ====================
@@ -389,7 +395,10 @@ class SlackSession:
         emoji: str,
     ) -> dict[str, Any]:
         """Add a reaction to a message."""
-        return await self._request("reactions.add", {"channel": channel_id, "timestamp": timestamp, "name": emoji})
+        return await self._request(
+            "reactions.add",
+            {"channel": channel_id, "timestamp": timestamp, "name": emoji},
+        )
 
     # ==================== DM Methods ====================
 
@@ -459,6 +468,7 @@ class SlackSession:
     ) -> list[dict[str, Any]]:
         """Search for messages."""
         result = await self._request(
-            "search.messages", {"query": query, "count": count, "sort": sort, "sort_dir": sort_dir}
+            "search.messages",
+            {"query": query, "count": count, "sort": sort, "sort_dir": sort_dir},
         )
         return result.get("messages", {}).get("matches", [])

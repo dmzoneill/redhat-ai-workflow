@@ -108,7 +108,7 @@ from scripts.common.memory import (
 
 ### Tool-Level (Auto-Heal Decorator)
 
-```
+```python
 Tool Fails
     ↓
 @auto_heal() Detects Pattern
@@ -126,7 +126,7 @@ Returns Result
 
 ### Skill-Level (Pattern Matching)
 
-```
+```text
 Skill Step Fails
     ↓
 check_known_issues() → Reads patterns.yaml + tool_fixes.yaml
@@ -152,7 +152,7 @@ Continues Skill Execution
 
 ### Memory Operations per Day
 
-```
+```text
 Total:  ~395 operations/day
 
 Reads:  ~250/day (65%)
@@ -195,7 +195,7 @@ Writes: ~145/day (35%)
 
 ## 🏗️ Architecture Layers
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │ Layer 1: MCP Tools                                   │
 │  memory_read, memory_write, memory_update,           │

@@ -488,7 +488,15 @@ def _register_mr_tools(registry: ToolRegistry) -> None:
     ) -> str:
         """Create a new merge request."""
         return await _gitlab_mr_create_impl(
-            project, title, description, source_branch, target_branch, draft, labels, assignee, reviewer
+            project,
+            title,
+            description,
+            source_branch,
+            target_branch,
+            draft,
+            labels,
+            assignee,
+            reviewer,
         )
 
     @auto_heal()
@@ -534,7 +542,15 @@ def _register_mr_tools(registry: ToolRegistry) -> None:
     ) -> str:
         """Update an existing merge request."""
         return await _gitlab_mr_update_impl(
-            project, mr_id, title, description, add_label, remove_label, assignee, reviewer, draft
+            project,
+            mr_id,
+            title,
+            description,
+            add_label,
+            remove_label,
+            assignee,
+            reviewer,
+            draft,
         )
 
     @auto_heal()

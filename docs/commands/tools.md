@@ -51,7 +51,7 @@ flowchart TD
 
 ## Instructions
 
-```
+```text
 tool_list()
 ```
 

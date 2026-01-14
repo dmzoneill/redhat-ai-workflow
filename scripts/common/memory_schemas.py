@@ -288,7 +288,13 @@ def get_schema_template(key: str) -> Optional[str]:
                         started="2026-01-09T10:00:00",
                     )
                 ],
-                open_mrs=[OpenMR(id=1459, project="automation-analytics-backend", title="AAP-12345 - feat: example")],
+                open_mrs=[
+                    OpenMR(
+                        id=1459,
+                        project="automation-analytics-backend",
+                        title="AAP-12345 - feat: example",
+                    )
+                ],
                 follow_ups=[FollowUp(task="Update documentation", priority="high")],
                 last_updated="2026-01-09T14:00:00",
             )

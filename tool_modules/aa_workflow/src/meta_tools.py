@@ -45,7 +45,12 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
                 patterns = yaml.safe_load(f) or {}
 
             # Check all pattern categories
-            for category in ["error_patterns", "auth_patterns", "bonfire_patterns", "pipeline_patterns"]:
+            for category in [
+                "error_patterns",
+                "auth_patterns",
+                "bonfire_patterns",
+                "pipeline_patterns",
+            ]:
                 for pattern in patterns.get(category, []):
                     pattern_text = pattern.get("pattern", "").lower()
                     if pattern_text and (pattern_text in error_lower or pattern_text in tool_lower):

@@ -56,17 +56,17 @@ For detailed step-by-step process, see the [memory_init skill documentation](../
 ## Usage
 
 **Reset state files only (preserves learned patterns):**
-```
+```text
 skill_run("memory_init", '{"confirm": true}')
 ```text
 
 **Full reset (including learned memory):**
-```
+```text
 skill_run("memory_init", '{"confirm": true, "reset_learned": true}')
 ```text
 
 **Full reset but keep patterns:**
-```
+```text
 skill_run("memory_init", '{"confirm": true, "reset_learned": true, "preserve_patterns": true}')
 ```
 

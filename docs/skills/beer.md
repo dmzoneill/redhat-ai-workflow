@@ -91,7 +91,7 @@ flowchart TD
 
 ## Example Output
 
-```
+```text
 ## 🍺 Cheers, Dave!
 
 📊 **Today's Summary**

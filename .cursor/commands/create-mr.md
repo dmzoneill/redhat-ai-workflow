@@ -31,7 +31,7 @@ skill_run("create_mr", '{"issue_key": "AAP-61214", "draft": true}')
 
 ## MR Title Format
 
-```
+```text
 AAP-61214 - feat(billing): Add invoice generation
 ```
 

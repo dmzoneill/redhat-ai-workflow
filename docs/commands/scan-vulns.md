@@ -55,7 +55,7 @@ For detailed step-by-step process, see the [scan_vulnerabilities skill documenta
 
 ## Instructions
 
-```
+```text
 skill_run("scan_vulnerabilities", '{"image": "$IMAGE"}')
 ```
 
