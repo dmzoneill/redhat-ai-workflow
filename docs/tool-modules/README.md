@@ -6,13 +6,13 @@ Tool modules are MCP plugins that provide specific capabilities. Each module con
 
 ## Quick Reference
 
-**245 tools** across **16 modules**, split into **170 basic** (used in skills, 69%) and **75 extra** (rarely used, 31%).
+**263 tools** across **16 modules**, split into **188 basic** (used in skills, 71%) and **75 extra** (rarely used, 29%).
 
 > **Performance:** Loading basic tools only reduces context window usage by **30%**. See [Tool Organization](../tool-organization.md) for details.
 
 | Module | Variant | Tools | Usage % | Description |
 |--------|---------|-------|---------|-------------|
-| [workflow](./workflow.md) | basic | 16 | 100% | Core: agents, skills, memory, vpn_connect, kube_login |
+| [workflow](./workflow.md) | basic | 18 | 100% | Core: agents, skills, memory, vpn_connect, kube_login |
 | [git](./git.md) | basic | 27 | 90% | Essential git (status, log, diff, add, commit, push, rebase, merge) |
 | [git](./git.md) | extra | 3 | - | Rarely used (clean, remote_info, docker_compose_down) |
 | [gitlab](./gitlab.md) | basic | 16 | 53% | MRs, CI basics (list, view, create, comment, lint) |
@@ -38,11 +38,11 @@ Tool modules are MCP plugins that provide specific capabilities. Each module con
 | [slack](./slack.md) | extra | 3 | - | Reactions, get_channels, list_messages |
 | [appinterface](./appinterface.md) | basic | 4 | 57% | Core validation (diff, get_saas, resources, validate) |
 | [appinterface](./appinterface.md) | extra | 3 | - | Clusters, user, search |
-| [lint](./common.md) | basic | 1 | 14% | lint_python (used in pre-MR checks) |
-| [lint](./common.md) | extra | 6 | - | dockerfile, yaml, precommit, security, test coverage |
-| [dev_workflow](./common.md) | extra | 9 | 0% | All workflow helpers (manual invocation only) |
+| [lint](./lint.md) | basic | 1 | 14% | lint_python (used in pre-MR checks) |
+| [lint](./lint.md) | extra | 6 | - | dockerfile, yaml, precommit, security, test coverage |
+| [dev_workflow](./dev_workflow.md) | basic | 9 | 100% | Workflow helpers (start_work, prepare_mr, etc.) |
 
-**Total:** 245 tools (**170 basic**, **75 extra**) across 16 modules
+**Total:** 263 tools (**188 basic**, **75 extra**) across 16 modules
 
 > **Data-Driven Split:** Based on analysis of 55 skills. See `.claude/skill-tool-usage-report.md` for full details.
 
@@ -148,7 +148,7 @@ Claude: [AgentLoader]
         → Loading: k8s_basic, bonfire_basic, jira_basic, quay
         → Notifying Cursor of tool change
 
-        🔧 DevOps agent ready with ~83 tools
+        🔧 DevOps agent ready with ~74 tools
 ```
 
 ### Accessing Extra Tools

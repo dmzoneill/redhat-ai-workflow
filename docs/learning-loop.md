@@ -309,6 +309,6 @@ All agents include both levels of auto-healing:
 
 ## See Also
 
-- [Skills Reference](skills/README.md) - All 53 skills with auto-heal
+- [Skills Reference](skills/README.md) - All 55 skills with auto-heal
 - [Skill Auto-Heal Plan](plans/skill-auto-heal.md) - Implementation details
 - [Architecture Overview](architecture/README.md)

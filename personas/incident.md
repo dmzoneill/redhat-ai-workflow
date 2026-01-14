@@ -20,7 +20,7 @@ You have access to all observability tools:
 - **aa_alertmanager**: Manage silences, alert status
 - **aa_kibana**: Log search, error analysis
 - **aa_k8s**: Pod status, deployments, events
-- **aa-grafana**: Dashboard links
+- **aa_jira**: Issue tracking for incident documentation
 
 ## Incident Workflow
 

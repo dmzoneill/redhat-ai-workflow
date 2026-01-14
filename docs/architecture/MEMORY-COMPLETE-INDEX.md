@@ -92,8 +92,8 @@ This maps EVERY memory operation in the codebase:
 **Start here:** [MEMORY-COMPLETENESS-REPORT.md](./MEMORY-COMPLETENESS-REPORT.md)
 
 This verifies 100% coverage with metrics:
-- ✅ 239/239 tools have @auto_heal (100%)
-- ✅ 53/53 skills have auto-retry (100%)
+- ✅ 263/263 tools have @auto_heal (100%)
+- ✅ 55/55 skills have auto-retry (100%)
 - ✅ All 21 memory files documented
 - ✅ All 3 persistence mechanisms identified
 - ✅ Zero gaps remaining
@@ -227,7 +227,7 @@ This provides high-level technical overview:
 
 2. **Auto-Remediation Integration Points**
    - Layer 1: Tool-level (239 decorators)
-   - Layer 2: Skill-level (53 skills)
+   - Layer 2: Skill-level (55 skills)
    - Layer 3: Compute-level (11 skills)
    - Layer 4: Meta-level (debug_tool)
 
@@ -272,7 +272,7 @@ This provides high-level technical overview:
    - Memory operations found: 179
    - Operation types: 10
    - Auto-heal decorators: 239 (100% of tools)
-   - Skills with auto-retry: 53 (100% of skills)
+   - Skills with auto-retry: 55 (100% of skills)
 
 2. **Analysis Breakdown**
    - Files scanned (skills, tool modules, scripts, server)
@@ -462,8 +462,8 @@ This provides high-level technical overview:
 | **Total Files Analyzed** | 67 | 100% |
 | **Memory Operations Found** | 179 | 100% |
 | **Operation Types** | 10 | 100% |
-| **Auto-Heal Decorators** | 239 | 100% of 239 tools |
-| **Skills with Auto-Retry** | 53 | 100% of 53 skills |
+| **Auto-Heal Decorators** | 263 | 100% of 263 tools |
+| **Skills with Auto-Retry** | 55 | 100% of 55 skills |
 | **Memory Files** | 21 | 100% |
 | **Documentation Files** | 7 | Complete |
 
@@ -624,7 +624,7 @@ Examples:
 ✅ **179 memory operations**
 ✅ **10 operation types**
 ✅ **239 @auto_heal decorators**
-✅ **53 skills with auto-retry**
+✅ **55 skills with auto-retry**
 ✅ **21 memory files**
 ✅ **4 auto-remediation layers**
 

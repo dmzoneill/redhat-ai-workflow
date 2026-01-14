@@ -121,12 +121,12 @@ pre-commit run --all-files
 ```
 redhat-ai-workflow/
 ├── personas/                    # Agent persona definitions (YAML)
-├── skills/                      # 53 workflow skill definitions (YAML)
+├── skills/                      # 55 workflow skill definitions (YAML)
 ├── memory/                      # Persistent memory storage
 │   ├── state/                   # Active issues, MRs, environments
 │   └── learned/                 # Patterns, tool fixes, runbooks
-├── tool_modules/                # MCP tool modules (17 modules, ~270 tools)
-│   ├── aa_workflow/             # Workflow tools (16 tools)
+├── tool_modules/                # MCP tool modules (16 modules, 263 tools)
+│   ├── aa_workflow/             # Workflow tools (18 tools)
 │   ├── aa_git/                  # Git operations (30 tools)
 │   ├── aa_gitlab/               # GitLab integration (30 tools)
 │   ├── aa_jira/                 # Jira integration (28 tools)

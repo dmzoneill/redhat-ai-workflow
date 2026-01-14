@@ -7,7 +7,7 @@ persona: personas/devops.md
 
 # Slim tool selection - only the essentials
 tools:
-  - k8s           # 26 tools - Core Kubernetes
+  - k8s           # 28 tools - Core Kubernetes
   - prometheus    # 13 tools - Alerts and metrics
 
-# Total: ~39 tools
+# Total: ~41 tools

@@ -37,124 +37,144 @@
     "viewsWelcome": [
       {
         "view": "aaWorkflowExplorer",
-        "contents": "No workflow data available.\n[Refresh](command:aa_workflow.refreshTree)\n\nMake sure the memory files exist in ~/.config/aa_workflow/memory/"
+        "contents": "No workflow data available.\n[Refresh](command:aa-workflow.refreshTree)\n\nMake sure the memory files exist in ~/.config/aa-workflow/memory/"
       }
     ],
     "commands": [
       {
-        "command": "aa_workflow.showStatus",
+        "command": "aa-workflow.showStatus",
         "title": "AI Workflow: Show Status"
       },
       {
-        "command": "aa_workflow.openJiraIssue",
+        "command": "aa-workflow.openJiraIssue",
         "title": "AI Workflow: Open Current Jira Issue"
       },
       {
-        "command": "aa_workflow.openMR",
+        "command": "aa-workflow.openMR",
         "title": "AI Workflow: Open Current MR"
       },
       {
-        "command": "aa_workflow.investigateAlert",
+        "command": "aa-workflow.investigateAlert",
         "title": "AI Workflow: Investigate Alert"
       },
       {
-        "command": "aa_workflow.refreshStatus",
+        "command": "aa-workflow.refreshStatus",
         "title": "AI Workflow: Refresh Status"
       },
       {
-        "command": "aa_workflow.refreshTree",
+        "command": "aa-workflow.refreshTree",
         "title": "AI Workflow: Refresh Tree View",
         "icon": "$(refresh)"
       },
       {
-        "command": "aa_workflow.runSkill",
+        "command": "aa-workflow.runSkill",
         "title": "AI Workflow: Run Skill..."
       },
       {
-        "command": "aa_workflow.startWork",
+        "command": "aa-workflow.startWork",
         "title": "AI Workflow: Start Work on Issue"
       },
       {
-        "command": "aa_workflow.coffee",
+        "command": "aa-workflow.coffee",
         "title": "AI Workflow: Morning Briefing (/coffee)"
       },
       {
-        "command": "aa_workflow.beer",
+        "command": "aa-workflow.beer",
         "title": "AI Workflow: End of Day Summary (/beer)"
       },
       {
-        "command": "aa_workflow.checkNotifications",
+        "command": "aa-workflow.checkNotifications",
         "title": "AI Workflow: Check for Notifications"
       },
       {
-        "command": "aa_workflow.openDashboard",
+        "command": "aa-workflow.openDashboard",
         "title": "AI Workflow: Open Dashboard",
         "icon": "$(dashboard)"
       },
       {
-        "command": "aa_workflow.openSkillVisualizer",
+        "command": "aa-workflow.openSkillVisualizer",
         "title": "AI Workflow: Open Skill Visualizer"
       },
       {
-        "command": "aa_workflow.visualizeSkill",
+        "command": "aa-workflow.visualizeSkill",
         "title": "AI Workflow: Visualize Skill..."
+      },
+      {
+        "command": "aa-workflow.openSkillFlowchart",
+        "title": "AI Workflow: Open Skill Flowchart",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "aa-workflow.visualizeSkillFlowchart",
+        "title": "AI Workflow: Visualize Skill Flowchart..."
+      },
+      {
+        "command": "aa-workflow.showSkillExecution",
+        "title": "AI Workflow: Show Skill Execution"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "aa_workflow.openDashboard",
+          "command": "aa-workflow.openDashboard",
           "when": "view == aaWorkflowExplorer",
           "group": "navigation@1"
         },
         {
-          "command": "aa_workflow.refreshTree",
+          "command": "aa-workflow.refreshTree",
           "when": "view == aaWorkflowExplorer",
           "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "aa_workflow.openJiraIssue",
+          "command": "aa-workflow.openJiraIssue",
           "when": "view == aaWorkflowExplorer && viewItem == issue",
           "group": "inline"
         },
         {
-          "command": "aa_workflow.openMR",
+          "command": "aa-workflow.openMR",
           "when": "view == aaWorkflowExplorer && viewItem == mr",
           "group": "inline"
         },
         {
-          "command": "aa_workflow.investigateAlert",
+          "command": "aa-workflow.investigateAlert",
           "when": "view == aaWorkflowExplorer && viewItem == alert",
           "group": "inline"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "aa-workflow.openSkillFlowchart",
+        "key": "ctrl+alt+s",
+        "mac": "cmd+alt+s"
+      }
+    ],
     "configuration": {
       "title": "AI Workflow",
       "properties": {
-        "aa_workflow.refreshInterval": {
+        "aa-workflow.refreshInterval": {
           "type": "number",
           "default": 30,
           "description": "Status refresh interval in seconds"
         },
-        "aa_workflow.showSlackStatus": {
+        "aa-workflow.showSlackStatus": {
           "type": "boolean",
           "default": true,
           "description": "Show Slack daemon status in status bar"
         },
-        "aa_workflow.showActiveIssue": {
+        "aa-workflow.showActiveIssue": {
           "type": "boolean",
           "default": true,
           "description": "Show active Jira issue in status bar"
         },
-        "aa_workflow.showEnvironment": {
+        "aa-workflow.showEnvironment": {
           "type": "boolean",
           "default": true,
           "description": "Show environment health in status bar"
         },
-        "aa_workflow.showActiveMR": {
+        "aa-workflow.showActiveMR": {
           "type": "boolean",
           "default": true,
           "description": "Show active MR in status bar"

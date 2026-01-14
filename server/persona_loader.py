@@ -42,9 +42,9 @@ TOOL_MODULES = {
     "kibana": 9,
     "konflux": 35,  # Removed: 5 duplicate/low-value tkn tools
     "bonfire": 20,  # Removed: bonfire_version (low value)
-    "quay": 7,  # Removed: quay_check_aa_image (duplicate)
+    "quay": 7,  # 6 basic + skopeo_get_digest
     "appinterface": 6,
-    "workflow": 16,  # Core only (memory, persona, session, skill, infra, meta)
+    "workflow": 18,  # Core only (memory, persona, session, skill, infra, meta)
     "lint": 7,  # Developer-specific linting/testing tools
     "dev_workflow": 9,  # Developer-specific workflow tools
     "slack": 8,  # Removed: 7 daemon/internal tools
@@ -54,7 +54,7 @@ TOOL_MODULES = {
     "git_extra": 3,  # Tools not used in skills
     "jira_basic": 17,
     "jira_extra": 11,
-    "gitlab_basic": 16,
+    "gitlab_basic": 17,  # includes gitlab_mr_sha
     "gitlab_extra": 14,
     "k8s_basic": 22,
     "k8s_extra": 6,
@@ -74,7 +74,7 @@ TOOL_MODULES = {
     "appinterface_extra": 3,
     "lint_basic": 1,
     "lint_extra": 6,
-    "dev_workflow_extra": 9,  # No basic (all unused)
+    "dev_workflow_basic": 9,  # All used in skills
     "slack_basic": 6,
     "slack_extra": 3,
     "google_calendar_basic": 6,  # No extra (all used)

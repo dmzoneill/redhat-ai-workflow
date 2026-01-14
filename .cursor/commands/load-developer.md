@@ -7,7 +7,7 @@ Call `persona_load("developer")` to load:
 - GitLab tools (MR create, review, merge)
 - Jira tools (issue view, search, update)
 
-**~106 tools** for daily development workflow.
+**~78 tools** for daily development workflow.
 
 Use for:
 - Start work on issue

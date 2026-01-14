@@ -17,6 +17,8 @@ import { registerTreeView, WorkflowTreeProvider } from "./treeView";
 import { registerNotifications, NotificationManager } from "./notifications";
 import { registerDashboard } from "./dashboard";
 import { registerSkillVisualizer } from "./skillVisualizer";
+import { registerSkillFlowchartPanel } from "./skillFlowchartPanel";
+import { registerSkillExecutionWatcher } from "./skillExecutionWatcher";
 
 let statusBarManager: StatusBarManager | undefined;
 let dataProvider: WorkflowDataProvider | undefined;
@@ -44,6 +46,12 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Initialize skill visualizer
   registerSkillVisualizer(context);
+
+  // Initialize skill flowchart panel (bottom drawer)
+  registerSkillFlowchartPanel(context);
+
+  // Initialize skill execution watcher (connects to MCP server)
+  registerSkillExecutionWatcher(context);
 
   // Register commands
   registerCommands(context, dataProvider, statusBarManager);

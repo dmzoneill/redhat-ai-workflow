@@ -791,7 +791,7 @@ def resolve_repo(repo_path, repo_name, issue_key):
 
 1. **Three Access Methods:** MCP tools, Python helpers, Direct YAML - each serves different use cases
 2. **Dual Pattern Checking:** Both tool-level (auto_heal) and skill-level (skill_engine) check patterns
-3. **Session Logging Universal:** 39 of 54 skills (72%) log to session files
+3. **Session Logging Universal:** 39 of 55 skills (72%) log to session files
 4. **Auto-Heal Logging:** 100% of tools log failures automatically
 5. **Memory Context:** Skills have implicit `memory` object in compute blocks
 6. **No Locking:** Best-effort writes, rare conflicts in single-user system

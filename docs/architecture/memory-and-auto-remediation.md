@@ -260,7 +260,7 @@ actions:
 
 **Location:** `server/auto_heal_decorator.py`
 
-**Coverage:** 239+ tools across 17 modules
+**Coverage:** 263 tools across 16 modules
 
 #### How It Works
 
@@ -365,7 +365,7 @@ stats:
 
 **Location:** `tool_modules/aa_workflow/src/skill_engine.py`
 
-**Coverage:** All 54 skills
+**Coverage:** All 55 skills
 
 #### How It Works
 
@@ -931,9 +931,9 @@ stats:
 
 1. **Two-Layer Defense**: Tools have @auto_heal, skills check memory patterns
 2. **Self-Improving**: Failures teach the system via memory writes
-3. **100% Coverage**: All 239+ tools have auto-heal decorators
+3. **100% Coverage**: All 263 tools have auto-heal decorators
 4. **High Success Rate**: 77% of failures auto-remediated
-5. **Memory Integration**: 46 of 54 skills use memory operations
+5. **Memory Integration**: 46 of 55 skills use memory operations
 6. **Session Tracking**: All actions logged to daily session files
 7. **Pattern Learning**: Users can teach new patterns via `learn_pattern` skill
 8. **Best-Effort Writes**: Memory logging never blocks tool execution

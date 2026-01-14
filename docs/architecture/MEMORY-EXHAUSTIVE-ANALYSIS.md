@@ -373,13 +373,13 @@ async def tool_function(...):
 
 ---
 
-### Layer 2: Skill-Level Auto-Fix (53 skills)
+### Layer 2: Skill-Level Auto-Fix (55 skills)
 
 **What:** `_try_auto_fix()` in skill engine
 
 **How:** Skills call engine's auto-fix on step failure, engine checks patterns.yaml, applies fix, retries
 
-**Coverage:** ALL 53 skills have auto-retry via skill engine
+**Coverage:** ALL 55 skills have auto-retry via skill engine
 
 **Integration:**
 
@@ -492,7 +492,7 @@ error_patterns:
 
 **How:** Reads tool source, compares to error, proposes fix
 
-**Coverage:** Available for ALL 239 tools
+**Coverage:** Available for ALL 263 tools
 
 **Integration:**
 
@@ -679,8 +679,8 @@ if ctx and ctx.get("pod_name"):
 5. Success → pattern usage stats updated
 
 **Coverage:**
-- Tool-level: 239 tools (100%)
-- Skill-level: 53 skills (100%)
+- Tool-level: 263 tools (100%)
+- Skill-level: 55 skills (100%)
 
 **Example:**
 ```python
@@ -815,7 +815,7 @@ patterns_data["auth_patterns"][0]["usage_stats"]["success_rate"] = 0.96
 | Component | Total | With Auto-Heal | Coverage |
 |-----------|-------|---------------|----------|
 | MCP Tools | 239 | 239 | 100% |
-| Skills | 53 | 53 | 100% |
+| Skills | 55 | 55 | 100% |
 | Tool Modules | 14 | 14 | 100% |
 
 ### Memory File Usage
@@ -839,8 +839,8 @@ patterns_data["auth_patterns"][0]["usage_stats"]["success_rate"] = 0.96
 ✅ **ALL** auto-remediation integration points documented (4 layers)
 ✅ **ALL** memory files inventoried (21 files)
 ✅ **ALL** access patterns identified (4 patterns)
-✅ **100%** tool coverage for auto-heal (239/239 tools)
-✅ **100%** skill coverage for auto-retry (53/53 skills)
+✅ **100%** tool coverage for auto-heal (239/263 tools)
+✅ **100%** skill coverage for auto-retry (55/55 skills)
 
 ### Key Insights
 

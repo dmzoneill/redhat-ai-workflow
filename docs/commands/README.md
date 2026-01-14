@@ -570,7 +570,7 @@ tool_list(module='git')
 tool_list(module='gitlab')
 ```
 
-Shows ~270 tools across 17 modules.
+Shows ~263 tools across 16 modules.
 
 ---
 

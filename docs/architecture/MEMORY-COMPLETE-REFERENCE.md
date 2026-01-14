@@ -177,7 +177,7 @@ Writes: ~145/day (35%)
 | **Learning** | 1 | write patterns | patterns |
 | **Deployment** | 12 | update env, session_log | environments, sessions |
 
-**Total:** 46 of 54 skills (85%) use memory
+**Total:** 46 of 55 skills (85%) use memory
 
 ### Most-Read Files
 
@@ -240,12 +240,12 @@ Writes: ~145/day (35%)
 1. **5 MCP Tools** for declarative memory operations
 2. **15+ Python Helpers** for programmatic operations in skills
 3. **10+ Memory Files** across 3 directories (state, learned, sessions)
-4. **85% Skill Adoption** (46 of 54 skills use memory)
+4. **85% Skill Adoption** (46 of 55 skills use memory)
 5. **Auto-Timestamping** on all writes (`last_updated` field)
 
 ### Auto-Remediation
 
-1. **100% Tool Coverage** - All 239+ tools have @auto_heal decorators
+1. **100% Tool Coverage** - All 263 tools have @auto_heal decorators
 2. **Two-Layer Defense** - Tool-level + Skill-level auto-fix
 3. **77% Success Rate** - 98 of 127 failures auto-fixed
 4. **Pattern Learning** - Failures logged to memory for future prevention
@@ -433,7 +433,7 @@ skill_run("standup_summary")
 
 ### Memory Adoption
 
-- **85% skill adoption** - 46 of 54 skills use memory
+- **85% skill adoption** - 46 of 55 skills use memory
 - **39 skills log sessions** - Complete activity tracking
 - **~395 operations/day** - Heavy usage
 - **10+ memory files** - Rich context persistence

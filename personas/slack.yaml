@@ -68,11 +68,11 @@ persona: |
 
 # Tools loaded for this agent
 tools:
-  - workflow   # 28 tools - Skills, agents, memory (REQUIRED)
-  - slack      # 16 tools - Core Slack integration
-  - jira       # 24 tools - Issue tracking
-  - gitlab     # 35 tools - Code review, MRs, pipelines
-  # Total: ~103 tools (under 128 limit)
+  - workflow   # 18 tools - Skills, agents, memory (REQUIRED)
+  - slack      # 9 tools - Core Slack integration
+  - jira       # 28 tools - Issue tracking
+  - gitlab     # 30 tools - Code review, MRs, pipelines
+  # Total: ~85 tools (under 128 limit)
 
 skills:
   - start_work

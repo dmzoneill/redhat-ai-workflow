@@ -1,64 +1,52 @@
-# Environment State
-# Tracks health and status of stage/prod environments
-# Updated automatically by skills and agents
-
-last_checked: null
-
 environments:
-  stage:
-    namespace: tower-analytics-stage
-    cluster: crcs02ue1
-    kubeconfig: ~/.kube/config.s
-    status: unknown
-    last_check: null
-    alerts: []
-    deployments: []
-    known_issues: []
-    notes: ""
-
-  production:
-    namespace: tower-analytics-prod
-    cluster: crcp01ue1
-    kubeconfig: ~/.kube/config.p
-    status: unknown
-    last_check: null
-    alerts: []
-    deployments: []
-    known_issues: []
-    notes: ""
-
   ephemeral:
+    active_namespaces:
+    - commit: df06cbad43a2
+      created: '2026-01-13T23:52:01.163155'
+      expires: '2026-01-14T01:52:01.856000'
+      mr_id: '1491'
+      name: ephemeral-fep0lt
+      tests_passed: false
+    - commit: df06cbad43a2
+      created: '2026-01-14T12:00:40.594970'
+      expires: '2026-01-14T14:00:40.608901'
+      mr_id: '1491'
+      name: ephemeral-mo6eze
+      tests_passed: false
     cluster: ephemeral
     kubeconfig: ~/.kube/config.e
-    status: unknown
-    last_check: null
-    active_namespaces: []
-    notes: ""
-
+    last_check: '2026-01-14T12:00:40.594970'
+    notes: ''
+    status: active
   konflux:
-    namespace: aap-aa-tenant
+    active_pipelines: []
     cluster: konflux
     kubeconfig: ~/.kube/config.k
-    status: unknown
     last_check: null
-    active_pipelines: []
-    notes: ""
-
-# Recent deployments
-recent_deployments: []
-# Example:
-#   - environment: stage
-#     version: "v2.3.1"
-#     deployed_at: "2024-12-21T15:30:00Z"
-#     deployed_by: "username"
-#     mr_id: 1234
-#     status: success
-
-# Known issues
+    namespace: aap-aa-tenant
+    notes: ''
+    status: unknown
+  production:
+    alerts: []
+    cluster: crcp01ue1
+    deployments: []
+    known_issues: []
+    kubeconfig: ~/.kube/config.p
+    last_check: null
+    namespace: tower-analytics-prod
+    notes: ''
+    status: unknown
+  stage:
+    alerts: []
+    cluster: crcs02ue1
+    deployments: []
+    known_issues: []
+    kubeconfig: ~/.kube/config.s
+    last_check: null
+    namespace: tower-analytics-stage
+    notes: ''
+    status: unknown
 known_issues: []
-# Example:
-#   - environment: stage
-#     issue: "High memory usage on app-api pod"
-#     since: "2024-12-20T10:00:00Z"
-#     jira: "PROJ-99999"
-#     workaround: "Restart pod every 24h"
+last_checked: null
+last_updated: '2026-01-14T12:00:40.633926'
+recent_deployments: []

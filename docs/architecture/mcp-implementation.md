@@ -135,7 +135,7 @@ sequenceDiagram
     MCP->>Cursor: tools/list_changed notification
     Cursor->>Cursor: Refresh tool list
     Loader-->>MCP: Agent persona
-    MCP-->>Claude: "Loaded ~95 tools"
+    MCP-->>Claude: "Loaded ~78 tools"
     Claude-->>User: "DevOps agent ready!"
 ```
 
@@ -248,14 +248,14 @@ Available decorators:
 Start with minimal tools, switch agents dynamically:
 
 ```bash
-python -m src.server  # Starts with developer persona (~95 tools)
+python -m src.server  # Starts with developer persona (~78 tools)
 ```
 
 Then in chat:
 ```
 You: Load the devops agent
 Claude: [calls persona_load("devops")]
-        DevOps agent loaded! Now have k8s, bonfire, quay, gitlab (~95 tools)
+        DevOps agent loaded! Now have k8s, bonfire, quay, gitlab (~74 tools)
 ```
 
 ### 2. Static Agent Mode
@@ -263,8 +263,8 @@ Claude: [calls persona_load("devops")]
 Start with a specific agent's tools pre-loaded:
 
 ```bash
-python -m src.server --agent developer  # ~95 tools
-python -m src.server --agent devops     # ~95 tools
+python -m src.server --agent developer  # ~78 tools
+python -m src.server --agent devops     # ~74 tools
 ```
 
 ### 3. Single Tool Module (Standalone)
