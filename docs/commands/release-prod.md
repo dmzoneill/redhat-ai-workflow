@@ -70,7 +70,7 @@ skill_run("release_aa_backend_prod", '{"commit_sha": "abc123..."}')
 | `release_date` | Target release date | Today |
 | `include_billing` | Include billing component | `false` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Release main component

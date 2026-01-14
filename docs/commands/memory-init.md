@@ -72,15 +72,11 @@ skill_run("memory_init", '{"confirm": true, "reset_learned": true, "preserve_pat
 
 ## What Gets Reset
 
-#
-
-## State Files (always reset)
+### State Files (always reset)
 - `state/current_work.yaml` - Active issues, open MRs, follow-ups
 - `state/environments.yaml` - Environment status, ephemeral namespaces
 
-#
-
-## Learned Files (only with reset_learned=true)
+### Learned Files (only with reset_learned=true)
 - `learned/runbooks.yaml` - Operational procedures
 - `learned/teammate_preferences.yaml` - Review preferences
 - `learned/service_quirks.yaml` - Service behaviors

@@ -11,15 +11,15 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Claude](https://img.shields.io/badge/Claude-Anthropic-FF6B6B?style=for-the-badge&logo=anthropic&logoColor=white)](https://anthropic.com/)
 [![Cursor](https://img.shields.io/badge/Cursor-IDE-000000?style=for-the-badge&logo=cursor&logoColor=white)](https://cursor.sh/)
-[![Tools](https://img.shields.io/badge/Tools-263-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#-tool-modules)
-[![Skills](https://img.shields.io/badge/Skills-55-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)](#-skills)
+[![Tools](https://img.shields.io/badge/Tools-263-10b981?style=for-the-badge&logo=toolbox&logoColor=white)](#tool-modules)
+[![Skills](https://img.shields.io/badge/Skills-55-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)](#skills)
 [![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 **Transform Claude into your personal DevOps engineer, developer assistant, and incident responder.**
 
 *Works with both **Claude Code** and **Cursor IDE***
 
-[Getting Started](#-quick-start) •
+[Getting Started](#quick-start) •
 [Commands](docs/commands/README.md) •
 [Skills](docs/skills/README.md) •
 [Personas](docs/personas/README.md) •
@@ -45,7 +45,7 @@ AI Workflow is a **comprehensive MCP (Model Context Protocol) server** that give
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1️⃣ Clone & Install
 
@@ -231,7 +231,7 @@ graph LR
 
 ---
 
-## ⚡ Skills
+## Skills
 
 Skills are reusable multi-step workflows with **built-in auto-healing**. See [full skills reference](docs/skills/README.md).
 
@@ -365,7 +365,7 @@ When enabled, `/create-mr` and `/mark-ready` will:
 
 ---
 
-## 🔧 Tool Modules
+## Tool Modules
 
 **263 tools** across 16 modules, split into **188 basic** (used in skills, 71%) and **75 extra** (rarely used, 29%). See [full MCP server reference](docs/tool-modules/README.md).
 

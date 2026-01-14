@@ -75,7 +75,7 @@ skill_run("sprint_planning", '{"project": "AAP"}')
 | `sprint` | Target sprint name | Next sprint |
 | `capacity` | Team capacity (points) | Auto |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Analyze backlog

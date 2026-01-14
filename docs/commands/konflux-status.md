@@ -73,7 +73,7 @@ skill_run("konflux_status", '{}')
 | `namespace` | Specific namespace | `aap-aa-tenant` |
 | `application` | Filter by application | All |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Overall Konflux status

@@ -22,7 +22,7 @@ No arguments required.
 - **Weekends:** Not allowed
 - **Duplicates:** Automatically checks for existing meetings
 
-## Examples
+## Additional Examples
 ```
 
 ```bash

@@ -73,7 +73,7 @@ skill_run("scan_vulnerabilities", '{"image": "$IMAGE"}')
 | `image` | Full image path | Required |
 | `tag` | Image tag or SHA | `latest` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Scan latest

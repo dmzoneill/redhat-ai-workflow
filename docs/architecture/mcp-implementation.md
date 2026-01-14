@@ -26,7 +26,7 @@ Add to your project's `.cursor/mcp.json`:
     }
   }
 }
-```text
+```
 
 ## Directory Structure
 
@@ -311,7 +311,7 @@ TOOL_MODULES = {
 ```yaml
 tools:
   - {name}
-```text
+```
 
 ## Special Modules
 

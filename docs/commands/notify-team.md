@@ -74,7 +74,7 @@ skill_run("notify_team", '{"channel": "$CHANNEL", "message": "$MESSAGE"}')
 | `message` | Message to send | Required |
 | `mentions` | List of usernames to @mention | Optional |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Simple notification

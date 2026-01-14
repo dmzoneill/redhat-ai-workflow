@@ -78,9 +78,7 @@ For detailed step-by-step process, see the [create_jira_issue skill documentatio
 
 ## Usage
 
-#
-
-## Quick Story
+### Quick Story
 
 ```text
 skill_run("create_jira_issue", '{
@@ -93,9 +91,7 @@ skill_run("create_jira_issue", '{
 }')
 ```bash
 
-#
-
-## Full Story with All Fields
+### Full Story with All Fields
 
 ```text
 skill_run("create_jira_issue", '{
@@ -112,9 +108,7 @@ skill_run("create_jira_issue", '{
 }')
 ```bash
 
-#
-
-## Quick Bug
+### Quick Bug
 
 ```text
 skill_run("create_jira_issue", '{

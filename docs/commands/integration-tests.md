@@ -74,7 +74,7 @@ skill_run("check_integration_tests", '{}')
 | `application` | Application to check | All |
 | `snapshot` | Specific snapshot to review | Latest |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Check all integration tests

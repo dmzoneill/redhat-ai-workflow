@@ -77,7 +77,7 @@ skill_run("scale_deployment", '{"deployment": "$DEPLOYMENT", "namespace": "$NAME
 | `replicas` | Target replica count | Required |
 | `environment` | Cluster (stage/prod) | `stage` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Scale up

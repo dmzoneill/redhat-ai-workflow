@@ -75,7 +75,7 @@ skill_run("rebase_pr", '{"mr_id": $MR_ID}')
 | `project` | GitLab project | Current repo |
 | `target_branch` | Branch to rebase onto | `main` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Rebase an MR

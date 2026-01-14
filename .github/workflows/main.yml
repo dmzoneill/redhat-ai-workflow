@@ -15,3 +15,6 @@ jobs:
     uses: dmzoneill/dmzoneill/.github/workflows/dispatch.yaml@main
     with:
       basic: "true"
+      # Disable jscpd - .claude/ and .cursor/ directories are intentionally
+      # mirrored (same commands for both IDE integrations)
+      VALIDATE_JSCPD: "false"

@@ -77,7 +77,7 @@ skill_run("debug_prod")
 | `pod_filter` | Filter pods by name pattern | All pods |
 | `time_range` | Log time range | `1h` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # General production health check

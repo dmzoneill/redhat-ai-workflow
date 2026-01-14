@@ -76,7 +76,7 @@ skill_run("sync_branch")
 | `stash_changes` | Stash uncommitted changes first | `true` |
 | `force_push` | Force push after rebase | `false` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Simple sync - stashes changes, rebases, restores

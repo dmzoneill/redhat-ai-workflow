@@ -94,7 +94,7 @@ skill_run("notify_mr", '{"mr_id": "$MR_ID"}')
 | `message` | Custom message to include | None |
 | `reminder` | Format as reminder vs new | false |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Notify about specific MR

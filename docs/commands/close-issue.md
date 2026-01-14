@@ -75,7 +75,7 @@ skill_run("close_issue", '{"issue_key": "AAP-XXXXX"}')
 | `repo` | Repository path | Resolved from issue |
 | `add_comment` | Add commit summary comment | `true` |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Close issue with commit summary

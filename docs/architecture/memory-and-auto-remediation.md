@@ -262,7 +262,7 @@ actions:
 
 **Coverage:** 263 tools across 16 modules
 
-#### How It Works
+#### How Tool Auto-Heal Works
 
 ```python
 @auto_heal(cluster="ephemeral", max_retries=1)
@@ -367,7 +367,7 @@ stats:
 
 **Coverage:** All 55 skills
 
-#### How It Works
+#### How Skill Auto-Fix Works
 
 When a tool step fails in a skill:
 
@@ -545,7 +545,7 @@ def log_fix_attempt(self, error_info, action, success, details=""):
         self.memory.increment("learned/skill_error_fixes", f"stats.{action}_success")
     else:
         self.memory.increment("learned/skill_error_fixes", f"stats.{action}_failed")
-```text
+```
 
 ---
 

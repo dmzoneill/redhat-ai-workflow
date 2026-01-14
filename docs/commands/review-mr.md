@@ -73,7 +73,7 @@ This will:
 6. Analyze code for security, memory leaks, race conditions
 7. Auto-approve or post feedback based on findings
 
-## Examples
+## Additional Examples
 
 ```bash
 # By MR ID

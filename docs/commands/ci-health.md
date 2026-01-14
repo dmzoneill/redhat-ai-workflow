@@ -77,7 +77,7 @@ skill_run("check_ci_health", '{"project": "$PROJECT"}')
 | `pipeline_id` | Specific pipeline to inspect | Latest |
 | `job_name` | Specific job to focus on | All failed |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Check current repo CI

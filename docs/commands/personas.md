@@ -64,7 +64,7 @@ persona_load("developer")
 | `incident` | Production issues, logs | workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager (~78 tools) |
 | `release` | Shipping to production | workflow, konflux_basic, quay, jira_basic, git_basic (~91 tools) |
 
-## Examples
+## Additional Examples
 
 ```bash
 # Starting development work
@@ -91,27 +91,19 @@ When you load a persona:
 
 ## Personas
 
-#
-
-## 👨‍💻 Developer
+### 👨‍💻 Developer
 Expert in code review, git workflows, Jira management.
 Focuses on code quality and PR best practices.
 
-#
-
-## 🔧 DevOps
+### 🔧 DevOps
 Expert in Kubernetes, ephemeral environments, deployments.
 Knows bonfire, cluster management, image tags.
 
-#
-
-## 🚨 Incident
+### 🚨 Incident
 Expert in production investigation, log analysis, metrics.
 Focuses on quick triage and root cause analysis.
 
-#
-
-## 📦 Release
+### 📦 Release
 Expert in Konflux builds, Quay images, app-interface.
 Guides stage → prod promotions.
 
