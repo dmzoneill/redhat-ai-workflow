@@ -175,4 +175,4 @@ Start your day with `/coffee`, end it with `/beer`:
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*

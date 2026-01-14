@@ -58,14 +58,14 @@ google_calendar_quick_meeting(
 )
 ```
 
-## Constraints
+## Additional Constraints
 
 - **Timezone:** Irish time (Europe/Dublin) - not your laptop time
 - **Window:** 15:00-19:00 only (3pm-7pm Irish time)
 - **Weekends:** Not allowed
 - **Duplicates:** Automatically checks for existing meetings
 
-## Examples
+## Basic Examples
 
 ```python
 # Auto-find next mutual free slot
@@ -83,7 +83,7 @@ google_calendar_quick_meeting(
 )
 ```
 
-## Check Availability First
+## Check Availability Example
 
 ```python
 # See all free slots for both calendars
@@ -92,7 +92,7 @@ google_calendar_check_mutual_availability(
 )
 ```
 
-## Check for Existing Meeting
+## Existing Meeting Check Example
 
 ```python
 # Before scheduling, check if meeting exists
@@ -105,4 +105,4 @@ google_calendar_find_meeting(
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*

@@ -113,4 +113,4 @@ tool_exec('bonfire_namespace_list', '{"mine_only": true}')
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*

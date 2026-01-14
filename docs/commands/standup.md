@@ -114,4 +114,4 @@ For detailed step-by-step process, see the [standup_summary skill documentation]
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*

@@ -89,4 +89,4 @@ skill_run("review_pr", '{"url": "https://gitlab.cee.redhat.com/automation-analyt
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*

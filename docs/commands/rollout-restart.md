@@ -92,4 +92,4 @@ Use carefully in production. Consider silencing alerts first with `/silence-aler
 
 ## Related Commands
 
-_(To be determined based on command relationships)_
+*(To be determined based on command relationships)*
