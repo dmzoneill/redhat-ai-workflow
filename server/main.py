@@ -51,8 +51,8 @@ TOOL_MODULES = {
     "jira_basic": 15,  # Basic: view, search, list, my_issues, set_status, comment
     "jira_extra": 14,  # Extra: create, clone, links, flags, sprints
     # GitLab - split into basic and extra
-    "gitlab": 31,  # All gitlab tools
-    "gitlab_basic": 16,  # Basic: mr_list, mr_view, mr_create, ci_status, ci_list
+    "gitlab": 32,  # All gitlab tools (includes gitlab_mr_sha)
+    "gitlab_basic": 17,  # Basic: mr_list, mr_view, mr_create, mr_sha, ci_status, ci_list
     "gitlab_extra": 15,  # Extra: mr_approve, mr_merge, ci_run, issues, releases
     # K8s - split into basic and extra
     "k8s": 28,  # All k8s tools
@@ -73,7 +73,7 @@ TOOL_MODULES = {
     # Other modules (no split needed)
     "alertmanager": 9,  # Silence management
     "kibana": 10,  # Log search
-    "quay": 11,  # Container images
+    "quay": 9,  # Container images (6 basic + 2 extra + skopeo_get_digest)
     "appinterface": 7,  # GitOps config
     "slack": 48,  # Slack messaging
     "google_calendar": 6,  # Calendar/meetings

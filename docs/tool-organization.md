@@ -9,8 +9,8 @@ This document explains how tools are organized into `_basic` and `_extra` module
 ## Overview
 
 All tool modules are split into two files:
-- **`tools_basic.py`** - Tools actively used in at least one skill (170 tools, 69%)
-- **`tools_extra.py`** - Tools not used in any skill (75 tools, 31%)
+- **`tools_basic.py`** - Tools actively used in at least one skill (188 tools, 71%)
+- **`tools_extra.py`** - Tools not used in any skill (75 tools, 29%)
 
 This organization **reduces context window usage by 30%** while maintaining full functionality for common workflows.
 
@@ -22,7 +22,7 @@ This organization **reduces context window usage by 30%** while maintaining full
 
 | Metric | Before | After | Improvement |
 |--------|--------|-------|-------------|
-| **Default Tool Count** | 245 | 170 | -30% |
+| **Default Tool Count** | 263 | 188 | -29% |
 | **Context Window Usage** | ~40KB | ~28KB | -30% |
 | **Persona Load Time** | ~800ms | ~600ms | -25% |
 
@@ -67,8 +67,8 @@ The split is **data-driven**, not opinion-based:
 | **google_calendar** | 6 | 6 | 0 | 100% | All calendar tools actively used |
 | **appinterface** | 7 | 4 | 3 | 57% | Core validation vs search/admin |
 | **lint** | 7 | 1 | 6 | 14% | Most linting is interactive |
-| **dev_workflow** | 9 | 0 | 9 | 0% | All workflow helpers unused |
-| **workflow** | 16 | 16 | 0 | 100% | Core system tools |
+| **dev_workflow** | 9 | 9 | 0 | 100% | All development workflow helpers used |
+| **workflow** | 18 | 18 | 0 | 100% | Core system tools |
 
 ### Category Insights
 
@@ -76,6 +76,7 @@ The split is **data-driven**, not opinion-based:
 - `git` (90%) - Essential development tool
 - `google_calendar` (100%) - All scheduling tools used
 - `workflow` (100%) - Core system functionality
+- `dev_workflow` (100%) - All development workflow helpers used
 
 **Medium Usage (50-80%)**
 - `k8s` (79%) - Common ops + some debugging
@@ -88,7 +89,6 @@ The split is **data-driven**, not opinion-based:
 - `prometheus` (38%) - Many specialized metrics
 - `kibana` (11%) - Mostly interactive log analysis
 - `lint` (14%) - Interactive linting workflows
-- `dev_workflow` (0%) - All helpers are manual
 
 ---
 
@@ -107,7 +107,7 @@ tools:
   - jira_basic     # 17 tools
 ```
 
-**Result:** ~61 tools loaded (30% reduction)
+**Result:** ~78 tools loaded (30% reduction)
 
 ### Loading Extra Tools
 
@@ -238,7 +238,7 @@ tool_modules/aa_git/src/
 
 **Why?** All linting is typically interactive or in CI, not in skills
 
-### dev_workflow_extra (9 tools - ALL)
+### dev_workflow_basic (9 tools - ALL)
 - `workflow_check_deploy_readiness` - Deployment checks
 - `workflow_create_branch` - Branch creation
 - `workflow_daily_standup` - Standup generation
@@ -249,7 +249,7 @@ tool_modules/aa_git/src/
 - `workflow_run_local_checks` - Local checks
 - `workflow_start_work` - Work start
 
-**Why?** All are workflow helpers meant for manual invocation, not used in automated skills
+**Note:** All development workflow tools are in basic as they are used in skills.
 
 ---
 
@@ -296,7 +296,7 @@ tools:
   - git          # 30 tools
   - gitlab       # 30 tools
   - jira         # 28 tools
-# Total: ~104 tools
+# Total: ~106 tools
 ```
 
 ### After Reorganization
@@ -304,11 +304,11 @@ tools:
 ```yaml
 # personas/developer.yaml (new)
 tools:
-  - workflow     # 16 tools
+  - workflow     # 18 tools
   - git_basic    # 27 tools
   - gitlab_basic # 16 tools
   - jira_basic   # 17 tools
-# Total: ~76 tools (27% reduction)
+# Total: ~78 tools (25% reduction)
 ```
 
 ### Accessing Extra Tools
@@ -332,15 +332,15 @@ tools:
 ## Statistics
 
 ### Overall
-- **Total Tools:** 245
-- **Basic (Used):** 170 (69.4%)
-- **Extra (Unused):** 75 (30.6%)
-- **Context Reduction:** 30%
+- **Total Tools:** 263
+- **Basic (Used):** 188 (71.5%)
+- **Extra (Unused):** 75 (28.5%)
+- **Context Reduction:** 29%
 
 ### Skills Analyzed
 - **Total Skills:** 55
-- **Tools Discovered:** 245
-- **Unique Tool Calls:** 170
+- **Tools Discovered:** 263
+- **Unique Tool Calls:** 188
 
 ### Top Used Tools
 1. `memory_session_log` - 39 skills
@@ -350,7 +350,6 @@ tools:
 5. `git_fetch` - 11 skills
 
 ### Never Used Tools (Candidates for Deprecation)
-- All 9 `dev_workflow` tools
 - 8/9 `kibana` tools
 - 6/7 `lint` tools
 - Various admin/metadata tools

@@ -141,6 +141,7 @@ class SkillExecutor:
         create_issue_fn=None,
         ask_question_fn=None,
         enable_interactive_recovery: bool = True,
+        emit_events: bool = True,
     ):
         self.skill = skill
         self.inputs = inputs
@@ -149,6 +150,7 @@ class SkillExecutor:
         self.create_issue_fn = create_issue_fn
         self.ask_question_fn = ask_question_fn
         self.enable_interactive_recovery = enable_interactive_recovery
+        self.emit_events = emit_events
         # Load config.json config for compute blocks
         self.config = load_config()
         self.context = {
@@ -159,6 +161,42 @@ class SkillExecutor:
         self.step_results: list[dict] = []
         self.start_time: float | None = None
         self.error_recovery = None  # Initialized when needed
+
+        # Event emitter for VS Code extension
+        self.event_emitter = None
+        if emit_events:
+            try:
+                # Use absolute import to avoid relative import issues
+                from tool_modules.aa_workflow.src.skill_execution_events import SkillExecutionEmitter, set_emitter
+
+                self.event_emitter = SkillExecutionEmitter(
+                    skill.get("name", "unknown"),
+                    skill.get("steps", []),
+                )
+                set_emitter(self.event_emitter)
+                logger.info(f"Event emitter initialized for skill: {skill.get('name', 'unknown')}")
+                # Debug: write to a file to confirm emitter is created
+                from pathlib import Path
+
+                debug_file = Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
+                debug_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(debug_file, "a") as f:
+                    from datetime import datetime
+
+                    f.write(f"{datetime.now().isoformat()} - Emitter created for {skill.get('name', 'unknown')}\n")
+            except Exception as e:
+                logger.warning(f"Failed to initialize event emitter: {e}")
+                # Also write to debug file on failure
+                try:
+                    from datetime import datetime
+                    from pathlib import Path
+
+                    debug_file = Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
+                    debug_file.parent.mkdir(parents=True, exist_ok=True)
+                    with open(debug_file, "a") as f:
+                        f.write(f"{datetime.now().isoformat()} - FAILED to create emitter: {e}\n")
+                except Exception:
+                    pass
 
         # Layer 5: Initialize usage pattern learner
         self.usage_learner = None
@@ -954,44 +992,10 @@ class SkillExecutor:
             return f"<compute error: {e}>"
 
     def _get_module_for_tool(self, tool_name: str) -> str | None:
-        """Map tool name to module name based on prefix."""
-        module_prefixes = {
-            "git_": "git",
-            "jira_": "jira",
-            "gitlab_": "gitlab",
-            "slack_": "slack",
-            "kubectl_": "k8s",
-            "k8s_": "k8s",
-            "prometheus_": "prometheus",
-            "alertmanager_": "alertmanager",
-            "kibana_": "kibana",
-            "konflux_": "konflux",
-            "tkn_": "konflux",
-            "bonfire_": "bonfire",
-            "quay_": "quay",
-            "appinterface_": "appinterface",
-            # Lint module tools (developer-specific)
-            "lint_": "lint",
-            "test_": "lint",
-            "security_": "lint",
-            "precommit_": "lint",
-            # Dev-workflow module tools (developer-specific)
-            "workflow_": "dev_workflow",
-            # Core workflow module tools (always loaded)
-            "memory_": "workflow",
-            "persona_": "workflow",
-            "skill_": "workflow",
-            "session_": "workflow",
-            "tool_": "workflow",
-            "vpn_": "workflow",
-            "kube_": "workflow",
-            "debug_": "workflow",
-        }
+        """Map tool name to module name using the discovery system."""
+        from server.tool_discovery import get_module_for_tool
 
-        for prefix, mod in module_prefixes.items():
-            if tool_name.startswith(prefix):
-                return mod
-        return None
+        return get_module_for_tool(tool_name)
 
     def _format_tool_result(self, result, duration: float) -> dict:
         """Format tool execution result into standard dict."""
@@ -1097,7 +1101,20 @@ class SkillExecutor:
 
                     if fix_applied:
                         self._debug("  → Auto-fix applied, retrying tool")
+                        # Emit auto-heal event
+                        if self.event_emitter:
+                            fix_type = self._determine_fix_type(error_msg.lower(), None, matches)
+                            self.event_emitter.auto_heal(
+                                self.event_emitter.current_step_index,
+                                f"Applied {fix_type or 'auto'} fix for: {error_msg[:50]}",
+                            )
                         try:
+                            # Emit retry event
+                            if self.event_emitter:
+                                self.event_emitter.retry(
+                                    self.event_emitter.current_step_index,
+                                    1,  # First retry
+                                )
                             retry_result = await temp_server.call_tool(tool_name, args)
                             duration = time.time() - start
                             self._debug(f"  → Retry completed in {duration:.2f}s")
@@ -1282,7 +1299,7 @@ class SkillExecutor:
                 return "\n".join(output_lines)
         return None
 
-    async def execute(self) -> str:
+    async def execute(self) -> str:  # noqa: C901
         """Execute all steps and return the result."""
         import time
 
@@ -1291,6 +1308,10 @@ class SkillExecutor:
         skill_name = self.skill.get("name", "unknown")
         self._debug(f"Starting skill: {skill_name}")
         self._debug(f"Inputs: {json.dumps(self.inputs)}")
+
+        # Emit skill start event
+        if self.event_emitter:
+            self.event_emitter.skill_start()
 
         for inp in self.skill.get("inputs", []):
             name = inp["name"]
@@ -1315,38 +1336,83 @@ class SkillExecutor:
 
         step_num = 0
         for step in self.skill.get("steps", []):
+            step_index = step_num  # 0-based index for events
             step_num += 1
             step_name = step.get("name", f"step_{step_num}")
+            step_start_time = time.time()
 
             if "condition" in step:
                 if not self._eval_condition(step["condition"]):
                     self._debug(f"Skipping step '{step_name}' - condition false")
                     output_lines.append(f"⏭️ **Step {step_num}: {step_name}** - *skipped (condition false)*\n")
+                    # Emit step skipped event
+                    if self.event_emitter:
+                        self.event_emitter.step_skipped(step_index, "condition false")
                     continue
+
+            # Emit step start event
+            if self.event_emitter:
+                self.event_emitter.step_start(step_index)
 
             if "then" in step:
                 early_return = self._process_then_block(step, output_lines)
                 if early_return is not None:
+                    # Emit skill complete (early return)
+                    if self.event_emitter:
+                        total_time = time.time() - (self.start_time or 0.0)
+                        self.event_emitter.skill_complete(True, int(total_time * 1000))
                     return early_return
                 continue
 
+            step_success = True
+            step_error = None
+
             if "tool" in step:
+                # Check for memory operations
+                tool_name = step.get("tool", "")
+                if self.event_emitter:
+                    self._emit_memory_events_for_tool(step_index, tool_name, step.get("args", {}))
+
                 should_continue = await self._process_tool_step(step, step_num, step_name, output_lines)
+
+                # Check step result
+                if self.step_results:
+                    last_result = self.step_results[-1]
+                    step_success = last_result.get("success", True)
+                    if not step_success:
+                        step_error = last_result.get("error", "Unknown error")
+
                 if not should_continue:
+                    # Emit step failed event
+                    if self.event_emitter:
+                        duration_ms = int((time.time() - step_start_time) * 1000)
+                        self.event_emitter.step_failed(step_index, duration_ms, step_error or "Step failed")
                     break
 
             elif "compute" in step:
                 output_name = step.get("output", step_name)
                 output_lines.append(f"🧮 **Step {step_num}: {step_name}** (compute)")
 
-                result = self._exec_compute(step["compute"], output_name)
-                self.context[output_name] = result
-
-                output_lines.append(f"   → `{output_name}` = {str(result)[:100]}\n")
+                try:
+                    result = self._exec_compute(step["compute"], output_name)
+                    self.context[output_name] = result
+                    output_lines.append(f"   → `{output_name}` = {str(result)[:100]}\n")
+                except Exception as e:
+                    step_success = False
+                    step_error = str(e)
+                    output_lines.append(f"   ❌ Error: {e}\n")
 
             elif "description" in step:
                 output_lines.append(f"📝 **Step {step_num}: {step_name}** (manual)")
                 output_lines.append(f"   {self._template(step['description'])}\n")
+
+            # Emit step complete/failed event
+            if self.event_emitter:
+                duration_ms = int((time.time() - step_start_time) * 1000)
+                if step_success:
+                    self.event_emitter.step_complete(step_index, duration_ms)
+                else:
+                    self.event_emitter.step_failed(step_index, duration_ms, step_error or "Unknown error")
 
         self._format_skill_outputs(output_lines)
 
@@ -1358,12 +1424,41 @@ class SkillExecutor:
             f"\n---\n⏱️ *Completed in {total_time:.2f}s* | " f"✅ {success_count} succeeded | ❌ {fail_count} failed"
         )
 
+        # Emit skill complete event
+        if self.event_emitter:
+            overall_success = fail_count == 0
+            self.event_emitter.skill_complete(overall_success, int(total_time * 1000))
+            # Clear the global emitter
+            try:
+                from .skill_execution_events import set_emitter
+
+                set_emitter(None)
+            except Exception:
+                pass
+
         if self.debug and self.log:
             output_lines.append("\n\n### 🔍 Debug Log\n```")
             output_lines.extend(self.log)
             output_lines.append("```")
 
         return "\n".join(output_lines)
+
+    def _emit_memory_events_for_tool(self, step_index: int, tool_name: str, args: dict) -> None:
+        """Emit memory read/write events based on tool being called."""
+        if not self.event_emitter:
+            return
+
+        # Memory read tools
+        memory_read_tools = ["memory_read", "memory_query", "check_known_issues", "memory_stats"]
+        if any(t in tool_name for t in memory_read_tools):
+            key = args.get("key", tool_name)
+            self.event_emitter.memory_read(step_index, key)
+
+        # Memory write tools
+        memory_write_tools = ["memory_write", "memory_update", "memory_append", "memory_session_log", "learn_tool_fix"]
+        if any(t in tool_name for t in memory_write_tools):
+            key = args.get("key", tool_name)
+            self.event_emitter.memory_write(step_index, key)
 
 
 def _skill_list_impl() -> list[TextContent]:
@@ -1446,6 +1541,15 @@ async def _skill_run_impl(
     ask_question_fn=None,
 ) -> list[TextContent]:
     """Implementation of skill_run tool."""
+    # Debug: confirm this code path is reached
+    from datetime import datetime
+    from pathlib import Path
+
+    debug_file = Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
+    debug_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(debug_file, "a") as f:
+        f.write(f"{datetime.now().isoformat()} - _skill_run_impl called for {skill_name}\n")
+
     skill_file = SKILLS_DIR / f"{skill_name}.yaml"
     if not skill_file.exists():
         available = [f.stem for f in SKILLS_DIR.glob("*.yaml")] if SKILLS_DIR.exists() else []
@@ -1491,6 +1595,7 @@ async def _skill_run_impl(
             create_issue_fn=create_issue_fn,
             ask_question_fn=ask_question_fn,
             enable_interactive_recovery=True,
+            emit_events=True,  # Enable VS Code extension events
         )
         result = await executor.execute()
 

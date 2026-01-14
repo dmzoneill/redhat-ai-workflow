@@ -75,7 +75,7 @@ Instead of chaining tools manually, use pre-built skills:
 │  - state/environments.yaml  - learned/runbooks.yaml    │
 ├─────────────────────────────────────────────────────────┤
 │  MCP TOOLS (tool_modules/)                               │
-│  245 tools: 170 basic (used) + 75 extra (unused)       │
+│  263 tools: 188 basic (used) + 75 extra (unused)       │
 │  aa_git, aa_jira, aa_gitlab, aa_k8s, aa_prometheus...  │
 │  30% context reduction with basic-only loading         │
 └─────────────────────────────────────────────────────────┘
@@ -89,12 +89,12 @@ Instead of chaining tools manually, use pre-built skills:
 ```
 Load the devops agent
 ```
-Tools switch dynamically! You get k8s_basic, bonfire_basic, jira_basic, quay (~62 tools).
+Tools switch dynamically! You get k8s_basic, bonfire_basic, jira_basic, quay (~74 tools).
 
 ```
 Load the developer agent
 ```
-Now you have git_basic, gitlab_basic, jira_basic (~61 tools).
+Now you have git_basic, gitlab_basic, jira_basic (~78 tools).
 
 ### Run a Skill
 ```
@@ -117,19 +117,19 @@ Claude runs the `test_mr_ephemeral` skill automatically.
 
 ---
 
-## MCP Tools (245 total: 170 basic + 75 extra)
+## MCP Tools (263 total: 188 basic + 75 extra)
 
 ### Tool Organization
 
 **All tools are split into `_basic` (used in skills) and `_extra` (rarely used) to reduce context window by 30%.**
 
-> **Data-Driven:** Analyzed 55 skills to identify which 170 tools are actually used. See `.claude/skill-tool-usage-report.md` for details.
+> **Data-Driven:** Analyzed 55 skills to identify which 188 tools are actually used. See `.claude/skill-tool-usage-report.md` for details.
 
 ### Tool Categories
 
 | Module | Total | Basic (Used) | Extra (Unused) | Purpose |
 |--------|-------|--------------|----------------|---------|
-| `aa_workflow` | 16 | 16 | 0 | Core: agents, skills, memory, vpn, kube_login |
+| `aa_workflow` | 18 | 18 | 0 | Core: agents, skills, memory, vpn, kube_login |
 | `aa_git` | 30 | 27 | 3 | Git operations (90% usage) |
 | `aa_gitlab` | 30 | 16 | 14 | GitLab MRs, CI/CD pipelines (53% usage) |
 | `aa_jira` | 28 | 17 | 11 | Jira issues (61% usage) |
@@ -144,9 +144,9 @@ Claude runs the `test_mr_ephemeral` skill automatically.
 | `aa_google_calendar` | 6 | 6 | 0 | Calendar & meetings (100% usage) |
 | `aa_slack` | 9 | 6 | 3 | Slack integration (67% usage) |
 | `aa_lint` | 7 | 1 | 6 | Code linting and testing (14% usage) |
-| `aa_dev_workflow` | 9 | 0 | 9 | Development workflow helpers (0% usage) |
+| `aa_dev_workflow` | 9 | 9 | 0 | Development workflow helpers (100% usage) |
 
-**Total:** 245 tools (170 basic used in skills, 75 extra rarely used)
+**Total:** 263 tools (188 basic used in skills, 75 extra rarely used)
 
 ### Most-Used Tools
 
@@ -192,40 +192,40 @@ You: Load the devops agent
 [Server sends tools/list_changed to Cursor]
 [Cursor refreshes available tools]
 
-Claude: DevOps persona loaded with ~62 tools!
+Claude: DevOps persona loaded with ~74 tools!
 ```
 
 ### Available Personas
 
 | Persona | Modules | ~Tools | Best For |
 |---------|---------|--------|----------|
-| **developer** | workflow, git_basic, gitlab_basic, jira_basic | ~61 | Coding, PRs, code review |
-| **devops** | workflow, k8s_basic, bonfire_basic, jira_basic, quay | ~62 | Ephemeral deployments, K8s ops |
-| **incident** | workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager | ~70 | Production debugging |
-| **release** | workflow, konflux_basic, quay, jira_basic, git_basic | ~70 | Shipping releases |
-| **universal** | workflow, git_basic, gitlab_basic, jira_basic, k8s_basic | ~75 | All-in-one |
-| **core** | workflow, git_basic, jira_basic, k8s_basic | ~59 | Essential shared |
+| **developer** | workflow, git_basic, gitlab_basic, jira_basic | ~78 | Coding, PRs, code review |
+| **devops** | workflow, k8s_basic, bonfire_basic, jira_basic, quay | ~74 | Ephemeral deployments, K8s ops |
+| **incident** | workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager | ~78 | Production debugging |
+| **release** | workflow, konflux_basic, quay, jira_basic, git_basic | ~91 | Shipping releases |
+| **universal** | workflow, git_basic, gitlab_basic, jira_basic, k8s_basic | ~100 | All-in-one |
+| **core** | workflow, git_basic, jira_basic, k8s_basic | ~84 | Essential shared |
 
 > **Note:** All personas include `jira_basic` for issue tracking. Use `tool_exec()` for `_extra` tools.
 
-### DevOps Persona (`personas/devops.md`) ~62 tools
+### DevOps Persona (`personas/devops.md`) ~74 tools
 - Focus: Infrastructure, ephemeral environments, deployments
-- Tools: workflow (16), k8s_basic (14), bonfire_basic (10), jira_basic (15), quay (7)
+- Tools: workflow (18), k8s_basic (22), bonfire_basic (10), jira_basic (17), quay (7)
 - Use when: Deploying to ephemeral, checking namespaces
 
-### Developer Persona (`personas/developer.md`) ~61 tools
+### Developer Persona (`personas/developer.md`) ~78 tools
 - Focus: Coding, PRs, code review
-- Tools: workflow (16), git_basic (14), gitlab_basic (16), jira_basic (15)
+- Tools: workflow (18), git_basic (27), gitlab_basic (16), jira_basic (17)
 - Use when: Writing code, creating MRs
 
-### Incident Persona (`personas/incident.md`) ~70 tools
+### Incident Persona (`personas/incident.md`) ~78 tools
 - Focus: Rapid triage, mitigation, recovery
-- Tools: workflow (16), k8s_basic (14), prometheus_basic (9), kibana (9), jira_basic (15), alertmanager (7)
+- Tools: workflow (18), k8s_basic (22), prometheus_basic (5), kibana (9), jira_basic (17), alertmanager (7)
 - Use when: Production incidents
 
-### Release Persona (`personas/release.md`) ~70 tools
+### Release Persona (`personas/release.md`) ~91 tools
 - Focus: Release coordination, deployment
-- Tools: workflow (16), konflux_basic (18), quay (7), jira_basic (15), git_basic (14)
+- Tools: workflow (18), konflux_basic (22), quay (7), jira_basic (17), git_basic (27)
 - Use when: Managing releases
 
 ---
@@ -463,8 +463,15 @@ ai-workflow/
 | **Bonfire tools** | 20 tools | ✅ All decorated with `@auto_heal_ephemeral()` |
 | **Konflux tools** | 35 tools | ✅ All decorated with `@auto_heal_konflux()` |
 | **Prometheus tools** | 13 tools | ✅ All decorated with `@auto_heal()` |
-| **Other modules** | ~55 tools | ✅ All decorated with `@auto_heal()` |
-| **Skills** | 53 skills | ✅ All auto-retry via skill engine |
+| **Alertmanager tools** | 7 tools | ✅ All decorated with `@auto_heal()` |
+| **Kibana tools** | 9 tools | ✅ All decorated with `@auto_heal()` |
+| **Slack tools** | 9 tools | ✅ All decorated with `@auto_heal()` |
+| **Dev Workflow tools** | 9 tools | ✅ All decorated with `@auto_heal()` |
+| **Lint tools** | 7 tools | ✅ All decorated with `@auto_heal()` |
+| **Quay tools** | 7 tools | ✅ All decorated with `@auto_heal()` |
+| **AppInterface tools** | 7 tools | ✅ All decorated with `@auto_heal()` |
+| **Google Calendar** | 6 tools | ⚠️ No auto-heal (OAuth-based auth) |
+| **Skills** | 55 skills | ✅ All auto-retry via skill engine |
 
 ### Failure Memory
 

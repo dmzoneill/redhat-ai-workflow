@@ -8,7 +8,7 @@ The auto-remediation system has **4 layers** that integrate with **8 persistence
 
 **Coverage:**
 - **429 @auto_heal decorators** across 30 tool modules
-- **54 skills** with auto-retry capability
+- **55 skills** with auto-retry capability
 - **3 distinct error recovery systems** (tool-level, skill-level, skill-compute-level)
 - **8 persistence mechanisms** (6 YAML, 1 SQLite, 1 JSON)
 
@@ -84,7 +84,7 @@ stats:
 
 ---
 
-### Layer 2: Skill-Level Auto-Retry (54 skills)
+### Layer 2: Skill-Level Auto-Retry (55 skills)
 
 **Location:** `tool_modules/aa_workflow/src/skill_engine.py`
 

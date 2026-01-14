@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+from server.tool_discovery import build_full_manifest, get_module_for_tool
 from server.tool_registry import ToolRegistry
 
 # Setup project path for server imports
@@ -113,309 +114,55 @@ def _format_known_issues(matches: list) -> str:
     return "\n".join(lines)
 
 
-# Tool counts per module - for discovery
-# This registry must be kept in sync with actual tools in each module
-TOOL_REGISTRY = {
-    "git": [
-        "git_status",
-        "git_branch_list",
-        "git_branch_create",
-        "git_checkout",
-        "git_log",
-        "git_diff",
-        "git_add",
-        "git_commit",
-        "git_push",
-        "git_pull",
-        "git_stash",
-        "git_fetch",
-        "git_merge",
-        "git_rebase",
-        "git_remote",
-    ],
-    "jira": [
-        "jira_view_issue",
-        "jira_view_issue_json",
-        "jira_search",
-        "jira_list_issues",
-        "jira_my_issues",
-        "jira_list_blocked",
-        "jira_lint",
-        "jira_set_status",
-        "jira_set_summary",
-        "jira_set_priority",
-        "jira_set_story_points",
-        "jira_set_epic",
-        "jira_assign",
-        "jira_unassign",
-        "jira_add_comment",
-        "jira_block",
-        "jira_unblock",
-        "jira_add_to_sprint",
-        "jira_remove_sprint",
-        "jira_create_issue",
-        "jira_clone_issue",
-        "jira_add_link",
-        "jira_add_flag",
-        "jira_remove_flag",
-        "jira_open_browser",
-    ],
-    "gitlab": [
-        "gitlab_mr_list",
-        "gitlab_mr_view",
-        "gitlab_mr_create",
-        "gitlab_mr_update",
-        "gitlab_mr_approve",
-        "gitlab_mr_revoke",
-        "gitlab_mr_merge",
-        "gitlab_mr_close",
-        "gitlab_mr_reopen",
-        "gitlab_mr_comment",
-        "gitlab_mr_diff",
-        "gitlab_mr_rebase",
-        "gitlab_mr_checkout",
-        "gitlab_mr_approvers",
-        "gitlab_ci_list",
-        "gitlab_ci_status",
-        "gitlab_ci_view",
-        "gitlab_ci_run",
-        "gitlab_ci_retry",
-        "gitlab_ci_cancel",
-        "gitlab_ci_trace",
-        "gitlab_ci_lint",
-        "gitlab_repo_view",
-        "gitlab_repo_clone",
-        "gitlab_issue_list",
-        "gitlab_issue_view",
-        "gitlab_issue_create",
-        "gitlab_label_list",
-        "gitlab_release_list",
-        "gitlab_user_info",
-    ],
-    "k8s": [
-        "kubectl_get_pods",
-        "kubectl_describe_pod",
-        "kubectl_logs",
-        "kubectl_delete_pod",
-        "kubectl_get_deployments",
-        "kubectl_describe_deployment",
-        "kubectl_rollout_status",
-        "kubectl_rollout_restart",
-        "kubectl_scale",
-        "kubectl_get_services",
-        "kubectl_get_events",
-        "kubectl_get",
-        "kubectl_exec",
-        "kubectl_top_pods",
-    ],
-    "prometheus": [
-        "prometheus_query",
-        "prometheus_query_range",
-        "prometheus_alerts",
-        "prometheus_rules",
-        "prometheus_targets",
-        "prometheus_labels",
-        "prometheus_series",
-        "prometheus_namespace_metrics",
-        "prometheus_error_rate",
-        "prometheus_pod_health",
-        "prometheus_grafana_link",
-    ],
-    "alertmanager": [
-        "alertmanager_silences",
-        "alertmanager_create_silence",
-        "alertmanager_delete_silence",
-        "alertmanager_status",
-        "alertmanager_alerts",
-    ],
-    "kibana": [
-        "kibana_search_logs",
-        "kibana_get_errors",
-        "kibana_get_pod_logs",
-        "kibana_trace_request",
-        "kibana_get_link",
-        "kibana_error_link",
-        "kibana_status",
-        "kibana_index_patterns",
-        "kibana_list_dashboards",
-    ],
-    "konflux": [
-        "konflux_list_applications",
-        "konflux_get_application",
-        "konflux_list_components",
-        "konflux_get_component",
-        "konflux_list_snapshots",
-        "konflux_get_snapshot",
-        "konflux_list_integration_tests",
-        "konflux_get_test_results",
-        "konflux_list_releases",
-        "konflux_get_release",
-        "konflux_list_release_plans",
-        "konflux_list_builds",
-        "konflux_get_build_logs",
-        "konflux_list_environments",
-        "konflux_namespace_summary",
-    ],
-    "bonfire": [
-        "bonfire_version",
-        "bonfire_namespace_reserve",
-        "bonfire_namespace_list",
-        "bonfire_namespace_describe",
-        "bonfire_namespace_release",
-        "bonfire_namespace_extend",
-        "bonfire_namespace_wait",
-        "bonfire_apps_list",
-        "bonfire_apps_dependencies",
-        "bonfire_deploy",
-        "bonfire_deploy_with_reserve",
-        "bonfire_process",
-        "bonfire_deploy_env",
-        "bonfire_process_env",
-        "bonfire_deploy_iqe_cji",
-        "bonfire_pool_list",
-        "bonfire_deploy_aa",
-    ],
-    "quay": [
-        "quay_get_repository",
-        "quay_list_tags",
-        "quay_get_tag",
-        "quay_check_image_exists",
-        "quay_get_vulnerabilities",
-        "quay_get_manifest",
-        "quay_check_aa_image",
-        "quay_list_aa_tags",
-    ],
-    "appinterface": [
-        "appinterface_validate",
-        "appinterface_get_saas",
-        "appinterface_diff",
-        "appinterface_resources",
-        "appinterface_search",
-        "appinterface_clusters",
-    ],
-    "lint": [
-        "lint_python",
-        "lint_yaml",
-        "lint_dockerfile",
-        "test_run",
-        "test_coverage",
-        "security_scan",
-        "precommit_run",
-    ],
-    "dev_workflow": [
-        "workflow_start_work",
-        "workflow_check_deploy_readiness",
-        "workflow_review_feedback",
-        "workflow_create_branch",
-        "workflow_prepare_mr",
-        "workflow_run_local_checks",
-        "workflow_monitor_pipelines",
-        "workflow_handle_review",
-        "workflow_daily_standup",
-    ],
-    # === NEW MODULES ===
-    "google_calendar": [
-        "google_calendar_find_meeting",
-        "google_calendar_check_mutual_availability",
-        "google_calendar_schedule_meeting",
-        "google_calendar_quick_meeting",
-        "google_calendar_list_events",
-        "google_calendar_status",
-    ],
-    "slack": [
-        "slack_list_messages",
-        "slack_send_message",
-        "slack_get_channels",
-        "slack_post_team",
-        "slack_dm_gitlab_user",
-        "slack_get_user",
-        "slack_search_messages",
-        "slack_add_reaction",
-        "slack_list_channels",
-    ],
-    "workflow": [
-        "vpn_connect",
-        "kube_login",
-        "memory_read",
-        "memory_write",
-        "memory_update",
-        "memory_append",
-        "memory_session_log",
-        "check_known_issues",
-        "learn_tool_fix",
-        "tool_list",
-        "tool_exec",
-        "persona_list",
-        "persona_load",
-        "session_start",
-        "skill_list",
-        "skill_run",
-        "debug_tool",
-    ],
-}
+# ============== Dynamic Tool Discovery ==============
+# Tools are discovered by scanning module files at runtime.
+# No more hardcoded lists to maintain!
 
-# Module prefix mapping - maps tool prefixes to module names
-MODULE_PREFIXES = {
-    "git_": "git",
-    "jira_": "jira",
-    "gitlab_": "gitlab",
-    "kubectl_": "k8s",
-    "k8s_": "k8s",
-    "prometheus_": "prometheus",
-    "alertmanager_": "alertmanager",
-    "kibana_": "kibana",
-    "konflux_": "konflux",
-    "tkn_": "konflux",
-    "bonfire_": "bonfire",
-    "quay_": "quay",
-    "appinterface_": "appinterface",
-    # Lint module tools (developer-specific)
-    "lint_": "lint",
-    "test_": "lint",
-    "security_": "lint",
-    "precommit_": "lint",
-    # Dev-workflow module tools (developer-specific)
-    "workflow_": "dev_workflow",
-    # Core workflow module tools (always loaded)
-    "memory_": "workflow",
-    "check_known_": "workflow",
-    "learn_tool_": "workflow",
-    "persona_": "workflow",
-    "skill_": "workflow",
-    "session_": "workflow",
-    "tool_": "workflow",
-    "vpn_": "workflow",
-    "kube_": "workflow",
-    "debug_": "workflow",
-    # Google Calendar module
-    "google_calendar_": "google_calendar",
-    # Slack module
-    "slack_": "slack",
-}
+
+def _get_tool_registry() -> dict[str, list[str]]:
+    """Get the tool registry by discovering tools from modules.
+
+    This replaces the old hardcoded TOOL_REGISTRY dict.
+    Tools are discovered by parsing @registry.tool() decorators in module files.
+    """
+    return build_full_manifest()
+
+
+def _get_module_for_tool(tool_name: str) -> str | None:
+    """Get the module a tool belongs to.
+
+    This replaces the old MODULE_PREFIXES dict.
+    Uses the discovery system with prefix-based fallback.
+    """
+    return get_module_for_tool(tool_name)
 
 
 async def _tool_list_impl(module: str) -> list[TextContent]:
     """Implementation of tool_list tool."""
+    # Get tools dynamically from discovery system
+    tool_registry = _get_tool_registry()
+
     if module:
-        if module not in TOOL_REGISTRY:
+        if module not in tool_registry:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Unknown module: {module}\n\n" f"Available: {', '.join(TOOL_REGISTRY.keys())}",
+                    text=f"❌ Unknown module: {module}\n\n" f"Available: {', '.join(tool_registry.keys())}",
                 )
             ]
 
-        tools = TOOL_REGISTRY[module]
+        tools = tool_registry[module]
         lines = [f"## Module: {module}\n", f"**{len(tools)} tools available:**\n"]
         for t in tools:
             lines.append(f"- `{t}`")
-        lines.append(f"\n*Use `tool_exec('{tools[0]}', '{{}}')` to run*")
+        if tools:
+            lines.append(f"\n*Use `tool_exec('{tools[0]}', '{{}}')` to run*")
         return [TextContent(type="text", text="\n".join(lines))]
 
     # List all modules
     lines = ["## Available Tool Modules\n"]
     total = 0
-    for mod, tools in TOOL_REGISTRY.items():
+    for mod, tools in tool_registry.items():
         lines.append(f"- **{mod}**: {len(tools)} tools")
         total += len(tools)
     lines.append(f"\n**Total: {total} tools**")
@@ -491,12 +238,8 @@ async def _handle_tool_exec_error(tool_name: str, error_msg: str, args: str, cre
 
 async def _tool_exec_impl(tool_name: str, args: str, create_issue_fn) -> list[TextContent]:
     """Implementation of tool_exec tool."""
-    # Determine which module the tool belongs to
-    module = None
-    for prefix, mod in MODULE_PREFIXES.items():
-        if tool_name.startswith(prefix):
-            module = mod
-            break
+    # Determine which module the tool belongs to using discovery system
+    module = _get_module_for_tool(tool_name)
 
     if not module:
         return [

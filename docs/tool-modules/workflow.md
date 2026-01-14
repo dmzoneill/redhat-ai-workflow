@@ -10,7 +10,7 @@ The `aa_workflow` module provides core tools for session management, skill execu
 
 ## Tool Count
 
-**16 tools**
+**18 tools**
 
 ## Core Tools (Always Available)
 
@@ -25,7 +25,7 @@ The `aa_workflow` module provides core tools for session management, skill execu
 | `tool_exec` | Execute any tool dynamically |
 | `debug_tool` | Self-healing tool debugger |
 
-## Memory Tools
+## Memory Tools (9 tools)
 
 | Tool | Description |
 |------|-------------|
@@ -33,20 +33,18 @@ The `aa_workflow` module provides core tools for session management, skill execu
 | `memory_write` | Write to persistent memory |
 | `memory_update` | Update specific field |
 | `memory_append` | Append to list |
+| `memory_query` | Query memory using JSONPath |
 | `memory_session_log` | Log action to session |
 | `check_known_issues` | Check memory for known fixes |
 | `learn_tool_fix` | Save a fix to memory |
+| `memory_stats` | Get memory system statistics |
 
-## Workflow Tools
+## Infrastructure Tools (2 tools)
 
 | Tool | Description |
 |------|-------------|
-| `workflow_start_work` | Quick start work |
-| `workflow_prepare_mr` | Prepare MR |
-| `workflow_run_local_checks` | Run linting |
-| `workflow_monitor_pipelines` | Check pipelines |
-| `workflow_check_deploy_readiness` | Deployment checklist |
-| `workflow_daily_standup` | Generate standup |
+| `vpn_connect` | Connect to Red Hat VPN |
+| `kube_login` | Refresh Kubernetes credentials |
 
 ## Usage Examples
 

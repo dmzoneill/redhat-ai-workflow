@@ -48,7 +48,7 @@ graph TB
 
 Individual MCP tool functions that perform specific actions:
 
-- **270 tools** across 17 modules
+- **263 tools** across 16 modules
 - Each tool is a simple, focused function
 - Wrapped with `@auto_heal` decorators for self-healing
 - Shared utilities in `server/utils.py`
@@ -59,17 +59,17 @@ Specialized personas with curated tool sets:
 
 | Agent | Focus | Modules |
 |-------|-------|---------|
-| developer | Coding, PRs | 6 modules (~95 tools) |
-| devops | Deployments, K8s | 5 modules (~95 tools) |
-| incident | Production debugging | 8 modules (~80 tools) |
-| release | Shipping | 6 modules (~80 tools) |
-| slack | Slack bot daemon | 6 modules (~80 tools) |
+| developer | Coding, PRs | 4 modules (~78 tools) |
+| devops | Deployments, K8s | 5 modules (~74 tools) |
+| incident | Production debugging | 6 modules (~78 tools) |
+| release | Shipping | 5 modules (~91 tools) |
+| slack | Slack bot daemon | 4 modules (~85 tools) |
 
 ### ⚡ Skills
 
 Multi-step workflows that chain tools:
 
-- YAML-defined workflows (53 skills)
+- YAML-defined workflows (55 skills)
 - Conditional logic and branching
 - Template substitution (Jinja2)
 - Error handling
@@ -114,14 +114,14 @@ sequenceDiagram
     MCP->>Cursor: tools/list_changed notification
     Cursor->>Cursor: Refresh tool list
     Loader-->>MCP: Agent persona
-    MCP-->>Claude: "Loaded ~95 tools"
+    MCP-->>Claude: "Loaded ~74 tools"
 ```
 
 ## Tool Modules
 
 ```
 tool_modules/
-├── aa_workflow/        # Core workflow tools (16 tools)
+├── aa_workflow/        # Core workflow tools (18 tools)
 ├── aa_git/             # Git operations (30 tools)
 ├── aa_gitlab/          # GitLab MRs, pipelines (30 tools)
 ├── aa_jira/            # Jira issues (28 tools)
@@ -250,7 +250,7 @@ Central configuration via `config.json`:
 
 - [MCP Implementation Details](./mcp-implementation.md) - Server code & patterns
 - [Workflow Module Architecture](./workflow-modules.md) - aa_workflow internal structure
-- [Skills Reference](../skills/README.md) - All 50 available skills
+- [Skills Reference](../skills/README.md) - All 55 available skills
 - [Learning Loop](../learning-loop.md) - Auto-remediation and memory integration
 - [Skill Auto-Heal Plan](../plans/skill-auto-heal.md) - Auto-heal implementation details
 - [README](../../README.md) - Getting started

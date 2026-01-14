@@ -7,7 +7,7 @@ persona: personas/incident.md
 
 # Slim tool selection - only the essentials
 tools:
-  - alertmanager  # 6 tools - Alert silencing
+  - alertmanager  # 7 tools - Alert silencing
   - kibana        # 9 tools - Log search
 
-# Total: ~15 tools
+# Total: ~16 tools

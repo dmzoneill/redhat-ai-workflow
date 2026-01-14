@@ -134,7 +134,8 @@ steps:
       result = {
           "gitlab_project": aa_config.get("gitlab", "automation-analytics/automation-analytics-backend"),
           "konflux_namespace": aa_config.get("konflux_namespace", "aap-aa-tenant"),
-          "quay_pr_repo": quay_config.get("repositories", {}).get("automation-analytics", "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"),
+          # Full Quay path: namespace/org/app/component
+          "quay_pr_repo": f"{quay_config.get('default_namespace', 'redhat-user-workloads')}/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main",
           "quay_pr_namespace": quay_config.get("default_namespace", "redhat-user-workloads"),
           "quay_release_namespace": "redhat-services-prod",
           "ephemeral_kubeconfig": bonfire_config.get("kubeconfig", str(Path.home() / ".kube/config.e")),
@@ -179,7 +180,7 @@ steps:
   # Step 1: Get full 40-char SHA directly from GitLab API (if mr_id provided)
   - name: get_mr_sha
     description: "Get full 40-char commit SHA from GitLab MR"
-    condition: "{{ inputs.mr_id and not inputs.commit_sha }}"
+    condition: "{{ inputs.get('mr_id') and not inputs.get('commit_sha') }}"
     tool: gitlab_mr_sha
     args:
       project: "{{ cfg.gitlab_project }}"
@@ -262,8 +263,8 @@ steps:
   # Step 2: Determine final commit SHA
   - name: resolve_commit
     compute: |
-      if inputs.commit_sha:
-        sha = inputs.commit_sha
+      if inputs.get('commit_sha'):
+        sha = inputs.get('commit_sha')
       elif mr_info and mr_info.get('sha'):
         sha = mr_info['sha']
       else:
@@ -415,8 +416,8 @@ steps:
     description: "Decide whether to deploy billing or main ClowdApp"
     compute: |
       # If user explicitly specified, use that
-      if inputs.billing is not None:
-        use_billing = inputs.billing
+      if inputs.get('billing') is not None:
+        use_billing = inputs.get('billing')
         reason = "User explicitly specified"
       else:
         # Auto-detect based on signals

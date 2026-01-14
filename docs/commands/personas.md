@@ -59,10 +59,10 @@ persona_load("developer")
 
 | Persona | Focus | Tools Loaded |
 |---------|-------|--------------|
-| `developer` | Coding, PRs, reviews | git, gitlab, jira, lint, dev-workflow (~106 tools) |
-| `devops` | Deployments, k8s, ephemeral | k8s, bonfire, quay, gitlab (~106 tools) |
-| `incident` | Production issues, logs | k8s, kibana, prometheus, jira (~100 tools) |
-| `release` | Shipping to production | konflux, quay, appinterface, git (~100 tools) |
+| `developer` | Coding, PRs, reviews | workflow, git_basic, gitlab_basic, jira_basic (~78 tools) |
+| `devops` | Deployments, k8s, ephemeral | workflow, k8s_basic, bonfire_basic, jira_basic, quay (~74 tools) |
+| `incident` | Production issues, logs | workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager (~78 tools) |
+| `release` | Shipping to production | workflow, konflux_basic, quay, jira_basic, git_basic (~91 tools) |
 
 ## Examples
 

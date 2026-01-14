@@ -201,7 +201,7 @@ jira_cli_patterns:
 
 ### ACTUAL @auto_heal Decorator Code
 
-This is the real decorator that wraps all 239 MCP tools:
+This is the real decorator that wraps all 263 MCP tools:
 
 ```python
 # server/auto_heal_decorator.py (lines 1-50)
@@ -1050,7 +1050,7 @@ This document shows the ACTUAL code, not just descriptions:
 6. **Real pattern stats** - times_matched, times_fixed, success_rate
 
 **Key Integration Points:**
-- Tool-level: @auto_heal on 239 tools → logs to tool_failures.yaml
+- Tool-level: @auto_heal on 263 tools → logs to tool_failures.yaml
 - Skill-level: _try_auto_fix reads patterns.yaml → updates usage stats
 - Session: memory_session_log appends to sessions/YYYY-MM-DD.yaml
 - State: memory_append/update modifies state/current_work.yaml

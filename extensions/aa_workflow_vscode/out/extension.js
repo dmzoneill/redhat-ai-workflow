@@ -53,6 +53,8 @@ const treeView_1 = require("./treeView");
 const notifications_1 = require("./notifications");
 const dashboard_1 = require("./dashboard");
 const skillVisualizer_1 = require("./skillVisualizer");
+const skillFlowchartPanel_1 = require("./skillFlowchartPanel");
+const skillExecutionWatcher_1 = require("./skillExecutionWatcher");
 let statusBarManager;
 let dataProvider;
 let treeProvider;
@@ -72,6 +74,10 @@ function activate(context) {
     (0, dashboard_1.registerDashboard)(context, dataProvider);
     // Initialize skill visualizer
     (0, skillVisualizer_1.registerSkillVisualizer)(context);
+    // Initialize skill flowchart panel (bottom drawer)
+    (0, skillFlowchartPanel_1.registerSkillFlowchartPanel)(context);
+    // Initialize skill execution watcher (connects to MCP server)
+    (0, skillExecutionWatcher_1.registerSkillExecutionWatcher)(context);
     // Register commands
     (0, commands_1.registerCommands)(context, dataProvider, statusBarManager);
     // Start periodic refresh
