@@ -18,3 +18,5 @@ jobs:
       # Disable jscpd - .claude/ and .cursor/ directories are intentionally
       # mirrored (same commands for both IDE integrations)
       VALIDATE_JSCPD: "false"
+      # Disable natural language linting - too noisy for technical docs
+      VALIDATE_NATURAL_LANGUAGE: "false"

@@ -30,7 +30,7 @@ flowchart TD
 2. Be logged into ephemeral cluster
 3. Have the MR ID or branch name
 
-## Usage
+## How to Use
 
 Tell me:
 - "Deploy MR 1459 to ephemeral"
