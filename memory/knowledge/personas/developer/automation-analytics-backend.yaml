@@ -1,0 +1,107 @@
+metadata:
+  project: automation-analytics-backend
+  persona: developer
+  last_updated: '2026-01-15T22:46:24.014869'
+  last_scanned: '2026-01-15T22:46:24.006141'
+  confidence: 0.8200000000000002
+  auto_generated: true
+architecture:
+  overview: 'Tower Analytics Backend
+
+    ======================='
+  key_modules:
+  - path: test/
+    purpose: Test module
+    notes: Auto-detected from project structure
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding:
+  - pattern: Python project
+    location: pyproject.toml
+  testing:
+  - pattern: pytest test suite
+    example: pytest tests/
+  deployment:
+  - pattern: GitLab CI/CD
+    notes: Pipeline defined in .gitlab-ci.yml
+  - pattern: Docker containerization
+    notes: Dockerfile present
+gotchas:
+- issue: Short SHAs don't work for Quay images
+  reason: Konflux only tags images with full 40-char git SHA
+  solution: Use gitlab_mr_sha() to get full SHA before deploying
+- issue: pytest-xdist needs database isolation
+  reason: Parallel workers share database by default, causing race conditions
+  solution: Use pytest-django-queries or worker-specific DB names
+- issue: Billing calculations are time-sensitive
+  reason: Uses @transaction.atomic and relies on consistent timestamps
+  solution: Always use timezone.now() and wrap in transactions
+learned_from_tasks:
+- date: '2026-01-15'
+  task: AAP-61661
+  learning: pytest-xdist parallelization requires careful database isolation - each
+    worker needs its own database or transaction isolation to prevent race conditions
+- date: '2026-01-15'
+  task: AAP-61661
+  learning: pytest-xdist parallelization requires database isolation per worker. Also
+    deprecated docker-compose syntax (version field) should be removed and external
+    network dependencies avoided.
+- date: '2026-01-15'
+  task: AAP-60034
+  learning: Multi-pod billing deployments need concurrency controls to prevent race
+    conditions. Use database-level locking or distributed locks when multiple pods
+    process billing data.
+- date: '2026-01-15'
+  task: AAP-58394
+  learning: Billing accuracy calculations must happen AFTER syncing records, not before.
+    Order of operations matters for accurate billing reports.
+- date: '2026-01-15'
+  task: AAP-60420
+  learning: Python 3.12 / RHEL 10 readiness requires updating base images and checking
+    for deprecated syntax. Plan upgrades early.
+- date: '2026-01-15'
+  task: AAP-59793
+  learning: When billing params come as strings instead of dicts, handle AttributeError
+    gracefully. Always validate input types before calling .get() on billing parameters.
+- date: '2026-01-15'
+  task: AAP-54933
+  learning: Use well-defined named types (dataclasses/TypedDicts) instead of raw tuples/dicts
+    for billing data structures. Improves type safety and IDE support.
+- date: '2026-01-15'
+  task: AAP-53485
+  learning: 'SQLAlchemy 2.0 migration: set SQLALCHEMY_SILENCE_UBER_WARNING=1 to suppress
+    deprecation warnings during transition. Address actual deprecations incrementally.'
+- date: '2026-01-15'
+  task: AAP-52640
+  learning: 'Pytest warnings: watch for invisible unicode characters in test files
+    - replace with ASCII equivalents. Use difflib to deduplicate similar warnings.'
+- date: '2026-01-15'
+  task: AAP-41047
+  learning: Prometheus alerts can be validated in tests. Add prom alerts activation
+    and monitoring tests to catch alert rule issues before deployment.
+- date: '2026-01-15'
+  task: AAP-58364
+  learning: Billing message recovery needs a dedicated cronjob. Configure recovery
+    job parameters separately from main billing job for better reliability.
+- date: '2026-01-15'
+  task: AAP-60807
+  learning: Rollup processing can overwhelm the system - add throttling and oldest-first
+    processing mode to handle large backlogs gracefully.
+- date: '2026-01-15'
+  task: AAP-52737
+  learning: Tenants stuck in WIP state need batch size limiting. Add safeguards to
+    prevent runaway processing of problematic tenants.
+- date: '2026-01-15'
+  task: AAP-53962
+  learning: When removing feature flags (like Unleash), clean up ALL related configs
+    and dependencies. Check clowder configs, env vars, and code references.
+- date: '2026-01-15'
+  task: AAP-58394
+  learning: 'Mock billing for local dev: try internal K8s service URL first, then
+    fall back to proxy IP for DNS resolution issues. Support both AWS and other billing
+    providers.'
+- date: '2026-01-15'
+  task: AAP-62200
+  learning: Docker builds should use Red Hat internal package repository for compliance.
+    Configure build args for internal repo access.

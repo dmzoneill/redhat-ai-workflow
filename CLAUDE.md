@@ -268,10 +268,71 @@ Memory persists across sessions.
 - `patterns.yaml` - Error patterns and solutions
 - `runbooks.yaml` - Procedures that worked
 
+### Knowledge (`memory/knowledge/`)
+- `personas/{persona}/{project}.yaml` - Project-specific knowledge per persona
+- Architecture, patterns, gotchas, testing approaches
+
 ### Session Instructions
 - Read `memory/state/current_work.yaml` at session start
 - Update memory when learning something reusable
 - Save important patterns to `memory/learned/`
+- Knowledge is auto-loaded during `session_start()` based on current project
+
+---
+
+## Knowledge Layer
+
+Project-specific knowledge that loads automatically based on persona and project.
+
+### Knowledge Tools
+| Tool | Purpose |
+|------|---------|
+| `knowledge_load(project, persona)` | Load knowledge into context |
+| `knowledge_scan(project, persona)` | Scan project and generate knowledge |
+| `knowledge_update(project, persona, section, content)` | Update specific sections |
+| `knowledge_learn(learning, task)` | Record learnings from tasks |
+| `knowledge_list()` | List available knowledge files |
+
+### Knowledge Skills
+| Skill | Purpose |
+|-------|---------|
+| `bootstrap_knowledge` | Full knowledge generation for all personas |
+| `learn_architecture` | Deep scan of project architecture |
+
+### Auto-Loading
+Knowledge is automatically loaded during `session_start()`:
+1. Detects current project from working directory
+2. Gets current persona
+3. Loads `memory/knowledge/personas/{persona}/{project}.yaml`
+4. If no knowledge exists, prompts to run `knowledge_scan`
+
+---
+
+## Project Management
+
+Tools for managing projects in `config.json`.
+
+### Project Tools
+| Tool | Purpose |
+|------|---------|
+| `project_list()` | List all configured projects |
+| `project_detect(path)` | Auto-detect project settings |
+| `project_add(name, path, gitlab, jira_project, ...)` | Add a new project |
+| `project_update(name, ...)` | Update project settings |
+| `project_remove(name, confirm)` | Remove a project |
+
+### Project Skill
+```text
+skill_run("add_project", '{"path": "/path/to/project", "jira_project": "AAP"}')
+```
+
+### Auto-Detection
+The tools auto-detect:
+- Language (Python, JavaScript, Go, Rust, Java)
+- Default branch from git
+- GitLab remote from git origin
+- Lint/test commands from config files
+- Commit scopes from directory structure
 
 ---
 

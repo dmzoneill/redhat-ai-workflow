@@ -42,3 +42,79 @@ tool_fixes:
     Config loading step didn't include repo_path.
   times_prevented: 0
   tool_name: test_mr_ephemeral skill
+- date_learned: '2026-01-15'
+  error_pattern: ProcessSingleton for your profile directory
+  fix_applied: 'Script now tries: 1) Connect via CDP to existing Chrome (CHROME_CDP_URL),
+    2) Copy profile to /tmp and launch with copy, 3) Fall back to plain Chromium.
+    For SSO plugin support, launch Chrome with: google-chrome --remote-debugging-port=9222'
+  root_cause: Chrome profile already in use by another Chrome instance - Playwright
+    cannot use the same profile simultaneously
+  times_prevented: 0
+  tool_name: concur_run_full_automation
+- date_learned: '2026-01-15'
+  error_pattern: TrustArc Cookie Consent Manager
+  fix_applied: 'Added dismiss_cookie_consent(page) function that finds TrustArc iframe
+    by title, clicks Accept button. Also added JS to remove .truste_overlay elements:
+    page.evaluate("document.querySelectorAll(''.truste_overlay, .truste_box_overlay'').forEach(el
+    => el.remove());")'
+  root_cause: Cookie consent popup in iframe blocking page interaction
+  times_prevented: 0
+  tool_name: concur_run_full_automation
+- date_learned: '2026-01-15'
+  error_pattern: What's New dialog
+  fix_applied: Added dismiss_dialogs(page) function that finds div[role='dialog'][aria-modal='true']
+    and clicks Close button. Integrated into safe_click() helper to auto-dismiss before
+    clicking.
+  root_cause: TREX intro dialog (modal) blocking page interaction after navigation
+  times_prevented: 0
+  tool_name: concur_run_full_automation
+- date_learned: '2026-01-15'
+  error_pattern: Locator.click.*Timeout
+  fix_applied: Updated safe_click() to accept page parameter and call dismiss_cookie_consent()
+    and dismiss_dialogs() before attempting click. Also use flexible text-based selectors
+    like text='Start a Claim' instead of CSS class selectors.
+  root_cause: Element blocked by overlay, cookie consent, or dialog - click cannot
+    reach target
+  times_prevented: 0
+  tool_name: concur_run_full_automation
+- date_learned: '2026-01-15'
+  error_pattern: net::ERR_ABORTED
+  fix_applied: Wrap page.goto() in try/except, catch net::ERR_ABORTED, then call page.wait_for_load_state("domcontentloaded",
+    timeout=60_000) as fallback.
+  root_cause: Navigation aborted during Concur redirects - common with SSO flows
+  times_prevented: 0
+  tool_name: concur_run_full_automation
+- date_learned: '2026-01-15'
+  error_pattern: Delete option clicked but report not deleted
+  fix_applied: 'To delete a report: 1) Open the report by clicking the card, 2) Click
+    the "..." button NEXT TO "Submit Claim" (not the help menu or expense line kebab),
+    3) Select "Delete Claim" from dropdown, 4) Confirm. Use sibling selector: find
+    Submit Claim button, then click the last button in its parent container.'
+  root_cause: Was clicking the expense LINE item's kebab menu (deletes expense line)
+    instead of the REPORT's More Actions menu (deletes entire report)
+  times_prevented: 0
+  tool_name: concur_cleanup_unsubmitted
+- date_learned: '2026-01-15'
+  error_pattern: Help menu opened instead of More Actions
+  fix_applied: 'Use sibling selector: Find Submit Claim button, get parent, click
+    last button in parent. Verify button text doesn''t contain ''Submit''. The correct
+    "..." is always immediately to the right of Submit Claim.'
+  root_cause: Selector [class*='header'] button[class*='menu'] matched the help menu
+    (?) instead of the report actions (...)
+  times_prevented: 0
+  tool_name: concur_cleanup_unsubmitted
+- date_learned: '2026-01-15'
+  error_pattern: Expense line deleted instead of report
+  fix_applied: 'The expense line kebab (in Actions column) deletes the expense LINE.
+    To delete the REPORT: 1) Open report, 2) Find Submit Claim button in header, 3)
+    Click sibling "..." button, 4) Select "Delete Claim"'
+  root_cause: Clicked kebab menu on expense LINE item (in the table) instead of the
+    report's More Actions menu (in header)
+  times_prevented: 0
+  tool_name: concur_cleanup_unsubmitted
+- date_learned: '2026-01-16'
+  error_pattern: no such host
+  fix_applied: Run vpn_connect() to connect to Red Hat VPN
+  root_cause: VPN not connected - internal GitLab not reachable
+  times_prevented: 0
+  tool_name: gitlab_mr_list

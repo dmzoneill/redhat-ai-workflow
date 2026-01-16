@@ -31,6 +31,123 @@ bonfire_patterns:
   fix: Only release namespaces you own
   meaning: Cannot release namespace owned by another user
   pattern: namespace not owned
+concur_cleanup_patterns: "# Cleanup-specific patterns - learned 2026-01-15\n- pattern:\
+  \ Delete option clicked but report not deleted\n  meaning: Clicked wrong menu -\
+  \ expense line kebab instead of report More Actions\n  fix: Click the \"...\" button\
+  \ NEXT TO \"Submit Claim\", not the expense line kebab\n  commands:\n  - Find Submit\
+  \ Claim button\n  - Click sibling button (parent.locator(\"button\").last)\n  -\
+  \ Select \"Delete Claim\" from dropdown\n  - Confirm in dialog\n\n- pattern: Help\
+  \ menu opened instead of More Actions\n  meaning: Clicked help icon (?) instead\
+  \ of report actions (...)\n  fix: Use position-based selector to find button right\
+  \ of Submit Claim\n  commands:\n  - submit_btn = page.locator(\"button:has-text('Submit\
+  \ Claim')\").first\n  - parent = submit_btn.locator(\"xpath=..\")\n  - kebab = parent.locator(\"\
+  button\").last\n  - Verify kebab_text does not contain \"Submit\"\n\n- pattern:\
+  \ Could not find confirmation button\n  meaning: Delete confirmation dialog not\
+  \ detected\n  fix: Use dialog-specific selectors\n  commands:\n  - \"[role='dialog']\
+  \ button:has-text('Delete')\"\n  - \".sapcnqr-dialog button:has-text('Delete')\"\
+  \n  - \"button.sapcnqr-button--destructive\"\n\n- pattern: Reports still exist after\
+  \ cleanup\n  meaning: Delete action not actually deleting\n  fix: Verify clicking\
+  \ correct menu and confirming deletion\n  commands:\n  - Take screenshot after each\
+  \ step\n  - Check screenshots in ~/src/aa-concur/screenshots/\n  - Verify \"Delete\
+  \ Claim\" option visible in menu"
+concur_patterns:
+- commands:
+  - export BW_SESSION=$(bw unlock --raw)
+  fix: Initialize Bitwarden session for credential access
+  meaning: Bitwarden CLI session not initialized
+  pattern: BW_SESSION not set
+- commands:
+  - systemctl --user start redhatter
+  - Check localhost:8009 is accessible
+  fix: Start the redhatter service for Concur SSO credentials
+  meaning: Local credential service not running
+  pattern: redhatter service
+- commands:
+  - concur_get_sso_credentials()
+  - Verify auth.redhat.com is accessible
+  fix: Check credentials and SSO service availability
+  meaning: Red Hat SSO authentication failed
+  pattern: SSO login failed
+- commands:
+  - Close existing Chrome OR
+  - Launch Chrome with --remote-debugging-port=9222 and set CHROME_CDP_URL
+  - Script will copy profile to /tmp/chrome-playwright-profile
+  fix: Use profile copy or connect via CDP to existing Chrome
+  meaning: Chrome profile already in use by another instance
+  pattern: ProcessSingleton
+- commands:
+  - dismiss_cookie_consent(page) - accepts cookies in TrustArc iframe
+  - page.evaluate("document.querySelectorAll('.truste_overlay, .truste_box_overlay').forEach(el
+    => el.remove());")
+  fix: Dismiss cookie consent before clicking elements
+  meaning: Cookie consent popup blocking page interaction
+  pattern: TrustArc Cookie Consent Manager
+- commands:
+  - dismiss_dialogs(page) - clicks Close button on modal dialogs
+  - Look for div[role='dialog'][aria-modal='true']
+  fix: Dismiss intro dialogs before clicking elements
+  meaning: TREX intro dialog blocking page interaction
+  pattern: What's New
+- commands:
+  - dismiss_cookie_consent(page)
+  - dismiss_dialogs(page)
+  - page.evaluate to remove blocking overlays
+  - Use safe_click() helper with page parameter
+  fix: Dismiss all blocking elements before clicking
+  meaning: Element not clickable, likely blocked by overlay or dialog
+  pattern: Locator.click.*Timeout
+- commands:
+  - try/except around page.goto()
+  - page.wait_for_load_state("domcontentloaded", timeout=60_000)
+  fix: Catch exception and wait for page load state
+  meaning: Navigation aborted (common with Concur redirects)
+  pattern: net::ERR_ABORTED
+- commands:
+  - text='Start a Claim' instead of a.sapcnqr-link.hhsg-qt-create-menu-item
+  - button:has-text('Save Expense') instead of button[data-nuiexp='save-expense']
+  fix: Use text-based selectors instead of CSS class selectors
+  meaning: Concur UI selector too specific
+  pattern: Create Report button not found
+- commands:
+  - browser_snapshot() to check page structure
+  - browser_wait_for(time=5)
+  fix: Wait for iframe to load or navigate directly
+  meaning: Concur expense iframe not loaded
+  pattern: expense frame not found
+- commands:
+  - browser_wait_for(time=3)
+  - Check transactionAmount field value
+  fix: Wait for conversion to stabilize before proceeding
+  meaning: EUR to USD conversion not completing
+  pattern: currency conversion
+- commands:
+  - browser_snapshot() to check modal state
+  - Check for validation errors on page
+  fix: Ensure report is valid and all required fields filled
+  meaning: Submit modal dialog not appearing
+  pattern: Submit confirmation not found
+- commands:
+  - Launch Chrome with --remote-debugging-port=9222
+  - Set CHROME_CDP_URL=http://localhost:9222
+  - Script will connect to existing Chrome with extensions
+  fix: Use Chrome with user profile for SSO plugin auto-login
+  meaning: Browser launched without Chrome extensions
+  pattern: SSO plugin not detected
+- commands:
+  - concur_cleanup_unsubmitted(headless=False)
+  - cd ~/src/aa-concur && pipenv run python scripts/gomo_to_concur.py --cleanup --headed
+  fix: Run cleanup to delete unsubmitted reports
+  meaning: Failed automation left incomplete reports
+  pattern: unsubmitted expense reports
+daily_patterns:
+- commits: 0
+  date: '2026-01-15'
+  day_of_week: Thursday
+  ephemeral_envs: 0
+  lines_added: 0
+  lines_removed: 0
+  stale_branches: 29
+  weekly_commits: 0
 error_patterns:
 - commands:
   - quay_check_image_exists(image='...', tag='...')
@@ -84,34 +201,27 @@ error_patterns:
 jira_cli_patterns:
 - commit: 85d96ea
   date: '2026-01-02'
-  description: 'The rh-issue CLI for creating Jira stories requires:
-
-    1. --input-file with YAML containing Title Case field names
-
-    2. Required fields: User Story, Acceptance Criteria, Supporting Documentation,
-    Definition of Done
-
-    3. --no-ai flag for non-interactive mode
-
-    4. Summary is passed as positional arg, not in YAML
-
-    '
+  description: 'The rh-issue CLI for creating Jira stories requires: 1. --input-file
+    with YAML containing Title Case field names 2. Required fields: User Story, Acceptance
+    Criteria, Supporting Documentation, Definition of Done 3. --no-ai flag for non-interactive
+    mode 4. Summary is passed as positional arg, not in YAML '
   issue: AAP-61699
   pattern: rh-issue create-issue requires --input-file for stories
   solution: Build temp YAML file with proper fields, use --input-file --no-ai
 - date: '2026-01-08'
-  description: "When user says \"transition AAP-XXXXX to X\" or \"move issue to In\
-    \ Progress/Review/etc\":\n1. This means use rh-issue set-status AAP-XXXXX \"X\"\
-    \n2. Before transitioning, may need to set required fields:\n   - Sprint: rh-issue\
-    \ get-sprint (to find active sprint), then rh-issue add-to-sprint AAP-XXXXX \"\
-    Sprint Name\"\n   - Story Points: rh-issue set-story-points AAP-XXXXX N\n   -\
-    \ Assignee: rh-issue assign AAP-XXXXX user@redhat.com (use full email, not username)\n\
-    3. Common statuses: New, Refinement, Backlog, In Progress, Review, Release Pending,\
-    \ Closed\n4. NEVER use curl for Jira operations - always use rh-issue CLI\n"
+  description: 'When user says "transition AAP-XXXXX to X" or "move issue to In Progress/Review/etc":
+    1. This means use rh-issue set-status AAP-XXXXX "X" 2. Before transitioning, may
+    need to set required fields: - Sprint: rh-issue get-sprint (to find active sprint),
+    then rh-issue add-to-sprint AAP-XXXXX "Sprint Name" - Story Points: rh-issue set-story-points
+    AAP-XXXXX N - Assignee: rh-issue assign AAP-XXXXX user@redhat.com (use full email,
+    not username) 3. Common statuses: New, Refinement, Backlog, In Progress, Review,
+    Release Pending, Closed 4. NEVER use curl for Jira operations - always use rh-issue
+    CLI '
   pattern: transition issue to status
   solution: Use rh-issue set-status, with add-to-sprint and set-story-points if needed
-last_updated: null
+last_updated: '2026-01-16T15:33:37.653164'
 performance_patterns: []
+pipeline_failures: []
 pipeline_patterns:
 - commands:
   - lint_python(repo='.', fix=True)
