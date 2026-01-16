@@ -2,6 +2,13 @@
 
 Create or manage Alertmanager silences.
 
+## Prerequisites
+
+Load the incident persona first:
+```text
+persona_load("incident")
+```
+
 ## Instructions
 
 ```text

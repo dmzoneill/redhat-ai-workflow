@@ -9,6 +9,13 @@ arguments:
 
 Check container image for security vulnerabilities.
 
+## Prerequisites
+
+Load the release persona first:
+```text
+persona_load("release")
+```
+
 ## Instructions
 
 ```text

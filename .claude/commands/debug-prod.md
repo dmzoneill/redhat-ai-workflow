@@ -8,6 +8,13 @@ arguments:
 
 Deep investigation of production issues.
 
+## Prerequisites
+
+Load the incident persona first:
+```text
+persona_load("incident")
+```
+
 ## Instructions
 
 ```text

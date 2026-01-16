@@ -2,6 +2,13 @@
 
 Guide you through promoting stage → production.
 
+## Prerequisites
+
+Load the release persona first:
+```text
+persona_load("release")
+```
+
 ## Instructions
 
 ```text

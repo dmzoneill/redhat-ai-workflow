@@ -2,6 +2,13 @@
 
 Verify Kubernetes secrets and configmaps.
 
+## Prerequisites
+
+Load the devops persona first:
+```text
+persona_load("devops")
+```
+
 ## Instructions
 
 ```text

@@ -11,6 +11,14 @@ arguments:
 
 Restart a deployment and monitor the rollout.
 
+## Prerequisites
+
+Load the devops or incident persona first:
+```text
+persona_load("devops")   # For routine restarts
+persona_load("incident") # During incident response
+```
+
 ## Instructions
 
 ```text

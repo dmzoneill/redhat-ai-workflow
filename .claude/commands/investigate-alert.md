@@ -8,6 +8,13 @@ arguments:
 
 Quick triage of a firing Prometheus alert.
 
+## Prerequisites
+
+Load the incident persona first:
+```text
+persona_load("incident")
+```
+
 ## Instructions
 
 ```text

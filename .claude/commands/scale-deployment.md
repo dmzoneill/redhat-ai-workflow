@@ -12,6 +12,14 @@ arguments:
 
 Scale a deployment up or down.
 
+## Prerequisites
+
+Load the devops or incident persona first:
+```text
+persona_load("devops")   # For routine scaling
+persona_load("incident") # During incident response
+```
+
 ## Instructions
 
 ```text
