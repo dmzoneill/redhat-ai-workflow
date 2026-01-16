@@ -1041,9 +1041,26 @@ class SkillExecutor:
         try:
             result = await self.server.call_tool(tool_name, args)
             duration = time.time() - start_time
+            duration_ms = int(duration * 1000)
             self._debug(f"  → Completed in {duration:.2f}s")
+
+            # Record tool call stats
+            try:
+                from .agent_stats import record_tool_call
+
+                record_tool_call(tool_name, True, duration_ms)
+            except Exception as stats_err:
+                logger.debug(f"Failed to record tool stats: {stats_err}")
+
             return self._format_tool_result(result, duration)
         except Exception as e:
+            # Record failed tool call
+            try:
+                from .agent_stats import record_tool_call
+
+                record_tool_call(tool_name, False, 0)
+            except Exception:
+                pass
             return {"success": False, "error": str(e)}
 
     async def _load_and_execute_module_tool(self, module: str, tool_name: str, args: dict, start_time: float) -> dict:
@@ -1081,10 +1098,27 @@ class SkillExecutor:
 
             result = await temp_server.call_tool(tool_name, args)
             duration = time.time() - start_time
+            duration_ms = int(duration * 1000)
             self._debug(f"  → Completed in {duration:.2f}s")
+
+            # Record tool call stats
+            try:
+                from .agent_stats import record_tool_call
+
+                record_tool_call(tool_name, True, duration_ms)
+            except Exception as stats_err:
+                logger.debug(f"Failed to record tool stats: {stats_err}")
+
             return self._format_tool_result(result, duration)
 
         except Exception as e:
+            # Record failed tool call
+            try:
+                from .agent_stats import record_tool_call
+
+                record_tool_call(tool_name, False, 0)
+            except Exception:
+                pass
             return {
                 "success": False,
                 "error": str(e),
@@ -1145,7 +1179,17 @@ class SkillExecutor:
                                 )
                             retry_result = await temp_server.call_tool(tool_name, args)
                             duration = time.time() - start
+                            duration_ms = int(duration * 1000)
                             self._debug(f"  → Retry completed in {duration:.2f}s")
+
+                            # Record successful retry
+                            try:
+                                from .agent_stats import record_tool_call
+
+                                record_tool_call(tool_name, True, duration_ms)
+                            except Exception:
+                                pass
+
                             return self._format_tool_result(retry_result, duration)
                         except Exception as retry_e:
                             error_msg = f"{error_msg}\n\n(Retry after auto-fix also failed: {retry_e})"
@@ -1469,6 +1513,25 @@ class SkillExecutor:
             except Exception:
                 pass
 
+        # Track skill execution in agent stats
+        try:
+            from .agent_stats import record_skill_execution
+
+            overall_success = fail_count == 0
+            record_skill_execution(
+                skill_name=skill_name,
+                success=overall_success,
+                duration_ms=int(total_time * 1000),
+                steps_completed=success_count,
+                total_steps=len(self.skill.get("steps", [])),
+            )
+        except Exception as e:
+            self._debug(f"Failed to record skill stats: {e}")
+
+        # Extract and save learnings from successful skill execution
+        if fail_count == 0:
+            await self._extract_and_save_learnings(output_lines)
+
         if self.debug and self.log:
             output_lines.append("\n\n### 🔍 Debug Log\n```")
             output_lines.extend(self.log)
@@ -1503,6 +1566,117 @@ class SkillExecutor:
         if any(t in tool_name for t in memory_write_tools):
             key = args.get("key", tool_name)
             self.event_emitter.memory_write(step_index, key)
+
+    async def _extract_and_save_learnings(self, output_lines: list[str]) -> None:
+        """Extract learnings from successful skill execution and save to knowledge.
+
+        This is called after a skill completes successfully. It analyzes the
+        execution context and results to extract potential learnings.
+        """
+        skill_name = self.skill.get("name", "unknown")
+
+        # Skip skills that don't produce learnable outcomes
+        non_learning_skills = [
+            "memory_view",
+            "memory_cleanup",
+            "coffee",
+            "beer",
+            "standup_summary",
+            "weekly_summary",
+        ]
+        if skill_name in non_learning_skills:
+            return
+
+        # Try to detect project and persona
+        try:
+            from .knowledge_tools import (
+                _detect_project_from_path,
+                _get_current_persona,
+                _load_knowledge,
+                _save_knowledge,
+            )
+
+            project = _detect_project_from_path()
+            if not project:
+                self._debug("No project detected, skipping learning extraction")
+                return
+
+            persona = _get_current_persona() or "developer"
+
+            # Load existing knowledge
+            knowledge = _load_knowledge(persona, project)
+            if not knowledge:
+                self._debug(f"No knowledge file for {project}/{persona}, skipping")
+                return
+
+            # Extract learning based on skill type
+            learning = None
+            task = self.inputs.get("issue_key", skill_name)
+
+            # Skills that produce learnable outcomes
+            if skill_name == "start_work":
+                issue_key = self.inputs.get("issue_key", "")
+                if issue_key:
+                    learning = f"Started work on {issue_key}"
+
+            elif skill_name == "create_mr":
+                issue_key = self.inputs.get("issue_key", "")
+                if issue_key:
+                    learning = f"Created MR for {issue_key}"
+
+            elif skill_name in ["review_pr", "review_all_prs"]:
+                # Extract review insights
+                mr_id = self.inputs.get("mr_id", "")
+                if mr_id:
+                    learning = f"Reviewed MR !{mr_id}"
+
+            elif skill_name == "test_mr_ephemeral":
+                mr_id = self.inputs.get("mr_id", "")
+                if mr_id:
+                    learning = f"Tested MR !{mr_id} in ephemeral environment"
+
+            elif skill_name == "investigate_alert":
+                alert = self.inputs.get("alert_name", "")
+                if alert:
+                    learning = f"Investigated alert: {alert}"
+
+            elif skill_name == "close_issue":
+                issue_key = self.inputs.get("issue_key", "")
+                if issue_key:
+                    learning = f"Closed issue {issue_key}"
+
+            # Save learning if we extracted one
+            if learning:
+                # Ensure learned_from_tasks exists
+                if "learned_from_tasks" not in knowledge:
+                    knowledge["learned_from_tasks"] = []
+
+                # Add the learning
+                knowledge["learned_from_tasks"].append(
+                    {
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "task": task,
+                        "learning": learning,
+                        "skill": skill_name,
+                    }
+                )
+
+                # Limit to last 50 learnings
+                knowledge["learned_from_tasks"] = knowledge["learned_from_tasks"][-50:]
+
+                # Slightly increase confidence
+                current_confidence = knowledge.get("metadata", {}).get("confidence", 0.5)
+                knowledge["metadata"]["confidence"] = min(current_confidence + 0.01, 1.0)
+
+                # Save
+                _save_knowledge(persona, project, knowledge)
+                self._debug(f"Saved learning: {learning}")
+
+                # Add note to output
+                output_lines.append(f"\n📚 *Learning recorded: {learning}*")
+
+        except Exception as e:
+            self._debug(f"Failed to extract/save learnings: {e}")
 
 
 def _skill_list_impl() -> list[TextContent]:

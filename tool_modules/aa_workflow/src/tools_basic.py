@@ -268,17 +268,20 @@ def register_tools(server: "FastMCP") -> int:
     Register core workflow tools with the MCP server.
 
     This function registers only CORE tools needed by all personas:
-    - memory_tools: 5 tools for persistent context storage
+    - memory_tools: 9 tools for persistent context storage
     - persona_tools: 2 tools for persona management
     - session_tools: 1 tool + 3 prompts for session management
     - resources: 8 MCP resources for config/state
     - skill_engine: 2 tools for skill execution (with Claude Code integration)
     - infra_tools: 2 tools for VPN/Kube auth
-    - meta_tools: 2 tools for dynamic tool loading
+    - meta_tools: 3 tools for dynamic tool loading
 
-    Persona-specific tools are in separate modules:
-    - aa_lint: 7 tools for linting/testing (developer persona)
-    - aa_dev_workflow: 9 tools for dev workflow (developer persona)
+    Total: ~18 tools (down from 36)
+
+    Extra tools (in tools_extra.py, load via workflow_extra):
+    - knowledge_tools: 6 tools for project knowledge management
+    - project_tools: 5 tools for project configuration
+    - scheduler_tools: 7 tools for cron job management
     """
     tool_count = 0
 
@@ -299,7 +302,7 @@ def register_tools(server: "FastMCP") -> int:
         logger.debug("Claude Code integration module not available")
         ask_question_fn = None
 
-    # Register CORE tools only
+    # Register CORE tools only (18 tools)
     tool_count += register_memory_tools(server)
     tool_count += register_persona_tools(server)
     tool_count += register_session_tools(server)

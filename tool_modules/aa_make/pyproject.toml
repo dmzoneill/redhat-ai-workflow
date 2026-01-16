@@ -1,0 +1,10 @@
+[project]
+name = "aa_make"
+version = "0.1.0"
+description = "Make/build automation tools for AI Workflow"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

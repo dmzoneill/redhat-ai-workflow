@@ -1291,6 +1291,45 @@ async def _git_stash_impl(repo: str, action: str = "push", message: str = "") ->
     return f"✅ Stash {action} successful\n\n{output or 'Done'}"
 
 
+async def _git_blame_impl(repo: str, file: str, lines: str = "") -> str:
+    """Get blame information for a file.
+
+    Args:
+        repo: Repository path
+        file: File path to blame
+        lines: Optional line range (e.g., "1,10" for lines 1-10)
+
+    Returns:
+        Blame output showing who last modified each line.
+    """
+    path = resolve_repo_path(repo)
+
+    args = ["blame", "--porcelain"]
+    if lines:
+        args.extend(["-L", lines])
+    args.append(file)
+
+    success, output = await run_git(args, cwd=path)
+    if not success:
+        return f"❌ Failed to get blame: {output}"
+
+    # Parse porcelain output to extract authors
+    authors: dict[str, int] = {}
+    current_author = None
+
+    for line in output.split("\n"):
+        if line.startswith("author "):
+            current_author = line[7:]
+            authors[current_author] = authors.get(current_author, 0) + 1
+
+    # Format output
+    lines_out = ["## Blame Summary", ""]
+    for author, count in sorted(authors.items(), key=lambda x: -x[1]):
+        lines_out.append(f"- **{author}**: {count} lines")
+
+    return "\n".join(lines_out)
+
+
 @auto_heal()
 def _parse_status_output(output: str) -> tuple[list, list, list]:
     """Parse git status porcelain output into staged, modified, untracked lists."""
@@ -1952,6 +1991,21 @@ def _register_git_advanced_tools(registry: ToolRegistry) -> None:
         """Stash or restore changes."""
         return await _git_stash_impl(repo, action, message)
 
+    @auto_heal()
+    @registry.tool()
+    async def git_blame(repo: str, file: str, lines: str = "") -> str:
+        """Get blame information for a file.
+
+        Args:
+            repo: Repository path
+            file: File path to blame
+            lines: Optional line range (e.g., "1,10" for lines 1-10)
+
+        Returns:
+            Blame output showing who last modified each line.
+        """
+        return await _git_blame_impl(repo, file, lines)
+
 
 def _register_build_tools(registry: ToolRegistry) -> None:
     """Register build tools."""
@@ -1981,6 +2035,11 @@ def register_tools(server: FastMCP) -> int:
     """
     Register git tools with the MCP server.
 
+    Note: Docker, lint, and make tools have been moved to separate modules:
+    - aa_docker: docker_compose_*, docker_cp, docker_exec
+    - aa_lint: code_format, code_lint
+    - aa_make: make_target
+
     Args:
         server: FastMCP server instance
 
@@ -1989,13 +2048,11 @@ def register_tools(server: FastMCP) -> int:
     """
     registry = ToolRegistry(server)
 
-    _register_code_quality_tools(registry)
-    _register_docker_tools(registry)
+    # Only register git-specific tools
     _register_git_basic_ops_tools(registry)
     _register_git_branching_tools(registry)
     _register_git_commits_tools(registry)
     _register_git_remote_tools(registry)
     _register_git_advanced_tools(registry)
-    _register_build_tools(registry)
 
     return registry.count

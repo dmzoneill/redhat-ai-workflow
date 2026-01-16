@@ -5,6 +5,7 @@ Provides tools for:
 - Prompts for guided workflows (debug, review)
 """
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,18 +14,22 @@ import yaml
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
+from server.utils import load_config
 
 # Support both package import and direct loading
 try:
-    from .constants import MEMORY_DIR, PERSONAS_DIR
+    from .constants import KNOWLEDGE_DIR, MEMORY_DIR, PERSONAS_DIR
 except ImportError:
     TOOL_MODULES_DIR = Path(__file__).parent.parent.parent
     PROJECT_DIR = TOOL_MODULES_DIR.parent
     PERSONAS_DIR = PROJECT_DIR / "personas"
     MEMORY_DIR = PROJECT_DIR / "memory"
+    KNOWLEDGE_DIR = MEMORY_DIR / "knowledge" / "personas"
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 
 # ==================== TOOL IMPLEMENTATIONS ====================
@@ -223,8 +228,146 @@ def _load_learned_patterns(lines: list[str]) -> None:
         pass
 
 
+def _detect_project_from_cwd() -> str | None:
+    """Detect project from current working directory."""
+    config = load_config()
+    if not config:
+        return None
+
+    try:
+        cwd = Path.cwd().resolve()
+    except Exception:
+        return None
+
+    repositories = config.get("repositories", {})
+    for project_name, project_config in repositories.items():
+        project_path = Path(project_config.get("path", "")).expanduser().resolve()
+        try:
+            cwd.relative_to(project_path)
+            return project_name
+        except ValueError:
+            continue
+
+    return None
+
+
+def _get_current_persona() -> str | None:
+    """Get the currently loaded persona."""
+    try:
+        from server.persona_loader import get_loader
+
+        loader = get_loader()
+        if loader:
+            return loader.current_persona
+    except Exception:
+        pass
+    return None
+
+
+def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
+    """Load and append project knowledge if available.
+
+    Returns the detected project name, or None.
+    """
+    # Detect project from cwd
+    project = _detect_project_from_cwd()
+    if not project:
+        return None
+
+    # Determine persona
+    persona = agent or _get_current_persona() or "developer"
+
+    # Check if knowledge exists
+    knowledge_path = KNOWLEDGE_DIR / persona / f"{project}.yaml"
+
+    if knowledge_path.exists():
+        try:
+            with open(knowledge_path) as f:
+                knowledge = yaml.safe_load(f) or {}
+
+            metadata = knowledge.get("metadata", {})
+            confidence = metadata.get("confidence", 0)
+            confidence_emoji = "🟢" if confidence > 0.7 else "🟡" if confidence > 0.4 else "🔴"
+
+            lines.append(f"## 📚 Project Knowledge: {project}\n")
+            lines.append(f"*Persona: {persona} | Confidence: {confidence_emoji} {confidence:.0%}*\n")
+
+            # Show architecture overview if available
+            arch = knowledge.get("architecture", {})
+            if arch.get("overview"):
+                overview = arch["overview"][:200]
+                if len(arch["overview"]) > 200:
+                    overview += "..."
+                lines.append(f"**Overview:** {overview}\n")
+
+            # Show key modules
+            key_modules = arch.get("key_modules", [])[:3]
+            if key_modules:
+                lines.append("**Key Modules:**")
+                for module in key_modules:
+                    lines.append(f"- `{module.get('path', '?')}`: {module.get('purpose', '')}")
+                lines.append("")
+
+            # Show gotchas count
+            gotchas = knowledge.get("gotchas", [])
+            learned = knowledge.get("learned_from_tasks", [])
+            if gotchas or learned:
+                lines.append(f"*{len(gotchas)} gotchas, {len(learned)} learnings recorded*")
+                lines.append("")
+
+            lines.append("*Use `knowledge_query()` for details or `knowledge_learn()` to add insights*")
+            lines.append("")
+
+            return project
+
+        except Exception as e:
+            logger.warning(f"Failed to load knowledge: {e}")
+            return project
+
+    else:
+        # Knowledge doesn't exist - will be auto-scanned
+        lines.append(f"## 📚 Project Detected: {project}\n")
+        lines.append(f"*No knowledge yet for {persona} persona. Auto-scanning...*\n")
+
+        # Trigger auto-scan
+        try:
+            from .knowledge_tools import _generate_initial_knowledge, _save_knowledge
+
+            config = load_config()
+            project_config = config.get("repositories", {}).get(project, {})
+            project_path = Path(project_config.get("path", "")).expanduser()
+
+            if project_path.exists():
+                knowledge = _generate_initial_knowledge(project, persona, project_path)
+                _save_knowledge(persona, project, knowledge)
+
+                lines.append("✅ **Initial knowledge generated!**\n")
+
+                # Show brief summary
+                arch = knowledge.get("architecture", {})
+                deps = arch.get("dependencies", [])[:5]
+                if deps:
+                    lines.append(f"**Dependencies:** {', '.join(f'`{d}`' for d in deps)}")
+                    lines.append("")
+
+                lines.append("*Knowledge will improve as you complete tasks.*")
+                lines.append("")
+
+        except Exception as e:
+            logger.warning(f"Failed to auto-scan project: {e}")
+            lines.append(f"*Auto-scan failed: {e}. Run `knowledge_scan()` manually.*")
+            lines.append("")
+
+        return project
+
+
 async def _session_start_impl(agent: str = "", memory_session_log_fn=None) -> list[TextContent]:
     """Implementation of session_start tool."""
+    # Track session start in stats
+    from tool_modules.aa_workflow.src.agent_stats import start_session
+
+    start_session()
+
     lines = ["# 🚀 Session Started\n"]
 
     # Load all context sections using helper functions
@@ -233,6 +376,9 @@ async def _session_start_impl(agent: str = "", memory_session_log_fn=None) -> li
     _load_session_history(lines)
     _load_persona_info(lines, agent)
     _load_learned_patterns(lines)
+
+    # Load project-specific knowledge (auto-scans if needed)
+    detected_project = _load_project_knowledge(lines, agent)
 
     # Show available skills
     lines.append("## ⚡ Quick Skills\n")
@@ -261,7 +407,8 @@ async def _session_start_impl(agent: str = "", memory_session_log_fn=None) -> li
 
     # Log session start (if function provided)
     if memory_session_log_fn:
-        await memory_session_log_fn("Session started", f"Agent: {agent or 'none'}")
+        project_info = f", Project: {detected_project}" if detected_project else ""
+        await memory_session_log_fn("Session started", f"Agent: {agent or 'none'}{project_info}")
 
     return [TextContent(type="text", text="\n".join(lines))]
 

@@ -287,6 +287,11 @@ async def _memory_read_impl(key: str = "") -> list[TextContent]:
     Returns:
         Memory contents or list of available memory files.
     """
+    # Track memory read
+    from tool_modules.aa_workflow.src.agent_stats import record_memory_read
+
+    record_memory_read()
+
     if not key:
         # List available memory
         lines = ["## Available Memory\n"]
@@ -334,6 +339,11 @@ async def _memory_write_impl(key: str, content: str) -> list[TextContent]:
     Returns:
         Confirmation of the write.
     """
+    # Track memory write
+    from tool_modules.aa_workflow.src.agent_stats import record_memory_write
+
+    record_memory_write()
+
     # Handle with or without .yaml extension
     if not key.endswith(".yaml"):
         key = f"{key}.yaml"
@@ -371,6 +381,11 @@ async def _memory_update_impl(key: str, path: str, value: str) -> list[TextConte
     Returns:
         Confirmation of the update.
     """
+    # Track memory write
+    from tool_modules.aa_workflow.src.agent_stats import record_memory_write
+
+    record_memory_write()
+
     if not key.endswith(".yaml"):
         key = f"{key}.yaml"
 
@@ -418,6 +433,11 @@ async def _memory_append_impl(key: str, list_path: str, item: str) -> list[TextC
     Returns:
         Confirmation of the append.
     """
+    # Track memory write
+    from tool_modules.aa_workflow.src.agent_stats import record_memory_write
+
+    record_memory_write()
+
     if not key.endswith(".yaml"):
         key = f"{key}.yaml"
 
@@ -479,6 +499,10 @@ async def _memory_query_impl(key: str, query: str) -> list[TextContent]:
     Returns:
         Matching data as YAML.
     """
+    # Track memory read
+    from tool_modules.aa_workflow.src.agent_stats import record_memory_read
+
+    record_memory_read()
     try:
         from jsonpath_ng import parse
     except ImportError:
@@ -557,6 +581,11 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
     Returns:
         Confirmation of the log entry.
     """
+    # Track memory write
+    from tool_modules.aa_workflow.src.agent_stats import record_memory_write
+
+    record_memory_write()
+
     today = datetime.now().strftime("%Y-%m-%d")
     session_file = MEMORY_DIR / "sessions" / f"{today}.yaml"
     session_file.parent.mkdir(parents=True, exist_ok=True)

@@ -10,6 +10,7 @@ PROJECT_DIR = TOOL_MODULES_DIR.parent
 MEMORY_DIR = PROJECT_DIR / "memory"
 PERSONAS_DIR = PROJECT_DIR / "personas"
 SKILLS_DIR = PROJECT_DIR / "skills"
+KNOWLEDGE_DIR = MEMORY_DIR / "knowledge" / "personas"
 
 # GitHub configuration for error reporting
 GITHUB_REPO = "dmzoneill/redhat-ai-workflow"

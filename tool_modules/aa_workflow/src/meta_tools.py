@@ -3,6 +3,7 @@
 Provides tools for:
 - tool_list: List all available tools across modules
 - tool_exec: Execute any tool from any module dynamically
+- context_filter: Get context-aware tool recommendations for a message
 """
 
 import importlib.util
@@ -18,6 +19,17 @@ from server.tool_registry import ToolRegistry
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT
+
+# Import tool filtering for context-aware recommendations
+try:
+    from tool_modules.aa_ollama.src.skill_discovery import detect_skill
+    from tool_modules.aa_ollama.src.tool_filter import filter_tools_detailed
+
+    TOOL_FILTER_AVAILABLE = True
+except ImportError:
+    TOOL_FILTER_AVAILABLE = False
+    filter_tools_detailed = None
+    detect_skill = None
 
 TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
 
@@ -334,5 +346,155 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             tool_exec("gitlab_mr_list", '{"project": "your-backend"}')
         """
         return await _tool_exec_impl(tool_name, args, create_issue_fn)
+
+    @registry.tool()
+    async def context_filter(
+        message: str,
+        persona: str = "developer",
+    ) -> list[TextContent]:
+        """
+        Get context-aware tool recommendations for a message.
+
+        Uses the 4-layer HybridToolFilter to analyze your message and return:
+        - Recommended tools for this task
+        - Detected skill (if any)
+        - Memory context (active issues, repo, branch)
+        - Learned patterns (known fixes)
+        - Semantic knowledge (relevant code)
+
+        Call this FIRST when starting a complex task to understand what tools
+        and context are available.
+
+        Args:
+            message: The task or question you want to accomplish
+            persona: Current persona (developer, devops, incident, release)
+
+        Returns:
+            Context-aware recommendations including tools, skill, and enriched context.
+
+        Example:
+            context_filter("deploy MR 1459 to ephemeral")
+            # Returns: detected skill, recommended tools, memory state, etc.
+        """
+        if not TOOL_FILTER_AVAILABLE:
+            return [
+                TextContent(
+                    type="text",
+                    text="⚠️ Tool filtering not available. Install: pip install sentence-transformers lancedb",
+                )
+            ]
+
+        try:
+            # Detect skill first
+            detected_skill = detect_skill(message) if detect_skill else None
+
+            # Run the 4-layer filter
+            result = filter_tools_detailed(
+                message=message,
+                persona=persona,
+                detected_skill=detected_skill,
+            )
+
+            # Format the response
+            ctx = result.get("context", {})
+            lines = []
+
+            # Header
+            lines.append(f'## 🎯 Context Analysis for: "{message[:50]}..."')
+            lines.append("")
+
+            # Persona
+            persona_icon = {"developer": "👨‍💻", "devops": "🔧", "incident": "🚨", "release": "📦"}.get(
+                result["persona"], "👤"
+            )
+            if result.get("persona_auto_detected"):
+                lines.append(
+                    f"**Persona**: {persona_icon} {result['persona']} "
+                    f"(auto-detected via {result.get('persona_detection_reason', 'keyword')})"
+                )
+            else:
+                lines.append(f"**Persona**: {persona_icon} {result['persona']}")
+
+            # Skill
+            skill = ctx.get("skill", {})
+            if skill.get("name"):
+                lines.append(f"**Detected Skill**: 🎯 {skill['name']}")
+                if skill.get("description"):
+                    lines.append(f"  - {skill['description'][:100]}")
+                if skill.get("tools"):
+                    lines.append(f"  - Tools: {', '.join(skill['tools'][:10])}")
+                if skill.get("memory_ops"):
+                    mem_ops = skill["memory_ops"]
+                    if mem_ops.get("reads"):
+                        lines.append(f"  - Memory reads: {len(mem_ops['reads'])}")
+                    if mem_ops.get("writes"):
+                        lines.append(f"  - Memory writes: {len(mem_ops['writes'])}")
+            else:
+                lines.append("**Detected Skill**: None (will use general tools)")
+
+            lines.append("")
+
+            # Memory state
+            mem = ctx.get("memory_state", {})
+            lines.append("### 🧠 Memory State")
+            if mem.get("current_repo"):
+                lines.append(f"- Active repo: `{mem['current_repo']}`")
+            if mem.get("current_branch"):
+                lines.append(f"- Branch: `{mem['current_branch']}`")
+            active_issues = mem.get("active_issues", [])
+            if active_issues:
+                issue_keys = [i.get("key", str(i)) for i in active_issues[:3]]
+                lines.append(f"- Active issues: {', '.join(issue_keys)}")
+            if not any([mem.get("current_repo"), mem.get("current_branch"), active_issues]):
+                lines.append("- No active work context")
+
+            lines.append("")
+
+            # Learned patterns
+            patterns = ctx.get("learned_patterns", [])
+            if patterns:
+                lines.append("### 💡 Relevant Learned Patterns")
+                for p in patterns[:3]:
+                    lines.append(f"- **{p.get('pattern', 'Unknown')[:40]}**")
+                    if p.get("fix"):
+                        lines.append(f"  Fix: {p['fix'][:60]}")
+
+            # Semantic knowledge
+            semantic = ctx.get("semantic_knowledge", [])
+            if semantic:
+                lines.append("")
+                lines.append("### 🔍 Relevant Code (Semantic Search)")
+                for s in semantic[:3]:
+                    lines.append(f"- `{s.get('file', 'unknown')}`")
+                    if s.get("content"):
+                        lines.append(f"  ```\n  {s['content'][:100]}...\n  ```")
+
+            lines.append("")
+
+            # Recommended tools
+            tools = result.get("tools", [])
+            lines.append(f"### 📋 Recommended Tools ({len(tools)} tools)")
+            lines.append(f"Reduction: {result.get('reduction_pct', 0):.1f}% | Latency: {result.get('latency_ms', 0)}ms")
+            lines.append("")
+
+            # Group tools by category
+            tool_groups = {}
+            for t in tools:
+                prefix = t.split("_")[0] if "_" in t else "other"
+                if prefix not in tool_groups:
+                    tool_groups[prefix] = []
+                tool_groups[prefix].append(t)
+
+            for group, group_tools in sorted(tool_groups.items()):
+                lines.append(
+                    f"**{group}**: {', '.join(group_tools[:5])}"
+                    + (f" +{len(group_tools)-5} more" if len(group_tools) > 5 else "")
+                )
+
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        except Exception as e:
+            logger.error(f"Context filter error: {e}")
+            return [TextContent(type="text", text=f"❌ Error running context filter: {e}")]
 
     return registry.count

@@ -335,6 +335,42 @@ async def _gitlab_mr_view_impl(project: str, mr_id: int) -> str:
     return output if success else f"❌ Failed: {output}"
 
 
+async def _gitlab_commit_list_impl(project: str, mr_id: int = 0, ref: str = "", limit: int = 20) -> str:
+    """Implementation of gitlab_commit_list tool - list commits for MR or branch."""
+    import json
+
+    encoded_project = project.replace("/", "%2F")
+
+    # If mr_id provided, get MR commits
+    if mr_id:
+        endpoint = f"projects/{encoded_project}/merge_requests/{mr_id}/commits?per_page={limit}"
+    elif ref:
+        endpoint = f"projects/{encoded_project}/repository/commits?ref_name={ref}&per_page={limit}"
+    else:
+        endpoint = f"projects/{encoded_project}/repository/commits?per_page={limit}"
+
+    success, output = await run_glab(["api", endpoint], repo=project)
+    if not success:
+        return f"❌ Failed to get commits: {output}"
+
+    try:
+        commits = json.loads(output)
+        if not commits:
+            return "No commits found"
+
+        lines = []
+        for commit in commits[:limit]:
+            sha = commit.get("short_id", commit.get("id", "")[:8])
+            title = commit.get("title", "")
+            author = commit.get("author_name", "")
+            lines.append(f"- `{sha}` {title} ({author})")
+
+        header = f"## Commits for MR !{mr_id}" if mr_id else f"## Commits on {ref or 'default branch'}"
+        return f"{header}\n\n" + "\n".join(lines)
+    except json.JSONDecodeError:
+        return f"❌ Failed to parse commits: {output[:200]}"
+
+
 async def _gitlab_mr_sha_impl(project: str, mr_id: int) -> str:
     """Implementation of gitlab_mr_sha tool - get full commit SHA for an MR."""
     # Use glab api to get the MR details including sha
@@ -574,6 +610,22 @@ def _register_mr_tools(registry: ToolRegistry) -> None:
             Full 40-char commit SHA for the MR's head commit.
         """
         return await _gitlab_mr_sha_impl(project, mr_id)
+
+    @auto_heal()
+    @registry.tool()
+    async def gitlab_commit_list(project: str, mr_id: int = 0, ref: str = "", limit: int = 20) -> str:
+        """List commits for a merge request or branch.
+
+        Args:
+            project: GitLab project path (e.g., "automation-analytics/automation-analytics-backend")
+            mr_id: Merge request ID (if listing MR commits)
+            ref: Branch/ref name (if listing branch commits, ignored if mr_id provided)
+            limit: Maximum number of commits to return
+
+        Returns:
+            List of commits with SHA, title, and author.
+        """
+        return await _gitlab_commit_list_impl(project, mr_id, ref, limit)
 
 
 def register_tools(server: "FastMCP") -> int:

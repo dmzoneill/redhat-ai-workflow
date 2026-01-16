@@ -402,8 +402,19 @@ class SlackListener:
             if mention_pattern in text:
                 return True
 
-        # Check for watched keywords
+        # Check for @me command pattern (literal "@me " at start of message)
         text_lower = text.lower()
+        if text_lower.startswith("@me ") or text_lower == "@me":
+            logger.debug(f"@me command detected: {text[:50]}")
+            return True
+
+        # Check for ! or / commands in self-DM channel only
+        if self.config.self_dm_channel and channel_id == self.config.self_dm_channel:
+            if text.startswith("!") or (text.startswith("/") and not text.startswith("//")):
+                logger.debug(f"Self-DM command detected: {text[:50]}")
+                return True
+
+        # Check for watched keywords
         for keyword in self.config.watched_keywords:
             if keyword in text_lower:
                 return True

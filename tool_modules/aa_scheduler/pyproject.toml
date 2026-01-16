@@ -1,0 +1,10 @@
+[project]
+name = "aa_scheduler"
+version = "0.1.0"
+description = "Cron/scheduler management tools for AI Workflow"
+requires-python = ">=3.11"
+dependencies = ["croniter"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

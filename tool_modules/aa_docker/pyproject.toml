@@ -1,0 +1,10 @@
+[project]
+name = "aa_docker"
+version = "0.1.0"
+description = "Docker container management tools for AI Workflow"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
