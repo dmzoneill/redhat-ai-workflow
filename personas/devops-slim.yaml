@@ -1,13 +1,16 @@
 # DevOps Persona - Slim Configuration
-# Only essential tools to stay under limit when combined with other personas
+# Minimal tools for resource-constrained environments
 
 name: devops
-description: Infrastructure, monitoring (slim)
+description: Deployments, K8s (slim - 57 tools)
 persona: personas/devops.md
 
 # Slim tool selection - only the essentials
 tools:
-  - k8s           # 28 tools - Core Kubernetes
-  - prometheus    # 13 tools - Alerts and metrics
+  - workflow        # 18 tools - Core (memory, persona, session, skill, infra, meta)
+  - k8s_basic       # 22 tools - Essential k8s (pods, logs, deployments, events)
+  - jira_basic      # 17 tools - Issue tracking
 
-# Total: ~41 tools
+# Total: ~57 tools ✅
+# Missing from full: bonfire_basic (10), quay (8), docker (4)
+# Use tool_exec() for bonfire/quay/docker operations when needed

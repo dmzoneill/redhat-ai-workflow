@@ -1,13 +1,16 @@
 # Incident Persona - Slim Configuration
-# Only essential tools to stay under limit when combined with other personas
+# Minimal tools for resource-constrained environments
 
 name: incident
-description: Production incidents (slim)
+description: Alerts, Logs (slim - 45 tools)
 persona: personas/incident.md
 
 # Slim tool selection - only the essentials
 tools:
-  - alertmanager  # 7 tools - Alert silencing
-  - kibana        # 9 tools - Log search
+  - workflow          # 18 tools - Core (memory, persona, session, skill, infra, meta)
+  - k8s_basic         # 22 tools - Essential k8s (pods, logs, deployments, events)
+  - prometheus_basic  # 5 tools - Metrics, alerts
 
-# Total: ~16 tools
+# Total: ~45 tools ✅
+# Missing from full: kibana (9), jira_basic (17), alertmanager (7)
+# Use tool_exec() for log search and alertmanager when needed

@@ -6,9 +6,9 @@ description: Production incident response and recovery
 persona: personas/incident.md
 
 # Tool modules to load (from tool_modules/aa_*)
-# Using split modules to stay under 100 tools
+# Clean separation of concerns - each module has a single purpose
 tools:
-  - workflow          # 18 tools - Skills, agents, memory (REQUIRED)
+  - workflow          # 18 tools - Core (memory, persona, session, skill, infra, meta)
   - k8s_basic         # 22 tools - Essential k8s (pods, logs, deployments, events)
   - prometheus_basic  # 5 tools - Metrics, alerts, health checks
   - kibana            # 9 tools - Log search
@@ -16,7 +16,7 @@ tools:
   - alertmanager      # 7 tools - Silence management
 
 # Total: ~78 tools ✅
-# Note: k8s_extra, prometheus_extra available via tool_exec() if needed
+# Note: knowledge, project, scheduler modules available via tool_exec() if needed
 
 skills:
   # Investigation
