@@ -7,7 +7,7 @@ description: "Run the skill test runner to validate all skills work correctly."
 Run the skill test runner to validate all skills work correctly.
 
 ```bash
-cd /home/daoneill/src/redhat-ai-workflow && source ~/bonfire_venv/bin/activate && python scripts/skill_test_runner.py
+cd /home/daoneill/src/redhat-ai-workflow && source .venv/bin/activate && python scripts/skill_test_runner.py
 ```
 
 This will:

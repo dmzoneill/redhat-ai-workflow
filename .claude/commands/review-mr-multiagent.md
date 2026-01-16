@@ -1,130 +1,214 @@
-# Multi-Agent Code Review
+---
+name: review-mr-multiagent
+description: "**Description:** Run comprehensive multi-agent code review with 6 specialized agents (hybrid Claude + Gemini)."
+arguments:
+  - name: mr_id
+---
+# /review-mr-multiagent
 
 **Description:** Run comprehensive multi-agent code review with 6 specialized agents (hybrid Claude + Gemini).
+
+**Usage:**
+```text
+skill_run("review_pr_multiagent", '{"mr_id": 1482}')
+```
 
 ## Specialized Agents
 
 Each agent focuses on a specific aspect using Claude or Gemini via Vertex AI:
 
-- **Architecture** (Claude): Design patterns, SOLID principles, code organization
-- **Security** (Gemini): Vulnerabilities, auth issues, OWASP Top 10
-- **Performance** (Claude): Algorithm efficiency, database queries, scalability
-- **Testing** (Gemini): Test coverage, edge cases, test quality
-- **Documentation** (Claude): Comments, API docs, README updates
-- **Style** (Gemini): Naming conventions, formatting, consistency
+- 🏗️ **Architecture** (Claude): Design patterns, SOLID principles, code organization
+- 🔒 **Security** (Gemini): Vulnerabilities, auth issues, OWASP Top 10
+- ⚡ **Performance** (Claude): Algorithm efficiency, database queries, scalability
+- 🧪 **Testing** (Gemini): Test coverage, edge cases, test quality
+- 📝 **Documentation** (Claude): Comments, API docs, README updates
+- 🎨 **Style** (Gemini): Naming conventions, formatting, consistency
+
+**Coordinator**: Synthesizes all reviews into unified feedback
 
 **No API Keys Required** - Uses your Claude Code/Gemini CLI setup with Vertex AI!
 
-## Usage
+## Performance
 
-**Basic review (auto-posts to MR):**
-```bash
-skill_run("review_pr_multiagent", '{"mr_id": 1483, "post_combined": true}')
+- **Time:** ~2-3 minutes (6 agents running sequentially via CLI)
+- **Quality:** Expert-level insights from specialized agents with diverse model perspectives
+- **Cost:** Depends on your Vertex AI pricing
+- **Models:** Hybrid approach - 3 Claude agents + 3 Gemini agents
+
+## Options
+
+### Full Review (Default)
+```text
+skill_run("review_pr_multiagent", '{"mr_id": 1482}')
 ```
 
-**Preview review without posting:**
-```bash
-skill_run("review_pr_multiagent", '{"mr_id": 1483}')
-```
+### Selective Agents
+Run only specific agents to optimize cost and time:
 
-**Debug mode (show full output):**
-```bash
-skill_run("review_pr_multiagent", '{"mr_id": 1483, "debug": true}')
-```
-
-## Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `mr_id` | integer | *required* | GitLab MR ID to review |
-| `post_combined` | boolean | `false` | Post synthesized review to MR |
-| `debug` | boolean | `false` | Show full review output (up to 10k chars) |
-| `agents` | string | all 6 agents | Comma-separated agent list |
-| `model` | string | `sonnet` | Model to use for agents |
-
-## Selective Agent Reviews
-
-**Security and testing only:**
-```bash
+**Security audit:**
+```text
 skill_run("review_pr_multiagent", '{
-  "mr_id": 1483,
-  "agents": "security,testing",
-  "post_combined": true
+  "mr_id": 1482,
+  "agents": "security,architecture"
+}')
+```
+Cost: ~$0.05, Time: ~20s
+
+**Hotfix check:**
+```text
+skill_run("review_pr_multiagent", '{
+  "mr_id": 1482,
+  "agents": "security,testing"
+}')
+```
+Cost: ~$0.03, Time: ~15s
+
+**Documentation review:**
+```text
+skill_run("review_pr_multiagent", '{
+  "mr_id": 1482,
+  "agents": "documentation,style"
+}')
+```
+Cost: ~$0.01, Time: ~10s
+
+### Preview Mode
+Generate review without posting to MR:
+```text
+skill_run("review_pr_multiagent", '{
+  "mr_id": 1482,
+  "post_combined": false
 }')
 ```
 
-**Architecture and performance only:**
-```bash
+### Sequential Execution
+For rate limiting or debugging:
+```text
 skill_run("review_pr_multiagent", '{
-  "mr_id": 1483,
-  "agents": "architecture,performance",
-  "post_combined": true
+  "mr_id": 1482,
+  "parallel": false
 }')
 ```
+Time: ~3-4 minutes
 
-## How It Works
+## What It Does
 
-1. **Parallel Execution**: All 6 agents run simultaneously (~1.8 minutes total)
-2. **Specialized Analysis**: Each agent reviews from their expertise area
-3. **Synthesis**: Final agent combines all reviews into a natural, single-engineer perspective
-4. **Output**: Professional review without mentioning AI/agents/tools
+1. **Fetches MR details** - Title, description, author, status
+2. **Gets code diff** - All changes for analysis
+3. **Runs specialized agents** - Each agent reviews in parallel
+4. **Coordinates findings** - Deduplicates and prioritizes issues
+5. **Posts combined review** - Unified feedback on MR
+6. **Auto-approves** - If no critical issues found
 
 ## Output Format
 
-The final review sounds like it's from a single senior engineer:
+The coordinator creates a structured review:
 
 ```markdown
-# Code Review: MR !1483
+## 🤖 Multi-Agent Code Review
 
-Thanks for working on this rollups issue. I've reviewed the changes...
+### 🔴 Critical Issues
+- Issues that must be fixed before merge
 
-## Critical Issues
+### 🟡 Warnings
+- Issues that should be addressed
 
-[Substantive findings organized by severity]
+### 💡 Suggestions
+- Nice-to-have improvements
 
-## Warnings
+### 📊 Summary
+- Overall assessment and recommendation
+```text
 
-[Important considerations]
+## Example Workflows
 
-## Suggestions
+**High-priority feature:**
+```text
+skill_run("review_pr_multiagent", '{"mr_id": 1482}')
+```text
 
-[Improvements and optimizations]
-```
-
-**No emojis, no AI mentions, no multi-agent references** - just professional feedback.
-
-## Performance
-
-- **Time**: ~1.8 minutes (with parallel execution)
-- **Agents**: 6 specialized reviewers
-- **Models**: Hybrid Claude + Gemini via Vertex AI
-- **Speedup**: 4.2x faster than sequential execution
-
-## Examples
-
-**Full review with posting:**
-```bash
-skill_run("review_pr_multiagent", '{"mr_id": 1483, "post_combined": true}')
-```
-
-**Quick security/testing check:**
-```bash
+**Production hotfix:**
+```text
 skill_run("review_pr_multiagent", '{
   "mr_id": 1483,
-  "agents": "security,testing",
-  "post_combined": true
+  "agents": "security,testing"
+}')
+```text
+
+**New API endpoint:**
+```text
+skill_run("review_pr_multiagent", '{
+  "mr_id": 1484,
+  "agents": "security,architecture,performance"
 }')
 ```
 
-**Preview before posting:**
-```bash
-skill_run("review_pr_multiagent", '{"mr_id": 1483}')
-# Review, then post manually if satisfied
-skill_run("review_pr_multiagent", '{"mr_id": 1483, "post_combined": true}')
+## Model Optimization
+
+The system uses tiered model selection for cost optimization:
+
+| Model | Cost | Speed | Best For |
+|-------|------|-------|----------|
+| **Opus 4.5** | 10x | Slowest | Reserved for special cases |
+| **Sonnet 4.5** | 5x | Medium | Critical reasoning (security, architecture) |
+| **Sonnet 3.7** | 3x | Fast | Balanced tasks (performance, testing) |
+| **Haiku 3.5** | 1x | Very fast | Simple tasks (docs, style) |
+
+## Comparison: Single vs Multi-Agent
+
+| Aspect | Single Agent | Multi-Agent |
+|--------|-------------|-------------|
+| **Coverage** | Broad but shallow | Deep in each domain |
+| **Cost** | 1 API call (~$0.02) | 7 API calls (~$0.12) |
+| **Time** | ~10 seconds | ~30 seconds (parallel) |
+| **Quality** | Good overall | Excellent in focus areas |
+| **Specialization** | Generalist | 6 specialists |
+
+## Use Cases
+
+**When to use multi-agent:**
+- Production releases
+- Security-critical changes
+- Major architectural changes
+- High-impact features
+- New APIs or services
+
+**When to use single-agent:**
+- Small bug fixes
+- Documentation updates
+- Simple refactoring
+- Quick reviews
+
+## Integration
+
+Replace single-agent reviews in workflows:
+```yaml
+# Old
+- tool: skill_run
+  args:
+    skill_name: "review_pr"
+    inputs: '{"mr_id": {{ mr_id }}}'
+
+# New - Multi-agent
+- tool: skill_run
+  args:
+    skill_name: "review_pr_multiagent"
+    inputs: '{"mr_id": {{ mr_id }}}'
 ```
 
-## See Also
+## Quick Reference
 
-- Documentation: `docs/multi-agent-code-review.md`
-- Model selection: `docs/multiagent-model-selection.md`
-- Single-agent review: `/review` skill
+**Available Agents:**
+- `architecture` - Design patterns, SOLID principles
+- `security` - Vulnerabilities, OWASP Top 10
+- `performance` - Efficiency, optimization
+- `testing` - Coverage, edge cases
+- `documentation` - Comments, API docs
+- `style` - Naming, formatting
+
+**Agent Combinations:**
+- All agents: Full review (~$0.12, 30s)
+- `security,architecture`: Security audit (~$0.05, 20s)
+- `security,testing`: Hotfix check (~$0.03, 15s)
+- `documentation,style`: Docs review (~$0.01, 10s)
+- `architecture,performance,testing`: Feature review (~$0.08, 25s)

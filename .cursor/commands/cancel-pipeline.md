@@ -2,6 +2,13 @@
 
 Cancel a running Tekton pipeline.
 
+## Prerequisites
+
+Load the release persona first:
+```text
+persona_load("release")
+```
+
 ## Instructions
 
 ```text

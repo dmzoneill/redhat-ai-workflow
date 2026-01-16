@@ -1,3 +1,7 @@
+---
+name: smoke-tools
+description: "Comprehensive smoke test of ALL 203 MCP tools across 16 modules."
+---
 # Smoke Test ALL MCP Tools
 
 Comprehensive smoke test of ALL 203 MCP tools across 16 modules.

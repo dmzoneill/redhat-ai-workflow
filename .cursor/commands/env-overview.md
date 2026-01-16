@@ -2,6 +2,14 @@
 
 Full health check of a Kubernetes environment.
 
+## Prerequisites
+
+Load the devops or incident persona first:
+```text
+persona_load("devops")   # For routine checks
+persona_load("incident") # During incident response
+```
+
 ## Instructions
 
 ```text

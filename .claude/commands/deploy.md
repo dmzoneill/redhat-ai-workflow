@@ -8,6 +8,13 @@ arguments:
 
 **Description:** Deploy a Merge Request to an ephemeral environment for testing.
 
+**Prerequisites:**
+
+Load the devops persona first:
+```text
+persona_load("devops")
+```
+
 **Usage:**
 ```text
 skill_run("test_mr_ephemeral", '{"mr_id": 1450}')

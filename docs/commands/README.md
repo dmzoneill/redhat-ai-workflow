@@ -2,7 +2,7 @@
 
 Cursor commands are slash commands you can invoke directly in the Cursor IDE chat. Type `/` to see available commands.
 
-**Total: 64 commands** across 10 categories.
+**Total: 82 commands** across 12 categories.
 
 ## Quick Reference
 
@@ -16,6 +16,8 @@ Cursor commands are slash commands you can invoke directly in the Cursor IDE cha
 | [📋 Jira](#-jira-management) | `/create-issue`, `/clone-issue`, `/sprint-planning` |
 | [📅 Calendar & Email](#-calendar--email) | `/my-calendar`, `/schedule-meeting`, `/setup-gmail`, `/google-reauth` |
 | [🔐 Infrastructure](#-infrastructure) | `/konflux-status`, `/appinterface-check`, `/ci-health`, `/cancel-pipeline`, `/check-secrets`, `/scan-vulns` |
+| [📚 Knowledge](#-knowledge) | `/knowledge-scan`, `/knowledge-load`, `/knowledge-update`, `/knowledge-learn`, `/knowledge-list`, `/bootstrap-knowledge`, `/learn-architecture` |
+| [📁 Project](#-project-management) | `/add-project`, `/list-projects`, `/detect-project`, `/remove-project` |
 | [🔍 Discovery](#-discovery) | `/tools`, `/personas`, `/list-skills`, `/smoke-tools`, `/smoke-skills`, `/memory` |
 | [🛠️ Utilities](#️-utilities) | `/debug-tool`, `/learn-fix`, `/learn-pattern`, `/deploy`, `/load-developer`, `/load-devops`, `/notify-mr`, `/notify-team`, `/memory-edit`, `/memory-cleanup`, `/memory-init` |
 
@@ -559,6 +561,124 @@ skill_run("scan_vulnerabilities", '{"image": "quay.io/..."}')
 
 ---
 
+## 📚 Knowledge
+
+### `/knowledge-scan` 🔍
+**Scan a project and generate persona-specific knowledge.**
+
+```text
+knowledge_scan(project="my-project", persona="developer")
+```
+
+Detects: Architecture, patterns, testing approach, gotchas.
+
+---
+
+### `/knowledge-load` 📥
+**Load project knowledge into context.**
+
+```text
+knowledge_load(project="my-project", persona="developer")
+```
+
+Auto-loaded during `session_start()` based on current project.
+
+---
+
+### `/knowledge-update` ✏️
+**Update a specific section of project knowledge.**
+
+```text
+knowledge_update(section="architecture", content="api_framework: FastAPI")
+```
+
+---
+
+### `/knowledge-learn` 📖
+**Record learnings from completed tasks.**
+
+```text
+knowledge_learn(learning="Use Depends() for DB sessions", task="Auth implementation")
+```
+
+---
+
+### `/knowledge-list` 📋
+**List all available knowledge files.**
+
+```text
+knowledge_list()
+```
+
+---
+
+### `/bootstrap-knowledge` 🚀
+**Generate comprehensive knowledge for all personas.**
+
+```text
+skill_run("bootstrap_knowledge", '{"project": "my-project"}')
+```
+
+Creates knowledge for developer, devops, tester, and release personas.
+
+---
+
+### `/learn-architecture` 🏗️
+**Deep scan of project architecture.**
+
+```text
+skill_run("learn_architecture", '{"project": "my-project"}')
+```
+
+---
+
+## 📁 Project Management
+
+### `/add-project` ➕
+**Add a new project to config.json with auto-detection.**
+
+```text
+skill_run("add_project", '{"path": "/path/to/project", "jira_project": "AAP"}')
+```
+
+Or use the tool directly:
+```text
+project_add(name="my-project", path="/path", gitlab="org/repo", jira_project="AAP")
+```
+
+---
+
+### `/list-projects` 📋
+**List all configured projects.**
+
+```text
+project_list()
+```
+
+Shows path, GitLab, Jira, and status for each project.
+
+---
+
+### `/detect-project` 🔍
+**Auto-detect project settings from a directory.**
+
+```text
+project_detect(path="/path/to/project")
+```
+
+Detects: Language, default branch, GitLab remote, lint/test commands, scopes.
+
+---
+
+### `/remove-project` ❌
+**Remove a project from config.json.**
+
+```text
+project_remove(name="my-project", confirm=True)
+```
+
+---
+
 ## 🔍 Discovery
 
 ### `/tools` 🔧
@@ -725,8 +845,10 @@ All commands are defined in `.cursor/commands/`:
 
 ```text
 .cursor/commands/
+├── add-project.md          # NEW: Add project to config
 ├── appinterface-check.md
 ├── beer.md
+├── bootstrap-knowledge.md  # NEW: Full knowledge generation
 ├── cancel-pipeline.md
 ├── check-feedback.md
 ├── check-namespaces.md
@@ -743,6 +865,7 @@ All commands are defined in `.cursor/commands/`:
 ├── debug-tool.md
 ├── deploy-ephemeral.md
 ├── deploy.md
+├── detect-project.md       # NEW: Auto-detect project settings
 ├── env-overview.md
 ├── extend-ephemeral.md
 ├── google-reauth.md
@@ -750,9 +873,16 @@ All commands are defined in `.cursor/commands/`:
 ├── integration-tests.md
 ├── investigate-alert.md
 ├── jira-hygiene.md
+├── knowledge-learn.md      # NEW: Record learnings
+├── knowledge-list.md       # NEW: List knowledge files
+├── knowledge-load.md       # NEW: Load knowledge
+├── knowledge-scan.md       # NEW: Scan project for knowledge
+├── knowledge-update.md     # NEW: Update knowledge sections
 ├── konflux-status.md
+├── learn-architecture.md   # NEW: Deep architecture scan
 ├── learn-fix.md
 ├── learn-pattern.md
+├── list-projects.md        # NEW: List configured projects
 ├── list-skills.md
 ├── load-developer.md
 ├── load-devops.md
@@ -767,6 +897,7 @@ All commands are defined in `.cursor/commands/`:
 ├── personas.md
 ├── rebase-pr.md
 ├── release-prod.md
+├── remove-project.md       # NEW: Remove project from config
 ├── review-all-open.md
 ├── review-mr-multiagent.md
 ├── review-mr-with-tests.md

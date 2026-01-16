@@ -2,6 +2,13 @@
 
 Validate app-interface GitOps configuration.
 
+## Prerequisites
+
+Load the release persona first:
+```text
+persona_load("release")
+```
+
 ## Instructions
 
 ```text
