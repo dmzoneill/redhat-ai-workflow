@@ -71,8 +71,82 @@ steps:
   - name: init_autoheal
     description: "Initialize failure tracking"
     compute: |
-      result = {"git_failures": []}
+      result = {"git_failures": [], "attempts": 0}
     output: autoheal_state
+    on_error: continue
+
+  # ==================== MEMORY CONTEXT ====================
+
+  - name: check_known_issues
+    description: "Check for known rebase issues"
+    compute: |
+      # Check known issues for git rebase
+      issues = memory.check_known_issues("git_rebase", "")
+
+      result = {
+          "has_known_issues": len(issues.get("matches", [])) > 0 if issues else False,
+          "issues": issues.get("matches", [])[:3] if issues else [],
+      }
+    output: known_issues
+    on_error: continue
+
+  - name: load_rebase_history
+    description: "Load previous rebase history for this branch"
+    compute: |
+      # Load learned patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      rebase_history = patterns.get("rebases", [])
+
+      # Find history for similar branches
+      issue_key = inputs.get("issue_key", "")
+      mr_id = inputs.get("mr_id")
+
+      relevant_rebases = []
+      if issue_key:
+          relevant_rebases = [r for r in rebase_history if issue_key in str(r.get("branch", ""))]
+      elif mr_id:
+          relevant_rebases = [r for r in rebase_history if str(mr_id) == str(r.get("mr_id", ""))]
+
+      # Common conflict files
+      conflict_files = {}
+      for r in rebase_history:
+          for cf in r.get("conflict_files", []):
+              conflict_files[cf] = conflict_files.get(cf, 0) + 1
+
+      result = {
+          "previous_rebases": len(rebase_history),
+          "for_this_branch": relevant_rebases[-5:],
+          "common_conflict_files": sorted(conflict_files.keys(), key=lambda x: conflict_files[x], reverse=True)[:10],
+      }
+    output: rebase_history
+    on_error: continue
+
+  - name: get_coding_patterns
+    description: "Get coding patterns from knowledge for conflict resolution"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "patterns.coding"
+    output: coding_patterns_raw
+    on_error: continue
+
+  - name: parse_coding_patterns
+    description: "Parse coding patterns"
+    compute: |
+      patterns_result = coding_patterns_raw if 'coding_patterns_raw' in dir() and coding_patterns_raw else {}
+
+      coding_patterns = []
+      if isinstance(patterns_result, dict) and patterns_result.get('found'):
+          content = patterns_result.get('content', [])
+          if isinstance(content, list):
+              coding_patterns = content[:5]
+
+      result = {
+          'patterns': coding_patterns,
+          'has_patterns': len(coding_patterns) > 0,
+      }
+    output: coding_patterns
     on_error: continue
 
   # ==================== RESOLVE REPOSITORY ====================
@@ -378,6 +452,40 @@ steps:
     output: rebase_result
 
   # ==================== HANDLE CONFLICTS (AUTO-RESOLVE IF POSSIBLE) ====================
+
+  - name: search_conflict_context
+    description: "Find similar code patterns to help resolve conflicts"
+    condition: "rebase_result.get('conflicts') and rebase_result.get('conflict_files')"
+    tool: code_search
+    args:
+      query: "{{ rebase_result.conflict_files[0] if rebase_result.conflict_files else 'conflict resolution' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+      min_score: 0.5
+    output: conflict_context_raw
+    on_error: continue
+
+  - name: parse_conflict_context
+    description: "Parse conflict context search results"
+    condition: "conflict_context_raw"
+    compute: |
+      context_result = conflict_context_raw if conflict_context_raw else {}
+
+      similar_code = []
+      if isinstance(context_result, dict) and context_result.get('results'):
+          for r in context_result.get('results', [])[:3]:
+              similar_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+                  'preview': r.get('code_chunk', '')[:150] if r.get('code_chunk') else '',
+              })
+
+      result = {
+          'similar_code': similar_code,
+          'has_context': len(similar_code) > 0,
+      }
+    output: conflict_context
+    on_error: continue
 
   - name: analyze_and_resolve_conflicts
     description: "Analyze conflicts and auto-resolve obvious ones"
@@ -822,6 +930,178 @@ steps:
       details: "{{ 'Success' if rebase_log_context.success else ('Conflicts' if rebase_log_context.conflicts else 'Failed') }}"
     on_error: continue
 
+  - name: learn_rebase_pattern
+    description: "Learn from this rebase for future reference"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "rebases" not in patterns:
+          patterns["rebases"] = []
+
+      effective_result = final_rebase_result if 'final_rebase_result' in dir() and final_rebase_result else rebase_result
+
+      # Record this rebase
+      rebase_record = {
+          "branch": target_branch if target_branch else "unknown",
+          "mr_id": inputs.get("mr_id"),
+          "issue_key": inputs.get("issue_key"),
+          "base_branch": resolved_repo.get("default_branch", "main") if resolved_repo else "main",
+          "had_merge_commits": merge_check.get("has_merge_commits", False) if merge_check else False,
+          "merge_count": merge_check.get("merge_count", 0) if merge_check else 0,
+          "success": effective_result.get("success", False) if effective_result else False,
+          "had_conflicts": effective_result.get("conflicts", False) if effective_result else False,
+          "auto_resolved": conflict_resolution.get("all_resolved", False) if conflict_resolution else False,
+          "conflict_files": [nh.get("file") for nh in (conflict_resolution.get("needs_human", []) if conflict_resolution else [])],
+          "lint_passed": lint_check.get("passed", True) if lint_check else True,
+          "pushed": bool(push_result) if 'push_result' in dir() else False,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["rebases"].append(rebase_record)
+
+      # Keep last 200 rebase records
+      patterns["rebases"] = patterns["rebases"][-200:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "rebase pattern learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: track_conflict_prone_files
+    description: "Track files that frequently have conflicts during rebases"
+    condition: "conflict_resolution and conflict_resolution.get('needs_human')"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "conflict_prone_files" not in patterns:
+          patterns["conflict_prone_files"] = []
+
+      # Track each conflicting file
+      for nh in (conflict_resolution.get("needs_human", []) or []):
+          filepath = nh.get("file")
+          if not filepath:
+              continue
+
+          existing = [f for f in patterns["conflict_prone_files"] if f.get("file") == filepath]
+
+          if existing:
+              existing[0]["conflict_count"] = existing[0].get("conflict_count", 1) + 1
+              existing[0]["last_conflict"] = datetime.now().isoformat()
+          else:
+              patterns["conflict_prone_files"].append({
+                  "file": filepath,
+                  "conflict_count": 1,
+                  "first_conflict": datetime.now().isoformat(),
+                  "last_conflict": datetime.now().isoformat(),
+              })
+
+      # Keep top 100 conflict-prone files
+      patterns["conflict_prone_files"] = sorted(
+          patterns["conflict_prone_files"],
+          key=lambda x: x.get("conflict_count", 0),
+          reverse=True
+      )[:100]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "conflict-prone files tracked"
+    output: conflict_tracking_result
+    on_error: continue
+
+  - name: update_mr_state
+    description: "Update MR state in memory after rebase"
+    condition: "inputs.get('mr_id')"
+    compute: |
+      from datetime import datetime
+
+      # Update current work state
+      current_work = memory.read_memory("state/current_work") or {}
+      if "open_mrs" not in current_work:
+          current_work["open_mrs"] = []
+
+      effective_result = final_rebase_result if 'final_rebase_result' in dir() and final_rebase_result else rebase_result
+
+      # Find and update this MR
+      for mr in current_work["open_mrs"]:
+          if mr.get("id") == inputs.get("mr_id"):
+              mr["last_rebase"] = datetime.now().isoformat()
+              mr["rebase_success"] = effective_result.get("success", False) if effective_result else False
+              mr["pushed"] = bool(push_result) if 'push_result' in dir() else False
+              break
+
+      memory.write_memory("state/current_work", current_work)
+      result = "MR state updated"
+    output: mr_state_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_rebase_failures
+    description: "Detect failure patterns from rebase operations"
+    compute: |
+      errors_detected = []
+
+      # Check git failures
+      rebase_text = str(rebase_raw) if 'rebase_raw' in dir() and rebase_raw else ""
+      fetch_text = str(fetch_result) if 'fetch_result' in dir() and fetch_result else ""
+      combined = rebase_text + fetch_text
+
+      if "conflict" in combined.lower():
+          errors_detected.append({
+              "tool": "git_rebase",
+              "pattern": "conflict",
+              "cause": "Rebase resulted in merge conflicts",
+              "fix": "Resolve conflicts manually, then git add and git rebase --continue"
+          })
+      if "permission denied" in combined.lower():
+          errors_detected.append({
+              "tool": "git_fetch",
+              "pattern": "permission denied",
+              "cause": "SSH key not loaded or git credentials expired",
+              "fix": "Run ssh-add or check git credentials"
+          })
+
+      # Check GitLab failures
+      mr_text = str(mr_details) if 'mr_details' in dir() and mr_details else ""
+      if "no such host" in mr_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_view",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      result = errors_detected
+    output: rebase_errors_detected
+    on_error: continue
+
+  - name: learn_rebase_conflict_failure
+    description: "Learn from rebase conflict failures"
+    condition: "rebase_errors_detected and any(e.get('pattern') == 'conflict' for e in rebase_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "git_rebase"
+      error_pattern: "conflict"
+      root_cause: "Rebase resulted in merge conflicts"
+      fix_description: "Resolve conflicts manually, then git add and git rebase --continue"
+    output: rebase_conflict_fix_learned
+    on_error: continue
+
+  - name: learn_rebase_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "rebase_errors_detected and any(e.get('pattern') == 'no such host' for e in rebase_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_view"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: rebase_vpn_fix_learned
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
@@ -835,6 +1115,24 @@ outputs:
       ## 🛠️ Resolve Remaining Conflicts
 
       I auto-resolved what I could, but some conflicts need your judgment:
+
+      {% if conflict_context and conflict_context.has_context %}
+      ### 🔍 Similar Code for Reference
+
+      These files have similar patterns that may help resolve conflicts:
+
+      {% for code in conflict_context.similar_code[:3] %}
+      - `{{ code.file }}` ({{ "%.0f"|format(code.score * 100) }}% similar)
+      {% endfor %}
+      {% endif %}
+
+      {% if coding_patterns and coding_patterns.has_patterns %}
+      ### 📋 Coding Patterns to Follow
+
+      {% for pattern in coding_patterns.patterns[:3] %}
+      - {{ pattern }}
+      {% endfor %}
+      {% endif %}
 
       **Step 1:** Open each file marked with ⚠️ above and resolve the conflicts
       Look for markers like:

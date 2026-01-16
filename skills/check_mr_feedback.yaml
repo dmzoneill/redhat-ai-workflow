@@ -42,6 +42,54 @@ inputs:
     description: "Use Slack link format in summary"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_review_patterns
+    description: "Get code review patterns from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      query: "gotchas"
+    output: review_knowledge_raw
+    on_error: continue
+
+  - name: parse_review_knowledge
+    description: "Parse review knowledge for feedback context"
+    compute: |
+      knowledge_text = str(review_knowledge_raw) if review_knowledge_raw else ""
+
+      gotchas = []
+      patterns = []
+
+      # Extract gotchas related to code review
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["review", "feedback", "comment", "approval", "mr", "merge"]):
+                  gotchas.append(line.strip()[:150])
+              if any(kw in line_lower for kw in ["pattern", "convention", "style", "best practice"]):
+                  patterns.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+          "patterns": patterns[:3],
+      }
+    output: review_knowledge
+    on_error: continue
+
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_mr_list"
+      error_text: ""
+    output: gitlab_known_issues
+    on_error: continue
+
   # Step 1: Get list of user's open MRs using MCP tool
   - name: get_my_mrs
     description: "Fetch all open MRs authored by the current user"
@@ -432,6 +480,47 @@ steps:
 
       result = f"Added {added} follow-ups"
     output: followup_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_mr_feedback_failures
+    description: "Detect failure patterns from MR feedback checks"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab API failures
+      mrs_text = str(open_mrs_raw) if 'open_mrs_raw' in dir() and open_mrs_raw else ""
+
+      if "no such host" in mrs_text.lower() or "dial tcp" in mrs_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in mrs_text.lower() or "401" in mrs_text:
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "unauthorized",
+              "cause": "GitLab authentication failed or token expired",
+              "fix": "Check GitLab token in config.json"
+          })
+
+      result = errors_detected
+    output: mr_feedback_errors_detected
+    on_error: continue
+
+  - name: learn_mr_feedback_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "mr_feedback_errors_detected and any(e.get('pattern') == 'no such host' for e in mr_feedback_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_list"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: mr_feedback_vpn_fix_learned
     on_error: continue
 
 outputs:

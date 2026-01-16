@@ -64,6 +64,58 @@ steps:
     output: autoheal_state
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_git_patterns
+    description: "Get git/branching patterns from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      query: "gotchas"
+    output: git_knowledge_raw
+    on_error: continue
+
+  - name: parse_git_knowledge
+    description: "Parse git knowledge for rebase context"
+    compute: |
+      knowledge_text = str(git_knowledge_raw) if git_knowledge_raw else ""
+
+      gotchas = []
+
+      # Extract gotchas related to git/branching
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["git", "branch", "rebase", "merge", "conflict", "push", "pull"]):
+                  gotchas.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+      }
+    output: git_knowledge
+    on_error: continue
+
+  - name: check_rebase_known_issues
+    description: "Check for known git rebase issues"
+    compute: |
+      # Check known issues for git rebase
+      rebase_issues = memory.check_known_issues("git_rebase", "") or {}
+      git_issues = memory.check_known_issues("git", "") or {}
+
+      all_issues = []
+      for issues in [rebase_issues, git_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: sync_known_issues
+    on_error: continue
+
   # ==================== RESOLVE REPOSITORY ====================
 
   - name: resolve_repo
@@ -379,6 +431,173 @@ steps:
       details: "{{ commit_status.behind }} commits behind, rebased: {{ rebase_result.success if rebase_result else 'skipped' }}"
     on_error: continue
 
+  - name: learn_sync_pattern
+    description: "Learn from branch sync for future reference"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "branch_syncs" not in patterns:
+          patterns["branch_syncs"] = []
+
+      # Record this sync
+      sync_record = {
+          "branch": branch_status.get("branch", "unknown") if branch_status else "unknown",
+          "repo": resolved_repo.get("path", "unknown") if resolved_repo else "unknown",
+          "base_branch": resolved_repo.get("default_branch", "main") if resolved_repo else "main",
+          "commits_behind": commit_status.get("behind", 0) if commit_status else 0,
+          "commits_ahead": commit_status.get("ahead", 0) if commit_status else 0,
+          "success": rebase_result.get("success", False) if rebase_result else False,
+          "had_conflicts": rebase_result.get("conflicts", False) if rebase_result else False,
+          "pushed": bool(push_result) if 'push_result' in dir() and push_result else False,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["branch_syncs"].append(sync_record)
+
+      # Keep last 100 sync records
+      patterns["branch_syncs"] = patterns["branch_syncs"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "sync pattern learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: track_branches_behind
+    description: "Track branches that frequently fall behind"
+    condition: "commit_status and commit_status.behind > 5"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "branches_falling_behind" not in patterns:
+          patterns["branches_falling_behind"] = []
+
+      branch_name = branch_status.get("branch", "") if branch_status else ""
+
+      # Track this branch
+      existing = [b for b in patterns["branches_falling_behind"] if b.get("branch") == branch_name]
+
+      if existing:
+          existing[0]["count"] = existing[0].get("count", 1) + 1
+          existing[0]["last_behind"] = commit_status.get("behind", 0)
+          existing[0]["last_synced"] = datetime.now().isoformat()
+      else:
+          patterns["branches_falling_behind"].append({
+              "branch": branch_name,
+              "repo": resolved_repo.get("path", "") if resolved_repo else "",
+              "count": 1,
+              "max_behind": commit_status.get("behind", 0),
+              "last_behind": commit_status.get("behind", 0),
+              "first_synced": datetime.now().isoformat(),
+              "last_synced": datetime.now().isoformat(),
+          })
+
+      # Update max
+      for b in patterns["branches_falling_behind"]:
+          if b.get("branch") == branch_name:
+              b["max_behind"] = max(b.get("max_behind", 0), commit_status.get("behind", 0))
+
+      # Keep top 30 by count
+      patterns["branches_falling_behind"] = sorted(
+          patterns["branches_falling_behind"],
+          key=lambda x: x.get("count", 0),
+          reverse=True
+      )[:30]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "branch behind pattern tracked"
+    output: behind_tracking_result
+    on_error: continue
+
+  - name: save_shared_context
+    description: "Save sync context for other skills"
+    compute: |
+      from datetime import datetime
+
+      # Share context that other skills can use
+      shared = memory.read_memory("state/shared_context") or {}
+
+      shared["last_branch_sync"] = {
+          "timestamp": datetime.now().isoformat(),
+          "branch": branch_status.get("branch", "") if branch_status else "",
+          "base": resolved_repo.get("default_branch", "main") if resolved_repo else "main",
+          "behind": commit_status.get("behind", 0) if commit_status else 0,
+          "ahead": commit_status.get("ahead", 0) if commit_status else 0,
+          "success": rebase_result.get("success", False) if rebase_result else False,
+          "pushed": bool(push_result) if 'push_result' in dir() and push_result else False,
+      }
+
+      memory.write_memory("state/shared_context", shared)
+      result = "shared context saved"
+    output: shared_context_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_sync_failures
+    description: "Detect failure patterns from sync operations"
+    compute: |
+      errors_detected = []
+
+      # Check git failures
+      rebase_text = str(rebase_raw) if 'rebase_raw' in dir() and rebase_raw else ""
+      fetch_text = str(fetch_result) if 'fetch_result' in dir() and fetch_result else ""
+      push_text = str(push_result) if 'push_result' in dir() and push_result else ""
+      combined = rebase_text + fetch_text + push_text
+
+      if "conflict" in combined.lower():
+          errors_detected.append({
+              "tool": "git_rebase",
+              "pattern": "conflict",
+              "cause": "Rebase resulted in merge conflicts",
+              "fix": "Resolve conflicts manually, then git add and git rebase --continue"
+          })
+      if "permission denied" in combined.lower():
+          errors_detected.append({
+              "tool": "git_fetch",
+              "pattern": "permission denied",
+              "cause": "SSH key not loaded or git credentials expired",
+              "fix": "Run ssh-add or check git credentials"
+          })
+      if "rejected" in combined.lower() and "push" in combined.lower():
+          errors_detected.append({
+              "tool": "git_push",
+              "pattern": "push rejected",
+              "cause": "Remote has changes not in local branch",
+              "fix": "Use --force-with-lease to push rebased branch"
+          })
+
+      result = errors_detected
+    output: sync_errors_detected
+    on_error: continue
+
+  - name: learn_sync_conflict_failure
+    description: "Learn from rebase conflict failures"
+    condition: "sync_errors_detected and any(e.get('pattern') == 'conflict' for e in sync_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "git_rebase"
+      error_pattern: "conflict"
+      root_cause: "Rebase resulted in merge conflicts"
+      fix_description: "Resolve conflicts manually, then git add and git rebase --continue"
+    output: sync_conflict_fix_learned
+    on_error: continue
+
+  - name: learn_sync_push_failure
+    description: "Learn from push rejected failures"
+    condition: "sync_errors_detected and any(e.get('pattern') == 'push rejected' for e in sync_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "git_push"
+      error_pattern: "push rejected"
+      root_cause: "Remote has changes not in local branch"
+      fix_description: "Use --force-with-lease to push rebased branch"
+    output: sync_push_fix_learned
+    on_error: continue
+
 outputs:
   - name: summary
     value: |
@@ -422,6 +641,16 @@ outputs:
       4. `git push --force-with-lease`
 
       **To abort:** `git rebase --abort`
+
+      {% if sync_known_issues and sync_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in sync_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
       {% else %}
       ❌ Rebase failed: {{ rebase_result.message }}
       {% endif %}

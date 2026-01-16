@@ -1,5 +1,6 @@
 # Skill: Weekly Summary
 # Generate a summary of work from session logs
+# Enhanced with knowledge and learning metrics
 
 name: weekly_summary
 description: |
@@ -11,10 +12,13 @@ description: |
   - MRs created/reviewed
   - Deployments and debugging sessions
   - Patterns learned
+  - **NEW:** Knowledge growth metrics
+  - **NEW:** Vector search usage stats
+  - **NEW:** Learned patterns summary
 
   Useful for weekly reports or sprint reviews.
 
-version: "1.1"
+version: "2.0"
 
 inputs:
   - name: days
@@ -42,6 +46,26 @@ inputs:
     description: "Use Slack link format"
 
 steps:
+
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_mr_list"
+      error_text: ""
+    output: gitlab_known_issues
+    on_error: continue
+
+  - name: check_jira_known_issues
+    description: "Check for known Jira issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "jira_search"
+      error_text: ""
+    output: jira_known_issues
+    on_error: continue
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -177,6 +201,120 @@ steps:
     args:
       key: "state/current_work"
     output: current_work_raw
+    on_error: continue
+
+  # ==================== KNOWLEDGE & LEARNING METRICS ====================
+
+  - name: load_learned_patterns
+    description: "Load learned patterns from memory"
+    tool: memory_read
+    args:
+      key: "learned/patterns"
+    output: learned_patterns_raw
+    on_error: continue
+
+  - name: load_tool_fixes
+    description: "Load tool fixes from memory"
+    tool: memory_read
+    args:
+      key: "learned/tool_fixes"
+    output: tool_fixes_raw
+    on_error: continue
+
+  - name: get_knowledge_stats
+    description: "Get knowledge base statistics"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      section: "metadata"
+    output: knowledge_metadata_raw
+    on_error: continue
+
+  - name: get_vector_stats
+    description: "Get vector index statistics"
+    tool: code_stats
+    args:
+      project: "automation-analytics-backend"
+    output: vector_stats_raw
+    on_error: continue
+
+  - name: parse_learning_metrics
+    description: "Parse learning and knowledge metrics"
+    compute: |
+      import re
+      import yaml
+
+      metrics = {
+          "patterns_count": 0,
+          "tool_fixes_count": 0,
+          "knowledge_confidence": 0,
+          "vector_files": 0,
+          "vector_chunks": 0,
+          "vector_searches": 0,
+          "recent_patterns": [],
+          "recent_fixes": [],
+      }
+
+      # Parse learned patterns
+      if 'learned_patterns_raw' in dir() and learned_patterns_raw:
+          try:
+              if isinstance(learned_patterns_raw, str):
+                  patterns_data = yaml.safe_load(learned_patterns_raw) or {}
+              else:
+                  patterns_data = learned_patterns_raw or {}
+
+              # Count all pattern categories
+              for key, value in patterns_data.items():
+                  if isinstance(value, list):
+                      metrics["patterns_count"] += len(value)
+                      # Get recent patterns
+                      for p in value[-3:]:
+                          if isinstance(p, dict):
+                              metrics["recent_patterns"].append(p.get("pattern", str(p))[:50])
+          except:
+              pass
+
+      # Parse tool fixes
+      if 'tool_fixes_raw' in dir() and tool_fixes_raw:
+          try:
+              if isinstance(tool_fixes_raw, str):
+                  fixes_data = yaml.safe_load(tool_fixes_raw) or {}
+              else:
+                  fixes_data = tool_fixes_raw or {}
+
+              fixes_list = fixes_data.get("fixes", [])
+              metrics["tool_fixes_count"] = len(fixes_list)
+
+              # Get recent fixes
+              for fix in fixes_list[-3:]:
+                  if isinstance(fix, dict):
+                      metrics["recent_fixes"].append(fix.get("tool_name", "unknown"))
+          except:
+              pass
+
+      # Parse knowledge metadata
+      if 'knowledge_metadata_raw' in dir() and knowledge_metadata_raw:
+          raw_text = str(knowledge_metadata_raw)
+          conf_match = re.search(r'confidence[:\s]+(\d+)', raw_text, re.I)
+          if conf_match:
+              metrics["knowledge_confidence"] = int(conf_match.group(1))
+
+      # Parse vector stats
+      if 'vector_stats_raw' in dir() and vector_stats_raw:
+          raw_text = str(vector_stats_raw)
+          files_match = re.search(r'(\d+)\s*files', raw_text)
+          chunks_match = re.search(r'(\d+)\s*chunks', raw_text)
+          searches_match = re.search(r'(\d+)\s*searches', raw_text)
+
+          if files_match:
+              metrics["vector_files"] = int(files_match.group(1))
+          if chunks_match:
+              metrics["vector_chunks"] = int(chunks_match.group(1))
+          if searches_match:
+              metrics["vector_searches"] = int(searches_match.group(1))
+
+      learning_metrics = metrics
+    output: learning_metrics
     on_error: continue
 
   - name: parse_external_data
@@ -382,6 +520,89 @@ steps:
       result = "\n".join(lines)
     output: formatted_summary
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_weekly_failures
+    description: "Detect failure patterns from weekly summary data gathering"
+    compute: |
+      errors_detected = []
+
+      # Check git failures
+      commit_text = str(recent_commits_raw) if 'recent_commits_raw' in dir() and recent_commits_raw else ""
+      if "permission denied" in commit_text.lower():
+          errors_detected.append({
+              "tool": "git_log",
+              "pattern": "permission denied",
+              "cause": "Git repository access denied",
+              "fix": "Check repository permissions and SSH keys"
+          })
+
+      # Check GitLab failures
+      gitlab_text = str(gitlab_mrs_raw) if 'gitlab_mrs_raw' in dir() and gitlab_mrs_raw else ""
+      if "no such host" in gitlab_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      # Check Jira failures
+      jira_text = str(jira_issues_raw) if 'jira_issues_raw' in dir() and jira_issues_raw else ""
+      if "command timed out" in jira_text.lower():
+          errors_detected.append({
+              "tool": "jira_search",
+              "pattern": "command timed out",
+              "cause": "Jira API timeout",
+              "fix": "Check VPN connection and retry"
+          })
+
+      # Check Konflux failures
+      konflux_text = str(konflux_releases_raw) if 'konflux_releases_raw' in dir() and konflux_releases_raw else ""
+      if "no route to host" in konflux_text.lower():
+          errors_detected.append({
+              "tool": "konflux_list_releases",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - Konflux cluster not reachable",
+              "fix": "Run vpn_connect() and kube_login('konflux')"
+          })
+
+      result = errors_detected
+    output: weekly_errors_detected
+    on_error: continue
+
+  - name: learn_weekly_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "weekly_errors_detected and any(e.get('pattern') == 'no such host' for e in weekly_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_list"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: weekly_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_weekly_konflux_failure
+    description: "Learn from Konflux VPN failures"
+    condition: "weekly_errors_detected and any(e.get('pattern') == 'no route to host' for e in weekly_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "konflux_list_releases"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - Konflux cluster not reachable"
+      fix_description: "Run vpn_connect() and kube_login('konflux')"
+    output: weekly_konflux_fix_learned
+    on_error: continue
+
+  - name: log_weekly_session
+    description: "Log weekly summary generation to session"
+    tool: memory_session_log
+    args:
+      action: "Generated weekly summary"
+      details: "{{ analysis.total_entries }} session entries, {{ external_data.commit_count if external_data else 0 }} commits"
+    on_error: continue
+
 outputs:
   - name: summary
     value: |
@@ -408,6 +629,31 @@ outputs:
       ### GitLab MRs
       {% for mr in external_data.gitlab_mrs[:5] %}
       - !{{ mr }}
+      {% endfor %}
+      {% endif %}
+
+      ## 🧠 Knowledge & Learning
+
+      | Metric | Value |
+      |--------|-------|
+      | Knowledge Confidence | {{ learning_metrics.knowledge_confidence }}% |
+      | Learned Patterns | {{ learning_metrics.patterns_count }} |
+      | Tool Fixes | {{ learning_metrics.tool_fixes_count }} |
+      | Vector Index Files | {{ learning_metrics.vector_files }} |
+      | Vector Index Chunks | {{ learning_metrics.vector_chunks }} |
+      | Code Searches | {{ learning_metrics.vector_searches }} |
+
+      {% if learning_metrics.recent_patterns %}
+      ### Recent Patterns Learned
+      {% for pattern in learning_metrics.recent_patterns %}
+      - {{ pattern }}
+      {% endfor %}
+      {% endif %}
+
+      {% if learning_metrics.recent_fixes %}
+      ### Recent Tool Fixes
+      {% for fix in learning_metrics.recent_fixes %}
+      - {{ fix }}
       {% endfor %}
       {% endif %}
 

@@ -1,0 +1,507 @@
+# Skill: Learn Architecture
+# Enhanced with semantic code search for pattern discovery
+
+name: learn_architecture
+description: |
+  Deep scan of project structure to update architecture knowledge.
+
+  **NEW Features:**
+  - Uses semantic code search to discover patterns
+  - Identifies code relationships and dependencies
+  - Analyzes error handling patterns
+  - Discovers API endpoints and data models
+version: "2.0"
+
+inputs:
+  - name: project
+    type: string
+    required: false
+    description: Project name from config.json (auto-detected from cwd if empty)
+  - name: persona
+    type: string
+    required: false
+    default: ""
+    description: Persona to update (uses current persona if empty)
+  - name: focus
+    type: string
+    required: false
+    default: ""
+    description: Specific area to focus on (e.g., "api", "tests", "models")
+  - name: use_vector_search
+    type: boolean
+    required: false
+    default: true
+    description: Use semantic vector search for deeper pattern discovery
+
+outputs:
+  - name: architecture_update
+    value: "{{ update_result }}"
+
+steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_vector_known_issues
+    description: "Check for known vector search issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "code_search"
+      error_text: ""
+    output: vector_known_issues
+    on_error: continue
+
+  - name: detect_context
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      # Detect project
+      project_name = inputs.get("project", "")
+      if not project_name:
+          config = load_config()
+          cwd = Path.cwd().resolve()
+          for name, cfg in config.get("repositories", {}).items():
+              project_path = Path(cfg.get("path", "")).expanduser().resolve()
+              try:
+                  cwd.relative_to(project_path)
+                  project_name = name
+                  break
+              except ValueError:
+                  continue
+
+      if not project_name:
+          raise ValueError("Could not detect project")
+
+      # Detect persona
+      persona_name = inputs.get("persona", "")
+      if not persona_name:
+          try:
+              from server.persona_loader import get_loader
+              loader = get_loader()
+              if loader:
+                  persona_name = loader.current_persona or "developer"
+          except:
+              persona_name = "developer"
+
+      project = project_name
+      persona = persona_name
+    output: project
+
+  - name: get_project_path
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      project_config = config.get("repositories", {}).get(project)
+      project_path = Path(project_config.get("path", "")).expanduser()
+      path_str = str(project_path)
+    output: path_str
+
+  - name: scan_directory_structure
+    compute: |
+      from pathlib import Path
+      import os
+
+      project_path = Path(path_str)
+
+      # Build directory tree (max 3 levels deep)
+      def scan_dir(path, depth=0, max_depth=3):
+          if depth >= max_depth:
+              return []
+
+          items = []
+          try:
+              for item in sorted(path.iterdir()):
+                  if item.name.startswith('.'):
+                      continue
+                  if item.name in ['node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build']:
+                      continue
+
+                  if item.is_dir():
+                      children = scan_dir(item, depth + 1, max_depth)
+                      items.append({
+                          "name": item.name,
+                          "type": "dir",
+                          "children": children[:10],  # Limit children
+                      })
+                  elif item.is_file() and depth < 2:
+                      items.append({
+                          "name": item.name,
+                          "type": "file",
+                      })
+          except PermissionError:
+              pass
+
+          return items[:20]  # Limit items per level
+
+      structure = scan_dir(project_path)
+      dir_structure = structure
+    output: dir_structure
+
+  - name: analyze_key_modules
+    compute: |
+      from pathlib import Path
+
+      project_path = Path(path_str)
+      focus = inputs.get("focus", "")
+
+      key_modules = []
+
+      # Common important directories
+      important_dirs = {
+          "src": "Source code",
+          "lib": "Library code",
+          "app": "Application code",
+          "api": "API endpoints",
+          "core": "Core functionality",
+          "services": "Service layer",
+          "models": "Data models",
+          "utils": "Utility functions",
+          "helpers": "Helper functions",
+          "tests": "Test suite",
+          "scripts": "Scripts and tools",
+          "config": "Configuration",
+          "migrations": "Database migrations",
+      }
+
+      for dir_name, purpose in important_dirs.items():
+          dir_path = project_path / dir_name
+          if dir_path.exists():
+              # Count files
+              py_files = len(list(dir_path.rglob("*.py")))
+              js_files = len(list(dir_path.rglob("*.js"))) + len(list(dir_path.rglob("*.ts")))
+
+              file_count = py_files + js_files
+              if file_count > 0:
+                  key_modules.append({
+                      "path": f"{dir_name}/",
+                      "purpose": purpose,
+                      "notes": f"{file_count} source files",
+                  })
+
+      # If focus specified, look deeper
+      if focus:
+          focus_path = project_path / focus
+          if focus_path.exists():
+              # List files in focus area
+              files = [f.name for f in focus_path.iterdir() if f.is_file()][:10]
+              key_modules.append({
+                  "path": f"{focus}/",
+                  "purpose": f"Focus area: {focus}",
+                  "notes": f"Files: {', '.join(files[:5])}",
+              })
+
+      modules_list = key_modules
+    output: modules_list
+
+  - name: analyze_dependencies
+    compute: |
+      from pathlib import Path
+      import json
+
+      project_path = Path(path_str)
+      deps = []
+
+      # Python dependencies
+      pyproject = project_path / "pyproject.toml"
+      if pyproject.exists():
+          try:
+              import tomllib
+              with open(pyproject, "rb") as f:
+                  data = tomllib.load(f)
+              project_deps = data.get("project", {}).get("dependencies", [])
+              deps.extend([d.split("[")[0].split(">=")[0].split("==")[0] for d in project_deps[:15]])
+          except:
+              pass
+
+      requirements = project_path / "requirements.txt"
+      if requirements.exists() and not deps:
+          try:
+              content = requirements.read_text()
+              for line in content.split("\n")[:15]:
+                  if line.strip() and not line.startswith("#"):
+                      dep = line.split("==")[0].split(">=")[0].split("[")[0].strip()
+                      if dep:
+                          deps.append(dep)
+          except:
+              pass
+
+      # Node dependencies
+      package_json = project_path / "package.json"
+      if package_json.exists():
+          try:
+              with open(package_json) as f:
+                  data = json.load(f)
+              deps.extend(list(data.get("dependencies", {}).keys())[:15])
+          except:
+              pass
+
+      dependencies = list(set(deps))[:20]
+    output: dependencies
+
+  # ==================== SEMANTIC CODE SEARCH ====================
+
+  - name: search_api_patterns
+    description: "Search for API endpoint patterns"
+    condition: "{{ inputs.use_vector_search | default(true) }}"
+    tool: code_search
+    args:
+      query: "API endpoint route handler request response"
+      project: "{{ project }}"
+      limit: 10
+    output: api_patterns_raw
+    on_error: continue
+
+  - name: parse_api_patterns
+    description: "Parse API pattern search results"
+    compute: |
+      patterns = []
+      if 'api_patterns_raw' in dir() and api_patterns_raw:
+          raw_text = str(api_patterns_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  patterns.append(line.strip()[:100])
+
+      api_patterns = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:10],
+      }
+    output: api_patterns
+    on_error: continue
+
+  - name: search_model_patterns
+    description: "Search for data model patterns"
+    condition: "{{ inputs.use_vector_search | default(true) }}"
+    tool: code_search
+    args:
+      query: "class model schema database table field"
+      project: "{{ project }}"
+      limit: 10
+    output: model_patterns_raw
+    on_error: continue
+
+  - name: parse_model_patterns
+    description: "Parse model pattern search results"
+    compute: |
+      patterns = []
+      if 'model_patterns_raw' in dir() and model_patterns_raw:
+          raw_text = str(model_patterns_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  patterns.append(line.strip()[:100])
+
+      model_patterns = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:10],
+      }
+    output: model_patterns
+    on_error: continue
+
+  - name: search_error_patterns
+    description: "Search for error handling patterns"
+    condition: "{{ inputs.use_vector_search | default(true) }}"
+    tool: code_search
+    args:
+      query: "exception error handling try except raise"
+      project: "{{ project }}"
+      limit: 10
+    output: error_patterns_raw
+    on_error: continue
+
+  - name: parse_error_patterns
+    description: "Parse error pattern search results"
+    compute: |
+      patterns = []
+      if 'error_patterns_raw' in dir() and error_patterns_raw:
+          raw_text = str(error_patterns_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  patterns.append(line.strip()[:100])
+
+      error_patterns = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:10],
+      }
+    output: error_patterns
+    on_error: continue
+
+  - name: search_test_patterns
+    description: "Search for testing patterns"
+    condition: "{{ inputs.use_vector_search | default(true) }}"
+    tool: code_search
+    args:
+      query: "test fixture mock assert pytest unittest"
+      project: "{{ project }}"
+      limit: 10
+    output: test_patterns_raw
+    on_error: continue
+
+  - name: parse_test_patterns
+    description: "Parse test pattern search results"
+    compute: |
+      patterns = []
+      if 'test_patterns_raw' in dir() and test_patterns_raw:
+          raw_text = str(test_patterns_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  patterns.append(line.strip()[:100])
+
+      test_patterns = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:10],
+      }
+    output: test_patterns
+    on_error: continue
+
+  - name: search_focus_area
+    description: "Search for patterns in focus area"
+    condition: "{{ inputs.focus and inputs.use_vector_search | default(true) }}"
+    tool: code_search
+    args:
+      query: "{{ inputs.focus }} implementation pattern"
+      project: "{{ project }}"
+      limit: 10
+    output: focus_patterns_raw
+    on_error: continue
+
+  - name: parse_focus_patterns
+    description: "Parse focus area search results"
+    compute: |
+      patterns = []
+      if 'focus_patterns_raw' in dir() and focus_patterns_raw:
+          raw_text = str(focus_patterns_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  patterns.append(line.strip()[:100])
+
+      focus_patterns = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:10],
+      }
+    output: focus_patterns
+    on_error: continue
+
+  # ==================== UPDATE KNOWLEDGE ====================
+
+  - name: update_knowledge
+    tool: knowledge_update
+    args:
+      project: "{{ project }}"
+      persona: "{{ persona }}"
+      section: "architecture.key_modules"
+      content: "{{ modules_list | tojson }}"
+      append: false
+
+  - name: update_dependencies
+    tool: knowledge_update
+    args:
+      project: "{{ project }}"
+      persona: "{{ persona }}"
+      section: "architecture.dependencies"
+      content: "{{ dependencies | tojson }}"
+      append: false
+
+  - name: build_result
+    compute: |
+      lines = [f"## 🏗️ Architecture Knowledge Updated: {project}\n"]
+      lines.append(f"**Persona:** {persona}\n")
+
+      lines.append("### Key Modules Found\n")
+      for mod in modules_list[:10]:
+          lines.append(f"- **{mod['path']}**: {mod['purpose']} ({mod.get('notes', '')})")
+
+      lines.append(f"\n### Dependencies ({len(dependencies)})\n")
+      lines.append(", ".join(f"`{d}`" for d in dependencies[:15]))
+
+      # Semantic search results
+      if inputs.get("use_vector_search", True):
+          lines.append("\n### 🔍 Patterns Discovered (Semantic Search)\n")
+
+          if 'api_patterns' in dir() and api_patterns and api_patterns.get('found'):
+              lines.append(f"**API Endpoints:** {len(api_patterns.get('patterns', []))} patterns found")
+              for p in api_patterns.get('patterns', [])[:3]:
+                  lines.append(f"  - `{p}`")
+
+          if 'model_patterns' in dir() and model_patterns and model_patterns.get('found'):
+              lines.append(f"**Data Models:** {len(model_patterns.get('patterns', []))} patterns found")
+              for p in model_patterns.get('patterns', [])[:3]:
+                  lines.append(f"  - `{p}`")
+
+          if 'error_patterns' in dir() and error_patterns and error_patterns.get('found'):
+              lines.append(f"**Error Handling:** {len(error_patterns.get('patterns', []))} patterns found")
+              for p in error_patterns.get('patterns', [])[:3]:
+                  lines.append(f"  - `{p}`")
+
+          if 'test_patterns' in dir() and test_patterns and test_patterns.get('found'):
+              lines.append(f"**Testing:** {len(test_patterns.get('patterns', []))} patterns found")
+              for p in test_patterns.get('patterns', [])[:3]:
+                  lines.append(f"  - `{p}`")
+
+      if inputs.get("focus"):
+          lines.append(f"\n### Focus Area: {inputs['focus']}\n")
+          if 'focus_patterns' in dir() and focus_patterns and focus_patterns.get('found'):
+              lines.append(f"Found {len(focus_patterns.get('patterns', []))} patterns:")
+              for p in focus_patterns.get('patterns', [])[:5]:
+                  lines.append(f"- `{p}`")
+          else:
+              lines.append("Detailed analysis added to knowledge.")
+
+      lines.append("\n*Use `knowledge_query()` to view full architecture knowledge.*")
+      lines.append("*Use `code_search()` for semantic code search.*")
+
+      update_result = "\n".join(lines)
+    output: update_result
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_architecture_failures
+    description: "Detect failure patterns from architecture learning"
+    compute: |
+      errors_detected = []
+
+      # Check vector search failures
+      api_text = str(api_patterns_raw) if 'api_patterns_raw' in dir() and api_patterns_raw else ""
+      model_text = str(model_patterns_raw) if 'model_patterns_raw' in dir() and model_patterns_raw else ""
+      combined = api_text + model_text
+
+      if "no index" in combined.lower() or "index not found" in combined.lower():
+          errors_detected.append({
+              "tool": "code_search",
+              "pattern": "index not found",
+              "cause": "Vector index not created for this project",
+              "fix": "Run skill_run('bootstrap_knowledge', ...)"
+          })
+
+      # Check knowledge update failures
+      update_text = str(knowledge_update_result) if 'knowledge_update_result' in dir() and knowledge_update_result else ""
+      if "permission denied" in update_text.lower():
+          errors_detected.append({
+              "tool": "knowledge_update",
+              "pattern": "permission denied",
+              "cause": "Cannot write to knowledge directory",
+              "fix": "Check permissions on memory/knowledge/"
+          })
+
+      result = errors_detected
+    output: architecture_errors_detected
+    on_error: continue
+
+  - name: learn_architecture_index_failure
+    description: "Learn from vector index failures"
+    condition: "architecture_errors_detected and any(e.get('pattern') == 'index not found' for e in architecture_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "code_search"
+      error_pattern: "index not found"
+      root_cause: "Vector index not created for this project"
+      fix_description: "Run skill_run('bootstrap_knowledge', ...)"
+    output: architecture_index_fix_learned
+    on_error: continue
+
+  - name: log_architecture_session
+    description: "Log architecture learning to session"
+    tool: memory_session_log
+    args:
+      action: "Learned architecture for {{ project }}"
+      details: "Persona: {{ persona }}, Focus: {{ inputs.focus | default('all') }}"
+    on_error: continue

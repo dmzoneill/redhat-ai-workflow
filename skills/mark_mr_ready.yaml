@@ -53,6 +53,54 @@ inputs:
 
 steps:
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_mr_readiness_patterns
+    description: "Get MR readiness patterns from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      query: "gotchas"
+    output: mr_ready_knowledge_raw
+    on_error: continue
+
+  - name: parse_mr_ready_knowledge
+    description: "Parse MR readiness knowledge"
+    compute: |
+      knowledge_text = str(mr_ready_knowledge_raw) if mr_ready_knowledge_raw else ""
+
+      gotchas = []
+      checklist = []
+
+      # Extract gotchas related to MR readiness
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["mr", "merge", "review", "ready", "draft", "lint", "test"]):
+                  gotchas.append(line.strip()[:150])
+              if any(kw in line_lower for kw in ["check", "ensure", "verify", "must", "should"]):
+                  checklist.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+          "checklist": checklist[:5],
+      }
+    output: mr_ready_knowledge
+    on_error: continue
+
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_mr_update"
+      error_text: ""
+    output: gitlab_known_issues
+    on_error: continue
+
   - name: init_autoheal
     description: "Initialize failure tracking"
     compute: |
@@ -354,6 +402,59 @@ outputs:
 
       **MR:** {{ mr_info.web_url }}
       {% if mr_info.jira_key %}**Jira:** {{ cfg.jira_url }}/browse/{{ mr_info.jira_key }}{% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_ready_failures
+    description: "Detect failure patterns from marking MR ready"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab failures
+      mr_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
+      update_text = str(update_result) if 'update_result' in dir() and update_result else ""
+      combined = mr_text + update_text
+
+      if "no such host" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_update",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "not found" in combined.lower() and "merge request" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_update",
+              "pattern": "merge request not found",
+              "cause": "MR ID doesn't exist or wrong project",
+              "fix": "Check MR ID and project path"
+          })
+
+      # Check Slack failures
+      slack_text = str(slack_result) if 'slack_result' in dir() and slack_result else ""
+      if "not_in_channel" in slack_text.lower():
+          errors_detected.append({
+              "tool": "slack_post_team",
+              "pattern": "not_in_channel",
+              "cause": "Bot not added to Slack channel",
+              "fix": "Invite the bot to the team channel"
+          })
+
+      result = errors_detected
+    output: ready_errors_detected
+    on_error: continue
+
+  - name: learn_ready_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "ready_errors_detected and any(e.get('pattern') == 'no such host' for e in ready_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_update"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: ready_vpn_fix_learned
+    on_error: continue
 
   - name: context
     value:

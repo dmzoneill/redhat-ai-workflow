@@ -34,6 +34,80 @@ inputs:
     description: "Max issues to show"
 
 steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_jira_known_issues
+    description: "Check for known Jira issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "jira_list_issues"
+      error_text: ""
+    output: jira_known_issues
+    on_error: continue
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_sprint_patterns
+    description: "Get sprint planning patterns from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "patterns"
+    output: sprint_patterns_raw
+    on_error: continue
+
+  - name: parse_sprint_patterns
+    description: "Parse sprint planning patterns"
+    compute: |
+      patterns_result = sprint_patterns_raw if 'sprint_patterns_raw' in dir() and sprint_patterns_raw else {}
+
+      sprint_patterns = []
+      if isinstance(patterns_result, dict) and patterns_result.get('found'):
+          content = patterns_result.get('content', {})
+          if isinstance(content, dict):
+              # Get coding patterns that might affect estimation
+              coding = content.get('coding', [])
+              if isinstance(coding, list):
+                  sprint_patterns.extend(coding[:3])
+
+      result = {
+          'patterns': sprint_patterns[:5],
+          'has_patterns': len(sprint_patterns) > 0,
+      }
+    output: sprint_planning_patterns
+    on_error: continue
+
+  - name: get_project_gotchas
+    description: "Get project gotchas that might affect sprint planning"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "gotchas"
+    output: planning_gotchas_raw
+    on_error: continue
+
+  - name: parse_planning_gotchas
+    description: "Parse planning-relevant gotchas"
+    compute: |
+      gotchas_result = planning_gotchas_raw if 'planning_gotchas_raw' in dir() and planning_gotchas_raw else {}
+
+      planning_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              planning_gotchas = content[:5]
+
+      result = {
+          'gotchas': planning_gotchas,
+          'has_gotchas': len(planning_gotchas) > 0,
+      }
+    output: planning_gotchas
+    on_error: continue
+
+  # ==================== JIRA QUERIES ====================
+
   - name: get_backlog
     description: "Get backlog issues"
     tool: jira_list_issues
@@ -202,3 +276,81 @@ outputs:
       ```
       {% endfor %}
       {% endif %}
+
+      {% if planning_gotchas and planning_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Project Gotchas (Consider for Estimation)
+
+      {% for gotcha in planning_gotchas.gotchas[:5] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if sprint_planning_patterns and sprint_planning_patterns.has_patterns %}
+      ---
+
+      ### 📋 Coding Patterns
+
+      {% for pattern in sprint_planning_patterns.patterns[:3] %}
+      - {{ pattern }}
+      {% endfor %}
+      {% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_planning_failures
+    description: "Detect failure patterns from sprint planning"
+    compute: |
+      errors_detected = []
+
+      # Check Jira failures
+      backlog_text = str(backlog_issues_raw) if 'backlog_issues_raw' in dir() and backlog_issues_raw else ""
+      blocked_text = str(blocked_issues_raw) if 'blocked_issues_raw' in dir() and blocked_issues_raw else ""
+      combined = backlog_text + blocked_text
+
+      if "command timed out" in combined.lower():
+          errors_detected.append({
+              "tool": "jira_list_issues",
+              "pattern": "command timed out",
+              "cause": "Jira API timeout - network or server issue",
+              "fix": "Check VPN connection and retry"
+          })
+      if "unauthorized" in combined.lower():
+          errors_detected.append({
+              "tool": "jira_list_issues",
+              "pattern": "unauthorized",
+              "cause": "Jira authentication failed",
+              "fix": "Check Jira credentials in config.json"
+          })
+      if "project does not exist" in combined.lower():
+          errors_detected.append({
+              "tool": "jira_list_issues",
+              "pattern": "project does not exist",
+              "cause": "Jira project key is incorrect",
+              "fix": "Check project key (e.g., AAP, RHCLOUD)"
+          })
+
+      result = errors_detected
+    output: planning_errors_detected
+    on_error: continue
+
+  - name: learn_planning_jira_failure
+    description: "Learn from Jira timeout failures"
+    condition: "planning_errors_detected and any(e.get('pattern') == 'command timed out' for e in planning_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "jira_list_issues"
+      error_pattern: "command timed out"
+      root_cause: "Jira API timeout - network or server issue"
+      fix_description: "Check VPN connection and retry"
+    output: planning_jira_fix_learned
+    on_error: continue
+
+  - name: log_planning_session
+    description: "Log sprint planning to session"
+    tool: memory_session_log
+    args:
+      action: "Sprint planning for {{ inputs.project }}"
+      details: "Backlog: {{ backlog_info.count if backlog_info else 0 }}, Blocked: {{ blocked_info.count if blocked_info else 0 }}, Candidates: {{ sprint_candidates.count if sprint_candidates else 0 }}"
+    on_error: continue

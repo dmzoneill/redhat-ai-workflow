@@ -37,6 +37,60 @@ inputs:
     description: "Just list namespaces without extending"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_bonfire_known_issues
+    description: "Check for known bonfire/ephemeral issues"
+    compute: |
+      # Check known issues for bonfire operations
+      bonfire_issues = memory.check_known_issues("bonfire", "") or {}
+      ephemeral_issues = memory.check_known_issues("ephemeral", "") or {}
+      namespace_issues = memory.check_known_issues("namespace", "") or {}
+
+      all_issues = []
+      for issues in [bonfire_issues, ephemeral_issues, namespace_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: ephemeral_known_issues
+    on_error: continue
+
+  - name: get_ephemeral_gotchas
+    description: "Get ephemeral-related gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: ephemeral_gotchas_raw
+    on_error: continue
+
+  - name: parse_ephemeral_gotchas
+    description: "Parse ephemeral-related gotchas"
+    compute: |
+      gotchas_result = ephemeral_gotchas_raw if 'ephemeral_gotchas_raw' in dir() and ephemeral_gotchas_raw else {}
+
+      ephemeral_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for ephemeral-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['ephemeral', 'bonfire', 'namespace', 'reserve', 'extend', 'deploy']):
+                      ephemeral_gotchas.append(g)
+
+      result = {
+          'gotchas': ephemeral_gotchas[:5],
+          'has_gotchas': len(ephemeral_gotchas) > 0,
+      }
+    output: extend_gotchas
+    on_error: continue
+
   # ==================== LIST NAMESPACES ====================
 
   - name: list_my_namespaces
@@ -258,7 +312,97 @@ outputs:
       ```python
       kubectl_get_pods(namespace='{{ selected_ns.namespace }}', environment='ephemeral')
       ```
+
+      {% if extend_gotchas and extend_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Ephemeral Gotchas
+
+      {% for gotcha in extend_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
       {% endif %}
+
+      {% if ephemeral_known_issues and ephemeral_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in ephemeral_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+      {% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_extend_failures
+    description: "Detect failure patterns from ephemeral extension"
+    compute: |
+      errors_detected = []
+
+      # Check bonfire failures
+      namespaces_text = str(my_namespaces_raw) if 'my_namespaces_raw' in dir() and my_namespaces_raw else ""
+      extend_text = str(extend_result_raw) if 'extend_result_raw' in dir() and extend_result_raw else ""
+      combined = namespaces_text + extend_text
+
+      if "no route to host" in combined.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_extend",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - ephemeral cluster not reachable",
+              "fix": "Run vpn_connect() and kube_login('ephemeral')"
+          })
+      if "unauthorized" in combined.lower() or "forbidden" in combined.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_extend",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for ephemeral cluster",
+              "fix": "Run kube_login('ephemeral')"
+          })
+      if "not found" in combined.lower() and "namespace" in combined.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_extend",
+              "pattern": "namespace not found",
+              "cause": "Namespace doesn't exist or already expired",
+              "fix": "Reserve a new namespace with bonfire_namespace_reserve()"
+          })
+
+      result = errors_detected
+    output: extend_errors_detected
+    on_error: continue
+
+  - name: learn_extend_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "extend_errors_detected and any(e.get('pattern') == 'no route to host' for e in extend_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_extend"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - ephemeral cluster not reachable"
+      fix_description: "Run vpn_connect() and kube_login('ephemeral')"
+    output: extend_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_extend_auth_failure
+    description: "Learn from auth failures"
+    condition: "extend_errors_detected and any(e.get('pattern') == 'unauthorized' for e in extend_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_extend"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for ephemeral cluster"
+      fix_description: "Run kube_login('ephemeral')"
+    output: extend_auth_fix_learned
+    on_error: continue
+
+  - name: log_extend_session
+    description: "Log extension to session"
+    tool: memory_session_log
+    args:
+      action: "Extended ephemeral namespace {{ selected_ns.namespace if selected_ns else 'unknown' }}"
+      details: "Duration: {{ inputs.duration }}, Success: {{ extension_status.success if extension_status else 'unknown' }}"
+    on_error: continue
 
   - name: context
     value:

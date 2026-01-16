@@ -63,6 +63,59 @@ steps:
     output: autoheal_state
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_pr_best_practices
+    description: "Get PR best practices from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "patterns.coding"
+    output: pr_practices_raw
+    on_error: continue
+
+  - name: parse_pr_practices
+    description: "Parse PR best practices"
+    compute: |
+      practices_result = pr_practices_raw if 'pr_practices_raw' in dir() and pr_practices_raw else {}
+
+      pr_practices = []
+      if isinstance(practices_result, dict) and practices_result.get('found'):
+          content = practices_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for PR-related practices
+              for p in content:
+                  p_str = str(p).lower()
+                  if any(kw in p_str for kw in ['pr', 'mr', 'review', 'feedback', 'merge', 'rebase']):
+                      pr_practices.append(p)
+
+      result = {
+          'practices': pr_practices[:5],
+          'has_practices': len(pr_practices) > 0,
+      }
+    output: pr_best_practices
+    on_error: continue
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab MR issues"
+    compute: |
+      # Check known issues for GitLab operations
+      gitlab_issues = memory.check_known_issues("gitlab", "") or {}
+      mr_issues = memory.check_known_issues("merge_request", "") or {}
+
+      all_issues = []
+      for issues in [gitlab_issues, mr_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: gitlab_known_issues
+    on_error: continue
+
   # ==================== RESOLVE PROJECT ====================
 
   - name: resolve_project
@@ -330,6 +383,68 @@ steps:
       details: "{{ 'Merged one' if merge_result else 'No merges' }}"
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_my_prs_failures
+    description: "Detect failure patterns from PR checks"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab API failures
+      mrs_text = str(my_mrs_raw) if 'my_mrs_raw' in dir() and my_mrs_raw else ""
+      details_text = str(first_mr_details) if 'first_mr_details' in dir() and first_mr_details else ""
+      combined = mrs_text + details_text
+
+      if "no such host" in combined.lower() or "dial tcp" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in combined.lower() or "401" in combined:
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "unauthorized",
+              "cause": "GitLab authentication failed or token expired",
+              "fix": "Check GitLab token in config.json"
+          })
+      if "merge conflict" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_merge",
+              "pattern": "merge conflict",
+              "cause": "MR has merge conflicts with target branch",
+              "fix": "Run skill_run('rebase_pr', '{\"mr_id\": <id>}') to rebase"
+          })
+
+      result = errors_detected
+    output: my_prs_errors_detected
+    on_error: continue
+
+  - name: learn_my_prs_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "my_prs_errors_detected and any(e.get('pattern') == 'no such host' for e in my_prs_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_list"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: my_prs_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_merge_conflict_failure
+    description: "Learn from merge conflict failures"
+    condition: "my_prs_errors_detected and any(e.get('pattern') == 'merge conflict' for e in my_prs_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_merge"
+      error_pattern: "merge conflict"
+      root_cause: "MR has merge conflicts with target branch"
+      fix_description: "Run skill_run('rebase_pr', '{\"mr_id\": <id>}') to rebase"
+    output: merge_conflict_fix_learned
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
@@ -388,6 +503,26 @@ outputs:
       {% else %}
       - View MR details: `gitlab_mr_view(project="...", mr_id=<id>)`
       - Check all MRs again: `skill_run("check_my_prs", '{}')`
+      {% endif %}
+
+      {% if pr_best_practices and pr_best_practices.has_practices %}
+      ---
+
+      ### 📋 PR Best Practices
+
+      {% for practice in pr_best_practices.practices[:3] %}
+      - {{ practice }}
+      {% endfor %}
+      {% endif %}
+
+      {% if gitlab_known_issues and gitlab_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in gitlab_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
       {% endif %}
 
   - name: context

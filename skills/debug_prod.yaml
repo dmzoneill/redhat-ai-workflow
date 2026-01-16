@@ -1,5 +1,6 @@
 # Skill: Debug Production Issues
 # Systematic investigation of production problems
+# Enhanced with knowledge/memory/vector search integration
 
 name: debug_prod
 description: |
@@ -7,8 +8,14 @@ description: |
   Gathers pod status, logs, metrics, alerts, and recent deployments.
   Suggests likely causes based on patterns and learned knowledge.
 
+  **NEW Features:**
+  - Semantic search for error handlers in codebase
+  - DevOps knowledge integration for deployment patterns
+  - Cross-reference with recent code changes
+  - Architecture-aware debugging suggestions
+
   Resolves namespace and paths from config.json.
-version: "1.2"
+version: "2.0"
 
 inputs:
   - name: namespace
@@ -35,6 +42,26 @@ inputs:
 # No hardcoded constants - resolved dynamically from config.json
 
 steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_k8s_known_issues
+    description: "Check for known Kubernetes issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "kubectl_get_pods"
+      error_text: ""
+    output: k8s_known_issues
+    on_error: continue
+
+  - name: check_kibana_known_issues
+    description: "Check for known Kibana issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "kibana_search_logs"
+      error_text: ""
+    output: kibana_known_issues
+    on_error: continue
+
   # ==================== LOAD CONFIG ====================
 
   - name: load_config
@@ -888,6 +915,127 @@ steps:
       result = matches
     output: pattern_matches
 
+  # ==================== KNOWLEDGE & VECTOR SEARCH ====================
+
+  # Search for error handlers in the codebase
+  - name: search_error_handlers
+    description: "Find error handling code for observed errors"
+    condition: "pod_logs and len(pod_logs) > 0"
+    tool: code_search
+    args:
+      query: "{{ pod_logs[0].errors[0][:50] if pod_logs and pod_logs[0].errors else 'exception handler' }} error handling"
+      project: "automation-analytics-backend"
+      limit: 5
+    output: error_handler_raw
+    on_error: continue
+
+  - name: parse_error_handlers
+    description: "Parse error handler search results"
+    compute: |
+      handlers = []
+      if 'error_handler_raw' in dir() and error_handler_raw:
+          raw_text = str(error_handler_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  handlers.append(line.strip()[:120])
+
+      result = {
+          "found": len(handlers) > 0,
+          "handlers": handlers[:5],
+          "count": len(handlers),
+      }
+    output: error_handlers
+    on_error: continue
+
+  # Load DevOps knowledge for deployment patterns
+  - name: load_devops_knowledge
+    description: "Load DevOps knowledge for debugging context"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "patterns.deployment"
+    output: devops_patterns_raw
+    on_error: continue
+
+  - name: parse_devops_patterns
+    description: "Parse DevOps deployment patterns"
+    compute: |
+      patterns = []
+      if 'devops_patterns_raw' in dir() and devops_patterns_raw:
+          raw_text = str(devops_patterns_raw)
+          import re
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', raw_text, re.DOTALL):
+              pattern = match.group(1).strip()[:150]
+              if pattern and len(pattern) > 10:
+                  patterns.append(pattern)
+
+      result = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:5],
+      }
+    output: devops_patterns
+    on_error: continue
+
+  # Load production gotchas
+  - name: load_prod_gotchas
+    description: "Load production-specific gotchas"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: prod_gotchas_raw
+    on_error: continue
+
+  - name: parse_prod_gotchas
+    description: "Parse production gotchas"
+    compute: |
+      gotchas = []
+      if 'prod_gotchas_raw' in dir() and prod_gotchas_raw:
+          raw_text = str(prod_gotchas_raw)
+          import re
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', raw_text, re.DOTALL):
+              gotcha = match.group(1).strip()[:150]
+              if gotcha and len(gotcha) > 10:
+                  gotchas.append(gotcha)
+
+      result = {
+          "found": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+      }
+    output: prod_gotchas
+    on_error: continue
+
+  # Search for code related to the deployed SHA
+  - name: search_deployed_code
+    description: "Search for code changes in deployed version"
+    condition: "deployed_sha and deployed_sha.sha"
+    tool: code_search
+    args:
+      query: "{{ ns_info.namespace }} deployment configuration"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: deployed_code_raw
+    on_error: continue
+
+  - name: parse_deployed_code
+    description: "Parse deployed code search"
+    compute: |
+      code = []
+      if 'deployed_code_raw' in dir() and deployed_code_raw:
+          raw_text = str(deployed_code_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  code.append(line.strip()[:100])
+
+      result = {
+          "found": len(code) > 0,
+          "code": code[:3],
+      }
+    output: deployed_code
+    on_error: continue
+
   # ==================== BUILD REPORT ====================
 
   # Step 16: Compile investigation report
@@ -1028,6 +1176,35 @@ steps:
             lines.append(f"- *Commands:* `{match['commands'][0]}`")
         lines.append("")
 
+      # === ERROR HANDLERS (from code search) ===
+      if 'error_handlers' in dir() and error_handlers and error_handlers.get('found'):
+        lines.append("### 🔍 Related Error Handlers (Code Search)")
+        lines.append(f"Found **{error_handlers['count']}** relevant code locations:")
+        for handler in error_handlers.get('handlers', [])[:3]:
+          lines.append(f"- `{handler}`")
+        lines.append("")
+
+      # === DEVOPS PATTERNS ===
+      if 'devops_patterns' in dir() and devops_patterns and devops_patterns.get('found'):
+        lines.append("### 📚 DevOps Deployment Patterns")
+        for pattern in devops_patterns.get('patterns', [])[:3]:
+          lines.append(f"- {pattern}")
+        lines.append("")
+
+      # === PRODUCTION GOTCHAS ===
+      if 'prod_gotchas' in dir() and prod_gotchas and prod_gotchas.get('found'):
+        lines.append("### ⚠️ Production Gotchas")
+        for gotcha in prod_gotchas.get('gotchas', [])[:3]:
+          lines.append(f"- {gotcha}")
+        lines.append("")
+
+      # === DEPLOYED CODE CONTEXT ===
+      if 'deployed_code' in dir() and deployed_code and deployed_code.get('found'):
+        lines.append("### 📝 Related Deployment Code")
+        for code in deployed_code.get('code', []):
+          lines.append(f"- `{code}`")
+        lines.append("")
+
       # === DASHBOARDS ===
       lines.append("### 🔗 Dashboards")
       if metrics_results and metrics_results.get('grafana_url'):
@@ -1106,6 +1283,115 @@ steps:
       memory.update_field("state/environments", f"environments.{env_key}.status", status)
       result = "environment updated"
     output: env_update_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_debug_failures
+    description: "Detect failure patterns from debug operations"
+    compute: |
+      errors_detected = []
+
+      # Check kubectl failures
+      pod_status_text = str(pod_status) if 'pod_status' in dir() and pod_status else ""
+      events_text = str(k8s_events) if 'k8s_events' in dir() and k8s_events else ""
+      combined_k8s = pod_status_text + events_text
+
+      if "unauthorized" in combined_k8s.lower() or "forbidden" in combined_k8s.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_pods",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for production cluster",
+              "fix": "Run kube_login(cluster='prod') to refresh credentials"
+          })
+      if "no route to host" in combined_k8s.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_pods",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - cannot reach production cluster",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      # Check Prometheus failures
+      error_rate_text = str(error_rate_raw) if 'error_rate_raw' in dir() and error_rate_raw else ""
+      if "connection refused" in error_rate_text.lower():
+          errors_detected.append({
+              "tool": "prometheus_query",
+              "pattern": "connection refused",
+              "cause": "Cannot connect to Prometheus - VPN or auth issue",
+              "fix": "Check VPN connection and Prometheus access"
+          })
+
+      # Check Kibana failures
+      kibana_text = str(kibana_errors_raw) if 'kibana_errors_raw' in dir() and kibana_errors_raw else ""
+      if "unauthorized" in kibana_text.lower() or "401" in kibana_text:
+          errors_detected.append({
+              "tool": "kibana_search_logs",
+              "pattern": "unauthorized",
+              "cause": "Kibana authentication failed",
+              "fix": "Check Kibana credentials in config.json"
+          })
+
+      # Check Slack failures
+      slack_text = str(slack_messages_raw) if 'slack_messages_raw' in dir() and slack_messages_raw else ""
+      if "invalid_auth" in slack_text.lower() or "not_authed" in slack_text.lower():
+          errors_detected.append({
+              "tool": "slack_search_messages",
+              "pattern": "invalid_auth",
+              "cause": "Slack authentication failed or token expired",
+              "fix": "Refresh Slack token in config.json"
+          })
+
+      result = errors_detected
+    output: debug_errors_detected
+    on_error: continue
+
+  - name: learn_prod_auth_failure
+    description: "Learn from production cluster auth failures"
+    condition: "debug_errors_detected and any(e.get('tool') == 'kubectl_get_pods' and e.get('pattern') == 'unauthorized' for e in debug_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_pods"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for production cluster"
+      fix_description: "Run kube_login(cluster='prod') to refresh credentials"
+    output: prod_auth_fix_learned
+    on_error: continue
+
+  - name: learn_prod_vpn_failure
+    description: "Learn from production VPN failures"
+    condition: "debug_errors_detected and any(e.get('pattern') == 'no route to host' for e in debug_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_pods"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - cannot reach production cluster"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: prod_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_prometheus_failure
+    description: "Learn from Prometheus connection failures"
+    condition: "debug_errors_detected and any(e.get('tool') == 'prometheus_query' for e in debug_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "prometheus_query"
+      error_pattern: "connection refused"
+      root_cause: "Cannot connect to Prometheus - VPN or auth issue"
+      fix_description: "Check VPN connection and Prometheus access"
+    output: prometheus_fix_learned
+    on_error: continue
+
+  - name: learn_kibana_failure
+    description: "Learn from Kibana auth failures"
+    condition: "debug_errors_detected and any(e.get('tool') == 'kibana_search_logs' for e in debug_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kibana_search_logs"
+      error_pattern: "unauthorized"
+      root_cause: "Kibana authentication failed"
+      fix_description: "Check Kibana credentials in config.json"
+    output: kibana_fix_learned
     on_error: continue
 
 outputs:

@@ -1,0 +1,252 @@
+# Skill: Find Similar Code
+# Find code similar to a given snippet or description
+
+name: find_similar_code
+description: |
+  Find code similar to a given snippet or description.
+
+  Use this skill to:
+  - Find existing implementations of similar functionality
+  - Discover patterns used elsewhere in the codebase
+  - Find code to reference when implementing new features
+  - Identify potential code duplication
+
+  Uses semantic vector search for intelligent matching.
+version: "1.0"
+
+inputs:
+  - name: query
+    type: string
+    required: true
+    description: Description of what you're looking for, or a code snippet
+  - name: project
+    type: string
+    required: false
+    description: Project name from config.json (auto-detected from cwd if empty)
+  - name: limit
+    type: integer
+    required: false
+    default: 10
+    description: Maximum number of results to return
+  - name: show_context
+    type: boolean
+    required: false
+    default: true
+    description: Show surrounding code context for each result
+
+outputs:
+  - name: summary
+    value: "{{ search_result }}"
+  - name: results
+    value: "{{ parsed_results }}"
+
+steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_vector_known_issues
+    description: "Check for known vector search issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "code_search"
+      error_text: ""
+    output: vector_known_issues
+    on_error: continue
+
+  - name: detect_project
+    condition: "{{ not inputs.project }}"
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      cwd = Path.cwd().resolve()
+
+      detected = None
+      for name, cfg in config.get("repositories", {}).items():
+          project_path = Path(cfg.get("path", "")).expanduser().resolve()
+          try:
+              cwd.relative_to(project_path)
+              detected = name
+              break
+          except ValueError:
+              continue
+
+      if not detected:
+          # Default to automation-analytics-backend
+          detected = "automation-analytics-backend"
+
+      project = detected
+    output: project
+
+  - name: set_project
+    condition: "{{ inputs.project }}"
+    compute: |
+      project = inputs.get("project")
+    output: project
+
+  # Perform semantic search
+  - name: search_similar
+    description: "Search for similar code using semantic vector search"
+    tool: code_search
+    args:
+      query: "{{ inputs.query }}"
+      project: "{{ project }}"
+      limit: "{{ inputs.limit | default(10) }}"
+    output: search_results_raw
+    on_error: continue
+
+  - name: parse_search_results
+    description: "Parse search results"
+    compute: |
+      results = []
+      if 'search_results_raw' in dir() and search_results_raw:
+          raw_text = str(search_results_raw)
+
+          # Parse results - expecting format like "file:line - snippet"
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  parts = line.split(':', 2)
+                  if len(parts) >= 2:
+                      file_path = parts[0].strip()
+                      rest = ':'.join(parts[1:]).strip()
+
+                      # Try to extract line number
+                      line_num = None
+                      snippet = rest
+                      if rest and rest[0].isdigit():
+                          num_end = 0
+                          for i, c in enumerate(rest):
+                              if not c.isdigit():
+                                  num_end = i
+                                  break
+                          if num_end > 0:
+                              line_num = int(rest[:num_end])
+                              snippet = rest[num_end:].strip(' -:')
+
+                      results.append({
+                          "file": file_path,
+                          "line": line_num,
+                          "snippet": snippet[:200],
+                      })
+
+      parsed_results = results
+    output: parsed_results
+    on_error: continue
+
+  # Get knowledge context for the query
+  - name: get_related_patterns
+    description: "Get related patterns from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "patterns.coding"
+    output: related_patterns_raw
+    on_error: continue
+
+  - name: parse_related_patterns
+    description: "Parse related patterns"
+    compute: |
+      import re
+
+      patterns = []
+      if 'related_patterns_raw' in dir() and related_patterns_raw:
+          raw_text = str(related_patterns_raw)
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', raw_text, re.DOTALL):
+              pattern = match.group(1).strip()[:100]
+              if pattern and len(pattern) > 10:
+                  patterns.append(pattern)
+
+      related_patterns = patterns[:5]
+    output: related_patterns
+    on_error: continue
+
+  # Build summary
+  - name: build_summary
+    compute: |
+      lines = [f"## 🔍 Similar Code Search: {project}\n"]
+      lines.append(f"**Query:** {inputs.query[:100]}\n")
+
+      if parsed_results:
+          lines.append(f"### Found {len(parsed_results)} Results\n")
+
+          for i, result in enumerate(parsed_results[:10], 1):
+              file_path = result.get('file', 'unknown')
+              line_num = result.get('line')
+              snippet = result.get('snippet', '')
+
+              if line_num:
+                  lines.append(f"**{i}. `{file_path}:{line_num}`**")
+              else:
+                  lines.append(f"**{i}. `{file_path}`**")
+
+              if snippet:
+                  lines.append(f"```")
+                  lines.append(snippet[:150])
+                  lines.append(f"```")
+              lines.append("")
+      else:
+          lines.append("### No Results Found\n")
+          lines.append("Try a different query or ensure the vector index is up to date.")
+          lines.append("Run `skill_run('knowledge_refresh')` to update the index.")
+
+      # Add related patterns
+      if related_patterns:
+          lines.append("### 📚 Related Coding Patterns\n")
+          for pattern in related_patterns[:3]:
+              lines.append(f"- {pattern}")
+          lines.append("")
+
+      lines.append("---")
+      lines.append("*Use `code_search()` directly for more control over search parameters.*")
+
+      search_result = "\n".join(lines)
+    output: search_result
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_search_failures
+    description: "Detect failure patterns from code search"
+    compute: |
+      errors_detected = []
+
+      # Check vector search failures
+      search_text = str(search_results_raw) if 'search_results_raw' in dir() and search_results_raw else ""
+      if "no index" in search_text.lower() or "index not found" in search_text.lower():
+          errors_detected.append({
+              "tool": "code_search",
+              "pattern": "index not found",
+              "cause": "Vector index not created for this project",
+              "fix": "Run skill_run('bootstrap_knowledge', ...)"
+          })
+      if "empty index" in search_text.lower():
+          errors_detected.append({
+              "tool": "code_search",
+              "pattern": "empty index",
+              "cause": "Vector index exists but has no content",
+              "fix": "Run skill_run('knowledge_refresh', '{\"full_rescan\": true}')"
+          })
+
+      result = errors_detected
+    output: search_errors_detected
+    on_error: continue
+
+  - name: learn_search_index_failure
+    description: "Learn from vector index failures"
+    condition: "search_errors_detected and any(e.get('pattern') == 'index not found' for e in search_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "code_search"
+      error_pattern: "index not found"
+      root_cause: "Vector index not created for this project"
+      fix_description: "Run skill_run('bootstrap_knowledge', ...)"
+    output: search_index_fix_learned
+    on_error: continue
+
+  # Log to session
+  - name: log_search
+    description: "Log search to session"
+    tool: memory_session_log
+    args:
+      action: "Code search in {{ project }}"
+      details: "Query: {{ inputs.query[:50] }}, Results: {{ parsed_results | length if parsed_results else 0 }}"
+    on_error: continue

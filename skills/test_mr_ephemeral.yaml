@@ -1182,6 +1182,94 @@ steps:
     output: ephemeral_hook_result
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: search_related_tests
+    description: "Find test files related to the changed code"
+    condition: "{{ commit_info and commit_info.get('message') }}"
+    tool: code_search
+    args:
+      query: "test {{ commit_info.message[:100] }}"
+      project: "automation-analytics-backend"
+      limit: 5
+      min_score: 0.5
+    output: related_tests_raw
+    on_error: continue
+
+  - name: parse_related_tests
+    description: "Parse related test results"
+    compute: |
+      tests_result = related_tests_raw if 'related_tests_raw' in dir() and related_tests_raw else {}
+
+      related_tests = []
+      if isinstance(tests_result, dict) and tests_result.get('results'):
+          for r in tests_result.get('results', [])[:5]:
+              if 'test' in r.get('file_path', '').lower():
+                  related_tests.append({
+                      'file': r.get('file_path', ''),
+                      'score': r.get('score', 0),
+                  })
+
+      result = {
+          'tests': related_tests,
+          'count': len(related_tests),
+          'has_related_tests': len(related_tests) > 0,
+      }
+    output: related_tests
+    on_error: continue
+
+  - name: get_testing_gotchas
+    description: "Get testing-specific gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "gotchas"
+    output: testing_gotchas_raw
+    on_error: continue
+
+  - name: parse_testing_gotchas
+    description: "Parse testing gotchas"
+    compute: |
+      gotchas_result = testing_gotchas_raw if 'testing_gotchas_raw' in dir() and testing_gotchas_raw else {}
+
+      testing_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for test-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['test', 'pytest', 'mock', 'fixture', 'assert']):
+                      testing_gotchas.append(g)
+
+      result = {
+          'gotchas': testing_gotchas[:5],
+          'has_gotchas': len(testing_gotchas) > 0,
+      }
+    output: testing_gotchas
+    on_error: continue
+
+  - name: check_ephemeral_known_issues
+    description: "Check for known ephemeral/bonfire issues"
+    compute: |
+      # Check known issues for bonfire and ephemeral
+      bonfire_issues = memory.check_known_issues("bonfire", "") or {}
+      quay_issues = memory.check_known_issues("quay", "") or {}
+      konflux_issues = memory.check_known_issues("konflux", "") or {}
+
+      all_issues = []
+      for issues in [bonfire_issues, quay_issues, konflux_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: ephemeral_known_issues
+    on_error: continue
+
   # ==================== MEMORY INTEGRATION ====================
 
   - name: build_memory_context
@@ -1247,6 +1335,120 @@ steps:
       memory.write_memory("state/environments", data)
       result = "ephemeral namespace tracked"
     output: ephemeral_tracking_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_failure_patterns
+    description: "Detect failure patterns from tool outputs"
+    compute: |
+      # Collect error patterns from various tool outputs
+      errors_detected = []
+
+      # Check GitLab failures
+      mr_sha_text = str(mr_sha_raw) if 'mr_sha_raw' in dir() and mr_sha_raw else ""
+      if "no such host" in mr_sha_text.lower() or "dial tcp" in mr_sha_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_sha",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      # Check Quay failures
+      quay_text = str(quay_result) if 'quay_result' in dir() and quay_result else ""
+      if "manifest unknown" in quay_text.lower():
+          errors_detected.append({
+              "tool": "quay_get_tag",
+              "pattern": "manifest unknown",
+              "cause": "Image not built yet or wrong SHA - Konflux may not have completed build",
+              "fix": "Wait for Konflux build to complete, check with konflux_list_builds()"
+          })
+      if "unauthorized" in quay_text.lower():
+          errors_detected.append({
+              "tool": "quay_get_tag",
+              "pattern": "unauthorized",
+              "cause": "Quay authentication failed or image is private",
+              "fix": "Check Quay credentials and image visibility"
+          })
+
+      # Check bonfire/namespace failures
+      ns_text = str(namespace_result) if 'namespace_result' in dir() and namespace_result else ""
+      if "no pools available" in ns_text.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_reserve",
+              "pattern": "no pools available",
+              "cause": "All ephemeral namespace pools are exhausted",
+              "fix": "Wait for pools to free up or release unused namespaces with bonfire_namespace_list(mine=True)"
+          })
+      if "unauthorized" in ns_text.lower() or "forbidden" in ns_text.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_reserve",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for ephemeral cluster",
+              "fix": "Run kube_login(cluster='ephemeral') to refresh credentials"
+          })
+
+      # Check Konflux/Tekton failures
+      tekton_text = str(tekton_pipelines_raw) if 'tekton_pipelines_raw' in dir() and tekton_pipelines_raw else ""
+      if "unauthorized" in tekton_text.lower():
+          errors_detected.append({
+              "tool": "tkn_pipelinerun_list",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for Konflux cluster",
+              "fix": "Run kube_login(cluster='konflux') to refresh credentials"
+          })
+
+      result = errors_detected
+    output: detected_errors
+    on_error: continue
+
+  - name: learn_gitlab_failure
+    description: "Learn from GitLab failures"
+    condition: "detected_errors and any(e.get('tool') == 'gitlab_mr_sha' for e in detected_errors)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_sha"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: gitlab_fix_learned
+    on_error: continue
+
+  - name: learn_quay_manifest_failure
+    description: "Learn from Quay manifest unknown failures"
+    condition: "detected_errors and any(e.get('pattern') == 'manifest unknown' for e in detected_errors)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "quay_get_tag"
+      error_pattern: "manifest unknown"
+      root_cause: "Image not built yet or wrong SHA - Konflux may not have completed build"
+      fix_description: "Wait for Konflux build to complete, check with konflux_list_builds()"
+    output: quay_manifest_fix_learned
+    on_error: continue
+
+  - name: learn_bonfire_pool_failure
+    description: "Learn from bonfire pool exhaustion"
+    condition: "detected_errors and any(e.get('pattern') == 'no pools available' for e in detected_errors)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_reserve"
+      error_pattern: "no pools available"
+      root_cause: "All ephemeral namespace pools are exhausted"
+      fix_description: "Wait for pools to free up or release unused namespaces with bonfire_namespace_list(mine=True)"
+    output: bonfire_pool_fix_learned
+    on_error: continue
+
+  - name: learn_k8s_auth_failure
+    description: "Learn from Kubernetes auth failures"
+    condition: "detected_errors and any(e.get('pattern') == 'unauthorized' and 'bonfire' in e.get('tool', '') for e in detected_errors)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_reserve"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for ephemeral cluster"
+      fix_description: "Run kube_login(cluster='ephemeral') to refresh credentials"
+    output: k8s_auth_fix_learned
     on_error: continue
 
 outputs:
@@ -1409,6 +1611,36 @@ outputs:
       ```
       {{ test_result.output[:1000] }}
       ```
+      {% endif %}
+
+      {% if related_tests and related_tests.has_related_tests %}
+      ---
+
+      ### 🔍 Related Test Files (from semantic search)
+
+      {% for test in related_tests.tests[:5] %}
+      - `{{ test.file }}` (similarity: {{ "%.0f"|format(test.score * 100) }}%)
+      {% endfor %}
+      {% endif %}
+
+      {% if testing_gotchas and testing_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Testing Gotchas
+
+      {% for gotcha in testing_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if ephemeral_known_issues and ephemeral_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues to Watch For
+
+      {% for issue in ephemeral_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
       {% endif %}
 
       ---

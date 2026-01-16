@@ -49,6 +49,81 @@ inputs:
     description: "Wait for rollout to complete"
 
 steps:
+  # ==================== MEMORY CONTEXT ====================
+
+  - name: check_known_issues
+    description: "Check for known scaling issues"
+    compute: |
+      # Check known issues for kubectl scale
+      issues = memory.check_known_issues("kubectl_scale", "")
+
+      result = {
+          "has_known_issues": len(issues.get("matches", [])) > 0 if issues else False,
+          "issues": issues.get("matches", [])[:3] if issues else [],
+      }
+    output: known_issues
+    on_error: continue
+
+  - name: get_scaling_gotchas
+    description: "Get scaling-related gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: scaling_gotchas_raw
+    on_error: continue
+
+  - name: parse_scaling_gotchas
+    description: "Parse scaling-related gotchas"
+    compute: |
+      gotchas_result = scaling_gotchas_raw if 'scaling_gotchas_raw' in dir() and scaling_gotchas_raw else {}
+
+      scaling_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for scaling-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['scale', 'replica', 'pod', 'resource', 'memory', 'cpu', 'oom']):
+                      scaling_gotchas.append(g)
+
+      result = {
+          'gotchas': scaling_gotchas[:5],
+          'has_gotchas': len(scaling_gotchas) > 0,
+      }
+    output: scale_gotchas
+    on_error: continue
+
+  - name: load_scale_history
+    description: "Load previous scaling history for this deployment"
+    compute: |
+      # Load learned patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      scale_history = patterns.get("deployment_scales", [])
+
+      # Find history for this specific deployment
+      deployment_history = [
+          s for s in scale_history
+          if s.get("deployment") == inputs.deployment and s.get("namespace") == inputs.namespace
+      ]
+
+      # Check if we have common scaling patterns
+      common_scales = {}
+      for h in deployment_history:
+          to_rep = h.get("to_replicas")
+          if to_rep:
+              common_scales[to_rep] = common_scales.get(to_rep, 0) + 1
+
+      result = {
+          "previous_scales": len(deployment_history),
+          "recent_scales": deployment_history[-5:],
+          "common_replica_counts": sorted(common_scales.keys(), key=lambda x: common_scales[x], reverse=True)[:3],
+      }
+    output: scale_history
+    on_error: continue
+
   # ==================== GET CURRENT STATE ====================
 
   - name: get_current_deployment
@@ -207,6 +282,152 @@ steps:
       details: "{{ current_state.current_replicas }} → {{ inputs.replicas }} replicas in {{ inputs.namespace }}"
     on_error: continue
 
+  - name: learn_scale_pattern
+    description: "Learn from this scaling for future reference"
+    condition: "scale_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "deployment_scales" not in patterns:
+          patterns["deployment_scales"] = []
+
+      # Record this scale operation
+      scale_record = {
+          "deployment": inputs.deployment,
+          "namespace": inputs.namespace,
+          "environment": inputs.environment,
+          "from_replicas": current_state.current_replicas if current_state else None,
+          "to_replicas": inputs.replicas,
+          "success": scale_status.success if scale_status else False,
+          "all_running": final_state.all_running if final_state else False,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["deployment_scales"].append(scale_record)
+
+      # Keep last 100 scale records
+      patterns["deployment_scales"] = patterns["deployment_scales"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "scale pattern learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: track_scale_failures
+    description: "Track scaling failures for auto-remediation"
+    condition: "scale_status and not scale_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "scale_failures" not in patterns:
+          patterns["scale_failures"] = []
+
+      # Track this failure
+      key = f"{inputs.namespace}/{inputs.deployment}"
+      existing = [f for f in patterns["scale_failures"] if f.get("key") == key]
+
+      if existing:
+          existing[0]["count"] = existing[0].get("count", 1) + 1
+          existing[0]["last_failure"] = datetime.now().isoformat()
+          existing[0]["last_error"] = scale_status.message if scale_status else None
+      else:
+          patterns["scale_failures"].append({
+              "key": key,
+              "deployment": inputs.deployment,
+              "namespace": inputs.namespace,
+              "target_replicas": inputs.replicas,
+              "count": 1,
+              "first_failure": datetime.now().isoformat(),
+              "last_failure": datetime.now().isoformat(),
+              "last_error": scale_status.message if scale_status else None,
+          })
+
+      # Keep top 30 problematic deployments
+      patterns["scale_failures"] = sorted(
+          patterns["scale_failures"],
+          key=lambda x: x.get("count", 0),
+          reverse=True
+      )[:30]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "scale failure tracked"
+    output: failure_tracking_result
+    on_error: continue
+
+  - name: update_environment_state
+    description: "Update environment state after scaling"
+    condition: "scale_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Update environment state
+      env_data = memory.read_memory("state/environments") or {}
+      if "environments" not in env_data:
+          env_data["environments"] = {}
+
+      env_key = inputs.environment
+      if env_key not in env_data["environments"]:
+          env_data["environments"][env_key] = {"status": "unknown", "deployments": {}}
+
+      env = env_data["environments"][env_key]
+      env["deployments"][inputs.deployment] = {
+          "last_scale": datetime.now().isoformat(),
+          "replicas": inputs.replicas,
+          "running": final_state.running_count if final_state else 0,
+      }
+
+      memory.write_memory("state/environments", env_data)
+      result = "environment state updated"
+    output: env_update_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_scale_failures
+    description: "Detect failure patterns from scale operations"
+    compute: |
+      errors_detected = []
+
+      # Check kubectl failures
+      deployments_text = str(deployments_raw) if 'deployments_raw' in dir() and deployments_raw else ""
+      scale_text = str(scale_result) if 'scale_result' in dir() and scale_result else ""
+      combined = deployments_text + scale_text
+
+      if "unauthorized" in combined.lower() or "forbidden" in combined.lower():
+          errors_detected.append({
+              "tool": "kubectl_scale",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired",
+              "fix": "Run kube_login(cluster='stage' or 'prod') to refresh credentials"
+          })
+      if "not found" in combined.lower() and "deployment" in combined.lower():
+          errors_detected.append({
+              "tool": "kubectl_scale",
+              "pattern": "deployment not found",
+              "cause": "Deployment name is incorrect or doesn't exist",
+              "fix": "List deployments with kubectl_get_deployments()"
+          })
+
+      result = errors_detected
+    output: scale_errors_detected
+    on_error: continue
+
+  - name: learn_scale_auth_failure
+    description: "Learn from k8s auth failures"
+    condition: "scale_errors_detected and any(e.get('pattern') == 'unauthorized' for e in scale_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_scale"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired"
+      fix_description: "Run kube_login(cluster='stage' or 'prod') to refresh credentials"
+    output: scale_auth_fix_learned
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -272,6 +493,26 @@ outputs:
       ```python
       kubectl_rollout(action='undo', resource='deployment/{{ inputs.deployment }}', namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
       ```
+
+      {% if scale_gotchas and scale_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Scaling Gotchas
+
+      {% for gotcha in scale_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if known_issues and known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
 
   - name: context
     value:

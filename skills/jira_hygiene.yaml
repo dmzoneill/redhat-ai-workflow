@@ -59,6 +59,53 @@ steps:
     output: autoheal_state
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_jira_best_practices
+    description: "Get Jira best practices from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "patterns.coding"
+    output: jira_practices_raw
+    on_error: continue
+
+  - name: parse_jira_practices
+    description: "Parse Jira best practices"
+    compute: |
+      practices_result = jira_practices_raw if 'jira_practices_raw' in dir() and jira_practices_raw else {}
+
+      jira_practices = []
+      if isinstance(practices_result, dict) and practices_result.get('found'):
+          content = practices_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for Jira-related practices
+              for p in content:
+                  p_str = str(p).lower()
+                  if any(kw in p_str for kw in ['jira', 'issue', 'story', 'acceptance', 'criteria', 'description']):
+                      jira_practices.append(p)
+
+      result = {
+          'practices': jira_practices[:5],
+          'has_practices': len(jira_practices) > 0,
+      }
+    output: jira_best_practices
+    on_error: continue
+
+  - name: check_jira_known_issues
+    description: "Check for known Jira issues"
+    compute: |
+      # Check known issues for Jira operations
+      jira_issues = memory.check_known_issues("jira", "") or {}
+
+      result = {
+          "has_known_issues": len(jira_issues.get("matches", [])) > 0 if jira_issues else False,
+          "issues": jira_issues.get("matches", [])[:5] if jira_issues else [],
+      }
+    output: jira_known_issues
+    on_error: continue
+
   # ==================== RESOLVE PROJECT/COMPONENT ====================
 
   - name: resolve_context
@@ -525,6 +572,47 @@ steps:
     output: followup_result
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_hygiene_failures
+    description: "Detect failure patterns from hygiene checks"
+    compute: |
+      errors_detected = []
+
+      # Check Jira API failures
+      issue_text = str(issue_raw) if 'issue_raw' in dir() and issue_raw else ""
+
+      if "issue does not exist" in issue_text.lower():
+          errors_detected.append({
+              "tool": "jira_view_issue",
+              "pattern": "issue does not exist",
+              "cause": "Jira issue key is incorrect or issue was deleted",
+              "fix": "Verify Jira issue key format (e.g., AAP-12345)"
+          })
+      if "unauthorized" in issue_text.lower() or "401" in issue_text:
+          errors_detected.append({
+              "tool": "jira_view_issue",
+              "pattern": "unauthorized",
+              "cause": "Jira authentication failed or token expired",
+              "fix": "Check Jira credentials in config.json"
+          })
+
+      result = errors_detected
+    output: hygiene_errors_detected
+    on_error: continue
+
+  - name: learn_hygiene_jira_failure
+    description: "Learn from Jira failures"
+    condition: "hygiene_errors_detected and any(e.get('pattern') == 'issue does not exist' for e in hygiene_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "jira_view_issue"
+      error_pattern: "issue does not exist"
+      root_cause: "Jira issue key is incorrect or issue was deleted"
+      fix_description: "Verify Jira issue key format (e.g., AAP-12345)"
+    output: hygiene_jira_fix_learned
+    on_error: continue
+
 outputs:
   - name: summary
     value: |
@@ -551,6 +639,26 @@ outputs:
       jira_add_comment(issue_key='{{ inputs.issue_key }}', comment='...')
       jira_set_status(issue_key='{{ inputs.issue_key }}', status='Refinement')
       ```
+      {% endif %}
+
+      {% if jira_best_practices and jira_best_practices.has_practices %}
+      ---
+
+      ### 📋 Jira Best Practices
+
+      {% for practice in jira_best_practices.practices[:3] %}
+      - {{ practice }}
+      {% endfor %}
+      {% endif %}
+
+      {% if jira_known_issues and jira_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in jira_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
       {% endif %}
 
   - name: context

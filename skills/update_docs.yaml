@@ -45,6 +45,61 @@ inputs:
     description: "Only check, don't suggest updates"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_doc_patterns
+    description: "Get documentation patterns from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "patterns"
+    output: doc_patterns_raw
+    on_error: continue
+
+  - name: parse_doc_patterns
+    description: "Parse documentation patterns"
+    compute: |
+      patterns_result = doc_patterns_raw if 'doc_patterns_raw' in dir() and doc_patterns_raw else {}
+
+      doc_patterns = []
+      if isinstance(patterns_result, dict) and patterns_result.get('found'):
+          content = patterns_result.get('content', {})
+          if isinstance(content, dict):
+              # Get coding patterns that might relate to docs
+              coding = content.get('coding', [])
+              if isinstance(coding, list):
+                  for p in coding:
+                      p_str = str(p).lower()
+                      if any(kw in p_str for kw in ['doc', 'readme', 'comment', 'api', 'schema']):
+                          doc_patterns.append(p)
+
+      result = {
+          'patterns': doc_patterns[:5],
+          'has_patterns': len(doc_patterns) > 0,
+      }
+    output: documentation_patterns
+    on_error: continue
+
+  - name: check_doc_known_issues
+    description: "Check for known documentation issues"
+    compute: |
+      # Check known issues for documentation
+      doc_issues = memory.check_known_issues("documentation", "") or {}
+      readme_issues = memory.check_known_issues("readme", "") or {}
+
+      all_issues = []
+      for issues in [doc_issues, readme_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: doc_known_issues
+    on_error: continue
+
   # ==================== RESOLVE REPOSITORY ====================
 
   - name: resolve_repo
@@ -373,7 +428,78 @@ outputs:
       {% endfor %}
       {% endif %}
 
+      {% if documentation_patterns and documentation_patterns.has_patterns %}
+      ---
+
+      ### 📋 Documentation Patterns
+
+      {% for pattern in documentation_patterns.patterns[:3] %}
+      - {{ pattern }}
+      {% endfor %}
       {% endif %}
+
+      {% if doc_known_issues and doc_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in doc_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+      {% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_docs_failures
+    description: "Detect failure patterns from documentation updates"
+    compute: |
+      errors_detected = []
+
+      # Check git failures
+      git_text = str(git_status_raw) if 'git_status_raw' in dir() and git_status_raw else ""
+      commit_text = str(commit_result_raw) if 'commit_result_raw' in dir() and commit_result_raw else ""
+      combined = git_text + commit_text
+
+      if "permission denied" in combined.lower():
+          errors_detected.append({
+              "tool": "git_commit",
+              "pattern": "permission denied",
+              "cause": "Git repository access denied",
+              "fix": "Check repository permissions and SSH keys"
+          })
+      if "not a git repository" in combined.lower():
+          errors_detected.append({
+              "tool": "git_status",
+              "pattern": "not a git repository",
+              "cause": "Not in a git repository",
+              "fix": "Navigate to a git repository first"
+          })
+
+      result = errors_detected
+    output: docs_errors_detected
+    on_error: continue
+
+  - name: learn_docs_git_failure
+    description: "Learn from git failures"
+    condition: "docs_errors_detected and any(e.get('pattern') == 'permission denied' for e in docs_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "git_commit"
+      error_pattern: "permission denied"
+      root_cause: "Git repository access denied"
+      fix_description: "Check repository permissions and SSH keys"
+    output: docs_git_fix_learned
+    on_error: continue
+
+  - name: log_docs_session
+    description: "Log documentation check to session"
+    tool: memory_session_log
+    args:
+      action: "Checked documentation for {{ resolved_repo.path if resolved_repo else 'unknown' }}"
+      details: "Needs attention: {{ doc_summary.needs_attention if doc_summary else 'unknown' }}"
+    on_error: continue
 
   - name: context
     value:

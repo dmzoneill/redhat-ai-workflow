@@ -1,5 +1,6 @@
 # Skill: Start Work on Jira Issue
 # Combines issue lookup, branch creation/checkout, MR feedback, and status update
+# Enhanced with knowledge/memory/vector search integration
 
 name: start_work
 description: |
@@ -13,11 +14,15 @@ description: |
   - Creates or checks out feature branch
   - Shows MR feedback if exists
   - Updates Jira status
+  - **NEW:** Searches codebase for related code using semantic vector search
+  - **NEW:** Loads project-specific gotchas and patterns from knowledge base
+  - **NEW:** Shows relevant error patterns from learned memory
 
   Uses MCP tools: jira_view_issue, git_fetch, git_branch_list, git_checkout,
                   git_branch_create, git_pull, gitlab_mr_list, gitlab_mr_view,
-                  gitlab_mr_comments, gitlab_ci_status, jira_set_status
-version: "1.5"
+                  gitlab_mr_comments, gitlab_ci_status, jira_set_status,
+                  code_search, knowledge_query, check_known_issues
+version: "2.0"
 
 inputs:
   - name: issue_key
@@ -139,6 +144,120 @@ steps:
           )
       result = "Issue found"
     output: issue_check
+
+  # ==================== KNOWLEDGE & VECTOR SEARCH ====================
+
+  # Search codebase for related code using semantic vector search
+  - name: search_related_code
+    description: "Find code related to this issue using semantic search"
+    tool: code_search
+    args:
+      query: "{{ issue[:200] if issue else inputs.issue_key }}"
+      project: "{{ resolved_repo.name }}"
+      limit: 5
+    output: related_code_raw
+    on_error: continue
+
+  - name: parse_related_code
+    description: "Parse semantic search results"
+    compute: |
+      code_results = []
+      if related_code_raw:
+          raw_text = str(related_code_raw)
+          # Parse results - expecting list of file:line matches
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  code_results.append(line.strip()[:120])
+
+      result = {
+          "found": len(code_results) > 0,
+          "results": code_results[:5],
+          "count": len(code_results),
+      }
+    output: related_code
+    on_error: continue
+
+  # Load project-specific gotchas from knowledge base
+  - name: load_project_gotchas
+    description: "Load relevant gotchas for this project"
+    tool: knowledge_query
+    args:
+      project: "{{ resolved_repo.name }}"
+      section: "gotchas"
+    output: project_gotchas_raw
+    on_error: continue
+
+  - name: parse_gotchas
+    description: "Parse gotchas into actionable list"
+    compute: |
+      gotchas = []
+      if project_gotchas_raw:
+          raw_text = str(project_gotchas_raw)
+          # Parse YAML-like gotchas
+          import re
+          # Look for gotcha entries
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', raw_text, re.DOTALL):
+              gotcha = match.group(1).strip()[:150]
+              if gotcha and len(gotcha) > 10:
+                  gotchas.append(gotcha)
+
+      result = {
+          "found": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+          "count": len(gotchas),
+      }
+    output: project_gotchas
+    on_error: continue
+
+  # Load architecture context for the project
+  - name: load_architecture_context
+    description: "Load architecture overview for context"
+    tool: knowledge_query
+    args:
+      project: "{{ resolved_repo.name }}"
+      section: "architecture.overview"
+    output: architecture_context_raw
+    on_error: continue
+
+  - name: parse_architecture
+    description: "Parse architecture context"
+    compute: |
+      arch_text = str(architecture_context_raw)[:500] if architecture_context_raw else ""
+      result = {
+          "found": len(arch_text) > 20,
+          "overview": arch_text,
+      }
+    output: architecture_context
+    on_error: continue
+
+  # Check for known error patterns related to this issue
+  - name: check_related_patterns
+    description: "Check memory for patterns related to this issue"
+    tool: check_known_issues
+    args:
+      tool_name: ""
+      error_text: "{{ issue[:100] if issue else '' }}"
+    output: related_patterns_raw
+    on_error: continue
+
+  - name: parse_related_patterns
+    description: "Parse related error patterns"
+    compute: |
+      patterns = []
+      if related_patterns_raw:
+          raw_text = str(related_patterns_raw)
+          if "No known issues" not in raw_text and len(raw_text) > 20:
+              # Extract pattern info
+              import re
+              for match in re.finditer(r'pattern[:\s]+([^\n]+)', raw_text, re.I):
+                  patterns.append(match.group(1).strip()[:100])
+
+      result = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:3],
+      }
+    output: related_patterns
+    on_error: continue
 
   # Step 2: Fetch latest using MCP tool
   - name: fetch_all
@@ -523,6 +642,62 @@ steps:
       value: "{{ memory_context.timestamp }}"
     on_error: continue
 
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_start_work_failures
+    description: "Detect failure patterns from start work operations"
+    compute: |
+      errors_detected = []
+
+      # Check Jira API failures
+      issue_text = str(issue) if 'issue' in dir() and issue else ""
+      if "issue does not exist" in issue_text.lower():
+          errors_detected.append({
+              "tool": "jira_view_issue",
+              "pattern": "issue does not exist",
+              "cause": "Jira issue key is incorrect or issue was deleted",
+              "fix": "Verify Jira issue key format (e.g., AAP-12345)"
+          })
+
+      # Check GitLab failures
+      mrs_text = str(open_mrs_raw) if 'open_mrs_raw' in dir() and open_mrs_raw else ""
+      if "no such host" in mrs_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      result = errors_detected
+    output: start_work_errors_detected
+    on_error: continue
+
+  - name: learn_start_work_jira_failure
+    description: "Learn from Jira failures"
+    condition: "start_work_errors_detected and any(e.get('pattern') == 'issue does not exist' for e in start_work_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "jira_view_issue"
+      error_pattern: "issue does not exist"
+      root_cause: "Jira issue key is incorrect or issue was deleted"
+      fix_description: "Verify Jira issue key format (e.g., AAP-12345)"
+    output: start_work_jira_fix_learned
+    on_error: continue
+
+  - name: learn_start_work_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "start_work_errors_detected and any(e.get('pattern') == 'no such host' for e in start_work_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_list"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: start_work_vpn_fix_learned
+    on_error: continue
+
 outputs:
   - name: summary
     value: |
@@ -542,6 +717,46 @@ outputs:
       _Tip: Run `git stash pop` when you want to restore these changes._
 
       {% endif %}
+
+      {% if related_code and related_code.found %}
+      ---
+      ### 🔍 Related Code (Semantic Search)
+
+      Found **{{ related_code.count }}** relevant code locations:
+      {% for result in related_code.results[:3] %}
+      - `{{ result }}`
+      {% endfor %}
+
+      _Use `code_search` for more detailed searches._
+      {% endif %}
+
+      {% if project_gotchas and project_gotchas.found %}
+      ---
+      ### ⚠️ Project Gotchas
+
+      Keep these in mind while working:
+      {% for gotcha in project_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if related_patterns and related_patterns.found %}
+      ---
+      ### 💡 Related Patterns from Memory
+
+      Similar issues have been seen before:
+      {% for pattern in related_patterns.patterns %}
+      - {{ pattern }}
+      {% endfor %}
+      {% endif %}
+
+      {% if architecture_context and architecture_context.found %}
+      ---
+      ### 🏗️ Architecture Context
+
+      {{ architecture_context.overview[:300] }}
+      {% endif %}
+
       {% if branch_check.exists %}
 
       ---
@@ -610,3 +825,7 @@ outputs:
       has_mr: "{{ existing_mr is not none }}"
       has_feedback: "{{ mr_feedback.has_feedback if mr_feedback else false }}"
       mr_id: "{{ mr_feedback.mr_id if mr_feedback else none }}"
+      related_code_count: "{{ related_code.count if related_code else 0 }}"
+      gotchas_count: "{{ project_gotchas.count if project_gotchas else 0 }}"
+      has_architecture_context: "{{ architecture_context.found if architecture_context else false }}"
+      has_related_patterns: "{{ related_patterns.found if related_patterns else false }}"

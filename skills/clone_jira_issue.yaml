@@ -38,6 +38,29 @@ inputs:
     description: "Assign cloned issue to current user"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_jira_known_issues
+    description: "Check for known Jira issues"
+    compute: |
+      # Check known issues for Jira operations
+      jira_issues = memory.check_known_issues("jira", "") or {}
+      clone_issues = memory.check_known_issues("clone", "") or {}
+
+      all_issues = []
+      for issues in [jira_issues, clone_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: clone_known_issues
+    on_error: continue
+
+  # ==================== GET SOURCE ISSUE ====================
+
   - name: get_source
     description: "Get source issue details"
     tool: jira_view_issue
@@ -128,6 +151,68 @@ steps:
       action: "Cloned {{ inputs.issue_key }} to {{ clone_result.new_key if clone_result else 'failed' }}"
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_clone_failures
+    description: "Detect failure patterns from clone operations"
+    compute: |
+      errors_detected = []
+
+      # Check Jira API failures
+      source_text = str(source_raw) if 'source_raw' in dir() and source_raw else ""
+      clone_text = str(clone_raw) if 'clone_raw' in dir() and clone_raw else ""
+      combined = source_text + clone_text
+
+      if "issue does not exist" in combined.lower():
+          errors_detected.append({
+              "tool": "jira_view_issue",
+              "pattern": "issue does not exist",
+              "cause": "Jira issue key is incorrect or issue was deleted",
+              "fix": "Verify Jira issue key format (e.g., AAP-12345)"
+          })
+      if "unauthorized" in combined.lower() or "401" in combined:
+          errors_detected.append({
+              "tool": "jira_clone_issue",
+              "pattern": "unauthorized",
+              "cause": "Jira authentication failed or token expired",
+              "fix": "Check Jira credentials in config.json"
+          })
+      if "permission" in combined.lower() and "denied" in combined.lower():
+          errors_detected.append({
+              "tool": "jira_clone_issue",
+              "pattern": "permission denied",
+              "cause": "You don't have permission to clone issues in this project",
+              "fix": "Check your Jira project permissions"
+          })
+
+      result = errors_detected
+    output: clone_errors_detected
+    on_error: continue
+
+  - name: learn_jira_not_found_failure
+    description: "Learn from Jira issue not found failures"
+    condition: "clone_errors_detected and any(e.get('pattern') == 'issue does not exist' for e in clone_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "jira_view_issue"
+      error_pattern: "issue does not exist"
+      root_cause: "Jira issue key is incorrect or issue was deleted"
+      fix_description: "Verify Jira issue key format (e.g., AAP-12345)"
+    output: jira_not_found_fix_learned
+    on_error: continue
+
+  - name: learn_jira_auth_failure
+    description: "Learn from Jira auth failures"
+    condition: "clone_errors_detected and any(e.get('pattern') == 'unauthorized' for e in clone_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "jira_clone_issue"
+      error_pattern: "unauthorized"
+      root_cause: "Jira authentication failed or token expired"
+      fix_description: "Check Jira credentials in config.json"
+    output: jira_auth_fix_learned
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -177,4 +262,14 @@ outputs:
 
       **Open in browser:**
       https://issues.redhat.com/browse/{{ clone_result.new_key }}
+
+      {% if clone_known_issues and clone_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in clone_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
       {% endif %}

@@ -54,6 +54,60 @@ inputs:
     description: "GitLab project to check for pending MRs"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_appinterface_known_issues
+    description: "Check for known app-interface and release issues"
+    compute: |
+      # Check known issues for app-interface operations
+      appinterface_issues = memory.check_known_issues("appinterface", "") or {}
+      release_issues = memory.check_known_issues("release", "") or {}
+      saas_issues = memory.check_known_issues("saas", "") or {}
+
+      all_issues = []
+      for issues in [appinterface_issues, release_issues, saas_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: appinterface_known_issues
+    on_error: continue
+
+  - name: get_release_gotchas
+    description: "Get release-related gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "release"
+      section: "gotchas"
+    output: release_gotchas_raw
+    on_error: continue
+
+  - name: parse_release_gotchas
+    description: "Parse release-related gotchas"
+    compute: |
+      gotchas_result = release_gotchas_raw if 'release_gotchas_raw' in dir() and release_gotchas_raw else {}
+
+      release_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for release-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['release', 'app-interface', 'saas', 'sha', 'prod', 'stage', 'promote']):
+                      release_gotchas.append(g)
+
+      result = {
+          'gotchas': release_gotchas[:5],
+          'has_gotchas': len(release_gotchas) > 0,
+      }
+    output: release_check_gotchas
+    on_error: continue
+
   # ==================== GET SAAS FILES ====================
 
   - name: get_saas_file
@@ -636,3 +690,106 @@ outputs:
       # Check prod namespace
       skill_run("appinterface_check", '{"namespace_stage": "{{ inputs.namespace_prod }}"}')
       ```
+
+      {% if release_check_gotchas and release_check_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Release Gotchas
+
+      {% for gotcha in release_check_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if appinterface_known_issues and appinterface_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in appinterface_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_appinterface_failures
+    description: "Detect failure patterns from app-interface checks"
+    compute: |
+      errors_detected = []
+
+      # Check app-interface failures
+      saas_text = str(saas_config_raw) if 'saas_config_raw' in dir() and saas_config_raw else ""
+      if "not found" in saas_text.lower():
+          errors_detected.append({
+              "tool": "appinterface_get_saas",
+              "pattern": "not found",
+              "cause": "SaaS file not found in app-interface",
+              "fix": "Check saas_file input parameter"
+          })
+
+      # Check Kubernetes failures
+      stage_text = str(stage_deploy_raw) if 'stage_deploy_raw' in dir() and stage_deploy_raw else ""
+      prod_text = str(prod_deploy_raw) if 'prod_deploy_raw' in dir() and prod_deploy_raw else ""
+      combined_k8s = stage_text + prod_text
+
+      if "forbidden" in combined_k8s.lower() or "unauthorized" in combined_k8s.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_deployments",
+              "pattern": "forbidden",
+              "cause": "Kubernetes auth expired or insufficient permissions",
+              "fix": "Run kube_login('stage') and kube_login('prod')"
+          })
+      if "no route to host" in combined_k8s.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_deployments",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - cluster not reachable",
+              "fix": "Run vpn_connect()"
+          })
+
+      # Check GitLab failures
+      gitlab_text = str(pending_mrs_raw) if 'pending_mrs_raw' in dir() and pending_mrs_raw else ""
+      if "no such host" in gitlab_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      result = errors_detected
+    output: appinterface_errors_detected
+    on_error: continue
+
+  - name: learn_appinterface_k8s_failure
+    description: "Learn from Kubernetes auth failures"
+    condition: "appinterface_errors_detected and any(e.get('pattern') == 'forbidden' for e in appinterface_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_deployments"
+      error_pattern: "forbidden"
+      root_cause: "Kubernetes auth expired or insufficient permissions"
+      fix_description: "Run kube_login('stage') and kube_login('prod')"
+    output: appinterface_k8s_fix_learned
+    on_error: continue
+
+  - name: learn_appinterface_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "appinterface_errors_detected and any(e.get('pattern') == 'no route to host' for e in appinterface_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_deployments"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - cluster not reachable"
+      fix_description: "Run vpn_connect()"
+    output: appinterface_vpn_fix_learned
+    on_error: continue
+
+  - name: log_appinterface_session
+    description: "Log app-interface check to session"
+    tool: memory_session_log
+    args:
+      action: "Checked app-interface for {{ inputs.saas_file }}"
+      details: "Ready: {{ release_readiness.ready if release_readiness else 'unknown' }}, Blockers: {{ release_readiness.blockers | length if release_readiness and release_readiness.blockers else 0 }}"
+    on_error: continue

@@ -52,6 +52,102 @@ inputs:
     description: "Wait for pipeline to complete (up to 15 min)"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_ci_patterns
+    description: "Get CI/pipeline failure patterns from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      query: "gotchas"
+    output: ci_knowledge_raw
+    on_error: continue
+
+  - name: parse_ci_knowledge
+    description: "Parse CI knowledge for context"
+    compute: |
+      knowledge_text = str(ci_knowledge_raw) if ci_knowledge_raw else ""
+
+      gotchas = []
+      patterns = []
+
+      # Extract gotchas related to CI/pipelines
+      if "gotchas" in knowledge_text.lower():
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["pipeline", "ci", "test", "flaky", "timeout", "retry"]):
+                  gotchas.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+          "patterns": patterns[:5],
+      }
+    output: ci_knowledge
+    on_error: continue
+
+  # ==================== MEMORY CONTEXT ====================
+
+  - name: check_known_issues
+    description: "Check for known CI issues before retrying"
+    compute: |
+      # Check known issues for CI systems
+      gitlab_issues = memory.check_known_issues("gitlab_ci_retry", "")
+      tekton_issues = memory.check_known_issues("tkn_pipeline_start", "")
+
+      all_issues = []
+      if gitlab_issues and gitlab_issues.get("matches"):
+          all_issues.extend(gitlab_issues["matches"][:2])
+      if tekton_issues and tekton_issues.get("matches"):
+          all_issues.extend(tekton_issues["matches"][:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:3],
+      }
+    output: known_issues
+    on_error: continue
+
+  - name: load_retry_history
+    description: "Load previous retry history"
+    compute: |
+      # Load learned patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      retry_history = patterns.get("ci_retries", [])
+
+      # Find recent retries
+      recent_retries = retry_history[-10:]
+
+      # Find common failure patterns
+      failure_jobs = {}
+      for r in retry_history:
+          for job in r.get("failed_jobs", []):
+              failure_jobs[job] = failure_jobs.get(job, 0) + 1
+
+      result = {
+          "previous_retries": len(retry_history),
+          "recent_retries": recent_retries,
+          "common_failing_jobs": sorted(failure_jobs.keys(), key=lambda x: failure_jobs[x], reverse=True)[:5],
+          "success_rate": sum(1 for r in retry_history[-20:] if r.get("retry_succeeded")) / max(len(retry_history[-20:]), 1),
+      }
+    output: retry_history
+    on_error: continue
+
+  - name: check_flaky_jobs
+    description: "Check if failing jobs are known to be flaky"
+    compute: |
+      # Load patterns for flaky jobs
+      patterns = memory.read_memory("learned/patterns") or {}
+      flaky_jobs = patterns.get("flaky_ci_jobs", [])
+
+      result = {
+          "flaky_jobs": [j.get("job_name") for j in flaky_jobs[:10]],
+          "count": len(flaky_jobs),
+      }
+    output: flaky_jobs_info
+    on_error: continue
+
   # ==================== DETERMINE CI SYSTEM ====================
 
   - name: determine_system
@@ -246,6 +342,194 @@ steps:
     args:
       action: "Retried {{ ci_system.system }} pipeline"
       details: "Target: {{ ci_system.target }}, Project: {{ inputs.project if ci_system.system != 'tekton' else inputs.namespace }}"
+    on_error: continue
+
+  - name: learn_retry_pattern
+    description: "Learn from this retry for future reference"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "ci_retries" not in patterns:
+          patterns["ci_retries"] = []
+
+      # Record this retry
+      retry_record = {
+          "system": ci_system.system if ci_system else "unknown",
+          "target": ci_system.target if ci_system else None,
+          "project": inputs.project if ci_system and ci_system.system != "tekton" else inputs.namespace,
+          "failed_jobs": gitlab_pipeline_status.failed_jobs if gitlab_pipeline_status else [],
+          "retry_triggered": bool(gitlab_retry_result or tekton_retry_result if 'gitlab_retry_result' in dir() or 'tekton_retry_result' in dir() else False),
+          "retry_succeeded": None,  # Will be updated by follow-up check
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["ci_retries"].append(retry_record)
+
+      # Keep last 200 retry records
+      patterns["ci_retries"] = patterns["ci_retries"][-200:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "retry pattern learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: track_flaky_jobs
+    description: "Track jobs that frequently fail then pass on retry"
+    condition: "gitlab_pipeline_status and gitlab_pipeline_status.failed_jobs"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "flaky_ci_jobs" not in patterns:
+          patterns["flaky_ci_jobs"] = []
+
+      # Track each failed job
+      for job in (gitlab_pipeline_status.failed_jobs or [])[:5]:
+          existing = [j for j in patterns["flaky_ci_jobs"] if j.get("job_name") == job]
+
+          if existing:
+              existing[0]["fail_count"] = existing[0].get("fail_count", 1) + 1
+              existing[0]["last_failed"] = datetime.now().isoformat()
+          else:
+              patterns["flaky_ci_jobs"].append({
+                  "job_name": job,
+                  "project": inputs.project,
+                  "fail_count": 1,
+                  "retry_success_count": 0,  # Updated when retry succeeds
+                  "first_failed": datetime.now().isoformat(),
+                  "last_failed": datetime.now().isoformat(),
+              })
+
+      # Keep top 100 flaky jobs by fail count
+      patterns["flaky_ci_jobs"] = sorted(
+          patterns["flaky_ci_jobs"],
+          key=lambda x: x.get("fail_count", 0),
+          reverse=True
+      )[:100]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "flaky job tracking updated"
+    output: flaky_tracking_result
+    on_error: continue
+
+  - name: save_shared_context
+    description: "Save context for other skills to use"
+    compute: |
+      from datetime import datetime
+
+      # Share context that other skills can use
+      shared = memory.read_memory("state/shared_context") or {}
+
+      shared["last_ci_retry"] = {
+          "timestamp": datetime.now().isoformat(),
+          "system": ci_system.system if ci_system else None,
+          "target": ci_system.target if ci_system else None,
+          "project": inputs.project if ci_system and ci_system.system != "tekton" else inputs.namespace,
+          "failed_jobs": gitlab_pipeline_status.failed_jobs if gitlab_pipeline_status else [],
+          "retry_triggered": bool(gitlab_retry_result or tekton_retry_result if 'gitlab_retry_result' in dir() or 'tekton_retry_result' in dir() else False),
+      }
+
+      memory.write_memory("state/shared_context", shared)
+      result = "shared context saved"
+    output: shared_context_result
+    on_error: continue
+
+  - name: update_mr_state
+    description: "Update MR state if this was an MR retry"
+    condition: "ci_system and ci_system.system == 'gitlab_mr' and inputs.mr_id"
+    compute: |
+      from datetime import datetime
+
+      # Update current work state
+      current_work = memory.read_memory("state/current_work") or {}
+      if "open_mrs" not in current_work:
+          current_work["open_mrs"] = []
+
+      # Find and update this MR
+      for mr in current_work["open_mrs"]:
+          if mr.get("id") == inputs.mr_id:
+              mr["last_retry"] = datetime.now().isoformat()
+              mr["pipeline_status"] = mr_pipeline.status if mr_pipeline else "unknown"
+              break
+
+      memory.write_memory("state/current_work", current_work)
+      result = "MR state updated"
+    output: mr_state_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_ci_retry_failures
+    description: "Detect failure patterns from CI retry operations"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab failures
+      gitlab_text = str(gitlab_status_raw) if 'gitlab_status_raw' in dir() and gitlab_status_raw else ""
+      mr_text = str(mr_pipeline_raw) if 'mr_pipeline_raw' in dir() and mr_pipeline_raw else ""
+      combined_gitlab = gitlab_text + mr_text
+
+      if "no such host" in combined_gitlab.lower():
+          errors_detected.append({
+              "tool": "gitlab_ci_status",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in combined_gitlab.lower():
+          errors_detected.append({
+              "tool": "gitlab_ci_status",
+              "pattern": "unauthorized",
+              "cause": "GitLab authentication failed or token expired",
+              "fix": "Check GitLab token in config.json"
+          })
+
+      # Check Tekton failures
+      tekton_text = str(tekton_status_raw) if 'tekton_status_raw' in dir() and tekton_status_raw else ""
+      if "unauthorized" in tekton_text.lower() or "forbidden" in tekton_text.lower():
+          errors_detected.append({
+              "tool": "tkn_pipelinerun_describe",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for Konflux cluster",
+              "fix": "Run kube_login(cluster='konflux') to refresh credentials"
+          })
+      if "not found" in tekton_text.lower() and "pipelinerun" in tekton_text.lower():
+          errors_detected.append({
+              "tool": "tkn_pipelinerun_describe",
+              "pattern": "pipelinerun not found",
+              "cause": "PipelineRun name is incorrect or has been garbage collected",
+              "fix": "List recent runs with tkn_pipelinerun_list() to find correct name"
+          })
+
+      result = errors_detected
+    output: ci_retry_errors_detected
+    on_error: continue
+
+  - name: learn_ci_retry_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "ci_retry_errors_detected and any(e.get('pattern') == 'no such host' for e in ci_retry_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_ci_status"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: ci_retry_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_tekton_auth_failure
+    description: "Learn from Tekton auth failures"
+    condition: "ci_retry_errors_detected and any(e.get('tool') == 'tkn_pipelinerun_describe' and e.get('pattern') == 'unauthorized' for e in ci_retry_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "tkn_pipelinerun_describe"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for Konflux cluster"
+      fix_description: "Run kube_login(cluster='konflux') to refresh credentials"
+    output: tekton_auth_fix_learned
     on_error: continue
 
 outputs:

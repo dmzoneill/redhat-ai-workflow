@@ -30,6 +30,50 @@ inputs:
 # No hardcoded constants - resolved from config.json
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_jira_patterns
+    description: "Get Jira workflow patterns from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      query: "gotchas"
+    output: jira_knowledge_raw
+    on_error: continue
+
+  - name: parse_jira_knowledge
+    description: "Parse Jira knowledge for workflow context"
+    compute: |
+      knowledge_text = str(jira_knowledge_raw) if jira_knowledge_raw else ""
+
+      gotchas = []
+
+      # Extract gotchas related to Jira workflow
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["jira", "issue", "status", "transition", "done", "close", "workflow"]):
+                  gotchas.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+      }
+    output: jira_knowledge
+    on_error: continue
+
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_jira_known_issues
+    description: "Check for known Jira issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "jira_transition"
+      error_text: ""
+    output: jira_known_issues
+    on_error: continue
+
   # ==================== LOAD CONFIG ====================
 
   - name: load_config
@@ -367,6 +411,112 @@ steps:
 
       result = "memory updated"
     output: memory_cleanup_result
+    on_error: continue
+
+  - name: learn_issue_closure_pattern
+    description: "Learn from issue closure for future reference"
+    condition: "{{ not status_check.already_done }}"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "issue_closures" not in patterns:
+          patterns["issue_closures"] = []
+
+      # Record this closure
+      closure_record = {
+          "issue_key": inputs.issue_key.upper(),
+          "branch": branch_info.get("primary") if branch_info else None,
+          "commits": commit_info.get("count", 0) if commit_info else 0,
+          "mr_merged": mr_info.get("merged", False) if mr_info else False,
+          "with_comment": inputs.add_comment,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["issue_closures"].append(closure_record)
+
+      # Keep last 100 closure records
+      patterns["issue_closures"] = patterns["issue_closures"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "closure pattern learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: save_shared_context
+    description: "Save closure context for other skills"
+    condition: "{{ not status_check.already_done }}"
+    compute: |
+      from datetime import datetime
+
+      # Share context that other skills can use
+      shared = memory.read_memory("state/shared_context") or {}
+
+      shared["last_issue_closed"] = {
+          "timestamp": datetime.now().isoformat(),
+          "issue_key": inputs.issue_key.upper(),
+          "branch": branch_info.get("primary") if branch_info else None,
+          "commits": commit_info.get("count", 0) if commit_info else 0,
+          "mr_merged": mr_info.get("merged", False) if mr_info else False,
+      }
+
+      memory.write_memory("state/shared_context", shared)
+      result = "shared context saved"
+    output: shared_context_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_close_failures
+    description: "Detect failure patterns from close operations"
+    compute: |
+      errors_detected = []
+
+      # Check Jira API failures
+      issue_text = str(issue) if 'issue' in dir() and issue else ""
+      transition_text = str(transition_result) if 'transition_result' in dir() and transition_result else ""
+      combined = issue_text + transition_text
+
+      if "issue does not exist" in combined.lower():
+          errors_detected.append({
+              "tool": "jira_view_issue",
+              "pattern": "issue does not exist",
+              "cause": "Jira issue key is incorrect or issue was deleted",
+              "fix": "Verify Jira issue key format (e.g., AAP-12345)"
+          })
+      if "transition" in combined.lower() and "not available" in combined.lower():
+          errors_detected.append({
+              "tool": "jira_transition",
+              "pattern": "transition not available",
+              "cause": "Issue cannot be transitioned to Done from current status",
+              "fix": "Check available transitions with jira_view_issue()"
+          })
+
+      # Check GitLab failures
+      mr_text = str(mr_list) if 'mr_list' in dir() and mr_list else ""
+      if "no such host" in mr_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      result = errors_detected
+    output: close_errors_detected
+    on_error: continue
+
+  - name: learn_close_transition_failure
+    description: "Learn from transition failures"
+    condition: "close_errors_detected and any(e.get('pattern') == 'transition not available' for e in close_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "jira_transition"
+      error_pattern: "transition not available"
+      root_cause: "Issue cannot be transitioned to Done from current status"
+      fix_description: "Check available transitions with jira_view_issue()"
+    output: transition_fix_learned
     on_error: continue
 
 outputs:

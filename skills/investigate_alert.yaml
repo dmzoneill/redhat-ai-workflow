@@ -1,5 +1,6 @@
 # Skill: Investigate Alert
 # Quick triage of a firing alert, escalates to debug_prod for deeper investigation
+# Enhanced with knowledge/memory/vector search integration
 
 name: investigate_alert
 description: |
@@ -10,12 +11,14 @@ description: |
   2. Quick health check (pods, deployments)
   3. Check recent events
   4. Look for known patterns
-  5. Escalate to debug_prod if serious
+  5. **NEW:** Search codebase for error source code
+  6. **NEW:** Load deployment gotchas from knowledge
+  7. Escalate to debug_prod if serious
 
   Use this for quick triage. For deep investigation, use debug_prod directly.
 
   Resolves namespaces and paths from config.json.
-version: "2.2"
+version: "3.0"
 
 inputs:
   - name: environment
@@ -43,6 +46,26 @@ inputs:
 # No hardcoded constants - resolved dynamically from config.json
 
 steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_prometheus_known_issues
+    description: "Check for known Prometheus issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "prometheus_query"
+      error_text: ""
+    output: prometheus_known_issues
+    on_error: continue
+
+  - name: check_k8s_known_issues
+    description: "Check for known Kubernetes issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "kubectl_get_pods"
+      error_text: ""
+    output: k8s_known_issues
+    on_error: continue
+
   # ==================== LOAD CONFIG ====================
 
   - name: load_config
@@ -422,6 +445,97 @@ steps:
       result = matches[:5]
     output: pattern_matches
 
+  # ==================== KNOWLEDGE & VECTOR SEARCH ====================
+
+  # Search codebase for error source code
+  - name: search_error_source
+    description: "Search codebase for code related to this alert"
+    condition: "alert_info.alerts"
+    tool: code_search
+    args:
+      query: "{{ alert_info.alerts[0].name if alert_info.alerts else 'error' }} error handling exception"
+      project: "automation-analytics-backend"
+      limit: 5
+    output: error_source_raw
+    on_error: continue
+
+  - name: parse_error_source
+    description: "Parse error source search results"
+    compute: |
+      sources = []
+      if 'error_source_raw' in dir() and error_source_raw:
+          raw_text = str(error_source_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  sources.append(line.strip()[:120])
+
+      result = {
+          "found": len(sources) > 0,
+          "sources": sources[:5],
+          "count": len(sources),
+      }
+    output: error_source
+    on_error: continue
+
+  # Load deployment gotchas from knowledge
+  - name: load_deployment_gotchas
+    description: "Load deployment-related gotchas"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: deployment_gotchas_raw
+    on_error: continue
+
+  - name: parse_deployment_gotchas
+    description: "Parse deployment gotchas"
+    compute: |
+      gotchas = []
+      if 'deployment_gotchas_raw' in dir() and deployment_gotchas_raw:
+          raw_text = str(deployment_gotchas_raw)
+          import re
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', raw_text, re.DOTALL):
+              gotcha = match.group(1).strip()[:150]
+              if gotcha and len(gotcha) > 10:
+                  gotchas.append(gotcha)
+
+      result = {
+          "found": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+      }
+    output: deployment_gotchas
+    on_error: continue
+
+  # Search for recent code changes that might have caused the issue
+  - name: search_recent_changes
+    description: "Search for code changes related to the alert"
+    condition: "alert_info.alerts"
+    tool: code_search
+    args:
+      query: "{{ target.namespace }} {{ alert_info.alerts[0].name if alert_info.alerts else '' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: recent_changes_raw
+    on_error: continue
+
+  - name: parse_recent_changes
+    description: "Parse recent changes search"
+    compute: |
+      changes = []
+      if 'recent_changes_raw' in dir() and recent_changes_raw:
+          raw_text = str(recent_changes_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  changes.append(line.strip()[:100])
+
+      result = {
+          "found": len(changes) > 0,
+          "changes": changes[:3],
+      }
+    output: recent_changes
+    on_error: continue
+
   # ==================== DETERMINE SEVERITY ====================
 
   - name: assess_severity
@@ -619,6 +733,103 @@ steps:
     output: env_update_result
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_alert_investigation_failures
+    description: "Detect failure patterns from alert investigation"
+    compute: |
+      errors_detected = []
+
+      # Check Prometheus failures
+      alerts_text = str(alerts_raw) if 'alerts_raw' in dir() and alerts_raw else ""
+      if "connection refused" in alerts_text.lower() or "no route to host" in alerts_text.lower():
+          errors_detected.append({
+              "tool": "prometheus_alerts",
+              "pattern": "connection refused",
+              "cause": "Cannot connect to Prometheus - VPN or network issue",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in alerts_text.lower():
+          errors_detected.append({
+              "tool": "prometheus_alerts",
+              "pattern": "unauthorized",
+              "cause": "Prometheus authentication failed",
+              "fix": "Check Prometheus credentials and cluster access"
+          })
+
+      # Check kubectl failures
+      pods_text = str(pods_raw) if 'pods_raw' in dir() and pods_raw else ""
+      health_text = str(namespace_health_raw) if 'namespace_health_raw' in dir() and namespace_health_raw else ""
+      combined_k8s = pods_text + health_text
+
+      if "unauthorized" in combined_k8s.lower() or "forbidden" in combined_k8s.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_pods",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired",
+              "fix": "Run kube_login(cluster='stage' or 'prod') to refresh credentials"
+          })
+
+      # Check Kibana failures
+      kibana_text = str(kibana_errors_raw) if 'kibana_errors_raw' in dir() and kibana_errors_raw else ""
+      if "unauthorized" in kibana_text.lower() or "401" in kibana_text:
+          errors_detected.append({
+              "tool": "kibana_search_logs",
+              "pattern": "unauthorized",
+              "cause": "Kibana authentication failed",
+              "fix": "Open Kibana in browser first to authenticate"
+          })
+
+      # Check Grafana failures
+      grafana_text = str(grafana_link_raw) if 'grafana_link_raw' in dir() and grafana_link_raw else ""
+      if "unauthorized" in grafana_text.lower():
+          errors_detected.append({
+              "tool": "grafana_get_dashboard_link",
+              "pattern": "unauthorized",
+              "cause": "Grafana authentication failed",
+              "fix": "Check Grafana credentials in config.json"
+          })
+
+      result = errors_detected
+    output: alert_errors_detected
+    on_error: continue
+
+  - name: learn_prometheus_connection_failure
+    description: "Learn from Prometheus connection failures"
+    condition: "alert_errors_detected and any(e.get('tool') == 'prometheus_alerts' and e.get('pattern') == 'connection refused' for e in alert_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "prometheus_alerts"
+      error_pattern: "connection refused"
+      root_cause: "Cannot connect to Prometheus - VPN or network issue"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: prometheus_conn_fix_learned
+    on_error: continue
+
+  - name: learn_k8s_auth_failure
+    description: "Learn from Kubernetes auth failures"
+    condition: "alert_errors_detected and any(e.get('tool') == 'kubectl_get_pods' for e in alert_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_pods"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired"
+      fix_description: "Run kube_login(cluster='stage' or 'prod') to refresh credentials"
+    output: k8s_auth_fix_learned
+    on_error: continue
+
+  - name: learn_kibana_auth_failure
+    description: "Learn from Kibana auth failures"
+    condition: "alert_errors_detected and any(e.get('tool') == 'kibana_search_logs' for e in alert_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kibana_search_logs"
+      error_pattern: "unauthorized"
+      root_cause: "Kibana authentication failed"
+      fix_description: "Open Kibana in browser first to authenticate"
+    output: kibana_auth_fix_learned
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
@@ -699,6 +910,35 @@ outputs:
       - **{{ match.pattern }}**
         - Cause: {{ match.cause }}
         - Fix: {{ match.fix }}
+      {% endfor %}
+      {% endif %}
+
+      {% if error_source and error_source.found %}
+      ### 🔍 Related Code (Semantic Search)
+
+      Found **{{ error_source.count }}** relevant code locations:
+      {% for source in error_source.sources[:3] %}
+      - `{{ source }}`
+      {% endfor %}
+
+      _Use `code_search` for more detailed searches._
+      {% endif %}
+
+      {% if deployment_gotchas and deployment_gotchas.found %}
+      ### ⚠️ Deployment Gotchas
+
+      Keep these in mind:
+      {% for gotcha in deployment_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if recent_changes and recent_changes.found %}
+      ### 📝 Potentially Related Code
+
+      Recent code that might be related:
+      {% for change in recent_changes.changes %}
+      - `{{ change }}`
       {% endfor %}
       {% endif %}
 

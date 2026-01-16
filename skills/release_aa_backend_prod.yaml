@@ -39,6 +39,61 @@ steps:
     output: autoheal_state
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_release_known_issues
+    description: "Check for known release/deployment issues"
+    compute: |
+      # Check known issues for release operations
+      release_issues = memory.check_known_issues("release", "") or {}
+      quay_issues = memory.check_known_issues("quay", "") or {}
+      appinterface_issues = memory.check_known_issues("app-interface", "") or {}
+      deploy_issues = memory.check_known_issues("deploy", "") or {}
+
+      all_issues = []
+      for issues in [release_issues, quay_issues, appinterface_issues, deploy_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: release_known_issues
+    on_error: continue
+
+  - name: get_release_gotchas
+    description: "Get release-related gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "release"
+      section: "gotchas"
+    output: release_gotchas_raw
+    on_error: continue
+
+  - name: parse_release_gotchas
+    description: "Parse release-related gotchas"
+    compute: |
+      gotchas_result = release_gotchas_raw if 'release_gotchas_raw' in dir() and release_gotchas_raw else {}
+
+      release_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for release-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['release', 'prod', 'deploy', 'sha', 'quay', 'app-interface', 'promote']):
+                      release_gotchas.append(g)
+
+      result = {
+          'gotchas': release_gotchas[:5],
+          'has_gotchas': len(release_gotchas) > 0,
+      }
+    output: prod_release_gotchas
+    on_error: continue
+
   # ==================== LOAD CONFIG ====================
 
   - name: load_config
@@ -485,6 +540,71 @@ steps:
       details: "SHA: {{ inputs.commit_sha[:12] }}, Jira: {{ jira_issue.key if jira_issue else 'N/A' }}"
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_release_failures
+    description: "Detect failure patterns from release operations"
+    compute: |
+      errors_detected = []
+
+      # Check Quay failures
+      quay_text = str(quay_image) if 'quay_image' in dir() and quay_image else ""
+      if "not found" in quay_text.lower() or "manifest unknown" in quay_text.lower():
+          errors_detected.append({
+              "tool": "quay_check_image_exists",
+              "pattern": "image not found",
+              "cause": "Image not built yet - Konflux build may not have completed",
+              "fix": "Wait for Konflux build to complete, check with konflux_list_builds()"
+          })
+
+      # Check GitLab MR failures
+      mr_text = str(mr_result) if 'mr_result' in dir() and mr_result else ""
+      if "no such host" in mr_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_create",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      # Check Jira failures
+      jira_text = str(jira_issue) if 'jira_issue' in dir() and jira_issue else ""
+      if "unauthorized" in jira_text.lower():
+          errors_detected.append({
+              "tool": "jira_create_issue",
+              "pattern": "unauthorized",
+              "cause": "Jira authentication failed or token expired",
+              "fix": "Check Jira credentials in config.json"
+          })
+
+      result = errors_detected
+    output: release_errors_detected
+    on_error: continue
+
+  - name: learn_release_image_failure
+    description: "Learn from image not found failures"
+    condition: "release_errors_detected and any(e.get('pattern') == 'image not found' for e in release_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "quay_check_image_exists"
+      error_pattern: "image not found"
+      root_cause: "Image not built yet - Konflux build may not have completed"
+      fix_description: "Wait for Konflux build to complete, check with konflux_list_builds()"
+    output: release_image_fix_learned
+    on_error: continue
+
+  - name: learn_release_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "release_errors_detected and any(e.get('pattern') == 'no such host' for e in release_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_create"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: release_vpn_fix_learned
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
@@ -528,6 +648,26 @@ outputs:
       ```
       skill_run("release_aa_backend_prod", '{"commit_sha": "{{ current_prod_sha }}"}')
       ```
+
+      {% if prod_release_gotchas and prod_release_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Release Gotchas
+
+      {% for gotcha in prod_release_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if release_known_issues and release_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in release_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
 
   - name: context
     value:

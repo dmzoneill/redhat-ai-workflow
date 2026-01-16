@@ -54,6 +54,59 @@ steps:
     output: autoheal_state
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_branch_naming_patterns
+    description: "Get branch naming conventions from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "patterns.coding"
+    output: branch_patterns_raw
+    on_error: continue
+
+  - name: parse_branch_patterns
+    description: "Parse branch naming patterns"
+    compute: |
+      patterns_result = branch_patterns_raw if 'branch_patterns_raw' in dir() and branch_patterns_raw else {}
+
+      branch_patterns = []
+      if isinstance(patterns_result, dict) and patterns_result.get('found'):
+          content = patterns_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for branch-related patterns
+              for p in content:
+                  p_str = str(p).lower()
+                  if any(kw in p_str for kw in ['branch', 'naming', 'aap-', 'feature/', 'fix/']):
+                      branch_patterns.append(p)
+
+      result = {
+          'patterns': branch_patterns[:5],
+          'has_patterns': len(branch_patterns) > 0,
+      }
+    output: branch_naming_patterns
+    on_error: continue
+
+  - name: check_git_known_issues
+    description: "Check for known git branch issues"
+    compute: |
+      # Check known issues for git operations
+      git_issues = memory.check_known_issues("git", "") or {}
+      branch_issues = memory.check_known_issues("branch", "") or {}
+
+      all_issues = []
+      for issues in [git_issues, branch_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: cleanup_known_issues
+    on_error: continue
+
   # ==================== RESOLVE REPOSITORY ====================
 
   - name: resolve_repo
@@ -236,6 +289,109 @@ steps:
       details: "Deleted {{ deletion_results.deleted_count }} branches in {{ resolved_repo.path }}"
     on_error: continue
 
+  - name: learn_cleanup_pattern
+    description: "Learn from branch cleanup for future reference"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "branch_cleanups" not in patterns:
+          patterns["branch_cleanups"] = []
+
+      # Record this cleanup
+      cleanup_record = {
+          "repo": resolved_repo.get("path", "unknown") if resolved_repo else "unknown",
+          "candidate_count": branch_candidates.get("candidate_count", 0) if branch_candidates else 0,
+          "deleted_count": deletion_results.get("deleted_count", 0) if deletion_results else 0,
+          "dry_run": inputs.dry_run,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["branch_cleanups"].append(cleanup_record)
+
+      # Keep last 50 cleanup records
+      patterns["branch_cleanups"] = patterns["branch_cleanups"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "cleanup pattern learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: track_stale_branches
+    description: "Track frequently stale branches by pattern"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "stale_branch_patterns" not in patterns:
+          patterns["stale_branch_patterns"] = {}
+
+      # Analyze branch naming patterns
+      for candidate in (branch_candidates.get("candidates", []) or [])[:20]:
+          branch_name = candidate.get("name", "")
+
+          # Extract prefix pattern (e.g., "aap-" or "feature/")
+          import re
+          prefix_match = re.match(r'^([a-zA-Z]+-|\w+/)', branch_name)
+          if prefix_match:
+              prefix = prefix_match.group(1)
+              if prefix not in patterns["stale_branch_patterns"]:
+                  patterns["stale_branch_patterns"][prefix] = {"count": 0, "examples": []}
+
+              patterns["stale_branch_patterns"][prefix]["count"] += 1
+              if len(patterns["stale_branch_patterns"][prefix]["examples"]) < 5:
+                  patterns["stale_branch_patterns"][prefix]["examples"].append(branch_name)
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "stale branch patterns tracked"
+    output: stale_pattern_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_cleanup_failures
+    description: "Detect failure patterns from branch cleanup"
+    compute: |
+      errors_detected = []
+
+      # Check git failures
+      fetch_text = str(fetch_result) if 'fetch_result' in dir() and fetch_result else ""
+      branches_text = str(all_branches_raw) if 'all_branches_raw' in dir() and all_branches_raw else ""
+      combined = fetch_text + branches_text
+
+      if "permission denied" in combined.lower():
+          errors_detected.append({
+              "tool": "git_fetch",
+              "pattern": "permission denied",
+              "cause": "SSH key not loaded or git credentials expired",
+              "fix": "Run ssh-add or check git credentials"
+          })
+      if "could not read" in combined.lower() and "remote" in combined.lower():
+          errors_detected.append({
+              "tool": "git_fetch",
+              "pattern": "could not read remote",
+              "cause": "Remote repository not accessible",
+              "fix": "Check VPN connection and remote URL"
+          })
+
+      result = errors_detected
+    output: cleanup_errors_detected
+    on_error: continue
+
+  - name: learn_cleanup_permission_failure
+    description: "Learn from git permission failures"
+    condition: "cleanup_errors_detected and any(e.get('pattern') == 'permission denied' for e in cleanup_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "git_fetch"
+      error_pattern: "permission denied"
+      root_cause: "SSH key not loaded or git credentials expired"
+      fix_description: "Run ssh-add or check git credentials"
+    output: cleanup_permission_fix_learned
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -306,6 +462,26 @@ outputs:
       ```python
       git_branch_delete(repo='{{ resolved_repo.path }}', branch='BRANCH_NAME')
       ```
+
+      {% if branch_naming_patterns and branch_naming_patterns.has_patterns %}
+      ---
+
+      ### 📋 Branch Naming Conventions
+
+      {% for pattern in branch_naming_patterns.patterns[:3] %}
+      - {{ pattern }}
+      {% endfor %}
+      {% endif %}
+
+      {% if cleanup_known_issues and cleanup_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in cleanup_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
 
   - name: context
     value:

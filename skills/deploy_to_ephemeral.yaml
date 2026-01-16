@@ -47,6 +47,59 @@ inputs:
     description: "Component to deploy (main or billing)"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_deployment_known_issues
+    description: "Check for known deployment issues"
+    compute: |
+      # Check known issues for bonfire and deployment
+      bonfire_issues = memory.check_known_issues("bonfire", "") or {}
+      deploy_issues = memory.check_known_issues("deploy", "") or {}
+
+      all_issues = []
+      for issues in [bonfire_issues, deploy_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: deployment_known_issues
+    on_error: continue
+
+  - name: get_deployment_gotchas
+    description: "Get deployment gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: deployment_gotchas_raw
+    on_error: continue
+
+  - name: parse_deployment_gotchas
+    description: "Parse deployment-related gotchas"
+    compute: |
+      gotchas_result = deployment_gotchas_raw if 'deployment_gotchas_raw' in dir() and deployment_gotchas_raw else {}
+
+      deploy_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for deployment-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['deploy', 'ephemeral', 'bonfire', 'namespace', 'pod', 'k8s']):
+                      deploy_gotchas.append(g)
+
+      result = {
+          'gotchas': deploy_gotchas[:5],
+          'has_gotchas': len(deploy_gotchas) > 0,
+      }
+    output: deployment_gotchas
+    on_error: continue
+
   # ==================== CHECK POOLS ====================
 
   - name: list_pools
@@ -242,6 +295,106 @@ steps:
       details: "Duration: {{ inputs.duration }}, Image: {{ inputs.image_tag or 'latest' }}"
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_deploy_failures
+    description: "Detect failure patterns from deployment"
+    compute: |
+      errors_detected = []
+
+      # Check pool/reservation failures
+      reserve_text = str(reserve_result) if 'reserve_result' in dir() and reserve_result else ""
+      if "no pools available" in reserve_text.lower() or "no namespaces available" in reserve_text.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_reserve",
+              "pattern": "no pools available",
+              "cause": "All ephemeral namespace pools are exhausted",
+              "fix": "Wait for pools to free up or release unused namespaces"
+          })
+      if "unauthorized" in reserve_text.lower() or "forbidden" in reserve_text.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_reserve",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for ephemeral cluster",
+              "fix": "Run kube_login(cluster='ephemeral') to refresh credentials"
+          })
+      if "no route to host" in reserve_text.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_reserve",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - cannot reach ephemeral cluster",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      # Check deploy failures
+      deploy_text = str(deploy_result) if 'deploy_result' in dir() and deploy_result else ""
+      if "manifest unknown" in deploy_text.lower():
+          errors_detected.append({
+              "tool": "bonfire_deploy",
+              "pattern": "manifest unknown",
+              "cause": "Image tag not found in registry - wrong SHA or image not built",
+              "fix": "Verify image exists in Quay with quay_get_tag() before deploying"
+          })
+      if "timeout" in deploy_text.lower():
+          errors_detected.append({
+              "tool": "bonfire_deploy",
+              "pattern": "timeout",
+              "cause": "Deployment timed out - pods may be failing to start",
+              "fix": "Check pod status with kubectl_get_pods() and logs with kubectl_logs()"
+          })
+
+      result = errors_detected
+    output: deploy_errors_detected
+    on_error: continue
+
+  - name: learn_pool_exhaustion
+    description: "Learn from pool exhaustion failures"
+    condition: "deploy_errors_detected and any(e.get('pattern') == 'no pools available' for e in deploy_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_reserve"
+      error_pattern: "no pools available"
+      root_cause: "All ephemeral namespace pools are exhausted"
+      fix_description: "Wait for pools to free up or release unused namespaces with bonfire_namespace_list(mine=True)"
+    output: pool_fix_learned
+    on_error: continue
+
+  - name: learn_ephemeral_auth_failure
+    description: "Learn from ephemeral cluster auth failures"
+    condition: "deploy_errors_detected and any(e.get('pattern') == 'unauthorized' for e in deploy_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_reserve"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for ephemeral cluster"
+      fix_description: "Run kube_login(cluster='ephemeral') to refresh credentials"
+    output: auth_fix_learned
+    on_error: continue
+
+  - name: learn_vpn_failure
+    description: "Learn from VPN/network failures"
+    condition: "deploy_errors_detected and any(e.get('pattern') == 'no route to host' for e in deploy_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_reserve"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - cannot reach ephemeral cluster"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: vpn_fix_learned
+    on_error: continue
+
+  - name: learn_manifest_failure
+    description: "Learn from manifest unknown failures"
+    condition: "deploy_errors_detected and any(e.get('pattern') == 'manifest unknown' for e in deploy_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_deploy"
+      error_pattern: "manifest unknown"
+      root_cause: "Image tag not found in registry - wrong SHA or image not built"
+      fix_description: "Verify image exists in Quay with quay_get_tag() before deploying"
+    output: manifest_fix_learned
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -334,6 +487,26 @@ outputs:
       ```
       bonfire_namespace_release(namespace='{{ namespace_info.namespace }}')
       ```
+
+      {% if deployment_gotchas and deployment_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Deployment Gotchas
+
+      {% for gotcha in deployment_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if deployment_known_issues and deployment_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in deployment_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
       {% endif %}
 
   - name: context

@@ -151,6 +151,224 @@ steps:
       }
     output: lint_result
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: search_failing_code
+    description: "Find code related to CI failures"
+    condition: "trace_analysis and trace_analysis.get('errors')"
+    tool: code_search
+    args:
+      query: "{{ trace_analysis.errors[0][:100] if trace_analysis.errors else 'test failure' }}"
+      project: "automation-analytics-backend"
+      limit: 5
+      min_score: 0.5
+    output: failing_code_raw
+    on_error: continue
+
+  - name: parse_failing_code
+    description: "Parse code search results for failures"
+    condition: "failing_code_raw"
+    compute: |
+      code_result = failing_code_raw if failing_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:5]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+                  'preview': r.get('code_chunk', '')[:100] if r.get('code_chunk') else '',
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+          'has_related_code': len(related_code) > 0,
+      }
+    output: failing_code_analysis
+    on_error: continue
+
+  - name: get_ci_gotchas
+    description: "Get CI/pipeline gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "gotchas"
+    output: ci_gotchas_raw
+    on_error: continue
+
+  - name: parse_ci_gotchas
+    description: "Parse CI-related gotchas"
+    compute: |
+      gotchas_result = ci_gotchas_raw if 'ci_gotchas_raw' in dir() and ci_gotchas_raw else {}
+
+      ci_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for CI-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['ci', 'pipeline', 'gitlab', 'test', 'lint', 'build']):
+                      ci_gotchas.append(g)
+
+      result = {
+          'gotchas': ci_gotchas[:5],
+          'has_gotchas': len(ci_gotchas) > 0,
+      }
+    output: ci_gotchas
+    on_error: continue
+
+  # ==================== MEMORY ====================
+
+  - name: log_ci_health_check
+    description: "Log CI health check to session"
+    tool: memory_session_log
+    args:
+      action: "Checked CI health for {{ inputs.project }}"
+      details: "Pipelines: {{ pipelines_info.count }}, Failures: {{ pipelines_info.has_failures }}"
+    on_error: continue
+
+  - name: learn_ci_failure_patterns
+    description: "Learn from CI failures for future auto-remediation"
+    condition: "pipelines_info.has_failures"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "ci_failure_patterns" not in patterns:
+          patterns["ci_failure_patterns"] = []
+
+      # Record this failure check
+      for error in (trace_analysis.get("errors", []) or [])[:5]:
+          # Check if we've seen this error before
+          error_lower = str(error).lower()[:100]
+          existing = [p for p in patterns["ci_failure_patterns"] if p.get("error_text", "").lower()[:100] == error_lower]
+
+          if existing:
+              existing[0]["count"] = existing[0].get("count", 1) + 1
+              existing[0]["last_seen"] = datetime.now().isoformat()
+          else:
+              patterns["ci_failure_patterns"].append({
+                  "error_text": str(error)[:200],
+                  "project": inputs.project,
+                  "pipeline_id": pipelines_info.pipelines[0].get("id") if pipelines_info.pipelines else None,
+                  "count": 1,
+                  "first_seen": datetime.now().isoformat(),
+                  "last_seen": datetime.now().isoformat(),
+              })
+
+      # Keep top 50 most common failures
+      patterns["ci_failure_patterns"] = sorted(
+          patterns["ci_failure_patterns"],
+          key=lambda x: x.get("count", 0),
+          reverse=True
+      )[:50]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "CI failure patterns learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: check_known_issues
+    description: "Check for known CI issues"
+    compute: |
+      # Check known issues for CI
+      issues = memory.check_known_issues("gitlab_ci", "")
+
+      result = {
+          "has_known_issues": len(issues.get("matches", [])) > 0 if issues else False,
+          "issues": issues.get("matches", [])[:3] if issues else [],
+      }
+    output: known_issues
+    on_error: continue
+
+  - name: save_shared_context
+    description: "Save CI health context for other skills"
+    compute: |
+      from datetime import datetime
+
+      # Share context that other skills can use
+      shared = memory.read_memory("state/shared_context") or {}
+
+      shared["last_ci_health_check"] = {
+          "timestamp": datetime.now().isoformat(),
+          "project": inputs.project,
+          "pipeline_count": pipelines_info.get("count", 0) if pipelines_info else 0,
+          "has_failures": pipelines_info.get("has_failures", False) if pipelines_info else False,
+          "ci_valid": lint_result.get("valid", True) if lint_result else True,
+          "errors": trace_analysis.get("errors", [])[:3] if trace_analysis else [],
+      }
+
+      memory.write_memory("state/shared_context", shared)
+      result = "shared context saved"
+    output: shared_context_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_ci_health_failures
+    description: "Detect failure patterns from CI health checks"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab API failures
+      pipelines_text = str(pipelines_raw) if 'pipelines_raw' in dir() and pipelines_raw else ""
+      lint_text = str(lint_raw) if 'lint_raw' in dir() and lint_raw else ""
+      combined = pipelines_text + lint_text
+
+      if "no such host" in combined.lower() or "dial tcp" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_ci_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in combined.lower() or "401" in combined:
+          errors_detected.append({
+              "tool": "gitlab_ci_list",
+              "pattern": "unauthorized",
+              "cause": "GitLab authentication failed or token expired",
+              "fix": "Check GitLab token in config.json"
+          })
+      if "project not found" in combined.lower() or "404" in combined:
+          errors_detected.append({
+              "tool": "gitlab_ci_list",
+              "pattern": "project not found",
+              "cause": "GitLab project path is incorrect or you don't have access",
+              "fix": "Verify project path in config.json and check GitLab permissions"
+          })
+
+      result = errors_detected
+    output: ci_health_errors_detected
+    on_error: continue
+
+  - name: learn_gitlab_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "ci_health_errors_detected and any(e.get('pattern') == 'no such host' for e in ci_health_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_ci_list"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: gitlab_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_gitlab_auth_failure
+    description: "Learn from GitLab auth failures"
+    condition: "ci_health_errors_detected and any(e.get('pattern') == 'unauthorized' for e in ci_health_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_ci_list"
+      error_pattern: "unauthorized"
+      root_cause: "GitLab authentication failed or token expired"
+      fix_description: "Check GitLab token in config.json"
+    output: gitlab_auth_fix_learned
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -217,4 +435,26 @@ outputs:
       ```
       gitlab_ci_cancel(project='{{ inputs.project }}', pipeline_id='{{ pipelines_info.pipelines[0].id }}')
       ```
+
+      {% if failing_code_analysis and failing_code_analysis.has_related_code %}
+      ---
+
+      ### 🔍 Related Code (from semantic search)
+
+      These files may be related to the failure:
+
+      {% for code in failing_code_analysis.code[:5] %}
+      - `{{ code.file }}` (similarity: {{ "%.0f"|format(code.score * 100) }}%)
+      {% endfor %}
+      {% endif %}
+
+      {% if ci_gotchas and ci_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ CI Gotchas to Consider
+
+      {% for gotcha in ci_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
       {% endif %}

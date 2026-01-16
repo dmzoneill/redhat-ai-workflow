@@ -59,6 +59,63 @@ steps:
     output: autoheal_state
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_notification_patterns
+    description: "Get notification patterns from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      query: "gotchas"
+    output: notification_knowledge_raw
+    on_error: continue
+
+  - name: parse_notification_knowledge
+    description: "Parse notification knowledge for context"
+    compute: |
+      knowledge_text = str(notification_knowledge_raw) if notification_knowledge_raw else ""
+
+      gotchas = []
+      patterns = []
+
+      # Extract gotchas related to notifications
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["slack", "notify", "channel", "mention", "review"]):
+                  gotchas.append(line.strip()[:150])
+              if any(kw in line_lower for kw in ["pattern", "format", "template", "message"]):
+                  patterns.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+          "patterns": patterns[:3],
+      }
+    output: notification_knowledge
+    on_error: continue
+
+  - name: check_notification_known_issues
+    description: "Check for known Slack/notification issues"
+    compute: |
+      # Check known issues for notification operations
+      slack_issues = memory.check_known_issues("slack", "") or {}
+      notification_issues = memory.check_known_issues("notification", "") or {}
+      gitlab_issues = memory.check_known_issues("gitlab", "") or {}
+
+      all_issues = []
+      for issues in [slack_issues, notification_issues, gitlab_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: notification_known_issues
+    on_error: continue
+
   # ==================== SETUP ====================
 
   - name: setup
@@ -292,6 +349,85 @@ outputs:
       {% else %}
       ⚠️ Message built but Slack posting requires slack module to be loaded
       {% endif %}
+
+      {% if notification_known_issues and notification_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in notification_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_notify_failures
+    description: "Detect failure patterns from MR notification"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab failures
+      mr_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
+      if "no such host" in mr_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_view",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "not found" in mr_text.lower() and "merge request" in mr_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_view",
+              "pattern": "merge request not found",
+              "cause": "MR ID doesn't exist or wrong project",
+              "fix": "Check MR ID and project path"
+          })
+
+      # Check Slack failures
+      slack_text = str(slack_result_raw) if 'slack_result_raw' in dir() and slack_result_raw else ""
+      if "not_in_channel" in slack_text.lower() or "channel_not_found" in slack_text.lower():
+          errors_detected.append({
+              "tool": "slack_post_team",
+              "pattern": "not_in_channel",
+              "cause": "Bot not added to Slack channel",
+              "fix": "Invite the bot to the team channel"
+          })
+      if "invalid_auth" in slack_text.lower():
+          errors_detected.append({
+              "tool": "slack_post_team",
+              "pattern": "invalid_auth",
+              "cause": "Slack token expired or invalid",
+              "fix": "Check Slack token in config.json"
+          })
+
+      result = errors_detected
+    output: notify_errors_detected
+    on_error: continue
+
+  - name: learn_notify_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "notify_errors_detected and any(e.get('pattern') == 'no such host' for e in notify_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_view"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: notify_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_notify_slack_failure
+    description: "Learn from Slack channel failures"
+    condition: "notify_errors_detected and any(e.get('pattern') == 'not_in_channel' for e in notify_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "slack_post_team"
+      error_pattern: "not_in_channel"
+      root_cause: "Bot not added to Slack channel"
+      fix_description: "Invite the bot to the team channel"
+    output: notify_slack_fix_learned
+    on_error: continue
 
   - name: message
     value: "{{ notification.message }}"

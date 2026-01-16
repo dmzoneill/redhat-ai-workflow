@@ -28,6 +28,62 @@ inputs:
     description: "Number of results to show"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_test_known_issues
+    description: "Check for known Konflux/test issues"
+    compute: |
+      # Check known issues for test operations
+      konflux_issues = memory.check_known_issues("konflux", "") or {}
+      test_issues = memory.check_known_issues("integration_test", "") or {}
+      tekton_issues = memory.check_known_issues("tekton", "") or {}
+
+      all_issues = []
+      for issues in [konflux_issues, test_issues, tekton_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: test_known_issues
+    on_error: continue
+
+  - name: get_testing_gotchas
+    description: "Get testing-related gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "gotchas"
+    output: testing_gotchas_raw
+    on_error: continue
+
+  - name: parse_testing_gotchas
+    description: "Parse testing-related gotchas"
+    compute: |
+      gotchas_result = testing_gotchas_raw if 'testing_gotchas_raw' in dir() and testing_gotchas_raw else {}
+
+      testing_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for testing-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['test', 'integration', 'konflux', 'snapshot', 'ci']):
+                      testing_gotchas.append(g)
+
+      result = {
+          'gotchas': testing_gotchas[:5],
+          'has_gotchas': len(testing_gotchas) > 0,
+      }
+    output: integration_test_gotchas
+    on_error: continue
+
+  # ==================== LIST TESTS ====================
+
   - name: list_tests
     description: "List integration test runs"
     tool: konflux_list_integration_tests
@@ -106,6 +162,57 @@ steps:
       }
     output: snapshots_info
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_integration_test_failures
+    description: "Detect failure patterns from integration test operations"
+    compute: |
+      errors_detected = []
+
+      # Check Konflux/k8s failures
+      tests_text = str(tests_raw) if 'tests_raw' in dir() and tests_raw else ""
+      snapshots_text = str(snapshots_raw) if 'snapshots_raw' in dir() and snapshots_raw else ""
+      combined = tests_text + snapshots_text
+
+      if "unauthorized" in combined.lower() or "forbidden" in combined.lower():
+          errors_detected.append({
+              "tool": "konflux_list_integration_tests",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for Konflux cluster",
+              "fix": "Run kube_login(cluster='konflux') to refresh credentials"
+          })
+      if "no route to host" in combined.lower():
+          errors_detected.append({
+              "tool": "konflux_list_integration_tests",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - cannot reach Konflux cluster",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      result = errors_detected
+    output: integration_test_errors_detected
+    on_error: continue
+
+  - name: learn_integration_test_auth_failure
+    description: "Learn from Konflux auth failures"
+    condition: "integration_test_errors_detected and any(e.get('pattern') == 'unauthorized' for e in integration_test_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "konflux_list_integration_tests"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for Konflux cluster"
+      fix_description: "Run kube_login(cluster='konflux') to refresh credentials"
+    output: integration_test_auth_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Checked integration tests"
+      details: "namespace={{ inputs.namespace }}, tests={{ tests_info.total if tests_info is defined else 'unknown' }}"
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -159,3 +266,23 @@ outputs:
       ```
       konflux_get_snapshot(name='<snapshot-name>', namespace='{{ inputs.namespace }}')
       ```
+
+      {% if integration_test_gotchas and integration_test_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Testing Gotchas
+
+      {% for gotcha in integration_test_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if test_known_issues and test_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in test_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

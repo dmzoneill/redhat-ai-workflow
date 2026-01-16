@@ -1,23 +1,31 @@
 # Skill: Create Jira Issue
 # Create new Jira issues with linking and assignment
+# Enhanced with semantic code search for context-rich issues
 
 name: create_jira_issue
 description: |
   Create a new Jira issue with proper linking and assignment.
 
+  **Enhanced with Semantic Search:**
+  - Searches codebase for related code based on issue summary
+  - Adds relevant file references to issue description
+  - Identifies potential areas of impact
+  - Suggests related components/modules
+
   Use for:
-  - Creating bug reports
-  - Creating feature requests
+  - Creating bug reports (with relevant code context)
+  - Creating feature requests (with implementation hints)
   - Creating sub-tasks
   - Linking related issues
 
   The skill will:
-  1. Create the issue
-  2. Assign to specified user (or self)
-  3. Link to related issues
-  4. Transition to appropriate status
+  1. Search codebase for related code (semantic search)
+  2. Create the issue with enriched description
+  3. Assign to specified user (or self)
+  4. Link to related issues
+  5. Transition to appropriate status
 
-version: "1.0"
+version: "1.1"
 
 inputs:
   - name: summary
@@ -42,6 +50,18 @@ inputs:
     required: false
     default: "AAP"
     description: "Jira project key"
+
+  - name: repo
+    type: string
+    required: false
+    default: "automation-analytics-backend"
+    description: "Repository to search for related code"
+
+  - name: search_code
+    type: boolean
+    required: false
+    default: true
+    description: "Search codebase for related code (semantic search)"
 
   - name: assignee
     type: string
@@ -91,15 +111,178 @@ steps:
     output: autoheal_state
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_jira_known_issues
+    description: "Check for known Jira issues"
+    compute: |
+      # Check known issues for Jira operations
+      jira_issues = memory.check_known_issues("jira", "") or {}
+      issue_issues = memory.check_known_issues("issue_create", "") or {}
+
+      all_issues = []
+      for issues in [jira_issues, issue_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: jira_known_issues
+    on_error: continue
+
+  - name: get_jira_best_practices
+    description: "Get Jira best practices from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "patterns"
+    output: jira_practices_raw
+    on_error: continue
+
+  - name: parse_jira_practices
+    description: "Parse Jira best practices"
+    compute: |
+      practices_result = jira_practices_raw if 'jira_practices_raw' in dir() and jira_practices_raw else {}
+
+      jira_practices = []
+      if isinstance(practices_result, dict) and practices_result.get('found'):
+          content = practices_result.get('content', {})
+          if isinstance(content, dict):
+              # Get coding patterns that might relate to Jira
+              coding = content.get('coding', [])
+              if isinstance(coding, list):
+                  for p in coding:
+                      p_str = str(p).lower()
+                      if any(kw in p_str for kw in ['jira', 'issue', 'ticket', 'story', 'bug', 'task']):
+                          jira_practices.append(p)
+
+      result = {
+          'practices': jira_practices[:5],
+          'has_practices': len(jira_practices) > 0,
+      }
+    output: jira_best_practices
+    on_error: continue
+
+  # ==================== SEMANTIC CODE SEARCH ====================
+
+  - name: search_related_code
+    description: "Search codebase for code related to the issue"
+    condition: "inputs.search_code"
+    tool: code_search
+    args:
+      query: "{{ inputs.summary }}"
+      project: "{{ inputs.repo }}"
+      limit: 5
+    output: code_search_raw
+    on_error: continue
+
+  - name: parse_code_search
+    description: "Parse semantic search results"
+    condition: "inputs.search_code"
+    compute: |
+      import re
+
+      search_result = code_search_raw if 'code_search_raw' in dir() and code_search_raw else ""
+      search_text = str(search_result) if search_result else ""
+
+      related_files = []
+      code_snippets = []
+      modules_affected = set()
+
+      # Parse the markdown output from code_search
+      # Format: ### 1. `file_path` (lines X-Y)
+      file_pattern = r'###\s*\d+\.\s*`([^`]+)`\s*\(lines\s*(\d+)-(\d+)\)'
+      type_pattern = r'\*\*Type:\*\*\s*(\w+)\s*\|\s*\*\*Name:\*\*\s*(\w+)\s*\|\s*\*\*Relevance:\*\*\s*(\d+)%'
+
+      matches = re.findall(file_pattern, search_text)
+      type_matches = re.findall(type_pattern, search_text)
+
+      for i, (file_path, start_line, end_line) in enumerate(matches[:5]):
+          # Extract module/component from path
+          parts = file_path.split('/')
+          if len(parts) > 1:
+              module = parts[0] if parts[0] not in ['src', 'app', 'lib'] else (parts[1] if len(parts) > 1 else parts[0])
+              modules_affected.add(module)
+
+          file_info = {
+              'path': file_path,
+              'start_line': int(start_line),
+              'end_line': int(end_line),
+              'type': type_matches[i][0] if i < len(type_matches) else 'unknown',
+              'name': type_matches[i][1] if i < len(type_matches) else 'unknown',
+              'relevance': int(type_matches[i][2]) if i < len(type_matches) else 0,
+          }
+          related_files.append(file_info)
+
+      # Extract code snippets (first 3 high-relevance ones)
+      code_blocks = re.findall(r'```\w+\n(.*?)```', search_text, re.DOTALL)
+      for i, block in enumerate(code_blocks[:3]):
+          if len(block.strip()) > 20:  # Skip tiny snippets
+              code_snippets.append({
+                  'code': block.strip()[:500],  # Limit size
+                  'file': related_files[i]['path'] if i < len(related_files) else 'unknown',
+              })
+
+      result = {
+          'found': len(related_files) > 0,
+          'files': related_files,
+          'modules': list(modules_affected),
+          'snippets': code_snippets,
+          'file_count': len(related_files),
+          'high_relevance_count': sum(1 for f in related_files if f.get('relevance', 0) >= 60),
+      }
+    output: code_context
+    on_error: continue
+
+  - name: build_enhanced_description
+    description: "Build enhanced description with code context"
+    compute: |
+      original_desc = inputs.get('description', '') or ''
+      code_ctx = code_context if 'code_context' in dir() and code_context else {}
+
+      enhanced_desc = original_desc
+
+      # Add code context section if we found related code
+      if code_ctx.get('found') and code_ctx.get('files'):
+          if enhanced_desc:
+              enhanced_desc += "\n\n"
+
+          enhanced_desc += "---\n\n"
+          enhanced_desc += "h3. 🔍 Related Code (auto-discovered)\n\n"
+
+          # List affected modules
+          if code_ctx.get('modules'):
+              enhanced_desc += "*Potentially affected modules:* " + ", ".join(code_ctx['modules'][:5]) + "\n\n"
+
+          # List relevant files
+          enhanced_desc += "*Relevant files:*\n"
+          for f in code_ctx.get('files', [])[:5]:
+              relevance_indicator = "🟢" if f.get('relevance', 0) >= 70 else "🟡" if f.get('relevance', 0) >= 40 else "⚪"
+              enhanced_desc += f"* {relevance_indicator} {{{{code}}}}{f['path']}{{{{code}}}} (lines {f['start_line']}-{f['end_line']}) - {f.get('type', 'code')}: {f.get('name', 'unknown')}\n"
+
+          # Add note about semantic search
+          enhanced_desc += "\n_Code references discovered via semantic search based on issue summary._\n"
+
+      result = {
+          'description': enhanced_desc,
+          'was_enhanced': code_ctx.get('found', False),
+          'files_added': code_ctx.get('file_count', 0),
+      }
+    output: enhanced_description
+    on_error: continue
+
   # ==================== CREATE ISSUE ====================
 
   - name: create_issue
-    description: "Create the Jira issue"
+    description: "Create the Jira issue with enhanced description"
     tool: jira_create_issue
     args:
       project: "{{ inputs.project }}"
       summary: "{{ inputs.summary }}"
-      description: "{{ inputs.description or '' }}"
+      description: "{{ enhanced_description.description if enhanced_description and enhanced_description.description else (inputs.description or '') }}"
       issue_type: "{{ inputs.issue_type }}"
       priority: "{{ inputs.priority }}"
       labels: "{{ inputs.labels or '' }}"
@@ -214,6 +397,66 @@ steps:
       details: "{{ inputs.summary[:50] }}{% if inputs.link_to %}, linked to {{ inputs.link_to }}{% endif %}"
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_create_failures
+    description: "Detect failure patterns from issue creation"
+    compute: |
+      errors_detected = []
+
+      # Check Jira API failures
+      create_text = str(create_result) if 'create_result' in dir() and create_result else ""
+
+      if "unauthorized" in create_text.lower() or "401" in create_text:
+          errors_detected.append({
+              "tool": "jira_create_issue",
+              "pattern": "unauthorized",
+              "cause": "Jira authentication failed or token expired",
+              "fix": "Check Jira credentials in config.json"
+          })
+      if "project" in create_text.lower() and "not found" in create_text.lower():
+          errors_detected.append({
+              "tool": "jira_create_issue",
+              "pattern": "project not found",
+              "cause": "Jira project key is incorrect",
+              "fix": "Verify project key (e.g., AAP, RHCLOUD)"
+          })
+      if "issue type" in create_text.lower() and "not found" in create_text.lower():
+          errors_detected.append({
+              "tool": "jira_create_issue",
+              "pattern": "issue type not found",
+              "cause": "Issue type doesn't exist in this project",
+              "fix": "Use valid types: Story, Bug, Task, Epic"
+          })
+
+      result = errors_detected
+    output: create_errors_detected
+    on_error: continue
+
+  - name: learn_jira_create_auth_failure
+    description: "Learn from Jira auth failures"
+    condition: "create_errors_detected and any(e.get('pattern') == 'unauthorized' for e in create_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "jira_create_issue"
+      error_pattern: "unauthorized"
+      root_cause: "Jira authentication failed or token expired"
+      fix_description: "Check Jira credentials in config.json"
+    output: create_auth_fix_learned
+    on_error: continue
+
+  - name: learn_jira_project_failure
+    description: "Learn from project not found failures"
+    condition: "create_errors_detected and any(e.get('pattern') == 'project not found' for e in create_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "jira_create_issue"
+      error_pattern: "project not found"
+      root_cause: "Jira project key is incorrect"
+      fix_description: "Verify project key (e.g., AAP, RHCLOUD)"
+    output: project_fix_learned
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -279,6 +522,55 @@ outputs:
       - Issue type exists ({{ inputs.issue_type }})
       - You have permission to create issues
 
+      {% endif %}
+
+      {% if jira_best_practices and jira_best_practices.has_practices %}
+      ---
+
+      ### 📋 Jira Best Practices
+
+      {% for practice in jira_best_practices.practices[:3] %}
+      - {{ practice }}
+      {% endfor %}
+      {% endif %}
+
+      {% if jira_known_issues and jira_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in jira_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+      {% if code_context and code_context.found %}
+      ---
+
+      ### 🔍 Code Context (Semantic Search)
+
+      {% if enhanced_description and enhanced_description.was_enhanced %}
+      ✅ Issue description enhanced with {{ code_context.file_count }} related file(s)
+      {% endif %}
+
+      **Potentially affected modules:** {{ code_context.modules | join(', ') if code_context.modules else 'None identified' }}
+
+      **Related files found:**
+      {% for f in code_context.files[:5] %}
+      - {% if f.relevance >= 70 %}🟢{% elif f.relevance >= 40 %}🟡{% else %}⚪{% endif %} `{{ f.path }}` ({{ f.relevance }}% match) - {{ f.type }}: {{ f.name }}
+      {% endfor %}
+
+      {% if code_context.high_relevance_count > 0 %}
+      📊 {{ code_context.high_relevance_count }} high-relevance match(es) found
+      {% endif %}
+      {% elif inputs.search_code %}
+      ---
+
+      ### 🔍 Code Context
+
+      ⚠️ No related code found via semantic search. The codebase may not be indexed.
+
+      To index: `code_index("{{ inputs.repo }}")`
       {% endif %}
 
   - name: context

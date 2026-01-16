@@ -28,6 +28,61 @@ inputs:
     description: "Environment (stage, production, ephemeral)"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_devops_gotchas
+    description: "Get DevOps gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: devops_gotchas_raw
+    on_error: continue
+
+  - name: parse_devops_gotchas
+    description: "Parse DevOps gotchas"
+    compute: |
+      gotchas_result = devops_gotchas_raw if 'devops_gotchas_raw' in dir() and devops_gotchas_raw else {}
+
+      devops_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for environment-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['k8s', 'pod', 'deploy', 'namespace', 'service', 'ingress', 'stage', 'prod']):
+                      devops_gotchas.append(g)
+
+      result = {
+          'gotchas': devops_gotchas[:5],
+          'has_gotchas': len(devops_gotchas) > 0,
+      }
+    output: environment_gotchas
+    on_error: continue
+
+  - name: check_k8s_known_issues
+    description: "Check for known k8s issues"
+    compute: |
+      # Check known issues for k8s operations
+      k8s_issues = memory.check_known_issues("k8s", "") or {}
+      kubectl_issues = memory.check_known_issues("kubectl", "") or {}
+
+      all_issues = []
+      for issues in [k8s_issues, kubectl_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: k8s_known_issues
+    on_error: continue
+
+  # ==================== K8S QUERIES ====================
+
   - name: get_environment_summary
     description: "Get environment summary"
     tool: k8s_environment_summary
@@ -147,6 +202,57 @@ steps:
       }
     output: pod_analysis
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_env_overview_failures
+    description: "Detect failure patterns from environment overview"
+    compute: |
+      errors_detected = []
+
+      # Check kubectl failures
+      ns_text = str(ns_health_raw) if 'ns_health_raw' in dir() and ns_health_raw else ""
+      pods_text = str(pods_raw) if 'pods_raw' in dir() and pods_raw else ""
+      combined = ns_text + pods_text
+
+      if "unauthorized" in combined.lower() or "forbidden" in combined.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_pods",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired",
+              "fix": "Run kube_login(cluster='stage' or 'prod') to refresh credentials"
+          })
+      if "no route to host" in combined.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_pods",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - cannot reach cluster",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      result = errors_detected
+    output: env_overview_errors_detected
+    on_error: continue
+
+  - name: learn_env_overview_auth_failure
+    description: "Learn from k8s auth failures"
+    condition: "env_overview_errors_detected and any(e.get('pattern') == 'unauthorized' for e in env_overview_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_pods"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired"
+      fix_description: "Run kube_login(cluster='stage' or 'prod') to refresh credentials"
+    output: env_overview_auth_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Checked environment overview"
+      details: "namespace={{ inputs.namespace }}, environment={{ inputs.environment }}, healthy={{ health_info.healthy if health_info is defined else 'unknown' }}"
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -213,3 +319,23 @@ outputs:
       ```
       kubectl_logs(pod_name='<pod>', namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
       ```
+
+      {% if environment_gotchas and environment_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Environment Gotchas
+
+      {% for gotcha in environment_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if k8s_known_issues and k8s_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in k8s_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

@@ -1,5 +1,6 @@
 # Skill: Review PR/MR
 # Structured code review with local testing
+# Enhanced with knowledge/memory/vector search integration
 
 name: review_pr
 description: |
@@ -14,8 +15,14 @@ description: |
   Checks MR description, commit format, pipelines, Jira context,
   runs local tests, and provides brief focused feedback.
 
+  **NEW Features:**
+  - Semantic search for similar code patterns in codebase
+  - Architecture validation against project knowledge
+  - Pattern checking against learned error patterns
+  - Author history and coaching based on past reviews
+
   Automatically approves or posts feedback based on findings.
-version: "1.3"
+version: "2.0"
 
 inputs:
   - name: mr_id
@@ -181,6 +188,62 @@ steps:
         result = resolved_mr_id
     output: mr_id
 
+  # ==================== PRE-EMPTIVE MEMORY CHECKS ====================
+
+  # Check for known GitLab API issues before fetching MR
+  - name: check_gitlab_known_issues
+    description: "Check memory for known GitLab API issues before fetching MR"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_mr_view"
+      error_text: ""
+    output: gitlab_known_issues
+    on_error: continue
+
+  - name: preempt_gitlab_errors
+    description: "Apply pre-emptive fixes based on known patterns"
+    compute: |
+      known = str(gitlab_known_issues) if 'gitlab_known_issues' in dir() and gitlab_known_issues else ""
+
+      preemptive_warnings = []
+      if "401" in known or "unauthorized" in known.lower():
+          preemptive_warnings.append("GitLab token may need refresh")
+      if "timeout" in known.lower():
+          preemptive_warnings.append("GitLab API may be slow")
+      if "rate limit" in known.lower():
+          preemptive_warnings.append("GitLab rate limiting detected")
+
+      result = {
+          "has_warnings": len(preemptive_warnings) > 0,
+          "warnings": preemptive_warnings,
+      }
+    output: gitlab_preemption
+    on_error: continue
+
+  # Check if we've reviewed this MR before (load from cache)
+  - name: check_previous_review
+    description: "Load previous review if this is a re-review"
+    compute: |
+      mr_str = str(mr_id) if mr_id else ""
+
+      data = memory.read_memory("learned/review_cache") if memory else {}
+      recent = data.get("recent_approvals", []) if isinstance(data.get("recent_approvals"), list) else []
+
+      previous = next((r for r in recent if str(r.get("mr_id", "")) == mr_str), None)
+
+      if previous:
+          result = {
+              "is_rereview": True,
+              "previous_approval": previous.get("approved_at"),
+              "previous_author": previous.get("author"),
+              "previous_files_changed": previous.get("files_changed", 0),
+              "hint": "This MR was previously reviewed - checking for new commits",
+          }
+      else:
+          result = {"is_rereview": False}
+    output: previous_review
+    on_error: continue
+
   # ==================== GATHER CONTEXT ====================
 
   # Step 1: Get MR details
@@ -199,7 +262,7 @@ steps:
     tool: gitlab_commit_list
     args:
       project: "{{ resolved.gitlab_project }}"
-      ref: "{{ mr_id }}"
+      mr_id: "{{ mr_id }}"
       limit: 20
     output: mr_commits_raw
     on_error: continue
@@ -235,7 +298,7 @@ steps:
     description: "Get the code diff for the MR"
     tool: git_diff
     args:
-      repo: "{{ resolved.repo_path }}"
+      repo: "{{ resolved.path }}"
       ref1: "{{ resolved.default_branch }}"
       ref2: "HEAD"
       stat: true
@@ -280,7 +343,7 @@ steps:
     condition: "diff_analysis and diff_analysis.file_count > 0"
     tool: git_blame
     args:
-      repo: "{{ resolved.repo_path }}"
+      repo: "{{ resolved.path }}"
       file: "{{ diff_analysis.files_changed[0] }}"
     output: blame_raw
     on_error: continue
@@ -318,6 +381,153 @@ steps:
       jira_key = parsers.extract_jira_key(mr_details) if parsers else "NOT_FOUND"
       result = jira_key or "NOT_FOUND"
     output: jira_key
+
+  # ==================== KNOWLEDGE & VECTOR SEARCH ====================
+
+  # Search for similar code patterns in the codebase
+  - name: search_similar_patterns
+    description: "Find similar code patterns to validate against conventions"
+    condition: "diff_analysis and diff_analysis.file_count > 0"
+    tool: code_search
+    args:
+      query: "{{ diff_analysis.files_changed[0] | default('') }} implementation pattern"
+      project: "{{ resolved.gitlab_project | replace('automation-analytics/', '') }}"
+      limit: 5
+    output: similar_code_raw
+    on_error: continue
+
+  - name: parse_similar_code
+    description: "Parse similar code search results"
+    compute: |
+      similar = []
+      if 'similar_code_raw' in dir() and similar_code_raw:
+          raw_text = str(similar_code_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  similar.append(line.strip()[:100])
+
+      result = {
+          "found": len(similar) > 0,
+          "results": similar[:5],
+          "count": len(similar),
+      }
+    output: similar_code
+    on_error: continue
+
+  # Load architecture knowledge for validation
+  - name: load_architecture_for_review
+    description: "Load architecture knowledge to validate changes"
+    tool: knowledge_query
+    args:
+      project: "{{ resolved.gitlab_project | replace('automation-analytics/', '') }}"
+      section: "architecture.key_modules"
+    output: architecture_modules_raw
+    on_error: continue
+
+  - name: parse_architecture_modules
+    description: "Parse architecture modules for validation"
+    compute: |
+      modules = []
+      if 'architecture_modules_raw' in dir() and architecture_modules_raw:
+          raw_text = str(architecture_modules_raw)
+          import re
+          # Extract module paths
+          for match in re.finditer(r'path[:\s]+([^\n,]+)', raw_text, re.I):
+              modules.append(match.group(1).strip())
+
+      result = {
+          "found": len(modules) > 0,
+          "modules": modules[:10],
+      }
+    output: architecture_modules
+    on_error: continue
+
+  # Check if changed files align with architecture
+  - name: validate_architecture_alignment
+    description: "Check if changes align with project architecture"
+    compute: |
+      alignment_issues = []
+
+      if 'diff_analysis' in dir() and diff_analysis and 'architecture_modules' in dir() and architecture_modules:
+          changed_files = diff_analysis.get("files_changed", [])
+          known_modules = architecture_modules.get("modules", [])
+
+          # Check if changes are in known module areas
+          for f in changed_files[:10]:
+              in_known_module = False
+              for mod in known_modules:
+                  if mod in f or f.startswith(mod.rstrip('/')):
+                      in_known_module = True
+                      break
+
+              # Flag files outside known modules (potential architecture violation)
+              if not in_known_module and not any(skip in f for skip in ['test', 'conftest', '__init__', 'migrations']):
+                  if f.endswith('.py') and '/' in f:
+                      alignment_issues.append(f"New code in `{f}` - verify it belongs in this location")
+
+      result = {
+          "has_issues": len(alignment_issues) > 0,
+          "issues": alignment_issues[:3],
+      }
+    output: architecture_alignment
+    on_error: continue
+
+  # Load coding patterns from knowledge
+  - name: load_coding_patterns
+    description: "Load coding patterns for the project"
+    tool: knowledge_query
+    args:
+      project: "{{ resolved.gitlab_project | replace('automation-analytics/', '') }}"
+      section: "patterns.coding"
+    output: coding_patterns_raw
+    on_error: continue
+
+  - name: parse_coding_patterns
+    description: "Parse coding patterns"
+    compute: |
+      patterns = []
+      if 'coding_patterns_raw' in dir() and coding_patterns_raw:
+          raw_text = str(coding_patterns_raw)
+          import re
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', raw_text, re.DOTALL):
+              pattern = match.group(1).strip()[:100]
+              if pattern and len(pattern) > 10:
+                  patterns.append(pattern)
+
+      result = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:5],
+      }
+    output: coding_patterns
+    on_error: continue
+
+  # Check for known problematic patterns in the diff
+  - name: check_known_problematic_patterns
+    description: "Check diff against known error patterns"
+    tool: check_known_issues
+    args:
+      tool_name: ""
+      error_text: "{{ mr_diff[:500] if mr_diff else '' }}"
+    output: problematic_patterns_raw
+    on_error: continue
+
+  - name: parse_problematic_patterns
+    description: "Parse problematic pattern matches"
+    compute: |
+      issues = []
+      if 'problematic_patterns_raw' in dir() and problematic_patterns_raw:
+          raw_text = str(problematic_patterns_raw)
+          if "No known issues" not in raw_text and len(raw_text) > 20:
+              import re
+              for match in re.finditer(r'(?:pattern|fix)[:\s]+([^\n]+)', raw_text, re.I):
+                  issues.append(match.group(1).strip()[:80])
+
+      result = {
+          "found": len(issues) > 0,
+          "issues": issues[:3],
+      }
+    output: problematic_patterns
+    on_error: continue
 
   # Step 3: Get Jira issue details (if found)
   - name: get_jira_issue
@@ -402,6 +612,56 @@ steps:
     output: pipeline_trace_raw
     on_error: continue
 
+  # Learn from pipeline failure patterns for faster diagnosis
+  - name: learn_pipeline_failure
+    description: "Save pipeline failure patterns for faster diagnosis"
+    condition: "pipeline_trace_raw and 'error' in str(pipeline_trace_raw).lower()"
+    compute: |
+      from datetime import datetime
+      import re
+
+      trace = str(pipeline_trace_raw) if pipeline_trace_raw else ""
+
+      # Extract error signature
+      error_lines = [l.strip() for l in trace.split("\n") if "error" in l.lower() or "failed" in l.lower()]
+      error_signature = error_lines[0][:100] if error_lines else "unknown"
+
+      # Check if this pattern exists
+      data = memory.read_memory("learned/patterns") if memory else {}
+      pipeline_patterns = data.get("pipeline_patterns", []) if isinstance(data.get("pipeline_patterns"), list) else []
+
+      # Simple deduplication by first 50 chars
+      signature_short = error_signature[:50]
+      existing = next((p for p in pipeline_patterns if signature_short in str(p.get("pattern", ""))[:50]), None)
+
+      if not existing and signature_short != "unknown":
+          pipeline_patterns.append({
+              "pattern": signature_short,
+              "meaning": "Pipeline failure - needs investigation",
+              "fix": "Check CI logs for details",
+              "first_seen": datetime.now().isoformat(),
+              "mr_ids": [str(mr_id)],
+              "commands": ["gitlab_ci_trace"],
+          })
+          data["pipeline_patterns"] = pipeline_patterns[-30:]
+          if memory:
+              memory.write_memory("learned/patterns", data)
+          result = {"learned": True, "pattern": signature_short}
+      elif existing:
+          # Update existing pattern with new MR
+          mr_list = existing.get("mr_ids", [])
+          if str(mr_id) not in mr_list:
+              mr_list.append(str(mr_id))
+              existing["mr_ids"] = mr_list[-10:]
+              existing["last_seen"] = datetime.now().isoformat()
+              if memory:
+                  memory.write_memory("learned/patterns", data)
+          result = {"learned": False, "pattern": signature_short, "recurrence": len(mr_list)}
+      else:
+          result = {"learned": False, "pattern": "none"}
+    output: pipeline_learning_result
+    on_error: continue
+
   - name: get_approvers
     description: "Get MR approvers list"
     tool: gitlab_mr_approvers
@@ -460,6 +720,46 @@ steps:
         commit_cfg = get_commit_format()
         result = issues + [f"Pattern: {commit_cfg['pattern']}"]
     output: format_issues
+
+  # Learn from new format issues for future detection
+  - name: learn_format_pattern
+    description: "Save new format issues to patterns for future detection"
+    condition: "format_issues and format_issues != ['Format OK'] and len(format_issues) > 1"
+    compute: |
+      from datetime import datetime
+
+      data = memory.read_memory("learned/patterns") if memory else {}
+      commit_patterns = data.get("commit_format_patterns", []) if isinstance(data.get("commit_format_patterns"), list) else []
+
+      # Extract the first specific issue (not the generic pattern line)
+      new_issue = format_issues[0] if format_issues else ""
+
+      # Check if already known
+      known = any(p.get("issue") == new_issue for p in commit_patterns)
+
+      if not known and new_issue and not new_issue.startswith("Pattern:"):
+          commit_patterns.append({
+              "issue": new_issue,
+              "mr_id": str(mr_id),
+              "first_seen": datetime.now().isoformat(),
+              "occurrences": 1,
+          })
+          data["commit_format_patterns"] = commit_patterns[-50:]
+          if memory:
+              memory.write_memory("learned/patterns", data)
+          result = f"Learned new format pattern: {new_issue[:50]}"
+      else:
+          # Increment occurrence count for known pattern
+          for p in commit_patterns:
+              if p.get("issue") == new_issue:
+                  p["occurrences"] = p.get("occurrences", 0) + 1
+                  p["last_seen"] = datetime.now().isoformat()
+                  if memory:
+                      memory.write_memory("learned/patterns", data)
+                  break
+          result = "Pattern already known"
+    output: format_learning_result
+    on_error: continue
 
   # Step 8: Check MR description
   - name: check_description
@@ -742,8 +1042,66 @@ steps:
       if new_files and not test_files:
         issues.append(f"📝 Tests: New code in {len(new_files)} files but no test updates")
 
+      # Add architecture alignment issues from knowledge check
+      if 'architecture_alignment' in dir() and architecture_alignment and architecture_alignment.get('has_issues'):
+          for arch_issue in architecture_alignment.get('issues', []):
+              issues.append(f"🏗️ Architecture: {arch_issue}")
+
+      # Add problematic patterns from memory
+      if 'problematic_patterns' in dir() and problematic_patterns and problematic_patterns.get('found'):
+          for pattern_issue in problematic_patterns.get('issues', []):
+              issues.append(f"⚠️ Known Pattern: {pattern_issue}")
+
       result = issues if issues else []
     output: code_issues
+
+  # Track common code issues by author for coaching
+  - name: track_author_code_issues
+    description: "Track common code issues per author for coaching"
+    condition: "code_issues and len(code_issues) > 0"
+    compute: |
+      from datetime import datetime
+
+      # Get author from context (will be set after extract_mr_author runs)
+      # For now, extract from MR details directly
+      author = ""
+      if parsers and mr_details:
+          author = parsers.extract_author_from_mr(mr_details) or ""
+
+      if author and memory:
+          data = memory.read_memory("learned/teammate_preferences")
+          teammates = data.get("teammates", {}) if isinstance(data.get("teammates"), dict) else {}
+
+          if author not in teammates:
+              teammates[author] = {}
+
+          # Track issue types by category
+          issue_types = teammates[author].get("common_issues", {})
+          for issue in code_issues:
+              # Extract category from emoji prefix
+              if "Security" in issue:
+                  issue_type = "security"
+              elif "Memory" in issue:
+                  issue_type = "memory"
+              elif "Race" in issue:
+                  issue_type = "race_condition"
+              elif "Tests" in issue:
+                  issue_type = "missing_tests"
+              else:
+                  issue_type = "other"
+              issue_types[issue_type] = issue_types.get(issue_type, 0) + 1
+
+          teammates[author]["common_issues"] = issue_types
+          teammates[author]["last_code_review"] = datetime.now().isoformat()
+
+          data["teammates"] = teammates
+          memory.write_memory("learned/teammate_preferences", data)
+
+          result = f"Tracked {len(code_issues)} issues for {author}"
+      else:
+          result = "No author or memory available"
+    output: author_issues_tracking
+    on_error: continue
 
   # Step 14: Prepare review summary
   - name: prepare_summary
@@ -784,6 +1142,22 @@ steps:
         lines.append("### 🔍 Code Review")
         for issue in code_issues[:5]:
           lines.append(f"- {issue}")
+        lines.append("")
+
+      # Similar code patterns found
+      if 'similar_code' in dir() and similar_code and similar_code.get('found'):
+        lines.append("### 🔎 Similar Code in Codebase")
+        lines.append("Found similar patterns - verify consistency:")
+        for result in similar_code.get('results', [])[:3]:
+          lines.append(f"- `{result}`")
+        lines.append("")
+
+      # Coding patterns from knowledge
+      if 'coding_patterns' in dir() and coding_patterns and coding_patterns.get('found'):
+        lines.append("### 📚 Project Coding Patterns")
+        lines.append("Ensure changes follow these patterns:")
+        for pattern in coding_patterns.get('patterns', [])[:3]:
+          lines.append(f"- {pattern}")
         lines.append("")
 
       # Test results
@@ -888,7 +1262,7 @@ steps:
     args:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ mr_id }}"
-      comment: "{{ feedback_message }}"
+      message: "{{ feedback_message }}"
     output: feedback_posted
     on_error: continue
 
@@ -901,6 +1275,46 @@ steps:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ mr_id }}"
     output: approval_result
+    on_error: continue
+
+  # Cache successful review for quick reference on re-reviews
+  - name: cache_successful_review
+    description: "Save successful review patterns for quick reference"
+    condition: "review_action.get('action') == 'approve' and approval_result"
+    compute: |
+      from datetime import datetime
+
+      author = ""
+      if parsers and mr_details:
+          author = parsers.extract_author_from_mr(mr_details) or ""
+
+      review_entry = {
+          "mr_id": str(mr_id),
+          "jira_key": jira_key if jira_key != 'NOT_FOUND' else None,
+          "author": author,
+          "approved_at": datetime.now().isoformat(),
+          "commit_count": commit_history.get("count", 0) if 'commit_history' in dir() and commit_history else 0,
+          "files_changed": diff_analysis.get("file_count", 0) if 'diff_analysis' in dir() and diff_analysis else 0,
+          "gitlab_project": resolved.get("gitlab_project", ""),
+      }
+
+      if memory:
+          data = memory.read_memory("learned/review_cache")
+          approvals = data.get("recent_approvals", []) if isinstance(data.get("recent_approvals"), list) else []
+
+          # Remove old entry for same MR if exists
+          approvals = [a for a in approvals if str(a.get("mr_id", "")) != str(mr_id)]
+          approvals.append(review_entry)
+
+          # Keep last 100 reviews
+          data["recent_approvals"] = approvals[-100:]
+          data["last_updated"] = datetime.now().isoformat()
+          memory.write_memory("learned/review_cache", data)
+
+          result = "Review cached"
+      else:
+          result = "Cache skipped: memory not available"
+    output: review_cache_result
     on_error: continue
 
   # Step 18b: Auto-merge if approved (optional)
@@ -970,6 +1384,32 @@ steps:
           "mr_url": mr_url
       }
     output: author_info
+
+  # Load author's past review history from memory
+  - name: load_author_history
+    description: "Check if we've reviewed this author's MRs before"
+    condition: "author_info and author_info.get('author')"
+    compute: |
+      author = author_info.get("author", "") if author_info else ""
+
+      data = memory.read_memory("learned/teammate_preferences") if memory else {}
+      teammates = data.get("teammates", {}) if isinstance(data.get("teammates"), dict) else {}
+
+      author_data = teammates.get(author, {})
+
+      reviews_given = author_data.get("reviews_given", 0)
+      approvals = author_data.get("approvals", 0)
+
+      result = {
+          "author": author,
+          "previous_reviews": reviews_given,
+          "approval_rate": round(approvals / max(reviews_given, 1) * 100),
+          "last_reviewed": author_data.get("last_reviewed"),
+          "common_issues": author_data.get("common_issues", {}),
+          "is_known_author": reviews_given > 0,
+      }
+    output: author_history
+    on_error: continue
 
   # Step 18e: Slack DM author on approval
   - name: slack_notify_approval
@@ -1078,6 +1518,123 @@ steps:
 
       result = f"tracked review for {author}"
     output: review_tracking_result
+    on_error: continue
+
+  # Share review context for other skills (investigate_alert, debug_prod)
+  - name: save_shared_review_context
+    description: "Share review findings for debug_prod, investigate_alert skills"
+    condition: "review_action.get('action') == 'request_changes' or (code_issues and len(code_issues) > 0)"
+    compute: |
+      from scripts.common.memory import save_shared_context
+
+      context = {
+          "type": "pr_review",
+          "mr_id": str(mr_id) if mr_id else "",
+          "jira_key": jira_key if jira_key != 'NOT_FOUND' else None,
+          "author": memory_context.get("author", "unknown"),
+          "action": review_action.get("action") if review_action else "unknown",
+          "issues_found": code_issues[:5] if code_issues else [],
+          "format_issues": format_issues if format_issues and format_issues != ["Format OK"] else [],
+          "pipeline_status": "failed" if "failed" in str(gitlab_pipeline).lower() else "ok",
+          "files_changed": diff_analysis.get("files_changed", [])[:10] if 'diff_analysis' in dir() and diff_analysis else [],
+          "has_security_issues": any("Security" in str(i) for i in code_issues) if code_issues else False,
+      }
+
+      save_shared_context("review_pr", context, ttl_hours=24)
+      result = "Context shared for 24h"
+    output: shared_context_result
+    on_error: continue
+
+  # Load any active investigation context at session end for awareness
+  - name: check_investigation_context
+    description: "Check if there's an active investigation that might relate to this review"
+    compute: |
+      from scripts.common.memory import load_shared_context
+
+      ctx = load_shared_context()
+
+      if ctx and ctx.get("type") in ["investigate_alert", "debug_prod"]:
+          result = {
+              "investigation_active": True,
+              "investigation_type": ctx.get("type"),
+              "namespace": ctx.get("namespace"),
+              "hint": "⚠️ Active investigation ongoing - review findings may be relevant",
+          }
+      else:
+          result = {"investigation_active": False}
+    output: investigation_context
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_review_failures
+    description: "Detect failure patterns from PR review operations"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab API failures
+      mr_text = str(mr_details) if 'mr_details' in dir() and mr_details else ""
+      diff_text = str(mr_diff_raw) if 'mr_diff_raw' in dir() and mr_diff_raw else ""
+      combined = mr_text + diff_text
+
+      if "no such host" in combined.lower() or "dial tcp" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_view",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in combined.lower() or "401" in combined:
+          errors_detected.append({
+              "tool": "gitlab_mr_view",
+              "pattern": "unauthorized",
+              "cause": "GitLab authentication failed or token expired",
+              "fix": "Check GitLab token in config.json"
+          })
+      if "not found" in combined.lower() and "merge request" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_view",
+              "pattern": "merge request not found",
+              "cause": "MR ID is incorrect or MR has been closed/merged",
+              "fix": "Verify MR ID with gitlab_mr_list()"
+          })
+
+      # Check Jira failures
+      jira_text = str(jira_details) if 'jira_details' in dir() and jira_details else ""
+      if "issue does not exist" in jira_text.lower():
+          errors_detected.append({
+              "tool": "jira_view_issue",
+              "pattern": "issue does not exist",
+              "cause": "Jira issue key is incorrect or issue was deleted",
+              "fix": "Verify Jira issue key format (e.g., AAP-12345)"
+          })
+
+      result = errors_detected
+    output: review_errors_detected
+    on_error: continue
+
+  - name: learn_review_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "review_errors_detected and any(e.get('pattern') == 'no such host' for e in review_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_view"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: review_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_review_auth_failure
+    description: "Learn from GitLab auth failures"
+    condition: "review_errors_detected and any(e.get('pattern') == 'unauthorized' for e in review_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_view"
+      error_pattern: "unauthorized"
+      root_cause: "GitLab authentication failed or token expired"
+      fix_description: "Check GitLab token in config.json"
+    output: review_auth_fix_learned
     on_error: continue
 
 # ==================== OUTPUT ====================

@@ -59,6 +59,87 @@ inputs:
     description: "Silence ID (required for 'delete' action)"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_alert_patterns
+    description: "Get alert patterns and silence guidance from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      query: "gotchas"
+    output: alert_knowledge_raw
+    on_error: continue
+
+  - name: parse_alert_knowledge
+    description: "Parse alert knowledge for silence context"
+    compute: |
+      knowledge_text = str(alert_knowledge_raw) if alert_knowledge_raw else ""
+
+      gotchas = []
+      runbooks = []
+
+      # Extract gotchas related to alerts/silencing
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["alert", "silence", "prometheus", "duration", "suppress"]):
+                  gotchas.append(line.strip()[:150])
+              if any(kw in line_lower for kw in ["runbook", "procedure", "when", "escalate"]):
+                  runbooks.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+          "runbooks": runbooks[:3],
+      }
+    output: alert_knowledge
+    on_error: continue
+
+  # ==================== MEMORY CONTEXT ====================
+
+  - name: check_known_issues
+    description: "Check for known alertmanager issues"
+    compute: |
+      # Check known issues for alertmanager operations
+      issues = memory.check_known_issues("alertmanager_create_silence", "")
+
+      result = {
+          "has_known_issues": len(issues.get("matches", [])) > 0 if issues else False,
+          "issues": issues.get("matches", [])[:3] if issues else [],
+      }
+    output: known_issues
+    on_error: continue
+
+  - name: load_silence_history
+    description: "Load previous silence history for this alert"
+    compute: |
+      # Load learned patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      silence_history = patterns.get("alert_silences", [])
+
+      # Find history for this specific alert
+      alert_history = [
+          s for s in silence_history
+          if s.get("alert_name") == inputs.alert_name
+      ]
+
+      # Check common durations for this alert
+      common_durations = {}
+      for h in alert_history:
+          dur = h.get("duration")
+          if dur:
+              common_durations[dur] = common_durations.get(dur, 0) + 1
+
+      result = {
+          "previous_silences": len(alert_history),
+          "recent_silences": alert_history[-5:],
+          "common_durations": sorted(common_durations.keys(), key=lambda x: common_durations[x], reverse=True)[:3],
+          "typical_reason": alert_history[-1].get("reason") if alert_history else None,
+      }
+    output: silence_history
+    on_error: continue
+
   # ==================== CHECK CURRENT STATE ====================
 
   - name: check_current_alerts
@@ -182,6 +263,159 @@ steps:
     args:
       action: "{{ 'Created' if inputs.action == 'create' else 'Deleted' }} alert silence"
       details: "Alert: {{ inputs.alert_name }}, Duration: {{ inputs.duration }}, Env: {{ inputs.environment }}"
+    on_error: continue
+
+  - name: learn_silence_pattern
+    description: "Learn from this silence for future reference"
+    condition: "create_status and create_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "alert_silences" not in patterns:
+          patterns["alert_silences"] = []
+
+      # Record this silence
+      silence_record = {
+          "alert_name": inputs.alert_name,
+          "environment": inputs.environment,
+          "duration": inputs.duration,
+          "reason": inputs.reason,
+          "namespace": inputs.namespace if inputs.get("namespace") else None,
+          "silence_id": create_status.silence_id if create_status else None,
+          "was_firing": alert_status.is_firing if alert_status else False,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["alert_silences"].append(silence_record)
+
+      # Keep last 100 silence records
+      patterns["alert_silences"] = patterns["alert_silences"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "silence pattern learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: track_recurring_silences
+    description: "Track alerts that are frequently silenced"
+    condition: "create_status and create_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "recurring_silences" not in patterns:
+          patterns["recurring_silences"] = []
+
+      # Track this alert
+      existing = [s for s in patterns["recurring_silences"] if s.get("alert_name") == inputs.alert_name]
+
+      if existing:
+          existing[0]["count"] = existing[0].get("count", 1) + 1
+          existing[0]["last_silenced"] = datetime.now().isoformat()
+          existing[0]["last_reason"] = inputs.reason
+      else:
+          patterns["recurring_silences"].append({
+              "alert_name": inputs.alert_name,
+              "environment": inputs.environment,
+              "count": 1,
+              "first_silenced": datetime.now().isoformat(),
+              "last_silenced": datetime.now().isoformat(),
+              "last_reason": inputs.reason,
+          })
+
+      # Keep top 50 recurring silences
+      patterns["recurring_silences"] = sorted(
+          patterns["recurring_silences"],
+          key=lambda x: x.get("count", 0),
+          reverse=True
+      )[:50]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "recurring silence tracked"
+    output: recurring_tracking_result
+    on_error: continue
+
+  - name: update_environment_state
+    description: "Update environment state with active silences"
+    condition: "create_status and create_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Update environment state
+      env_data = memory.read_memory("state/environments") or {}
+      if "environments" not in env_data:
+          env_data["environments"] = {}
+
+      env_key = inputs.environment
+      if env_key not in env_data["environments"]:
+          env_data["environments"][env_key] = {"status": "unknown", "active_silences": []}
+
+      env = env_data["environments"][env_key]
+      if "active_silences" not in env:
+          env["active_silences"] = []
+
+      # Add this silence
+      env["active_silences"].append({
+          "alert": inputs.alert_name,
+          "silence_id": create_status.silence_id if create_status else None,
+          "created": datetime.now().isoformat(),
+          "duration": inputs.duration,
+          "reason": inputs.reason,
+      })
+
+      # Keep last 20 silences
+      env["active_silences"] = env["active_silences"][-20:]
+
+      memory.write_memory("state/environments", env_data)
+      result = "environment state updated"
+    output: env_update_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_silence_failures
+    description: "Detect failure patterns from silence operations"
+    compute: |
+      errors_detected = []
+
+      # Check Alertmanager failures
+      alerts_text = str(current_alerts_raw) if 'current_alerts_raw' in dir() and current_alerts_raw else ""
+      silences_text = str(silences_list_raw) if 'silences_list_raw' in dir() and silences_list_raw else ""
+      create_text = str(create_result) if 'create_result' in dir() and create_result else ""
+      combined = alerts_text + silences_text + create_text
+
+      if "connection refused" in combined.lower() or "no route to host" in combined.lower():
+          errors_detected.append({
+              "tool": "alertmanager_create_silence",
+              "pattern": "connection refused",
+              "cause": "Cannot connect to Alertmanager - VPN or network issue",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in combined.lower():
+          errors_detected.append({
+              "tool": "alertmanager_create_silence",
+              "pattern": "unauthorized",
+              "cause": "Alertmanager authentication failed",
+              "fix": "Check Alertmanager credentials in config.json"
+          })
+
+      result = errors_detected
+    output: silence_errors_detected
+    on_error: continue
+
+  - name: learn_silence_connection_failure
+    description: "Learn from Alertmanager connection failures"
+    condition: "silence_errors_detected and any(e.get('pattern') == 'connection refused' for e in silence_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "alertmanager_create_silence"
+      error_pattern: "connection refused"
+      root_cause: "Cannot connect to Alertmanager - VPN or network issue"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: silence_conn_fix_learned
     on_error: continue
 
 outputs:

@@ -64,6 +64,62 @@ steps:
     output: autoheal_state
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_alert_patterns
+    description: "Get alert investigation patterns from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      query: "gotchas"
+    output: alert_knowledge_raw
+    on_error: continue
+
+  - name: parse_alert_knowledge
+    description: "Parse alert knowledge for investigation context"
+    compute: |
+      knowledge_text = str(alert_knowledge_raw) if alert_knowledge_raw else ""
+
+      gotchas = []
+      runbooks = []
+
+      # Extract gotchas related to alerts/monitoring
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["alert", "prometheus", "grafana", "pod", "crash", "oom", "memory", "cpu"]):
+                  gotchas.append(line.strip()[:150])
+              if any(kw in line_lower for kw in ["runbook", "procedure", "when", "if"]):
+                  runbooks.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0 or len(runbooks) > 0,
+          "gotchas": gotchas[:5],
+          "runbooks": runbooks[:3],
+      }
+    output: alert_knowledge
+    on_error: continue
+
+  - name: check_alert_known_issues
+    description: "Check for known alert patterns"
+    compute: |
+      # Check known issues for alerts
+      alert_issues = memory.check_known_issues("alert", "") or {}
+      prometheus_issues = memory.check_known_issues("prometheus", "") or {}
+
+      all_issues = []
+      for issues in [alert_issues, prometheus_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: alert_known_issues
+    on_error: continue
+
   # ==================== LOAD CONFIG ====================
 
   - name: load_config
@@ -258,6 +314,40 @@ steps:
               "tool_failed": False
           }
     output: error_analysis
+
+  - name: search_related_code
+    description: "Find code related to the alert"
+    condition: "alert_info and alert_info.get('alert_name')"
+    tool: code_search
+    args:
+      query: "{{ alert_info.alert_name }} {{ alert_info.description[:50] if alert_info.description else '' }}"
+      project: "automation-analytics-backend"
+      limit: 5
+      min_score: 0.5
+    output: alert_code_search_raw
+    on_error: continue
+
+  - name: parse_alert_code_search
+    description: "Parse code search results for alert"
+    compute: |
+      search_result = alert_code_search_raw if 'alert_code_search_raw' in dir() and alert_code_search_raw else {}
+
+      related_code = []
+      if isinstance(search_result, dict) and search_result.get('results'):
+          for r in search_result.get('results', [])[:5]:
+              related_code.append({
+                  'file': r.get('file_path', 'unknown'),
+                  'score': r.get('score', 0),
+                  'preview': r.get('code_chunk', '')[:100] if r.get('code_chunk') else '',
+              })
+
+      result = {
+          'code': related_code,
+          'has_related_code': len(related_code) > 0,
+          'count': len(related_code),
+      }
+    output: alert_related_code
+    on_error: continue
 
   # ==================== SEARCH JIRA ====================
 
@@ -519,6 +609,100 @@ steps:
       details: "Environment: {{ cfg.environment }}, Issues: {{ pod_analysis.total_issues if pod_analysis else 0 }}"
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_slack_alert_failures
+    description: "Detect failure patterns from Slack alert investigation"
+    compute: |
+      errors_detected = []
+
+      # Check Kubernetes failures
+      pods_text = str(pods_raw) if 'pods_raw' in dir() and pods_raw else ""
+      if "forbidden" in pods_text.lower() or "unauthorized" in pods_text.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_pods",
+              "pattern": "forbidden",
+              "cause": "Kubernetes auth expired or insufficient permissions",
+              "fix": "Run kube_login('stage') or kube_login('prod')"
+          })
+      if "no route to host" in pods_text.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_pods",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - cluster not reachable",
+              "fix": "Run vpn_connect()"
+          })
+
+      # Check Kibana failures
+      logs_text = str(logs_raw) if 'logs_raw' in dir() and logs_raw else ""
+      if "unauthorized" in logs_text.lower() or "authentication required" in logs_text.lower():
+          errors_detected.append({
+              "tool": "kibana_search_logs",
+              "pattern": "authentication required",
+              "cause": "Kibana session expired",
+              "fix": "Open Kibana in browser to refresh session"
+          })
+
+      # Check Jira failures
+      jira_text = str(jira_search_raw) if 'jira_search_raw' in dir() and jira_search_raw else ""
+      if "unauthorized" in jira_text.lower():
+          errors_detected.append({
+              "tool": "jira_search",
+              "pattern": "unauthorized",
+              "cause": "Jira authentication failed",
+              "fix": "Check Jira credentials in config.json"
+          })
+
+      # Check Slack failures
+      slack_text = str(reply_result) if 'reply_result' in dir() and reply_result else ""
+      if "not_in_channel" in slack_text.lower() or "channel_not_found" in slack_text.lower():
+          errors_detected.append({
+              "tool": "slack_reply",
+              "pattern": "not_in_channel",
+              "cause": "Bot not added to Slack channel",
+              "fix": "Invite the bot to the alert channel"
+          })
+
+      result = errors_detected
+    output: slack_alert_errors_detected
+    on_error: continue
+
+  - name: learn_slack_alert_k8s_failure
+    description: "Learn from Kubernetes auth failures"
+    condition: "slack_alert_errors_detected and any(e.get('pattern') == 'forbidden' for e in slack_alert_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_pods"
+      error_pattern: "forbidden"
+      root_cause: "Kubernetes auth expired or insufficient permissions"
+      fix_description: "Run kube_login('stage') or kube_login('prod')"
+    output: slack_alert_k8s_fix_learned
+    on_error: continue
+
+  - name: learn_slack_alert_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "slack_alert_errors_detected and any(e.get('pattern') == 'no route to host' for e in slack_alert_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_pods"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - cluster not reachable"
+      fix_description: "Run vpn_connect()"
+    output: slack_alert_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_slack_alert_kibana_failure
+    description: "Learn from Kibana auth failures"
+    condition: "slack_alert_errors_detected and any(e.get('pattern') == 'authentication required' for e in slack_alert_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kibana_search_logs"
+      error_pattern: "authentication required"
+      root_cause: "Kibana session expired"
+      fix_description: "Open Kibana in browser to refresh session"
+    output: slack_alert_kibana_fix_learned
+    on_error: continue
+
 outputs:
   - name: summary
     value: |
@@ -538,6 +722,22 @@ outputs:
       - **Action:** {{ jira_result.action }}
       {% else %}
       - ⚠️ No Jira issue created/found
+      {% endif %}
+
+      {% if alert_related_code and alert_related_code.has_related_code %}
+      ### 🔍 Related Code
+
+      {% for code in alert_related_code.code[:3] %}
+      - `{{ code.file }}` ({{ "%.0f"|format(code.score * 100) }}% match)
+      {% endfor %}
+      {% endif %}
+
+      {% if alert_known_issues and alert_known_issues.has_known_issues %}
+      ### 💡 Known Issues
+
+      {% for issue in alert_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
       {% endif %}
 
       ### Slack Response

@@ -59,6 +59,63 @@ steps:
     output: autoheal_state
     on_error: continue
 
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_meeting_patterns
+    description: "Get meeting/scheduling patterns from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      query: "gotchas"
+    output: meeting_knowledge_raw
+    on_error: continue
+
+  - name: parse_meeting_knowledge
+    description: "Parse meeting knowledge for scheduling context"
+    compute: |
+      knowledge_text = str(meeting_knowledge_raw) if meeting_knowledge_raw else ""
+
+      gotchas = []
+      preferences = []
+
+      # Extract gotchas related to meetings/scheduling
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["meeting", "calendar", "schedule", "timezone", "availability"]):
+                  gotchas.append(line.strip()[:150])
+              if any(kw in line_lower for kw in ["prefer", "best time", "avoid", "morning", "afternoon"]):
+                  preferences.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+          "preferences": preferences[:3],
+      }
+    output: meeting_knowledge
+    on_error: continue
+
+  - name: check_calendar_known_issues
+    description: "Check for known calendar/meeting issues"
+    compute: |
+      # Check known issues for calendar operations
+      calendar_issues = memory.check_known_issues("calendar", "") or {}
+      meeting_issues = memory.check_known_issues("meeting", "") or {}
+      google_issues = memory.check_known_issues("google", "") or {}
+
+      all_issues = []
+      for issues in [calendar_issues, meeting_issues, google_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: calendar_known_issues
+    on_error: continue
+
   # ==================== CHECK CALENDAR STATUS ====================
 
   - name: check_calendar_status
@@ -308,6 +365,75 @@ outputs:
       google_calendar_schedule_meeting(title='{{ inputs.title }}', start_time='{{ meeting_time.selected_time }}', duration_minutes={{ inputs.duration_minutes }})
       ```
       {% endif %}
+
+      {% if calendar_known_issues and calendar_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in calendar_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_schedule_failures
+    description: "Detect failure patterns from meeting scheduling"
+    compute: |
+      errors_detected = []
+
+      # Check calendar failures
+      calendar_text = str(calendar_check_raw) if 'calendar_check_raw' in dir() and calendar_check_raw else ""
+      events_text = str(existing_events_raw) if 'existing_events_raw' in dir() and existing_events_raw else ""
+      meeting_text = str(meeting_result_raw) if 'meeting_result_raw' in dir() and meeting_result_raw else ""
+      combined = calendar_text + events_text + meeting_text
+
+      if "oauth" in combined.lower() or "token" in combined.lower() or "credentials" in combined.lower():
+          errors_detected.append({
+              "tool": "google_calendar_schedule_meeting",
+              "pattern": "oauth token",
+              "cause": "Google OAuth token expired or not configured",
+              "fix": "Run setup-gmail to refresh OAuth tokens"
+          })
+      if "not found" in combined.lower() and "calendar" in combined.lower():
+          errors_detected.append({
+              "tool": "google_calendar_schedule_meeting",
+              "pattern": "calendar not found",
+              "cause": "Calendar ID not found or no access",
+              "fix": "Check calendar configuration in config.json"
+          })
+      if "quota" in combined.lower() or "rate limit" in combined.lower():
+          errors_detected.append({
+              "tool": "google_calendar_schedule_meeting",
+              "pattern": "quota exceeded",
+              "cause": "Google Calendar API quota exceeded",
+              "fix": "Wait a few minutes and retry"
+          })
+
+      result = errors_detected
+    output: schedule_errors_detected
+    on_error: continue
+
+  - name: learn_schedule_oauth_failure
+    description: "Learn from OAuth failures"
+    condition: "schedule_errors_detected and any(e.get('pattern') == 'oauth token' for e in schedule_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "google_calendar_schedule_meeting"
+      error_pattern: "oauth token"
+      root_cause: "Google OAuth token expired or not configured"
+      fix_description: "Run setup-gmail to refresh OAuth tokens"
+    output: schedule_oauth_fix_learned
+    on_error: continue
+
+  - name: log_schedule_session
+    description: "Log meeting scheduling to session"
+    tool: memory_session_log
+    args:
+      action: "Scheduled meeting: {{ inputs.title }}"
+      details: "Time: {{ meeting_time.selected_time if meeting_time else 'not selected' }}, Duration: {{ inputs.duration_minutes }}min"
+    on_error: continue
 
   - name: context
     value:

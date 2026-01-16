@@ -45,6 +45,50 @@ inputs:
     description: "Just list running pipelines without cancelling"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_pipeline_patterns
+    description: "Get pipeline patterns and gotchas from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      query: "gotchas"
+    output: pipeline_knowledge_raw
+    on_error: continue
+
+  - name: parse_pipeline_knowledge
+    description: "Parse pipeline knowledge for cancel context"
+    compute: |
+      knowledge_text = str(pipeline_knowledge_raw) if pipeline_knowledge_raw else ""
+
+      gotchas = []
+
+      # Extract gotchas related to pipelines/cancellation
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["pipeline", "tekton", "konflux", "cancel", "stuck", "timeout"]):
+                  gotchas.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+      }
+    output: pipeline_knowledge
+    on_error: continue
+
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_konflux_known_issues
+    description: "Check for known Konflux issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "tkn_pipelinerun_cancel"
+      error_text: ""
+    output: konflux_known_issues
+    on_error: continue
+
   # ==================== LIST PIPELINES ====================
 
   - name: list_pipelineruns
@@ -313,6 +357,76 @@ outputs:
       ```python
       tkn_pipeline_start(pipeline_name='PIPELINE_NAME', namespace='{{ inputs.namespace }}')
       ```
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_cancel_failures
+    description: "Detect failure patterns from pipeline cancellation"
+    compute: |
+      errors_detected = []
+
+      # Check Tekton/Konflux failures
+      list_text = str(pipelinerun_list_raw) if 'pipelinerun_list_raw' in dir() and pipelinerun_list_raw else ""
+      cancel_text = str(cancel_result_raw) if 'cancel_result_raw' in dir() and cancel_result_raw else ""
+      combined = list_text + cancel_text
+
+      if "no route to host" in combined.lower():
+          errors_detected.append({
+              "tool": "tkn_pipelinerun_cancel",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - Konflux cluster not reachable",
+              "fix": "Run vpn_connect() and kube_login('konflux')"
+          })
+      if "unauthorized" in combined.lower() or "forbidden" in combined.lower():
+          errors_detected.append({
+              "tool": "tkn_pipelinerun_cancel",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for Konflux cluster",
+              "fix": "Run kube_login('konflux')"
+          })
+      if "not found" in combined.lower() and "pipelinerun" in combined.lower():
+          errors_detected.append({
+              "tool": "tkn_pipelinerun_cancel",
+              "pattern": "pipelinerun not found",
+              "cause": "PipelineRun doesn't exist or already completed",
+              "fix": "List running pipelines with tkn_pipelinerun_list()"
+          })
+
+      result = errors_detected
+    output: cancel_errors_detected
+    on_error: continue
+
+  - name: learn_cancel_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "cancel_errors_detected and any(e.get('pattern') == 'no route to host' for e in cancel_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "tkn_pipelinerun_cancel"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - Konflux cluster not reachable"
+      fix_description: "Run vpn_connect() and kube_login('konflux')"
+    output: cancel_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_cancel_auth_failure
+    description: "Learn from auth failures"
+    condition: "cancel_errors_detected and any(e.get('pattern') == 'unauthorized' for e in cancel_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "tkn_pipelinerun_cancel"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for Konflux cluster"
+      fix_description: "Run kube_login('konflux')"
+    output: cancel_auth_fix_learned
+    on_error: continue
+
+  - name: log_cancel_session
+    description: "Log pipeline cancellation to session"
+    tool: memory_session_log
+    args:
+      action: "Cancelled pipeline {{ target_run.run_name if target_run else 'unknown' }}"
+      details: "Success: {{ cancel_status.success if cancel_status else 'unknown' }}"
+    on_error: continue
 
   - name: context
     value:

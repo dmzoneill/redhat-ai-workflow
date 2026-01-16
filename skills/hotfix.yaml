@@ -63,8 +63,76 @@ steps:
   - name: init_autoheal
     description: "Initialize auto-heal tracking"
     compute: |
-      result = {"git_failure": None, "jira_failure": None}
+      result = {"git_failure": None, "jira_failure": None, "attempts": 0}
     output: autoheal_state
+    on_error: continue
+
+  # ==================== CHECK KNOWN ISSUES ====================
+
+  - name: check_known_issues
+    description: "Check for known hotfix issues before starting"
+    compute: |
+      # Check known issues for git cherry-pick
+      issues = memory.check_known_issues("git_cherry_pick", "")
+
+      result = {
+          "has_known_issues": len(issues.get("matches", [])) > 0 if issues else False,
+          "issues": issues.get("matches", [])[:3] if issues else [],
+      }
+    output: known_issues
+    on_error: continue
+
+  - name: load_previous_hotfixes
+    description: "Load previous hotfix history for patterns"
+    compute: |
+      # Load learned patterns for hotfixes
+      patterns = memory.read_memory("learned/patterns") or {}
+      hotfix_patterns = patterns.get("hotfix_patterns", [])
+
+      # Check if we've seen this branch before
+      prev_for_branch = [
+          p for p in hotfix_patterns
+          if p.get("target_branch") == inputs.target_branch
+      ]
+
+      result = {
+          "previous_count": len(hotfix_patterns),
+          "for_this_branch": prev_for_branch[:3],
+          "common_conflicts": [p.get("conflict_file") for p in hotfix_patterns if p.get("had_conflict")][:5],
+      }
+    output: previous_hotfixes
+    on_error: continue
+
+  - name: get_release_gotchas
+    description: "Get release/deployment gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: release_gotchas_raw
+    on_error: continue
+
+  - name: parse_release_gotchas
+    description: "Parse release-related gotchas"
+    compute: |
+      gotchas_result = release_gotchas_raw if 'release_gotchas_raw' in dir() and release_gotchas_raw else {}
+
+      release_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for release-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['release', 'deploy', 'hotfix', 'cherry', 'tag', 'version']):
+                      release_gotchas.append(g)
+
+      result = {
+          'gotchas': release_gotchas[:5],
+          'has_gotchas': len(release_gotchas) > 0,
+      }
+    output: release_gotchas
     on_error: continue
 
   # ==================== RESOLVE REPOSITORY ====================
@@ -222,6 +290,44 @@ steps:
     output: blame_info
     on_error: continue
 
+  # ==================== IMPACT ANALYSIS ====================
+
+  - name: search_related_code
+    description: "Find code related to the hotfix for impact analysis"
+    condition: "commit_changes and commit_changes.files_changed"
+    tool: code_search
+    args:
+      query: "{{ commit_changes.files_changed[0] if commit_changes.files_changed else 'hotfix' }}"
+      project: "automation-analytics-backend"
+      limit: 5
+      min_score: 0.5
+    output: related_code_raw
+    on_error: continue
+
+  - name: parse_related_code
+    description: "Parse related code for impact assessment"
+    compute: |
+      code_result = related_code_raw if 'related_code_raw' in dir() and related_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:5]:
+              # Skip the same files being changed
+              if r.get('file_path') not in (commit_changes.get('files_changed', []) if commit_changes else []):
+                  related_code.append({
+                      'file': r.get('file_path', ''),
+                      'score': r.get('score', 0),
+                  })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+          'has_related_code': len(related_code) > 0,
+          'potential_impact': len(related_code) > 3,  # Flag if many related files
+      }
+    output: impact_analysis
+    on_error: continue
+
   # ==================== CHERRY-PICK ====================
 
   - name: cherry_pick_commit
@@ -329,6 +435,165 @@ steps:
       details: "Cherry-picked {{ inputs.commit[:12] }}{% if inputs.tag %}, tagged {{ inputs.tag }}{% endif %}"
     on_error: continue
 
+  - name: learn_hotfix_pattern
+    description: "Learn from this hotfix for future reference"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "hotfix_patterns" not in patterns:
+          patterns["hotfix_patterns"] = []
+
+      # Record this hotfix
+      hotfix_record = {
+          "commit": inputs.commit[:12] if inputs.commit else "unknown",
+          "target_branch": inputs.target_branch,
+          "tag": inputs.tag if inputs.get("tag") else None,
+          "success": pick_status.success if pick_status else False,
+          "had_conflict": pick_status.has_conflict if pick_status else False,
+          "conflict_files": commit_changes.files_changed[:3] if pick_status and pick_status.get("has_conflict") and commit_changes else [],
+          "jira_key": inputs.jira_key if inputs.get("jira_key") else None,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["hotfix_patterns"].append(hotfix_record)
+
+      # Keep last 50 hotfix records
+      patterns["hotfix_patterns"] = patterns["hotfix_patterns"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "hotfix pattern learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: track_conflict_patterns
+    description: "Track conflict patterns for auto-remediation hints"
+    condition: "pick_status and pick_status.has_conflict"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "cherry_pick_conflicts" not in patterns:
+          patterns["cherry_pick_conflicts"] = []
+
+      # Track which files cause conflicts
+      for f in (commit_changes.files_changed or [])[:5]:
+          existing = [c for c in patterns["cherry_pick_conflicts"] if c.get("file") == f]
+          if existing:
+              existing[0]["count"] = existing[0].get("count", 1) + 1
+              existing[0]["last_seen"] = datetime.now().isoformat()
+          else:
+              patterns["cherry_pick_conflicts"].append({
+                  "file": f,
+                  "target_branch": inputs.target_branch,
+                  "count": 1,
+                  "first_seen": datetime.now().isoformat(),
+                  "last_seen": datetime.now().isoformat(),
+              })
+
+      # Keep top 30 conflict-prone files
+      patterns["cherry_pick_conflicts"] = sorted(
+          patterns["cherry_pick_conflicts"],
+          key=lambda x: x.get("count", 0),
+          reverse=True
+      )[:30]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "conflict pattern tracked"
+    output: conflict_pattern_result
+    on_error: continue
+
+  - name: update_environment_state
+    description: "Update environment state after hotfix"
+    condition: "pick_status.success and inputs.push"
+    compute: |
+      from datetime import datetime
+
+      # Update environment state
+      env_data = memory.read_memory("state/environments") or {}
+      if "hotfixes" not in env_data:
+          env_data["hotfixes"] = []
+
+      env_data["hotfixes"].append({
+          "commit": inputs.commit[:12] if inputs.commit else "unknown",
+          "branch": inputs.target_branch,
+          "tag": inputs.tag if inputs.get("tag") else None,
+          "pushed": datetime.now().isoformat(),
+      })
+
+      # Keep last 20 hotfixes
+      env_data["hotfixes"] = env_data["hotfixes"][-20:]
+
+      memory.write_memory("state/environments", env_data)
+      result = "environment state updated"
+    output: env_update_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_hotfix_failures
+    description: "Detect failure patterns from hotfix operations"
+    compute: |
+      errors_detected = []
+
+      # Check git failures
+      checkout_text = str(checkout_result) if 'checkout_result' in dir() and checkout_result else ""
+      pick_text = str(cherry_pick_result) if 'cherry_pick_result' in dir() and cherry_pick_result else ""
+      push_text = str(push_result) if 'push_result' in dir() and push_result else ""
+      combined = checkout_text + pick_text + push_text
+
+      if "conflict" in combined.lower():
+          errors_detected.append({
+              "tool": "git_cherry_pick",
+              "pattern": "conflict",
+              "cause": "Cherry-pick resulted in merge conflicts",
+              "fix": "Resolve conflicts manually, then git add and git cherry-pick --continue"
+          })
+      if "permission denied" in combined.lower():
+          errors_detected.append({
+              "tool": "git_push",
+              "pattern": "permission denied",
+              "cause": "SSH key not loaded or git credentials expired",
+              "fix": "Run ssh-add or check git credentials"
+          })
+      if "rejected" in combined.lower() and "push" in combined.lower():
+          errors_detected.append({
+              "tool": "git_push",
+              "pattern": "push rejected",
+              "cause": "Remote has changes not in local branch",
+              "fix": "Pull latest changes first or use --force-with-lease"
+          })
+
+      result = errors_detected
+    output: hotfix_errors_detected
+    on_error: continue
+
+  - name: learn_hotfix_conflict_failure
+    description: "Learn from cherry-pick conflict failures"
+    condition: "hotfix_errors_detected and any(e.get('pattern') == 'conflict' for e in hotfix_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "git_cherry_pick"
+      error_pattern: "conflict"
+      root_cause: "Cherry-pick resulted in merge conflicts"
+      fix_description: "Resolve conflicts manually, then git add and git cherry-pick --continue"
+    output: hotfix_conflict_fix_learned
+    on_error: continue
+
+  - name: learn_hotfix_push_failure
+    description: "Learn from push rejected failures"
+    condition: "hotfix_errors_detected and any(e.get('pattern') == 'push rejected' for e in hotfix_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "git_push"
+      error_pattern: "push rejected"
+      root_cause: "Remote has changes not in local branch"
+      fix_description: "Pull latest changes first or use --force-with-lease"
+    output: hotfix_push_fix_learned
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -410,6 +675,32 @@ outputs:
 
       {% if blame_info and blame_info.authors %}
       **Authors:** {{ blame_info.authors | join(", ") }}
+      {% endif %}
+
+      {% if impact_analysis and impact_analysis.has_related_code %}
+      ---
+
+      ### 🔍 Impact Analysis
+
+      {% if impact_analysis.potential_impact %}
+      ⚠️ **High Impact**: {{ impact_analysis.count }} related files found
+      {% else %}
+      **Related Files:** {{ impact_analysis.count }}
+      {% endif %}
+
+      {% for code in impact_analysis.code[:3] %}
+      - `{{ code.file }}` (similarity: {{ "%.0f"|format(code.score * 100) }}%)
+      {% endfor %}
+      {% endif %}
+
+      {% if release_gotchas and release_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Release Gotchas
+
+      {% for gotcha in release_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
       {% endif %}
 
       ---

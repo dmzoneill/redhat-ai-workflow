@@ -1,0 +1,394 @@
+# Skill: Bootstrap Project Knowledge
+# Enhanced with vector indexing and deep analysis
+
+name: bootstrap_knowledge
+description: |
+  Scan a project and generate comprehensive knowledge for all personas.
+
+  **NEW Features:**
+  - Creates semantic vector index for code search
+  - Performs deep analysis of code patterns
+  - Starts file watcher for automatic index updates
+  - Analyzes git history for contributor patterns
+version: "2.0"
+
+inputs:
+  - name: project
+    type: string
+    required: false
+    description: Project name from config.json (auto-detected from cwd if empty)
+  - name: personas
+    type: string
+    required: false
+    default: "developer,devops,tester,release"
+    description: Comma-separated list of personas to generate knowledge for
+  - name: deep_scan
+    type: boolean
+    required: false
+    default: false
+    description: If true, perform deeper analysis (slower but more comprehensive)
+  - name: create_vector_index
+    type: boolean
+    required: false
+    default: true
+    description: If true, create semantic vector index for code search
+  - name: start_watcher
+    type: boolean
+    required: false
+    default: true
+    description: If true, start file watcher for automatic index updates
+
+outputs:
+  - name: summary
+    value: "{{ scan_results }}"
+
+steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_vector_known_issues
+    description: "Check for known vector indexing issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "code_index"
+      error_text: ""
+    output: vector_known_issues
+    on_error: continue
+
+  - name: detect_project
+    condition: "{{ not inputs.project }}"
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      cwd = Path.cwd().resolve()
+
+      detected = None
+      for name, cfg in config.get("repositories", {}).items():
+          project_path = Path(cfg.get("path", "")).expanduser().resolve()
+          try:
+              cwd.relative_to(project_path)
+              detected = name
+              break
+          except ValueError:
+              continue
+
+      if not detected:
+          raise ValueError("Could not detect project from current directory. Provide project name explicitly.")
+
+      project = detected
+    output: project
+
+  - name: set_project
+    condition: "{{ inputs.project }}"
+    compute: |
+      project = inputs.get("project")
+    output: project
+
+  - name: validate_project
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: ""
+    on_error: continue
+
+  - name: get_project_path
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      project_config = config.get("repositories", {}).get(project)
+
+      if not project_config:
+          available = list(config.get("repositories", {}).keys())
+          raise ValueError(f"Project '{project}' not found. Available: {', '.join(available)}")
+
+      project_path = Path(project_config.get("path", "")).expanduser()
+      if not project_path.exists():
+          raise ValueError(f"Project path does not exist: {project_path}")
+
+      path_str = str(project_path)
+    output: path_str
+
+  - name: parse_personas
+    compute: |
+      personas_str = inputs.get("personas", "developer,devops,tester,release")
+      personas_list = [p.strip() for p in personas_str.split(",") if p.strip()]
+    output: personas_list
+
+  - name: scan_for_developer
+    condition: "'developer' in personas_list"
+    tool: knowledge_scan
+    args:
+      project: "{{ project }}"
+      persona: developer
+      force: false
+
+  - name: scan_for_devops
+    condition: "'devops' in personas_list"
+    tool: knowledge_scan
+    args:
+      project: "{{ project }}"
+      persona: devops
+      force: false
+
+  - name: scan_for_tester
+    condition: "'tester' in personas_list"
+    tool: knowledge_scan
+    args:
+      project: "{{ project }}"
+      persona: tester
+      force: false
+
+  - name: scan_for_release
+    condition: "'release' in personas_list"
+    tool: knowledge_scan
+    args:
+      project: "{{ project }}"
+      persona: release
+      force: false
+
+  # ==================== VECTOR INDEX ====================
+
+  - name: create_vector_index
+    description: "Create semantic vector index for code search"
+    condition: "{{ inputs.create_vector_index | default(true) }}"
+    tool: code_index
+    args:
+      project: "{{ project }}"
+    output: vector_index_result
+    on_error: continue
+
+  - name: parse_vector_result
+    description: "Parse vector index creation result"
+    compute: |
+      index_info = {}
+      if 'vector_index_result' in dir() and vector_index_result:
+          raw_text = str(vector_index_result)
+          import re
+
+          # Extract stats
+          files_match = re.search(r'(\d+)\s*files', raw_text)
+          chunks_match = re.search(r'(\d+)\s*chunks', raw_text)
+
+          index_info = {
+              "created": True,
+              "files": int(files_match.group(1)) if files_match else 0,
+              "chunks": int(chunks_match.group(1)) if chunks_match else 0,
+          }
+      else:
+          index_info = {"created": False}
+
+      vector_info = index_info
+    output: vector_info
+    on_error: continue
+
+  - name: start_file_watcher
+    description: "Start file watcher for automatic index updates"
+    condition: "{{ inputs.start_watcher | default(true) and vector_info and vector_info.created }}"
+    tool: code_watch
+    args:
+      project: "{{ project }}"
+    output: watcher_result
+    on_error: continue
+
+  # ==================== DEEP ANALYSIS ====================
+
+  - name: analyze_code_patterns
+    description: "Analyze code patterns using semantic search"
+    condition: "{{ inputs.deep_scan and vector_info and vector_info.created }}"
+    tool: code_search
+    args:
+      query: "class definition pattern implementation"
+      project: "{{ project }}"
+      limit: 10
+    output: pattern_analysis_raw
+    on_error: continue
+
+  - name: parse_pattern_analysis
+    description: "Parse pattern analysis results"
+    condition: "{{ inputs.deep_scan }}"
+    compute: |
+      patterns = []
+      if 'pattern_analysis_raw' in dir() and pattern_analysis_raw:
+          raw_text = str(pattern_analysis_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  patterns.append(line.strip()[:100])
+
+      pattern_info = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:10],
+      }
+    output: pattern_info
+    on_error: continue
+
+  - name: analyze_error_handling
+    description: "Analyze error handling patterns"
+    condition: "{{ inputs.deep_scan and vector_info and vector_info.created }}"
+    tool: code_search
+    args:
+      query: "exception handling try except raise error"
+      project: "{{ project }}"
+      limit: 5
+    output: error_handling_raw
+    on_error: continue
+
+  - name: parse_error_handling
+    description: "Parse error handling analysis"
+    condition: "{{ inputs.deep_scan }}"
+    compute: |
+      handlers = []
+      if 'error_handling_raw' in dir() and error_handling_raw:
+          raw_text = str(error_handling_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  handlers.append(line.strip()[:100])
+
+      error_info = {
+          "found": len(handlers) > 0,
+          "handlers": handlers[:5],
+      }
+    output: error_info
+    on_error: continue
+
+  - name: deep_scan_readme
+    condition: "{{ inputs.deep_scan }}"
+    compute: |
+      from pathlib import Path
+
+      readme_path = Path(path_str) / "README.md"
+      readme_content = ""
+      if readme_path.exists():
+          readme_content = readme_path.read_text()[:5000]
+
+      readme_summary = readme_content
+    output: readme_summary
+
+  - name: deep_scan_tests
+    condition: "{{ inputs.deep_scan }}"
+    compute: |
+      from pathlib import Path
+
+      project_path = Path(path_str)
+      test_info = []
+
+      # Look for test directories
+      for test_dir in ["tests", "test", "spec"]:
+          test_path = project_path / test_dir
+          if test_path.exists():
+              # Count test files
+              py_tests = list(test_path.rglob("test_*.py"))
+              js_tests = list(test_path.rglob("*.test.js")) + list(test_path.rglob("*.spec.js"))
+
+              test_info.append({
+                  "directory": test_dir,
+                  "python_tests": len(py_tests),
+                  "js_tests": len(js_tests),
+              })
+
+              # Look for conftest.py (pytest fixtures)
+              conftest = test_path / "conftest.py"
+              if conftest.exists():
+                  test_info.append({"fixtures": "conftest.py found"})
+
+      test_summary = test_info
+    output: test_summary
+
+  - name: build_summary
+    compute: |
+      lines = [f"## 📚 Knowledge Bootstrap Complete: {project}\n"]
+      lines.append(f"**Project Path:** `{path_str}`\n")
+      lines.append(f"**Personas:** {', '.join(personas_list)}\n")
+
+      lines.append("### Generated Knowledge Files\n")
+      for persona in personas_list:
+          lines.append(f"- `memory/knowledge/personas/{persona}/{project}.yaml`")
+
+      # Vector index info
+      if 'vector_info' in dir() and vector_info and vector_info.get('created'):
+          lines.append("\n### 🔍 Vector Index Created\n")
+          lines.append(f"- **Files indexed:** {vector_info.get('files', 0)}")
+          lines.append(f"- **Chunks created:** {vector_info.get('chunks', 0)}")
+          if 'watcher_result' in dir() and watcher_result:
+              lines.append("- **File watcher:** ✅ Running (auto-updates enabled)")
+          lines.append("\nUse `code_search(query='...', project='{}')` for semantic code search.".format(project))
+
+      if inputs.get("deep_scan"):
+          lines.append("\n### Deep Scan Results\n")
+          if 'readme_summary' in dir() and readme_summary:
+              lines.append(f"**README:** {len(readme_summary)} chars analyzed")
+          if 'test_summary' in dir() and test_summary:
+              lines.append(f"**Tests:** {test_summary}")
+          if 'pattern_info' in dir() and pattern_info and pattern_info.get('found'):
+              lines.append(f"**Code Patterns:** {len(pattern_info.get('patterns', []))} patterns identified")
+          if 'error_info' in dir() and error_info and error_info.get('found'):
+              lines.append(f"**Error Handling:** {len(error_info.get('handlers', []))} handlers found")
+
+      lines.append("\n### Next Steps\n")
+      lines.append("1. Review generated knowledge with `knowledge_query(project='{}', persona='developer')`".format(project))
+      lines.append("2. Search code semantically with `code_search(query='...', project='{}')`".format(project))
+      lines.append("3. Add specific gotchas with `knowledge_update()`")
+      lines.append("4. Knowledge will grow automatically as you complete tasks")
+
+      scan_results = "\n".join(lines)
+    output: scan_results
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_bootstrap_failures
+    description: "Detect failure patterns from knowledge bootstrap"
+    compute: |
+      errors_detected = []
+
+      # Check vector index failures
+      vector_text = str(vector_info) if 'vector_info' in dir() and vector_info else ""
+      if "permission denied" in vector_text.lower():
+          errors_detected.append({
+              "tool": "code_index",
+              "pattern": "permission denied",
+              "cause": "Cannot write to vector cache directory",
+              "fix": "Check permissions on ~/.cache/aa-workflow/vectors/"
+          })
+      if "out of memory" in vector_text.lower():
+          errors_detected.append({
+              "tool": "code_index",
+              "pattern": "out of memory",
+              "cause": "Not enough memory for vector indexing",
+              "fix": "Try with fewer files or increase system memory"
+          })
+
+      # Check file watcher failures
+      watcher_text = str(watcher_result) if 'watcher_result' in dir() and watcher_result else ""
+      if "already running" in watcher_text.lower():
+          errors_detected.append({
+              "tool": "code_watch",
+              "pattern": "already running",
+              "cause": "File watcher already running for this project",
+              "fix": "No action needed - watcher is active"
+          })
+
+      result = errors_detected
+    output: bootstrap_errors_detected
+    on_error: continue
+
+  - name: learn_bootstrap_permission_failure
+    description: "Learn from permission failures"
+    condition: "bootstrap_errors_detected and any(e.get('pattern') == 'permission denied' for e in bootstrap_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "code_index"
+      error_pattern: "permission denied"
+      root_cause: "Cannot write to vector cache directory"
+      fix_description: "Check permissions on ~/.cache/aa-workflow/vectors/"
+    output: bootstrap_permission_fix_learned
+    on_error: continue
+
+  - name: log_bootstrap_session
+    description: "Log knowledge bootstrap to session"
+    tool: memory_session_log
+    args:
+      action: "Bootstrapped knowledge for {{ project }}"
+      details: "Personas: {{ ', '.join(personas_list) }}, Vector index: {{ vector_info.created if vector_info else 'not created' }}"
+    on_error: continue

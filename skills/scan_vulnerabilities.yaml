@@ -50,6 +50,60 @@ inputs:
     description: "Return error if high severity vulnerabilities found"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_security_known_issues
+    description: "Check for known security/vulnerability issues"
+    compute: |
+      # Check known issues for security operations
+      security_issues = memory.check_known_issues("security", "") or {}
+      quay_issues = memory.check_known_issues("quay", "") or {}
+      vuln_issues = memory.check_known_issues("vulnerability", "") or {}
+
+      all_issues = []
+      for issues in [security_issues, quay_issues, vuln_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: security_known_issues
+    on_error: continue
+
+  - name: get_security_gotchas
+    description: "Get security-related gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: security_gotchas_raw
+    on_error: continue
+
+  - name: parse_security_gotchas
+    description: "Parse security-related gotchas"
+    compute: |
+      gotchas_result = security_gotchas_raw if 'security_gotchas_raw' in dir() and security_gotchas_raw else {}
+
+      security_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for security-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['security', 'cve', 'vulnerability', 'scan', 'image', 'quay']):
+                      security_gotchas.append(g)
+
+      result = {
+          'gotchas': security_gotchas[:5],
+          'has_gotchas': len(security_gotchas) > 0,
+      }
+    output: scan_gotchas
+    on_error: continue
+
   # ==================== VERIFY IMAGE ====================
 
   - name: check_image_exists
@@ -271,7 +325,97 @@ outputs:
       # Check specific CVE
       # web_search("CVE-XXXX-XXXXX mitigation")
       ```
+
+      {% if scan_gotchas and scan_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Security Gotchas
+
+      {% for gotcha in scan_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
       {% endif %}
+
+      {% if security_known_issues and security_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in security_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+      {% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_scan_failures
+    description: "Detect failure patterns from vulnerability scanning"
+    compute: |
+      errors_detected = []
+
+      # Check Quay failures
+      image_text = str(image_check_raw) if 'image_check_raw' in dir() and image_check_raw else ""
+      vuln_text = str(vuln_report_raw) if 'vuln_report_raw' in dir() and vuln_report_raw else ""
+      combined = image_text + vuln_text
+
+      if "manifest unknown" in combined.lower() or "not found" in combined.lower():
+          errors_detected.append({
+              "tool": "quay_get_vulnerabilities",
+              "pattern": "manifest unknown",
+              "cause": "Image tag doesn't exist in Quay - build may not be complete",
+              "fix": "Wait for Konflux build to complete or check tag format"
+          })
+      if "unauthorized" in combined.lower() or "401" in combined:
+          errors_detected.append({
+              "tool": "quay_get_vulnerabilities",
+              "pattern": "unauthorized",
+              "cause": "Quay authentication failed",
+              "fix": "Check Quay credentials in config.json"
+          })
+      if "rate limit" in combined.lower():
+          errors_detected.append({
+              "tool": "quay_get_vulnerabilities",
+              "pattern": "rate limit",
+              "cause": "Quay API rate limit exceeded",
+              "fix": "Wait a few minutes and retry"
+          })
+
+      result = errors_detected
+    output: scan_errors_detected
+    on_error: continue
+
+  - name: learn_scan_manifest_failure
+    description: "Learn from manifest not found failures"
+    condition: "scan_errors_detected and any(e.get('pattern') == 'manifest unknown' for e in scan_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "quay_get_vulnerabilities"
+      error_pattern: "manifest unknown"
+      root_cause: "Image tag doesn't exist in Quay - build may not be complete"
+      fix_description: "Wait for Konflux build to complete or check tag format"
+    output: scan_manifest_fix_learned
+    on_error: continue
+
+  - name: learn_scan_auth_failure
+    description: "Learn from Quay auth failures"
+    condition: "scan_errors_detected and any(e.get('pattern') == 'unauthorized' for e in scan_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "quay_get_vulnerabilities"
+      error_pattern: "unauthorized"
+      root_cause: "Quay authentication failed"
+      fix_description: "Check Quay credentials in config.json"
+    output: scan_auth_fix_learned
+    on_error: continue
+
+  - name: log_scan_session
+    description: "Log vulnerability scan to session"
+    tool: memory_session_log
+    args:
+      action: "Scanned image {{ inputs.image_tag }} for vulnerabilities"
+      details: "Critical: {{ vuln_analysis.critical if vuln_analysis else 0 }}, Total: {{ vuln_analysis.total if vuln_analysis else 0 }}"
+    on_error: continue
 
   - name: context
     value:

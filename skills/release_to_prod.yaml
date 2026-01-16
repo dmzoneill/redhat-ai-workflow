@@ -49,6 +49,60 @@ inputs:
     description: "If true, just show what would be released without creating"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_release_gotchas
+    description: "Get release gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: release_gotchas_raw
+    on_error: continue
+
+  - name: parse_release_gotchas
+    description: "Parse release-related gotchas"
+    compute: |
+      gotchas_result = release_gotchas_raw if 'release_gotchas_raw' in dir() and release_gotchas_raw else {}
+
+      release_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for release-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['release', 'prod', 'deploy', 'konflux', 'quay', 'image']):
+                      release_gotchas.append(g)
+
+      result = {
+          'gotchas': release_gotchas[:5],
+          'has_gotchas': len(release_gotchas) > 0,
+      }
+    output: prod_release_gotchas
+    on_error: continue
+
+  - name: check_release_known_issues
+    description: "Check for known release issues"
+    compute: |
+      # Check known issues for release operations
+      release_issues = memory.check_known_issues("release", "") or {}
+      konflux_issues = memory.check_known_issues("konflux", "") or {}
+      quay_issues = memory.check_known_issues("quay", "") or {}
+
+      all_issues = []
+      for issues in [release_issues, konflux_issues, quay_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: release_known_issues
+    on_error: continue
+
   # ==================== VALIDATE INPUT ====================
 
   - name: validate_sha
@@ -305,6 +359,112 @@ steps:
     output: slack_release_notify
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_release_failures
+    description: "Detect failure patterns from release operations"
+    compute: |
+      errors_detected = []
+
+      # Check staging image failures
+      staging_text = str(staging_image_check) if 'staging_image_check' in dir() and staging_image_check else ""
+      if "not found" in staging_text.lower() or "manifest unknown" in staging_text.lower():
+          errors_detected.append({
+              "tool": "quay_check_image_exists",
+              "pattern": "image not found",
+              "cause": "Image not built yet in staging - Konflux build may not have completed",
+              "fix": "Wait for Konflux build to complete, check with konflux_list_builds()"
+          })
+
+      # Check Konflux auth failures
+      component_text = str(component_info_raw) if 'component_info_raw' in dir() and component_info_raw else ""
+      releases_text = str(releases_list_raw) if 'releases_list_raw' in dir() and releases_list_raw else ""
+      combined_text = component_text + releases_text
+
+      if "unauthorized" in combined_text.lower() or "forbidden" in combined_text.lower():
+          errors_detected.append({
+              "tool": "konflux_get_component",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for Konflux cluster",
+              "fix": "Run kube_login(cluster='konflux') to refresh credentials"
+          })
+      if "no route to host" in combined_text.lower():
+          errors_detected.append({
+              "tool": "konflux_get_component",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - cannot reach Konflux cluster",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      # Check release creation failures
+      release_text = str(create_release_result) if 'create_release_result' in dir() and create_release_result else ""
+      if "already exists" in release_text.lower():
+          errors_detected.append({
+              "tool": "konflux_create_release",
+              "pattern": "already exists",
+              "cause": "Release for this SHA already exists",
+              "fix": "Check existing releases with konflux_list_releases()"
+          })
+      if "component not found" in release_text.lower():
+          errors_detected.append({
+              "tool": "konflux_create_release",
+              "pattern": "component not found",
+              "cause": "Specified component doesn't exist in Konflux",
+              "fix": "List available components with konflux_list_components()"
+          })
+
+      result = errors_detected
+    output: release_errors_detected
+    on_error: continue
+
+  - name: learn_staging_image_failure
+    description: "Learn from staging image not found failures"
+    condition: "release_errors_detected and any(e.get('pattern') == 'image not found' for e in release_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "quay_check_image_exists"
+      error_pattern: "image not found"
+      root_cause: "Image not built yet in staging - Konflux build may not have completed"
+      fix_description: "Wait for Konflux build to complete, check with konflux_list_builds()"
+    output: staging_image_fix_learned
+    on_error: continue
+
+  - name: learn_konflux_auth_failure
+    description: "Learn from Konflux auth failures"
+    condition: "release_errors_detected and any(e.get('pattern') == 'unauthorized' for e in release_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "konflux_get_component"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for Konflux cluster"
+      fix_description: "Run kube_login(cluster='konflux') to refresh credentials"
+    output: konflux_auth_fix_learned
+    on_error: continue
+
+  - name: learn_konflux_vpn_failure
+    description: "Learn from Konflux VPN failures"
+    condition: "release_errors_detected and any(e.get('pattern') == 'no route to host' for e in release_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "konflux_get_component"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - cannot reach Konflux cluster"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: konflux_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_release_exists_failure
+    description: "Learn from release already exists failures"
+    condition: "release_errors_detected and any(e.get('pattern') == 'already exists' for e in release_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "konflux_create_release"
+      error_pattern: "already exists"
+      root_cause: "Release for this SHA already exists"
+      fix_description: "Check existing releases with konflux_list_releases()"
+    output: release_exists_fix_learned
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -411,6 +571,26 @@ outputs:
       ```
       {{ release_status.recent_releases }}
       ```
+
+      {% if prod_release_gotchas and prod_release_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Release Gotchas
+
+      {% for gotcha in prod_release_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if release_known_issues and release_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in release_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
 
   - name: context
     value:

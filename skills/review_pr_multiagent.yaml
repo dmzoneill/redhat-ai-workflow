@@ -59,6 +59,67 @@ outputs:
 - name: stats
   description: Review statistics
 steps:
+# ==================== PROACTIVE ISSUE DETECTION ====================
+
+- name: check_gitlab_known_issues
+  description: "Check for known GitLab issues before starting"
+  tool: check_known_issues
+  args:
+    tool_name: "gitlab_mr_view"
+    error_text: ""
+  output: gitlab_known_issues
+  on_error: continue
+
+# ==================== KNOWLEDGE INTEGRATION ====================
+
+- name: get_coding_patterns
+  description: Get coding patterns from knowledge for review context
+  tool: knowledge_query
+  args:
+    project: automation-analytics-backend
+    persona: developer
+    section: patterns.coding
+  output: coding_patterns_raw
+  on_error: continue
+
+- name: get_project_gotchas
+  description: Get project gotchas for review context
+  tool: knowledge_query
+  args:
+    project: automation-analytics-backend
+    persona: developer
+    section: gotchas
+  output: project_gotchas_raw
+  on_error: continue
+
+- name: parse_review_knowledge
+  description: Parse knowledge for agent context
+  compute: |
+    patterns_result = coding_patterns_raw if 'coding_patterns_raw' in dir() and coding_patterns_raw else {}
+    gotchas_result = project_gotchas_raw if 'project_gotchas_raw' in dir() and project_gotchas_raw else {}
+
+    coding_patterns = []
+    if isinstance(patterns_result, dict) and patterns_result.get('found'):
+        content = patterns_result.get('content', [])
+        if isinstance(content, list):
+            coding_patterns = content[:5]
+
+    gotchas = []
+    if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+        content = gotchas_result.get('content', [])
+        if isinstance(content, list):
+            gotchas = content[:5]
+
+    result = {
+        'patterns': coding_patterns,
+        'gotchas': gotchas,
+        'has_knowledge': len(coding_patterns) > 0 or len(gotchas) > 0,
+    }
+  output: review_knowledge
+  on_error: continue
+
+# ==================== GET MR DETAILS ====================
+
 - name: get_mr_details
   description: Get MR details
   tool: gitlab_mr_view
@@ -204,4 +265,62 @@ steps:
     project: automation-analytics/automation-analytics-backend
     mr_id: '{{ inputs.mr_id }}'
     message: '{{ review }}'
+  on_error: continue
+
+# ==================== LEARNING FROM FAILURES ====================
+
+- name: detect_multiagent_failures
+  description: "Detect failure patterns from multi-agent review"
+  compute: |
+    errors_detected = []
+
+    # Check for agent failures
+    reviews_text = str(all_reviews) if 'all_reviews' in dir() and all_reviews else ""
+    if "timeout" in reviews_text.lower():
+        errors_detected.append({
+            "tool": "claude_cli",
+            "pattern": "timeout",
+            "cause": "Claude/Gemini CLI timeout",
+            "fix": "Try with fewer agents or increase timeout"
+        })
+    if "rate limit" in reviews_text.lower():
+        errors_detected.append({
+            "tool": "claude_cli",
+            "pattern": "rate limit",
+            "cause": "API rate limit exceeded",
+            "fix": "Wait a few minutes and retry"
+        })
+
+    # Check GitLab failures
+    post_text = str(post_result) if 'post_result' in dir() and post_result else ""
+    if "no such host" in post_text.lower():
+        errors_detected.append({
+            "tool": "gitlab_mr_comment",
+            "pattern": "no such host",
+            "cause": "VPN not connected - internal GitLab not reachable",
+            "fix": "Run vpn_connect() to connect to Red Hat VPN"
+        })
+
+    result = errors_detected
+  output: multiagent_errors_detected
+  on_error: continue
+
+- name: learn_multiagent_vpn_failure
+  description: "Learn from VPN failures"
+  condition: "multiagent_errors_detected and any(e.get('pattern') == 'no such host' for e in multiagent_errors_detected)"
+  tool: learn_tool_fix
+  args:
+    tool_name: "gitlab_mr_comment"
+    error_pattern: "no such host"
+    root_cause: "VPN not connected - internal GitLab not reachable"
+    fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+  output: multiagent_vpn_fix_learned
+  on_error: continue
+
+- name: log_multiagent_session
+  description: "Log multi-agent review to session"
+  tool: memory_session_log
+  args:
+    action: "Multi-agent review for MR !{{ inputs.mr_id }}"
+    details: "Agents: {{ stats.agent_count if stats else 0 }}, Successful: {{ stats.successful if stats else 0 }}"
   on_error: continue

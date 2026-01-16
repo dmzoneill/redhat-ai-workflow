@@ -55,6 +55,17 @@ inputs:
 
 steps:
 
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_slack_known_issues
+    description: "Check for known Slack issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "slack_post_message"
+      error_text: ""
+    output: slack_known_issues
+    on_error: continue
+
   - name: init_autoheal
     description: "Initialize failure tracking"
     compute: |
@@ -244,6 +255,56 @@ outputs:
       ```
       {% endif %}
       {% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_notify_team_failures
+    description: "Detect failure patterns from team notification"
+    compute: |
+      errors_detected = []
+
+      # Check Slack failures
+      post_text = str(post_result_raw) if 'post_result_raw' in dir() and post_result_raw else ""
+      channel_text = str(channel_info) if 'channel_info' in dir() and channel_info else ""
+      combined = post_text + channel_text
+
+      if "not_in_channel" in combined.lower() or "channel_not_found" in combined.lower():
+          errors_detected.append({
+              "tool": "slack_post_message",
+              "pattern": "channel_not_found",
+              "cause": "Slack channel not found or bot not added",
+              "fix": "Check channel name and invite bot to channel"
+          })
+      if "invalid_auth" in combined.lower():
+          errors_detected.append({
+              "tool": "slack_post_message",
+              "pattern": "invalid_auth",
+              "cause": "Slack token expired or invalid",
+              "fix": "Check Slack token in config.json"
+          })
+      if "rate_limited" in combined.lower():
+          errors_detected.append({
+              "tool": "slack_post_message",
+              "pattern": "rate_limited",
+              "cause": "Slack API rate limit exceeded",
+              "fix": "Wait a few seconds and retry"
+          })
+
+      result = errors_detected
+    output: notify_team_errors_detected
+    on_error: continue
+
+  - name: learn_notify_team_channel_failure
+    description: "Learn from channel not found failures"
+    condition: "notify_team_errors_detected and any(e.get('pattern') == 'channel_not_found' for e in notify_team_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "slack_post_message"
+      error_pattern: "channel_not_found"
+      root_cause: "Slack channel not found or bot not added"
+      fix_description: "Check channel name and invite bot to channel"
+    output: notify_team_channel_fix_learned
+    on_error: continue
 
   - name: context
     value:

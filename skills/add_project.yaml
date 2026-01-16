@@ -1,0 +1,277 @@
+name: add_project
+description: |
+  Add a new project to config.json with auto-detection and validation.
+
+  This skill:
+  1. Detects project settings from the directory
+  2. Validates GitLab and Jira access
+  3. Adds the project to config.json
+  4. Optionally configures Quay and Bonfire integrations
+  5. Generates initial project knowledge
+
+inputs:
+  path:
+    type: string
+    required: true
+    description: Path to the project directory
+  name:
+    type: string
+    required: false
+    description: Project name (defaults to directory name)
+  gitlab:
+    type: string
+    required: false
+    description: GitLab project path (auto-detected if not provided)
+  jira_project:
+    type: string
+    required: true
+    description: Jira project key (e.g., AAP, KONFLUX)
+  jira_component:
+    type: string
+    required: false
+    description: Jira component name
+  konflux_namespace:
+    type: string
+    required: false
+    description: Konflux tenant namespace (if using Konflux CI)
+  setup_quay:
+    type: boolean
+    required: false
+    default: false
+    description: Configure Quay repository
+  setup_bonfire:
+    type: boolean
+    required: false
+    default: false
+    description: Configure Bonfire/ephemeral deployment
+  generate_knowledge:
+    type: boolean
+    required: false
+    default: true
+    description: Generate initial project knowledge
+
+steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_project_info"
+      error_text: ""
+    output: gitlab_known_issues
+    on_error: continue
+
+  - name: detect_settings
+    description: Auto-detect project settings from directory
+    tool: project_detect
+    args:
+      path: "{{ path }}"
+    outputs:
+      - detected_settings
+
+  - name: validate_path
+    description: Verify the project path exists
+    condition: "{{ detected_settings is defined }}"
+    tool: shell
+    args:
+      command: "test -d '{{ path }}' && echo 'exists' || echo 'missing'"
+    outputs:
+      - path_status
+
+  - name: get_project_name
+    description: Determine project name
+    tool: shell
+    args:
+      command: "basename '{{ path }}'"
+    outputs:
+      - detected_name
+
+  - name: check_gitlab_access
+    description: Verify GitLab project is accessible
+    condition: "{{ gitlab is defined and gitlab != '' }}"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ gitlab }}"
+      state: "opened"
+    continue_on_error: true
+    outputs:
+      - gitlab_check
+
+  - name: check_jira_access
+    description: Verify Jira project is accessible
+    tool: jira_list_issues
+    args:
+      project: "{{ jira_project }}"
+    continue_on_error: true
+    outputs:
+      - jira_check
+
+  - name: add_project
+    description: Add project to config.json
+    tool: project_add
+    args:
+      name: "{{ name | default(detected_name) }}"
+      path: "{{ path }}"
+      gitlab: "{{ gitlab }}"
+      jira_project: "{{ jira_project }}"
+      jira_component: "{{ jira_component | default('') }}"
+      konflux_namespace: "{{ konflux_namespace | default('') }}"
+      auto_detect: true
+    outputs:
+      - add_result
+
+  - name: setup_quay_repo
+    description: Add Quay repository configuration
+    condition: "{{ setup_quay == true and konflux_namespace is defined }}"
+    tool: shell
+    args:
+      command: |
+        # This would update config.json quay.repositories section
+        # For now, output instructions
+        echo "To add Quay repository, update config.json:"
+        echo "  quay.repositories.{{ name | default(detected_name) }}: {{ konflux_namespace }}/{{ name | default(detected_name) }}-main/{{ name | default(detected_name) }}-main"
+    outputs:
+      - quay_instructions
+
+  - name: setup_bonfire_app
+    description: Add Bonfire app configuration
+    condition: "{{ setup_bonfire == true }}"
+    tool: shell
+    args:
+      command: |
+        # Output bonfire configuration instructions
+        echo "To add Bonfire app, update config.json bonfire.apps section"
+        echo "See existing apps for reference"
+    outputs:
+      - bonfire_instructions
+
+  - name: generate_project_knowledge
+    description: Generate initial project knowledge
+    condition: "{{ generate_knowledge == true }}"
+    tool: knowledge_scan
+    args:
+      project: "{{ name | default(detected_name) }}"
+      persona: "developer"
+    continue_on_error: true
+    outputs:
+      - knowledge_result
+
+  - name: create_vector_index
+    description: Create semantic vector index for the project
+    condition: "{{ generate_knowledge == true }}"
+    tool: code_index
+    args:
+      project: "{{ name | default(detected_name) }}"
+    continue_on_error: true
+    outputs:
+      - index_result
+
+  - name: start_file_watcher
+    description: Start file watcher for automatic index updates
+    condition: "{{ generate_knowledge == true }}"
+    tool: code_watch
+    args:
+      project: "{{ name | default(detected_name) }}"
+      action: "start"
+    continue_on_error: true
+    outputs:
+      - watcher_result
+
+  - name: summary
+    description: Summarize what was done
+    tool: shell
+    args:
+      command: |
+        echo "## Project Setup Complete"
+        echo ""
+        echo "### Added to config.json"
+        echo "- Project: {{ name | default(detected_name) }}"
+        echo "- Path: {{ path }}"
+        echo "- GitLab: {{ gitlab }}"
+        echo "- Jira: {{ jira_project }}"
+        echo ""
+        echo "### Next Steps"
+        echo "1. Verify settings: project_list()"
+        echo "2. Start working: skill_run('start_work', '{\"issue_key\": \"{{ jira_project }}-XXXXX\", \"repo\": \"{{ name | default(detected_name) }}\"}')"
+        echo ""
+        echo "### Vector Search"
+        echo "- Index created: {{ index_result is defined }}"
+        echo "- File watcher: {{ watcher_result.running if watcher_result else 'not started' }}"
+        echo ""
+        echo "To search code semantically:"
+        echo "  code_search(query='your query', project='{{ name | default(detected_name) }}')"
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_add_project_failures
+    description: "Detect failure patterns from project setup"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab failures
+      gitlab_text = str(gitlab_result) if 'gitlab_result' in dir() and gitlab_result else ""
+      if "no such host" in gitlab_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_project_info",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "not found" in gitlab_text.lower() and "project" in gitlab_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_project_info",
+              "pattern": "project not found",
+              "cause": "GitLab project path is incorrect",
+              "fix": "Check the gitlab project path format"
+          })
+
+      # Check Jira failures
+      jira_text = str(jira_result) if 'jira_result' in dir() and jira_result else ""
+      if "project does not exist" in jira_text.lower():
+          errors_detected.append({
+              "tool": "jira_project_info",
+              "pattern": "project does not exist",
+              "cause": "Jira project key is incorrect",
+              "fix": "Check Jira project key (e.g., AAP, RHCLOUD)"
+          })
+
+      result = errors_detected
+    output: add_project_errors_detected
+    on_error: continue
+
+  - name: learn_add_project_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "add_project_errors_detected and any(e.get('pattern') == 'no such host' for e in add_project_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_project_info"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: add_project_vpn_fix_learned
+    on_error: continue
+
+  - name: log_add_project_session
+    description: "Log project addition to session"
+    tool: memory_session_log
+    args:
+      action: "Added project {{ name | default(detected_name) }}"
+      details: "Path: {{ path }}, GitLab: {{ gitlab }}, Jira: {{ jira_project }}"
+    on_error: continue
+
+outputs:
+  project_name: "{{ name | default(detected_name) }}"
+  config_updated: true
+  knowledge_generated: "{{ generate_knowledge }}"
+  vector_index_created: "{{ index_result is defined }}"
+  watcher_running: "{{ watcher_result.running if watcher_result else false }}"
+
+tags:
+  - project
+  - config
+  - setup
+
+personas:
+  - developer
+  - devops

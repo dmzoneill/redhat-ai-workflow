@@ -38,6 +38,74 @@ inputs:
     description: "Wait for rollout to complete"
 
 steps:
+  # ==================== MEMORY CONTEXT ====================
+
+  - name: check_known_issues
+    description: "Check for known k8s rollout issues"
+    compute: |
+      # Check known issues for kubectl operations
+      issues = memory.check_known_issues("kubectl_rollout_restart", "")
+
+      result = {
+          "has_known_issues": len(issues.get("matches", [])) > 0 if issues else False,
+          "issues": issues.get("matches", [])[:3] if issues else [],
+      }
+    output: known_issues
+    on_error: continue
+
+  - name: get_rollout_gotchas
+    description: "Get rollout-related gotchas from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "gotchas"
+    output: rollout_gotchas_raw
+    on_error: continue
+
+  - name: parse_rollout_gotchas
+    description: "Parse rollout-related gotchas"
+    compute: |
+      gotchas_result = rollout_gotchas_raw if 'rollout_gotchas_raw' in dir() and rollout_gotchas_raw else {}
+
+      rollout_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              # Filter for rollout-related gotchas
+              for g in content:
+                  g_str = str(g).lower()
+                  if any(kw in g_str for kw in ['rollout', 'restart', 'pod', 'deploy', 'k8s', 'configmap', 'secret']):
+                      rollout_gotchas.append(g)
+
+      result = {
+          'gotchas': rollout_gotchas[:5],
+          'has_gotchas': len(rollout_gotchas) > 0,
+      }
+    output: restart_gotchas
+    on_error: continue
+
+  - name: load_restart_history
+    description: "Load previous restart history for this deployment"
+    compute: |
+      # Load learned patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      restart_history = patterns.get("rollout_restarts", [])
+
+      # Find history for this specific deployment
+      deployment_history = [
+          r for r in restart_history
+          if r.get("deployment") == inputs.deployment and r.get("namespace") == inputs.namespace
+      ]
+
+      result = {
+          "previous_restarts": len(deployment_history),
+          "recent_failures": [r for r in deployment_history if not r.get("healthy")][-3:],
+          "last_restart": deployment_history[-1] if deployment_history else None,
+      }
+    output: restart_history
+    on_error: continue
+
   # ==================== PRE-RESTART CHECK ====================
 
   - name: describe_before
@@ -176,7 +244,7 @@ steps:
       }
     output: pods_health
 
-  # ==================== LOG ====================
+  # ==================== MEMORY ====================
 
   - name: log_restart
     description: "Log restart to session"
@@ -184,6 +252,150 @@ steps:
     args:
       action: "Restarted {{ inputs.deployment }} in {{ inputs.namespace }}"
       details: "Environment: {{ inputs.environment }}, Healthy: {{ pods_health.healthy if pods_health else 'unknown' }}"
+    on_error: continue
+
+  - name: learn_restart_pattern
+    description: "Learn from this restart for future reference"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "rollout_restarts" not in patterns:
+          patterns["rollout_restarts"] = []
+
+      # Record this restart
+      restart_record = {
+          "deployment": inputs.deployment,
+          "namespace": inputs.namespace,
+          "environment": inputs.environment,
+          "success": restart_status.success if restart_status else False,
+          "healthy": pods_health.healthy if pods_health else False,
+          "running_pods": pods_health.running if pods_health else 0,
+          "failed_pods": pods_health.failed if pods_health else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["rollout_restarts"].append(restart_record)
+
+      # Keep last 100 restart records
+      patterns["rollout_restarts"] = patterns["rollout_restarts"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "restart pattern learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: track_unhealthy_deployments
+    description: "Track deployments that frequently have issues"
+    condition: "pods_health and not pods_health.healthy"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "unhealthy_deployments" not in patterns:
+          patterns["unhealthy_deployments"] = []
+
+      # Track this deployment's failure
+      key = f"{inputs.namespace}/{inputs.deployment}"
+      existing = [d for d in patterns["unhealthy_deployments"] if d.get("key") == key]
+
+      if existing:
+          existing[0]["count"] = existing[0].get("count", 1) + 1
+          existing[0]["last_unhealthy"] = datetime.now().isoformat()
+          existing[0]["last_error"] = pods_health.pods[0] if pods_health.pods else None
+      else:
+          patterns["unhealthy_deployments"].append({
+              "key": key,
+              "deployment": inputs.deployment,
+              "namespace": inputs.namespace,
+              "environment": inputs.environment,
+              "count": 1,
+              "first_unhealthy": datetime.now().isoformat(),
+              "last_unhealthy": datetime.now().isoformat(),
+              "last_error": pods_health.pods[0] if pods_health.pods else None,
+          })
+
+      # Keep top 50 problematic deployments
+      patterns["unhealthy_deployments"] = sorted(
+          patterns["unhealthy_deployments"],
+          key=lambda x: x.get("count", 0),
+          reverse=True
+      )[:50]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "unhealthy deployment tracked"
+    output: unhealthy_tracking_result
+    on_error: continue
+
+  - name: update_environment_state
+    description: "Update environment state after restart"
+    compute: |
+      from datetime import datetime
+
+      # Update environment state
+      env_data = memory.read_memory("state/environments") or {}
+      if "environments" not in env_data:
+          env_data["environments"] = {}
+
+      env_key = inputs.environment
+      if env_key not in env_data["environments"]:
+          env_data["environments"][env_key] = {"status": "unknown", "deployments": {}}
+
+      env = env_data["environments"][env_key]
+      env["deployments"][inputs.deployment] = {
+          "last_restart": datetime.now().isoformat(),
+          "healthy": pods_health.healthy if pods_health else False,
+          "running": pods_health.running if pods_health else 0,
+      }
+
+      memory.write_memory("state/environments", env_data)
+      result = "environment state updated"
+    output: env_update_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_rollout_failures
+    description: "Detect failure patterns from rollout restart"
+    compute: |
+      errors_detected = []
+
+      # Check kubectl failures
+      describe_text = str(describe_before_raw) if 'describe_before_raw' in dir() and describe_before_raw else ""
+      restart_text = str(restart_result) if 'restart_result' in dir() and restart_result else ""
+      combined = describe_text + restart_text
+
+      if "unauthorized" in combined.lower() or "forbidden" in combined.lower():
+          errors_detected.append({
+              "tool": "kubectl_rollout",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired",
+              "fix": "Run kube_login(cluster='stage' or 'prod') to refresh credentials"
+          })
+      if "not found" in combined.lower() and "deployment" in combined.lower():
+          errors_detected.append({
+              "tool": "kubectl_rollout",
+              "pattern": "deployment not found",
+              "cause": "Deployment name is incorrect or doesn't exist",
+              "fix": "List deployments with kubectl_get_deployments()"
+          })
+
+      result = errors_detected
+    output: rollout_errors_detected
+    on_error: continue
+
+  - name: learn_rollout_auth_failure
+    description: "Learn from k8s auth failures"
+    condition: "rollout_errors_detected and any(e.get('pattern') == 'unauthorized' for e in rollout_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_rollout"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired"
+      fix_description: "Run kube_login(cluster='stage' or 'prod') to refresh credentials"
+    output: rollout_auth_fix_learned
     on_error: continue
 
 outputs:
@@ -248,6 +460,26 @@ outputs:
       ```
       kubectl_logs(pod_name='<pod>', namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
       ```
+      {% endif %}
+
+      {% if restart_gotchas and restart_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Rollout Gotchas
+
+      {% for gotcha in restart_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if known_issues and known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
       {% endif %}
       {% endif %}
 

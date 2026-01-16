@@ -38,6 +38,17 @@ inputs:
     description: "Update linked Jira issue"
 
 steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_mr_close"
+      error_text: ""
+    output: gitlab_known_issues
+    on_error: continue
+
   - name: get_mr_details
     description: "Get MR details before closing"
     tool: gitlab_mr_view
@@ -150,3 +161,53 @@ outputs:
 
       {{ close_status.message }}
       {% endif %}
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_close_failures
+    description: "Detect failure patterns from MR closure"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab failures
+      mr_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
+      close_text = str(close_result_raw) if 'close_result_raw' in dir() and close_result_raw else ""
+      combined = mr_text + close_text
+
+      if "no such host" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_close",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "not found" in combined.lower() and "merge request" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_close",
+              "pattern": "merge request not found",
+              "cause": "MR ID doesn't exist or wrong project",
+              "fix": "Check MR ID and project path"
+          })
+      if "already closed" in combined.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_close",
+              "pattern": "already closed",
+              "cause": "MR is already closed",
+              "fix": "No action needed - MR was already closed"
+          })
+
+      result = errors_detected
+    output: close_errors_detected
+    on_error: continue
+
+  - name: learn_close_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "close_errors_detected and any(e.get('pattern') == 'no such host' for e in close_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_close"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: close_vpn_fix_learned
+    on_error: continue

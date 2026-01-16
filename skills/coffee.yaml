@@ -1,5 +1,6 @@
 # Skill: Morning Coffee Briefing
 # Your daily standup assistant - everything you need to start the day
+# Enhanced with knowledge and vector search stats
 
 name: coffee
 description: |
@@ -16,9 +17,11 @@ description: |
   - 📝 Yesterday: Your commits (for standup prep)
   - 🚨 Alerts: Any firing or recent alerts
   - 🎯 Actions: Suggested next steps
+  - **NEW:** 🧠 Knowledge: Project knowledge stats and index freshness
+  - **NEW:** 🔍 Vector Search: Index health and search stats
 
   Requires: Gmail API access (same OAuth as Calendar)
-version: "1.1"
+version: "2.0"
 
 inputs:
   - name: full_email_scan
@@ -74,24 +77,224 @@ steps:
   - name: load_current_work
     description: "Load current work state from memory"
     compute: |
-      from pathlib import Path
-      import yaml
+      # Use shared memory helpers
+      current_work = memory.read_memory("state/current_work")
+      if not current_work:
+          current_work = {"active_issues": [], "open_mrs": [], "follow_ups": []}
 
-      memory_file = Path.home() / "src/redhat-ai-workflow/memory/state/current_work.yaml"
-      current_work = {"active_issues": [], "open_mrs": [], "follow_ups": []}
-
-      if memory_file.exists():
-          try:
-              with open(memory_file) as f:
-                  data = yaml.safe_load(f) or {}
-              current_work["active_issues"] = data.get("active_issues", [])
-              current_work["open_mrs"] = data.get("open_mrs", [])
-              current_work["follow_ups"] = data.get("follow_ups", [])
-          except Exception:
-              pass
-
-      result = current_work
+      result = {
+          "active_issues": current_work.get("active_issues", []),
+          "open_mrs": current_work.get("open_mrs", []),
+          "follow_ups": current_work.get("follow_ups", []),
+      }
     output: memory_work
+
+  - name: load_yesterday_session
+    description: "Load yesterday's session log for context"
+    compute: |
+      from datetime import datetime, timedelta
+
+      yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+      session_log = memory.read_memory(f"sessions/{yesterday}")
+
+      result = {
+          "has_session": bool(session_log),
+          "actions": session_log.get("actions", [])[-10:] if session_log else [],
+      }
+    output: yesterday_session
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab tool issues"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_mr_list"
+    output: gitlab_known_issues
+    on_error: continue
+
+  - name: check_jira_known_issues
+    description: "Check for known Jira tool issues"
+    tool: check_known_issues
+    args:
+      tool_name: "jira_search"
+    output: jira_known_issues
+    on_error: continue
+
+  - name: check_bonfire_known_issues
+    description: "Check for known Bonfire tool issues"
+    tool: check_known_issues
+    args:
+      tool_name: "bonfire"
+    output: bonfire_known_issues
+    on_error: continue
+
+  - name: aggregate_known_issues
+    description: "Aggregate all known issues"
+    compute: |
+      all_issues = []
+
+      # Parse each known issues result
+      for raw in [gitlab_known_issues, jira_known_issues, bonfire_known_issues]:
+          if raw:
+              raw_text = str(raw)
+              # Check if there are matches in the output
+              if "Known fixes" in raw_text or "pattern" in raw_text.lower():
+                  all_issues.append(raw_text[:200])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: known_issues
+    on_error: continue
+
+  # ==================== KNOWLEDGE & VECTOR STATS ====================
+
+  - name: get_vector_stats
+    description: "Get vector index statistics"
+    compute: |
+      # Vector stats are optional - only available if code_search module is loaded
+      result = None
+      try:
+          # Check if vector index exists by looking for metadata file
+          from pathlib import Path
+          vector_db_path = Path.home() / ".cache" / "aa-workflow" / "vectors" / "automation-analytics-backend"
+          metadata_file = vector_db_path / "metadata.json"
+
+          if metadata_file.exists():
+              import json
+              with open(metadata_file) as f:
+                  metadata = json.load(f)
+
+              # Get stats from nested structure
+              stats = metadata.get('stats', {})
+              search_stats = metadata.get('search_stats', {})
+
+              files = stats.get('files_indexed', 0)
+              chunks = stats.get('chunks_created', 0)
+              searches = search_stats.get('total_searches', 0)
+
+              result = f"files: {files}, chunks: {chunks}, searches: {searches}"
+
+              # Check index age
+              indexed_at = metadata.get('indexed_at')
+              if indexed_at:
+                  from datetime import datetime, timezone
+                  try:
+                      indexed_time = datetime.fromisoformat(indexed_at.replace('Z', '+00:00'))
+                      if indexed_time.tzinfo is None:
+                          indexed_time = indexed_time.replace(tzinfo=timezone.utc)
+                      now = datetime.now(timezone.utc)
+                      age_hours = (now - indexed_time).total_seconds() / 3600
+                      result += f", {age_hours:.1f} hours ago"
+                  except Exception:
+                      pass
+
+              # Check if file watcher is running (look for PID file)
+              watcher_pid_file = Path.home() / ".cache" / "aa-workflow" / "watcher.pid"
+              if watcher_pid_file.exists():
+                  try:
+                      import os
+                      pid = int(watcher_pid_file.read_text().strip())
+                      # Check if process is running
+                      os.kill(pid, 0)  # Signal 0 just checks if process exists
+                      result += ", watcher running"
+                  except (ProcessLookupError, ValueError, PermissionError):
+                      pass
+          else:
+              result = "not indexed"
+      except Exception as e:
+          result = f"error: {e}"
+    output: vector_stats_raw
+    on_error: continue
+
+  - name: parse_vector_stats
+    description: "Parse vector index stats"
+    compute: |
+      import re
+
+      stats = {
+          "indexed": False,
+          "files": 0,
+          "chunks": 0,
+          "age_hours": None,
+          "searches": 0,
+          "watcher_running": False,
+      }
+
+      if 'vector_stats_raw' in dir() and vector_stats_raw:
+          raw_text = str(vector_stats_raw)
+
+          # Check if indexed
+          if "files" in raw_text.lower() and "not found" not in raw_text.lower():
+              stats["indexed"] = True
+
+              # Extract stats
+              files_match = re.search(r'(\d+)\s*files', raw_text)
+              chunks_match = re.search(r'(\d+)\s*chunks', raw_text)
+              age_match = re.search(r'(\d+\.?\d*)\s*hours?\s*ago', raw_text)
+              searches_match = re.search(r'(\d+)\s*searches', raw_text)
+
+              if files_match:
+                  stats["files"] = int(files_match.group(1))
+              if chunks_match:
+                  stats["chunks"] = int(chunks_match.group(1))
+              if age_match:
+                  stats["age_hours"] = float(age_match.group(1))
+              if searches_match:
+                  stats["searches"] = int(searches_match.group(1))
+
+              # Check watcher status
+              if "watcher" in raw_text.lower() and "running" in raw_text.lower():
+                  stats["watcher_running"] = True
+
+      vector_stats = stats
+    output: vector_stats
+    on_error: continue
+
+  - name: get_knowledge_stats
+    description: "Get knowledge base statistics"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      section: "metadata"
+    output: knowledge_stats_raw
+    on_error: continue
+
+  - name: parse_knowledge_stats
+    description: "Parse knowledge stats"
+    compute: |
+      import re
+
+      stats = {
+          "has_knowledge": False,
+          "confidence": 0,
+          "gotchas_count": 0,
+          "patterns_count": 0,
+      }
+
+      if 'knowledge_stats_raw' in dir() and knowledge_stats_raw:
+          raw_text = str(knowledge_stats_raw)
+
+          if "confidence" in raw_text.lower() or "gotchas" in raw_text.lower():
+              stats["has_knowledge"] = True
+
+              # Extract confidence (handles both int and float like 0.82)
+              conf_match = re.search(r'confidence[:\s]+([\d.]+)', raw_text, re.I)
+              if conf_match:
+                  conf_val = float(conf_match.group(1))
+                  # Convert 0-1 scale to percentage if needed
+                  if conf_val <= 1:
+                      stats["confidence"] = int(conf_val * 100)
+                  else:
+                      stats["confidence"] = int(conf_val)
+
+              # Count gotchas
+              gotchas_count = raw_text.lower().count("gotcha")
+              stats["gotchas_count"] = gotchas_count
+
+      knowledge_stats = stats
+    output: knowledge_stats
+    on_error: continue
 
   # ==================== CALENDAR ====================
 
@@ -101,10 +304,14 @@ steps:
       from pathlib import Path
       from datetime import datetime, timedelta
       from zoneinfo import ZoneInfo
+      import os
 
-      CONFIG_DIR = Path.home() / ".config" / "google_calendar"
+      # Read config_dir from config.json, fallback to default
+      gc_config = ctx.get('config', {}).get('google_calendar', {})
+      config_dir = gc_config.get('config_dir', '~/.config/google_calendar')
+      CONFIG_DIR = Path(os.path.expanduser(config_dir))
       TOKEN_FILE = CONFIG_DIR / "token.json"
-      TIMEZONE = "Europe/Dublin"
+      TIMEZONE = gc_config.get('timezone', 'Europe/Dublin')
       tz = ZoneInfo(TIMEZONE)
 
       events_today = []
@@ -178,8 +385,12 @@ steps:
     description: "Fetch, analyze, and optionally triage unread emails"
     compute: |
       from pathlib import Path
+      import os
 
-      CONFIG_DIR = Path.home() / ".config" / "google_calendar"
+      # Read config_dir from config.json, fallback to default
+      gc_config = ctx.get('config', {}).get('google_calendar', {})
+      config_dir = gc_config.get('config_dir', '~/.config/google_calendar')
+      CONFIG_DIR = Path(os.path.expanduser(config_dir))
       TOKEN_FILE = CONFIG_DIR / "token.json"
 
       # Get user info for "directed at me" detection
@@ -347,11 +558,20 @@ steps:
     on_error: continue
 
   - name: parse_my_prs
-    description: "Parse MR list output"
+    description: "Parse MR list output and detect network errors"
     compute: |
       from scripts.common.parsers import parse_mr_list
 
-      result = parse_mr_list(my_prs_raw) if my_prs_raw else []
+      # Check for network errors in the raw output
+      network_error = False
+      raw_text = str(my_prs_raw) if my_prs_raw else ""
+      if "no such host" in raw_text.lower() or "dial tcp" in raw_text.lower():
+          network_error = True
+
+      # Store network error state for later use
+      ctx['network_error'] = network_error
+
+      result = parse_mr_list(my_prs_raw) if my_prs_raw and not network_error else []
     output: my_prs
 
   # Get MR IDs for comments check
@@ -999,11 +1219,62 @@ steps:
         lines.append("- Alert check not configured")
       lines.append("")
 
+      # Knowledge & Vector Stats
+      lines.append("## 🧠 Knowledge & Search")
+
+      # Knowledge stats
+      if 'knowledge_stats' in dir() and knowledge_stats and knowledge_stats.get('has_knowledge'):
+        conf = knowledge_stats.get('confidence', 0)
+        conf_bar = "█" * (conf // 10) + "░" * (10 - conf // 10)
+        lines.append(f"**Knowledge Confidence:** {conf_bar} {conf}%")
+        if knowledge_stats.get('gotchas_count', 0) > 0:
+          lines.append(f"- {knowledge_stats['gotchas_count']} gotchas documented")
+      else:
+        lines.append("- No project knowledge yet. Run `skill_run('bootstrap_knowledge')` to initialize.")
+
+      # Vector stats
+      if 'vector_stats' in dir() and vector_stats and vector_stats.get('indexed'):
+        lines.append(f"**Vector Index:** {vector_stats.get('files', 0)} files, {vector_stats.get('chunks', 0)} chunks")
+        if vector_stats.get('age_hours') is not None:
+          age = vector_stats['age_hours']
+          if age < 1:
+            age_str = "< 1 hour ago"
+          elif age < 24:
+            age_str = f"{age:.0f} hours ago"
+          else:
+            age_str = f"{age/24:.1f} days ago"
+          lines.append(f"- Last updated: {age_str}")
+        if vector_stats.get('searches', 0) > 0:
+          lines.append(f"- {vector_stats['searches']} searches performed")
+        if vector_stats.get('watcher_running'):
+          lines.append("- 🟢 File watcher running (auto-updates)")
+        else:
+          lines.append("- 🔴 File watcher not running")
+      else:
+        lines.append("- No vector index. Run `skill_run('bootstrap_knowledge')` to create.")
+      lines.append("")
+
+      # Network error warning
+      network_error = ctx.get('network_error', False)
+      if network_error:
+        lines.append("## ⚠️ Network Issues Detected")
+        lines.append("")
+        lines.append("GitLab tools failed with DNS errors. This usually means:")
+        lines.append("1. **VPN not connected** - Connect to Red Hat VPN")
+        lines.append("2. **DNS resolution issue** - Internal GitLab isn't reachable")
+        lines.append("")
+        lines.append("**To fix:** Run `vpn_connect()` or connect manually.")
+        lines.append("")
+
       # Actions
       lines.append("---")
       lines.append("")
       lines.append("## 🎯 Suggested Actions")
       actions = []
+
+      # VPN action first if network error
+      if network_error:
+        actions.append("- 🔌 **Connect to VPN** - Run `vpn_connect()` to access GitLab")
 
       if pr_feedback:
         actions.append(f"- Respond to feedback on {len(pr_feedback)} PR(s)")
@@ -1038,6 +1309,139 @@ steps:
 
       result = '\n'.join(lines)
     output: briefing
+
+  # ==================== MEMORY UPDATES ====================
+
+  - name: log_coffee_session
+    description: "Log morning briefing to session"
+    tool: memory_session_log
+    args:
+      action: "Morning coffee briefing"
+      details: "PRs: {{ my_prs | length if my_prs else 0 }}, Reviews: {{ review_requests | length if review_requests else 0 }}, Failed: {{ failed_pipelines | length if failed_pipelines else 0 }}"
+    on_error: continue
+
+  - name: update_work_state
+    description: "Sync memory with actual PR/issue state"
+    compute: |
+      from datetime import datetime
+
+      # Update current work with fresh data
+      current_work = memory.read_memory("state/current_work") or {}
+
+      # Sync open MRs from GitLab
+      mr_ids = [pr.get('id') for pr in (my_prs or [])]
+      current_work["open_mrs"] = [
+          {"id": pr.get('id'), "title": pr.get('title', '')[:50], "status": pr.get('status', 'open')}
+          for pr in (my_prs or [])[:10]
+      ]
+
+      # Track feedback waiting
+      current_work["feedback_waiting"] = [
+          {"mr_id": fb.get('mr_id'), "from": fb.get('author')}
+          for fb in (pr_feedback or [])
+      ]
+
+      # Track review assignments
+      current_work["reviews_assigned"] = [
+          {"id": rr.get('id'), "title": rr.get('title', '')[:40]}
+          for rr in (review_requests or [])[:5]
+      ]
+
+      current_work["last_coffee"] = datetime.now().isoformat()
+
+      memory.write_memory("state/current_work", current_work)
+      result = "work state synced"
+    output: work_sync_result
+    on_error: continue
+
+  - name: learn_pipeline_failures
+    description: "Learn from pipeline failures for future reference"
+    condition: "failed_pipelines and len(failed_pipelines) > 0"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "pipeline_failures" not in patterns:
+          patterns["pipeline_failures"] = []
+
+      # Track recurring failures
+      for fp in (failed_pipelines or [])[:5]:
+          jobs = fp.get("failed_jobs", [])
+          for job in jobs:
+              existing = [p for p in patterns["pipeline_failures"] if p.get("job") == job]
+              if existing:
+                  existing[0]["count"] = existing[0].get("count", 1) + 1
+                  existing[0]["last_seen"] = datetime.now().isoformat()
+              else:
+                  patterns["pipeline_failures"].append({
+                      "job": job,
+                      "count": 1,
+                      "first_seen": datetime.now().isoformat(),
+                      "last_seen": datetime.now().isoformat(),
+                  })
+
+      # Keep only top 20 by count
+      patterns["pipeline_failures"] = sorted(
+          patterns["pipeline_failures"],
+          key=lambda x: x.get("count", 0),
+          reverse=True
+      )[:20]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "pipeline failure patterns updated"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: save_shared_context
+    description: "Save context for other skills to use"
+    compute: |
+      from datetime import datetime
+
+      # Share context that other skills can use
+      shared = memory.read_memory("state/shared_context") or {}
+
+      shared["last_coffee"] = {
+          "timestamp": datetime.now().isoformat(),
+          "pr_count": len(my_prs) if my_prs else 0,
+          "feedback_waiting": len(pr_feedback) if pr_feedback else 0,
+          "failed_pipelines": len(failed_pipelines) if failed_pipelines else 0,
+          "review_assignments": len(review_requests) if review_requests else 0,
+          "active_ephemeral": len(ephemeral_namespaces) if ephemeral_namespaces else 0,
+          "alerts": {
+              "stage": len(alerts.get("stage", [])) if alerts else 0,
+              "production": len(alerts.get("production", [])) if alerts else 0,
+          }
+      }
+
+      memory.write_memory("state/shared_context", shared)
+      result = "shared context saved"
+    output: shared_context_result
+    on_error: continue
+
+  - name: learn_network_failure
+    description: "Learn from network/VPN failures if detected"
+    condition: "ctx.get('network_error', False)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_list"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: network_fix_learned
+    on_error: continue
+
+  - name: learn_jira_failure
+    description: "Learn from Jira failures if detected"
+    condition: "'HTTP error 400' in str(jira_activity_raw) if jira_activity_raw else False"
+    tool: learn_tool_fix
+    args:
+      tool_name: "jira_search"
+      error_pattern: "HTTP error 400"
+      root_cause: "JQL query syntax error or invalid field"
+      fix_description: "Check JQL syntax - labels field may need quotes around values with special chars"
+    output: jira_fix_learned
+    on_error: continue
 
 outputs:
   - name: summary

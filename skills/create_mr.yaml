@@ -1,5 +1,6 @@
 # Skill: Create Merge Request
 # Creates a properly formatted MR with Jira link, validation, and quality checks
+# Enhanced with knowledge/memory/vector search integration
 
 name: create_mr
 description: |
@@ -13,9 +14,15 @@ description: |
   - Creates MR with proper description
   - Links to Jira and updates status
 
+  **NEW Features:**
+  - Suggests reviewers based on code ownership (git blame + knowledge)
+  - Loads coding patterns to include in MR description
+  - Checks for related documentation that may need updating
+
   Uses MCP tools: git_status, git_fetch, git_log, git_push, gitlab_mr_list,
-                  gitlab_mr_create, jira_view_issue, jira_add_comment, jira_set_status
-version: "2.3"
+                  gitlab_mr_create, jira_view_issue, jira_add_comment, jira_set_status,
+                  code_search, knowledge_query, git_blame
+version: "3.0"
 
 inputs:
   - name: issue_key
@@ -85,6 +92,26 @@ inputs:
 # jira_url loaded from config.json in load_config step
 
 steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_mr_create"
+      error_text: ""
+    output: gitlab_known_issues
+    on_error: continue
+
+  - name: check_git_known_issues
+    description: "Check for known git issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "git_push"
+      error_text: ""
+    output: git_known_issues
+    on_error: continue
+
   # ==================== RESOLVE REPOSITORY ====================
 
   - name: resolve_repo
@@ -358,6 +385,118 @@ steps:
       else:
           result = {"exists": False, "message": "No existing MR found"}
     output: duplicate_check
+
+  # ==================== KNOWLEDGE & REVIEWER SUGGESTIONS ====================
+
+  # Get changed files for reviewer suggestion
+  - name: get_files_for_reviewers
+    description: "Get list of changed files for reviewer suggestion"
+    tool: git_log
+    args:
+      repo: "{{ resolved_repo.path }}"
+      limit: 1
+      numstat: true
+    output: changed_files_for_reviewers
+    on_error: continue
+
+  # Get blame info for main changed file to suggest reviewers
+  - name: get_blame_for_reviewers
+    description: "Get blame info to suggest reviewers"
+    condition: "changed_files_for_reviewers"
+    tool: git_blame
+    args:
+      repo: "{{ resolved_repo.path }}"
+      file: "{{ current_branch.name.split('-')[-1] if '-' in current_branch.name else 'src' }}"
+    output: blame_for_reviewers_raw
+    on_error: continue
+
+  - name: suggest_reviewers
+    description: "Suggest reviewers based on code ownership"
+    compute: |
+      import re
+
+      reviewers = []
+      if 'blame_for_reviewers_raw' in dir() and blame_for_reviewers_raw:
+          blame_text = str(blame_for_reviewers_raw)
+
+          # Extract authors from blame
+          authors = {}
+          for line in blame_text.split('\n'):
+              author_match = re.search(r'\(([^)]+)\s+\d{4}-\d{2}-\d{2}', line)
+              if author_match:
+                  author = author_match.group(1).strip()
+                  # Skip common non-human authors
+                  if author and author not in ['Not Committed Yet', 'unknown']:
+                      authors[author] = authors.get(author, 0) + 1
+
+          # Sort by contribution and get top 3
+          sorted_authors = sorted(authors.items(), key=lambda x: x[1], reverse=True)
+          reviewers = [a[0] for a in sorted_authors[:3]]
+
+      result = {
+          "found": len(reviewers) > 0,
+          "reviewers": reviewers,
+          "count": len(reviewers),
+      }
+    output: suggested_reviewers
+    on_error: continue
+
+  # Load coding patterns for MR description
+  - name: load_coding_patterns_for_mr
+    description: "Load coding patterns to reference in MR"
+    tool: knowledge_query
+    args:
+      project: "{{ resolved_repo.path | basename }}"
+      section: "patterns.coding"
+    output: coding_patterns_for_mr_raw
+    on_error: continue
+
+  - name: parse_coding_patterns_for_mr
+    description: "Parse coding patterns"
+    compute: |
+      patterns = []
+      if 'coding_patterns_for_mr_raw' in dir() and coding_patterns_for_mr_raw:
+          raw_text = str(coding_patterns_for_mr_raw)
+          import re
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', raw_text, re.DOTALL):
+              pattern = match.group(1).strip()[:100]
+              if pattern and len(pattern) > 10:
+                  patterns.append(pattern)
+
+      result = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:3],
+      }
+    output: coding_patterns_for_mr
+    on_error: continue
+
+  # Search for related code to mention in MR
+  - name: search_related_code_for_mr
+    description: "Search for related code to reference"
+    tool: code_search
+    args:
+      query: "{{ current_branch.name }} implementation"
+      project: "{{ resolved_repo.path | basename }}"
+      limit: 3
+    output: related_code_for_mr_raw
+    on_error: continue
+
+  - name: parse_related_code_for_mr
+    description: "Parse related code search"
+    compute: |
+      code = []
+      if 'related_code_for_mr_raw' in dir() and related_code_for_mr_raw:
+          raw_text = str(related_code_for_mr_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line:
+                  code.append(line.strip()[:100])
+
+      result = {
+          "found": len(code) > 0,
+          "code": code[:3],
+      }
+    output: related_code_for_mr
+    on_error: continue
 
   # ==================== LINTING ====================
 
@@ -663,7 +802,7 @@ steps:
     output: mr_commit_type
 
   - name: build_description
-    description: "Build MR description with Jira link"
+    description: "Build MR description with Jira link and knowledge context"
     compute: |
       import textwrap
 
@@ -671,6 +810,24 @@ steps:
       issue_key = inputs.get("issue_key", "").upper()
       issue_text = str(issue) if issue else ""
       summary_match = issue_text[:100] if issue_text else "No description"
+
+      # Build suggested reviewers section
+      reviewers_section = ""
+      if 'suggested_reviewers' in dir() and suggested_reviewers and suggested_reviewers.get('found'):
+          reviewers_list = ", ".join(f"@{r}" for r in suggested_reviewers.get('reviewers', []))
+          reviewers_section = f"\n## Suggested Reviewers\n{reviewers_list}\n"
+
+      # Build related code section
+      related_section = ""
+      if 'related_code_for_mr' in dir() and related_code_for_mr and related_code_for_mr.get('found'):
+          related_list = "\n".join(f"- `{c}`" for c in related_code_for_mr.get('code', []))
+          related_section = f"\n## Related Code\n{related_list}\n"
+
+      # Build coding patterns section
+      patterns_section = ""
+      if 'coding_patterns_for_mr' in dir() and coding_patterns_for_mr and coding_patterns_for_mr.get('found'):
+          patterns_list = "\n".join(f"- {p}" for p in coding_patterns_for_mr.get('patterns', []))
+          patterns_section = f"\n## Coding Patterns Followed\n{patterns_list}\n"
 
       description = textwrap.dedent(f"""
           ## Summary
@@ -681,7 +838,9 @@ steps:
 
           ## Changes
           - Commits: {commit_validation.get("count", 0)}
-
+          {reviewers_section}
+          {related_section}
+          {patterns_section}
           ## Testing
           - [ ] Unit tests pass
           - [ ] Integration tests pass
@@ -830,6 +989,103 @@ steps:
       key: "state/current_work"
       path: "last_updated"
       value: "{{ memory_context.timestamp }}"
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_create_mr_failures
+    description: "Detect failure patterns from MR creation"
+    compute: |
+      errors_detected = []
+
+      # Check git failures
+      git_status_text = str(git_status_raw) if 'git_status_raw' in dir() and git_status_raw else ""
+      fetch_text = str(fetch_result) if 'fetch_result' in dir() and fetch_result else ""
+      combined_git = git_status_text + fetch_text
+
+      if "permission denied" in combined_git.lower():
+          errors_detected.append({
+              "tool": "git_fetch",
+              "pattern": "permission denied",
+              "cause": "SSH key not loaded or git credentials expired",
+              "fix": "Run ssh-add or check git credentials"
+          })
+
+      # Check GitLab failures
+      existing_mrs_text = str(existing_mrs_raw) if 'existing_mrs_raw' in dir() and existing_mrs_raw else ""
+      mr_text = str(mr) if 'mr' in dir() and mr else ""
+      combined_gitlab = existing_mrs_text + mr_text
+
+      if "no such host" in combined_gitlab.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_create",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in combined_gitlab.lower() or "401" in combined_gitlab:
+          errors_detected.append({
+              "tool": "gitlab_mr_create",
+              "pattern": "unauthorized",
+              "cause": "GitLab authentication failed or token expired",
+              "fix": "Check GitLab token in config.json"
+          })
+      if "already exists" in combined_gitlab.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_create",
+              "pattern": "already exists",
+              "cause": "MR already exists for this branch",
+              "fix": "Use gitlab_mr_list() to find existing MR"
+          })
+
+      # Check merge conflicts
+      merge_text = str(merge_test_raw) if 'merge_test_raw' in dir() and merge_test_raw else ""
+      if "conflict" in merge_text.lower():
+          errors_detected.append({
+              "tool": "git_merge",
+              "pattern": "conflict",
+              "cause": "Branch has merge conflicts with target",
+              "fix": "Rebase branch first with skill_run('rebase_pr', ...)"
+          })
+
+      result = errors_detected
+    output: create_mr_errors_detected
+    on_error: continue
+
+  - name: learn_create_mr_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "create_mr_errors_detected and any(e.get('pattern') == 'no such host' for e in create_mr_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_create"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: create_mr_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_create_mr_auth_failure
+    description: "Learn from GitLab auth failures"
+    condition: "create_mr_errors_detected and any(e.get('pattern') == 'unauthorized' for e in create_mr_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_create"
+      error_pattern: "unauthorized"
+      root_cause: "GitLab authentication failed or token expired"
+      fix_description: "Check GitLab token in config.json"
+    output: create_mr_auth_fix_learned
+    on_error: continue
+
+  - name: learn_create_mr_conflict_failure
+    description: "Learn from merge conflict failures"
+    condition: "create_mr_errors_detected and any(e.get('pattern') == 'conflict' for e in create_mr_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "git_merge"
+      error_pattern: "conflict"
+      root_cause: "Branch has merge conflicts with target"
+      fix_description: "Rebase branch first with skill_run('rebase_pr', ...)"
+    output: create_mr_conflict_fix_learned
     on_error: continue
 
 outputs:

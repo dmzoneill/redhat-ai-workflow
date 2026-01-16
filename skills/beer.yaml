@@ -36,6 +36,63 @@ inputs:
     description: "Use Slack link format"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_project_patterns
+    description: "Get project patterns and learnings from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      query: "gotchas"
+    output: project_knowledge_raw
+    on_error: continue
+
+  - name: parse_project_knowledge
+    description: "Parse project knowledge for wrap-up context"
+    compute: |
+      knowledge_text = str(project_knowledge_raw) if project_knowledge_raw else ""
+
+      gotchas = []
+      patterns = []
+
+      # Extract gotchas and patterns for summary
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["gotcha", "watch out", "note", "important", "remember"]):
+                  gotchas.append(line.strip()[:150])
+              if any(kw in line_lower for kw in ["pattern", "convention", "best practice", "workflow"]):
+                  patterns.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0 or len(patterns) > 0,
+          "gotchas": gotchas[:5],
+          "patterns": patterns[:3],
+      }
+    output: project_knowledge
+    on_error: continue
+
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_mr_list"
+      error_text: ""
+    output: gitlab_known_issues
+    on_error: continue
+
+  - name: check_calendar_known_issues
+    description: "Check for known Google Calendar issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "google_calendar_events"
+      error_text: ""
+    output: calendar_known_issues
+    on_error: continue
+
   # ==================== CONFIGURATION ====================
 
   - name: load_config
@@ -247,8 +304,12 @@ steps:
       from pathlib import Path
       from datetime import datetime, timedelta
       from zoneinfo import ZoneInfo
+      import os
 
-      CONFIG_DIR = Path.home() / ".config" / "google_calendar"
+      # Read config_dir from config.json, fallback to default
+      gc_config = ctx.get('config', {}).get('google_calendar', {})
+      config_dir = gc_config.get('config_dir', '~/.config/google_calendar')
+      CONFIG_DIR = Path(os.path.expanduser(config_dir))
       TOKEN_FILE = CONFIG_DIR / "token.json"
       TIMEZONE = "Europe/Dublin"
       tz = ZoneInfo(TIMEZONE)
@@ -607,6 +668,194 @@ steps:
 
       result = '\n'.join(lines)
     output: briefing
+
+  # ==================== MEMORY UPDATES ====================
+
+  - name: log_beer_session
+    description: "Log end of day wrap-up to session"
+    tool: memory_session_log
+    args:
+      action: "End of day wrap-up (beer)"
+      details: "Commits: {{ todays_work.count if todays_work else 0 }}, PRs: {{ my_prs | length if my_prs else 0 }}"
+    on_error: continue
+
+  - name: update_work_state
+    description: "Sync memory with actual work state at end of day"
+    compute: |
+      from datetime import datetime
+
+      # Update current work with fresh data
+      current_work = memory.read_memory("state/current_work") or {}
+
+      # Save today's summary
+      if "daily_summaries" not in current_work:
+          current_work["daily_summaries"] = []
+
+      current_work["daily_summaries"].append({
+          "date": ctx.get("today", datetime.now().strftime("%Y-%m-%d")),
+          "commits": todays_work.get("count", 0) if todays_work else 0,
+          "open_prs": len(my_prs) if my_prs else 0,
+          "merged_today": len(merged_today) if merged_today else 0,
+          "uncommitted_repos": len(uncommitted_changes) if uncommitted_changes else 0,
+      })
+
+      # Keep last 30 days
+      current_work["daily_summaries"] = current_work["daily_summaries"][-30:]
+
+      current_work["last_beer"] = datetime.now().isoformat()
+
+      memory.write_memory("state/current_work", current_work)
+      result = "work state synced for EOD"
+    output: work_sync_result
+    on_error: continue
+
+  - name: learn_daily_patterns
+    description: "Learn from daily activity patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "daily_patterns" not in patterns:
+          patterns["daily_patterns"] = []
+
+      # Record today's pattern
+      day_record = {
+          "date": ctx.get("today", datetime.now().strftime("%Y-%m-%d")),
+          "day_of_week": ctx.get("day_name", datetime.now().strftime("%A")),
+          "commits": todays_work.get("count", 0) if todays_work else 0,
+          "weekly_commits": weekly_stats.get("commits_this_week", 0) if weekly_stats else 0,
+          "lines_added": weekly_stats.get("lines_added", 0) if weekly_stats else 0,
+          "lines_removed": weekly_stats.get("lines_removed", 0) if weekly_stats else 0,
+          "stale_branches": len(stale_branches) if stale_branches else 0,
+          "ephemeral_envs": len(ephemeral_namespaces) if ephemeral_namespaces else 0,
+      }
+
+      patterns["daily_patterns"].append(day_record)
+
+      # Keep last 90 days
+      patterns["daily_patterns"] = patterns["daily_patterns"][-90:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "daily patterns learned"
+    output: pattern_learn_result
+    on_error: continue
+
+  - name: save_standup_for_tomorrow
+    description: "Save standup notes for tomorrow morning"
+    condition: "standup_notes"
+    compute: |
+      from datetime import datetime, timedelta
+
+      # Save standup for tomorrow's coffee
+      shared = memory.read_memory("state/shared_context") or {}
+
+      tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+      shared["prepared_standup"] = {
+          "date": tomorrow,
+          "notes": standup_notes,
+          "generated_at": datetime.now().isoformat(),
+      }
+
+      memory.write_memory("state/shared_context", shared)
+      result = "standup notes saved for tomorrow"
+    output: standup_save_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_beer_failures
+    description: "Detect failure patterns from EOD data gathering"
+    compute: |
+      errors_detected = []
+
+      # Check git failures
+      git_text = str(todays_commits_raw) if 'todays_commits_raw' in dir() and todays_commits_raw else ""
+      if "permission denied" in git_text.lower():
+          errors_detected.append({
+              "tool": "git_log",
+              "pattern": "permission denied",
+              "cause": "Git repository access denied",
+              "fix": "Check repository permissions and SSH keys"
+          })
+
+      # Check GitLab failures
+      gitlab_text = str(my_prs_raw) if 'my_prs_raw' in dir() and my_prs_raw else ""
+      if "no such host" in gitlab_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      # Check calendar failures
+      calendar_text = str(tomorrow_calendar_raw) if 'tomorrow_calendar_raw' in dir() and tomorrow_calendar_raw else ""
+      if "oauth" in calendar_text.lower() or "token" in calendar_text.lower():
+          errors_detected.append({
+              "tool": "google_calendar_events",
+              "pattern": "oauth token",
+              "cause": "Google OAuth token expired or not configured",
+              "fix": "Run setup-gmail to refresh OAuth tokens"
+          })
+
+      # Check bonfire failures
+      bonfire_text = str(ephemeral_namespaces_raw) if 'ephemeral_namespaces_raw' in dir() and ephemeral_namespaces_raw else ""
+      if "no route to host" in bonfire_text.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_list",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - ephemeral cluster not reachable",
+              "fix": "Run vpn_connect() and kube_login('ephemeral')"
+          })
+
+      result = errors_detected
+    output: beer_errors_detected
+    on_error: continue
+
+  - name: learn_beer_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "beer_errors_detected and any(e.get('pattern') == 'no such host' for e in beer_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_list"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: beer_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_beer_calendar_failure
+    description: "Learn from Google Calendar OAuth failures"
+    condition: "beer_errors_detected and any(e.get('pattern') == 'oauth token' for e in beer_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "google_calendar_events"
+      error_pattern: "oauth token"
+      root_cause: "Google OAuth token expired or not configured"
+      fix_description: "Run setup-gmail to refresh OAuth tokens"
+    output: beer_calendar_fix_learned
+    on_error: continue
+
+  - name: learn_beer_bonfire_failure
+    description: "Learn from bonfire VPN failures"
+    condition: "beer_errors_detected and any(e.get('pattern') == 'no route to host' for e in beer_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_list"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - ephemeral cluster not reachable"
+      fix_description: "Run vpn_connect() and kube_login('ephemeral')"
+    output: beer_bonfire_fix_learned
+    on_error: continue
+
+  - name: log_beer_session
+    description: "Log EOD wrap-up to session"
+    tool: memory_session_log
+    args:
+      action: "EOD wrap-up completed"
+      details: "{{ todays_work.count if todays_work else 0 }} commits, {{ my_prs | length if my_prs else 0 }} open PRs"
+    on_error: continue
 
 outputs:
   - name: summary

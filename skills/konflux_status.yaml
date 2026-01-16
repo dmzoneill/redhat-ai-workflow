@@ -29,6 +29,58 @@ inputs:
     description: "Specific application to check (optional)"
 
 steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_konflux_known_issues
+    description: "Check for known Konflux issues"
+    compute: |
+      # Check known issues for Konflux operations
+      konflux_issues = memory.check_known_issues("konflux", "") or {}
+      tekton_issues = memory.check_known_issues("tekton", "") or {}
+      pipeline_issues = memory.check_known_issues("pipeline", "") or {}
+
+      all_issues = []
+      for issues in [konflux_issues, tekton_issues, pipeline_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: konflux_known_issues
+    on_error: continue
+
+  - name: get_build_patterns
+    description: "Get build patterns from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "devops"
+      section: "patterns.deployment"
+    output: build_patterns_raw
+    on_error: continue
+
+  - name: parse_build_patterns
+    description: "Parse build patterns"
+    compute: |
+      patterns_result = build_patterns_raw if 'build_patterns_raw' in dir() and build_patterns_raw else {}
+
+      build_patterns = []
+      if isinstance(patterns_result, dict) and patterns_result.get('found'):
+          content = patterns_result.get('content', [])
+          if isinstance(content, list):
+              build_patterns = content[:5]
+
+      result = {
+          'patterns': build_patterns,
+          'has_patterns': len(build_patterns) > 0,
+      }
+    output: konflux_build_patterns
+    on_error: continue
+
+  # ==================== KONFLUX QUERIES ====================
+
   - name: get_status
     description: "Get Konflux overall status"
     tool: konflux_status
@@ -136,6 +188,57 @@ steps:
     output: summary_raw
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_konflux_failures
+    description: "Detect failure patterns from Konflux operations"
+    compute: |
+      errors_detected = []
+
+      # Check Konflux/k8s failures
+      status_text = str(status_raw) if 'status_raw' in dir() and status_raw else ""
+      apps_text = str(apps_raw) if 'apps_raw' in dir() and apps_raw else ""
+      combined = status_text + apps_text
+
+      if "unauthorized" in combined.lower() or "forbidden" in combined.lower():
+          errors_detected.append({
+              "tool": "konflux_get_status",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for Konflux cluster",
+              "fix": "Run kube_login(cluster='konflux') to refresh credentials"
+          })
+      if "no route to host" in combined.lower():
+          errors_detected.append({
+              "tool": "konflux_get_status",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - cannot reach Konflux cluster",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      result = errors_detected
+    output: konflux_errors_detected
+    on_error: continue
+
+  - name: learn_konflux_auth_failure
+    description: "Learn from Konflux auth failures"
+    condition: "konflux_errors_detected and any(e.get('pattern') == 'unauthorized' for e in konflux_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "konflux_get_status"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for Konflux cluster"
+      fix_description: "Run kube_login(cluster='konflux') to refresh credentials"
+    output: konflux_auth_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Checked Konflux status"
+      details: "namespace={{ inputs.namespace }}, healthy={{ status_info.healthy if status_info is defined else 'unknown' }}, apps={{ apps_info.count if apps_info is defined else 'unknown' }}"
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -206,3 +309,23 @@ outputs:
       ```
       konflux_list_integration_tests(namespace='{{ inputs.namespace }}')
       ```
+
+      {% if konflux_build_patterns and konflux_build_patterns.has_patterns %}
+      ---
+
+      ### 📋 Build Patterns
+
+      {% for pattern in konflux_build_patterns.patterns[:3] %}
+      - {{ pattern }}
+      {% endfor %}
+      {% endif %}
+
+      {% if konflux_known_issues and konflux_known_issues.has_known_issues %}
+      ---
+
+      ### 💡 Known Issues
+
+      {% for issue in konflux_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

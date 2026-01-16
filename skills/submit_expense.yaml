@@ -1,0 +1,800 @@
+# Skill: Submit Remote Worker Expense
+# AI-assisted expense submission workflow with auto-remediation
+#
+# This skill provides FULLY AUTOMATED expense submission with:
+# - Automatic error detection and remediation
+# - Browser profile handling for SSO plugin support
+# - Cookie consent and dialog dismissal
+# - Cleanup of failed submissions
+#
+# IMPORTANT: For SSO plugin to work, launch Chrome with debugging:
+#   google-chrome --remote-debugging-port=9222
+#   export CHROME_CDP_URL=http://localhost:9222
+
+name: submit_expense
+description: |
+  Submit a Remote Worker Expense to SAP Concur.
+
+  This skill provides a complete automated workflow:
+  1. Checks prerequisites (credentials, services)
+  2. Downloads GOMO bill if needed
+  3. Submits expense to Concur
+  4. Handles common errors automatically
+
+  **Prerequisites:**
+  - Bitwarden session: `export BW_SESSION=$(bw unlock --raw)`
+  - Redhatter service running on localhost:8009
+
+  **For SSO plugin auto-login (recommended):**
+  ```bash
+  # Close Chrome, then restart with debugging:
+  google-chrome --remote-debugging-port=9222
+  export CHROME_CDP_URL=http://localhost:9222
+  ```
+
+  **Common Issues & Auto-Fixes:**
+  - Cookie consent popups → Auto-dismissed
+  - "What's New" dialogs → Auto-dismissed
+  - Chrome profile locked → Uses profile copy
+  - Failed reports → Use cleanup mode
+
+version: "2.0"
+
+inputs:
+  - name: month
+    type: string
+    required: false
+    default: ""
+    description: "Month in YYYY-MM format (default: previous month)"
+
+  - name: skip_download
+    type: boolean
+    required: false
+    default: false
+    description: "Skip GOMO download check if receipt already exists"
+
+  - name: dry_run
+    type: boolean
+    required: false
+    default: false
+    description: "Check prerequisites without submitting"
+
+  - name: cleanup
+    type: boolean
+    required: false
+    default: false
+    description: "Delete unsubmitted expense reports from previous failed runs"
+
+  - name: headless
+    type: boolean
+    required: false
+    default: false
+    description: "Run browser in headless mode (default: false for SSO plugin support)"
+
+# Default values for expense configuration
+defaults:
+  expense_type: "Remote Worker Expense"
+  payment_type: "Cash"
+  max_usd: 40.00
+  gomo_url: "https://my.gomo.ie/"
+  gomo_bills_url: "https://my.gomo.ie/bills"
+  concur_sso_url: "https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/concursolutions"
+  concur_home_url: "https://us2.concursolutions.com/home"
+
+# Error patterns for auto-remediation
+# These patterns are automatically detected and handled by the automation script
+error_patterns:
+  # ==================== CREDENTIAL ISSUES ====================
+  - pattern: "BW_SESSION not set"
+    fix: "Run: export BW_SESSION=$(bw unlock --raw)"
+    auto_fix: false
+    category: credentials
+
+  - pattern: "redhatter service"
+    fix: "Start redhatter service: systemctl --user start redhatter"
+    auto_fix: false
+    category: credentials
+
+  - pattern: "Failed to get Concur credentials"
+    fix: "Ensure redhatter service is running on localhost:8009"
+    auto_fix: false
+    category: credentials
+
+  # ==================== BROWSER/PROFILE ISSUES ====================
+  - pattern: "ProcessSingleton"
+    fix: "Chrome profile in use. Close Chrome or launch with: google-chrome --remote-debugging-port=9222"
+    auto_fix: true
+    auto_fix_action: "Script copies profile to /tmp and launches with copy"
+    category: browser
+
+  - pattern: "Failed to create a ProcessSingleton"
+    fix: "Chrome profile locked by another instance"
+    auto_fix: true
+    auto_fix_action: "1) Try CDP connection, 2) Copy profile to /tmp, 3) Fall back to plain Chromium"
+    category: browser
+
+  # ==================== COOKIE/DIALOG ISSUES ====================
+  - pattern: "TrustArc Cookie Consent"
+    fix: "Cookie consent popup detected"
+    auto_fix: true
+    auto_fix_action: "dismiss_cookie_consent(page) + JS overlay removal"
+    category: ui_blocking
+
+  - pattern: "truste_overlay"
+    fix: "TrustArc overlay blocking page"
+    auto_fix: true
+    auto_fix_action: "page.evaluate to remove .truste_overlay elements"
+    category: ui_blocking
+
+  - pattern: "What's New"
+    fix: "Intro dialog detected"
+    auto_fix: true
+    auto_fix_action: "dismiss_dialogs(page) - clicks Close button"
+    category: ui_blocking
+
+  - pattern: "aria-modal.*true"
+    fix: "Modal dialog blocking interaction"
+    auto_fix: true
+    auto_fix_action: "dismiss_dialogs(page)"
+    category: ui_blocking
+
+  # ==================== CLICK/TIMEOUT ISSUES ====================
+  - pattern: "Locator.click.*Timeout"
+    fix: "Element blocked by overlay or not visible"
+    auto_fix: true
+    auto_fix_action: "1) Remove overlays, 2) Dismiss dialogs, 3) Retry with force=True"
+    category: interaction
+
+  - pattern: "Locator.wait_for.*Timeout"
+    fix: "Element not found in time"
+    auto_fix: true
+    auto_fix_action: "Use flexible text-based selectors instead of CSS class selectors"
+    category: interaction
+
+  # ==================== NAVIGATION ISSUES ====================
+  - pattern: "net::ERR_ABORTED"
+    fix: "Navigation aborted (common with Concur SSO redirects)"
+    auto_fix: true
+    auto_fix_action: "Catch error, wait for domcontentloaded state"
+    category: navigation
+
+  - pattern: "Navigation timeout"
+    fix: "Page took too long to load"
+    auto_fix: true
+    auto_fix_action: "Increase timeout, wait for networkidle"
+    category: navigation
+
+  # ==================== CLEANUP-SPECIFIC ISSUES ====================
+  - pattern: "Delete option clicked but report not deleted"
+    fix: "Wrong menu clicked - clicked expense line kebab instead of report More Actions"
+    auto_fix: true
+    auto_fix_action: "Find Submit Claim button, click sibling '...' button, select Delete Claim"
+    category: cleanup
+
+  - pattern: "Could not find delete option"
+    fix: "Delete option not in menu"
+    auto_fix: true
+    auto_fix_action: "Use [role='menuitem']:has-text('Delete') selector"
+    category: cleanup
+
+  - pattern: "Could not find confirmation button"
+    fix: "Delete confirmation dialog not found"
+    auto_fix: true
+    auto_fix_action: "Look for [role='dialog'] button:has-text('Delete') or destructive button class"
+    category: cleanup
+
+  # ==================== SELECTOR ISSUES ====================
+  - pattern: "Start a Claim.*not found"
+    fix: "Selector too specific"
+    auto_fix: true
+    auto_fix_action: "Use text='Start a Claim' instead of CSS class selector"
+    category: selector
+
+  - pattern: "Save Expense.*not found"
+    fix: "Selector too specific"
+    auto_fix: true
+    auto_fix_action: "Use button:has-text('Save Expense') instead of data attribute"
+    category: selector
+
+steps:
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_expense_patterns
+    description: "Get expense submission patterns and gotchas from knowledge base"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      query: "gotchas"
+    output: expense_knowledge_raw
+    on_error: continue
+
+  - name: parse_expense_knowledge
+    description: "Parse expense knowledge for submission context"
+    compute: |
+      knowledge_text = str(expense_knowledge_raw) if expense_knowledge_raw else ""
+
+      gotchas = []
+      policies = []
+
+      # Extract gotchas related to expenses
+      if knowledge_text:
+          for line in knowledge_text.split("\n"):
+              line_lower = line.lower()
+              if any(kw in line_lower for kw in ["expense", "concur", "receipt", "submit", "reimbursement"]):
+                  gotchas.append(line.strip()[:150])
+              if any(kw in line_lower for kw in ["policy", "limit", "deadline", "approval"]):
+                  policies.append(line.strip()[:150])
+
+      result = {
+          "has_knowledge": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+          "policies": policies[:3],
+      }
+    output: expense_knowledge
+    on_error: continue
+
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_bitwarden_known_issues
+    description: "Check for known Bitwarden issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "bitwarden_get_credentials"
+      error_text: ""
+    output: bitwarden_known_issues
+    on_error: continue
+
+  # ==================== PHASE 0: CLEANUP MODE ====================
+
+  - name: cleanup_mode
+    description: "Handle cleanup mode - delete unsubmitted reports"
+    condition: "inputs.cleanup"
+    then:
+      - name: run_cleanup
+        tool: concur_cleanup_unsubmitted
+        args:
+          headless: "{{ inputs.headless }}"
+        output: cleanup_result
+
+      - return: |
+          ## 🧹 Concur Cleanup Complete
+
+          {{ cleanup_result }}
+
+          ---
+          *Unsubmitted expense reports have been deleted.*
+
+  # ==================== PHASE 1: PREREQUISITES ====================
+
+  - name: check_workflow_status
+    description: "Check all prerequisites for expense submission"
+    tool: concur_workflow_status
+    args: {}
+    output: workflow_status
+    on_error: continue
+
+  - name: parse_workflow_status
+    description: "Parse workflow status to determine next steps"
+    compute: |
+      status_text = str(workflow_status) if 'workflow_status' in dir() and workflow_status else ""
+
+      has_gomo_creds = "✅ GOMO credentials" in status_text
+      has_concur_creds = "✅ Concur SSO credentials" in status_text
+      has_receipt = "✅ Receipt" in status_text
+
+      # Extract amount if present
+      import re
+      amount_match = re.search(r'€([0-9.]+)', status_text)
+      amount = amount_match.group(1) if amount_match else None
+
+      all_ready = has_gomo_creds and has_concur_creds and has_receipt
+
+      result = {
+        "has_gomo_creds": has_gomo_creds,
+        "has_concur_creds": has_concur_creds,
+        "has_receipt": has_receipt,
+        "amount": amount,
+        "all_ready": all_ready,
+        "status_text": status_text[:800],
+      }
+    output: prereq_status
+
+  # ==================== PHASE 2: GET EXPENSE PARAMETERS ====================
+
+  - name: get_expense_params
+    description: "Get expense parameters for the month"
+    tool: concur_get_expense_params
+    args:
+      month: "{{ inputs.month }}"
+    output: expense_params
+
+  - name: parse_expense_params
+    description: "Extract expense parameters"
+    compute: |
+      params_text = str(expense_params) if 'expense_params' in dir() and expense_params else ""
+
+      import re
+
+      # Extract report name
+      name_match = re.search(r'\*\*Report Name:\*\*\s*(.+)', params_text)
+      report_name = name_match.group(1).strip() if name_match else "Remote Worker Expense"
+
+      # Extract report date
+      date_match = re.search(r'\*\*Report Date:\*\*\s*(\d{2}/\d{2}/\d{4})', params_text)
+      report_date = date_match.group(1) if date_match else ""
+
+      # Extract month
+      month_match = re.search(r'\*\*Month:\*\*\s*(\d{4}-\d{2})', params_text)
+      month_slug = month_match.group(1) if month_match else ""
+
+      # Extract amount if present (from params or prereq)
+      amount_match = re.search(r'\*\*Amount:\*\*\s*€([0-9.]+)', params_text)
+      amount = amount_match.group(1) if amount_match else prereq_status.get("amount")
+
+      # Check if receipt exists
+      receipt_ready = "✅" in params_text and "First Page" in params_text
+
+      result = {
+        "report_name": report_name,
+        "report_date": report_date,
+        "month_slug": month_slug,
+        "amount": amount,
+        "receipt_ready": receipt_ready,
+      }
+    output: expense_info
+
+  # ==================== PHASE 3: CHECK RECEIPT STATUS ====================
+
+  - name: check_receipt
+    description: "Check if receipt files exist"
+    tool: concur_check_receipt_status
+    args:
+      month: "{{ inputs.month }}"
+    output: receipt_status
+    on_error: continue
+
+  - name: parse_receipt_status
+    description: "Parse receipt status"
+    compute: |
+      receipt_text = str(receipt_status) if 'receipt_status' in dir() and receipt_status else ""
+
+      receipt_ready = "✅ Receipt ready" in receipt_text or "✅ Receipt file exists" in receipt_text
+      need_download = "❌ Receipt not ready" in receipt_text or not receipt_ready
+
+      # Try to extract amount from receipt status
+      import re
+      amount_match = re.search(r'€([0-9.]+)', receipt_text)
+      if amount_match and not expense_info.get("amount"):
+        expense_info["amount"] = amount_match.group(1)
+
+      # If amount still not found, try reading PDF directly via subprocess
+      if not expense_info.get("amount") and receipt_ready:
+        try:
+          import subprocess
+          from pathlib import Path
+          pdf_path = Path.home() / "src" / "aa-concur" / "downloads" / f"{expense_info['month_slug']}_page1.pdf"
+          if pdf_path.exists():
+            # Use pipenv from aa-concur to read PDF (has pypdf installed)
+            # Pattern: "Your bill for this month € XX.XX"
+            script = "from pypdf import PdfReader; import re; r=PdfReader('" + str(pdf_path) + "'); t=r.pages[0].extract_text() or ''; m=re.search(r'bill for this month[^0-9]*([0-9]+[.][0-9]{2})', t, re.I); print(m.group(1) if m else '')"
+            result_proc = subprocess.run(
+              ["pipenv", "run", "python", "-c", script],
+              cwd=str(Path.home() / "src" / "aa-concur"),
+              capture_output=True,
+              text=True,
+              timeout=15,
+              env={**os.environ, "PIPENV_IGNORE_VIRTUALENVS": "1"},
+            )
+            if result_proc.returncode == 0 and result_proc.stdout.strip():
+              expense_info["amount"] = result_proc.stdout.strip()
+        except Exception as e:
+          pass
+
+      result = {
+        "receipt_ready": receipt_ready,
+        "need_download": need_download,
+        "status_text": receipt_text[:300],
+      }
+    output: receipt_check
+
+  # ==================== PHASE 3b: DOWNLOAD GOMO BILL IF NEEDED ====================
+
+  - name: download_gomo_bill
+    description: "Download GOMO bill if receipt not available"
+    condition: "receipt_check.need_download and not inputs.dry_run and not inputs.skip_download"
+    tool: concur_download_gomo_bill
+    args:
+      skip_concur: true
+      headless: "{{ inputs.headless }}"
+    output: download_result
+    on_error: continue
+
+  - name: parse_download_result
+    description: "Parse download result and update receipt status"
+    condition: "receipt_check.need_download and not inputs.dry_run and not inputs.skip_download"
+    compute: |
+      download_text = str(download_result) if 'download_result' in dir() and download_result else ""
+
+      download_success = "✅ GOMO bill downloaded" in download_text
+
+      # Extract amount from download result
+      import re
+      amount_match = re.search(r'€([0-9.]+)', download_text)
+      if amount_match:
+        expense_info["amount"] = amount_match.group(1)
+
+      # Update receipt_check
+      if download_success:
+        receipt_check["receipt_ready"] = True
+        receipt_check["need_download"] = False
+
+      result = {
+        "success": download_success,
+        "output": download_text[:500],
+      }
+    output: download_status
+
+  - name: recheck_receipt_after_download
+    description: "Recheck receipt status after download"
+    condition: "receipt_check.need_download and not inputs.dry_run and not inputs.skip_download"
+    tool: concur_check_receipt_status
+    args:
+      month: "{{ inputs.month }}"
+    output: receipt_status_after
+    on_error: continue
+
+  - name: update_receipt_status
+    description: "Update receipt status after download"
+    condition: "receipt_check.need_download and not inputs.dry_run and not inputs.skip_download"
+    compute: |
+      receipt_text = str(receipt_status_after) if 'receipt_status_after' in dir() and receipt_status_after else ""
+
+      receipt_ready = "✅ Receipt ready" in receipt_text or "✅ Receipt file exists" in receipt_text
+
+      # Extract amount
+      import re
+      amount_match = re.search(r'€([0-9.]+)', receipt_text)
+      if amount_match:
+        expense_info["amount"] = amount_match.group(1)
+        receipt_check["receipt_ready"] = True
+        receipt_check["need_download"] = False
+
+      result = {"updated": True, "receipt_ready": receipt_ready}
+    output: receipt_update
+
+  # ==================== PHASE 4: CALCULATE USD AMOUNT ====================
+
+  - name: calculate_amounts
+    description: "Calculate EUR to USD conversion"
+    compute: |
+      eur_amount = expense_info.get("amount")
+
+      if eur_amount:
+        try:
+          eur_float = float(eur_amount)
+          # Approximate EUR->USD conversion (typically 1.05-1.10)
+          usd_raw = eur_float * 1.08
+          # Cap at $40 per policy
+          usd_capped = min(usd_raw, defaults["max_usd"])
+          usd_amount = f"{usd_capped:.2f}"
+        except (ValueError, TypeError):
+          usd_amount = "unknown"
+      else:
+        usd_amount = "unknown"
+
+      result = {
+        "eur_amount": eur_amount or "unknown",
+        "usd_amount": usd_amount,
+        "capped": usd_amount != "unknown" and float(usd_amount) >= defaults["max_usd"],
+      }
+    output: amounts
+
+  # ==================== PHASE 5: DRY RUN CHECK ====================
+
+  - name: dry_run_exit
+    description: "Exit early for dry run"
+    condition: "inputs.dry_run"
+    then:
+      - return: |
+          ## 🧪 Dry Run: Expense Submission Check
+
+          ### Prerequisites Status
+          {{ prereq_status.status_text }}
+
+          ### Expense Details
+          | Field | Value |
+          |-------|-------|
+          | Month | {{ expense_info.month_slug }} |
+          | Report Name | {{ expense_info.report_name }} |
+          | Report Date | {{ expense_info.report_date }} |
+          | Amount (EUR) | €{{ amounts.eur_amount }} |
+          | Amount (USD) | ${{ amounts.usd_amount }}{% if amounts.capped %} (capped){% endif %} |
+
+          ### Status
+          {% if prereq_status.all_ready %}
+          ✅ **All prerequisites met** - ready to submit
+          {% else %}
+          ❌ **Prerequisites not met:**
+          {% if not prereq_status.has_gomo_creds %}- GOMO credentials not available{% endif %}
+          {% if not prereq_status.has_concur_creds %}- Concur SSO credentials not available{% endif %}
+          {% if not prereq_status.has_receipt %}- Receipt not downloaded{% endif %}
+          {% endif %}
+
+          ### Browser Setup for Full Automation
+
+          For SSO plugin auto-login (recommended):
+          ```bash
+          # Close Chrome, then restart with debugging:
+          google-chrome --remote-debugging-port=9222
+          export CHROME_CDP_URL=http://localhost:9222
+          ```
+
+          ---
+          *Run without `dry_run=true` to submit expense*
+
+  # ==================== PHASE 6: FULL AUTOMATION ====================
+
+  - name: check_prerequisites_for_automation
+    description: "Verify all prerequisites before running full automation"
+    condition: "not inputs.dry_run"
+    compute: |
+      missing = []
+      if not prereq_status.get("has_gomo_creds"):
+        missing.append("GOMO credentials: Run `export BW_SESSION=$(bw unlock --raw)`")
+      if not prereq_status.get("has_concur_creds"):
+        missing.append("Concur credentials: Start redhatter service on localhost:8009")
+
+      result = {
+        "can_proceed": len(missing) == 0,
+        "missing": missing,
+      }
+    output: automation_prereqs
+
+  - name: abort_if_missing_prereqs
+    description: "Abort if prerequisites are missing"
+    condition: "not inputs.dry_run and not automation_prereqs.can_proceed"
+    then:
+      - return: |
+          ## ❌ Cannot Proceed - Missing Prerequisites
+
+          {% for item in automation_prereqs.missing %}
+          - {{ item }}
+          {% endfor %}
+
+          ### Fix These Issues Then Retry
+
+          ```bash
+          # 1. Initialize Bitwarden
+          export BW_SESSION=$(bw unlock --raw)
+
+          # 2. Start redhatter service
+          systemctl --user start redhatter
+
+          # 3. (Optional) For SSO plugin auto-login:
+          google-chrome --remote-debugging-port=9222
+          export CHROME_CDP_URL=http://localhost:9222
+          ```
+
+          Then run: `skill_run('submit_expense')`
+
+  - name: run_full_automation
+    description: "Run the full GOMO + Concur automation"
+    condition: "not inputs.dry_run and automation_prereqs.can_proceed"
+    tool: concur_run_full_automation
+    args:
+      headless: "{{ inputs.headless }}"
+    output: automation_result
+    on_error: continue
+
+  - name: parse_automation_result
+    description: "Parse automation result and check for errors"
+    condition: "not inputs.dry_run and automation_prereqs.can_proceed"
+    compute: |
+      result_text = str(automation_result) if 'automation_result' in dir() and automation_result else ""
+
+      success = "✅" in result_text and "successfully" in result_text.lower()
+
+      # Check for known error patterns
+      error_patterns = {
+        "ProcessSingleton": "Chrome profile in use. Close Chrome or use: google-chrome --remote-debugging-port=9222",
+        "TrustArc": "Cookie consent popup - should be auto-dismissed",
+        "What's New": "Intro dialog - should be auto-dismissed",
+        "Timeout": "Element not clickable - may need to dismiss overlays",
+        "net::ERR_ABORTED": "Navigation aborted - handled automatically",
+      }
+
+      detected_errors = []
+      for pattern, fix in error_patterns.items():
+        if pattern.lower() in result_text.lower():
+          detected_errors.append({"pattern": pattern, "fix": fix})
+
+      result = {
+        "success": success,
+        "output": result_text[:1500],
+        "errors": detected_errors,
+        "needs_cleanup": "failed" in result_text.lower() and not success,
+      }
+    output: automation_status
+
+  # ==================== PHASE 7: LOG SESSION ====================
+
+  - name: log_expense_submission
+    description: "Log expense submission to session"
+    tool: memory_session_log
+    args:
+      action: "Expense submission for {{ expense_info.month_slug }}"
+      details: "Amount: €{{ amounts.eur_amount }}, Success: {{ automation_status.success if automation_status else 'dry_run' }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## 💰 Expense Submission: {{ expense_info.month_slug }}
+
+      {% if automation_status and automation_status.success %}
+      ### ✅ Submission Successful!
+
+      | Field | Value |
+      |-------|-------|
+      | **Report Name** | {{ expense_info.report_name }} |
+      | **Amount (EUR)** | €{{ amounts.eur_amount }} |
+      | **Amount (USD)** | ${{ amounts.usd_amount }}{% if amounts.capped %} *(capped at $40)*{% endif %} |
+
+      {{ automation_status.output }}
+
+      {% elif automation_status and not automation_status.success %}
+      ### ❌ Submission Failed
+
+      {{ automation_status.output }}
+
+      {% if automation_status.errors %}
+      ### Detected Issues
+      {% for error in automation_status.errors %}
+      - **{{ error.pattern }}**: {{ error.fix }}
+      {% endfor %}
+      {% endif %}
+
+      {% if automation_status.needs_cleanup %}
+      ### 🧹 Cleanup Recommended
+
+      Failed submissions may have left incomplete expense reports.
+      Run cleanup to remove them:
+
+      ```
+      skill_run('submit_expense', '{"cleanup": true}')
+      ```
+      {% endif %}
+
+      ### Troubleshooting
+
+      1. **For SSO plugin support** (recommended):
+         ```bash
+         google-chrome --remote-debugging-port=9222
+         export CHROME_CDP_URL=http://localhost:9222
+         ```
+
+      2. **Run with visible browser** to debug:
+         ```
+         skill_run('submit_expense', '{"headless": false}')
+         ```
+
+      3. **Check screenshots** in `~/src/aa-concur/screenshots/`
+
+      {% else %}
+      ### Status
+      {% if prereq_status.all_ready %}
+      ✅ **All prerequisites met**
+      {% else %}
+      ⚠️ **Some prerequisites need attention:**
+      {% if not prereq_status.has_gomo_creds %}
+      - ❌ GOMO credentials: Run `export BW_SESSION=$(bw unlock --raw)`
+      {% endif %}
+      {% if not prereq_status.has_concur_creds %}
+      - ❌ Concur credentials: Start redhatter service on localhost:8009
+      {% endif %}
+      {% if not prereq_status.has_receipt %}
+      - ❌ Receipt: Download GOMO bill
+      {% endif %}
+      {% endif %}
+
+      ### Expense Details
+      | Field | Value |
+      |-------|-------|
+      | **Report Name** | {{ expense_info.report_name }} |
+      | **Report Date** | {{ expense_info.report_date }} |
+      | **Amount (EUR)** | €{{ amounts.eur_amount }} |
+      | **Amount (USD)** | ${{ amounts.usd_amount }}{% if amounts.capped %} *(capped at $40)*{% endif %} |
+      {% endif %}
+
+      ---
+
+      ### Quick Commands
+
+      **Full automation:**
+      ```
+      skill_run('submit_expense')
+      ```
+
+      **Dry run (check only):**
+      ```
+      skill_run('submit_expense', '{"dry_run": true}')
+      ```
+
+      **Cleanup failed reports:**
+      ```
+      skill_run('submit_expense', '{"cleanup": true}')
+      ```
+
+      **With visible browser:**
+      ```
+      skill_run('submit_expense', '{"headless": false}')
+      ```
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_expense_failures
+    description: "Detect failure patterns from expense submission"
+    compute: |
+      errors_detected = []
+
+      # Check Bitwarden failures
+      prereq_text = str(prereq_status) if 'prereq_status' in dir() and prereq_status else ""
+      if "bw_session" in prereq_text.lower() or "bitwarden" in prereq_text.lower():
+          errors_detected.append({
+              "tool": "bitwarden_get_credentials",
+              "pattern": "session expired",
+              "cause": "Bitwarden session expired or not set",
+              "fix": "Run: export BW_SESSION=$(bw unlock --raw)"
+          })
+
+      # Check browser automation failures
+      automation_text = str(automation_status) if 'automation_status' in dir() and automation_status else ""
+      if "chrome" in automation_text.lower() and "profile" in automation_text.lower():
+          errors_detected.append({
+              "tool": "browser_automation",
+              "pattern": "profile locked",
+              "cause": "Chrome profile is locked by another instance",
+              "fix": "Close Chrome or use --remote-debugging-port=9222"
+          })
+      if "timeout" in automation_text.lower():
+          errors_detected.append({
+              "tool": "browser_automation",
+              "pattern": "timeout",
+              "cause": "Page load or element timeout",
+              "fix": "Try with headless=false to see what's happening"
+          })
+
+      result = errors_detected
+    output: expense_errors_detected
+    on_error: continue
+
+  - name: learn_expense_bitwarden_failure
+    description: "Learn from Bitwarden failures"
+    condition: "expense_errors_detected and any(e.get('pattern') == 'session expired' for e in expense_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bitwarden_get_credentials"
+      error_pattern: "session expired"
+      root_cause: "Bitwarden session expired or not set"
+      fix_description: "Run: export BW_SESSION=$(bw unlock --raw)"
+    output: expense_bitwarden_fix_learned
+    on_error: continue
+
+  - name: log_expense_session
+    description: "Log expense submission to session"
+    tool: memory_session_log
+    args:
+      action: "Expense submission for {{ expense_info.month_slug if expense_info else 'unknown' }}"
+      details: "Success: {{ automation_status.success if automation_status else 'not attempted' }}"
+    on_error: continue
+
+  - name: context
+    value:
+      month: "{{ expense_info.month_slug }}"
+      amount_eur: "{{ amounts.eur_amount }}"
+      amount_usd: "{{ amounts.usd_amount }}"
+      report_name: "{{ expense_info.report_name }}"
+      report_date: "{{ expense_info.report_date }}"
+      all_ready: "{{ prereq_status.all_ready }}"
+      success: "{{ automation_status.success if automation_status else false }}"

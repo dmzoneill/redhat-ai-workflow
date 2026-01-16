@@ -1,0 +1,372 @@
+# Skill: Explain Code
+# Explain a piece of code using project knowledge and context
+
+name: explain_code
+description: |
+  Explain a piece of code using project knowledge and context.
+
+  Use this skill to:
+  - Understand unfamiliar code in the codebase
+  - Get context about how code fits into the architecture
+  - Learn about related patterns and gotchas
+  - Find similar implementations for reference
+
+  Combines semantic search with project knowledge for comprehensive explanations.
+version: "1.0"
+
+inputs:
+  - name: file
+    type: string
+    required: true
+    description: File path to explain (relative to project root)
+  - name: lines
+    type: string
+    required: false
+    description: Line range to focus on (e.g., "10-50")
+  - name: project
+    type: string
+    required: false
+    description: Project name from config.json (auto-detected from cwd if empty)
+  - name: depth
+    type: string
+    required: false
+    default: "normal"
+    description: "Explanation depth: 'brief', 'normal', or 'detailed'"
+
+outputs:
+  - name: summary
+    value: "{{ explanation }}"
+
+steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_vector_known_issues
+    description: "Check for known vector search issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "code_search"
+      error_text: ""
+    output: vector_known_issues
+    on_error: continue
+
+  - name: detect_project
+    condition: "{{ not inputs.project }}"
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      cwd = Path.cwd().resolve()
+
+      detected = None
+      for name, cfg in config.get("repositories", {}).items():
+          project_path = Path(cfg.get("path", "")).expanduser().resolve()
+          try:
+              cwd.relative_to(project_path)
+              detected = name
+              break
+          except ValueError:
+              continue
+
+      if not detected:
+          detected = "automation-analytics-backend"
+
+      project = detected
+    output: project
+
+  - name: set_project
+    condition: "{{ inputs.project }}"
+    compute: |
+      project = inputs.get("project")
+    output: project
+
+  # Get project path
+  - name: get_project_path
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      project_config = config.get("repositories", {}).get(project)
+
+      if project_config:
+          project_path = Path(project_config.get("path", "")).expanduser()
+      else:
+          project_path = Path.cwd()
+
+      path_str = str(project_path)
+    output: path_str
+
+  # Read the file content
+  - name: read_file_content
+    description: "Read the file to explain"
+    compute: |
+      from pathlib import Path
+
+      file_path = Path(path_str) / inputs.file
+
+      content = ""
+      if file_path.exists():
+          full_content = file_path.read_text()
+          lines = full_content.split('\n')
+
+          # Parse line range if provided
+          start_line = 1
+          end_line = len(lines)
+
+          if inputs.get('lines'):
+              line_range = inputs['lines']
+              if '-' in line_range:
+                  parts = line_range.split('-')
+                  start_line = int(parts[0])
+                  end_line = int(parts[1])
+              else:
+                  start_line = int(line_range)
+                  end_line = start_line + 50  # Default context
+
+          # Extract relevant lines
+          selected_lines = lines[max(0, start_line-1):min(len(lines), end_line)]
+          content = '\n'.join(f"{i+start_line}: {line}" for i, line in enumerate(selected_lines))
+      else:
+          content = f"File not found: {file_path}"
+
+      file_content = {
+          "path": str(file_path),
+          "content": content[:5000],  # Limit content size
+          "start_line": start_line,
+          "end_line": end_line,
+          "exists": file_path.exists(),
+      }
+    output: file_content
+    on_error: continue
+
+  # Search for related code
+  - name: search_related_code
+    description: "Find related code in the codebase"
+    condition: "file_content and file_content.exists"
+    tool: code_search
+    args:
+      query: "{{ file_content.content[:200] }}"
+      project: "{{ project }}"
+      limit: 5
+    output: related_code_raw
+    on_error: continue
+
+  - name: parse_related_code
+    description: "Parse related code results"
+    compute: |
+      related = []
+      if 'related_code_raw' in dir() and related_code_raw:
+          raw_text = str(related_code_raw)
+          for line in raw_text.split('\n'):
+              if line.strip() and ':' in line and inputs.file not in line:
+                  related.append(line.strip()[:100])
+
+      related_code = related[:5]
+    output: related_code
+    on_error: continue
+
+  # Get architecture context
+  - name: get_architecture_context
+    description: "Get architecture context for this file"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "architecture.key_modules"
+    output: architecture_raw
+    on_error: continue
+
+  - name: parse_architecture
+    description: "Parse architecture context"
+    compute: |
+      import re
+
+      arch_context = ""
+      if 'architecture_raw' in dir() and architecture_raw:
+          raw_text = str(architecture_raw)
+
+          # Find relevant module info based on file path
+          file_path = inputs.file.lower()
+          for match in re.finditer(r'path[:\s]+([^\n,]+).*?purpose[:\s]+([^\n]+)', raw_text, re.I | re.DOTALL):
+              module_path = match.group(1).strip().lower()
+              purpose = match.group(2).strip()
+
+              if module_path in file_path or file_path.startswith(module_path.rstrip('/')):
+                  arch_context = f"**Module:** {module_path}\n**Purpose:** {purpose}"
+                  break
+
+      architecture_context = arch_context
+    output: architecture_context
+    on_error: continue
+
+  # Get relevant gotchas
+  - name: get_gotchas
+    description: "Get relevant gotchas for this code"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "gotchas"
+    output: gotchas_raw
+    on_error: continue
+
+  - name: parse_gotchas
+    description: "Parse relevant gotchas"
+    compute: |
+      import re
+
+      gotchas = []
+      if 'gotchas_raw' in dir() and gotchas_raw:
+          raw_text = str(gotchas_raw)
+          file_path = inputs.file.lower()
+
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', raw_text, re.DOTALL):
+              gotcha = match.group(1).strip()
+              # Check if gotcha is relevant to this file
+              if any(kw in gotcha.lower() for kw in file_path.split('/')):
+                  gotchas.append(gotcha[:150])
+
+      relevant_gotchas = gotchas[:3]
+    output: relevant_gotchas
+    on_error: continue
+
+  # Get coding patterns
+  - name: get_patterns
+    description: "Get coding patterns for this type of code"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "patterns.coding"
+    output: patterns_raw
+    on_error: continue
+
+  - name: parse_patterns
+    description: "Parse coding patterns"
+    compute: |
+      import re
+
+      patterns = []
+      if 'patterns_raw' in dir() and patterns_raw:
+          raw_text = str(patterns_raw)
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', raw_text, re.DOTALL):
+              pattern = match.group(1).strip()[:100]
+              if pattern and len(pattern) > 10:
+                  patterns.append(pattern)
+
+      coding_patterns = patterns[:5]
+    output: coding_patterns
+    on_error: continue
+
+  # Build explanation
+  - name: build_explanation
+    compute: |
+      lines = [f"## 📖 Code Explanation: `{inputs.file}`\n"]
+
+      if not file_content.get('exists'):
+          lines.append(f"❌ File not found: {inputs.file}")
+          explanation = "\n".join(lines)
+      else:
+          # File info
+          if inputs.get('lines'):
+              lines.append(f"**Lines:** {file_content.get('start_line', 1)}-{file_content.get('end_line', '?')}\n")
+
+          # Architecture context
+          if architecture_context:
+              lines.append("### 🏗️ Architecture Context\n")
+              lines.append(architecture_context)
+              lines.append("")
+
+          # Code content
+          lines.append("### 📝 Code\n")
+          lines.append("```python")
+          lines.append(file_content.get('content', '')[:2000])
+          lines.append("```")
+          lines.append("")
+
+          # Related code
+          if related_code:
+              lines.append("### 🔗 Related Code\n")
+              lines.append("Similar implementations found:")
+              for code in related_code:
+                  lines.append(f"- `{code}`")
+              lines.append("")
+
+          # Gotchas
+          if relevant_gotchas:
+              lines.append("### ⚠️ Gotchas\n")
+              lines.append("Keep these in mind:")
+              for gotcha in relevant_gotchas:
+                  lines.append(f"- {gotcha}")
+              lines.append("")
+
+          # Coding patterns
+          if coding_patterns:
+              lines.append("### 📚 Coding Patterns\n")
+              lines.append("This code should follow these patterns:")
+              for pattern in coding_patterns:
+                  lines.append(f"- {pattern}")
+              lines.append("")
+
+          lines.append("---")
+          lines.append("*Use `find_similar_code` to search for more related implementations.*")
+
+          explanation = "\n".join(lines)
+    output: explanation
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_explain_failures
+    description: "Detect failure patterns from code explanation"
+    compute: |
+      errors_detected = []
+
+      # Check file read failures
+      file_text = str(file_content) if 'file_content' in dir() and file_content else ""
+      if "not found" in file_text.lower() or "no such file" in file_text.lower():
+          errors_detected.append({
+              "tool": "read_file",
+              "pattern": "file not found",
+              "cause": "File path doesn't exist",
+              "fix": "Check file path relative to project root"
+          })
+      if "permission denied" in file_text.lower():
+          errors_detected.append({
+              "tool": "read_file",
+              "pattern": "permission denied",
+              "cause": "Cannot read file",
+              "fix": "Check file permissions"
+          })
+
+      # Check vector search failures
+      search_text = str(similar_code_raw) if 'similar_code_raw' in dir() and similar_code_raw else ""
+      if "no index" in search_text.lower() or "index not found" in search_text.lower():
+          errors_detected.append({
+              "tool": "code_search",
+              "pattern": "index not found",
+              "cause": "Vector index not created for this project",
+              "fix": "Run skill_run('bootstrap_knowledge', ...)"
+          })
+
+      result = errors_detected
+    output: explain_errors_detected
+    on_error: continue
+
+  - name: learn_explain_index_failure
+    description: "Learn from vector index failures"
+    condition: "explain_errors_detected and any(e.get('pattern') == 'index not found' for e in explain_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "code_search"
+      error_pattern: "index not found"
+      root_cause: "Vector index not created for this project"
+      fix_description: "Run skill_run('bootstrap_knowledge', ...)"
+    output: explain_index_fix_learned
+    on_error: continue
+
+  # Log to session
+  - name: log_explanation
+    description: "Log explanation to session"
+    tool: memory_session_log
+    args:
+      action: "Explained code in {{ inputs.file }}"
+      details: "Project: {{ project }}, Lines: {{ inputs.lines | default('all') }}"
+    on_error: continue

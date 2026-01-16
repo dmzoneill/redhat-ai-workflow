@@ -71,11 +71,80 @@ inputs:
 
 steps:
 
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_gitlab_known_issues
+    description: "Check for known GitLab issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "gitlab_mr_list"
+      error_text: ""
+    output: gitlab_known_issues
+    on_error: continue
+
   - name: init_autoheal
     description: "Initialize failure tracking"
     compute: |
       result = {"gitlab_failures": []}
     output: autoheal_state
+    on_error: continue
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: get_review_patterns
+    description: "Get code review patterns from knowledge"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "patterns.coding"
+    output: review_patterns_raw
+    on_error: continue
+
+  - name: parse_review_patterns
+    description: "Parse code review patterns"
+    compute: |
+      patterns_result = review_patterns_raw if 'review_patterns_raw' in dir() and review_patterns_raw else {}
+
+      review_patterns = []
+      if isinstance(patterns_result, dict) and patterns_result.get('found'):
+          content = patterns_result.get('content', [])
+          if isinstance(content, list):
+              review_patterns = content[:5]
+
+      result = {
+          'patterns': review_patterns,
+          'has_patterns': len(review_patterns) > 0,
+      }
+    output: code_review_patterns
+    on_error: continue
+
+  - name: get_project_gotchas
+    description: "Get project gotchas for review context"
+    tool: knowledge_query
+    args:
+      project: "automation-analytics-backend"
+      persona: "developer"
+      section: "gotchas"
+    output: review_gotchas_raw
+    on_error: continue
+
+  - name: parse_review_gotchas
+    description: "Parse review-relevant gotchas"
+    compute: |
+      gotchas_result = review_gotchas_raw if 'review_gotchas_raw' in dir() and review_gotchas_raw else {}
+
+      review_gotchas = []
+      if isinstance(gotchas_result, dict) and gotchas_result.get('found'):
+          content = gotchas_result.get('content', [])
+          if isinstance(content, list):
+              review_gotchas = content[:5]
+
+      result = {
+          'gotchas': review_gotchas,
+          'has_gotchas': len(review_gotchas) > 0,
+      }
+    output: project_review_gotchas
     on_error: continue
 
   # ==================== RESOLVE PROJECT ====================
@@ -635,6 +704,47 @@ steps:
     output: prefs_update_result
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_batch_review_failures
+    description: "Detect failure patterns from batch PR review"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab API failures
+      mrs_text = str(open_mrs) if 'open_mrs' in dir() and open_mrs else ""
+
+      if "no such host" in mrs_text.lower() or "dial tcp" in mrs_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in mrs_text.lower() or "401" in mrs_text:
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "unauthorized",
+              "cause": "GitLab authentication failed or token expired",
+              "fix": "Check GitLab token in config.json"
+          })
+
+      result = errors_detected
+    output: batch_review_errors_detected
+    on_error: continue
+
+  - name: learn_batch_review_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "batch_review_errors_detected and any(e.get('pattern') == 'no such host' for e in batch_review_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_list"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: batch_review_vpn_fix_learned
+    on_error: continue
+
 # ==================== OUTPUT ====================
 
 outputs:
@@ -649,6 +759,26 @@ outputs:
       - **Review next batch:** `skill_run("review_all_prs", '{}')`
       - **Review specific MR:** `skill_run("review_pr", '{"mr_id": 123}')`
       - **Approve specific MR:** `gitlab_mr_approve(project="...", mr_id=123)`
+
+      {% if code_review_patterns and code_review_patterns.has_patterns %}
+      ---
+
+      ### 📋 Code Review Patterns
+
+      {% for pattern in code_review_patterns.patterns[:3] %}
+      - {{ pattern }}
+      {% endfor %}
+      {% endif %}
+
+      {% if project_review_gotchas and project_review_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Project Gotchas (Check in Reviews)
+
+      {% for gotcha in project_review_gotchas.gotchas[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
 
   - name: stats
     value:

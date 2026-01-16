@@ -1,0 +1,320 @@
+# Skill: Knowledge Refresh
+# Refresh and update project knowledge and vector index
+
+name: knowledge_refresh
+description: |
+  Refresh project knowledge and vector index.
+
+  Use this skill to:
+  - Update the vector index with recent code changes
+  - Re-scan project for architecture changes
+  - Refresh knowledge confidence scores
+  - Start/restart file watchers
+
+  Run this periodically or after major code changes.
+version: "1.0"
+
+inputs:
+  - name: project
+    type: string
+    required: false
+    description: Project name from config.json (auto-detected from cwd if empty)
+  - name: full_rescan
+    type: boolean
+    required: false
+    default: false
+    description: If true, perform full rescan instead of incremental update
+  - name: restart_watcher
+    type: boolean
+    required: false
+    default: true
+    description: If true, restart the file watcher
+
+outputs:
+  - name: summary
+    value: "{{ refresh_result }}"
+
+steps:
+  # ==================== PROACTIVE ISSUE DETECTION ====================
+
+  - name: check_vector_known_issues
+    description: "Check for known vector indexing issues before starting"
+    tool: check_known_issues
+    args:
+      tool_name: "code_index"
+      error_text: ""
+    output: vector_known_issues
+    on_error: continue
+
+  - name: detect_project
+    condition: "{{ not inputs.project }}"
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      cwd = Path.cwd().resolve()
+
+      detected = None
+      for name, cfg in config.get("repositories", {}).items():
+          project_path = Path(cfg.get("path", "")).expanduser().resolve()
+          try:
+              cwd.relative_to(project_path)
+              detected = name
+              break
+          except ValueError:
+              continue
+
+      if not detected:
+          raise ValueError("Could not detect project from current directory. Provide project name explicitly.")
+
+      project = detected
+    output: project
+
+  - name: set_project
+    condition: "{{ inputs.project }}"
+    compute: |
+      project = inputs.get("project")
+    output: project
+
+  # Get current stats before refresh
+  - name: get_current_stats
+    description: "Get current vector index stats"
+    tool: code_stats
+    args:
+      project: "{{ project }}"
+    output: stats_before_raw
+    on_error: continue
+
+  - name: parse_stats_before
+    description: "Parse current stats"
+    compute: |
+      import re
+
+      stats = {"files": 0, "chunks": 0, "searches": 0}
+      if 'stats_before_raw' in dir() and stats_before_raw:
+          raw_text = str(stats_before_raw)
+          files_match = re.search(r'(\d+)\s*files', raw_text)
+          chunks_match = re.search(r'(\d+)\s*chunks', raw_text)
+          searches_match = re.search(r'(\d+)\s*searches', raw_text)
+
+          if files_match:
+              stats["files"] = int(files_match.group(1))
+          if chunks_match:
+              stats["chunks"] = int(chunks_match.group(1))
+          if searches_match:
+              stats["searches"] = int(searches_match.group(1))
+
+      stats_before = stats
+    output: stats_before
+    on_error: continue
+
+  # Refresh vector index
+  - name: refresh_vector_index
+    description: "Update vector index with recent changes"
+    tool: code_index
+    args:
+      project: "{{ project }}"
+    output: index_result
+    on_error: continue
+
+  - name: parse_index_result
+    description: "Parse index update result"
+    compute: |
+      import re
+
+      result = {"success": False, "files": 0, "chunks": 0}
+      if 'index_result' in dir() and index_result:
+          raw_text = str(index_result)
+
+          if "error" not in raw_text.lower() and "failed" not in raw_text.lower():
+              result["success"] = True
+
+              files_match = re.search(r'(\d+)\s*files', raw_text)
+              chunks_match = re.search(r'(\d+)\s*chunks', raw_text)
+
+              if files_match:
+                  result["files"] = int(files_match.group(1))
+              if chunks_match:
+                  result["chunks"] = int(chunks_match.group(1))
+
+      index_update = result
+    output: index_update
+    on_error: continue
+
+  # Restart file watcher if requested
+  - name: restart_watcher
+    description: "Restart file watcher for automatic updates"
+    condition: "{{ inputs.restart_watcher | default(true) }}"
+    tool: code_watch
+    args:
+      project: "{{ project }}"
+    output: watcher_result
+    on_error: continue
+
+  - name: parse_watcher_result
+    description: "Parse watcher result"
+    compute: |
+      watcher_status = "unknown"
+      if 'watcher_result' in dir() and watcher_result:
+          raw_text = str(watcher_result)
+          if "running" in raw_text.lower() or "started" in raw_text.lower():
+              watcher_status = "running"
+          elif "stopped" in raw_text.lower():
+              watcher_status = "stopped"
+
+      watcher_info = {"status": watcher_status}
+    output: watcher_info
+    on_error: continue
+
+  # Refresh knowledge scan if full rescan requested
+  - name: full_knowledge_rescan
+    description: "Perform full knowledge rescan"
+    condition: "{{ inputs.full_rescan | default(false) }}"
+    tool: knowledge_scan
+    args:
+      project: "{{ project }}"
+      persona: "developer"
+      force: true
+    output: knowledge_scan_result
+    on_error: continue
+
+  # Get updated stats
+  - name: get_updated_stats
+    description: "Get updated vector index stats"
+    tool: code_stats
+    args:
+      project: "{{ project }}"
+    output: stats_after_raw
+    on_error: continue
+
+  - name: parse_stats_after
+    description: "Parse updated stats"
+    compute: |
+      import re
+
+      stats = {"files": 0, "chunks": 0, "searches": 0}
+      if 'stats_after_raw' in dir() and stats_after_raw:
+          raw_text = str(stats_after_raw)
+          files_match = re.search(r'(\d+)\s*files', raw_text)
+          chunks_match = re.search(r'(\d+)\s*chunks', raw_text)
+          searches_match = re.search(r'(\d+)\s*searches', raw_text)
+
+          if files_match:
+              stats["files"] = int(files_match.group(1))
+          if chunks_match:
+              stats["chunks"] = int(chunks_match.group(1))
+          if searches_match:
+              stats["searches"] = int(searches_match.group(1))
+
+      stats_after = stats
+    output: stats_after
+    on_error: continue
+
+  # Build summary
+  - name: build_summary
+    compute: |
+      lines = [f"## 🔄 Knowledge Refresh Complete: {project}\n"]
+
+      # Index update results
+      if index_update and index_update.get('success'):
+          lines.append("### Vector Index Updated")
+          lines.append(f"- **Files indexed:** {index_update.get('files', 0)}")
+          lines.append(f"- **Chunks created:** {index_update.get('chunks', 0)}")
+
+          # Show delta
+          files_delta = stats_after.get('files', 0) - stats_before.get('files', 0)
+          chunks_delta = stats_after.get('chunks', 0) - stats_before.get('chunks', 0)
+          if files_delta != 0 or chunks_delta != 0:
+              lines.append(f"- **Change:** {files_delta:+d} files, {chunks_delta:+d} chunks")
+      else:
+          lines.append("### ⚠️ Vector Index Update")
+          lines.append("- Index update may have failed or no changes detected")
+      lines.append("")
+
+      # Watcher status
+      if watcher_info:
+          status = watcher_info.get('status', 'unknown')
+          if status == 'running':
+              lines.append("### 🟢 File Watcher")
+              lines.append("- Watcher is running (auto-updates enabled)")
+          else:
+              lines.append("### 🔴 File Watcher")
+              lines.append(f"- Watcher status: {status}")
+      lines.append("")
+
+      # Full rescan results
+      if inputs.get('full_rescan') and 'knowledge_scan_result' in dir():
+          lines.append("### 📚 Knowledge Rescan")
+          lines.append("- Full knowledge rescan completed")
+
+      # Current stats
+      lines.append("### 📊 Current Stats")
+      lines.append(f"- **Total files:** {stats_after.get('files', 0)}")
+      lines.append(f"- **Total chunks:** {stats_after.get('chunks', 0)}")
+      lines.append(f"- **Total searches:** {stats_after.get('searches', 0)}")
+      lines.append("")
+
+      lines.append("*Use `code_search()` for semantic code search.*")
+
+      refresh_result = "\n".join(lines)
+    output: refresh_result
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_refresh_failures
+    description: "Detect failure patterns from knowledge refresh"
+    compute: |
+      errors_detected = []
+
+      # Check index update failures
+      index_text = str(index_update) if 'index_update' in dir() and index_update else ""
+      if "permission denied" in index_text.lower():
+          errors_detected.append({
+              "tool": "code_index",
+              "pattern": "permission denied",
+              "cause": "Cannot write to vector cache directory",
+              "fix": "Check permissions on ~/.cache/aa-workflow/vectors/"
+          })
+      if "out of memory" in index_text.lower():
+          errors_detected.append({
+              "tool": "code_index",
+              "pattern": "out of memory",
+              "cause": "Not enough memory for vector indexing",
+              "fix": "Try with fewer files or increase system memory"
+          })
+
+      # Check watcher failures
+      watcher_text = str(watcher_info) if 'watcher_info' in dir() and watcher_info else ""
+      if "failed to start" in watcher_text.lower():
+          errors_detected.append({
+              "tool": "code_watch",
+              "pattern": "failed to start",
+              "cause": "File watcher could not start",
+              "fix": "Check if another watcher is running or restart the MCP server"
+          })
+
+      result = errors_detected
+    output: refresh_errors_detected
+    on_error: continue
+
+  - name: learn_refresh_permission_failure
+    description: "Learn from permission failures"
+    condition: "refresh_errors_detected and any(e.get('pattern') == 'permission denied' for e in refresh_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "code_index"
+      error_pattern: "permission denied"
+      root_cause: "Cannot write to vector cache directory"
+      fix_description: "Check permissions on ~/.cache/aa-workflow/vectors/"
+    output: refresh_permission_fix_learned
+    on_error: continue
+
+  # Log to session
+  - name: log_refresh
+    description: "Log refresh to session"
+    tool: memory_session_log
+    args:
+      action: "Knowledge refresh for {{ project }}"
+      details: "Files: {{ stats_after.files }}, Chunks: {{ stats_after.chunks }}"
+    on_error: continue
