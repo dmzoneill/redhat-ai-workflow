@@ -14,7 +14,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { SkillFlowchartPanel, getSkillFlowchartPanel } from "./skillFlowchartPanel";
+import { getCommandCenterPanel } from "./commandCenter";
 
 // ============================================================================
 // Types
@@ -180,158 +180,138 @@ export class SkillExecutionWatcher {
       previousExecution.skillName !== state.skillName ||
       previousExecution.startTime !== state.startTime;
 
-    // Auto-open flowchart panel when a skill starts OR completes (if we missed the start)
+    // Auto-open flowchart panel when a skill starts
+    // Don't auto-open for completed skills on initial load (stale state)
     if (isNewSkill) {
       console.log(`[SkillWatcher] New skill detected: ${state.skillName} (status: ${state.status})`);
-      this._autoOpenFlowchartPanel(state.skillName);
-      return; // Events will be processed after panel opens
+
+      // Only auto-open if skill is currently running
+      // Skip completed skills to avoid showing stale state on extension startup
+      if (state.status === "running") {
+        this._autoOpenFlowchartPanel(state.skillName);
+        return; // Events will be processed after panel opens
+      } else {
+        // For completed skills, just update status bar but don't auto-open panel
+        console.log(`[SkillWatcher] Skipping auto-open for completed skill: ${state.skillName}`);
+        return;
+      }
     }
 
-    // Get or create flowchart panel
-    const panel = getSkillFlowchartPanel();
-    if (!panel) {
-      // Panel not open, just update status bar
-      return;
-    }
-
-    // Process new events
-    const newEvents = this._getNewEvents(previousExecution, state);
-    for (const event of newEvents) {
-      this._processEvent(panel, event);
+    // Update Command Center if open
+    const commandCenter = getCommandCenterPanel();
+    if (commandCenter) {
+      // Convert state to execution format for Command Center
+      const execution = {
+        skillName: state.skillName,
+        status: state.status,
+        currentStepIndex: state.currentStepIndex,
+        totalSteps: state.totalSteps,
+        steps: this._buildStepsFromEvents(state),
+        startTime: state.startTime,
+        endTime: state.endTime,
+      };
+      commandCenter.updateSkillExecution(execution);
     }
   }
 
   /**
-   * Auto-open the flowchart panel when a skill starts
+   * Build steps array from events for display
+   */
+  private _buildStepsFromEvents(state: SkillExecutionState): any[] {
+    const steps: any[] = [];
+    const stepMap = new Map<number, any>();
+
+    for (const event of state.events) {
+      if (event.type === "skill_start" && event.data?.steps) {
+        // Initialize steps from skill_start event
+        event.data.steps.forEach((step: any, index: number) => {
+          stepMap.set(index, {
+            name: step.name,
+            description: step.description,
+            tool: step.tool,
+            status: "pending",
+          });
+        });
+      } else if (event.stepIndex !== undefined) {
+        const step = stepMap.get(event.stepIndex) || { name: event.stepName || `Step ${event.stepIndex + 1}` };
+
+        switch (event.type) {
+          case "step_start":
+            step.status = "running";
+            break;
+          case "step_complete":
+            step.status = "success";
+            step.duration = event.data?.duration;
+            step.result = event.data?.result;
+            break;
+          case "step_failed":
+            step.status = "failed";
+            step.error = event.data?.error;
+            step.duration = event.data?.duration;
+            break;
+          case "step_skipped":
+            step.status = "skipped";
+            break;
+          case "memory_read":
+            step.memoryRead = step.memoryRead || [];
+            if (event.data?.memoryKey && !step.memoryRead.includes(event.data.memoryKey)) {
+              step.memoryRead.push(event.data.memoryKey);
+            }
+            break;
+          case "memory_write":
+            step.memoryWrite = step.memoryWrite || [];
+            if (event.data?.memoryKey && !step.memoryWrite.includes(event.data.memoryKey)) {
+              step.memoryWrite.push(event.data.memoryKey);
+            }
+            break;
+          case "auto_heal":
+            step.healingApplied = true;
+            step.healingDetails = event.data?.healingDetails;
+            break;
+          case "retry":
+            step.retryCount = (step.retryCount || 0) + 1;
+            break;
+        }
+
+        stepMap.set(event.stepIndex, step);
+      }
+    }
+
+    // Convert map to array
+    for (let i = 0; i < state.totalSteps; i++) {
+      steps.push(stepMap.get(i) || { name: `Step ${i + 1}`, status: "pending" });
+    }
+
+    return steps;
+  }
+
+  /**
+   * Auto-open the Command Center Skills tab when a skill starts
    */
   private async _autoOpenFlowchartPanel(skillName: string): Promise<void> {
     try {
-      // Execute the command to open the flowchart panel
-      await vscode.commands.executeCommand("aa-workflow.openSkillFlowchart");
+      // Open Command Center and switch to Skills tab
+      await vscode.commands.executeCommand("aa-workflow.openCommandCenter", "skills");
 
       // Give the panel time to initialize
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Get the panel and load the skill
-      const panel = getSkillFlowchartPanel();
-      if (panel) {
-        await panel.loadSkill(skillName);
-        panel.startExecution(skillName);
-
-        // Process any events that came in while we were opening
-        if (this._currentExecution) {
-          for (const event of this._currentExecution.events) {
-            this._processEvent(panel, event);
-          }
-        }
+      // Update with current execution state
+      const commandCenter = getCommandCenterPanel();
+      if (commandCenter && this._currentExecution) {
+        const execution = {
+          skillName: this._currentExecution.skillName,
+          status: this._currentExecution.status,
+          currentStepIndex: this._currentExecution.currentStepIndex,
+          totalSteps: this._currentExecution.totalSteps,
+          steps: this._buildStepsFromEvents(this._currentExecution),
+          startTime: this._currentExecution.startTime,
+          endTime: this._currentExecution.endTime,
+        };
+        commandCenter.updateSkillExecution(execution);
       }
     } catch (e) {
-      console.error("Failed to auto-open flowchart panel:", e);
-    }
-  }
-
-  /**
-   * Get events that are new since last update
-   */
-  private _getNewEvents(
-    previous: SkillExecutionState | undefined,
-    current: SkillExecutionState
-  ): SkillExecutionEvent[] {
-    if (!previous || previous.skillName !== current.skillName) {
-      return current.events;
-    }
-
-    const previousCount = previous.events.length;
-    return current.events.slice(previousCount);
-  }
-
-  /**
-   * Process a single execution event
-   */
-  private _processEvent(
-    panel: SkillFlowchartPanel,
-    event: SkillExecutionEvent
-  ): void {
-    switch (event.type) {
-      case "skill_start":
-        // Load skill and start execution visualization
-        if (event.data?.steps) {
-          panel.loadSkill(event.skillName).then(() => {
-            panel.startExecution(event.skillName);
-          });
-        } else {
-          panel.startExecution(event.skillName);
-        }
-        break;
-
-      case "step_start":
-        if (event.stepIndex !== undefined) {
-          panel.updateStep(event.stepIndex, "running");
-        }
-        break;
-
-      case "step_complete":
-        if (event.stepIndex !== undefined) {
-          panel.updateStep(event.stepIndex, "success", {
-            duration: event.data?.duration,
-            result: event.data?.result,
-          });
-        }
-        break;
-
-      case "step_failed":
-        if (event.stepIndex !== undefined) {
-          panel.updateStep(event.stepIndex, "failed", {
-            duration: event.data?.duration,
-            error: event.data?.error,
-          });
-        }
-        break;
-
-      case "step_skipped":
-        if (event.stepIndex !== undefined) {
-          panel.updateStep(event.stepIndex, "skipped");
-        }
-        break;
-
-      case "skill_complete":
-        panel.completeExecution(event.data?.success ?? false);
-        break;
-
-      case "memory_read":
-        if (event.stepIndex !== undefined && event.data?.memoryKey) {
-          panel.recordMemoryOperation(
-            event.stepIndex,
-            "read",
-            event.data.memoryKey
-          );
-        }
-        break;
-
-      case "memory_write":
-        if (event.stepIndex !== undefined && event.data?.memoryKey) {
-          panel.recordMemoryOperation(
-            event.stepIndex,
-            "write",
-            event.data.memoryKey
-          );
-        }
-        break;
-
-      case "auto_heal":
-        if (event.stepIndex !== undefined) {
-          panel.recordHealing(
-            event.stepIndex,
-            event.data?.healingDetails || "Auto-healed"
-          );
-        }
-        break;
-
-      case "retry":
-        if (event.stepIndex !== undefined) {
-          panel.recordRetry(event.stepIndex);
-        }
-        break;
+      console.error("Failed to auto-open Command Center:", e);
     }
   }
 

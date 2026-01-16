@@ -15,10 +15,9 @@ import { WorkflowDataProvider } from "./dataProvider";
 import { registerCommands } from "./commands";
 import { registerTreeView, WorkflowTreeProvider } from "./treeView";
 import { registerNotifications, NotificationManager } from "./notifications";
-import { registerDashboard } from "./dashboard";
-import { registerSkillVisualizer } from "./skillVisualizer";
-import { registerSkillFlowchartPanel } from "./skillFlowchartPanel";
+import { registerCommandCenter, registerCommandCenterSerializer, getCommandCenterPanel } from "./commandCenter";
 import { registerSkillExecutionWatcher } from "./skillExecutionWatcher";
+import { registerSkillFlowchartPanel } from "./skillFlowchartPanel";
 
 let statusBarManager: StatusBarManager | undefined;
 let dataProvider: WorkflowDataProvider | undefined;
@@ -29,8 +28,15 @@ let refreshInterval: NodeJS.Timeout | undefined;
 export function activate(context: vscode.ExtensionContext) {
   console.log("AI Workflow extension activating...");
 
-  // Initialize the data provider (connects to D-Bus/memory)
+  // Initialize the data provider FIRST (needed by serializers)
   dataProvider = new WorkflowDataProvider();
+
+  // IMPORTANT: Register webview serializers IMMEDIATELY after data provider
+  // This ensures VS Code can restore panels even if other init takes time
+  // Both serializers must be registered before VS Code tries to restore any panels
+  console.log("[Extension] Registering webview serializers...");
+  registerSkillFlowchartPanel(context);
+  registerCommandCenterSerializer(context, dataProvider);
 
   // Initialize status bar items
   statusBarManager = new StatusBarManager(context, dataProvider);
@@ -41,17 +47,37 @@ export function activate(context: vscode.ExtensionContext) {
   // Initialize notifications
   notificationManager = registerNotifications(context, dataProvider);
 
-  // Initialize dashboard webview
-  registerDashboard(context, dataProvider);
+  // Initialize unified Command Center commands (serializer already registered above)
+  registerCommandCenter(context, dataProvider);
 
-  // Initialize skill visualizer
-  registerSkillVisualizer(context);
-
-  // Initialize skill flowchart panel (bottom drawer)
-  registerSkillFlowchartPanel(context);
-
-  // Initialize skill execution watcher (connects to MCP server)
+  // Initialize skill execution watcher (connects to MCP server and updates Command Center)
   registerSkillExecutionWatcher(context);
+
+  // Register "Open All Views" command (now just opens Command Center)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.openAllViews", async () => {
+      await vscode.commands.executeCommand("aa-workflow.openCommandCenter");
+      await vscode.commands.executeCommand("aaWorkflowExplorer.focus");
+    })
+  );
+
+  // Legacy command aliases for backwards compatibility
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.openDashboard", () => {
+      vscode.commands.executeCommand("aa-workflow.openCommandCenter", "overview");
+    })
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.openAgentOverview", () => {
+      vscode.commands.executeCommand("aa-workflow.openCommandCenter", "overview");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.openSkillVisualizer", () => {
+      vscode.commands.executeCommand("aa-workflow.openCommandCenter", "skills");
+    })
+  );
 
   // Register commands
   registerCommands(context, dataProvider, statusBarManager);
@@ -71,6 +97,12 @@ export function activate(context: vscode.ExtensionContext) {
   dataProvider.refresh().then(() => {
     statusBarManager?.update();
     treeProvider?.refresh();
+
+    // Set default agent from config
+    const defaultAgent = config.get<string>("defaultAgent", "");
+    if (defaultAgent && statusBarManager) {
+      statusBarManager.setAgent(defaultAgent);
+    }
   });
 
   console.log("AI Workflow extension activated!");

@@ -15,6 +15,7 @@ import * as path from "path";
 import * as os from "os";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { getConfigPath, getMemoryDir } from "./paths";
 
 const execAsync = promisify(exec);
 
@@ -67,6 +68,12 @@ export interface EphemeralNamespace {
   status?: string;
 }
 
+export interface VpnStatus {
+  connected: boolean;
+  name?: string;
+  error?: string;
+}
+
 export interface WorkflowStatus {
   slack?: SlackStatus;
   activeIssue?: ActiveIssue;
@@ -74,6 +81,7 @@ export interface WorkflowStatus {
   environment?: EnvironmentStatus;
   followUps?: FollowUp[];
   namespaces?: EphemeralNamespace[];
+  vpn?: VpnStatus;
   lastUpdated?: Date;
 }
 
@@ -85,18 +93,8 @@ export class WorkflowDataProvider {
   private gitlabUrl: string = "https://gitlab.cee.redhat.com";
 
   constructor() {
-    this.memoryDir = path.join(
-      os.homedir(),
-      ".config",
-      "aa-workflow",
-      "memory"
-    );
-    this.configPath = path.join(
-      os.homedir(),
-      "src",
-      "redhat-ai-workflow",
-      "config.json"
-    );
+    this.memoryDir = getMemoryDir();
+    this.configPath = getConfigPath();
 
     // Load config for URLs
     this.loadConfig();
@@ -134,6 +132,7 @@ export class WorkflowDataProvider {
       this.refreshEnvironment(),
       this.refreshFollowUps(),
       this.refreshNamespaces(),
+      this.refreshVpnStatus(),
     ]);
     this.status.lastUpdated = new Date();
   }
@@ -170,7 +169,8 @@ export class WorkflowDataProvider {
       // Use dbus-send to query the Slack daemon
       const { stdout } = await execAsync(
         `dbus-send --session --print-reply --dest=com.aiworkflow.SlackAgent ` +
-          `/com/aiworkflow/SlackAgent com.aiworkflow.SlackAgent.GetStats`
+          `/com/aiworkflow/SlackAgent com.aiworkflow.SlackAgent.GetStatus`,
+        { timeout: 3000 }
       );
 
       // Parse D-Bus response (format: variant "json_string")
@@ -178,11 +178,12 @@ export class WorkflowDataProvider {
       if (jsonMatch) {
         const stats = JSON.parse(jsonMatch[1]);
         return {
-          online: true,
+          online: stats.running !== false,
           polls: stats.polls || 0,
-          processed: stats.processed || 0,
-          responded: stats.responded || 0,
-          errors: stats.errors || 0,
+          // D-Bus returns messages_processed/messages_responded, map to short names
+          processed: stats.messages_processed || stats.processed || 0,
+          responded: stats.messages_responded || stats.responded || 0,
+          errors: stats.errors || stats.consecutive_errors || 0,
         };
       }
     } catch {
@@ -403,6 +404,46 @@ export class WorkflowDataProvider {
     }
 
     return items;
+  }
+
+  private async refreshVpnStatus(): Promise<void> {
+    try {
+      // Check if we can resolve gitlab.cee.redhat.com (internal host)
+      const { stdout } = await execAsync("getent hosts gitlab.cee.redhat.com", { timeout: 3000 });
+      if (stdout.trim()) {
+        this.status.vpn = {
+          connected: true,
+          name: "Red Hat VPN",
+        };
+      } else {
+        this.status.vpn = {
+          connected: false,
+          error: "Cannot resolve internal hosts",
+        };
+      }
+    } catch {
+      // Try alternative check - look for VPN interface
+      try {
+        const { stdout: nmcli } = await execAsync("nmcli -t -f NAME,TYPE,STATE connection show --active 2>/dev/null | grep -i vpn", { timeout: 2000 });
+        if (nmcli.trim()) {
+          const vpnName = nmcli.split(":")[0];
+          this.status.vpn = {
+            connected: true,
+            name: vpnName || "VPN",
+          };
+        } else {
+          this.status.vpn = {
+            connected: false,
+            error: "VPN not connected",
+          };
+        }
+      } catch {
+        this.status.vpn = {
+          connected: false,
+          error: "VPN not connected",
+        };
+      }
+    }
   }
 
   public dispose() {

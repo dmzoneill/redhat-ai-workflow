@@ -39,6 +39,7 @@ export interface SkillStep {
   // Lifecycle indicators
   memoryRead?: string[];      // Memory keys read by this step
   memoryWrite?: string[];     // Memory keys written by this step
+  semanticSearch?: string[];  // Semantic/knowledge search operations
   isAutoRemediation?: boolean; // Step is part of auto-remediation
   canRetry?: boolean;         // Step can be retried on failure
   retryCount?: number;        // Number of retries attempted
@@ -90,11 +91,50 @@ export class SkillFlowchartPanel {
     extensionUri: vscode.Uri,
     position: "side" | "bottom" = "bottom"
   ): SkillFlowchartPanel {
-    // Check if panel already exists
+    console.log("[SkillFlowchartPanel] ========================================");
+    console.log("[SkillFlowchartPanel] createOrShow called");
+    console.log("[SkillFlowchartPanel] currentPanel exists:", !!SkillFlowchartPanel.currentPanel);
+    console.log("[SkillFlowchartPanel] ========================================");
+
+    // Check if panel already exists in our static variable
     if (SkillFlowchartPanel.currentPanel) {
+      console.log("[SkillFlowchartPanel] Reusing existing panel from static variable, revealing...");
       SkillFlowchartPanel.currentPanel._panel.reveal();
       return SkillFlowchartPanel.currentPanel;
     }
+
+    // Debug: Log all open tabs to understand what's happening
+    console.log("[SkillFlowchartPanel] Scanning all open tabs...");
+    let tabCount = 0;
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        tabCount++;
+        const input = tab.input as any;
+        console.log(`[SkillFlowchartPanel] Tab ${tabCount}: label="${tab.label}", viewType="${input?.viewType || 'N/A'}", uri="${input?.uri?.toString() || 'N/A'}"`);
+      }
+    }
+    console.log(`[SkillFlowchartPanel] Total tabs found: ${tabCount}`);
+
+    // Look for existing flowchart tab
+    const existingTab = vscode.window.tabGroups.all
+      .flatMap(group => group.tabs)
+      .find(tab => {
+        const input = tab.input as { viewType?: string } | undefined;
+        const isMatch = input?.viewType === "aaSkillFlowchart";
+        if (tab.label.includes("Flowchart") || tab.label.includes("Skill")) {
+          console.log(`[SkillFlowchartPanel] Potential match: label="${tab.label}", viewType="${input?.viewType}", isMatch=${isMatch}`);
+        }
+        return isMatch;
+      });
+
+    if (existingTab) {
+      console.log("[SkillFlowchartPanel] Found existing tab - closing zombie and creating fresh");
+      vscode.window.tabGroups.close(existingTab);
+    } else {
+      console.log("[SkillFlowchartPanel] No existing aaSkillFlowchart tab found");
+    }
+
+    console.log("[SkillFlowchartPanel] Creating NEW panel");
 
     // Determine view column based on position preference
     // For "bottom", we use ViewColumn.Active which will open in the panel area
@@ -122,6 +162,15 @@ export class SkillFlowchartPanel {
       extensionUri
     );
     return SkillFlowchartPanel.currentPanel;
+  }
+
+  public static revive(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+    console.log("[SkillFlowchartPanel] ========================================");
+    console.log("[SkillFlowchartPanel] revive() called - restoring panel from VS Code");
+    console.log("[SkillFlowchartPanel] Previous currentPanel:", SkillFlowchartPanel.currentPanel);
+    SkillFlowchartPanel.currentPanel = new SkillFlowchartPanel(panel, extensionUri);
+    console.log("[SkillFlowchartPanel] New currentPanel set:", !!SkillFlowchartPanel.currentPanel);
+    console.log("[SkillFlowchartPanel] ========================================");
   }
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
@@ -598,6 +647,27 @@ export class SkillFlowchartPanel {
       } else if (tool === "learn_tool_fix") {
         step.memoryWrite.push("learned/tool_fixes");
       }
+    }
+
+    // Semantic search operations (knowledge/vector search)
+    const semanticSearchTools = [
+      "knowledge_query",
+      "knowledge_scan",
+      "knowledge_search",
+      "vector_search",
+      "codebase_search",
+      "semantic_search",
+    ];
+    if (semanticSearchTools.some((t) => tool.includes(t))) {
+      step.semanticSearch = step.semanticSearch || [];
+      const searchType = tool.includes("knowledge")
+        ? "knowledge"
+        : tool.includes("vector")
+          ? "vector"
+          : tool.includes("codebase")
+            ? "codebase"
+            : "semantic";
+      step.semanticSearch.push(searchType);
     }
 
     // Detect memory operations in compute blocks by name patterns
@@ -1734,6 +1804,14 @@ export class SkillFlowchartPanel {
       );
     }
 
+    // Semantic search indicator
+    if (step.semanticSearch && step.semanticSearch.length > 0) {
+      const searchTypes = step.semanticSearch.join(", ");
+      lifecycleIndicators.push(
+        `<span class="lifecycle-indicator semantic-search" title="Semantic Search: ${searchTypes}">🔍</span>`
+      );
+    }
+
     // Auto-remediation indicator
     if (step.isAutoRemediation) {
       lifecycleIndicators.push(
@@ -1816,6 +1894,9 @@ export class SkillFlowchartPanel {
     }
     if (step.memoryWrite && step.memoryWrite.length > 0) {
       tags.push(`<span class="step-tag memory-write">💾 ${step.memoryWrite.join(", ")}</span>`);
+    }
+    if (step.semanticSearch && step.semanticSearch.length > 0) {
+      tags.push(`<span class="step-tag semantic-search">🔍 ${step.semanticSearch.join(", ")}</span>`);
     }
     if (step.isAutoRemediation) {
       tags.push(`<span class="step-tag auto-heal">🔄 auto-remediation</span>`);
@@ -2035,7 +2116,12 @@ export class SkillFlowchartPanel {
   }
 
   public dispose(): void {
+    console.log("[SkillFlowchartPanel] ========================================");
+    console.log("[SkillFlowchartPanel] dispose() called - clearing currentPanel");
+    console.log("[SkillFlowchartPanel] currentPanel before clear:", !!SkillFlowchartPanel.currentPanel);
     SkillFlowchartPanel.currentPanel = undefined;
+    console.log("[SkillFlowchartPanel] currentPanel after clear:", SkillFlowchartPanel.currentPanel);
+    console.log("[SkillFlowchartPanel] ========================================");
     this._panel.dispose();
     while (this._disposables.length) {
       const x = this._disposables.pop();
@@ -2086,6 +2172,12 @@ export function registerSkillFlowchartPanel(
     vscode.commands.registerCommand(
       "aa-workflow.visualizeSkillFlowchart",
       async (skillName?: string) => {
+        console.log("[SkillFlowchartPanel] ========================================");
+        console.log("[SkillFlowchartPanel] visualizeSkillFlowchart COMMAND called");
+        console.log("[SkillFlowchartPanel] skillName:", skillName);
+        console.log("[SkillFlowchartPanel] currentPanel before createOrShow:", !!SkillFlowchartPanel.currentPanel);
+        console.log("[SkillFlowchartPanel] ========================================");
+
         const panel = SkillFlowchartPanel.createOrShow(context.extensionUri);
 
         if (!skillName) {
@@ -2108,4 +2200,16 @@ export function registerSkillFlowchartPanel(
       }
     )
   );
+
+  // Register serializer to revive panel after restart
+  context.subscriptions.push(
+    vscode.window.registerWebviewPanelSerializer("aaSkillFlowchart", {
+      async deserializeWebviewPanel(webviewPanel: vscode.WebviewPanel, _state: any) {
+        console.log("[SkillFlowchartPanel] Serializer deserializeWebviewPanel called - reviving panel");
+        SkillFlowchartPanel.revive(webviewPanel, context.extensionUri);
+      }
+    })
+  );
+
+  console.log("[SkillFlowchartPanel] registerSkillFlowchartPanel complete, serializer registered");
 }
