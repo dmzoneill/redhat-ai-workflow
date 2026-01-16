@@ -14,7 +14,7 @@
 .PHONY: help install install-dev test lint format clean \
         check-env config-validate status quick-start \
         slack-daemon slack-daemon-bg slack-daemon-stop slack-daemon-logs \
-        slack-daemon-verbose slack-daemon-dry slack-daemon-dbus slack-daemon-status \
+        slack-daemon-verbose slack-daemon-dry slack-daemon-debug slack-daemon-dbus slack-daemon-status \
         slack-test slack-status slack-pending slack-approve slack-approve-all \
         slack-reject slack-history slack-send slack-watch slack-reload \
         mcp-server mcp-developer mcp-devops mcp-incident mcp-release mcp-slack mcp-all mcp-custom \
@@ -57,6 +57,7 @@ help:
 	@printf "  \033[32mmake slack-daemon-logs\033[0m  Tail Slack daemon logs\n"
 	@printf "  \033[32mmake slack-daemon-verbose\033[0m  Run with verbose logging\n"
 	@printf "  \033[32mmake slack-daemon-dry\033[0m   Run in dry-run mode (no responses sent)\n"
+	@printf "  \033[32mmake slack-daemon-debug\033[0m Run in DEBUG mode (responses go to self-DM)\n"
 	@printf "  \033[32mmake slack-test\033[0m         Quick smoke test (validates credentials)\n"
 	@printf "\n"
 	@printf "\033[1mSlack Control (D-Bus IPC):\033[0m\n"
@@ -174,6 +175,11 @@ slack-daemon-verbose: check-env
 slack-daemon-dry: check-env
 	@printf "\033[36mStarting Slack daemon (dry-run mode)...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --dry-run --verbose
+
+slack-daemon-debug: check-env
+	@printf "\033[36mStarting Slack daemon (DEBUG MODE)...\033[0m\n"
+	@printf "\033[33m🐛 All responses will be sent to your self-DM instead of original recipients\033[0m\n\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_daemon.py --debug --verbose
 
 slack-daemon-stop:
 	@# Try to kill by PID file first

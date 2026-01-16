@@ -1,15 +1,32 @@
-# Shared Context Memory - Cross-skill communication
-#
-# This file allows skills to share context with each other.
-# When one skill discovers important information, it can save it here
-# for other skills to use without re-discovering.
-#
-# Context expires after 1 hour by default to prevent stale data.
-
 current_investigation:
-  started_by: ""
-  started_at: ""
   context: {}
-  expires_at: ""
+  expires_at: ''
+  started_at: ''
+  started_by: ''
+last_coffee:
+  active_ephemeral: 0
+  alerts:
+    production: 0
+    stage: 0
+  failed_pipelines: 0
+  feedback_waiting: 0
+  pr_count: 8
+  review_assignments: 0
+  timestamp: '2026-01-16T15:33:37.670545'
+last_updated: '2026-01-16T15:33:37.670630'
+prepared_standup:
+  date: '2026-01-16'
+  generated_at: '2026-01-15T18:00:12.709248'
+  notes: '**Yesterday:**
 
-last_updated: "2026-01-09T00:00:00"
+    - (no commits today)
+
+
+    **Today:**
+
+    - (check Jira board)
+
+
+    **Blockers:**
+
+    - None'

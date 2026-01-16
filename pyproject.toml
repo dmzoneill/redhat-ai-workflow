@@ -56,6 +56,10 @@ dependencies = [
 
     # Ephemeral environment management
     "crc-bonfire>=5.0.0",
+
+    # Scheduler
+    "apscheduler>=3.10.0",
+    "croniter>=2.0.0",
 ]
 
 [project.optional-dependencies]
