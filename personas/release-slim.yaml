@@ -1,13 +1,17 @@
 # Release Persona - Slim Configuration
-# Only essential tools to stay under limit when combined with other personas
+# Minimal tools for resource-constrained environments
 
 name: release
-description: Releases and deployments (slim)
+description: Releases, Konflux (slim - 65 tools)
 persona: personas/release.md
 
 # Slim tool selection - only the essentials
 tools:
-  - konflux       # 35 tools - Builds and snapshots
-  - quay          # 7 tools - Container images
+  - workflow        # 18 tools - Core (memory, persona, session, skill, infra, meta)
+  - konflux_basic   # 22 tools - Pipelines, components, snapshots
+  - quay            # 8 tools - Container images
+  - jira_basic      # 17 tools - Issue tracking
 
-# Total: ~42 tools
+# Total: ~65 tools ✅
+# Missing from full: git_basic (22), appinterface (7)
+# Use tool_exec() for git/app-interface operations when needed

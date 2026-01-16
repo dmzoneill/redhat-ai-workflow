@@ -1,0 +1,37 @@
+# Admin Persona Configuration
+# For administrative tasks: expenses, scheduling, team communication
+
+name: admin
+description: Administrative tasks - expenses, calendar, team communication
+persona: personas/admin.md
+
+# Tool modules to load (from tool_modules/aa_*)
+# Clean separation of concerns - each module has a single purpose
+tools:
+  - workflow        # 18 tools - Core (memory, persona, session, skill, infra, meta)
+  - knowledge       # 6 tools - Project knowledge management
+  - project         # 5 tools - Project configuration
+  - scheduler       # 7 tools - Cron job management
+  - concur          # 9 tools - Expense automation (Concur, GOMO)
+  - slack           # 9 tools - Team notifications, channel management
+  - jira_basic      # 17 tools - Issue viewing for context
+
+# Total: ~71 tools ✅
+
+skills:
+  # Expense management
+  - submit_expenses       # Submit monthly expenses (GOMO → Concur)
+  - expense_status        # Check expense report status
+
+  # Daily routines
+  - coffee                # ☕ Morning briefing
+  - beer                  # 🍺 End of day wrap-up
+  - standup_summary       # Generate standup summary
+  - weekly_summary        # Weekly work summary
+
+  # Team communication
+  - notify_team           # Send Slack notifications
+  - schedule_meeting      # Schedule Google Calendar meetings
+
+  # Issue tracking (read-only context)
+  - jira_hygiene          # Issue quality checks

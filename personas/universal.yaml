@@ -13,8 +13,9 @@ tools:
   - gitlab_basic    # 16 tools - MRs, CI/CD basics
   - jira_basic      # 17 tools - Issue viewing, search, status updates
   - k8s_basic       # 22 tools - Essential k8s (pods, logs, deployments)
+  - code_search     # 4 tools - Semantic code search with local vectors
 
-# Total: ~100 tools ✅
+# Total: ~104 tools ✅
 #
 # Persona switching: Tools are fixed at startup, but persona changes via persona_load().
 # When you say "load devops agent", Claude adopts the devops focus/expertise
