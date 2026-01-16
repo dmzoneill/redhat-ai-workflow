@@ -518,3 +518,247 @@ def load_shared_context() -> Optional[Dict[str, Any]]:
 
     context: Optional[Dict[str, Any]] = investigation.get("context")
     return context
+
+
+# =============================================================================
+# LEARNING FUNCTIONS - Check known issues and learn from fixes
+# =============================================================================
+
+
+def check_known_issues(tool_name: str = "", error_text: str = "") -> Dict[str, Any]:
+    """
+    Check memory for known issues matching this tool/error.
+
+    This is the synchronous version for use in skill compute blocks.
+    It searches patterns.yaml and tool_fixes.yaml for matching patterns.
+
+    Args:
+        tool_name: Name of the tool that failed (e.g., "gitlab_mr_list")
+        error_text: Error message text to match against patterns
+
+    Returns:
+        Dict with:
+            - matches: List of matching patterns with fix suggestions
+            - has_known_issues: Boolean indicating if any matches found
+
+    Example:
+        issues = memory.check_known_issues("gitlab_mr_list", "no such host")
+        if issues.get("has_known_issues"):
+            for match in issues.get("matches", []):
+                print(f"Known fix: {match.get('fix')}")
+    """
+    matches = []
+    error_lower = error_text.lower() if error_text else ""
+    tool_lower = tool_name.lower() if tool_name else ""
+
+    try:
+        # Check patterns.yaml
+        patterns_file = MEMORY_DIR / "learned" / "patterns.yaml"
+        if patterns_file.exists():
+            with open(patterns_file) as f:
+                patterns = yaml.safe_load(f) or {}
+
+            # Check all pattern categories
+            for category in [
+                "error_patterns",
+                "auth_patterns",
+                "bonfire_patterns",
+                "pipeline_patterns",
+                "network_patterns",
+            ]:
+                for pattern in patterns.get(category, []):
+                    pattern_text = pattern.get("pattern", "").lower()
+                    if pattern_text and (pattern_text in error_lower or pattern_text in tool_lower):
+                        matches.append(
+                            {
+                                "source": category,
+                                "pattern": pattern.get("pattern"),
+                                "meaning": pattern.get("meaning", ""),
+                                "fix": pattern.get("fix", ""),
+                                "commands": pattern.get("commands", []),
+                            }
+                        )
+
+        # Check tool_fixes.yaml
+        fixes_file = MEMORY_DIR / "learned" / "tool_fixes.yaml"
+        if fixes_file.exists():
+            with open(fixes_file) as f:
+                fixes = yaml.safe_load(f) or {}
+
+            for fix in fixes.get("tool_fixes", []):
+                if tool_name and fix.get("tool_name", "").lower() == tool_lower:
+                    matches.append(
+                        {
+                            "source": "tool_fixes",
+                            "tool_name": fix.get("tool_name"),
+                            "pattern": fix.get("error_pattern", ""),
+                            "fix": fix.get("fix_applied", ""),
+                        }
+                    )
+                elif error_text:
+                    fix_pattern = fix.get("error_pattern", "").lower()
+                    if fix_pattern and fix_pattern in error_lower:
+                        matches.append(
+                            {
+                                "source": "tool_fixes",
+                                "tool_name": fix.get("tool_name"),
+                                "pattern": fix.get("error_pattern", ""),
+                                "fix": fix.get("fix_applied", ""),
+                            }
+                        )
+
+    except Exception as e:
+        logger.debug(f"Error checking known issues: {e}")
+
+    return {
+        "matches": matches,
+        "has_known_issues": len(matches) > 0,
+    }
+
+
+def learn_tool_fix(
+    tool_name: str,
+    error_pattern: str,
+    root_cause: str,
+    fix_description: str,
+) -> bool:
+    """
+    Save a fix to memory after it works.
+
+    Use this after successfully fixing a tool error to remember the solution.
+    The next time this pattern appears, check_known_issues() will show the fix.
+
+    Args:
+        tool_name: Name of the tool that failed (e.g., "bonfire_deploy")
+        error_pattern: The error pattern to match (e.g., "manifest unknown")
+        root_cause: Why it failed (e.g., "Short SHA doesn't exist in Quay")
+        fix_description: What fixed it (e.g., "Use full 40-char SHA")
+
+    Returns:
+        True if successfully saved, False otherwise
+
+    Example:
+        memory.learn_tool_fix(
+            tool_name="gitlab_mr_list",
+            error_pattern="no such host",
+            root_cause="VPN not connected",
+            fix_description="Run vpn_connect() to connect to Red Hat VPN"
+        )
+    """
+    try:
+        fixes_file = MEMORY_DIR / "learned" / "tool_fixes.yaml"
+        fixes_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing fixes
+        if fixes_file.exists():
+            with open(fixes_file) as f:
+                data = yaml.safe_load(f) or {}
+        else:
+            data = {"tool_fixes": [], "stats": {"total_learned": 0}}
+
+        if "tool_fixes" not in data:
+            data["tool_fixes"] = []
+        if "stats" not in data:
+            data["stats"] = {"total_learned": 0}
+
+        # Check if this pattern already exists
+        for existing in data["tool_fixes"]:
+            if (
+                existing.get("tool_name") == tool_name
+                and existing.get("error_pattern") == error_pattern
+            ):
+                # Update existing entry
+                existing["root_cause"] = root_cause
+                existing["fix_applied"] = fix_description
+                existing["last_seen"] = datetime.now().isoformat()
+                existing["occurrences"] = existing.get("occurrences", 1) + 1
+                break
+        else:
+            # Add new entry
+            data["tool_fixes"].append(
+                {
+                    "tool_name": tool_name,
+                    "error_pattern": error_pattern,
+                    "root_cause": root_cause,
+                    "fix_applied": fix_description,
+                    "learned_at": datetime.now().isoformat(),
+                    "last_seen": datetime.now().isoformat(),
+                    "occurrences": 1,
+                }
+            )
+            data["stats"]["total_learned"] = data["stats"].get("total_learned", 0) + 1
+
+        # Keep only last 100 fixes
+        data["tool_fixes"] = data["tool_fixes"][-100:]
+        data["last_updated"] = datetime.now().isoformat()
+
+        # Write back
+        with open(fixes_file, "w") as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+        logger.debug(f"Learned fix for {tool_name}: {error_pattern}")
+        return True
+
+    except Exception as e:
+        logger.warning(f"Failed to learn tool fix: {e}")
+        return False
+
+
+def record_tool_failure(
+    tool_name: str,
+    error_text: str,
+    context: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Record a tool failure for pattern analysis.
+
+    This logs failures without necessarily having a fix yet.
+    Useful for tracking recurring issues that need investigation.
+
+    Args:
+        tool_name: Name of the tool that failed
+        error_text: Error message
+        context: Additional context (skill name, inputs, etc.)
+
+    Returns:
+        True if successfully recorded, False otherwise
+    """
+    try:
+        failures_file = MEMORY_DIR / "learned" / "tool_failures.yaml"
+        failures_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing failures
+        if failures_file.exists():
+            with open(failures_file) as f:
+                data = yaml.safe_load(f) or {}
+        else:
+            data = {"failures": [], "stats": {"total_failures": 0}}
+
+        if "failures" not in data:
+            data["failures"] = []
+        if "stats" not in data:
+            data["stats"] = {"total_failures": 0}
+
+        # Add failure entry
+        entry = {
+            "tool": tool_name,
+            "error_snippet": error_text[:200] if error_text else "",
+            "timestamp": datetime.now().isoformat(),
+            "context": context or {},
+        }
+        data["failures"].append(entry)
+        data["stats"]["total_failures"] = data["stats"].get("total_failures", 0) + 1
+
+        # Keep only last 100 failures
+        data["failures"] = data["failures"][-100:]
+        data["last_updated"] = datetime.now().isoformat()
+
+        # Write back
+        with open(failures_file, "w") as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+        return True
+
+    except Exception as e:
+        logger.warning(f"Failed to record tool failure: {e}")
+        return False

@@ -15,11 +15,15 @@ Usage:
 
     # Run with web UI:
     python -m server --tools git,jira --web --port 8765
+
+    # Disable scheduler:
+    python -m server --agent developer --no-scheduler
 """
 
 import argparse
 import asyncio
 import logging
+import signal
 import sys
 from pathlib import Path
 from typing import cast
@@ -79,6 +83,7 @@ TOOL_MODULES = {
     "google_calendar": 6,  # Calendar/meetings
     "lint": 7,  # Linting tools
     "dev_workflow": 9,  # Development helpers
+    "concur": 8,  # Expense automation (GOMO + Concur)
 }
 
 
@@ -295,11 +300,145 @@ def create_mcp_server(
     return server
 
 
-async def run_mcp_server(server: FastMCP):
-    """Run the MCP server in stdio mode (for AI integrations)."""
+# ==================== Scheduler Integration ====================
+
+
+async def init_scheduler(server: FastMCP) -> bool:
+    """Initialize and start the scheduler subsystem.
+
+    Args:
+        server: FastMCP server instance for skill execution
+
+    Returns:
+        True if scheduler started successfully
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        from tool_modules.aa_workflow.src.scheduler import init_scheduler as init_cron_scheduler
+        from tool_modules.aa_workflow.src.scheduler import start_scheduler
+        from tool_modules.aa_workflow.src.poll_engine import init_poll_engine
+        from tool_modules.aa_workflow.src.notification_engine import (
+            init_notification_engine,
+            send_notification,
+        )
+        from .utils import load_config
+
+        config = load_config()
+        schedules_config = config.get("schedules", {})
+
+        if not schedules_config.get("enabled", False):
+            logger.info("Scheduler disabled in config (schedules.enabled = false)")
+            return False
+
+        # Initialize notification engine
+        notification_engine = init_notification_engine(server=server, config=config)
+
+        # Create notification callback for scheduler
+        async def notification_callback(
+            job_name: str,
+            skill: str,
+            success: bool,
+            output: str | None,
+            error: str | None,
+            channels: list[str],
+        ):
+            await send_notification(
+                job_name=job_name,
+                skill=skill,
+                success=success,
+                output=output,
+                error=error,
+                channels=channels,
+            )
+
+        # Initialize cron scheduler
+        scheduler = init_cron_scheduler(
+            server=server,
+            notification_callback=notification_callback,
+        )
+
+        # Initialize poll engine with job execution callback
+        async def poll_job_callback(
+            job_name: str,
+            skill: str,
+            inputs: dict,
+            notify: list[str],
+        ):
+            await scheduler._execute_job(
+                job_name=job_name,
+                skill=skill,
+                inputs=inputs,
+                notify=notify,
+            )
+
+        poll_engine = init_poll_engine(
+            server=server,
+            job_callback=poll_job_callback,
+        )
+
+        # Configure poll engine with sources and jobs
+        poll_engine.configure(
+            poll_sources=schedules_config.get("poll_sources", {}),
+            poll_jobs=scheduler.config.get_poll_jobs(),
+        )
+
+        # Start scheduler and poll engine
+        await start_scheduler()
+        await poll_engine.start()
+
+        logger.info("Scheduler subsystem initialized and started")
+        return True
+
+    except ImportError as e:
+        logger.warning(f"Scheduler dependencies not available: {e}")
+        logger.info("Install with: pip install apscheduler croniter")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to initialize scheduler: {e}")
+        return False
+
+
+async def stop_scheduler():
+    """Stop the scheduler subsystem gracefully."""
+    logger = logging.getLogger(__name__)
+
+    try:
+        from tool_modules.aa_workflow.src.scheduler import stop_scheduler as stop_cron_scheduler
+        from tool_modules.aa_workflow.src.poll_engine import get_poll_engine
+
+        await stop_cron_scheduler()
+
+        poll_engine = get_poll_engine()
+        if poll_engine:
+            await poll_engine.stop()
+
+        logger.info("Scheduler subsystem stopped")
+    except Exception as e:
+        logger.warning(f"Error stopping scheduler: {e}")
+
+
+async def run_mcp_server(server: FastMCP, enable_scheduler: bool = True):
+    """Run the MCP server in stdio mode (for AI integrations).
+
+    Args:
+        server: FastMCP server instance
+        enable_scheduler: Whether to start the scheduler subsystem
+    """
     logger = logging.getLogger(__name__)
     logger.info("Starting MCP server (stdio mode)...")
-    await server.run_stdio_async()
+
+    # Initialize scheduler if enabled
+    scheduler_started = False
+    if enable_scheduler:
+        scheduler_started = await init_scheduler(server)
+
+    try:
+        await server.run_stdio_async()
+    finally:
+        # Cleanup scheduler on shutdown
+        if scheduler_started:
+            await stop_scheduler()
 
 
 def run_web_server(server: FastMCP, host: str = "127.0.0.1", port: int = 8765):
@@ -379,6 +518,11 @@ Examples:
         default="",
         help="Server name (default: based on agent or 'aa_workflow')",
     )
+    parser.add_argument(
+        "--no-scheduler",
+        action="store_true",
+        help="Disable the cron scheduler subsystem",
+    )
 
     args = parser.parse_args()
     logger = setup_logging(web_mode=args.web)
@@ -422,7 +566,8 @@ Examples:
         if args.web:
             run_web_server(server, host=args.host, port=args.port)
         else:
-            asyncio.run(run_mcp_server(server))
+            enable_scheduler = not args.no_scheduler
+            asyncio.run(run_mcp_server(server, enable_scheduler=enable_scheduler))
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
     except Exception as e:

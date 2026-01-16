@@ -45,13 +45,25 @@ from dotenv import load_dotenv
 
 from scripts.common.config_loader import load_config
 
+# @me command system imports
+from scripts.common.command_parser import CommandParser, ParsedCommand, TriggerType
+from scripts.common.command_registry import CommandRegistry, get_registry, CommandType
+from scripts.common.context_extractor import ContextExtractor, ConversationContext
+from scripts.common.response_router import (
+    ResponseRouter,
+    ResponseFormatter,
+    CommandContext,
+    ResponseMode,
+    get_router,
+)
+
 # Import PROJECT_ROOT after path setup
 PROJECT_ROOT = Path(slack_path_setup.PROJECT_ROOT)
 
 if TYPE_CHECKING:
     from src.listener import PendingMessage, SlackListener
     from src.slack_client import SlackSession
-    from src.state_db import SlackStateDB
+    from src.persistence import SlackStateDB
 
 LOCK_FILE = Path("/tmp/slack-daemon.lock")
 PID_FILE = Path("/tmp/slack-daemon.pid")
@@ -742,11 +754,15 @@ class TerminalUI:
         """Clear current line."""
         print("\r\033[K", end="")
 
-    def print_header(self):
+    def print_header(self, debug_mode: bool = False):
         """Print startup header."""
         cyan = self.COLORS["cyan"]
         bold = self.COLORS["bold"]
+        yellow = self.COLORS["yellow"]
         reset = self.COLORS["reset"]
+        
+        mode_indicator = f"{yellow}🐛 DEBUG MODE{reset}" if debug_mode else ""
+        
         print(
             f"""
 {cyan}╔══════════════════════════════════════════════════════════════════╗
@@ -755,7 +771,7 @@ class TerminalUI:
 ║  Monitoring Slack channels for messages...                         ║
 ║  Press Ctrl+C to stop                                              ║
 ╚══════════════════════════════════════════════════════════════════╝{reset}
-"""
+{mode_indicator}"""
         )
 
     def print_status(self, listener_stats: dict):
@@ -859,6 +875,303 @@ class TerminalUI:
 #
 # The Slack daemon is just a Slack interface - all intelligence is in Claude.
 # =============================================================================
+
+
+# =============================================================================
+# COMMAND HANDLER - @me commands
+# =============================================================================
+
+
+class CommandHandler:
+    """
+    Handles @me commands from Slack.
+
+    Parses commands, extracts context, and routes to appropriate handlers.
+    Supports:
+    - @me <skill_name> - Run a skill with context from thread
+    - @me help - List available commands
+    - @me help <command> - Get help for a specific command
+    - @me status - Show bot status
+    """
+
+    def __init__(
+        self,
+        slack_client: Any = None,
+        claude_agent: Any = None,
+        notifier: "DesktopNotifier | None" = None,
+    ):
+        self.slack_client = slack_client
+        self.claude_agent = claude_agent
+        self.notifier = notifier
+
+        self.parser = CommandParser()
+        self.registry = get_registry()
+        self.router = get_router()
+        self.formatter = ResponseFormatter()
+
+        # Config
+        self.config = get_slack_config("commands", {})
+        self.context_limit = self.config.get("context_messages_limit", 20)
+        self.contextual_skills = set(
+            self.config.get("contextual_skills", ["create_jira_issue", "investigate_alert"])
+        )
+
+    def is_command(self, text: str, is_self_dm: bool = False) -> bool:
+        """Check if a message is an @me command."""
+        parsed = self.parser.parse(text, is_self_dm)
+        return parsed.is_command
+
+    async def handle(
+        self,
+        message: "PendingMessage",
+        classification: "UserClassification",
+    ) -> tuple[str | None, bool]:
+        """
+        Handle an @me command.
+
+        Args:
+            message: The pending message
+            classification: User classification
+
+        Returns:
+            Tuple of (response_text, should_send)
+        """
+        # Check if this is in self-DM channel
+        self_dm_channel = get_slack_config("listener.self_dm_channel", "")
+        is_self_dm = message.channel_id == self_dm_channel
+
+        # Parse the command
+        parsed = self.parser.parse(message.text, is_self_dm)
+
+        if not parsed.is_command:
+            return None, False
+
+        logger.info(f"Processing @me command: {parsed.command} (type: {parsed.trigger_type.value})")
+
+        # Route the command
+        try:
+            if self.parser.is_help_command(parsed):
+                response = await self._handle_help(parsed)
+            elif self.parser.is_status_command(parsed):
+                response = await self._handle_status()
+            elif parsed.command == "list":
+                response = await self._handle_list(parsed)
+            else:
+                response = await self._handle_skill_or_tool(parsed, message)
+
+            # Format response
+            routing_ctx = CommandContext(
+                channel_id=message.channel_id,
+                thread_ts=message.thread_ts,
+                message_ts=message.timestamp,
+                user_id=message.user_id,
+                is_dm=message.is_dm,
+                reply_dm=parsed.reply_dm,
+                reply_thread=parsed.reply_thread,
+                command=parsed.command,
+            )
+
+            route_config = self.router.route(routing_ctx)
+
+            # Should always send command responses
+            should_send = classification.auto_respond
+
+            return response, should_send
+
+        except Exception as e:
+            logger.error(f"Error handling command {parsed.command}: {e}", exc_info=True)
+            return f"❌ Error: {str(e)}", True
+
+    async def _handle_help(self, parsed: ParsedCommand) -> str:
+        """Handle help command."""
+        target = self.parser.get_help_target(parsed)
+
+        if target:
+            # Help for specific command
+            help_info = self.registry.get_command_help(target)
+            if help_info:
+                return help_info.format_slack()
+            return f"❌ Unknown command: `{target}`\n\nUse `@me help` to list available commands."
+
+        # General help
+        commands = self.registry.list_commands()
+        return self.registry.format_list(commands, "slack")
+
+    async def _handle_status(self) -> str:
+        """Handle status command."""
+        lines = ["*🤖 Bot Status*\n"]
+
+        # Count available commands
+        skills = self.registry.list_commands(command_type=CommandType.SKILL)
+        tools = self.registry.list_commands(command_type=CommandType.TOOL)
+
+        lines.append(f"• *Skills available:* {len(skills)}")
+        lines.append(f"• *Tools available:* {len(tools)}")
+        lines.append(f"• *Contextual skills:* {', '.join(sorted(self.contextual_skills))}")
+
+        if self.claude_agent:
+            lines.append("• *Claude:* ✅ Connected")
+        else:
+            lines.append("• *Claude:* ❌ Not connected")
+
+        lines.append("\n_Use `@me help` to see available commands_")
+
+        return "\n".join(lines)
+
+    async def _handle_list(self, parsed: ParsedCommand) -> str:
+        """Handle list command."""
+        filter_type = None
+        if parsed.args:
+            arg = parsed.args[0].lower()
+            if arg in ("skill", "skills"):
+                filter_type = CommandType.SKILL
+            elif arg in ("tool", "tools"):
+                filter_type = CommandType.TOOL
+
+        commands = self.registry.list_commands(command_type=filter_type)
+        return self.registry.format_list(commands, "slack")
+
+    async def _handle_skill_or_tool(
+        self, parsed: ParsedCommand, message: "PendingMessage"
+    ) -> str:
+        """Handle a skill or tool command."""
+        cmd_info = self.registry.get_command(parsed.command)
+
+        if not cmd_info:
+            return (
+                f"❌ Unknown command: `{parsed.command}`\n\n"
+                f"Use `@me help` to list available commands."
+            )
+
+        # Get explicit inputs from parsed command
+        inputs = parsed.to_skill_inputs()
+
+        # Check if this is a contextual skill and we need to extract context
+        if cmd_info.contextual and not inputs:
+            context = await self._extract_context(message)
+            if context.is_valid():
+                # Merge context into inputs
+                context_inputs = context.to_skill_inputs(parsed.command)
+                inputs.update(context_inputs)
+
+                # Show extracted context to user
+                context_preview = self._format_context_preview(context)
+                if context_preview:
+                    logger.info(f"Extracted context for {parsed.command}: {context.summary[:100]}")
+
+        # Build the request for Claude
+        if cmd_info.command_type == CommandType.SKILL:
+            return await self._run_skill(parsed.command, inputs, message)
+        else:
+            return await self._run_tool(parsed.command, inputs, message)
+
+    async def _extract_context(self, message: "PendingMessage") -> ConversationContext:
+        """Extract context from the conversation."""
+        extractor = ContextExtractor(
+            slack_client=self.slack_client,
+            claude_agent=self.claude_agent,
+            context_messages_limit=self.context_limit,
+        )
+
+        return await extractor.extract(
+            channel_id=message.channel_id,
+            thread_ts=message.thread_ts,
+            message_ts=message.timestamp,
+            exclude_command_message=True,
+        )
+
+    def _format_context_preview(self, context: ConversationContext) -> str:
+        """Format a preview of extracted context."""
+        lines = []
+
+        if context.summary:
+            lines.append(f"*Summary:* {context.summary}")
+        if context.inferred_type:
+            lines.append(f"*Type:* {context.inferred_type}")
+        if context.jira_issues:
+            lines.append(f"*Related:* {', '.join(context.jira_issues)}")
+
+        return "\n".join(lines) if lines else ""
+
+    async def _run_skill(
+        self, skill_name: str, inputs: dict, message: "PendingMessage"
+    ) -> str:
+        """Run a skill via Claude."""
+        if not self.claude_agent:
+            return "❌ Claude agent not available"
+
+        # Build prompt for Claude to run the skill
+        import json
+        inputs_json = json.dumps(inputs) if inputs else "{}"
+
+        prompt = f"""Execute the skill `{skill_name}` with these inputs:
+
+```json
+{inputs_json}
+```
+
+Use `skill_run("{skill_name}", '{inputs_json}')` to execute the skill and return the results.
+Format the output for Slack (use *bold*, `code`, bullet points).
+"""
+
+        try:
+            context = {
+                "user_name": message.user_name,
+                "channel_name": message.channel_name,
+                "is_dm": message.is_dm,
+                "purpose": "skill_execution",
+                "skill_name": skill_name,
+            }
+            conversation_id = f"{message.channel_id}:{message.thread_ts or message.user_id}"
+
+            response = await self.claude_agent.process_message(
+                prompt, context, conversation_id=conversation_id
+            )
+            return response
+
+        except Exception as e:
+            logger.error(f"Failed to run skill {skill_name}: {e}")
+            return f"❌ Failed to run skill `{skill_name}`: {str(e)}"
+
+    async def _run_tool(
+        self, tool_name: str, inputs: dict, message: "PendingMessage"
+    ) -> str:
+        """Run a tool via Claude."""
+        if not self.claude_agent:
+            return "❌ Claude agent not available"
+
+        # Build prompt for Claude to run the tool
+        import json
+        inputs_json = json.dumps(inputs) if inputs else "{}"
+
+        prompt = f"""Execute the tool `{tool_name}` with these arguments:
+
+```json
+{inputs_json}
+```
+
+Call the tool directly and return the results.
+Format the output for Slack (use *bold*, `code`, bullet points).
+"""
+
+        try:
+            context = {
+                "user_name": message.user_name,
+                "channel_name": message.channel_name,
+                "is_dm": message.is_dm,
+                "purpose": "tool_execution",
+                "tool_name": tool_name,
+            }
+            conversation_id = f"{message.channel_id}:{message.thread_ts or message.user_id}"
+
+            response = await self.claude_agent.process_message(
+                prompt, context, conversation_id=conversation_id
+            )
+            return response
+
+        except Exception as e:
+            logger.error(f"Failed to run tool {tool_name}: {e}")
+            return f"❌ Failed to run tool `{tool_name}`: {str(e)}"
 
 
 # =============================================================================
@@ -1032,6 +1345,7 @@ class SlackDaemon:
         poll_interval_max: float = 15.0,
         enable_dbus: bool = False,
         enable_notify: bool = True,
+        debug_mode: bool = False,
     ):
         self.dry_run = dry_run
         self.verbose = verbose
@@ -1039,6 +1353,10 @@ class SlackDaemon:
         self.poll_interval_max = poll_interval_max
         self.enable_dbus = enable_dbus
         self.enable_notify = enable_notify
+        self.debug_mode = debug_mode
+        
+        # Debug mode: redirect all messages to self
+        self.debug_redirect_channel = get_slack_config("listener.self_dm_channel", "")
 
         self.ui = TerminalUI(verbose=verbose)
         self.notifier = DesktopNotifier(enabled=enable_notify)
@@ -1046,6 +1364,9 @@ class SlackDaemon:
         # Initialize Claude-based response generator (REQUIRED)
         # Will raise RuntimeError if Claude is not available
         self.response_generator = ResponseGenerator(notifier=self.notifier)
+
+        # Initialize @me command handler
+        self.command_handler: CommandHandler | None = None  # Initialized after session
 
         self.user_classifier = UserClassifier()
         self.channel_permissions = ChannelPermissions()
@@ -1075,9 +1396,9 @@ class SlackDaemon:
     async def start(self):
         """Initialize and start the daemon."""
         from src.listener import SlackListener
-        from src.state_db import SlackStateDB
+        from src.persistence import SlackStateDB
 
-        self.ui.print_header()
+        self.ui.print_header(debug_mode=self.debug_mode)
         self._start_time = time.time()
 
         # Initialize D-Bus if enabled
@@ -1100,6 +1421,14 @@ class SlackDaemon:
         # Initialize listener configuration
         config = self._init_listener_config()
         self.listener = SlackListener(self.session, self.state_db, config)
+
+        # Initialize @me command handler with session and Claude agent
+        self.command_handler = CommandHandler(
+            slack_client=self.session,
+            claude_agent=self.response_generator.claude_agent,
+            notifier=self.notifier,
+        )
+        print("✅ @me command handler initialized")
 
         # Print startup status
         self._print_startup_status(config)
@@ -1169,6 +1498,20 @@ class SlackDaemon:
 
             self.ui.print_info(f"🚨 Alert detected in {env} ({namespace})")
 
+            # DEBUG MODE: Redirect alert responses to self-DM
+            if self.debug_mode and self.debug_redirect_channel:
+                reply_channel = self.debug_redirect_channel
+                reply_thread_ts = None  # No threading in debug DMs
+                debug_prefix = (
+                    f"🐛 *DEBUG MODE* - Alert response (would go to #{msg.channel_name})\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                )
+                self.ui.print_info(f"🐛 DEBUG: Alert response will go to self-DM")
+            else:
+                reply_channel = msg.channel_id
+                reply_thread_ts = msg.timestamp
+                debug_prefix = ""
+
             # Build context for Claude to run the skill
             alert_context = f"""
 This is a Prometheus alert from the {env} environment that needs investigation AND a reply.
@@ -1180,10 +1523,10 @@ This is a Prometheus alert from the {env} environment that needs investigation A
 **Alert Message:**
 {msg.text[:2000]}
 
-IMPORTANT: After investigating, you MUST use `slack_send_message` to reply to the alert thread:
-- channel_id: "{msg.channel_id}"
-- thread_ts: "{msg.timestamp}"
-- text: (your investigation summary)
+IMPORTANT: After investigating, you MUST use `slack_send_message` to reply:
+- channel_id: "{reply_channel}"
+- thread_ts: {f'"{reply_thread_ts}"' if reply_thread_ts else 'null (no threading)'}
+- text: {f'"{debug_prefix}" + ' if debug_prefix else ''}(your investigation summary)
 
 Steps:
 1. Check pod status with k8s_get_pods
@@ -1253,6 +1596,26 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                 return
             else:
                 logger.debug(f"Alert detected but auto-investigate disabled for channel {msg.channel_id}")
+
+        # ==================== @ME COMMAND DETECTION ====================
+        # Check if this is an @me command (before normal processing)
+        self_dm_channel = get_slack_config("listener.self_dm_channel", "")
+        is_self_dm = msg.channel_id == self_dm_channel
+
+        if self.command_handler and self.command_handler.is_command(msg.text, is_self_dm):
+            logger.info(f"@me command detected: {msg.text[:50]}")
+            self.ui.print_message(msg, "@me command", classification, channel_allowed=True)
+            self.ui.messages_processed += 1
+
+            # Handle the command
+            response, should_send = await self.command_handler.handle(msg, classification)
+
+            if response:
+                # Send the response
+                await self._send_response_or_skip(msg, response, classification, should_send)
+
+            await self.state_db.mark_message_processed(msg.id)
+            return
 
         # ==================== NORMAL MESSAGE PROCESSING ====================
 
@@ -1406,12 +1769,27 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                 intent="claude",
             )
             try:
-                # In DMs (channel starts with D), don't use threading
-                # In channels, reply in thread to keep things organized
-                is_dm = msg.channel_id.startswith("D")
-                thread_ts = None if is_dm else (msg.thread_ts or msg.timestamp)
+                # DEBUG MODE: Redirect all messages to self-DM instead of original recipient
+                if self.debug_mode and self.debug_redirect_channel:
+                    target_channel = self.debug_redirect_channel
+                    # Add debug header to show where the message would have gone
+                    debug_header = (
+                        f"🐛 *DEBUG MODE* - Would have sent to #{msg.channel_name} "
+                        f"(reply to {msg.user_name})\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    )
+                    response = debug_header + response
+                    thread_ts = None  # No threading in debug DMs
+                    print(f"   {self.ui.COLORS['magenta']}🐛 DEBUG: Redirecting to self-DM{self.ui.COLORS['reset']}")
+                else:
+                    target_channel = msg.channel_id
+                    # In DMs (channel starts with D), don't use threading
+                    # In channels, reply in thread to keep things organized
+                    is_dm = msg.channel_id.startswith("D")
+                    thread_ts = None if is_dm else (msg.thread_ts or msg.timestamp)
+                
                 sent_msg = await self.session.send_message(
-                    channel_id=msg.channel_id,
+                    channel_id=target_channel,
                     text=response,
                     thread_ts=thread_ts,
                     typing_delay=True,
@@ -1671,6 +2049,13 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
 
         if self.dry_run:
             print("⚠️  DRY RUN MODE - no responses will be sent")
+        
+        if self.debug_mode:
+            if self.debug_redirect_channel:
+                print(f"🐛 DEBUG MODE - all responses redirected to self-DM ({self.debug_redirect_channel})")
+            else:
+                print("⚠️  DEBUG MODE enabled but no self_dm_channel configured in config.json!")
+                print("   Set slack.listener.self_dm_channel to your DM channel ID")
 
         print()
 
@@ -1737,6 +2122,11 @@ Single Instance:
         "--no-notify",
         action="store_true",
         help="Disable desktop notifications",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Debug mode: redirect all responses to your self-DM instead of original recipients",
     )
     parser.add_argument(
         "--status",
@@ -1807,6 +2197,9 @@ Single Instance:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
+    # Debug mode: CLI flag overrides config.json setting
+    debug_mode = args.debug or get_slack_config("debug", False)
+    
     daemon = SlackDaemon(
         dry_run=args.dry_run,
         verbose=args.verbose,
@@ -1814,6 +2207,7 @@ Single Instance:
         poll_interval_max=args.poll_max,
         enable_dbus=args.dbus,
         enable_notify=not args.no_notify,
+        debug_mode=debug_mode,
     )
 
     daemon.setup_signal_handlers()
