@@ -74,6 +74,19 @@ except ImportError:
         return ""
 
 
+# Import tool filtering for NPU-powered pre-filtering
+try:
+    from tool_modules.aa_ollama.src.tool_filter import filter_tools_detailed, get_filter
+    from tool_modules.aa_ollama.src.skill_discovery import detect_skill
+
+    TOOL_FILTER_AVAILABLE = True
+except ImportError:
+    TOOL_FILTER_AVAILABLE = False
+    filter_tools_detailed = None
+    detect_skill = None
+    get_filter = None
+
+
 logger = logging.getLogger(__name__)
 
 # Skill executor - use the actual skill engine from aa_workflow
@@ -1677,6 +1690,10 @@ class ClaudeAgent:
         self.tool_registry: ToolRegistry = ToolRegistry()
         self.tool_executor: ToolExecutor = ToolExecutor(PROJECT_ROOT)
 
+        # Tool filtering configuration
+        self.use_tool_filtering = TOOL_FILTER_AVAILABLE
+        self.persona = "developer"  # Default persona, can be changed per session
+
         # Conversation history tracking
         # Key: conversation_id (e.g., "channel_id:user_id" or "thread_ts")
         # Value: list of message dicts [{"role": "user/assistant", "content": "..."}]
@@ -1765,8 +1782,14 @@ KUBECONFIG - the tools handle this automatically:
 
 use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_view. for mr urls use gitlab_mr_view."""
 
-    def _build_context_message(self, message: str, context: Optional[dict], resolved_ctx) -> str:
-        """Build context-enriched message."""
+    def _build_context_message(
+        self,
+        message: str,
+        context: Optional[dict],
+        resolved_ctx,
+        filter_context: Optional[dict] = None,
+    ) -> str:
+        """Build context-enriched message with memory, patterns, and semantic knowledge."""
         context_parts = []
         if context:
             context_parts.append(
@@ -1800,10 +1823,58 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
             repos = ", ".join(a["name"] for a in resolved_ctx.alternatives)
             context_parts.append(f"Ambiguous repo - matches: {repos}. Ask user which one.")
 
+        # === Add enriched context from HybridToolFilter ===
+        enrichment_parts = []
+        if filter_context:
+            ctx = filter_context.get("context", {})
+
+            # Memory state (active issues, current repo)
+            mem = ctx.get("memory_state", {})
+            if mem.get("current_repo"):
+                enrichment_parts.append(f"Active repo: {mem['current_repo']}")
+            if mem.get("current_branch"):
+                enrichment_parts.append(f"Branch: {mem['current_branch']}")
+            active_issues = mem.get("active_issues", [])
+            if active_issues:
+                issue_keys = [i.get("key", str(i)) for i in active_issues[:3]]
+                enrichment_parts.append(f"Active issues: {', '.join(issue_keys)}")
+
+            # Detected skill
+            skill = ctx.get("skill", {})
+            if skill.get("name"):
+                enrichment_parts.append(f"Detected skill: {skill['name']}")
+                if skill.get("description"):
+                    enrichment_parts.append(f"Skill purpose: {skill['description'][:100]}")
+
+            # Learned patterns (error fixes)
+            patterns = ctx.get("learned_patterns", [])
+            if patterns:
+                pattern_hints = []
+                for p in patterns[:2]:
+                    if p.get("pattern") and p.get("fix"):
+                        pattern_hints.append(f"• {p['pattern'][:50]} → {p['fix'][:50]}")
+                if pattern_hints:
+                    enrichment_parts.append("Known fixes:\n" + "\n".join(pattern_hints))
+
+            # Semantic knowledge (relevant code)
+            semantic = ctx.get("semantic_knowledge", [])
+            if semantic:
+                code_hints = []
+                for s in semantic[:2]:
+                    if s.get("file"):
+                        code_hints.append(f"• {s['file']}: {s.get('content', '')[:80]}...")
+                if code_hints:
+                    enrichment_parts.append("Relevant code:\n" + "\n".join(code_hints))
+
+        # Build final message
+        result_parts = []
         if context_parts:
-            context_text = "Context: " + " | ".join(context_parts)
-            return f"{context_text}\n\nMessage: {message}"
-        return message
+            result_parts.append("Context: " + " | ".join(context_parts))
+        if enrichment_parts:
+            result_parts.append("Enriched Context:\n" + "\n".join(enrichment_parts))
+        result_parts.append(f"Message: {message}")
+
+        return "\n\n".join(result_parts)
 
     async def _execute_tool_loop(self, response, messages, tools):
         """Execute tool calls in a loop until Claude stops requesting tools."""
@@ -1856,12 +1927,45 @@ use tools to get real data. dont guess. for jira issues like AAP-12345 use jira_
             except Exception as e:
                 logger.warning(f"Failed to resolve context: {e}")
 
-        # Build context-enriched message
-        enriched_message = self._build_context_message(message, context, resolved_ctx)
-        messages = history + [{"role": "user", "content": enriched_message}]
+        # Get available tools (with optional NPU-powered filtering)
+        all_tools = self.tool_registry.list_tools()
+        filter_result = None
 
-        # Get available tools
-        tools = self.tool_registry.list_tools()
+        if self.use_tool_filtering and TOOL_FILTER_AVAILABLE:
+            # Detect skill early for better filtering
+            detected_skill = detect_skill(message) if detect_skill else None
+
+            # Get filtered tool names using 4-layer filter
+            # This also returns enriched context (memory, patterns, semantic knowledge)
+            filter_result = filter_tools_detailed(
+                message=message,
+                persona=self.persona,
+                detected_skill=detected_skill,
+            )
+
+            relevant_tool_names = set(filter_result["tools"])
+
+            # Filter tool definitions to only include relevant tools
+            tools = [tool for tool in all_tools if tool["name"] in relevant_tool_names]
+
+            # Check if persona was auto-detected and update
+            if filter_result.get("persona_auto_detected"):
+                logger.info(
+                    f"Auto-detected persona: {filter_result['persona']} "
+                    f"(was {self.persona}) via {filter_result['persona_detection_reason']}"
+                )
+
+            logger.info(
+                f"Tool filtering: {len(all_tools)} → {len(tools)} tools "
+                f"({filter_result['reduction_pct']}% reduction, {filter_result['latency_ms']}ms) "
+                f"via {', '.join(filter_result['methods'])}"
+            )
+        else:
+            tools = all_tools
+
+        # Build context-enriched message (includes memory, patterns, semantic knowledge)
+        enriched_message = self._build_context_message(message, context, resolved_ctx, filter_result)
+        messages = history + [{"role": "user", "content": enriched_message}]
 
         # Call Claude
         response = self.client.messages.create(

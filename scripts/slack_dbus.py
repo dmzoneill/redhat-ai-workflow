@@ -174,12 +174,22 @@ if DBUS_AVAILABLE:
         @dbus_property(access=PropertyAccess.READ)
         def Stats(self) -> "s":
             """JSON stats about the daemon."""
+            # Get listener stats if available (includes polls, errors, etc.)
+            listener_stats = {}
+            if hasattr(self.daemon, 'listener') and self.daemon.listener:
+                listener_stats = getattr(self.daemon.listener, 'stats', {})
+
             stats = {
                 "running": self.daemon.is_running,
                 "uptime": (time.time() - self.daemon.start_time if self.daemon.start_time else 0),
                 "messages_processed": self.daemon.messages_processed,
                 "messages_responded": self.daemon.messages_responded,
                 "pending_approvals": len(self.daemon.history.pending_approvals),
+                # Add listener stats for VSCode extension
+                "polls": listener_stats.get("polls", 0),
+                "errors": listener_stats.get("errors", 0),
+                "consecutive_errors": listener_stats.get("consecutive_errors", 0),
+                "messages_seen": listener_stats.get("messages_seen", 0),
             }
             return json.dumps(stats)
 

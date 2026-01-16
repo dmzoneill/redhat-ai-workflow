@@ -497,11 +497,15 @@ def _get_remediation_hints(error_text: str, tool_name: str) -> list[str]:
 
 
 def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
-    """Create a wrapper that adds debug hints on failure."""
+    """Create a wrapper that adds debug hints on failure and tracks stats."""
 
     # Capture tool_name and original_fn in closure defaults to avoid late binding
     @functools.wraps(original_fn)
     async def wrapper(*args, _orig=original_fn, _name=tool_name, **kwargs):
+        import time
+
+        start_time = time.time()
+        success = True
         try:
             result = await _orig(*args, **kwargs)
 
@@ -511,6 +515,7 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
                 text = first.text if hasattr(first, "text") else str(first)
 
                 if text.startswith("❌"):
+                    success = False
                     error_line = text.split("\n")[0][:80]
 
                     # Get remediation hints
@@ -526,6 +531,7 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
                     logger.warning(f"Tool {_name} failed: {error_line}")
 
             elif isinstance(result, str) and result.startswith("❌"):
+                success = False
                 error_line = result.split("\n")[0][:80]
 
                 # Get remediation hints
@@ -542,6 +548,7 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
             return result
 
         except Exception as e:
+            success = False
             error_msg = str(e)
             logger.exception(f"Tool {_name} crashed")
 
@@ -562,5 +569,15 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
 
 ---
 💡 Auto-fix: `debug_tool('{_name}', '{error_msg[:60]}')`{remediation_text}"""
+
+        finally:
+            # Track tool call in agent stats
+            duration_ms = int((time.time() - start_time) * 1000)
+            try:
+                from tool_modules.aa_workflow.src.agent_stats import record_tool_call
+
+                record_tool_call(_name, success, duration_ms)
+            except Exception:
+                pass  # Don't let stats tracking break tools
 
     return wrapper

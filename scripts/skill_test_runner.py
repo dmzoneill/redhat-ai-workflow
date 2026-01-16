@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -34,6 +35,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from server.utils import run_cmd  # noqa: E402
+from tool_modules.aa_workflow.src.agent_stats import (  # noqa: E402
+    record_memory_read,
+    record_memory_write,
+    record_skill_execution,
+    record_tool_call,
+)
 
 
 @dataclass
@@ -138,21 +145,39 @@ class ToolExecutor:
         if self.dry_run:
             return True, f"DRY RUN: {tool_name}({json.dumps(args)})"
 
-        # Route to appropriate executor
-        if tool_name.startswith("git_"):
-            return await self._exec_git(tool_name, args)
-        elif tool_name.startswith("jira_"):
-            return await self._exec_jira(tool_name, args)
-        elif tool_name.startswith("gitlab_"):
-            return await self._exec_gitlab(tool_name, args)
-        elif tool_name.startswith("bonfire_"):
-            return await self._exec_bonfire(tool_name, args)
-        elif tool_name.startswith("kubectl_") or tool_name.startswith("k8s_"):
-            return await self._exec_k8s(tool_name, args)
-        elif tool_name.startswith("quay_"):
-            return await self._exec_quay(tool_name, args)
-        else:
-            return True, f"SKIPPED (no executor): {tool_name}"
+        # Track execution time
+        start_time = time.time()
+        success = False
+        output = ""
+
+        try:
+            # Route to appropriate executor
+            if tool_name.startswith("git_"):
+                success, output = await self._exec_git(tool_name, args)
+            elif tool_name.startswith("jira_"):
+                success, output = await self._exec_jira(tool_name, args)
+            elif tool_name.startswith("gitlab_"):
+                success, output = await self._exec_gitlab(tool_name, args)
+            elif tool_name.startswith("bonfire_"):
+                success, output = await self._exec_bonfire(tool_name, args)
+            elif tool_name.startswith("kubectl_") or tool_name.startswith("k8s_"):
+                success, output = await self._exec_k8s(tool_name, args)
+            elif tool_name.startswith("quay_"):
+                success, output = await self._exec_quay(tool_name, args)
+            else:
+                return True, f"SKIPPED (no executor): {tool_name}"
+        finally:
+            # Record tool call stats (even for failures)
+            duration_ms = int((time.time() - start_time) * 1000)
+            if not output.startswith("SKIPPED"):
+                record_tool_call(tool_name, success, duration_ms)
+                # Also track memory operations separately
+                if tool_name in ("memory_read", "memory_query"):
+                    record_memory_read(tool_name)
+                elif tool_name in ("memory_write", "memory_update", "memory_append", "memory_session_log"):
+                    record_memory_write(tool_name)
+
+        return success, output
 
     async def _run_cmd(self, cmd: list[str], cwd: str = None, env: dict = None) -> tuple[bool, str]:
         """Run a command using the unified run_cmd from server.utils.
@@ -329,6 +354,7 @@ class SkillRunner:
     async def run_skill(self, skill_name: str, inputs: dict = None) -> SkillResult:
         """Run a skill and return results."""
         result = SkillResult(skill_name=skill_name, success=False)
+        skill_start_time = time.time()
 
         # Check exclusion
         if skill_name in self.exclusions["excluded_skills"]:
@@ -410,6 +436,16 @@ class SkillRunner:
 
         # Skill succeeds if no failures
         result.success = result.steps_failed == 0
+
+        # Record skill execution stats
+        skill_duration_ms = int((time.time() - skill_start_time) * 1000)
+        record_skill_execution(
+            skill_name,
+            result.success,
+            skill_duration_ms,
+            result.steps_passed,
+            result.steps_total,
+        )
 
         return result
 
