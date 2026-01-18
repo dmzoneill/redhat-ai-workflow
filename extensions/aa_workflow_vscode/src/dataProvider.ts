@@ -367,7 +367,7 @@ export class WorkflowDataProvider {
 
     // Parse each list item
     const listContent = match[1];
-    const itemBlocks = listContent.split(/\n\s+-\s+/).filter(Boolean);
+    const itemBlocks = listContent.split(/\n\s*-\s+/).filter(Boolean);
 
     for (const block of itemBlocks) {
       const item: any = {};
