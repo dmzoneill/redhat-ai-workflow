@@ -1203,6 +1203,170 @@ class SkillExecutor:
         result.pop("_temp_server", None)
         return result
 
+    def _detect_auto_heal_type(self, error_msg: str) -> tuple[str | None, str]:
+        """Detect if error is auto-healable and what type.
+
+        Returns:
+            (heal_type, cluster_hint) where heal_type is 'auth', 'network', or None
+        """
+        error_lower = error_msg.lower()
+
+        # Auth patterns that can be fixed with kube_login
+        auth_patterns = [
+            "unauthorized",
+            "401",
+            "forbidden",
+            "403",
+            "token expired",
+            "authentication required",
+            "not authorized",
+            "permission denied",
+            "the server has asked for the client to provide credentials",
+        ]
+
+        # Network patterns that can be fixed with vpn_connect
+        network_patterns = [
+            "no route to host",
+            "connection refused",
+            "network unreachable",
+            "timeout",
+            "dial tcp",
+            "connection reset",
+            "eof",
+            "cannot connect",
+        ]
+
+        # Determine cluster from error context
+        cluster = "stage"  # default
+        if "ephemeral" in error_lower or "bonfire" in error_lower:
+            cluster = "ephemeral"
+        elif "konflux" in error_lower:
+            cluster = "konflux"
+        elif "prod" in error_lower:
+            cluster = "prod"
+
+        if any(p in error_lower for p in auth_patterns):
+            return "auth", cluster
+        if any(p in error_lower for p in network_patterns):
+            return "network", cluster
+
+        return None, cluster
+
+    async def _attempt_auto_heal(
+        self,
+        heal_type: str,
+        cluster: str,
+        tool: str,
+        step: dict,
+        output_lines: list[str],
+    ) -> dict | None:
+        """Attempt to auto-heal and retry the tool.
+
+        Returns:
+            Retry result dict if successful, None if heal failed
+        """
+        try:
+            if heal_type == "auth":
+                output_lines.append(f"   🔧 Auto-healing: running kube_login({cluster})...")
+                self._debug(f"Auto-heal: kube_login({cluster})")
+
+                # Call kube_login tool
+                heal_result = await self._exec_tool("kube_login", {"cluster": cluster})
+                if not heal_result.get("success"):
+                    output_lines.append(f"   ⚠️ kube_login failed: {heal_result.get('error', 'unknown')}")
+                    return None
+                output_lines.append("   ✅ kube_login successful")
+
+            elif heal_type == "network":
+                output_lines.append("   🔧 Auto-healing: running vpn_connect()...")
+                self._debug("Auto-heal: vpn_connect()")
+
+                # Call vpn_connect tool
+                heal_result = await self._exec_tool("vpn_connect", {})
+                if not heal_result.get("success"):
+                    output_lines.append(f"   ⚠️ vpn_connect failed: {heal_result.get('error', 'unknown')}")
+                    return None
+                output_lines.append("   ✅ vpn_connect successful")
+
+            else:
+                return None
+
+            # Retry the original tool
+            output_lines.append(f"   🔄 Retrying {tool}...")
+            raw_args = step.get("args", {})
+            args = self._template_dict(raw_args)
+            retry_result = await self._exec_tool(tool, args)
+
+            return retry_result
+
+        except Exception as e:
+            self._debug(f"Auto-heal failed: {e}")
+            output_lines.append(f"   ⚠️ Auto-heal exception: {e}")
+            return None
+
+    async def _log_auto_heal_to_memory(
+        self,
+        tool: str,
+        heal_type: str,
+        error_snippet: str,
+        success: bool,
+    ) -> None:
+        """Log auto-heal attempt to memory for learning."""
+        try:
+            from datetime import datetime
+
+            import yaml
+
+            # Find memory directory
+            memory_dir = SKILLS_DIR.parent / "memory" / "learned"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+
+            failures_file = memory_dir / "tool_failures.yaml"
+
+            # Load or create
+            if failures_file.exists():
+                with open(failures_file) as f:
+                    data = yaml.safe_load(f) or {}
+            else:
+                data = {"failures": [], "stats": {"total_failures": 0, "auto_fixed": 0, "manual_required": 0}}
+
+            if "failures" not in data:
+                data["failures"] = []
+            if "stats" not in data:
+                data["stats"] = {"total_failures": 0, "auto_fixed": 0, "manual_required": 0}
+
+            # Add entry
+            entry = {
+                "tool": tool,
+                "error_type": heal_type,
+                "error_snippet": error_snippet[:100],
+                "fix_applied": "kube_login" if heal_type == "auth" else "vpn_connect",
+                "success": success,
+                "source": "skill_engine",
+                "timestamp": datetime.now().isoformat(),
+            }
+            data["failures"].append(entry)
+
+            # Update stats
+            data["stats"]["total_failures"] = data["stats"].get("total_failures", 0) + 1
+            if success:
+                data["stats"]["auto_fixed"] = data["stats"].get("auto_fixed", 0) + 1
+            else:
+                data["stats"]["manual_required"] = data["stats"].get("manual_required", 0) + 1
+
+            # Keep only last 100 entries
+            if len(data["failures"]) > 100:
+                data["failures"] = data["failures"][-100:]
+
+            # Write back
+            with open(failures_file, "w") as f:
+                yaml.dump(data, f, default_flow_style=False)
+
+            self._debug(f"Logged auto-heal for {tool} to memory (success={success})")
+
+        except Exception as e:
+            self._debug(f"Failed to log auto-heal to memory: {e}")
+
     async def _handle_tool_error(
         self,
         tool: str,
@@ -1222,6 +1386,67 @@ class SkillExecutor:
         pattern_hint = self._check_error_patterns(error_msg)
         if pattern_hint:
             output_lines.append(pattern_hint)
+
+        on_error = step.get("on_error", "fail")
+
+        # Handle auto_heal mode - try to fix and retry before giving up
+        if on_error == "auto_heal":
+            heal_type, cluster = self._detect_auto_heal_type(error_msg)
+
+            if heal_type:
+                output_lines.append(f"   🩹 Detected {heal_type} error, attempting auto-heal...")
+
+                retry_result = await self._attempt_auto_heal(heal_type, cluster, tool, step, output_lines)
+
+                if retry_result and retry_result.get("success"):
+                    # Auto-heal worked! Store result and continue
+                    output_lines.append("   ✅ Auto-heal successful!")
+                    output_name = step.get("output", step_name)
+                    self.context[output_name] = retry_result["result"]
+                    self._parse_and_store_tool_result(retry_result["result"], output_name)
+
+                    # Log success to memory
+                    await self._log_auto_heal_to_memory(tool, heal_type, error_msg[:100], success=True)
+
+                    self.step_results.append(
+                        {
+                            "step": step_name,
+                            "tool": tool,
+                            "success": True,
+                            "auto_healed": True,
+                            "heal_type": heal_type,
+                        }
+                    )
+                    return True
+                else:
+                    # Auto-heal failed, log and continue
+                    output_lines.append("   ⚠️ Auto-heal failed, continuing anyway...")
+                    await self._log_auto_heal_to_memory(tool, heal_type, error_msg[:100], success=False)
+            else:
+                output_lines.append("   ℹ️ Error not auto-healable, continuing...")
+
+            # Fall through to continue behavior
+            output_lines.append("   *Continuing despite error (on_error: auto_heal)*\n")
+
+            # Layer 5: Learn from this error
+            tool_params = {}
+            if "args" in step:
+                args_data = step["args"]
+                if isinstance(args_data, dict):
+                    tool_params = {k: self._template(str(v)) for k, v in args_data.items()}
+
+            await self._learn_from_error(tool_name=tool, params=tool_params, error_msg=error_msg)
+
+            self.step_results.append(
+                {
+                    "step": step_name,
+                    "tool": tool,
+                    "success": False,
+                    "error": error_msg,
+                    "auto_heal_attempted": heal_type is not None,
+                }
+            )
+            return True
 
         if self.create_issue_fn:
             skill_name = self.skill.get("name", "unknown")
@@ -1243,7 +1468,6 @@ class SkillExecutor:
             except Exception as e:
                 self._debug(f"Failed to create issue: {e}")
 
-        on_error = step.get("on_error", "fail")
         if on_error == "continue":
             output_lines.append("   *Continuing despite error (on_error: continue)*\n")
 
