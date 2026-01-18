@@ -185,7 +185,7 @@ steps:
       project: "{{ ctx.project }}"
       mr_id: "{{ ctx.mr_id }}"
     output: mr_result
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_mr_result
     description: "Parse MR details from glab output"
@@ -230,7 +230,7 @@ steps:
     args:
       issue_key: "{{ mr.issue_key }}"
     output: jira_result
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: parse_jira_result
     description: "Parse Jira issue summary"
@@ -312,6 +312,37 @@ steps:
     args:
       text: "{{ notification.message }}"
     output: slack_result
+    on_error: auto_heal  # Slack API - may need auth refresh
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_mr_code
+    description: "Search for code related to the MR being notified"
+    condition: "notification and notification.mr_id"
+    tool: code_search
+    args:
+      query: "GitLab MR !{{ notification.mr_id }} {{ mr.title or '' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: mr_code_raw
+    on_error: continue
+
+  - name: parse_mr_code
+    description: "Parse MR code search results"
+    condition: "mr_code_raw"
+    compute: |
+      code_result = mr_code_raw if mr_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: mr_code_search
     on_error: continue
 
   # ==================== MEMORY INTEGRATION ====================
@@ -322,6 +353,64 @@ steps:
     args:
       action: "Notified team about MR !{{ notification.mr_id }}"
       details: "{{ 'Reminder' if inputs.reminder else 'New notification' }}, Jira: {{ notification.issue_key }}"
+    on_error: continue
+
+  - name: track_mr_notifications
+    description: "Track MR notifications for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "mr_notifications" not in patterns:
+          patterns["mr_notifications"] = []
+
+      # Record this notification
+      notification_record = {
+          "mr_id": notification.mr_id if notification else "unknown",
+          "project": ctx.project if ctx else "unknown",
+          "issue_key": notification.issue_key if notification else None,
+          "is_reminder": inputs.reminder,
+          "slack_posted": bool(slack_result) if 'slack_result' in dir() else False,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["mr_notifications"].append(notification_record)
+
+      # Keep last 100 notifications
+      patterns["mr_notifications"] = patterns["mr_notifications"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "notification tracked"
+    output: notification_tracking_result
+    on_error: continue
+
+  - name: track_reminder_frequency
+    description: "Track MRs that need frequent reminders"
+    condition: "inputs.reminder"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "mr_reminder_frequency" not in patterns:
+          patterns["mr_reminder_frequency"] = {}
+
+      mr_key = f"{ctx.project}!{notification.mr_id}" if ctx and notification else "unknown"
+
+      if mr_key not in patterns["mr_reminder_frequency"]:
+          patterns["mr_reminder_frequency"][mr_key] = {
+              "count": 0,
+              "first_reminder": datetime.now().isoformat(),
+              "last_reminder": datetime.now().isoformat(),
+          }
+
+      patterns["mr_reminder_frequency"][mr_key]["count"] += 1
+      patterns["mr_reminder_frequency"][mr_key]["last_reminder"] = datetime.now().isoformat()
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "reminder frequency tracked"
+    output: reminder_tracking_result
     on_error: continue
 
 outputs:

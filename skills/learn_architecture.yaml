@@ -391,6 +391,7 @@ steps:
       section: "architecture.key_modules"
       content: "{{ modules_list | tojson }}"
       append: false
+    on_error: continue
 
   - name: update_dependencies
     tool: knowledge_update
@@ -400,6 +401,71 @@ steps:
       section: "architecture.dependencies"
       content: "{{ dependencies | tojson }}"
       append: false
+    on_error: continue
+
+  - name: track_architecture_learning
+    description: "Track architecture learning history"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "architecture_learning" not in patterns:
+          patterns["architecture_learning"] = []
+
+      # Record this learning
+      learning_record = {
+          "project": project if 'project' in dir() else "unknown",
+          "persona": persona if 'persona' in dir() else "developer",
+          "focus": inputs.get("focus", ""),
+          "modules_found": len(modules_list) if modules_list else 0,
+          "dependencies_found": len(dependencies) if dependencies else 0,
+          "api_patterns_found": len(api_patterns.get("patterns", [])) if api_patterns else 0,
+          "model_patterns_found": len(model_patterns.get("patterns", [])) if model_patterns else 0,
+          "error_patterns_found": len(error_patterns.get("patterns", [])) if error_patterns else 0,
+          "test_patterns_found": len(test_patterns.get("patterns", [])) if test_patterns else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["architecture_learning"].append(learning_record)
+
+      # Keep last 50 learning records
+      patterns["architecture_learning"] = patterns["architecture_learning"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "architecture learning tracked"
+    output: architecture_tracking_result
+    on_error: continue
+
+  - name: update_project_architecture_state
+    description: "Update project architecture state in memory"
+    compute: |
+      from datetime import datetime
+
+      # Update project architecture state
+      state_data = memory.read_memory("state/architecture") or {}
+      if "projects" not in state_data:
+          state_data["projects"] = {}
+
+      project_key = project if 'project' in dir() else "unknown"
+      state_data["projects"][project_key] = {
+          "last_scan": datetime.now().isoformat(),
+          "modules_count": len(modules_list) if modules_list else 0,
+          "dependencies_count": len(dependencies) if dependencies else 0,
+          "key_modules": [m.get("path") for m in modules_list[:10]] if modules_list else [],
+          "top_dependencies": dependencies[:10] if dependencies else [],
+          "patterns_discovered": {
+              "api": api_patterns.get("found", False) if api_patterns else False,
+              "models": model_patterns.get("found", False) if model_patterns else False,
+              "errors": error_patterns.get("found", False) if error_patterns else False,
+              "tests": test_patterns.get("found", False) if test_patterns else False,
+          },
+      }
+
+      memory.write_memory("state/architecture", state_data)
+      result = "project architecture state updated"
+    output: architecture_state_result
+    on_error: continue
 
   - name: build_result
     compute: |

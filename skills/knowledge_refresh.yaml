@@ -318,3 +318,61 @@ steps:
       action: "Knowledge refresh for {{ project }}"
       details: "Files: {{ stats_after.files }}, Chunks: {{ stats_after.chunks }}"
     on_error: continue
+
+  - name: track_knowledge_refreshes
+    description: "Track knowledge refreshes for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "knowledge_refreshes" not in patterns:
+          patterns["knowledge_refreshes"] = []
+
+      # Record this refresh
+      refresh_record = {
+          "project": project if 'project' in dir() else "unknown",
+          "full_rescan": inputs.get("full_rescan", False),
+          "files_before": stats_before.get("files", 0) if stats_before else 0,
+          "files_after": stats_after.get("files", 0) if stats_after else 0,
+          "chunks_before": stats_before.get("chunks", 0) if stats_before else 0,
+          "chunks_after": stats_after.get("chunks", 0) if stats_after else 0,
+          "index_success": index_update.get("success", False) if index_update else False,
+          "watcher_status": watcher_info.get("status", "unknown") if watcher_info else "unknown",
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["knowledge_refreshes"].append(refresh_record)
+
+      # Keep last 100 refreshes
+      patterns["knowledge_refreshes"] = patterns["knowledge_refreshes"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "refresh tracked"
+    output: refresh_tracking_result
+    on_error: continue
+
+  - name: update_project_knowledge_state
+    description: "Update project knowledge state in memory"
+    compute: |
+      from datetime import datetime
+
+      # Update project knowledge state
+      state_data = memory.read_memory("state/knowledge") or {}
+      if "projects" not in state_data:
+          state_data["projects"] = {}
+
+      project_key = project if 'project' in dir() else "unknown"
+      state_data["projects"][project_key] = {
+          "last_refresh": datetime.now().isoformat(),
+          "files_indexed": stats_after.get("files", 0) if stats_after else 0,
+          "chunks_indexed": stats_after.get("chunks", 0) if stats_after else 0,
+          "total_searches": stats_after.get("searches", 0) if stats_after else 0,
+          "watcher_status": watcher_info.get("status", "unknown") if watcher_info else "unknown",
+          "index_healthy": index_update.get("success", False) if index_update else False,
+      }
+
+      memory.write_memory("state/knowledge", state_data)
+      result = "project knowledge state updated"
+    output: knowledge_state_result
+    on_error: continue

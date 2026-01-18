@@ -370,3 +370,72 @@ steps:
       action: "Explained code in {{ inputs.file }}"
       details: "Project: {{ project }}, Lines: {{ inputs.lines | default('all') }}"
     on_error: continue
+
+  - name: track_code_explanations
+    description: "Track code explanations for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "code_explanations" not in patterns:
+          patterns["code_explanations"] = []
+
+      # Record this explanation
+      explanation_record = {
+          "file": inputs.file,
+          "project": project if 'project' in dir() else "unknown",
+          "lines": inputs.get("lines"),
+          "depth": inputs.get("depth", "normal"),
+          "related_code_found": len(related_code) if related_code else 0,
+          "gotchas_found": len(relevant_gotchas) if relevant_gotchas else 0,
+          "patterns_found": len(coding_patterns) if coding_patterns else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["code_explanations"].append(explanation_record)
+
+      # Keep last 100 explanations
+      patterns["code_explanations"] = patterns["code_explanations"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "explanation tracked"
+    output: explanation_tracking_result
+    on_error: continue
+
+  - name: track_frequently_explained_files
+    description: "Track files that are frequently explained"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "frequently_explained_files" not in patterns:
+          patterns["frequently_explained_files"] = []
+
+      # Track this file
+      existing = [f for f in patterns["frequently_explained_files"] if f.get("file") == inputs.file]
+
+      if existing:
+          existing[0]["explain_count"] = existing[0].get("explain_count", 1) + 1
+          existing[0]["last_explained"] = datetime.now().isoformat()
+      else:
+          patterns["frequently_explained_files"].append({
+              "file": inputs.file,
+              "project": project if 'project' in dir() else "unknown",
+              "explain_count": 1,
+              "first_explained": datetime.now().isoformat(),
+              "last_explained": datetime.now().isoformat(),
+          })
+
+      # Keep top 50 by explain count
+      patterns["frequently_explained_files"] = sorted(
+          patterns["frequently_explained_files"],
+          key=lambda x: x.get("explain_count", 0),
+          reverse=True
+      )[:50]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "frequently explained file tracked"
+    output: file_tracking_result
+    on_error: continue

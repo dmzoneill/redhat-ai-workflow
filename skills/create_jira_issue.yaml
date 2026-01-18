@@ -320,7 +320,7 @@ steps:
       issue_key: "{{ create_status.issue_key }}"
       assignee: "{{ inputs.assignee or 'currentUser' }}"
     output: assign_result
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # ==================== LINK ISSUES ====================
 
@@ -373,7 +373,7 @@ steps:
       issue_key: "{{ create_status.issue_key }}"
       transition: "Start Progress"
     output: transition_result
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # ==================== GET FINAL STATE ====================
 
@@ -384,7 +384,7 @@ steps:
     args:
       issue_key: "{{ create_status.issue_key }}"
     output: issue_details
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # ==================== MEMORY ====================
 
@@ -395,6 +395,54 @@ steps:
     args:
       action: "Created Jira issue {{ create_status.issue_key }}"
       details: "{{ inputs.summary[:50] }}{% if inputs.link_to %}, linked to {{ inputs.link_to }}{% endif %}"
+    on_error: continue
+
+  - name: track_issue_creations
+    description: "Track issue creations for patterns"
+    condition: "create_status and create_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "issue_creations" not in patterns:
+          patterns["issue_creations"] = []
+
+      # Record this creation
+      creation_record = {
+          "issue_key": create_status.issue_key if create_status else None,
+          "project": inputs.project,
+          "issue_type": inputs.issue_type,
+          "priority": inputs.priority,
+          "linked_to": inputs.link_to if inputs.link_to else None,
+          "code_context_added": enhanced_description.was_enhanced if enhanced_description else False,
+          "files_referenced": enhanced_description.files_added if enhanced_description else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["issue_creations"].append(creation_record)
+
+      # Keep last 100 creations
+      patterns["issue_creations"] = patterns["issue_creations"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "creation tracked"
+    output: creation_tracking_result
+    on_error: continue
+
+  - name: add_to_active_issues
+    description: "Add created issue to active issues"
+    condition: "create_status and create_status.success"
+    tool: memory_append
+    args:
+      key: "state/current_work"
+      list_path: "active_issues"
+      item: |
+        key: {{ create_status.issue_key }}
+        status: {{ "In Progress" if inputs.start_progress else "New" }}
+        type: {{ inputs.issue_type }}
+        summary: {{ inputs.summary[:60] }}
+        created: {{ now().isoformat() }}
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

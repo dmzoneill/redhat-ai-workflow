@@ -182,7 +182,7 @@ steps:
       namespace: "{{ target.namespace }}"
       environment: "{{ target.environment }}"
     output: pods_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: get_resource_usage
     description: "Get CPU/memory usage for pods"
@@ -321,7 +321,7 @@ steps:
       environment: "{{ target.environment }}"
       field_selector: "type=Warning"
     output: events_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: parse_events
     description: "Parse events"
@@ -347,7 +347,7 @@ steps:
       namespace: "{{ target.namespace }}"
       limit: 10
     output: kibana_errors_raw
-    on_error: continue
+    on_error: auto_heal  # Kibana - may need auth
 
   - name: parse_kibana_errors
     description: "Parse Kibana error results"

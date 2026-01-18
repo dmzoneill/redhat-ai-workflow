@@ -197,6 +197,36 @@ error_patterns:
     category: selector
 
 steps:
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_expense_code
+    description: "Search for code related to expense submission"
+    tool: code_search
+    args:
+      query: "expense submission Concur GOMO {{ inputs.month or 'monthly' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: expense_code_raw
+    on_error: continue
+
+  - name: parse_expense_code
+    description: "Parse expense code search results"
+    condition: "expense_code_raw"
+    compute: |
+      code_result = expense_code_raw if expense_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: expense_code_search
+    on_error: continue
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_expense_patterns
@@ -272,7 +302,7 @@ steps:
     tool: concur_workflow_status
     args: {}
     output: workflow_status
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_workflow_status
     description: "Parse workflow status to determine next steps"
@@ -308,6 +338,7 @@ steps:
     args:
       month: "{{ inputs.month }}"
     output: expense_params
+    on_error: auto_heal
 
   - name: parse_expense_params
     description: "Extract expense parameters"
@@ -352,7 +383,7 @@ steps:
     args:
       month: "{{ inputs.month }}"
     output: receipt_status
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_receipt_status
     description: "Parse receipt status"
@@ -408,7 +439,7 @@ steps:
       skip_concur: true
       headless: "{{ inputs.headless }}"
     output: download_result
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_download_result
     description: "Parse download result and update receipt status"
@@ -442,7 +473,7 @@ steps:
     args:
       month: "{{ inputs.month }}"
     output: receipt_status_after
-    on_error: continue
+    on_error: auto_heal
 
   - name: update_receipt_status
     description: "Update receipt status after download"
@@ -585,7 +616,7 @@ steps:
     args:
       headless: "{{ inputs.headless }}"
     output: automation_result
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_automation_result
     description: "Parse automation result and check for errors"

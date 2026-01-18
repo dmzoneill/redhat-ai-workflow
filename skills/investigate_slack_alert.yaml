@@ -215,7 +215,7 @@ steps:
       namespace: "{{ alert_info.namespace }}"
       environment: "{{ cfg.environment }}"
     output: pod_status
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: analyze_pod_status
     description: "Identify unhealthy pods using shared parser"
@@ -279,7 +279,7 @@ steps:
       tail: 50
       environment: "{{ cfg.environment }}"
     output: recent_logs
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: extract_error_patterns
     description: "Extract error patterns from logs using shared parser"
@@ -358,7 +358,7 @@ steps:
       jql: "project = AAP AND summary ~ '{{ alert_info.alert_name }}' AND status NOT IN (Done, Closed) ORDER BY created DESC"
       max_results: 5
     output: existing_issues
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: search_billing_issues
     description: "Search for billing event issues if this is a billing alert"
@@ -368,7 +368,7 @@ steps:
       jql: "project = AAP AND summary ~ 'BillingEvent' ORDER BY created DESC"
       max_results: 10
     output: billing_issues
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: analyze_existing_issues
     description: "Determine if we have a matching issue or need to create one using shared parsers"

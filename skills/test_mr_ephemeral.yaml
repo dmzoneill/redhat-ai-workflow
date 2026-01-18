@@ -186,7 +186,7 @@ steps:
       project: "{{ cfg.gitlab_project }}"
       mr_id: "{{ inputs.mr_id }}"
     output: mr_sha_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Step 1b: Parse SHA from gitlab_mr_sha output
   - name: parse_mr_sha
@@ -229,7 +229,7 @@ steps:
       project: "{{ cfg.gitlab_project }}"
       mr_id: "{{ inputs.mr_id }}"
     output: gitlab_ci_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_gitlab_ci
     description: "Parse GitLab CI status"
@@ -331,7 +331,7 @@ steps:
     args:
       issue_key: "{{ commit_info.jira_key }}"
     output: jira_issue
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # Step 3c: Analyze Jira issue for billing signals
   - name: analyze_jira_billing
@@ -470,7 +470,7 @@ steps:
       tag: "{{ commit_sha }}"
       namespace: "{{ cfg.quay_pr_namespace }}"
     output: quay_result
-    on_error: continue
+    on_error: auto_heal  # Quay API - may need auth/network
 
   # Step 5: If image not found, check Konflux build status
   - name: check_konflux_build
@@ -491,7 +491,7 @@ steps:
       namespace: "{{ cfg.konflux_namespace }}"
       limit: 20
     output: tekton_pipelines_raw
-    on_error: continue
+    on_error: auto_heal  # Konflux cluster - may need kube_login
 
   - name: list_snapshots
     description: "List recent snapshots to find deployment candidate"
@@ -500,7 +500,7 @@ steps:
     args:
       namespace: "{{ cfg.konflux_namespace }}"
     output: snapshots_raw
-    on_error: continue
+    on_error: auto_heal  # Konflux cluster - may need kube_login
 
   - name: get_snapshot_for_sha
     description: "Get snapshot details for this commit"
@@ -510,7 +510,7 @@ steps:
       name: "{{ git_sha[:8] }}"
       namespace: "{{ cfg.konflux_namespace }}"
     output: snapshot_details_raw
-    on_error: continue
+    on_error: auto_heal  # Konflux cluster - may need kube_login
 
   - name: find_commit_pipeline
     description: "Find pipeline run for this specific commit"
@@ -558,7 +558,7 @@ steps:
       run_name: "{{ commit_pipeline.pipeline_name }}"
       namespace: "{{ cfg.konflux_namespace }}"
     output: pipeline_describe_raw
-    on_error: continue
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
   - name: parse_pipeline_details
     description: "Extract detailed pipeline information"
@@ -599,7 +599,7 @@ steps:
       follow: false
       all_tasks: true
     output: tekton_logs_raw
-    on_error: continue
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
   # Step 5c: Get build logs if pipeline failed
   - name: get_failed_build_logs
@@ -611,7 +611,7 @@ steps:
       namespace: "{{ cfg.konflux_namespace }}"
       tail: 100
     output: build_logs_raw
-    on_error: continue
+    on_error: auto_heal  # Konflux cluster - may need kube_login
 
   - name: parse_build_failure
     description: "Parse build failure details from Konflux and Tekton logs"
@@ -708,7 +708,7 @@ steps:
       timeout: 600
       force: true
     output: namespace_result
-    on_error: continue
+    on_error: auto_heal  # CRITICAL: Ephemeral cluster - needs kube_login(ephemeral)
 
   # Step 8: Extract namespace name
   - name: get_namespace_name
@@ -747,7 +747,7 @@ steps:
       namespace: "{{ namespace_name }}"
       timeout: 300
     output: wait_result
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
   # Step 10b: Get deployment events for diagnostics
   - name: get_deployment_events
@@ -758,7 +758,7 @@ steps:
       namespace: "{{ namespace_name }}"
       environment: "ephemeral"
     output: deploy_events_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
   - name: parse_deploy_events
     description: "Parse deployment events for issues"
@@ -799,7 +799,7 @@ steps:
       environment: "ephemeral"
       decode: true
     output: db_host_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - DB secrets
 
   - name: get_db_port
     description: "Get DB port from secret"
@@ -812,7 +812,7 @@ steps:
       environment: "ephemeral"
       decode: true
     output: db_port_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - DB secrets
 
   - name: get_db_user
     description: "Get DB user from secret"
@@ -825,7 +825,7 @@ steps:
       environment: "ephemeral"
       decode: true
     output: db_user_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - DB secrets
 
   - name: get_db_password
     description: "Get DB password from secret"
@@ -838,7 +838,7 @@ steps:
       environment: "ephemeral"
       decode: true
     output: db_password_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - DB secrets
 
   - name: get_db_name
     description: "Get DB name from secret"
@@ -851,7 +851,7 @@ steps:
       environment: "ephemeral"
       decode: true
     output: db_name_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - DB secrets
 
   - name: build_db_credentials
     description: "Build DB credentials object from secret values"
@@ -890,7 +890,7 @@ steps:
       namespace: "{{ namespace_name }}"
       environment: "ephemeral"
     output: pod_status
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - pod status
 
   - name: identify_failing_pods
     description: "Identify any failing pods for detailed diagnosis"
@@ -925,7 +925,7 @@ steps:
       namespace: "{{ namespace_name }}"
       environment: "ephemeral"
     output: failing_pod_description
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - pod details
 
   - name: parse_pod_issue
     description: "Parse pod description for issue details"
@@ -968,7 +968,7 @@ steps:
       namespace: "{{ namespace_name }}"
       environment: "ephemeral"
     output: all_pods_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - pod list for tests
 
   - name: find_fastapi_pod
     description: "Find the FastAPI pod from pod listing"

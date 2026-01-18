@@ -67,7 +67,7 @@ steps:
     args:
       issue_key: "{{ inputs.issue_key }}"
     output: source_raw
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: parse_source
     description: "Parse source issue"
@@ -142,13 +142,92 @@ steps:
     args:
       issue_key: "{{ clone_result.new_key }}"
     output: assign_raw
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: log_clone
     description: "Log clone action"
     tool: memory_session_log
     args:
       action: "Cloned {{ inputs.issue_key }} to {{ clone_result.new_key if clone_result else 'failed' }}"
+    on_error: continue
+
+  - name: track_clones
+    description: "Track issue clones for patterns"
+    condition: "clone_result and clone_result.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "issue_clones" not in patterns:
+          patterns["issue_clones"] = []
+
+      # Record this clone
+      clone_record = {
+          "source_key": inputs.issue_key,
+          "new_key": clone_result.new_key if clone_result else None,
+          "source_type": source_info.type if source_info else "unknown",
+          "link_type": inputs.link_type,
+          "assigned": inputs.assign_to_me,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["issue_clones"].append(clone_record)
+
+      # Keep last 50 clones
+      patterns["issue_clones"] = patterns["issue_clones"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "clone tracked"
+    output: clone_tracking_result
+    on_error: continue
+
+  - name: add_to_active_issues
+    description: "Add cloned issue to active issues"
+    condition: "clone_result and clone_result.success"
+    tool: memory_append
+    args:
+      key: "state/current_work"
+      list_path: "active_issues"
+      item: |
+        key: {{ clone_result.new_key }}
+        status: New
+        cloned_from: {{ inputs.issue_key }}
+        created: {{ now().isoformat() }}
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_related_code
+    description: "Search for code related to the source issue"
+    condition: "source_info.exists"
+    tool: code_search
+    args:
+      query: "{{ inputs.issue_key }} {{ source_info.summary[:50] if source_info else '' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: clone_code_raw
+    on_error: continue
+
+  - name: parse_clone_code
+    description: "Parse clone code search results"
+    condition: "clone_code_raw"
+    compute: |
+      code_result = clone_code_raw if clone_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:3]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+      }
+    output: clone_code_analysis
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

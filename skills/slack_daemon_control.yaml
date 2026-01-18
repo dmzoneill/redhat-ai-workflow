@@ -95,6 +95,36 @@ inputs:
     default: false
 
 steps:
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_daemon_code
+    description: "Search for code related to Slack daemon"
+    tool: code_search
+    args:
+      query: "Slack daemon control D-Bus IPC {{ inputs.action }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: daemon_code_raw
+    on_error: continue
+
+  - name: parse_daemon_code
+    description: "Parse daemon code search results"
+    condition: "daemon_code_raw"
+    compute: |
+      code_result = daemon_code_raw if daemon_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: daemon_code_search
+    on_error: continue
+
   - name: validate_action
     description: "Validate the action and required parameters"
     compute: |
@@ -249,6 +279,40 @@ steps:
       else:
         result = {"success": False, "error": f"Unknown action: {action}"}
     output: action_result
+
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: log_daemon_action
+    description: "Log daemon action to session"
+    tool: memory_session_log
+    args:
+      action: "Slack daemon {{ inputs.action }}"
+      details: "Success: {{ action_result.success }}, {{ action_result.output[:100] if action_result.output else '' }}"
+    on_error: continue
+
+  - name: track_daemon_state
+    description: "Track daemon state in memory"
+    condition: "inputs.action in ['start', 'stop', 'status']"
+    compute: |
+      from datetime import datetime
+
+      # Update daemon state
+      state = memory.read_memory("state/slack_daemon") or {}
+
+      if inputs.action == "start" and action_result.success:
+          state["status"] = "running"
+          state["pid"] = action_result.get("pid")
+          state["started_at"] = datetime.now().isoformat()
+      elif inputs.action == "stop" and action_result.success:
+          state["status"] = "stopped"
+          state["stopped_at"] = datetime.now().isoformat()
+      elif inputs.action == "status":
+          state["last_checked"] = datetime.now().isoformat()
+
+      memory.write_memory("state/slack_daemon", state)
+      result = "daemon state tracked"
+    output: daemon_state_result
+    on_error: continue
 
 outputs:
   - name: success

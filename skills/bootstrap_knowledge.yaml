@@ -392,3 +392,58 @@ steps:
       action: "Bootstrapped knowledge for {{ project }}"
       details: "Personas: {{ ', '.join(personas_list) }}, Vector index: {{ vector_info.created if vector_info else 'not created' }}"
     on_error: continue
+
+  - name: track_bootstrap_history
+    description: "Track knowledge bootstrap history"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "knowledge_bootstraps" not in patterns:
+          patterns["knowledge_bootstraps"] = []
+
+      # Record this bootstrap
+      bootstrap_record = {
+          "project": project if 'project' in dir() else "unknown",
+          "personas": personas_list if 'personas_list' in dir() else [],
+          "vector_index_created": vector_info.created if vector_info else False,
+          "files_indexed": vector_info.get("files", 0) if vector_info else 0,
+          "chunks_created": vector_info.get("chunks", 0) if vector_info else 0,
+          "deep_scan": inputs.get("deep_scan", False),
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["knowledge_bootstraps"].append(bootstrap_record)
+
+      # Keep last 50 bootstraps
+      patterns["knowledge_bootstraps"] = patterns["knowledge_bootstraps"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "bootstrap tracked"
+    output: bootstrap_tracking_result
+    on_error: continue
+
+  - name: update_project_knowledge_state
+    description: "Update project knowledge state"
+    compute: |
+      from datetime import datetime
+
+      # Update project knowledge state
+      state = memory.read_memory("state/knowledge") or {}
+      if "projects" not in state:
+          state["projects"] = {}
+
+      project_name = project if 'project' in dir() else "unknown"
+      state["projects"][project_name] = {
+          "last_bootstrap": datetime.now().isoformat(),
+          "personas": personas_list if 'personas_list' in dir() else [],
+          "vector_indexed": vector_info.created if vector_info else False,
+          "files_indexed": vector_info.get("files", 0) if vector_info else 0,
+          "watcher_running": watcher_result is not None if 'watcher_result' in dir() else False,
+      }
+
+      memory.write_memory("state/knowledge", state)
+      result = "knowledge state updated"
+    output: knowledge_state_result
+    on_error: continue

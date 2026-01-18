@@ -94,7 +94,7 @@ steps:
     args:
       project: "{{ gitlab }}"
       state: "opened"
-    continue_on_error: true
+    on_error: auto_heal
     outputs:
       - gitlab_check
 
@@ -103,7 +103,7 @@ steps:
     tool: jira_list_issues
     args:
       project: "{{ jira_project }}"
-    continue_on_error: true
+    on_error: auto_heal
     outputs:
       - jira_check
 
@@ -153,7 +153,7 @@ steps:
     args:
       project: "{{ name | default(detected_name) }}"
       persona: "developer"
-    continue_on_error: true
+    on_error: continue
     outputs:
       - knowledge_result
 
@@ -163,7 +163,7 @@ steps:
     tool: code_index
     args:
       project: "{{ name | default(detected_name) }}"
-    continue_on_error: true
+    on_error: continue
     outputs:
       - index_result
 
@@ -174,7 +174,7 @@ steps:
     args:
       project: "{{ name | default(detected_name) }}"
       action: "start"
-    continue_on_error: true
+    on_error: continue
     outputs:
       - watcher_result
 
@@ -258,6 +258,50 @@ steps:
     args:
       action: "Added project {{ name | default(detected_name) }}"
       details: "Path: {{ path }}, GitLab: {{ gitlab }}, Jira: {{ jira_project }}"
+    on_error: continue
+
+  - name: track_project_additions
+    description: "Track project additions in memory"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "project_additions" not in patterns:
+          patterns["project_additions"] = []
+
+      # Record this addition
+      addition_record = {
+          "name": name if 'name' in dir() and name else detected_name if 'detected_name' in dir() else "unknown",
+          "path": path if 'path' in dir() else inputs.get("path", "unknown"),
+          "gitlab": gitlab if 'gitlab' in dir() else inputs.get("gitlab", ""),
+          "jira_project": jira_project if 'jira_project' in dir() else inputs.get("jira_project", ""),
+          "knowledge_generated": inputs.get("generate_knowledge", True),
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["project_additions"].append(addition_record)
+
+      # Keep last 50 additions
+      patterns["project_additions"] = patterns["project_additions"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "project addition tracked"
+    output: project_tracking_result
+    on_error: continue
+
+  - name: update_projects_state
+    description: "Update projects state in memory"
+    tool: memory_append
+    args:
+      key: "state/projects"
+      list_path: "configured_projects"
+      item: |
+        name: {{ name | default(detected_name) }}
+        path: {{ path }}
+        gitlab: {{ gitlab }}
+        jira_project: {{ jira_project }}
+        added: {{ now().isoformat() }}
     on_error: continue
 
 outputs:

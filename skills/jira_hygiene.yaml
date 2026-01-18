@@ -406,7 +406,7 @@ steps:
       issue_key: "{{ inputs.issue_key }}"
       status: "Refinement"
     output: status_result
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # Apply priority fix
   - name: apply_priority_fix
@@ -532,6 +532,36 @@ steps:
       result = '\n'.join(lines)
     output: report
 
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_related_code
+    description: "Search for code related to this Jira issue"
+    tool: code_search
+    args:
+      query: "Jira issue {{ inputs.issue_key }} code changes implementation"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: related_code_raw
+    on_error: continue
+
+  - name: parse_related_code
+    description: "Parse related code search results"
+    condition: "related_code_raw"
+    compute: |
+      code_result = related_code_raw if related_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: related_code_search
+    on_error: continue
+
   # ==================== MEMORY INTEGRATION ====================
 
   - name: log_hygiene_check
@@ -540,6 +570,76 @@ steps:
     args:
       action: "Hygiene check on {{ inputs.issue_key }}"
       details: "{{ 'Healthy' if validation.is_healthy else validation.issues|length|string + ' issues found' }}"
+    on_error: continue
+
+  - name: track_hygiene_checks
+    description: "Track hygiene checks for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "hygiene_checks" not in patterns:
+          patterns["hygiene_checks"] = []
+
+      # Record this check
+      check_record = {
+          "issue_key": inputs.issue_key,
+          "health_score": validation.get("health_score", 0),
+          "is_healthy": validation.get("is_healthy", False),
+          "issues_count": len(validation.get("issues", [])),
+          "needs_input_count": len(validation.get("needs_input", [])),
+          "transition_ready": validation.get("transition_ready", False),
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["hygiene_checks"].append(check_record)
+
+      # Keep last 100 checks
+      patterns["hygiene_checks"] = patterns["hygiene_checks"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "hygiene check tracked"
+    output: hygiene_tracking_result
+    on_error: continue
+
+  - name: track_common_hygiene_issues
+    description: "Track common hygiene issues for insights"
+    condition: "validation and validation.issues"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "common_hygiene_issues" not in patterns:
+          patterns["common_hygiene_issues"] = {}
+
+      # Track each issue type
+      for issue in validation.get("issues", []):
+          # Normalize issue for tracking
+          issue_type = issue.split(":")[0] if ":" in issue else issue[:50]
+          issue_type = issue_type.replace("❌", "").replace("⚠️", "").strip()
+
+          if issue_type not in patterns["common_hygiene_issues"]:
+              patterns["common_hygiene_issues"][issue_type] = {
+                  "count": 0,
+                  "first_seen": datetime.now().isoformat(),
+                  "last_seen": datetime.now().isoformat(),
+                  "example_issues": [],
+              }
+
+          patterns["common_hygiene_issues"][issue_type]["count"] += 1
+          patterns["common_hygiene_issues"][issue_type]["last_seen"] = datetime.now().isoformat()
+
+          # Track example issues
+          if inputs.issue_key not in patterns["common_hygiene_issues"][issue_type]["example_issues"]:
+              patterns["common_hygiene_issues"][issue_type]["example_issues"].append(inputs.issue_key)
+              patterns["common_hygiene_issues"][issue_type]["example_issues"] = \
+                  patterns["common_hygiene_issues"][issue_type]["example_issues"][-10:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "common hygiene issues tracked"
+    output: common_issues_tracking_result
     on_error: continue
 
   - name: create_followup_if_needed

@@ -18,6 +18,52 @@ version: "1.0"
 inputs: []
 
 steps:
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_pattern_code
+    description: "Search for code related to error patterns"
+    tool: code_search
+    args:
+      query: "error pattern detection tool failure auto-heal"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: pattern_code_raw
+    on_error: continue
+
+  - name: parse_pattern_code
+    description: "Parse pattern code search results"
+    condition: "pattern_code_raw"
+    compute: |
+      code_result = pattern_code_raw if pattern_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: pattern_code_search
+    on_error: continue
+
+  # ==================== MEMORY CONTEXT ====================
+
+  - name: load_existing_patterns
+    description: "Load existing patterns for comparison"
+    compute: |
+      # Load learned patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      existing_patterns = patterns.get("error_patterns", [])
+
+      result = {
+          "existing_count": len(existing_patterns),
+          "existing_patterns": [p.get("pattern") for p in existing_patterns[:20]],
+      }
+    output: existing_patterns_info
+    on_error: continue
+
   - name: mine_patterns
     description: "Analyze tool failures to discover new patterns"
     compute: |
@@ -34,6 +80,43 @@ steps:
       suggestions = mine_patterns_from_failures()
       result = suggestions
     output: pattern_suggestions
+
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: log_pattern_discovery
+    description: "Log pattern discovery to session"
+    tool: memory_session_log
+    args:
+      action: "Ran pattern discovery"
+      details: "Found {{ pattern_suggestions | length if pattern_suggestions else 0 }} new patterns, existing: {{ existing_patterns_info.existing_count if existing_patterns_info else 0 }}"
+    on_error: continue
+
+  - name: track_discovery_history
+    description: "Track pattern discovery history"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "pattern_discovery_runs" not in patterns:
+          patterns["pattern_discovery_runs"] = []
+
+      # Record this run
+      run_record = {
+          "timestamp": datetime.now().isoformat(),
+          "suggestions_found": len(pattern_suggestions) if pattern_suggestions else 0,
+          "existing_patterns": existing_patterns_info.existing_count if existing_patterns_info else 0,
+      }
+
+      patterns["pattern_discovery_runs"].append(run_record)
+
+      # Keep last 50 runs
+      patterns["pattern_discovery_runs"] = patterns["pattern_discovery_runs"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "discovery history tracked"
+    output: discovery_tracking_result
+    on_error: continue
 
 outputs:
   - name: summary

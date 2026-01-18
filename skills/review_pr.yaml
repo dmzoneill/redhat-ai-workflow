@@ -152,7 +152,7 @@ steps:
       state: opened
       search: "{{ inputs.get('issue_key', '') }}"
     output: mr_search_results
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Step 0c: Extract MR ID from search results or URL
   - name: extract_mr_id
@@ -254,7 +254,7 @@ steps:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ mr_id }}"
     output: mr_details
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Step 1b: Get commit history for the MR
   - name: get_mr_commits
@@ -537,7 +537,7 @@ steps:
     args:
       issue_key: "{{ jira_key }}"
     output: jira_details
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # Step 4: Get MR diff
   - name: get_diff
@@ -601,7 +601,7 @@ steps:
     args:
       project: "{{ resolved.gitlab_project }}"
     output: gitlab_pipeline
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_pipeline_trace
     description: "Get pipeline trace if failed"
@@ -610,7 +610,7 @@ steps:
     args:
       project: "{{ resolved.gitlab_project }}"
     output: pipeline_trace_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Learn from pipeline failure patterns for faster diagnosis
   - name: learn_pipeline_failure
@@ -807,7 +807,7 @@ steps:
     args:
       repo: "{{ resolved.path }}"
     output: fetch_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   # Step 9c: Checkout branch
   - name: checkout_branch
@@ -831,7 +831,7 @@ steps:
       repo: "{{ resolved.path }}"
       refspec: "merge-requests/{{ mr_id }}/head:{{ source_branch }}"
     output: mr_fetch_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   # Step 9e: Checkout after MR fetch
   - name: checkout_mr_branch
@@ -1464,7 +1464,7 @@ steps:
         Action: {{ review_action.get('action', 'unknown') }}
         Reason: {{ review_action.get('reason', '') }}
     output: jira_updated
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # ==================== MEMORY INTEGRATION ====================
 

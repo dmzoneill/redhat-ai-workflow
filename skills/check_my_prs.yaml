@@ -171,7 +171,7 @@ steps:
       state: opened
       author: "{{ my_username }}"
     output: my_mrs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_my_mrs
     description: "Parse MR list using shared parser"
@@ -192,7 +192,7 @@ steps:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ my_mrs[0]['iid'] }}"
     output: first_mr_details
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: analyze_first_mr
     description: "Analyze feedback status of first MR using shared parser"
@@ -223,7 +223,7 @@ steps:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ first_mr_status.get('iid') }}"
     output: feedback_details
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # ==================== AUTO-REBASE IF NEEDED ====================
 
@@ -381,6 +381,37 @@ steps:
     args:
       action: "Checked {{ mr_statuses|length if mr_statuses else 0 }} of my PRs"
       details: "{{ 'Merged one' if merge_result else 'No merges' }}"
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_pr_code
+    description: "Search for code related to my PRs"
+    condition: "first_mr_status and first_mr_status.get('iid')"
+    tool: code_search
+    args:
+      query: "GitLab MR !{{ first_mr_status.get('iid') }} {{ first_mr_status.get('title', '')[:50] }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: pr_code_raw
+    on_error: continue
+
+  - name: parse_pr_code
+    description: "Parse PR code search results"
+    condition: "pr_code_raw"
+    compute: |
+      code_result = pr_code_raw if pr_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: pr_code_search
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

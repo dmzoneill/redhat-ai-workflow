@@ -212,7 +212,7 @@ steps:
       repo: "{{ resolved_repo.path }}"
       prune: true
     output: fetch_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   # Step 3: Validate commits using MCP tool
   - name: get_commit_log
@@ -358,7 +358,7 @@ steps:
     args:
       project: "{{ resolved_repo.gitlab_project }}"
     output: existing_mrs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: detect_duplicate_mr
     description: "Parse MRs to find duplicate using shared parser"
@@ -712,7 +712,7 @@ steps:
     args:
       issue_key: "{{ inputs.issue_key }}"
     output: issue
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: jira_hygiene_check
     description: "Check Jira issue quality"
@@ -760,7 +760,7 @@ steps:
       branch: "{{ current_branch.name }}"
       set_upstream: true
     output: push_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
     # NOTE: Auto-heal is now handled by @auto_heal() decorator on the tool
 
   - name: detect_commit_type
@@ -896,7 +896,7 @@ steps:
         MR created: {{ mr.web_url }}
         Branch: {{ current_branch.name }}
         Status: {{ "Draft" if inputs.draft else "Ready for Review" }}
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: update_status
     description: "Move Jira to In Review (if not draft)"
@@ -905,7 +905,7 @@ steps:
     args:
       issue_key: "{{ inputs.issue_key }}"
       status: "In Review"
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # ==================== SLACK NOTIFICATION ====================
 

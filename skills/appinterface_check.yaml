@@ -116,7 +116,7 @@ steps:
     args:
       service_name: "{{ inputs.saas_file }}"
     output: saas_raw
-    on_error: continue
+    on_error: auto_heal  # App Interface - may need auth
 
   - name: parse_saas_refs
     description: "Extract stage and prod refs from SaaS file"
@@ -227,7 +227,7 @@ steps:
       namespace: "{{ inputs.namespace_stage }}"
       environment: "stage"
     output: live_stage_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: parse_live_stage
     description: "Extract deployed image SHA from stage"
@@ -270,7 +270,7 @@ steps:
       namespace: "{{ inputs.namespace_prod }}"
       environment: "prod"
     output: live_prod_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: parse_live_prod
     description: "Extract deployed image SHA from prod"
@@ -343,7 +343,7 @@ steps:
     tool: appinterface_diff
     args: {}
     output: diff_raw
-    on_error: continue
+    on_error: auto_heal  # App Interface - may need auth
 
   - name: parse_diff
     description: "Parse diff for tower-analytics changes"
@@ -376,7 +376,7 @@ steps:
     args:
       namespace: "{{ inputs.namespace_stage }}"
     output: resources_raw
-    on_error: continue
+    on_error: auto_heal  # App Interface - may need auth
 
   - name: parse_resources
     description: "Parse resources"
@@ -405,7 +405,7 @@ steps:
       namespace: "{{ inputs.namespace_stage }}"
       environment: "stage"
     output: quota_stage_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: get_limits_stage
     description: "Get limit ranges from stage namespace"
@@ -415,7 +415,7 @@ steps:
       namespace: "{{ inputs.namespace_stage }}"
       environment: "stage"
     output: limits_stage_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: parse_quotas
     description: "Parse quota and limit information"
@@ -472,6 +472,41 @@ steps:
       state: "opened"
       per_page: 10
     output: mrs_raw
+    on_error: auto_heal  # GitLab API - may need auth refresh
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_release_code
+    description: "Search for release-related code and configuration"
+    tool: code_search
+    args:
+      query: "{{ inputs.saas_file }} release deployment configuration"
+      project: "automation-analytics-backend"
+      limit: 5
+    output: release_code_raw
+    on_error: continue
+
+  - name: parse_release_code
+    description: "Parse release code search results"
+    condition: "release_code_raw"
+    compute: |
+      code_result = release_code_raw if release_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:5]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+                  'preview': r.get('code_chunk', '')[:100] if r.get('code_chunk') else '',
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+          'has_related_code': len(related_code) > 0,
+      }
+    output: release_code_analysis
     on_error: continue
 
   - name: parse_pending_mrs
@@ -792,4 +827,57 @@ outputs:
     args:
       action: "Checked app-interface for {{ inputs.saas_file }}"
       details: "Ready: {{ release_readiness.ready if release_readiness else 'unknown' }}, Blockers: {{ release_readiness.blockers | length if release_readiness and release_readiness.blockers else 0 }}"
+    on_error: continue
+
+  - name: track_appinterface_checks
+    description: "Track app-interface checks for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "appinterface_checks" not in patterns:
+          patterns["appinterface_checks"] = []
+
+      # Record this check
+      check_record = {
+          "saas_file": inputs.saas_file,
+          "ready": release_readiness.ready if release_readiness else False,
+          "blockers": len(release_readiness.blockers) if release_readiness and release_readiness.blockers else 0,
+          "warnings": len(release_readiness.warnings) if release_readiness and release_readiness.warnings else 0,
+          "stage_in_sync": state_comparison.stage_in_sync if state_comparison else False,
+          "prod_in_sync": state_comparison.prod_in_sync if state_comparison else False,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["appinterface_checks"].append(check_record)
+
+      # Keep last 100 checks
+      patterns["appinterface_checks"] = patterns["appinterface_checks"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "appinterface check tracked"
+    output: appinterface_tracking_result
+    on_error: continue
+
+  - name: update_release_state
+    description: "Update release readiness state"
+    condition: "release_readiness"
+    compute: |
+      from datetime import datetime
+
+      # Update release state
+      state = memory.read_memory("state/release") or {}
+
+      state["last_check"] = {
+          "saas_file": inputs.saas_file,
+          "ready": release_readiness.ready if release_readiness else False,
+          "stage_ref": release_readiness.stage_ref if release_readiness else None,
+          "prod_ref": release_readiness.prod_ref if release_readiness else None,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      memory.write_memory("state/release", state)
+      result = "release state updated"
+    output: release_state_result
     on_error: continue

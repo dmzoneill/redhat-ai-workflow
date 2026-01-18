@@ -206,6 +206,71 @@ steps:
       details: "Category: {{ save_result.category }}, Action: {{ save_result.action }}"
     on_error: continue
 
+  - name: track_pattern_learning
+    description: "Track pattern learning history"
+    condition: "save_result.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "pattern_learning_history" not in patterns:
+          patterns["pattern_learning_history"] = []
+
+      # Record this learning
+      learning_record = {
+          "pattern": save_result.pattern,
+          "category": save_result.category,
+          "action": save_result.action,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["pattern_learning_history"].append(learning_record)
+
+      # Keep last 100 learning records
+      patterns["pattern_learning_history"] = patterns["pattern_learning_history"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "pattern learning tracked"
+    output: learning_tracking_result
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_similar_patterns
+    description: "Search for similar patterns in codebase"
+    condition: "validation.valid"
+    tool: code_search
+    args:
+      query: "{{ validation.pattern }} error {{ validation.meaning[:50] }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: similar_patterns_raw
+    on_error: continue
+
+  - name: parse_similar_patterns
+    description: "Parse similar patterns search results"
+    condition: "similar_patterns_raw"
+    compute: |
+      code_result = similar_patterns_raw if similar_patterns_raw else {}
+
+      similar_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:3]:
+              similar_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+                  'preview': r.get('code_chunk', '')[:100] if r.get('code_chunk') else '',
+              })
+
+      result = {
+          'similar': similar_code,
+          'count': len(similar_code),
+          'has_similar': len(similar_code) > 0,
+      }
+    output: similar_patterns_analysis
+    on_error: continue
+
 outputs:
   - name: summary
     value: |

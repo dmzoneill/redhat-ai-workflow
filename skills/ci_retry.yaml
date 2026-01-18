@@ -179,7 +179,7 @@ steps:
       project: "{{ inputs.project }}"
       mr_id: "{{ inputs.mr_id }}"
     output: mr_pipeline_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_mr_pipeline
     description: "Extract pipeline ID from MR"
@@ -222,7 +222,7 @@ steps:
       project: "{{ inputs.project }}"
       pipeline_id: "{{ inputs.pipeline_id or mr_pipeline.pipeline_id }}"
     output: gitlab_status_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_gitlab_status
     description: "Parse GitLab pipeline status"
@@ -264,7 +264,7 @@ steps:
       project: "{{ inputs.project }}"
       pipeline_id: "{{ inputs.pipeline_id or mr_pipeline.pipeline_id }}"
     output: gitlab_final_status
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # ==================== TEKTON PIPELINE ====================
 
@@ -276,7 +276,7 @@ steps:
       run_name: "{{ inputs.tekton_run }}"
       namespace: "{{ inputs.namespace }}"
     output: tekton_status_raw
-    on_error: continue
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
   - name: parse_tekton_status
     description: "Parse Tekton PipelineRun status"
@@ -321,7 +321,7 @@ steps:
       follow: false
       all_tasks: true
     output: tekton_logs_raw
-    on_error: continue
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
   - name: list_tekton_runs
     description: "List recent Tekton runs after retry"
@@ -331,6 +331,37 @@ steps:
       namespace: "{{ inputs.namespace }}"
       limit: 5
     output: tekton_runs_after
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_pipeline_code
+    description: "Search for code related to this pipeline"
+    condition: "ci_system and ci_system.target"
+    tool: code_search
+    args:
+      query: "CI pipeline {{ ci_system.system }} {{ ci_system.target }} retry failure"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: pipeline_code_raw
+    on_error: continue
+
+  - name: parse_pipeline_code
+    description: "Parse pipeline code search results"
+    condition: "pipeline_code_raw"
+    compute: |
+      code_result = pipeline_code_raw if pipeline_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: pipeline_code_search
     on_error: continue
 
   # ==================== MEMORY ====================

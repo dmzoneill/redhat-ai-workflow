@@ -56,7 +56,7 @@ steps:
       project: "{{ inputs.project }}"
       mr_id: "{{ inputs.mr_id }}"
     output: mr_details_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: extract_jira_key
     description: "Extract Jira key from MR"
@@ -117,7 +117,7 @@ steps:
 
         Reason: {{ inputs.reason }}
     output: jira_comment_result
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: log_closure
     description: "Log MR closure"
@@ -125,6 +125,89 @@ steps:
     args:
       action: "Closed MR !{{ inputs.mr_id }}"
       details: "{{ mr_info.title }} - {{ inputs.reason }}"
+    on_error: continue
+
+  - name: track_mr_closures
+    description: "Track MR closures for patterns"
+    condition: "close_status and close_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "mr_closures" not in patterns:
+          patterns["mr_closures"] = []
+
+      # Record this closure
+      closure_record = {
+          "mr_id": inputs.mr_id,
+          "project": inputs.project,
+          "title": mr_info.title if mr_info else "unknown",
+          "jira_key": mr_info.jira_key if mr_info else None,
+          "reason": inputs.reason,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["mr_closures"].append(closure_record)
+
+      # Keep last 50 closures
+      patterns["mr_closures"] = patterns["mr_closures"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "closure tracked"
+    output: closure_tracking_result
+    on_error: continue
+
+  - name: remove_from_open_mrs
+    description: "Remove closed MR from open_mrs in memory"
+    condition: "close_status and close_status.success"
+    compute: |
+      # Remove from open_mrs
+      current_work = memory.read_memory("state/current_work") or {}
+      open_mrs = current_work.get("open_mrs", [])
+
+      # Filter out this MR
+      current_work["open_mrs"] = [
+          m for m in open_mrs
+          if str(m.get("id")) != str(inputs.mr_id)
+      ]
+
+      memory.write_memory("state/current_work", current_work)
+      result = "MR removed from open_mrs"
+    output: mr_removal_result
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_mr_code
+    description: "Search for code related to the closed MR"
+    tool: code_search
+    args:
+      query: "{{ mr_info.title if mr_info else '' }} {{ mr_info.jira_key if mr_info else '' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: mr_code_raw
+    on_error: continue
+
+  - name: parse_mr_code
+    description: "Parse MR code search results"
+    condition: "mr_code_raw"
+    compute: |
+      code_result = mr_code_raw if mr_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:3]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+      }
+    output: mr_code_analysis
     on_error: continue
 
 outputs:

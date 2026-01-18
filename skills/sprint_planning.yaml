@@ -116,7 +116,7 @@ steps:
       status: "Backlog"
       limit: "{{ inputs.limit }}"
     output: backlog_raw
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: parse_backlog
     description: "Parse backlog issues"
@@ -147,7 +147,7 @@ steps:
     args:
       project: "{{ inputs.project }}"
     output: blocked_raw
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: parse_blocked
     description: "Parse blocked issues"
@@ -176,7 +176,7 @@ steps:
       status: "Ready for Development"
       limit: "{{ inputs.limit }}"
     output: ready_raw
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: parse_ready
     description: "Parse ready issues"
@@ -297,6 +297,37 @@ outputs:
       {% endfor %}
       {% endif %}
 
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_sprint_code
+    description: "Search for code related to sprint planning issues"
+    condition: "sprint_candidates and sprint_candidates.count > 0"
+    tool: code_search
+    args:
+      query: "Jira sprint planning {{ inputs.project }} {{ sprint_candidates.candidates[0].key if sprint_candidates.candidates else '' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: sprint_code_raw
+    on_error: continue
+
+  - name: parse_sprint_code
+    description: "Parse sprint code search results"
+    condition: "sprint_code_raw"
+    compute: |
+      code_result = sprint_code_raw if sprint_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: sprint_code_search
+    on_error: continue
+
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_planning_failures
@@ -353,4 +384,86 @@ outputs:
     args:
       action: "Sprint planning for {{ inputs.project }}"
       details: "Backlog: {{ backlog_info.count if backlog_info else 0 }}, Blocked: {{ blocked_info.count if blocked_info else 0 }}, Candidates: {{ sprint_candidates.count if sprint_candidates else 0 }}"
+    on_error: continue
+
+  - name: track_sprint_planning
+    description: "Track sprint planning sessions for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "sprint_planning_sessions" not in patterns:
+          patterns["sprint_planning_sessions"] = []
+
+      # Record this planning session
+      planning_record = {
+          "project": inputs.project,
+          "sprint": inputs.sprint if inputs.sprint else None,
+          "backlog_count": backlog_info.count if backlog_info else 0,
+          "blocked_count": blocked_info.count if blocked_info else 0,
+          "ready_count": ready_info.count if ready_info else 0,
+          "candidates_count": sprint_candidates.count if sprint_candidates else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["sprint_planning_sessions"].append(planning_record)
+
+      # Keep last 50 planning sessions
+      patterns["sprint_planning_sessions"] = patterns["sprint_planning_sessions"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "planning session tracked"
+    output: planning_tracking_result
+    on_error: continue
+
+  - name: track_blocked_issues_trend
+    description: "Track blocked issues trend over time"
+    condition: "blocked_info and blocked_info.count > 0"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "blocked_issues_trend" not in patterns:
+          patterns["blocked_issues_trend"] = []
+
+      # Record blocked issues snapshot
+      trend_record = {
+          "project": inputs.project,
+          "count": blocked_info.count,
+          "issues": blocked_info.blocked[:10] if blocked_info.blocked else [],
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["blocked_issues_trend"].append(trend_record)
+
+      # Keep last 100 snapshots
+      patterns["blocked_issues_trend"] = patterns["blocked_issues_trend"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "blocked issues trend tracked"
+    output: blocked_trend_result
+    on_error: continue
+
+  - name: save_sprint_context
+    description: "Save sprint context for other skills"
+    compute: |
+      from datetime import datetime
+
+      # Share context that other skills can use
+      shared = memory.read_memory("state/shared_context") or {}
+
+      shared["last_sprint_planning"] = {
+          "timestamp": datetime.now().isoformat(),
+          "project": inputs.project,
+          "sprint": inputs.sprint if inputs.sprint else None,
+          "backlog_count": backlog_info.count if backlog_info else 0,
+          "blocked_count": blocked_info.count if blocked_info else 0,
+          "candidates": [c["key"] for c in sprint_candidates.candidates[:5]] if sprint_candidates else [],
+      }
+
+      memory.write_memory("state/shared_context", shared)
+      result = "sprint context saved"
+    output: sprint_context_result
     on_error: continue
