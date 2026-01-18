@@ -1199,6 +1199,8 @@ except Exception as e:
         let inFollowUps = false;
         let inSprintIssues = false;
         let currentIssueData: any = {};
+        let currentMRData: any = {};
+        const allOpenMRs: any[] = [];
 
         for (const line of lines) {
           // Detect section starts
@@ -1266,10 +1268,20 @@ except Exception as e:
             }
           }
 
-          if (inOpenMRs && line.trim().startsWith("- iid:")) {
-            const iid = line.split(":")[1]?.trim();
-            if (iid && !activeMR) {
-              activeMR = { iid };
+          // Parse open MRs - collect all MRs then find the one matching active issue
+          if (inOpenMRs) {
+            if (line.trim().startsWith("- id:")) {
+              // New MR item - save previous if exists
+              if (currentMRData.id) {
+                allOpenMRs.push({ ...currentMRData });
+              }
+              currentMRData = { id: line.split(":")[1]?.trim() };
+            } else if (line.trim().startsWith("id:")) {
+              currentMRData.id = line.split(":")[1]?.trim();
+            } else if (line.trim().startsWith("title:")) {
+              currentMRData.title = line.split(":").slice(1).join(":").trim().replace(/^['"]|['"]$/g, '');
+            } else if (line.trim().startsWith("status:")) {
+              currentMRData.status = line.split(":")[1]?.trim();
             }
           }
           if (inFollowUps && line.trim().startsWith("- ")) {
@@ -1290,6 +1302,26 @@ except Exception as e:
         if (inActiveIssues && currentIssueData.key && !activeIssue) {
           activeIssue = { ...currentIssueData };
           activeRepo = currentIssueData.repo || null;
+        }
+
+        // Don't forget the last MR if we were still parsing
+        if (currentMRData.id) {
+          allOpenMRs.push({ ...currentMRData });
+        }
+
+        // Find the MR that matches the active issue (by issue key in title)
+        if (activeIssue && activeIssue.key && allOpenMRs.length > 0) {
+          const matchingMR = allOpenMRs.find(mr =>
+            mr.title && mr.title.includes(activeIssue.key)
+          );
+          if (matchingMR) {
+            activeMR = matchingMR;
+          }
+        }
+
+        // Fallback to first open MR if no match found
+        if (!activeMR && allOpenMRs.length > 0) {
+          activeMR = allOpenMRs[0];
         }
 
         return { activeIssue, activeMR, followUps, sprintIssues, activeRepo };
@@ -5555,7 +5587,7 @@ print(result)
               <div class="card-header">
                 <div class="card-icon cyan">🔀</div>
                 <div>
-                  <div class="card-title" id="currentMRTitle">${currentWork.activeMR ? `MR !${currentWork.activeMR.iid}` : "No Active MR"}</div>
+                  <div class="card-title" id="currentMRTitle">${currentWork.activeMR ? `MR !${currentWork.activeMR.id}` : "No Active MR"}</div>
                   <div class="card-subtitle" id="currentMRStatus">${currentWork.activeMR ? "Open" : "Create an MR when ready"}</div>
                 </div>
               </div>
@@ -8354,7 +8386,7 @@ print(result)
               }
             }
 
-            updateText('currentMRTitle', mr ? 'MR !' + mr.iid : 'No Active MR');
+            updateText('currentMRTitle', mr ? 'MR !' + mr.id : 'No Active MR');
             updateText('currentMRStatus', mr ? 'Open' : 'Create an MR when ready');
 
             const mrActions = document.getElementById('currentMRActions');
