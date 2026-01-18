@@ -231,7 +231,7 @@ steps:
       project: "{{ resolved_repo.gitlab_project }}"
       mr_id: "{{ inputs.mr_id }}"
     output: mr_details
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: list_branches
     description: "List all branches for issue key lookup"
@@ -275,7 +275,7 @@ steps:
       repo: "{{ resolved_repo.path }}"
       prune: true
     output: fetch_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   - name: get_merge_commits
     description: "Get merge commits on the branch"
@@ -375,7 +375,7 @@ steps:
     args:
       repo: "{{ resolved_repo.path }}"
     output: pull_result_raw
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   - name: sync_with_remote
     description: "Reset to remote if pull failed"
@@ -755,7 +755,7 @@ steps:
       force: true
       dry_run: true
     output: dry_run_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   - name: analyze_protection
     description: "Check dry-run result for protection issues"

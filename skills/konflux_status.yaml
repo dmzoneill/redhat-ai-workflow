@@ -87,7 +87,7 @@ steps:
     args:
       namespace: "{{ inputs.namespace }}"
     output: status_raw
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_status
     description: "Parse status"
@@ -109,7 +109,7 @@ steps:
     args:
       namespace: "{{ inputs.namespace }}"
     output: apps_raw
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_applications
     description: "Parse application list"
@@ -136,7 +136,7 @@ steps:
     args:
       namespace: "{{ inputs.namespace }}"
     output: running_raw
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_running
     description: "Parse running pipelines"
@@ -161,7 +161,7 @@ steps:
     args:
       namespace: "{{ inputs.namespace }}"
     output: failed_raw
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_failed
     description: "Parse failed pipelines"
@@ -186,6 +186,36 @@ steps:
     args:
       namespace: "{{ inputs.namespace }}"
     output: summary_raw
+    on_error: auto_heal
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_konflux_code
+    description: "Search for code related to Konflux builds"
+    tool: code_search
+    args:
+      query: "Konflux build pipeline {{ inputs.namespace }} {{ inputs.application or '' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: konflux_code_raw
+    on_error: continue
+
+  - name: parse_konflux_code
+    description: "Parse Konflux code search results"
+    condition: "konflux_code_raw"
+    compute: |
+      code_result = konflux_code_raw if konflux_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: konflux_code_search
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================
@@ -237,6 +267,89 @@ steps:
     args:
       action: "Checked Konflux status"
       details: "namespace={{ inputs.namespace }}, healthy={{ status_info.healthy if status_info is defined else 'unknown' }}, apps={{ apps_info.count if apps_info is defined else 'unknown' }}"
+    on_error: continue
+
+  - name: track_konflux_checks
+    description: "Track Konflux status checks for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "konflux_checks" not in patterns:
+          patterns["konflux_checks"] = []
+
+      # Record this check
+      check_record = {
+          "namespace": inputs.namespace,
+          "healthy": status_info.healthy if status_info else False,
+          "apps_count": apps_info.count if apps_info else 0,
+          "running_pipelines": running_info.count if running_info else 0,
+          "failed_pipelines": failed_info.count if failed_info else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["konflux_checks"].append(check_record)
+
+      # Keep last 100 checks
+      patterns["konflux_checks"] = patterns["konflux_checks"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "konflux check tracked"
+    output: konflux_tracking_result
+    on_error: continue
+
+  - name: update_konflux_state
+    description: "Update Konflux state in memory"
+    compute: |
+      from datetime import datetime
+
+      # Update Konflux state
+      state_data = memory.read_memory("state/konflux") or {}
+      if "namespaces" not in state_data:
+          state_data["namespaces"] = {}
+
+      state_data["namespaces"][inputs.namespace] = {
+          "last_check": datetime.now().isoformat(),
+          "healthy": status_info.healthy if status_info else False,
+          "applications": apps_info.applications if apps_info else [],
+          "apps_count": apps_info.count if apps_info else 0,
+          "running_pipelines": running_info.count if running_info else 0,
+          "failed_pipelines": failed_info.count if failed_info else 0,
+      }
+
+      memory.write_memory("state/konflux", state_data)
+      result = "konflux state updated"
+    output: konflux_state_result
+    on_error: continue
+
+  - name: track_failed_pipelines_history
+    description: "Track failed pipelines for pattern analysis"
+    condition: "failed_info and failed_info.count > 0"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "failed_pipelines_history" not in patterns:
+          patterns["failed_pipelines_history"] = []
+
+      # Track this failure event
+      failure_record = {
+          "namespace": inputs.namespace,
+          "failed_count": failed_info.count,
+          "failed_pipelines": failed_info.pipelines[:5],
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["failed_pipelines_history"].append(failure_record)
+
+      # Keep last 100 failure events
+      patterns["failed_pipelines_history"] = patterns["failed_pipelines_history"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "failed pipelines tracked"
+    output: failed_tracking_result
     on_error: continue
 
 outputs:

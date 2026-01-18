@@ -41,7 +41,7 @@ steps:
       project: "{{ inputs.project }}"
       status: "{{ inputs.status if inputs.status != 'all' else '' }}"
     output: pipelines_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_pipelines
     description: "Parse pipeline list"
@@ -85,7 +85,7 @@ steps:
       project: "{{ inputs.project }}"
       pipeline_id: "{{ pipelines_info.pipelines[0].id if pipelines_info.pipelines else '0' }}"
     output: failed_details_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_trace
     description: "Get trace log of failed pipeline"
@@ -95,7 +95,7 @@ steps:
       project: "{{ inputs.project }}"
       pipeline_id: "{{ pipelines_info.pipelines[0].id if pipelines_info.pipelines else '0' }}"
     output: trace_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_trace
     description: "Parse trace for error messages"

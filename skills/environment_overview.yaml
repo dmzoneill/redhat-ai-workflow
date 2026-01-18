@@ -175,7 +175,7 @@ steps:
       namespace: "{{ inputs.namespace }}"
       environment: "{{ inputs.environment }}"
     output: pods_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: analyze_pods
     description: "Analyze pod health"
@@ -201,6 +201,36 @@ steps:
         "healthy": running > 0 and failed == 0,
       }
     output: pod_analysis
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_environment_code
+    description: "Search for code related to this environment"
+    tool: code_search
+    args:
+      query: "Kubernetes environment {{ inputs.environment }} namespace {{ inputs.namespace }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: environment_code_raw
+    on_error: continue
+
+  - name: parse_environment_code
+    description: "Parse environment code search results"
+    condition: "environment_code_raw"
+    compute: |
+      code_result = environment_code_raw if environment_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: environment_code_search
+    on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================
 
@@ -251,6 +281,107 @@ steps:
     args:
       action: "Checked environment overview"
       details: "namespace={{ inputs.namespace }}, environment={{ inputs.environment }}, healthy={{ health_info.healthy if health_info is defined else 'unknown' }}"
+    on_error: continue
+
+  - name: track_environment_checks
+    description: "Track environment checks for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "environment_checks" not in patterns:
+          patterns["environment_checks"] = []
+
+      # Record this check
+      check_record = {
+          "namespace": inputs.namespace,
+          "environment": inputs.environment,
+          "healthy": health_info.healthy if health_info else False,
+          "services_count": services_info.count if services_info else 0,
+          "pods_running": pod_analysis.running if pod_analysis else 0,
+          "pods_failed": pod_analysis.failed if pod_analysis else 0,
+          "ingress_hosts": ingress_info.count if ingress_info else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["environment_checks"].append(check_record)
+
+      # Keep last 100 checks
+      patterns["environment_checks"] = patterns["environment_checks"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "environment check tracked"
+    output: env_tracking_result
+    on_error: continue
+
+  - name: update_environment_state
+    description: "Update environment state in memory"
+    compute: |
+      from datetime import datetime
+
+      # Update environment state
+      env_data = memory.read_memory("state/environments") or {}
+      if "environments" not in env_data:
+          env_data["environments"] = {}
+
+      env_key = inputs.environment
+      if env_key not in env_data["environments"]:
+          env_data["environments"][env_key] = {}
+
+      env_data["environments"][env_key][inputs.namespace] = {
+          "last_check": datetime.now().isoformat(),
+          "healthy": health_info.healthy if health_info else False,
+          "services": services_info.count if services_info else 0,
+          "pods_running": pod_analysis.running if pod_analysis else 0,
+          "pods_failed": pod_analysis.failed if pod_analysis else 0,
+      }
+
+      memory.write_memory("state/environments", env_data)
+      result = "environment state updated"
+    output: env_state_result
+    on_error: continue
+
+  - name: track_unhealthy_environments
+    description: "Track unhealthy environments for alerting"
+    condition: "health_info and not health_info.healthy"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "unhealthy_environments" not in patterns:
+          patterns["unhealthy_environments"] = []
+
+      # Track this unhealthy state
+      key = f"{inputs.environment}/{inputs.namespace}"
+      existing = [e for e in patterns["unhealthy_environments"] if e.get("key") == key]
+
+      if existing:
+          existing[0]["unhealthy_count"] = existing[0].get("unhealthy_count", 1) + 1
+          existing[0]["last_unhealthy"] = datetime.now().isoformat()
+          existing[0]["pods_failed"] = pod_analysis.failed if pod_analysis else 0
+      else:
+          patterns["unhealthy_environments"].append({
+              "key": key,
+              "namespace": inputs.namespace,
+              "environment": inputs.environment,
+              "unhealthy_count": 1,
+              "first_unhealthy": datetime.now().isoformat(),
+              "last_unhealthy": datetime.now().isoformat(),
+              "pods_failed": pod_analysis.failed if pod_analysis else 0,
+          })
+
+      # Keep top 30 by unhealthy count
+      patterns["unhealthy_environments"] = sorted(
+          patterns["unhealthy_environments"],
+          key=lambda x: x.get("unhealthy_count", 0),
+          reverse=True
+      )[:30]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "unhealthy environment tracked"
+    output: unhealthy_tracking_result
     on_error: continue
 
 outputs:

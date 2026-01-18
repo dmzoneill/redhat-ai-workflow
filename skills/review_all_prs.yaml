@@ -212,7 +212,7 @@ steps:
       state: opened
       per_page: "{{ inputs.limit }}"
     output: open_mrs
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Step 2: Parse MR list and separate own vs others
   - name: parse_mrs
@@ -261,7 +261,7 @@ steps:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ my_first_mr_info.iid }}"
     output: my_first_mr_details
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Step 2c: Detect if my MR has merge conflicts
   - name: detect_merge_conflicts
@@ -366,7 +366,7 @@ steps:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ first_mr_info.iid }}"
     output: first_mr_details
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Step 6: Analyze first MR's review status
   - name: analyze_first_mr
@@ -702,6 +702,40 @@ steps:
       memory.write_memory("learned/teammate_preferences", data)
       result = "updated"
     output: prefs_update_result
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_review_code
+    description: "Search for code related to MRs being reviewed"
+    condition: "first_mr_info and first_mr_info.get('iid', 0) > 0"
+    tool: code_search
+    args:
+      query: "{{ first_mr_info.title if first_mr_info else '' }} code review"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: review_code_raw
+    on_error: continue
+
+  - name: parse_review_code
+    description: "Parse review code search results"
+    condition: "review_code_raw"
+    compute: |
+      code_result = review_code_raw if review_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:3]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+      }
+    output: review_code_analysis
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

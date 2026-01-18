@@ -135,7 +135,7 @@ steps:
       duration: "{{ inputs.duration }}"
       pool: "{{ inputs.pool }}"
     output: reserve_result
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
   - name: parse_reservation
     description: "Extract namespace name from reservation"
@@ -217,7 +217,7 @@ steps:
       app: "{{ inputs.app }}"
       extra_args: "{{ image_config.param }}"
     output: deploy_result
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
   - name: parse_deploy
     description: "Parse deployment result"
@@ -255,7 +255,7 @@ steps:
       namespace: "{{ namespace_info.namespace }}"
       environment: "ephemeral"
     output: pods_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: parse_pod_health
     description: "Analyze pod health"
@@ -285,7 +285,65 @@ steps:
       }
     output: pod_health
 
-  # ==================== LOG SESSION ====================
+  # ==================== MEMORY & LEARNING ====================
+
+  - name: load_recent_deployments
+    description: "Load recent deployment history for context"
+    tool: memory_read
+    args:
+      key: "state/ephemeral_deployments"
+    output: recent_deployments_raw
+    on_error: continue
+
+  - name: parse_recent_deployments
+    description: "Parse recent deployments for patterns"
+    compute: |
+      deployments = recent_deployments_raw if 'recent_deployments_raw' in dir() and recent_deployments_raw else {}
+
+      recent = []
+      if isinstance(deployments, dict):
+          recent = deployments.get('deployments', [])[-5:]
+
+      # Check for recent failures with same app
+      recent_failures = [d for d in recent if d.get('app') == inputs.app and not d.get('success', True)]
+
+      result = {
+          "recent": recent,
+          "recent_failures": recent_failures,
+          "has_recent_failures": len(recent_failures) > 0,
+      }
+    output: deployment_history
+    on_error: continue
+
+  - name: search_deployment_configs
+    description: "Search for deployment-related configuration"
+    tool: code_search
+    args:
+      query: "{{ inputs.app }} deployment configuration clowdapp"
+      repo: "automation-analytics-backend"
+      limit: 5
+    output: deployment_configs_raw
+    on_error: continue
+
+  - name: parse_deployment_configs
+    description: "Parse deployment config search results"
+    compute: |
+      configs = deployment_configs_raw if 'deployment_configs_raw' in dir() and deployment_configs_raw else {}
+
+      relevant_files = []
+      if isinstance(configs, dict) and configs.get('results'):
+          for r in configs.get('results', [])[:5]:
+              relevant_files.append({
+                  'file': r.get('file', ''),
+                  'snippet': r.get('snippet', '')[:200],
+              })
+
+      result = {
+          "config_files": relevant_files,
+          "has_configs": len(relevant_files) > 0,
+      }
+    output: deployment_configs
+    on_error: continue
 
   - name: log_deployment
     description: "Log deployment to session"
@@ -293,6 +351,24 @@ steps:
     args:
       action: "Deployed {{ inputs.app }} to {{ namespace_info.namespace }}"
       details: "Duration: {{ inputs.duration }}, Image: {{ inputs.image_tag or 'latest' }}"
+    on_error: continue
+
+  - name: save_deployment_to_history
+    description: "Save deployment to history for future reference"
+    condition: "namespace_info.success"
+    tool: memory_append
+    args:
+      key: "state/ephemeral_deployments"
+      list_path: "deployments"
+      item: |
+        app: {{ inputs.app }}
+        namespace: {{ namespace_info.namespace }}
+        image_tag: {{ inputs.image_tag or 'latest' }}
+        component: {{ inputs.component }}
+        duration: {{ inputs.duration }}
+        success: {{ deploy_status.success if deploy_status else false }}
+        healthy: {{ pod_health.healthy if pod_health else false }}
+        timestamp: {{ now().isoformat() }}
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

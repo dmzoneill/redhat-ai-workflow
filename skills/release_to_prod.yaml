@@ -103,6 +103,41 @@ steps:
     output: release_known_issues
     on_error: continue
 
+  # ==================== SEMANTIC SEARCH FOR CHANGES ====================
+
+  - name: search_release_changes
+    description: "Search codebase for changes related to this release"
+    tool: code_search
+    args:
+      query: "deployment configuration release production"
+      project: "automation-analytics-backend"
+      limit: 5
+    output: release_code_search_raw
+    on_error: continue
+
+  - name: parse_release_code_search
+    description: "Parse code search results for release context"
+    compute: |
+      import re
+
+      search_text = str(release_code_search_raw) if 'release_code_search_raw' in dir() and release_code_search_raw else ""
+
+      # Extract relevant files
+      file_pattern = r'###\s*\d+\.\s*`([^`]+)`'
+      files = re.findall(file_pattern, search_text)
+
+      # Look for deployment-related files
+      deployment_files = [f for f in files if any(kw in f.lower() for kw in ['deploy', 'config', 'settings', 'env'])]
+
+      result = {
+          "found": len(files) > 0,
+          "files": files[:5],
+          "deployment_files": deployment_files[:3],
+          "has_deployment_changes": len(deployment_files) > 0,
+      }
+    output: release_code_context
+    on_error: continue
+
   # ==================== VALIDATE INPUT ====================
 
   - name: validate_sha
@@ -129,7 +164,7 @@ steps:
       tag: "{{ validated_sha.sha }}"
       namespace: "redhat-user-workloads"
     output: staging_image_check
-    on_error: continue
+    on_error: auto_heal  # Quay API - may need auth
 
   - name: parse_staging_check
     description: "Parse staging image check result"
@@ -275,7 +310,7 @@ steps:
     tool: appinterface_validate
     args: {}
     output: appinterface_validation_raw
-    on_error: continue
+    on_error: auto_heal  # App Interface - may need auth
 
   - name: parse_appinterface_validation
     description: "Parse validation result"
@@ -339,6 +374,23 @@ steps:
       details: "SHA: {{ validated_sha.short }}, Component: {{ inputs.component }}"
     on_error: continue
 
+  - name: save_release_to_history
+    description: "Save release to history for tracking"
+    condition: "release_result and release_result.success"
+    tool: memory_append
+    args:
+      key: "state/releases"
+      list_path: "release_history"
+      item: |
+        sha: "{{ validated_sha.sha }}"
+        short_sha: "{{ validated_sha.short }}"
+        component: "{{ inputs.component }}"
+        application: "{{ inputs.application }}"
+        namespace: "{{ inputs.namespace }}"
+        timestamp: "{{ now().isoformat() }}"
+        status: "released"
+    on_error: continue
+
   - name: create_grafana_annotation
     description: "Mark release on Grafana dashboards"
     condition: "release_result and release_result.success"
@@ -357,7 +409,7 @@ steps:
       channel: "team-automation-analytics"
       message: "📦 **Production Release** - `{{ validated_sha.short }}` released to {{ inputs.component }}"
     output: slack_release_notify
-    on_error: continue
+    on_error: auto_heal  # Slack API - may need auth
 
   # ==================== LEARNING FROM FAILURES ====================
 

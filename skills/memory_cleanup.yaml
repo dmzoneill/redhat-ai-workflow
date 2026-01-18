@@ -29,6 +29,36 @@ inputs:
     description: "Remove session logs older than this many days (default: 7)"
 
 steps:
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_cleanup_code
+    description: "Search for code related to memory cleanup"
+    tool: code_search
+    args:
+      query: "memory cleanup stale entries session logs"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: cleanup_code_raw
+    on_error: continue
+
+  - name: parse_cleanup_code
+    description: "Parse cleanup code search results"
+    condition: "cleanup_code_raw"
+    compute: |
+      code_result = cleanup_code_raw if cleanup_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: cleanup_code_search
+    on_error: continue
+
   - name: load_current_work
     description: "Load current work state from memory"
     tool: memory_read
@@ -261,6 +291,37 @@ steps:
     args:
       action: "Memory cleanup"
       details: "Removed {{ analysis.total }} stale entries"
+    on_error: continue
+
+  - name: track_cleanup_history
+    description: "Track cleanup history for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "memory_cleanups" not in patterns:
+          patterns["memory_cleanups"] = []
+
+      # Record this cleanup
+      cleanup_record = {
+          "dry_run": inputs.dry_run,
+          "total_stale": analysis.total if analysis else 0,
+          "active_issues_cleaned": analysis.counts.active_issues if analysis else 0,
+          "open_mrs_cleaned": analysis.counts.open_mrs if analysis else 0,
+          "ephemeral_cleaned": analysis.counts.ephemeral_namespaces if analysis else 0,
+          "archived_sessions": archive_result.archived if archive_result else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["memory_cleanups"].append(cleanup_record)
+
+      # Keep last 50 cleanup records
+      patterns["memory_cleanups"] = patterns["memory_cleanups"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "cleanup history tracked"
+    output: cleanup_tracking_result
     on_error: continue
 
 outputs:

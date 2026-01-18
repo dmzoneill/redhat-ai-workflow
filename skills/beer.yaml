@@ -36,6 +36,36 @@ inputs:
     description: "Use Slack link format"
 
 steps:
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_eod_code
+    description: "Search for code related to end of day activities"
+    tool: code_search
+    args:
+      query: "end of day wrap-up commits PRs standup"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: eod_code_raw
+    on_error: continue
+
+  - name: parse_eod_code
+    description: "Parse EOD code search results"
+    condition: "eod_code_raw"
+    compute: |
+      code_result = eod_code_raw if eod_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: eod_code_search
+    on_error: continue
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_project_patterns
@@ -253,7 +283,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       state: "merged"
     output: merged_mrs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_merged_today
     description: "Filter for today's merges"
@@ -274,7 +304,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       author: "@me"
     output: my_prs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_my_prs
     description: "Parse my open PRs using shared parser"
@@ -365,7 +395,7 @@ steps:
     args:
       mine: true
     output: ephemeral_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
   - name: parse_ephemeral
     description: "Parse ephemeral namespaces"

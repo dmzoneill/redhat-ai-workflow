@@ -131,7 +131,7 @@ steps:
     args:
       issue_key: "{{ validated_issue_key }}"
     output: issue
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
     # NOTE: Auto-heal is now handled by @auto_heal() decorator on the tool
 
   - name: check_issue_exists
@@ -267,7 +267,7 @@ steps:
       repo: "{{ resolved_repo.path }}"
       prune: true
     output: fetch_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   # Step 3: Check for existing branch using MCP tool
   - name: list_branches
@@ -303,7 +303,7 @@ steps:
     args:
       project: "{{ resolved_repo.gitlab }}"
     output: open_mrs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: find_matching_mr
     description: "Find MR matching our issue key or branch using shared parser"
@@ -337,7 +337,7 @@ steps:
       project: "{{ resolved_repo.gitlab }}"
       mr_id: "{{ existing_mr.id }}"
     output: mr_details_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_mr_comments
     description: "Get MR review comments"
@@ -347,7 +347,7 @@ steps:
       project: "{{ resolved_repo.gitlab }}"
       mr_id: "{{ existing_mr.id }}"
     output: mr_comments_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_pipeline_status
     description: "Get CI pipeline status"
@@ -357,7 +357,7 @@ steps:
       project: "{{ resolved_repo.gitlab }}"
       branch: "{{ branch_check.branch }}"
     output: pipeline_status_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: analyze_mr_feedback
     description: "Analyze MR feedback for actionable items using shared parser"
@@ -396,7 +396,7 @@ steps:
     args:
       issue_key: "{{ validated_issue_key }}"
     output: jira_details_raw
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: parse_jira_updates
     description: "Parse Jira details for updates using shared parser"
@@ -481,7 +481,7 @@ steps:
       repo: "{{ resolved_repo.path }}"
       rebase: true
     output: pull_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   # Step 8b: Create new branch using MCP tools
   - name: checkout_main
@@ -502,7 +502,7 @@ steps:
       repo: "{{ resolved_repo.path }}"
       rebase: true
     output: main_pull_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   - name: create_new_branch
     description: "Create new feature branch"
@@ -522,7 +522,7 @@ steps:
     args:
       issue_key: "{{ inputs.issue_key }}"
       status: "In Progress"
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # Step 9b: Transition issue using workflow transition (more reliable)
   - name: transition_issue
@@ -533,7 +533,7 @@ steps:
       issue_key: "{{ inputs.issue_key }}"
       transition: "Start Progress"
     output: transition_result
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # Step 9c: Assign issue to current user
   - name: assign_issue
@@ -544,7 +544,7 @@ steps:
       issue_key: "{{ inputs.issue_key }}"
       assignee: "currentUser"
     output: assign_result
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # Step 10: Determine final branch name
   - name: get_final_branch
@@ -585,7 +585,7 @@ steps:
       channel: "team-automation-analytics"
       message: "{{ slack_msg }}"
     output: slack_notify_result
-    on_error: continue
+    on_error: auto_heal  # Slack API - may need auth
 
   # Step 12: Build issue summary and timestamp for memory
   - name: build_memory_context

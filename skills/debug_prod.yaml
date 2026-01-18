@@ -167,7 +167,7 @@ steps:
       namespace: "{{ ns_info.namespace }}"
       environment: "production"
     output: pod_status
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: get_pod_resources
     description: "Get CPU/memory usage for pods"
@@ -284,7 +284,7 @@ steps:
       namespace: "{{ ns_info.namespace }}"
       environment: "production"
     output: k8s_events
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   # Step 7: Filter important events
   - name: filter_events
@@ -328,7 +328,7 @@ steps:
       namespace: "{{ ns_info.namespace }}"
       environment: "production"
     output: pod_describe_1_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   # Step 8b: Get logs from first problem pod
   - name: get_pod_logs_1
@@ -342,7 +342,7 @@ steps:
       tail: 500
       since: "{{ pods_selection.time_range }}"
     output: pod_logs_1_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   # Step 8c: Get logs from second problem pod
   - name: get_pod_logs_2
@@ -356,7 +356,7 @@ steps:
       tail: 500
       since: "{{ pods_selection.time_range }}"
     output: pod_logs_2_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   # Step 8d: Get logs from third problem pod
   - name: get_pod_logs_3
@@ -370,7 +370,7 @@ steps:
       tail: 500
       since: "{{ pods_selection.time_range }}"
     output: pod_logs_3_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   # Step 8e: Parse logs for errors
   - name: parse_pod_logs
@@ -412,7 +412,7 @@ steps:
     args:
       environment: "production"
     output: firing_alerts
-    on_error: continue
+    on_error: auto_heal  # Alertmanager - may need auth
 
   # Step 10: Get alert definition if alert_name provided
   - name: get_alert_definition
@@ -471,7 +471,7 @@ steps:
       namespace: "{{ ns_info.namespace }}"
       limit: 20
     output: kibana_errors_raw
-    on_error: continue
+    on_error: auto_heal  # Kibana - may need auth
 
   - name: parse_kibana_errors_initial
     description: "Initial check for Kibana auth issues"
@@ -586,7 +586,7 @@ steps:
       query: "sum(rate(http_requests_total{namespace=\"{{ ns_info.namespace }}\",code=~\"5..\"}[5m]))"
       environment: "production"
     output: error_rate_raw
-    on_error: continue
+    on_error: auto_heal  # Prometheus - may need auth
 
   - name: query_error_rate_trend
     description: "Query error rate trend over time"
@@ -746,7 +746,7 @@ steps:
       namespace: "{{ ns_info.namespace }}"
       environment: "production"
     output: deployments_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   # Step 12b: Get replicasets
   - name: get_replicasets
@@ -759,7 +759,7 @@ steps:
       environment: "production"
       output_format: "wide"
     output: replicasets_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   # Step 12c: Parse deployment info
   - name: parse_deployment_info

@@ -290,7 +290,7 @@ steps:
     args:
       max_results: 20
     output: my_issues_raw
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: get_jira_in_progress
     description: "Get my issues in progress"
@@ -299,7 +299,7 @@ steps:
     args:
       jql: 'project = {{ resolved_repo.jira_project }} AND assignee = currentUser() AND status in ("In Progress", "In Review") ORDER BY updated DESC'
     output: jira_in_progress
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: get_jira_done_recently
     description: "Get recently closed issues"
@@ -308,7 +308,7 @@ steps:
     args:
       jql: 'project = {{ resolved_repo.jira_project }} AND assignee = currentUser() AND status = Done AND updated >= -{{ inputs.days }}d ORDER BY updated DESC'
     output: jira_done
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: parse_jira_issues
     description: "Parse Jira issues using shared parser"
@@ -338,7 +338,7 @@ steps:
       state: all
       author: "{{ author_info.name }}"
     output: my_mrs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_mr_reviews
     description: "Get MRs I reviewed"
@@ -349,7 +349,7 @@ steps:
       state: all
       reviewer: "{{ author_info.name }}"
     output: reviewed_mrs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_gitlab_activity
     description: "Parse GitLab MR activity using shared parser"
@@ -664,6 +664,37 @@ steps:
       memory.write_memory("state/shared_context", shared)
       result = "shared context saved"
     output: shared_context_result
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_recent_code
+    description: "Search for code related to recent commits"
+    condition: "commit_info and commit_info.get('issue_keys')"
+    tool: code_search
+    args:
+      query: "recent commits {{ commit_info.issue_keys[0] if commit_info.issue_keys else '' }} standup"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: recent_code_raw
+    on_error: continue
+
+  - name: parse_recent_code
+    description: "Parse recent code search results"
+    condition: "recent_code_raw"
+    compute: |
+      code_result = recent_code_raw if recent_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: recent_code_search
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

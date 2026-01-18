@@ -163,7 +163,7 @@ steps:
       repo: "{{ resolved_repo.path }}"
       all: true
     output: fetch_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   - name: list_branches
     description: "List available branches"
@@ -395,7 +395,7 @@ steps:
       ref: "{{ inputs.target_branch }}"
       tags: true
     output: push_result
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   - name: parse_push
     description: "Parse push result"
@@ -422,7 +422,7 @@ steps:
       issue_key: "{{ inputs.jira_key }}"
       comment: "Hotfix created: cherry-picked {{ inputs.commit[:12] }} to {{ inputs.target_branch }}{% if inputs.tag %}\nTagged as {{ inputs.tag }}{% endif %}"
     output: jira_comment_result
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # ==================== MEMORY ====================
 

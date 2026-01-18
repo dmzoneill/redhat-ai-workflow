@@ -112,7 +112,7 @@ steps:
     args:
       repository: "{{ inputs.repository }}"
       tag: "{{ inputs.image_tag }}"
-    on_error: continue
+    on_error: auto_heal  # Quay API - may need auth
 
   - name: validate_image
     description: "Stop if image doesn't exist"
@@ -139,7 +139,7 @@ steps:
       tag: "{{ inputs.image_tag }}"
       namespace: "{{ inputs.namespace }}"
     output: vuln_raw
-    on_error: continue
+    on_error: auto_heal  # Quay API - may need auth
 
   - name: get_manifest
     description: "Get image manifest for metadata"
@@ -150,7 +150,7 @@ steps:
       tag: "{{ inputs.image_tag }}"
       namespace: "{{ inputs.namespace }}"
     output: manifest_raw
-    on_error: continue
+    on_error: auto_heal  # Quay API - may need auth
 
   # ==================== ANALYZE RESULTS ====================
 
@@ -248,6 +248,42 @@ steps:
       }
     output: policy_result
 
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_security_code
+    description: "Search for security-related code if vulnerabilities found"
+    condition: "vuln_analysis and vuln_analysis.critical > 0 and vuln_analysis.cves"
+    tool: code_search
+    args:
+      query: "security vulnerability CVE dependency {{ vuln_analysis.cves[0] if vuln_analysis.cves else '' }}"
+      project: "automation-analytics-backend"
+      limit: 5
+    output: security_code_raw
+    on_error: continue
+
+  - name: parse_security_code
+    description: "Parse security code search results"
+    condition: "security_code_raw"
+    compute: |
+      code_result = security_code_raw if security_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:5]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+                  'preview': r.get('code_chunk', '')[:100] if r.get('code_chunk') else '',
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+          'has_related_code': len(related_code) > 0,
+      }
+    output: security_code_analysis
+    on_error: continue
+
   # ==================== MEMORY ====================
 
   - name: log_scan
@@ -256,6 +292,104 @@ steps:
     args:
       action: "Security scan: {{ inputs.image_tag[:12] }}"
       details: "{{ vuln_analysis.icon }} {{ vuln_analysis.status }} - {{ vuln_analysis.total }} vulns ({{ vuln_analysis.critical }} critical)"
+    on_error: continue
+
+  - name: track_vulnerability_scans
+    description: "Track vulnerability scans for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "vulnerability_scans" not in patterns:
+          patterns["vulnerability_scans"] = []
+
+      # Record this scan
+      scan_record = {
+          "image_tag": inputs.image_tag[:40],
+          "repository": inputs.repository,
+          "namespace": inputs.namespace,
+          "critical": vuln_analysis.critical if vuln_analysis else 0,
+          "high": vuln_analysis.high if vuln_analysis else 0,
+          "total": vuln_analysis.total if vuln_analysis else 0,
+          "status": vuln_analysis.status if vuln_analysis else "unknown",
+          "blocked": policy_result.blocked if policy_result else False,
+          "cves": vuln_analysis.cves[:5] if vuln_analysis and vuln_analysis.cves else [],
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["vulnerability_scans"].append(scan_record)
+
+      # Keep last 100 scans
+      patterns["vulnerability_scans"] = patterns["vulnerability_scans"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "scan tracked"
+    output: scan_tracking_result
+    on_error: continue
+
+  - name: track_recurring_cves
+    description: "Track CVEs that appear frequently"
+    condition: "vuln_analysis and vuln_analysis.cves"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "recurring_cves" not in patterns:
+          patterns["recurring_cves"] = {}
+
+      # Track each CVE
+      for cve in (vuln_analysis.cves or [])[:10]:
+          if cve not in patterns["recurring_cves"]:
+              patterns["recurring_cves"][cve] = {
+                  "count": 0,
+                  "first_seen": datetime.now().isoformat(),
+                  "last_seen": datetime.now().isoformat(),
+                  "images": [],
+              }
+
+          patterns["recurring_cves"][cve]["count"] += 1
+          patterns["recurring_cves"][cve]["last_seen"] = datetime.now().isoformat()
+
+          # Track which images have this CVE
+          image_key = f"{inputs.repository}:{inputs.image_tag[:12]}"
+          if image_key not in patterns["recurring_cves"][cve]["images"]:
+              patterns["recurring_cves"][cve]["images"].append(image_key)
+              patterns["recurring_cves"][cve]["images"] = patterns["recurring_cves"][cve]["images"][-10:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "recurring CVEs tracked"
+    output: cve_tracking_result
+    on_error: continue
+
+  - name: update_security_state
+    description: "Update security state in memory"
+    compute: |
+      from datetime import datetime
+
+      # Update security state
+      state_data = memory.read_memory("state/security") or {}
+      if "recent_scans" not in state_data:
+          state_data["recent_scans"] = []
+
+      state_data["recent_scans"].append({
+          "image": f"{inputs.repository}:{inputs.image_tag[:12]}",
+          "status": vuln_analysis.status if vuln_analysis else "unknown",
+          "critical": vuln_analysis.critical if vuln_analysis else 0,
+          "blocked": policy_result.blocked if policy_result else False,
+          "timestamp": datetime.now().isoformat(),
+      })
+
+      # Keep last 50 scans
+      state_data["recent_scans"] = state_data["recent_scans"][-50:]
+
+      # Track if we have any blocked images
+      state_data["has_blocked_images"] = any(s.get("blocked") for s in state_data["recent_scans"][-10:])
+
+      memory.write_memory("state/security", state_data)
+      result = "security state updated"
+    output: security_state_result
     on_error: continue
 
 outputs:

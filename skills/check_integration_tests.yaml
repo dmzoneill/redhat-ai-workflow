@@ -90,7 +90,7 @@ steps:
     args:
       namespace: "{{ inputs.namespace }}"
     output: tests_raw
-    on_error: continue
+    on_error: auto_heal  # Konflux cluster - may need kube_login
 
   - name: parse_tests
     description: "Parse test list"
@@ -133,7 +133,7 @@ steps:
       name: "{{ tests_info.tests[0].name if tests_info.tests else '' }}"
       namespace: "{{ inputs.namespace }}"
     output: failed_results_raw
-    on_error: continue
+    on_error: auto_heal  # Konflux cluster - may need kube_login
 
   - name: list_snapshots
     description: "List recent snapshots"
@@ -141,7 +141,7 @@ steps:
     args:
       namespace: "{{ inputs.namespace }}"
     output: snapshots_raw
-    on_error: continue
+    on_error: auto_heal  # Konflux cluster - may need kube_login
 
   - name: parse_snapshots
     description: "Parse snapshot list"
@@ -211,6 +211,77 @@ steps:
     args:
       action: "Checked integration tests"
       details: "namespace={{ inputs.namespace }}, tests={{ tests_info.total if tests_info is defined else 'unknown' }}"
+    on_error: continue
+
+  - name: track_test_checks
+    description: "Track integration test checks for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "integration_test_checks" not in patterns:
+          patterns["integration_test_checks"] = []
+
+      # Record this check
+      check_record = {
+          "namespace": inputs.namespace,
+          "total_tests": tests_info.count if tests_info else 0,
+          "passed": tests_info.passed if tests_info else 0,
+          "failed": tests_info.failed if tests_info else 0,
+          "running": tests_info.running if tests_info else 0,
+          "snapshots": snapshots_info.count if snapshots_info else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["integration_test_checks"].append(check_record)
+
+      # Keep last 100 checks
+      patterns["integration_test_checks"] = patterns["integration_test_checks"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "test check tracked"
+    output: test_tracking_result
+    on_error: continue
+
+  - name: track_failed_tests
+    description: "Track failed tests for flakiness detection"
+    condition: "tests_info and tests_info.failed > 0"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "failed_integration_tests" not in patterns:
+          patterns["failed_integration_tests"] = []
+
+      # Track each failed test
+      for test in (tests_info.tests or []):
+          if test.get("status") == "failed":
+              existing = [t for t in patterns["failed_integration_tests"] if t.get("name") == test.get("name")]
+
+              if existing:
+                  existing[0]["fail_count"] = existing[0].get("fail_count", 1) + 1
+                  existing[0]["last_failed"] = datetime.now().isoformat()
+              else:
+                  patterns["failed_integration_tests"].append({
+                      "name": test.get("name"),
+                      "namespace": inputs.namespace,
+                      "fail_count": 1,
+                      "first_failed": datetime.now().isoformat(),
+                      "last_failed": datetime.now().isoformat(),
+                  })
+
+      # Keep top 50 by fail count
+      patterns["failed_integration_tests"] = sorted(
+          patterns["failed_integration_tests"],
+          key=lambda x: x.get("fail_count", 0),
+          reverse=True
+      )[:50]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "failed tests tracked"
+    output: failed_test_tracking_result
     on_error: continue
 
 outputs:

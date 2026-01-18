@@ -98,7 +98,7 @@ steps:
       project: "{{ inputs.project }}"
       author: "@me"
     output: open_mrs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_open_mrs
     description: "Parse MR list output"
@@ -133,7 +133,7 @@ steps:
       project: "{{ inputs.project }}"
       mr_id: "{{ mr_data.ids[0] }}"
     output: mr1_comments
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_mr2_comments
     description: "Get comments for second MR"
@@ -143,7 +143,7 @@ steps:
       project: "{{ inputs.project }}"
       mr_id: "{{ mr_data.ids[1] }}"
     output: mr2_comments
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_mr3_comments
     description: "Get comments for third MR"
@@ -153,7 +153,7 @@ steps:
       project: "{{ inputs.project }}"
       mr_id: "{{ mr_data.ids[2] }}"
     output: mr3_comments
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_mr4_comments
     description: "Get comments for fourth MR"
@@ -163,7 +163,7 @@ steps:
       project: "{{ inputs.project }}"
       mr_id: "{{ mr_data.ids[3] }}"
     output: mr4_comments
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_mr5_comments
     description: "Get comments for fifth MR"
@@ -173,7 +173,7 @@ steps:
       project: "{{ inputs.project }}"
       mr_id: "{{ mr_data.ids[4] }}"
     output: mr5_comments
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Step 4: Analyze all comments
   - name: check_comments
@@ -444,6 +444,40 @@ steps:
     args:
       action: "Checked MR feedback"
       details: "{{ (feedback_with_calendar_check or feedback_analysis) | length if (feedback_with_calendar_check or feedback_analysis) else 0 }} MRs with feedback"
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_related_code
+    description: "Search for code related to MRs with feedback"
+    condition: "feedback_analysis and len(feedback_analysis) > 0"
+    tool: code_search
+    args:
+      query: "{{ feedback_analysis[0].title if feedback_analysis else '' }} code review"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: mr_code_raw
+    on_error: continue
+
+  - name: parse_mr_code
+    description: "Parse MR code search results"
+    condition: "mr_code_raw"
+    compute: |
+      code_result = mr_code_raw if mr_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:3]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+      }
+    output: mr_code_analysis
     on_error: continue
 
   - name: create_followups_for_feedback

@@ -250,3 +250,78 @@ steps:
       action: "Code search in {{ project }}"
       details: "Query: {{ inputs.query[:50] }}, Results: {{ parsed_results | length if parsed_results else 0 }}"
     on_error: continue
+
+  - name: track_code_searches
+    description: "Track code searches for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "code_searches" not in patterns:
+          patterns["code_searches"] = []
+
+      # Record this search
+      search_record = {
+          "query": inputs.query[:100],
+          "project": project if 'project' in dir() else "unknown",
+          "results_count": len(parsed_results) if parsed_results else 0,
+          "patterns_found": len(related_patterns) if related_patterns else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["code_searches"].append(search_record)
+
+      # Keep last 100 searches
+      patterns["code_searches"] = patterns["code_searches"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "search tracked"
+    output: search_tracking_result
+    on_error: continue
+
+  - name: track_popular_queries
+    description: "Track popular search queries"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "popular_queries" not in patterns:
+          patterns["popular_queries"] = []
+
+      # Normalize query for comparison
+      query_normalized = inputs.query[:100].lower().strip()
+
+      # Track this query
+      existing = [q for q in patterns["popular_queries"] if q.get("query_normalized") == query_normalized]
+
+      if existing:
+          existing[0]["search_count"] = existing[0].get("search_count", 1) + 1
+          existing[0]["last_searched"] = datetime.now().isoformat()
+          existing[0]["avg_results"] = (
+              (existing[0].get("avg_results", 0) * (existing[0]["search_count"] - 1) +
+               (len(parsed_results) if parsed_results else 0)) / existing[0]["search_count"]
+          )
+      else:
+          patterns["popular_queries"].append({
+              "query": inputs.query[:100],
+              "query_normalized": query_normalized,
+              "project": project if 'project' in dir() else "unknown",
+              "search_count": 1,
+              "first_searched": datetime.now().isoformat(),
+              "last_searched": datetime.now().isoformat(),
+              "avg_results": len(parsed_results) if parsed_results else 0,
+          })
+
+      # Keep top 50 by search count
+      patterns["popular_queries"] = sorted(
+          patterns["popular_queries"],
+          key=lambda x: x.get("search_count", 0),
+          reverse=True
+      )[:50]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "popular query tracked"
+    output: query_tracking_result
+    on_error: continue

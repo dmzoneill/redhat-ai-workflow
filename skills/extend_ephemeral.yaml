@@ -99,7 +99,7 @@ steps:
     args:
       mine: true
     output: my_namespaces_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
   - name: parse_namespaces
     description: "Parse namespace list"
@@ -149,7 +149,7 @@ steps:
     args:
       namespace: "{{ selected_ns.namespace }}"
     output: ns_describe_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
   - name: parse_describe
     description: "Parse namespace details"
@@ -198,7 +198,7 @@ steps:
       namespace: "{{ selected_ns.namespace }}"
       duration: "{{ inputs.duration }}"
     output: extend_result
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
   - name: parse_extend_result
     description: "Parse extend result"
@@ -223,6 +223,37 @@ steps:
     output: extension_status
     on_error: continue
 
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_ephemeral_code
+    description: "Search for code related to ephemeral namespace management"
+    condition: "selected_ns and selected_ns.namespace"
+    tool: code_search
+    args:
+      query: "ephemeral namespace {{ selected_ns.namespace }} bonfire extend"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: ephemeral_code_raw
+    on_error: continue
+
+  - name: parse_ephemeral_code
+    description: "Parse ephemeral code search results"
+    condition: "ephemeral_code_raw"
+    compute: |
+      code_result = ephemeral_code_raw if ephemeral_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: ephemeral_code_search
+    on_error: continue
+
   # ==================== MEMORY ====================
 
   - name: log_extension
@@ -232,6 +263,50 @@ steps:
     args:
       action: "Extended ephemeral namespace"
       details: "{{ selected_ns.namespace }} + {{ inputs.duration }}"
+    on_error: continue
+
+  - name: track_extension_history
+    description: "Track namespace extension history for patterns"
+    condition: "extension_status and extension_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "namespace_extensions" not in patterns:
+          patterns["namespace_extensions"] = []
+
+      # Record this extension
+      extension_record = {
+          "namespace": selected_ns.namespace if selected_ns else "unknown",
+          "duration": inputs.duration,
+          "success": extension_status.success if extension_status else False,
+          "new_expiry": extension_status.new_expiry if extension_status else None,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["namespace_extensions"].append(extension_record)
+
+      # Keep last 50 extension records
+      patterns["namespace_extensions"] = patterns["namespace_extensions"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "extension pattern learned"
+    output: extension_pattern_result
+    on_error: continue
+
+  - name: update_ephemeral_state
+    description: "Update ephemeral deployment state"
+    condition: "extension_status and extension_status.success"
+    tool: memory_append
+    args:
+      key: "state/ephemeral_deployments"
+      list_path: "extensions"
+      item: |
+        namespace: {{ selected_ns.namespace if selected_ns else 'unknown' }}
+        duration: {{ inputs.duration }}
+        new_expiry: {{ extension_status.new_expiry if extension_status else 'unknown' }}
+        timestamp: {{ now().isoformat() }}
     on_error: continue
 
 outputs:

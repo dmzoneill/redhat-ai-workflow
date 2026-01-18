@@ -546,7 +546,7 @@ steps:
     args:
       project: "automation-analytics/automation-analytics-backend"
     output: all_open_prs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: get_my_prs
     description: "Get PRs authored by me"
@@ -555,7 +555,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       author: "@me"
     output: my_prs_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_my_prs
     description: "Parse MR list output and detect network errors"
@@ -592,7 +592,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       mr_id: "{{ pr_ids_to_check[0] }}"
     output: pr1_comments_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Get comments for MR 2
   - name: get_pr2_comments
@@ -603,7 +603,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       mr_id: "{{ pr_ids_to_check[1] }}"
     output: pr2_comments_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Get comments for MR 3
   - name: get_pr3_comments
@@ -614,7 +614,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       mr_id: "{{ pr_ids_to_check[2] }}"
     output: pr3_comments_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Parse all comments for feedback
   - name: parse_pr_feedback
@@ -673,7 +673,7 @@ steps:
       jql: "{{ jira_jql }}"
       max_results: 20
     output: jira_activity_raw
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   - name: parse_jira_activity
     description: "Parse Jira search results"
@@ -698,7 +698,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       state: "merged"
     output: recent_merges_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_recent_merges
     description: "Parse merged MRs"
@@ -720,7 +720,7 @@ steps:
       filter_name: "Automation Analytics"
       silenced: false
     output: alerts_stage_raw
-    on_error: continue
+    on_error: auto_heal  # Alertmanager - may need auth
 
   - name: check_alerts_prod
     description: "Check for Automation Analytics alerts in production"
@@ -730,7 +730,7 @@ steps:
       filter_name: "Automation Analytics"
       silenced: false
     output: alerts_prod_raw
-    on_error: continue
+    on_error: auto_heal  # Alertmanager - may need auth
 
   - name: parse_alerts
     description: "Parse alert results"
@@ -834,7 +834,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       branch: "{{ mr_branches.get(pr_ids_to_check[0], '') }}"
     output: mr1_ci_status_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Get CI status for MR 2
   - name: get_mr2_ci_status
@@ -845,7 +845,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       branch: "{{ mr_branches.get(pr_ids_to_check[1], '') }}"
     output: mr2_ci_status_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Get CI status for MR 3
   - name: get_mr3_ci_status
@@ -856,7 +856,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       branch: "{{ mr_branches.get(pr_ids_to_check[2], '') }}"
     output: mr3_ci_status_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: check_failed_pipelines
     description: "Parse CI status for failed pipelines, excluding allow_failure jobs"
@@ -919,7 +919,7 @@ steps:
     args:
       mine: true
     output: ephemeral_namespaces_raw
-    on_error: continue
+    on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
   - name: parse_ephemeral_namespaces
     description: "Parse namespace list"
@@ -974,7 +974,7 @@ steps:
       project: "automation-analytics/automation-analytics-backend"
       reviewer: "@me"
     output: review_requests_raw
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_review_requests
     description: "Parse review request list"

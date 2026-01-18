@@ -98,7 +98,7 @@ steps:
       namespace: "{{ inputs.namespace }}"
       limit: 20
     output: pipelineruns_raw
-    on_error: continue
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
   - name: parse_pipelineruns
     description: "Parse pipeline runs"
@@ -163,7 +163,7 @@ steps:
       run_name: "{{ target_run.run_name }}"
       namespace: "{{ inputs.namespace }}"
     output: run_details_raw
-    on_error: continue
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
   - name: get_taskruns
     description: "List task runs for this pipeline"
@@ -173,7 +173,7 @@ steps:
       namespace: "{{ inputs.namespace }}"
       limit: 20
     output: taskruns_raw
-    on_error: continue
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
   - name: parse_details
     description: "Parse run details"
@@ -218,7 +218,7 @@ steps:
       run_name: "{{ target_run.run_name }}"
       namespace: "{{ inputs.namespace }}"
     output: cancel_result
-    on_error: continue
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
   - name: parse_cancel
     description: "Parse cancel result"
@@ -245,7 +245,7 @@ steps:
       run_name: "{{ target_run.run_name }}"
       namespace: "{{ inputs.namespace }}"
     output: delete_result
-    on_error: continue
+    on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
   - name: parse_delete
     description: "Parse delete result"
@@ -271,6 +271,101 @@ steps:
     args:
       action: "Cancelled pipeline {{ target_run.run_name }}"
       details: "Namespace: {{ inputs.namespace }}{% if inputs.delete %}, deleted{% endif %}"
+    on_error: continue
+
+  - name: track_pipeline_cancellations
+    description: "Track pipeline cancellations for patterns"
+    condition: "cancel_status and cancel_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "pipeline_cancellations" not in patterns:
+          patterns["pipeline_cancellations"] = []
+
+      # Record this cancellation
+      cancel_record = {
+          "run_name": target_run.run_name if target_run else "unknown",
+          "namespace": inputs.namespace,
+          "deleted": inputs.delete,
+          "status_before": run_status.status if run_status else "unknown",
+          "task_count": run_status.task_count if run_status else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["pipeline_cancellations"].append(cancel_record)
+
+      # Keep last 100 cancellations
+      patterns["pipeline_cancellations"] = patterns["pipeline_cancellations"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "cancellation tracked"
+    output: cancel_tracking_result
+    on_error: continue
+
+  - name: track_stuck_pipelines
+    description: "Track pipelines that frequently get stuck"
+    condition: "run_status and run_status.status == 'running'"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "stuck_pipelines" not in patterns:
+          patterns["stuck_pipelines"] = {}
+
+      # Extract pipeline name from run name (usually format: pipeline-name-xxxxx)
+      run_name = target_run.run_name if target_run else ""
+      pipeline_name = "-".join(run_name.split("-")[:-1]) if run_name else "unknown"
+
+      if pipeline_name not in patterns["stuck_pipelines"]:
+          patterns["stuck_pipelines"][pipeline_name] = {
+              "count": 0,
+              "first_stuck": datetime.now().isoformat(),
+              "last_stuck": datetime.now().isoformat(),
+          }
+
+      patterns["stuck_pipelines"][pipeline_name]["count"] += 1
+      patterns["stuck_pipelines"][pipeline_name]["last_stuck"] = datetime.now().isoformat()
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "stuck pipeline tracked"
+    output: stuck_tracking_result
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_pipeline_code
+    description: "Search for pipeline-related code"
+    condition: "target_run.run_name"
+    tool: code_search
+    args:
+      query: "pipeline tekton {{ target_run.run_name.split('-')[0] if target_run.run_name else '' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: pipeline_code_raw
+    on_error: continue
+
+  - name: parse_pipeline_code
+    description: "Parse pipeline code search results"
+    condition: "pipeline_code_raw"
+    compute: |
+      code_result = pipeline_code_raw if pipeline_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:3]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+      }
+    output: pipeline_code_analysis
     on_error: continue
 
 outputs:

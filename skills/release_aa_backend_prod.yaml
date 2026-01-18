@@ -163,7 +163,7 @@ steps:
       expect_success: true
       error_message: "Image not found in Quay for SHA {{ inputs.commit_sha }}. Build may not have completed."
     output: quay_image
-    on_error: continue
+    on_error: auto_heal  # Quay API - may need auth
 
   # ==================== GET CURRENT STATE ====================
 
@@ -221,7 +221,7 @@ steps:
       issue_type: "story"
       summary: "{{ inputs.release_date }} Analytics HCC Service Release"
     output: jira_issue
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # ==================== PREPARE APP-INTERFACE ====================
 
@@ -253,7 +253,7 @@ steps:
     args:
       repo: "{{ cfg.appinterface_repo }}"
       remote: "upstream"
-    on_error: continue
+    on_error: auto_heal  # Git remote - may need auth/network
 
   - name: rebase_upstream
     description: "Rebase on upstream master"
@@ -463,7 +463,7 @@ steps:
       source_branch: "{{ branch_name }}"
       draft: false
     output: mr_result
-    on_error: continue
+    on_error: auto_heal  # GitLab API - may need auth refresh
 
   # ==================== UPDATE JIRA ====================
 
@@ -479,7 +479,7 @@ steps:
 
         Releasing commit: {{ inputs.commit_sha }}
         {{ changelog }}
-    on_error: continue
+    on_error: auto_heal  # Jira API - may need auth refresh
 
   # Step 15: Emit release started hook
   - name: emit_release_started_hook
@@ -503,6 +503,36 @@ steps:
       else:
           result = "hooks skipped: emit_event not available"
     output: release_hook_result
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_release_code
+    description: "Search for code related to this production release"
+    tool: code_search
+    args:
+      query: "production release {{ inputs.commit_sha[:12] }} automation-analytics-backend deploy"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: release_code_raw
+    on_error: continue
+
+  - name: parse_release_code
+    description: "Parse release code search results"
+    condition: "release_code_raw"
+    compute: |
+      code_result = release_code_raw if release_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: release_code_search
     on_error: continue
 
   # ==================== MEMORY INTEGRATION ====================
@@ -538,6 +568,66 @@ steps:
     args:
       action: "Prepared production release {{ inputs.release_date }}"
       details: "SHA: {{ inputs.commit_sha[:12] }}, Jira: {{ jira_issue.key if jira_issue else 'N/A' }}"
+    on_error: continue
+
+  - name: track_production_releases
+    description: "Track production releases for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "production_releases" not in patterns:
+          patterns["production_releases"] = []
+
+      # Record this release
+      release_record = {
+          "release_date": inputs.release_date,
+          "commit_sha": inputs.commit_sha[:40],
+          "previous_sha": current_prod_sha[:40] if current_prod_sha else None,
+          "include_billing": inputs.include_billing,
+          "jira_key": jira_issue.key if jira_issue else None,
+          "mr_created": bool(mr_result) if 'mr_result' in dir() else False,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["production_releases"].append(release_record)
+
+      # Keep last 100 releases
+      patterns["production_releases"] = patterns["production_releases"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "release tracked"
+    output: release_tracking_result
+    on_error: continue
+
+  - name: update_release_state
+    description: "Update release state in memory"
+    compute: |
+      from datetime import datetime
+
+      # Update release state
+      state_data = memory.read_memory("state/releases") or {}
+      if "production" not in state_data:
+          state_data["production"] = {}
+
+      state_data["production"]["last_release"] = {
+          "date": inputs.release_date,
+          "sha": inputs.commit_sha[:12],
+          "previous_sha": current_prod_sha[:12] if current_prod_sha else None,
+          "jira_key": jira_issue.key if jira_issue else None,
+          "mr_url": mr_result.get("web_url", "") if mr_result else None,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      # Track release frequency
+      if "release_count" not in state_data["production"]:
+          state_data["production"]["release_count"] = 0
+      state_data["production"]["release_count"] += 1
+
+      memory.write_memory("state/releases", state_data)
+      result = "release state updated"
+    output: release_state_result
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

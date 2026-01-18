@@ -81,7 +81,7 @@ steps:
     args:
       limit: 100
     output: channels_raw
-    on_error: continue
+    on_error: auto_heal  # Slack API - may need auth
 
   - name: find_channel
     description: "Find the target channel"
@@ -187,7 +187,7 @@ steps:
       message: "{{ formatted_msg.text }}"
       thread_ts: "{{ inputs.thread_ts or '' }}"
     output: post_result
-    on_error: continue
+    on_error: auto_heal  # Slack API - may need auth
 
   - name: parse_post_result
     description: "Parse post result"
@@ -210,6 +210,37 @@ steps:
       }
     output: post_status
 
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_context_code
+    description: "Search for code related to the notification context"
+    condition: "inputs.context"
+    tool: code_search
+    args:
+      query: "{{ inputs.context }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: context_code_raw
+    on_error: continue
+
+  - name: parse_context_code
+    description: "Parse context code search results"
+    condition: "context_code_raw"
+    compute: |
+      code_result = context_code_raw if context_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: context_code_search
+    on_error: continue
+
   # ==================== MEMORY ====================
 
   - name: log_notification
@@ -219,6 +250,37 @@ steps:
     args:
       action: "Sent Slack notification"
       details: "Channel: #{{ channel_info.channel_name }}, Type: {{ inputs.type }}"
+    on_error: continue
+
+  - name: track_notifications
+    description: "Track notifications for patterns"
+    condition: "post_status.success"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "slack_notifications" not in patterns:
+          patterns["slack_notifications"] = []
+
+      # Record this notification
+      notification_record = {
+          "channel": channel_info.channel_name if channel_info else "unknown",
+          "type": inputs.type,
+          "has_mention": bool(inputs.mention),
+          "has_context": bool(inputs.context),
+          "threaded": bool(inputs.thread_ts),
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["slack_notifications"].append(notification_record)
+
+      # Keep last 100 notifications
+      patterns["slack_notifications"] = patterns["slack_notifications"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "notification tracked"
+    output: notification_tracking_result
     on_error: continue
 
 outputs:

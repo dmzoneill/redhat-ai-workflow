@@ -51,6 +51,35 @@ inputs:
     description: "Meeting description/agenda"
 
 steps:
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_meeting_code
+    description: "Search for code related to meeting scheduling"
+    tool: code_search
+    args:
+      query: "Google Calendar meeting scheduling {{ inputs.title }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: meeting_code_raw
+    on_error: continue
+
+  - name: parse_meeting_code
+    description: "Parse meeting code search results"
+    condition: "meeting_code_raw"
+    compute: |
+      code_result = meeting_code_raw if meeting_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('found'):
+          for item in code_result.get('content', []):
+              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
+
+      result = {
+          "has_code": len(related_code) > 0,
+          "code_snippets": related_code[:5],
+      }
+    output: meeting_code_search
+    on_error: continue
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -122,7 +151,7 @@ steps:
     description: "Verify calendar API is accessible"
     tool: google_calendar_status
     output: calendar_status
-    on_error: continue
+    on_error: auto_heal
 
   - name: validate_calendar
     description: "Check if calendar is accessible"
@@ -147,7 +176,7 @@ steps:
     args:
       days: "{{ inputs.days_ahead }}"
     output: events_raw
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_events
     description: "Parse existing events to find busy times"
@@ -181,7 +210,7 @@ steps:
       duration_minutes: "{{ inputs.duration_minutes }}"
       days_ahead: "{{ inputs.days_ahead }}"
     output: free_slots_raw
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_free_slots
     description: "Parse available time slots"
@@ -216,7 +245,7 @@ steps:
       duration_minutes: "{{ inputs.duration_minutes }}"
       days_ahead: "{{ inputs.days_ahead }}"
     output: attendee_availability_raw
-    on_error: continue
+    on_error: auto_heal
 
   - name: parse_attendee_availability
     description: "Parse attendee availability"
@@ -274,7 +303,7 @@ steps:
       attendees: "{{ inputs.attendees or '' }}"
       description: "{{ inputs.description or '' }}"
     output: meeting_result
-    on_error: continue
+    on_error: auto_heal
 
   # ==================== QUICK MEETING FALLBACK ====================
 
@@ -287,7 +316,7 @@ steps:
       when: "{{ meeting_time.selected_time }}"
       duration_minutes: "{{ inputs.duration_minutes }}"
     output: quick_meeting_result
-    on_error: continue
+    on_error: auto_heal
 
   # ==================== MEMORY ====================
 
@@ -298,6 +327,36 @@ steps:
     args:
       action: "Scheduled meeting: {{ inputs.title }}"
       details: "Time: {{ meeting_time.selected_time }}, Duration: {{ inputs.duration_minutes }}min"
+    on_error: continue
+
+  - name: track_meetings
+    description: "Track meeting scheduling for patterns"
+    condition: "meeting_result or quick_meeting_result"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "scheduled_meetings" not in patterns:
+          patterns["scheduled_meetings"] = []
+
+      # Record this meeting
+      meeting_record = {
+          "title": inputs.title,
+          "duration_minutes": inputs.duration_minutes,
+          "has_attendees": bool(inputs.attendees),
+          "auto_selected_time": meeting_time.auto_selected if meeting_time else False,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["scheduled_meetings"].append(meeting_record)
+
+      # Keep last 50 meetings
+      patterns["scheduled_meetings"] = patterns["scheduled_meetings"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "meeting tracked"
+    output: meeting_tracking_result
     on_error: continue
 
 outputs:

@@ -155,7 +155,7 @@ steps:
       namespace: "{{ inputs.namespace }}"
       environment: "{{ inputs.environment }}"
     output: restart_result
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: parse_restart
     description: "Parse restart result"
@@ -210,7 +210,7 @@ steps:
       namespace: "{{ inputs.namespace }}"
       environment: "{{ inputs.environment }}"
     output: pods_after_raw
-    on_error: continue
+    on_error: auto_heal  # K8s cluster - may need kube_login
 
   - name: parse_pods_after
     description: "Analyze pod health after restart"
@@ -353,6 +353,39 @@ steps:
       memory.write_memory("state/environments", env_data)
       result = "environment state updated"
     output: env_update_result
+    on_error: continue
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_deployment_code
+    description: "Search for code related to this deployment"
+    tool: code_search
+    args:
+      query: "{{ inputs.deployment }} kubernetes deployment configuration"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: deployment_code_raw
+    on_error: continue
+
+  - name: parse_deployment_code
+    description: "Parse deployment code search results"
+    condition: "deployment_code_raw"
+    compute: |
+      code_result = deployment_code_raw if deployment_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:3]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+      }
+    output: deployment_code_analysis
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================
