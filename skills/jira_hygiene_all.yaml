@@ -1,0 +1,236 @@
+# Skill: Batch Jira Hygiene
+# Runs hygiene checks on all your assigned Jira issues
+
+name: jira_hygiene_all
+description: |
+  Run hygiene checks on all your assigned Jira issues.
+
+  Fetches all issues assigned to you and runs jira_hygiene on each.
+  Useful for scheduled nightly cleanup of your issue backlog.
+
+version: "1.0"
+
+inputs:
+  - name: status
+    type: string
+    required: false
+    default: ""
+    description: "Filter by status (e.g., 'In Progress', 'New'). Empty = all statuses."
+
+  - name: limit
+    type: integer
+    required: false
+    default: 200
+    description: "Maximum number of issues to process"
+
+  - name: auto_fix
+    type: boolean
+    required: false
+    default: true
+    description: "Automatically fix issues where possible"
+
+  - name: auto_transition
+    type: boolean
+    required: false
+    default: true
+    description: "Auto-transition New → Refinement when ready"
+
+  - name: dry_run
+    type: boolean
+    required: false
+    default: false
+    description: "Show what would be fixed without making changes"
+
+steps:
+  # ==================== FETCH MY ISSUES ====================
+
+  - name: get_my_issues
+    description: "Fetch all issues assigned to me"
+    tool: jira_my_issues
+    args:
+      status: "{{ inputs.status }}"
+    output: my_issues_raw
+    on_error: auto_heal
+
+  - name: parse_my_issues
+    description: "Parse issue list"
+    compute: |
+      import re
+
+      issues_text = str(my_issues_raw) if my_issues_raw else ""
+
+      # Extract issue keys (AAP-XXXXX pattern)
+      issue_keys = re.findall(r'(AAP-\d+)', issues_text)
+
+      # Deduplicate while preserving order
+      seen = set()
+      unique_keys = []
+      for key in issue_keys:
+          if key not in seen:
+              seen.add(key)
+              unique_keys.append(key)
+
+      # Apply limit
+      limit = inputs.get('limit', 20) if isinstance(inputs, dict) else 20
+      limited_keys = unique_keys[:limit]
+
+      result = {
+          "issue_keys": limited_keys,
+          "total_found": len(unique_keys),
+          "processing": len(limited_keys),
+      }
+    output: parsed_issues
+
+  # ==================== RUN HYGIENE ON EACH ====================
+
+  - name: run_batch_hygiene
+    description: "Run hygiene check on each issue"
+    compute: |
+      results = []
+      healthy_count = 0
+      fixed_count = 0
+      needs_attention = []
+
+      auto_fix = inputs.get('auto_fix', True) if isinstance(inputs, dict) else True
+      auto_transition = inputs.get('auto_transition', True) if isinstance(inputs, dict) else True
+      dry_run = inputs.get('dry_run', False) if isinstance(inputs, dict) else False
+
+      for issue_key in parsed_issues.get('issue_keys', []):
+          try:
+              # Run hygiene skill on this issue
+              hygiene_result = skill_engine.run_skill(
+                  "jira_hygiene",
+                  {
+                      "issue_key": issue_key,
+                      "auto_fix": auto_fix and not dry_run,
+                      "auto_transition": auto_transition and not dry_run,
+                  }
+              )
+
+              # Parse result
+              result_text = str(hygiene_result) if hygiene_result else ""
+
+              if "100%" in result_text or "All Checks Passed" in result_text:
+                  healthy_count += 1
+                  results.append({"key": issue_key, "status": "healthy", "score": 100})
+              elif "Fixed" in result_text:
+                  fixed_count += 1
+                  results.append({"key": issue_key, "status": "fixed", "score": 70})
+              else:
+                  # Extract health score if present
+                  import re
+                  score_match = re.search(r'(\d+)%', result_text)
+                  score = int(score_match.group(1)) if score_match else 50
+
+                  needs_attention.append(issue_key)
+                  results.append({"key": issue_key, "status": "needs_attention", "score": score})
+
+          except Exception as e:
+              results.append({"key": issue_key, "status": "error", "error": str(e)[:100]})
+
+      result = {
+          "results": results,
+          "healthy_count": healthy_count,
+          "fixed_count": fixed_count,
+          "needs_attention": needs_attention,
+          "total_processed": len(results),
+      }
+    output: batch_results
+
+  # ==================== BUILD SUMMARY ====================
+
+  - name: build_summary
+    description: "Build batch hygiene summary"
+    compute: |
+      lines = ["## 🧹 Batch Jira Hygiene Report", ""]
+
+      total = parsed_issues.get('total_found', 0)
+      processed = batch_results.get('total_processed', 0)
+      healthy = batch_results.get('healthy_count', 0)
+      fixed = batch_results.get('fixed_count', 0)
+      attention = len(batch_results.get('needs_attention', []))
+
+      dry_run = inputs.get('dry_run', False) if isinstance(inputs, dict) else False
+
+      lines.append(f"**Issues Found:** {total}")
+      lines.append(f"**Processed:** {processed}")
+      if dry_run:
+          lines.append("**Mode:** 🔍 Dry Run (no changes made)")
+      lines.append("")
+
+      # Summary stats
+      lines.append("### Summary")
+      lines.append(f"- ✅ **Healthy:** {healthy}")
+      lines.append(f"- 🔧 **Fixed:** {fixed}")
+      lines.append(f"- ⚠️ **Needs Attention:** {attention}")
+      lines.append("")
+
+      # Issues needing attention
+      if batch_results.get('needs_attention'):
+          lines.append("### ⚠️ Issues Needing Manual Attention")
+          for key in batch_results['needs_attention'][:10]:
+              lines.append(f"- [{key}](https://issues.redhat.com/browse/{key})")
+          if len(batch_results['needs_attention']) > 10:
+              lines.append(f"- ... and {len(batch_results['needs_attention']) - 10} more")
+          lines.append("")
+
+      # Detailed results
+      lines.append("### Details")
+      for r in batch_results.get('results', [])[:15]:
+          key = r.get('key', '?')
+          status = r.get('status', 'unknown')
+          score = r.get('score', '?')
+
+          if status == 'healthy':
+              lines.append(f"- ✅ {key} (100%)")
+          elif status == 'fixed':
+              lines.append(f"- 🔧 {key} (fixed)")
+          elif status == 'needs_attention':
+              lines.append(f"- ⚠️ {key} ({score}%)")
+          elif status == 'error':
+              lines.append(f"- ❌ {key}: {r.get('error', 'unknown error')}")
+
+      if len(batch_results.get('results', [])) > 15:
+          lines.append(f"- ... and {len(batch_results['results']) - 15} more")
+
+      result = '\n'.join(lines)
+    output: summary_text
+
+  # ==================== LOG SESSION ====================
+
+  - name: log_batch_hygiene
+    description: "Log batch hygiene to session"
+    tool: memory_session_log
+    args:
+      action: "Batch Jira hygiene on {{ batch_results.total_processed }} issues"
+      details: "Healthy: {{ batch_results.healthy_count }}, Fixed: {{ batch_results.fixed_count }}, Needs attention: {{ batch_results.needs_attention | length }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {{ summary_text }}
+
+      ---
+
+      ### Quick Actions
+
+      {% if batch_results.needs_attention %}
+      **Fix specific issue:**
+      ```
+      skill_run("jira_hygiene", '{"issue_key": "{{ batch_results.needs_attention[0] }}"}')
+      ```
+      {% endif %}
+
+      **Run again:**
+      ```
+      skill_run("jira_hygiene_all", '{}')
+      ```
+
+  - name: stats
+    value:
+      total_found: "{{ parsed_issues.total_found }}"
+      processed: "{{ batch_results.total_processed }}"
+      healthy: "{{ batch_results.healthy_count }}"
+      fixed: "{{ batch_results.fixed_count }}"
+      needs_attention: "{{ batch_results.needs_attention | length }}"
