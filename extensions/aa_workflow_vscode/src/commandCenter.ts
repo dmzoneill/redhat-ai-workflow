@@ -8007,8 +8007,8 @@ print(result)
               <thead>
                 <tr>
                   <th></th>
-                  <th>Name</th>
-                  <th>Description</th>
+                  <th style="text-align: left;">Name</th>
+                  <th style="text-align: left;">Description</th>
                   <th>Tools</th>
                   <th>Skills</th>
                   <th>Actions</th>
@@ -8024,8 +8024,8 @@ print(result)
                   return `
                   <tr class="${isActive ? 'row-active' : ''}">
                     <td><span class="persona-icon-small ${this._getPersonaColor(persona.name)}">${this._getPersonaIcon(persona.name)}</span></td>
-                    <td><strong>${persona.name}</strong>${typeBadge}${isActive ? ' <span class="active-badge-small">Active</span>' : ''}</td>
-                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${persona.description || displayFileName}</td>
+                    <td style="text-align: left;"><strong>${persona.name}</strong>${typeBadge}${isActive ? ' <span class="active-badge-small">Active</span>' : ''}</td>
+                    <td style="text-align: left;">${persona.description || displayFileName}</td>
                     <td>${persona.tools.length}</td>
                     <td>${persona.skills.length || 'all'}</td>
                     <td>
