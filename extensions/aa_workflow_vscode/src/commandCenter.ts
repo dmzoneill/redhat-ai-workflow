@@ -7105,17 +7105,24 @@ print(result)
           color: var(--orange);
         }
 
-        /* Table containers */
+        /* Table containers - need to span full width when inside grid */
         .sessions-table-container,
         .personas-table-container {
           overflow-x: auto;
           width: 100%;
+          grid-column: 1 / -1; /* Span all grid columns */
         }
 
         .sessions-table-container .data-table,
         .personas-table-container .data-table {
           width: 100%;
+          min-width: 800px; /* Ensure minimum width for all columns */
           table-layout: auto;
+        }
+
+        /* When table view is active, make grid a single column */
+        .workspaces-grid:has(.sessions-table-container) {
+          display: block;
         }
 
         /* Clickable cells in tables */
@@ -8022,10 +8029,10 @@ print(result)
                     <td>${persona.tools.length}</td>
                     <td>${persona.skills.length || 'all'}</td>
                     <td>
-                      <button class="btn btn-${isActive ? "ghost" : "primary"} btn-small" data-action="loadPersona" data-persona="${displayFileName}" ${isActive ? "disabled" : ""}>
+                      <button class="btn btn-${isActive ? "ghost" : "primary"} btn-small" data-action="loadPersona" data-persona="${displayFileName}" ${isActive ? "disabled" : ""} title="${isActive ? "Currently active" : "Load this persona"}">
                         ${isActive ? "✓" : "🔄"}
                       </button>
-                      <button class="btn btn-ghost btn-small" data-action="viewPersonaFile" data-persona="${displayFileName}">📄</button>
+                      <button class="btn btn-ghost btn-small" data-action="viewPersonaFile" data-persona="${displayFileName}" title="View persona config file">📄</button>
                     </td>
                   </tr>
                   `;
