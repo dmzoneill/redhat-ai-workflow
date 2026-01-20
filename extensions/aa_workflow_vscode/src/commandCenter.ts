@@ -392,6 +392,10 @@ export class CommandCenterPanel {
           case "refresh":
             this.update(false); // Preserve UI state on manual refresh
             break;
+          case "reloadUI":
+            // Force full HTML re-render - useful after extension recompilation
+            this.update(true);
+            break;
           case "refreshWorkspaces":
             this._loadWorkspaceState();
             this._updateWorkspacesTab();
@@ -4017,6 +4021,24 @@ print(result)
           text-transform: uppercase;
         }
 
+        .header-reload-btn {
+          background: transparent;
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          padding: 8px 12px;
+          cursor: pointer;
+          font-size: 1rem;
+          opacity: 0.6;
+          transition: all 0.2s;
+          margin-left: 12px;
+        }
+
+        .header-reload-btn:hover {
+          opacity: 1;
+          background: rgba(255, 255, 255, 0.1);
+          border-color: var(--accent);
+        }
+
         /* ============================================ */
         /* Tabs */
         /* ============================================ */
@@ -7506,6 +7528,9 @@ print(result)
             <div class="header-stat-label">Sessions</div>
           </div>
         </div>
+        <button class="header-reload-btn" onclick="vscode.postMessage({ command: 'reloadUI' })" title="Reload UI (Ctrl+Shift+R) - Use after extension recompilation">
+          🔄
+        </button>
       </div>
 
       <!-- Tabs -->
@@ -8893,6 +8918,15 @@ print(result)
 
         // Run connection check on load
         checkExtensionConnection();
+
+        // Keyboard shortcut: Ctrl+Shift+R to reload UI (after extension recompilation)
+        document.addEventListener('keydown', function(e) {
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'R') {
+            e.preventDefault();
+            console.log('[CommandCenter-Webview] Ctrl+Shift+R pressed - requesting UI reload');
+            vscode.postMessage({ command: 'reloadUI' });
+          }
+        });
 
         // Simple YAML parser for skill files
         function parseSkillYaml(yaml) {
