@@ -1,5 +1,21 @@
 # AI Workflow Project Rules
 
+## ⛔ CRITICAL: Git Safety Rules
+
+**NEVER run `git checkout` on files without explicit user permission!**
+
+This has caused catastrophic loss of uncommitted work. Before ANY git operation that could discard changes:
+1. **ASK the user first** - "Can I revert file X? This will discard uncommitted changes."
+2. **Check `git status`** - See what's modified
+3. **Check `git diff`** - See what would be lost
+4. **Consider `git stash`** - Preserve changes before destructive operations
+
+Destructive git commands that require explicit permission:
+- `git checkout -- <file>` (discards changes)
+- `git reset --hard` (discards all changes)
+- `git clean -fd` (deletes untracked files)
+- `git stash drop` (deletes stashed changes)
+
 ## On Session Start - TRACK YOUR SESSION ID!
 
 **IMPORTANT:** Multiple Cursor chats share the same MCP server. You MUST track your session_id to maintain separate context per chat.

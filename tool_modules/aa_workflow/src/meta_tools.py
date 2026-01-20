@@ -11,7 +11,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import TextContent
 
 from server.tool_discovery import build_full_manifest, get_module_for_tool
@@ -496,5 +496,573 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         except Exception as e:
             logger.error(f"Context filter error: {e}")
             return [TextContent(type="text", text=f"❌ Error running context filter: {e}")]
+
+    @registry.tool()
+    async def apply_tool_filter(
+        ctx: Context,
+        message: str,
+        persona: str = "developer",
+    ) -> list[TextContent]:
+        """
+        Apply tool filtering to reduce the tools Claude sees at runtime.
+
+        This tool analyzes your message and dynamically hides irrelevant tools,
+        reducing Claude's context window usage and improving response quality.
+
+        Call this at the START of complex tasks to focus Claude on relevant tools.
+
+        The filter uses 4 layers:
+        1. Core tools (always kept: memory, persona, session)
+        2. Persona baseline (developer, devops, incident, release)
+        3. Skill tools (auto-detected from message)
+        4. NPU classification (semantic understanding if available)
+
+        Args:
+            message: The task you want to accomplish (e.g., "deploy MR 1459 to ephemeral")
+            persona: Current persona hint (auto-detected if not specified)
+
+        Returns:
+            Summary of filtering applied and tools now available.
+
+        Example:
+            apply_tool_filter("deploy MR 1459 to ephemeral")
+            # Hides git, jira, lint tools; keeps k8s, bonfire, gitlab, quay
+        """
+        if not TOOL_FILTER_AVAILABLE:
+            return [
+                TextContent(
+                    type="text",
+                    text="⚠️ Tool filtering not available. Install: pip install sentence-transformers lancedb",
+                )
+            ]
+
+        if not ctx:
+            return [
+                TextContent(
+                    type="text",
+                    text="⚠️ Context not available - cannot apply filter dynamically.\n\n"
+                    "Use `context_filter` instead to see recommendations.",
+                )
+            ]
+
+        try:
+            # Get the FastMCP server from context
+            server = ctx._fastmcp if hasattr(ctx, "_fastmcp") else None
+            if not server:
+                return [
+                    TextContent(
+                        type="text",
+                        text="⚠️ Server not available in context - cannot apply filter.\n\n"
+                        "Use `context_filter` instead to see recommendations.",
+                    )
+                ]
+
+            # Detect skill first
+            detected_skill = detect_skill(message) if detect_skill else None
+
+            # Run the 4-layer filter
+            result = filter_tools_detailed(
+                message=message,
+                persona=persona,
+                detected_skill=detected_skill,
+            )
+
+            relevant_tools = set(result.get("tools", []))
+
+            # Core tools that should NEVER be removed
+            CORE_TOOLS = {
+                "persona_load",
+                "persona_list",
+                "session_start",
+                "session_info",
+                "session_list",
+                "session_switch",
+                "session_rename",
+                "debug_tool",
+                "memory_read",
+                "memory_write",
+                "memory_update",
+                "memory_append",
+                "memory_query",
+                "memory_session_log",
+                "memory_stats",
+                "check_known_issues",
+                "learn_tool_fix",
+                "skill_list",
+                "skill_run",
+                "tool_list",
+                "tool_exec",
+                "context_filter",
+                "apply_tool_filter",
+                "vpn_connect",
+                "kube_login",
+                "workspace_state_export",
+                "workspace_state_list",
+            }
+
+            # Get current tools
+            current_tools = {t.name for t in await server.list_tools()}
+            tools_to_keep = relevant_tools | CORE_TOOLS
+
+            # Track what we're hiding
+            hidden_tools = []
+            kept_tools = []
+
+            # Remove tools not in the filtered set
+            for tool_name in list(current_tools):
+                if tool_name not in tools_to_keep:
+                    try:
+                        server.remove_tool(tool_name)
+                        hidden_tools.append(tool_name)
+                    except Exception as e:
+                        logger.warning(f"Could not remove tool {tool_name}: {e}")
+                else:
+                    kept_tools.append(tool_name)
+
+            # Notify Cursor that tools changed
+            if hidden_tools:
+                try:
+                    if hasattr(ctx, "session"):
+                        session = ctx.session
+                        if session and hasattr(session, "send_tool_list_changed"):
+                            await session.send_tool_list_changed()
+                            logger.info("Sent tools/list_changed notification to client")
+                except ValueError as e:
+                    logger.debug(f"Could not send notification (expected in test mode): {e}")
+                except Exception as e:
+                    logger.warning(f"Could not send tool list changed: {e}")
+
+            # Format response
+            lines = [
+                "## ✅ Tool Filter Applied",
+                "",
+                f"**Task**: {message[:60]}{'...' if len(message) > 60 else ''}",
+                f"**Persona**: {result.get('persona', persona)}",
+            ]
+
+            if result.get("persona_auto_detected"):
+                lines.append(f"  _(auto-detected via {result.get('persona_detection_reason', 'keyword')})_")
+
+            if detected_skill:
+                lines.append(f"**Skill**: {detected_skill}")
+
+            lines.extend(
+                [
+                    "",
+                    "### 📊 Results",
+                    f"- **Tools available**: {len(kept_tools)}",
+                    f"- **Tools hidden**: {len(hidden_tools)}",
+                    f"- **Reduction**: {result.get('reduction_pct', 0):.1f}%",
+                    f"- **Latency**: {result.get('latency_ms', 0):.0f}ms",
+                    "",
+                ]
+            )
+
+            # Show kept tools by category
+            if kept_tools:
+                lines.append("### 🔧 Available Tools")
+                tool_groups = {}
+                for t in sorted(kept_tools):
+                    prefix = t.split("_")[0] if "_" in t else "other"
+                    if prefix not in tool_groups:
+                        tool_groups[prefix] = []
+                    tool_groups[prefix].append(t)
+
+                for group, group_tools in sorted(tool_groups.items()):
+                    if len(group_tools) <= 5:
+                        lines.append(f"- **{group}**: {', '.join(group_tools)}")
+                    else:
+                        lines.append(f"- **{group}**: {', '.join(group_tools[:5])} +{len(group_tools)-5} more")
+
+            lines.extend(
+                [
+                    "",
+                    "---",
+                    "💡 **Tip**: Call `apply_tool_filter` again with a different message to re-filter,",
+                    "or use `persona_load` to restore all tools for a persona.",
+                ]
+            )
+
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        except Exception as e:
+            logger.error(f"Apply tool filter error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return [TextContent(type="text", text=f"❌ Error applying tool filter: {e}")]
+
+    @registry.tool()
+    async def workspace_state_export(ctx: Context) -> list[TextContent]:
+        """
+        Export workspace state for VS Code extension.
+
+        Exports all active workspace states to a JSON file that the
+        VS Code extension watches for real-time UI updates.
+
+        Returns:
+            Export status and file path.
+        """
+        try:
+            from tool_modules.aa_workflow.src.workspace_exporter import (
+                export_workspace_state_async,
+            )
+
+            result = await export_workspace_state_async(ctx)
+
+            if result.get("success"):
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"✅ Exported {result['workspace_count']} workspace(s) to:\n"
+                        f"`{result['file']}`\n\n"
+                        "The VS Code extension will pick up changes automatically.",
+                    )
+                ]
+            else:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"❌ Export failed: {result.get('error', 'Unknown error')}",
+                    )
+                ]
+        except Exception as e:
+            return [TextContent(type="text", text=f"❌ Export error: {e}")]
+
+    @registry.tool()
+    async def workspace_state_list(ctx: Context) -> list[TextContent]:
+        """
+        List all active workspace states.
+
+        Shows all workspaces tracked by the MCP server, including their
+        project, persona, active issue, branch, and sessions.
+
+        Returns:
+            List of workspace states with session details.
+        """
+        from server.workspace_state import WorkspaceRegistry
+
+        # Ensure current workspace is included
+        current_state = await WorkspaceRegistry.get_for_ctx(ctx)
+        current_session = current_state.get_active_session()
+
+        all_states = WorkspaceRegistry.get_all()
+
+        if not all_states:
+            return [TextContent(type="text", text="No active workspaces.")]
+
+        lines = ["## 🖥️ Active Workspaces & Sessions\n"]
+        total_sessions = 0
+
+        for uri, state in all_states.items():
+            is_current = uri == current_state.workspace_uri
+            marker = " ← *current*" if is_current else ""
+
+            lines.append(f"### `{uri}`{marker}")
+            lines.append(f"- **Project:** {state.project or 'default'}")
+
+            # Show sessions
+            session_count = state.session_count()
+            total_sessions += session_count
+            lines.append(f"- **Sessions:** {session_count}")
+
+            if state.sessions:
+                current_tools = state._get_loaded_tools()
+
+                for sid, session in state.sessions.items():
+                    is_active = sid == state.active_session_id
+                    is_this_chat = current_session and sid == current_session.session_id
+                    active_marker = " ✓ *active*" if is_active else ""
+                    this_chat_marker = " ← *this chat*" if is_this_chat else ""
+                    lines.append(f"  - `{sid[:8]}`{active_marker}{this_chat_marker}: {session.persona}")
+                    if session.issue_key:
+                        lines.append(f"    - Issue: {session.issue_key}")
+                    if session.branch:
+                        lines.append(f"    - Branch: {session.branch}")
+                    tools = session.tool_count or len(current_tools)
+                    if tools:
+                        lines.append(f"    - Tools: {tools} loaded")
+
+            lines.append("")
+
+        lines.append(f"*Total: {len(all_states)} workspace(s), {total_sessions} session(s)*")
+
+        # Auto-export to update VS Code extension
+        try:
+            from tool_modules.aa_workflow.src.workspace_exporter import (
+                export_workspace_state_async,
+            )
+            await export_workspace_state_async(ctx)
+        except Exception:
+            pass
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
+    async def session_info(ctx: Context, session_id: str = "") -> list[TextContent]:
+        """
+        Show session info for a specific session or the active session.
+
+        IMPORTANT: Each Cursor chat should track its own session_id. When you call
+        session_start(), save the returned session_id and pass it to this tool
+        to get YOUR session's info (not another chat's session).
+
+        Args:
+            session_id: Your session ID from session_start(). If not provided,
+                        shows the workspace's most recent active session (which
+                        may belong to a different chat).
+
+        Returns:
+            Session information including ID, persona, project, and activity.
+
+        Examples:
+            session_info(session_id="abc123")  # Get YOUR session info
+            session_info()                      # Get workspace's active session (shared)
+        """
+        from datetime import datetime
+        from server.workspace_state import WorkspaceRegistry
+
+        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+
+        # If session_id provided, look up that specific session
+        if session_id:
+            session = workspace.get_session(session_id)
+            if not session:
+                available = [f"`{sid}`" for sid in workspace.sessions.keys()]
+                return [TextContent(
+                    type="text",
+                    text=f"❌ Session `{session_id}` not found.\n\n"
+                    f"Available sessions: {', '.join(available) or 'none'}\n\n"
+                    "Use `session_start()` to create a new session."
+                )]
+            workspace.set_active_session(session_id)
+        else:
+            session = workspace.get_active_session()
+
+        if not session:
+            return [TextContent(type="text", text="❌ No active session. Call `session_start()` first.")]
+
+        session_project = session.project or workspace.project or 'default'
+        project_source = "(auto-detected)" if session.is_project_auto_detected else "(explicit)"
+
+        lines = [
+            "## 💬 Current Session Info\n",
+            "| Property | Value |",
+            "|----------|-------|",
+            f"| **Session ID** | `{session.session_id}` |",
+            f"| **Workspace** | `{workspace.workspace_uri}` |",
+            f"| **Project** | {session_project} {project_source} |",
+            f"| **Persona** | {session.persona} |",
+        ]
+
+        if session.issue_key:
+            lines.append(f"| **Issue** | {session.issue_key} |")
+        if session.branch:
+            lines.append(f"| **Branch** | {session.branch} |")
+
+        tools = session.tool_count or len(workspace._get_loaded_tools())
+        lines.append(f"| **Tools** | {tools} loaded |")
+
+        if session.started_at:
+            lines.append(f"| **Started** | {session.started_at.isoformat()} |")
+        if session.last_activity:
+            lines.append(f"| **Last Active** | {session.last_activity.isoformat()} |")
+
+        lines.append(f"\n*Session name: {session.name or 'unnamed'}*")
+
+        if session.last_tool:
+            time_ago = ""
+            if session.last_tool_time:
+                delta = datetime.now() - session.last_tool_time
+                if delta.total_seconds() < 60:
+                    time_ago = "just now"
+                elif delta.total_seconds() < 3600:
+                    time_ago = f"{int(delta.total_seconds() / 60)} min ago"
+                else:
+                    time_ago = f"{int(delta.total_seconds() / 3600)} hours ago"
+            lines.append(f"*Last tool: `{session.last_tool}` ({time_ago})*")
+            lines.append(f"*Total tool calls: {session.tool_call_count}*")
+
+        # Auto-export
+        try:
+            from tool_modules.aa_workflow.src.workspace_exporter import (
+                export_workspace_state_async,
+            )
+            await export_workspace_state_async(ctx)
+        except Exception:
+            pass
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
+    async def session_rename(ctx: Context, name: str, session_id: str = "") -> list[TextContent]:
+        """
+        Rename a session.
+
+        Give your session a friendly name to help identify it in the UI.
+
+        Args:
+            name: New name for the session (e.g., "Working on AAP-12345", "Debugging billing")
+            session_id: Optional session ID to rename. If not provided, renames the active session.
+
+        Returns:
+            Confirmation of the rename.
+
+        Examples:
+            session_rename(name="Fixing billing calculation bug")
+            session_rename(name="AAP-61214 - API refactor", session_id="abc123")
+        """
+        from server.workspace_state import WorkspaceRegistry
+
+        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+
+        if session_id:
+            session = workspace.get_session(session_id)
+            if not session:
+                return [TextContent(type="text", text=f"❌ Session `{session_id}` not found.")]
+        else:
+            session = workspace.get_active_session()
+
+        if not session:
+            return [TextContent(type="text", text="❌ No active session to rename.")]
+
+        old_name = session.name or "(unnamed)"
+        session.name = name
+
+        # Save to disk
+        WorkspaceRegistry.save_to_disk()
+
+        # Export for VS Code extension
+        try:
+            from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
+            await export_workspace_state_async(ctx)
+        except Exception:
+            pass
+
+        return [TextContent(type="text", text=f"✅ Session renamed: `{old_name}` → `{name}`")]
+
+    @registry.tool()
+    async def session_list(ctx: Context) -> list[TextContent]:
+        """
+        List all sessions in the current workspace.
+
+        Shows session IDs, names, personas, and recent activity for each session.
+        Useful for identifying which chat is which.
+
+        Returns:
+            List of all sessions with their details.
+        """
+        from datetime import datetime
+        from server.workspace_state import WorkspaceRegistry
+
+        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+        current_session = workspace.get_active_session()
+
+        if not workspace.sessions:
+            return [TextContent(type="text", text="No sessions in this workspace.")]
+
+        lines = ["## 📋 Sessions in this Workspace\n"]
+
+        # Sort by last activity (most recent first)
+        sorted_sessions = sorted(
+            workspace.sessions.values(),
+            key=lambda s: s.last_activity or datetime.min,
+            reverse=True
+        )
+
+        for session in sorted_sessions:
+            is_current = current_session and session.session_id == current_session.session_id
+            marker = "→ " if is_current else "  "
+
+            # Format time ago
+            time_ago = "unknown"
+            if session.last_activity:
+                delta = datetime.now() - session.last_activity
+                if delta.total_seconds() < 60:
+                    time_ago = "just now"
+                elif delta.total_seconds() < 3600:
+                    time_ago = f"{int(delta.total_seconds() / 60)} min ago"
+                elif delta.total_seconds() < 86400:
+                    time_ago = f"{int(delta.total_seconds() / 3600)} hours ago"
+                else:
+                    time_ago = f"{int(delta.total_seconds() / 86400)} days ago"
+
+            name_display = f"**{session.name}**" if session.name else "*unnamed*"
+            lines.append(f"{marker}`{session.session_id}` - {name_display}")
+            lines.append(f"   Persona: {session.persona} | Active: {time_ago}")
+
+            if session.last_tool:
+                lines.append(f"   Last: `{session.last_tool}` ({session.tool_call_count} calls)")
+
+            if session.issue_key:
+                lines.append(f"   Issue: {session.issue_key}")
+
+            lines.append("")
+
+        lines.append(f"*Total: {len(workspace.sessions)} session(s)*")
+        lines.append("\n*Tip: Use `session_rename(name='...')` to name your sessions*")
+        lines.append("*Tip: Use `session_switch(session_id='...')` to switch to a different session*")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
+    async def session_switch(ctx: Context, session_id: str) -> list[TextContent]:
+        """
+        Switch to a different session.
+
+        Use this to switch the active session to a specific session ID.
+        This is useful when you have multiple chats and want to ensure
+        you're working with the correct session context.
+
+        Args:
+            session_id: The session ID to switch to (from session_list or session_start).
+
+        Returns:
+            Confirmation of the switch with session details.
+
+        Examples:
+            session_switch(session_id="abc123")
+        """
+        from server.workspace_state import WorkspaceRegistry
+
+        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+
+        # Check if session exists
+        session = workspace.get_session(session_id)
+        if not session:
+            available = [f"`{sid}`" for sid in workspace.sessions.keys()]
+            return [TextContent(
+                type="text",
+                text=f"❌ Session `{session_id}` not found.\n\nAvailable sessions: {', '.join(available) or 'none'}"
+            )]
+
+        # Switch to the session
+        workspace.set_active_session(session_id)
+        session.touch()
+
+        # Save to disk
+        WorkspaceRegistry.save_to_disk()
+
+        # Build response
+        lines = [
+            f"✅ **Switched to session `{session_id}`**\n",
+            "| Property | Value |",
+            "|----------|-------|",
+            f"| **Name** | {session.name or '(unnamed)'} |",
+            f"| **Persona** | {session.persona} |",
+        ]
+
+        if session.issue_key:
+            lines.append(f"| **Issue** | {session.issue_key} |")
+        if session.branch:
+            lines.append(f"| **Branch** | {session.branch} |")
+
+        lines.append(f"| **Tool Calls** | {session.tool_call_count} |")
+
+        if session.last_tool:
+            lines.append(f"| **Last Tool** | `{session.last_tool}` |")
+
+        lines.append("\n*This session is now active for this chat.*")
+
+        return [TextContent(type="text", text="\n".join(lines))]
 
     return registry.count
