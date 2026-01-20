@@ -648,4 +648,44 @@ def filter_tools_detailed(
     Returns:
         Full filter result dict
     """
-    return get_filter().filter(message, persona, detected_skill, workspace_uri=workspace_uri)
+    result = get_filter().filter(message, persona, detected_skill, workspace_uri=workspace_uri)
+    
+    # Update session's dynamic tool count
+    _update_session_dynamic_count(
+        workspace_uri=workspace_uri,
+        tool_count=result.get("tool_count", len(result.get("tools", []))),
+        message=message,
+    )
+    
+    return result
+
+
+def _update_session_dynamic_count(workspace_uri: str, tool_count: int, message: str) -> None:
+    """Update the active session's dynamic tool count.
+    
+    Called after each NPU filter to record the context-aware tool count.
+    This allows the UI to show how many tools are relevant to the current context.
+    
+    Args:
+        workspace_uri: Workspace URI to find the session
+        tool_count: Number of tools returned by the filter
+        message: The message that triggered the filter (truncated for storage)
+    """
+    try:
+        from datetime import datetime
+        from server.workspace_state import WorkspaceRegistry
+        
+        workspace = WorkspaceRegistry.get(workspace_uri)
+        if workspace:
+            session = workspace.get_active_session(refresh_tools=False)
+            if session:
+                session.dynamic_tool_count = tool_count
+                session.last_filter_message = message[:100] if message else None
+                session.last_filter_time = datetime.now()
+                
+                # Persist change (debounced by save_to_disk)
+                WorkspaceRegistry.save_to_disk()
+                logger.debug(f"Updated dynamic_tool_count={tool_count} for session {session.session_id[:8]}")
+    except Exception as e:
+        # Don't fail the filter if we can't update the session
+        logger.debug(f"Failed to update dynamic tool count: {e}")

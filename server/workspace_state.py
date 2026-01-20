@@ -509,6 +509,11 @@ class ChatSession:
     - Persona (developer, devops, incident, release)
     - Active issue and branch
     - Tool filter cache (for NPU results)
+    
+    Tool Counts:
+    - static_tool_count: Baseline count from persona YAML (all tools available)
+    - dynamic_tool_count: Context-aware count from NPU filter (tools for current message)
+    - tool_count: Computed property returning dynamic if > 0, else static
     """
 
     session_id: str
@@ -518,7 +523,13 @@ class ChatSession:
     is_project_auto_detected: bool = False  # True if project was auto-detected from workspace path
     issue_key: str | None = None
     branch: str | None = None
-    tool_count: int = 0  # Number of tools loaded for this session's persona
+    
+    # Dual tool count system
+    static_tool_count: int = 0  # Baseline from persona YAML (calculated from tool modules)
+    dynamic_tool_count: int = 0  # Context-aware from NPU filter (updated on each filter call)
+    last_filter_message: str | None = None  # Message that triggered last NPU filter
+    last_filter_time: datetime | None = None  # When last NPU filter was run
+    
     started_at: datetime = field(default_factory=datetime.now)
     last_activity: datetime = field(default_factory=datetime.now)
 
@@ -537,6 +548,15 @@ class ChatSession:
     # Format: [{"meeting_id": 1, "title": "Sprint Planning", "date": "2025-01-20", "matches": 3}, ...]
     meeting_references: list[dict] = field(default_factory=list)
 
+    @property
+    def tool_count(self) -> int:
+        """Computed tool count: dynamic if available, else static.
+        
+        Returns dynamic_tool_count if > 0 (context-aware from NPU filter),
+        otherwise returns static_tool_count (baseline from persona YAML).
+        """
+        return self.dynamic_tool_count if self.dynamic_tool_count > 0 else self.static_tool_count
+
     # Backward compatibility property
     @property
     def active_tools(self) -> set[str]:
@@ -545,8 +565,8 @@ class ChatSession:
 
     @active_tools.setter
     def active_tools(self, value: set[str]) -> None:
-        """Deprecated: Sets tool_count from the length of the provided set."""
-        self.tool_count = len(value) if value else 0
+        """Deprecated: Sets static_tool_count from the length of the provided set."""
+        self.static_tool_count = len(value) if value else 0
 
     def touch(self, tool_name: str | None = None) -> None:
         """Update last activity timestamp and optionally track tool call.
@@ -582,7 +602,13 @@ class ChatSession:
             "is_project_auto_detected": self.is_project_auto_detected,
             "issue_key": self.issue_key,
             "branch": self.branch,
-            "tool_count": self.tool_count,
+            # Dual tool counts
+            "static_tool_count": self.static_tool_count,
+            "dynamic_tool_count": self.dynamic_tool_count,
+            "tool_count": self.tool_count,  # Computed for backward compat
+            "last_filter_message": self.last_filter_message,
+            "last_filter_time": self.last_filter_time.isoformat() if self.last_filter_time else None,
+            # Timestamps
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "last_activity": self.last_activity.isoformat() if self.last_activity else None,
             "name": self.name,
@@ -743,9 +769,9 @@ class WorkspaceState:
         """
         if self.active_session_id:
             session = self.sessions.get(self.active_session_id)
-            # Refresh tool count if zero (e.g., after restore from disk)
-            if session and refresh_tools and session.tool_count == 0:
-                session.tool_count = len(self._get_loaded_tools())
+            # Refresh static tool count if zero (e.g., after restore from disk)
+            if session and refresh_tools and session.static_tool_count == 0:
+                session.static_tool_count = len(self._get_loaded_tools())
             return session
         return None
 
@@ -935,7 +961,7 @@ class WorkspaceState:
                 project=self.project,
                 is_project_auto_detected=self.is_auto_detected,
                 name=cursor_chat.get("name"),
-                tool_count=get_persona_tool_count("developer"),  # Use cached persona count
+                static_tool_count=get_persona_tool_count("developer"),  # Use cached persona count
                 issue_key=issue_keys.get(sid),  # Set issue key if found in chat
             )
             if last_updated:
@@ -970,19 +996,19 @@ class WorkspaceState:
                     session.last_activity = cursor_last_activity
                     updated = True
 
-            # Update tool_count
+            # Update static_tool_count
             # - For active session: use currently loaded tools
             # - For inactive sessions: use cached persona tool count if current is 0
             is_active = (sid == self.active_session_id)
             if is_active and current_tool_count > 0:
-                if session.tool_count != current_tool_count:
-                    session.tool_count = current_tool_count
+                if session.static_tool_count != current_tool_count:
+                    session.static_tool_count = current_tool_count
                     updated = True
-            elif session.tool_count == 0:
+            elif session.static_tool_count == 0:
                 # Get from persona cache
                 persona_count = get_persona_tool_count(session.persona)
                 if persona_count > 0:
-                    session.tool_count = persona_count
+                    session.static_tool_count = persona_count
                     updated = True
 
             # Update issue_key if not already set and found in chat content
@@ -1558,11 +1584,22 @@ class WorkspaceRegistry:
                     except (ValueError, TypeError):
                         pass
 
-                # Restore tool count (new format) or derive from active_tools (old format)
-                if sess_data.get("tool_count"):
-                    session.tool_count = sess_data["tool_count"]
+                # Restore dual tool counts (new format) or derive from old format
+                if sess_data.get("static_tool_count"):
+                    session.static_tool_count = sess_data["static_tool_count"]
+                elif sess_data.get("tool_count"):
+                    # Old format: tool_count was the static count
+                    session.static_tool_count = sess_data["tool_count"]
                 elif sess_data.get("active_tools"):
-                    session.tool_count = len(sess_data["active_tools"])
+                    session.static_tool_count = len(sess_data["active_tools"])
+                
+                session.dynamic_tool_count = sess_data.get("dynamic_tool_count", 0)
+                session.last_filter_message = sess_data.get("last_filter_message")
+                if sess_data.get("last_filter_time"):
+                    try:
+                        session.last_filter_time = datetime.fromisoformat(sess_data["last_filter_time"])
+                    except (ValueError, TypeError):
+                        pass
 
                 # Restore activity tracking
                 session.last_tool = sess_data.get("last_tool")
@@ -1998,11 +2035,21 @@ class WorkspaceRegistry:
                     except (ValueError, TypeError):
                         pass
 
-                # Restore tool count (new format) or derive from active_tools (old format)
-                if sess_data.get("tool_count"):
-                    session.tool_count = sess_data["tool_count"]
+                # Restore dual tool counts (new format) or derive from old format
+                if sess_data.get("static_tool_count"):
+                    session.static_tool_count = sess_data["static_tool_count"]
+                elif sess_data.get("tool_count"):
+                    session.static_tool_count = sess_data["tool_count"]
                 elif sess_data.get("active_tools"):
-                    session.tool_count = len(sess_data["active_tools"])
+                    session.static_tool_count = len(sess_data["active_tools"])
+                
+                session.dynamic_tool_count = sess_data.get("dynamic_tool_count", 0)
+                session.last_filter_message = sess_data.get("last_filter_message")
+                if sess_data.get("last_filter_time"):
+                    try:
+                        session.last_filter_time = datetime.fromisoformat(sess_data["last_filter_time"])
+                    except (ValueError, TypeError):
+                        pass
 
                 # Restore activity tracking
                 session.last_tool = sess_data.get("last_tool")

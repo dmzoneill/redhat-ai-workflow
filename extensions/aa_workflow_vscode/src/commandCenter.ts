@@ -154,8 +154,15 @@ interface ChatSession {
   is_project_auto_detected: boolean;  // Whether project was auto-detected
   issue_key: string | null;
   branch: string | null;
-  tool_count?: number;  // Number of tools loaded for this persona (new format)
+  // Dual tool count system
+  static_tool_count?: number;  // Baseline from persona YAML (all tools available)
+  dynamic_tool_count?: number;  // Context-aware from NPU filter (tools for current message)
+  tool_count?: number;  // Computed: dynamic > 0 ? dynamic : static (for display)
+  last_filter_message?: string | null;  // Message that triggered last NPU filter
+  last_filter_time?: string | null;  // When last NPU filter was run
+  // Deprecated
   active_tools?: string[];  // Deprecated: old format, use tool_count
+  // Timestamps
   started_at: string | null;
   last_activity: string | null;
   name: string | null;
@@ -579,11 +586,11 @@ export class CommandCenterPanel {
       this.getInferenceStats();
     }, 500);
 
-    // Auto-refresh every 5 seconds with incremental DOM updates (no full re-render)
+    // Auto-refresh every 10 seconds with background sync
+    // The sync script updates workspace_states.json, and the file watcher triggers UI update
     this._refreshInterval = setInterval(() => {
-      this.update(false); // Incremental update to preserve UI state
-      this.getInferenceStats(); // Refresh inference stats
-    }, 5000);
+      this._backgroundSync();
+    }, 10000);
 
     debugLog("Constructor complete - panel ready");
   }
@@ -2951,6 +2958,8 @@ print(result)
     }
   }
 
+  private _workspaceWatcherDebounce: NodeJS.Timeout | undefined;
+
   private _setupWorkspaceWatcher(): void {
     try {
       const dir = path.dirname(WORKSPACE_STATES_FILE);
@@ -2960,17 +2969,83 @@ print(result)
 
       this._workspaceWatcher = fs.watch(dir, (eventType, filename) => {
         if (filename === "workspace_states.json") {
-          debugLog(`Workspace states file changed: ${eventType}`);
-          this._loadWorkspaceState();
-          this._updateWorkspacesTab();
+          // Debounce rapid changes (100ms)
+          if (this._workspaceWatcherDebounce) {
+            clearTimeout(this._workspaceWatcherDebounce);
+          }
+          this._workspaceWatcherDebounce = setTimeout(() => {
+            debugLog(`Workspace states file changed: ${eventType}`);
+            this._loadWorkspaceState();
+            this._updateWorkspacesTab();
+          }, 100);
         }
       });
-      debugLog("Workspace watcher set up");
+      debugLog("Workspace watcher set up with debouncing");
     } catch (error) {
       debugLog(`Error setting up workspace watcher: ${error}`);
     }
   }
 
+  /**
+   * Background sync - runs the sync script without blocking UI.
+   * Called every 10 seconds by the interval timer.
+   * The file watcher will trigger UI update when workspace_states.json changes.
+   */
+  private _backgroundSync(): void {
+    const { exec } = require('child_process');
+    const projectRoot = this._getProjectRoot();
+    
+    if (!projectRoot) {
+      return;
+    }
+
+    // Run sync script in background (non-blocking)
+    exec(
+      `python3 "${path.join(projectRoot, 'scripts', 'sync_workspace_state.py')}"`,
+      { cwd: projectRoot, timeout: 30000 },
+      (error: any, stdout: string, stderr: string) => {
+        if (error) {
+          debugLog(`Background sync error: ${error.message}`);
+        } else {
+          debugLog(`Background sync: ${stdout.trim()}`);
+        }
+        // File watcher will handle UI update when workspace_states.json changes
+        // Also do incremental UI update for stats
+        this.update(false);
+        this.getInferenceStats();
+      }
+    );
+  }
+
+  /**
+   * Get the project root directory.
+   */
+  private _getProjectRoot(): string | null {
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    
+    // Check current workspace first
+    if (fs.existsSync(path.join(workspacePath, 'scripts', 'sync_workspace_state.py'))) {
+      return workspacePath;
+    }
+    
+    // Try common locations
+    const possibleRoots = [
+      path.join(os.homedir(), 'src', 'redhat-ai-workflow'),
+      '/home/daoneill/src/redhat-ai-workflow',
+    ];
+    
+    for (const root of possibleRoots) {
+      if (fs.existsSync(path.join(root, 'scripts', 'sync_workspace_state.py'))) {
+        return root;
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * Manual sync with loading indicator - for explicit refresh requests.
+   */
   private async _syncAndRefreshSessions(): Promise<void> {
     // Show loading state
     this._panel.webview.postMessage({
@@ -2979,49 +3054,23 @@ print(result)
     });
 
     try {
-      // Directly run Python to sync and export workspace state
-      // This is more reliable than file watchers or HTTP endpoints
       const { execSync } = require('child_process');
-      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const projectRoot = this._getProjectRoot();
       
-      // Find the project root (where server/ directory is)
-      let projectRoot = workspacePath;
-      if (!fs.existsSync(path.join(projectRoot, 'server', 'workspace_state.py'))) {
-        // Try common locations
-        const possibleRoots = [
-          path.join(os.homedir(), 'src', 'redhat-ai-workflow'),
-          '/home/daoneill/src/redhat-ai-workflow',
-        ];
-        for (const root of possibleRoots) {
-          if (fs.existsSync(path.join(root, 'server', 'workspace_state.py'))) {
-            projectRoot = root;
-            break;
-          }
-        }
+      if (!projectRoot) {
+        throw new Error('Project root not found');
       }
 
-      const pythonScript = `
-import sys
-sys.path.insert(0, '${projectRoot.replace(/\\/g, '/')}')
-from server.workspace_state import WorkspaceRegistry
-WorkspaceRegistry.load_from_disk()
-result = WorkspaceRegistry.sync_all_with_cursor()
-from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state
-export_workspace_state()
-print(f"added={result['added']},removed={result['removed']},renamed={result['renamed']},updated={result.get('updated',0)}")
-`;
-
-      debugLog('Running session sync via Python subprocess');
-      const result = execSync(`python3 -c "${pythonScript.replace(/"/g, '\\"').replace(/\n/g, ';')}"`, {
-        encoding: 'utf8',
-        timeout: 30000,
-        cwd: projectRoot,
-      });
+      debugLog('Running manual session sync');
+      const result = execSync(
+        `python3 "${path.join(projectRoot, 'scripts', 'sync_workspace_state.py')}"`,
+        { encoding: 'utf8', timeout: 30000, cwd: projectRoot }
+      );
       
       debugLog(`Session sync result: ${result.trim()}`);
       
-      // Parse result and show message if changes were made
-      const match = result.match(/added=(\d+),removed=(\d+),renamed=(\d+),updated=(\d+)/);
+      // Parse result and show message
+      const match = result.match(/Sync: \+(\d+) -(\d+) ~(\d+) ↻(\d+)/);
       if (match) {
         const [, added, removed, renamed, updated] = match.map(Number);
         const total = added + removed + renamed + updated;
@@ -3186,7 +3235,13 @@ print(f"added={result['added']},removed={result['removed']},renamed={result['ren
               const persona = session.persona || "developer";
               const personaIcon = this._getPersonaIcon(persona);
               const personaColor = this._getPersonaColor(persona);
-              const toolCount = session.tool_count ?? (session as any).active_tools?.length ?? 0;
+              // Dual tool count: show dynamic (filtered) if available, else static (baseline)
+              const isDynamic = (session.dynamic_tool_count ?? 0) > 0;
+              const toolCount = session.tool_count ?? session.static_tool_count ?? (session as any).active_tools?.length ?? 0;
+              const toolLabel = isDynamic ? `${toolCount} ⚡` : `${toolCount}`;
+              const toolTitle = isDynamic 
+                ? `${toolCount} tools (filtered for context)` 
+                : `${toolCount} tools available for ${persona}`;
               const lastActivity = session.last_activity ? this._formatRelativeTime(session.last_activity) : "Unknown";
               const sessionName = session.name || `Session ${sessionId.substring(0, 6)}`;
               const sessionProject = (session as any).project || item.workspaceProject || '-';
@@ -3205,7 +3260,7 @@ print(f"added={result['added']},removed={result['removed']},renamed={result['ren
                 <td><span class="persona-badge-small ${personaColor}">${persona}</span></td>
                 <td>${issueKeys.length > 0 ? issueKeys.map(k => `<a href="https://issues.redhat.com/browse/${k}" class="issue-badge-small issue-link" title="Open ${k} in Jira">${k}</a>`).join(' ') : '-'}</td>
                 <td>${lastActivity}</td>
-                <td>${toolCount}</td>
+                <td title="${toolTitle}">${toolLabel}</td>
                 <td>
                   <button class="btn btn-ghost btn-small" data-action="copySessionId" data-session-id="${sessionId}" title="Copy Session ID">📋</button>
                   ${session.meeting_references && session.meeting_references.length > 0 ? `<button class="btn btn-ghost btn-small meeting-notes-btn" data-action="viewMeetingNotes" data-session-id="${sessionId}" title="View ${session.meeting_references.length} meeting(s) where issues were discussed">📝</button>` : ''}
@@ -3408,7 +3463,10 @@ print(f"added={result['added']},removed={result['removed']},renamed={result['ren
     const persona = session.persona || "developer";
     const personaIcon = this._getPersonaIcon(persona);
     const personaColor = this._getPersonaColor(persona);
-    const toolCount = session.tool_count ?? session.active_tools?.length ?? 0;
+    // Dual tool count: show dynamic (filtered) if available, else static (baseline)
+    const isDynamic = (session.dynamic_tool_count ?? 0) > 0;
+    const toolCount = session.tool_count ?? session.static_tool_count ?? session.active_tools?.length ?? 0;
+    const toolLabel = isDynamic ? `${toolCount} (filtered)` : `${toolCount} available`;
     const lastActivity = session.last_activity ? this._formatRelativeTime(session.last_activity) : "Unknown";
     const sessionName = session.name || `Session ${sessionId.substring(0, 6)}`;
     const activeClass = isActive ? "session-active" : "";
@@ -3458,7 +3516,7 @@ print(f"added={result['added']},removed={result['removed']},renamed={result['ren
           ` : ""}
           <div class="session-row">
             <span class="session-label">Tools</span>
-            <span class="session-value">${toolCount} active</span>
+            <span class="session-value">${toolLabel}</span>
           </div>
           <div class="session-row">
             <span class="session-label">Last Active</span>
@@ -7977,7 +8035,6 @@ print(f"added={result['added']},removed={result['removed']},renamed={result['ren
             <button class="btn btn-secondary" data-action="switchAgent">🤖 Switch Agent</button>
             <button class="btn btn-secondary" data-action="coffee">☕ Coffee</button>
             <button class="btn btn-secondary" data-action="beer">🍺 Beer</button>
-            <button class="btn btn-ghost" data-action="refresh">🔄 Refresh</button>
           </div>
         </div>
       </div>
@@ -7993,9 +8050,8 @@ print(f"added={result['added']},removed={result['removed']},renamed={result['ren
                 <button class="toggle-btn ${this._sessionViewMode === 'table' ? 'active' : ''}" data-action="changeSessionViewMode" data-value="table" title="Table View">📋 Table</button>
               </div>
               <span style="font-size: 0.9rem; color: var(--text-muted);">
-                ${this._getTotalSessionCount()} session(s)
+                ${this._getTotalSessionCount()} session(s) • Auto-refresh 10s
               </span>
-              <button class="btn btn-ghost btn-small" data-action="refreshWorkspaces">🔄 Refresh</button>
             </div>
           </div>
 
