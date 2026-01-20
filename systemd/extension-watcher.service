@@ -1,0 +1,16 @@
+[Unit]
+Description=AI Workflow VSCode Extension Watcher
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 scripts/extension_watcher.py --notify
+Restart=always
+RestartSec=10
+# Logs go to journald + file
+StandardOutput=append:/home/daoneill/.config/aa-workflow/extension_watcher.log
+StandardError=append:/home/daoneill/.config/aa-workflow/extension_watcher.log
+
+[Install]
+WantedBy=default.target
