@@ -61,6 +61,7 @@ import time
 from pathlib import Path
 
 # Configuration - watch all important project directories
+# NOTE: Don't include memory/ - it's written to during skill execution
 DEFAULT_WATCH_PATHS = [
     # Python backend
     "server/",
@@ -70,7 +71,6 @@ DEFAULT_WATCH_PATHS = [
     # Configuration and data
     "skills/",
     "personas/",
-    "memory/",
     # VSCode extension
     "extensions/aa_workflow_vscode/src/",
     # Root config files
