@@ -313,6 +313,14 @@ export class CommandCenterPanel {
   private _sessionGroupBy: 'none' | 'project' | 'persona' = 'project';
   private _sessionViewMode: 'card' | 'table' = 'card';
   private _personaViewMode: 'card' | 'table' = 'card';
+  
+  // Unified state from workspace_states.json (v3)
+  private _services: Record<string, any> = {};
+  private _ollama: Record<string, any> = {};
+  private _cronData: any = {};
+  private _slackChannels: string[] = [];
+  private _sprintIssues: any[] = [];
+  private _sprintIssuesUpdated: string = "";
 
   public static createOrShow(
     extensionUri: vscode.Uri,
@@ -478,7 +486,8 @@ export class CommandCenterPanel {
             await this.handleDBusQuery(message.service, message.method, message.args);
             break;
           case "refreshServices":
-            await this.refreshServiceStatus();
+            // Handled by unified background sync - trigger manual sync
+            this._backgroundSync();
             break;
           case "serviceControl":
             await this.handleServiceControl(message.action, message.service);
@@ -490,7 +499,8 @@ export class CommandCenterPanel {
             await this.sendSlackMessage(message.channel, message.text);
             break;
           case "refreshSlackChannels":
-            await this.refreshSlackChannels();
+            // Handled by unified background sync - trigger manual sync
+            this._backgroundSync();
             break;
           case "loadSkill":
             await this.loadSkillDefinition(message.skillName);
@@ -508,7 +518,8 @@ export class CommandCenterPanel {
             await this.openSkillFlowchart(message.skillName);
             break;
           case "refreshCron":
-            await this.refreshCronData();
+            // Handled by unified background sync - trigger manual sync
+            this._backgroundSync();
             break;
           case "loadMoreCronHistory":
             await this.refreshCronData(message.limit || 20);
@@ -533,7 +544,8 @@ export class CommandCenterPanel {
             await this.openPersonaFile(message.personaName);
             break;
           case "refreshIssues":
-            await this.refreshSprintIssues();
+            // Handled by unified background sync - trigger manual sync
+            this._backgroundSync();
             break;
           case "openJiraBoard":
             vscode.env.openExternal(vscode.Uri.parse("https://issues.redhat.com/secure/RapidBoard.jspa?rapidView=14813"));
@@ -547,7 +559,8 @@ export class CommandCenterPanel {
             await this.executeSemanticSearch(message.query, message.project);
             break;
           case "refreshOllamaStatus":
-            await this.refreshOllamaStatus();
+            // Handled by unified background sync - trigger manual sync
+            this._backgroundSync();
             break;
           case "testOllamaInstance":
             await this.testOllamaInstance(message.instance);
@@ -579,9 +592,9 @@ export class CommandCenterPanel {
     this.startExecutionWatcher();
     this._setupWorkspaceWatcher();
 
-    // Fetch sprint issues, environments, and inference stats asynchronously after initial render
+    // Initial data dispatch after first load (environments and inference stats are separate)
     setTimeout(() => {
-      this.refreshSprintIssues();
+      this._dispatchAllUIUpdates();
       this.checkEnvironmentHealth();
       this.getInferenceStats();
     }, 500);
@@ -2937,6 +2950,7 @@ print(result)
       if (fs.existsSync(WORKSPACE_STATES_FILE)) {
         const content = fs.readFileSync(WORKSPACE_STATES_FILE, "utf8");
         const parsed = JSON.parse(content);
+        
         // Handle both direct workspace map and wrapped format with "workspaces" key
         if (parsed.workspaces) {
           this._workspaceState = parsed.workspaces as WorkspaceExportedState;
@@ -2945,16 +2959,37 @@ print(result)
           this._workspaceState = parsed as WorkspaceExportedState;
           this._workspaceCount = Object.keys(this._workspaceState || {}).length;
         }
-        debugLog(`Loaded ${this._workspaceCount} workspace states`);
+        
+        // Load unified state (v3 format)
+        this._services = parsed.services || {};
+        this._ollama = parsed.ollama || {};
+        this._cronData = parsed.cron || {};
+        this._slackChannels = parsed.slack_channels || [];
+        this._sprintIssues = parsed.sprint_issues || [];
+        this._sprintIssuesUpdated = parsed.sprint_issues_updated || "";
+        
+        debugLog(`Loaded unified state: ${this._workspaceCount} workspaces, ${Object.keys(this._services).length} services, ${Object.keys(this._ollama).length} ollama`);
       } else {
         this._workspaceState = null;
         this._workspaceCount = 0;
+        this._services = {};
+        this._ollama = {};
+        this._cronData = {};
+        this._slackChannels = [];
+        this._sprintIssues = [];
+        this._sprintIssuesUpdated = "";
         debugLog("No workspace states file found");
       }
     } catch (error) {
       debugLog(`Error loading workspace states: ${error}`);
       this._workspaceState = null;
       this._workspaceCount = 0;
+      this._services = {};
+      this._ollama = {};
+      this._cronData = {};
+      this._slackChannels = [];
+      this._sprintIssues = [];
+      this._sprintIssuesUpdated = "";
     }
   }
 
@@ -2976,7 +3011,7 @@ print(result)
           this._workspaceWatcherDebounce = setTimeout(() => {
             debugLog(`Workspace states file changed: ${eventType}`);
             this._loadWorkspaceState();
-            this._updateWorkspacesTab();
+            this._dispatchAllUIUpdates();
           }, 100);
         }
       });
@@ -2984,6 +3019,71 @@ print(result)
     } catch (error) {
       debugLog(`Error setting up workspace watcher: ${error}`);
     }
+  }
+
+  /**
+   * Dispatch updates to ALL UI sections from unified state.
+   * Called when workspace_states.json changes.
+   */
+  private _dispatchAllUIUpdates(): void {
+    // Update sessions tab
+    this._updateWorkspacesTab();
+    
+    // Update services status
+    this._panel.webview.postMessage({
+      type: "serviceStatus",
+      services: this._formatServicesForUI(),
+      mcp: this._services.mcp || { running: false },
+    });
+    
+    // Update Ollama status
+    this._panel.webview.postMessage({
+      command: "ollamaStatusUpdate",
+      data: this._ollama,
+    });
+    
+    // Update cron data
+    this._panel.webview.postMessage({
+      type: "cronData",
+      config: {
+        enabled: this._cronData.enabled || false,
+        timezone: this._cronData.timezone || "UTC",
+        jobs: this._cronData.jobs || [],
+        execution_mode: this._cronData.execution_mode || "claude_cli",
+      },
+      history: this._cronData.history || [],
+      totalHistory: this._cronData.total_history || 0,
+      currentLimit: 10,
+    });
+    
+    // Update Slack channels
+    this._panel.webview.postMessage({
+      type: "slackChannels",
+      channels: this._slackChannels,
+    });
+    
+    // Update sprint issues
+    if (this._sprintIssues.length > 0) {
+      this._panel.webview.postMessage({
+        type: "sprintIssuesUpdate",
+        issues: this._sprintIssues,
+      });
+    }
+  }
+
+  /**
+   * Format services data for UI consumption.
+   */
+  private _formatServicesForUI(): any[] {
+    const serviceNames = ["slack", "cron", "meet"];
+    return serviceNames.map(name => {
+      const svc = this._services[name] || {};
+      return {
+        name: name === "slack" ? "Slack Agent" : 
+              name === "cron" ? "Cron Scheduler" : "Meet Bot",
+        ...svc,
+      };
+    });
   }
 
   /**
@@ -7985,7 +8085,6 @@ print(result)
             <div class="loading-placeholder">Loading assigned issues...</div>
           </div>
           <div class="section-actions">
-            <button class="btn btn-ghost btn-small" data-action="refreshIssues">🔄 Refresh</button>
             <button class="btn btn-ghost btn-small" data-action="openJiraBoard">📊 Open Jira Board</button>
           </div>
         </div>
@@ -8141,7 +8240,7 @@ print(result)
         <div class="section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h2 class="section-title" style="margin: 0;">🖥️ Ollama Instances</h2>
-            <button class="btn btn-secondary btn-sm" id="refreshOllamaStatus">↻ Refresh</button>
+            <span style="font-size: 0.85rem; color: var(--text-muted);">Auto-refresh 10s</span>
           </div>
           <div class="grid-4" id="ollamaInstances">
             <div class="service-card">
@@ -8219,7 +8318,7 @@ print(result)
         <div class="section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h2 class="section-title" style="margin: 0;">🔌 Background Services</h2>
-            <button class="btn btn-secondary btn-small" data-action="refreshServices">↻ Refresh</button>
+            <span style="font-size: 0.85rem; color: var(--text-muted);">Auto-refresh 10s</span>
           </div>
           <div class="grid-2">
             <!-- Slack Agent -->
@@ -8566,7 +8665,6 @@ print(result)
                 <select id="slackChannel" style="flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
                   <option value="">Select Channel...</option>
                 </select>
-                <button class="btn btn-secondary btn-small" data-action="refreshSlackChannels">↻ Refresh</button>
               </div>
               <div style="display: flex; gap: 12px;">
                 <input type="text" id="slackMessageInput" placeholder="Type a message..." style="flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
@@ -8580,14 +8678,14 @@ print(result)
         <div class="section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h2 class="section-title" style="margin: 0;">📬 Message Feed</h2>
-            <button class="btn btn-secondary btn-small" data-action="loadSlackHistory">↻ Refresh</button>
+            <span style="font-size: 0.85rem; color: var(--text-muted);">Auto-refresh 10s</span>
           </div>
           <div class="service-card">
             <div class="slack-messages" id="slackMessages" style="max-height: 500px;">
               <div class="empty-state">
                 <div class="empty-state-icon">💬</div>
                 <div>No messages yet</div>
-                <button class="btn btn-secondary btn-small" style="margin-top: 12px;" data-action="loadSlackHistory">Load History</button>
+                <div style="font-size: 0.8rem; margin-top: 8px; color: var(--text-muted);">Messages will appear automatically</div>
               </div>
             </div>
           </div>
@@ -9035,9 +9133,9 @@ print(result)
                 <div class="card-icon purple">📋</div>
                 <div class="card-title">Cron Jobs</div>
               </div>
-              <div>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 0.85rem; color: var(--text-muted);">Auto-refresh 10s</span>
                 <button class="btn btn-ghost btn-small" data-action="openConfigFile">⚙️ Edit Config</button>
-                <button class="btn btn-ghost btn-small" data-action="refreshCron">🔄 Refresh</button>
               </div>
             </div>
             <div class="cron-jobs-list">
@@ -10554,7 +10652,7 @@ print(result)
           if (message.type === 'sprintIssuesError') {
             const container = document.getElementById('sprintIssues');
             if (container) {
-              container.innerHTML = '<div class="loading-placeholder" style="color: var(--error);">Failed to load issues. Click Refresh to retry.</div>';
+              container.innerHTML = '<div class="loading-placeholder" style="color: var(--error);">Failed to load issues. Will retry on next auto-refresh.</div>';
             }
           }
 
@@ -11683,10 +11781,8 @@ print(result)
           }
         }
 
-        // Auto-refresh services on load
-        setTimeout(() => {
-          vscode.postMessage({ command: 'refreshServices' });
-        }, 500);
+        // Services are auto-refreshed via unified background sync
+        // No manual refresh needed on load
 
         // ============================================
         // Event Listeners (CSP-compliant)
@@ -11904,21 +12000,8 @@ print(result)
         // Ollama / Inference Event Listeners
         // ============================================
 
-        // Refresh Ollama status button
-        const refreshOllamaBtn = document.getElementById('refreshOllamaStatus');
-        if (refreshOllamaBtn) {
-          refreshOllamaBtn.addEventListener('click', () => {
-            // Refresh Ollama status
-            // Set all to checking
-            ['npu', 'igpu', 'nvidia', 'cpu'].forEach(inst => {
-              const statusEl = document.getElementById(inst + 'Status');
-              if (statusEl) {
-                statusEl.innerHTML = '<span class="status-dot checking"></span> Checking...';
-              }
-            });
-            vscode.postMessage({ command: 'refreshOllamaStatus' });
-          });
-        }
+        // Ollama status is auto-refreshed via unified background sync
+        // No manual refresh button needed
 
         // Test Ollama instance buttons
         document.querySelectorAll('[data-instance]').forEach(btn => {
@@ -11981,10 +12064,8 @@ print(result)
           });
         }
 
-        // Auto-refresh Ollama status on page load
-        setTimeout(() => {
-          vscode.postMessage({ command: 'refreshOllamaStatus' });
-        }, 500);
+        // Ollama status is auto-refreshed via unified background sync
+        // No manual refresh needed on page load
 
         // Meetings Tab Functions
         ${getMeetingsTabScript()}

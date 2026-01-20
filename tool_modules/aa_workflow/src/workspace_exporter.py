@@ -1,34 +1,56 @@
-"""Workspace State Exporter - Export workspace state for VS Code extension.
+"""Workspace State Exporter - Export unified UI state for VS Code extension.
 
-Exports workspace state to a JSON file that the VS Code extension can watch
-for real-time updates about active workspaces, sessions, personas, and tools.
+Exports ALL UI data to a single JSON file that the VS Code extension watches
+for real-time updates. This is the single source of truth for the Command Center.
 
 The exported file is written to:
   ~/.mcp/workspace_states/workspace_states.json
 
 The VS Code extension uses a file watcher to detect changes and update
-the UI accordingly.
+ALL UI sections accordingly (no manual refresh buttons needed).
 
-Export format (v2):
+Export format (v3):
 {
-    "version": 2,
+    "version": 3,
     "exported_at": "2024-01-18T12:00:00",
+    
+    // Session data
     "workspace_count": 1,
     "session_count": 2,
-    "workspaces": {
-        "file:///path/to/workspace": {
-            "workspace_uri": "...",
-            "project": "my-project",
-            "sessions": {
-                "abc123": { session details },
-                "def456": { session details }
-            },
-            "active_session_id": "abc123"
-        }
+    "workspaces": { ... },
+    "sessions": [ ... ],
+    
+    // Service status
+    "services": {
+        "slack": {"running": true, "uptime": "3.0d", ...},
+        "cron": {"running": true, "uptime": "1.9h", "jobs": 5, ...},
+        "meet": {"running": false},
+        "mcp": {"running": true, "pid": 12345}
     },
-    "sessions": [
-        { flattened session with workspace info }
-    ]
+    
+    // Ollama instances
+    "ollama": {
+        "npu": {"available": true, "port": 11434, "model": "qwen2.5:0.5b"},
+        "igpu": {"available": false, "port": 11435, ...},
+        ...
+    },
+    
+    // Cron configuration and history
+    "cron": {
+        "enabled": true,
+        "timezone": "UTC",
+        "execution_mode": "claude_cli",
+        "jobs": [...],
+        "history": [...],
+        "total_history": 42
+    },
+    
+    // Slack channels
+    "slack_channels": ["general", "random", ...],
+    
+    // Sprint issues (cached)
+    "sprint_issues": [...],
+    "sprint_issues_updated": "2024-01-18T12:00:00"
 }
 """
 
@@ -54,25 +76,57 @@ def _ensure_export_dir() -> None:
 
 
 def export_workspace_state(cleanup_stale: bool = False, max_stale_hours: int = 24) -> dict:
-    """Export all workspace states to JSON file.
+    """Export workspace states to JSON file (legacy v2 format).
 
-    This function is called periodically or when workspace state changes.
-    The VS Code extension watches this file for updates.
+    For full unified export with all UI data, use export_workspace_state_with_data().
 
     Args:
         cleanup_stale: If True, remove stale workspaces before export.
-                       Default is False to preserve sessions across exports.
         max_stale_hours: Hours of inactivity before a workspace is considered stale
 
     Returns:
         Dictionary with export status and workspace count.
+    """
+    # Delegate to unified export with no additional data
+    return export_workspace_state_with_data(
+        cleanup_stale=cleanup_stale,
+        max_stale_hours=max_stale_hours,
+    )
+
+
+def export_workspace_state_with_data(
+    cleanup_stale: bool = False,
+    max_stale_hours: int = 24,
+    services: dict | None = None,
+    ollama: dict | None = None,
+    cron: dict | None = None,
+    slack_channels: list | None = None,
+    sprint_issues: list | None = None,
+    sprint_issues_updated: str | None = None,
+) -> dict:
+    """Export unified UI state to JSON file.
+
+    This is the primary export function used by sync_workspace_state.py.
+    It exports ALL data needed by the Command Center UI.
+
+    Args:
+        cleanup_stale: If True, remove stale workspaces before export.
+        max_stale_hours: Hours of inactivity before a workspace is considered stale
+        services: Service status dict (slack, cron, meet, mcp)
+        ollama: Ollama instance status dict
+        cron: Cron config and history dict
+        slack_channels: List of Slack channel names
+        sprint_issues: List of sprint issues
+        sprint_issues_updated: ISO timestamp of when sprint issues were last fetched
+
+    Returns:
+        Dictionary with export status.
     """
     from server.workspace_state import WorkspaceRegistry
 
     _ensure_export_dir()
 
     # Full sync with Cursor's database before export
-    # This ensures sessions are in sync (adds, removes, renames)
     sync_result = WorkspaceRegistry.sync_all_with_cursor()
     if sum(sync_result.values()) > 0:
         logger.info(
@@ -80,7 +134,7 @@ def export_workspace_state(cleanup_stale: bool = False, max_stale_hours: int = 2
             f"+{sync_result['added']} -{sync_result['removed']} ~{sync_result['renamed']}"
         )
 
-    # Clean up stale workspaces before export (disabled by default to preserve sessions)
+    # Clean up stale workspaces before export (disabled by default)
     cleaned_count = 0
     if cleanup_stale:
         cleaned_count = WorkspaceRegistry.cleanup_stale(max_stale_hours)
@@ -91,21 +145,42 @@ def export_workspace_state(cleanup_stale: bool = False, max_stale_hours: int = 2
     # Get flattened sessions list for easier UI consumption
     all_sessions = WorkspaceRegistry.get_all_sessions()
 
-    # Build export data (v2 format with sessions)
+    # Build export data (v3 format with all UI data)
     export_data = {
-        "version": 2,
+        "version": 3,
         "exported_at": datetime.now().isoformat(),
+        
+        # Session data
         "workspace_count": len(all_states),
         "session_count": WorkspaceRegistry.total_session_count(),
         "workspaces": all_states,
-        "sessions": all_sessions,  # Flattened list of all sessions
+        "sessions": all_sessions,
+        
+        # Service status
+        "services": services or {},
+        
+        # Ollama instances
+        "ollama": ollama or {},
+        
+        # Cron configuration and history
+        "cron": cron or {},
+        
+        # Slack channels
+        "slack_channels": slack_channels or [],
+        
+        # Sprint issues
+        "sprint_issues": sprint_issues or [],
+        "sprint_issues_updated": sprint_issues_updated or "",
     }
 
     # Write to file
     try:
         with open(EXPORT_FILE, "w") as f:
             json.dump(export_data, f, indent=2, default=str)
-        logger.debug(f"Exported {len(all_states)} workspace(s), {len(all_sessions)} session(s) to {EXPORT_FILE}")
+        logger.debug(
+            f"Exported v3: {len(all_states)} workspace(s), {len(all_sessions)} session(s), "
+            f"{len(services or {})} services, {len(ollama or {})} ollama instances"
+        )
         return {
             "success": True,
             "workspace_count": len(all_states),
