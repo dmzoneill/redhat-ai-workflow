@@ -369,7 +369,8 @@ export class CommandCenterPanel {
             break;
           case "changePersonaViewMode":
             this._personaViewMode = message.value as 'card' | 'table';
-            this.update(false);
+            // Full update needed since personas tab content changes significantly
+            this.update(true);
             break;
           case "viewWorkspaceTools":
             this._viewWorkspaceTools(message.uri);
@@ -2764,6 +2765,15 @@ print(result)
         groupBy: this._sessionGroupBy,
         // Always send pre-rendered HTML to ensure consistency
         renderedHtml: this._renderWorkspaces(),
+      });
+    }
+  }
+
+  private _updatePersonasTab(): void {
+    if (this._panel.webview) {
+      this._panel.webview.postMessage({
+        type: "updatePersonas",
+        viewMode: this._personaViewMode,
       });
     }
   }
@@ -7099,6 +7109,13 @@ print(result)
         .sessions-table-container,
         .personas-table-container {
           overflow-x: auto;
+          width: 100%;
+        }
+
+        .sessions-table-container .data-table,
+        .personas-table-container .data-table {
+          width: 100%;
+          table-layout: auto;
         }
 
         /* Clickable cells in tables */
