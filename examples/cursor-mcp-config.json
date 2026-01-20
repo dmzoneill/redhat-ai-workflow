@@ -1,11 +1,39 @@
 {
   "mcpServers": {
-    "aa_workflow": {
-      "command": "bash",
+    "// OPTION 1: Direct connection (no hot-reload)": {},
+    "aa_workflow_direct": {
+      "command": "uv",
       "args": [
-        "-c",
-        "cd ~/src/redhat-ai-workflow && source .venv/bin/activate && python3 -m server"
+        "run",
+        "--directory", "/home/USER/src/redhat-ai-workflow",
+        "python", "-m", "server"
       ]
+    },
+
+    "// OPTION 2: With hot-reload proxy (recommended for development)": {},
+    "aa_workflow": {
+      "command": "python",
+      "args": [
+        "/home/USER/src/redhat-ai-workflow/scripts/mcp_proxy.py",
+        "--cwd", "/home/USER/src/redhat-ai-workflow",
+        "--",
+        "uv", "run", "python", "-m", "server"
+      ]
+    },
+
+    "// OPTION 3: Hot-reload proxy with debug logging": {},
+    "aa_workflow_debug": {
+      "command": "python",
+      "args": [
+        "/home/USER/src/redhat-ai-workflow/scripts/mcp_proxy.py",
+        "--cwd", "/home/USER/src/redhat-ai-workflow",
+        "--debug",
+        "--",
+        "uv", "run", "python", "-m", "server"
+      ],
+      "env": {
+        "MCP_PROXY_DEBUG": "1"
+      }
     }
   }
 }
