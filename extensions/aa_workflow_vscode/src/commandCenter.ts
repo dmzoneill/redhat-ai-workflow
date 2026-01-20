@@ -2866,7 +2866,7 @@ print(result)
           <thead>
             <tr>
               <th></th>
-              <th>Name</th>
+              <th style="text-align: left;">Name</th>
               <th>Project</th>
               <th>Persona</th>
               <th>Issue</th>
@@ -2891,7 +2891,7 @@ print(result)
               return `
               <tr class="${item.isActive ? 'row-active' : ''}" data-session-id="${sessionId}">
                 <td><span class="persona-icon-small ${personaColor}">${personaIcon}</span></td>
-                <td>
+                <td style="text-align: left;">
                   <span class="clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, '&quot;')}" title="Click to find this chat">
                     <strong>${sessionName}</strong>
                   </span>
