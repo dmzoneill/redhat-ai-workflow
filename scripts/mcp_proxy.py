@@ -16,6 +16,7 @@ Features:
 - Spawns the real MCP server as a subprocess
 - Forwards stdin/stdout bidirectionally
 - Watches for file changes and restarts the subprocess
+- Restarts dependent daemons (cron, slack, meet) on reload
 - Buffers requests during restart (debounced)
 - Transparent to both Cursor and the real server
 
@@ -45,9 +46,10 @@ To remove proxy (direct connection):
     }
 
 Environment variables:
-    MCP_PROXY_DEBUG=1       Enable debug logging
-    MCP_PROXY_NO_WATCH=1    Disable file watching (just proxy)
-    MCP_PROXY_DEBOUNCE=1.0  Debounce time in seconds (default: 0.5)
+    MCP_PROXY_DEBUG=1           Enable debug logging
+    MCP_PROXY_NO_WATCH=1        Disable file watching (just proxy)
+    MCP_PROXY_DEBOUNCE=3.0      Debounce time in seconds (default: 3.0)
+    MCP_PROXY_NO_DAEMONS=1      Don't restart daemons on reload
 """
 
 import os
@@ -58,23 +60,93 @@ import threading
 import time
 from pathlib import Path
 
-# Configuration
+# Configuration - watch all important project directories
 DEFAULT_WATCH_PATHS = [
+    # Python backend
     "server/",
     "tool_modules/",
+    "scripts/",
+    "ptools/",
+    # Configuration and data
     "skills/",
     "personas/",
+    "memory/",
+    # VSCode extension
+    "extensions/aa_workflow_vscode/src/",
+    # Root config files
+    "config.json",
+    ".flake8",
+    ".pre-commit-config.yaml",
 ]
-WATCH_EXTENSIONS = {".py", ".yaml", ".json"}
-DEBOUNCE_SECONDS = float(os.environ.get("MCP_PROXY_DEBOUNCE", "0.5"))
+
+# File extensions to watch
+WATCH_EXTENSIONS = {
+    ".py",  # Python
+    ".ts",  # TypeScript (VSCode extension)
+    ".js",  # JavaScript
+    ".json",  # Config files
+    ".yaml",  # Skills, personas, memory
+    ".yml",  # Alternative YAML extension
+    ".toml",  # pyproject.toml etc
+}
+
+# Debounce: 3 seconds to allow batch saves and avoid rapid restarts
+DEBOUNCE_SECONDS = float(os.environ.get("MCP_PROXY_DEBOUNCE", "3.0"))
+
+# Debug and feature flags
 DEBUG = os.environ.get("MCP_PROXY_DEBUG", "").lower() in ("1", "true", "yes")
 NO_WATCH = os.environ.get("MCP_PROXY_NO_WATCH", "").lower() in ("1", "true", "yes")
+NO_DAEMONS = os.environ.get("MCP_PROXY_NO_DAEMONS", "").lower() in ("1", "true", "yes")
+
+# Systemd user services to restart on reload
+DAEMON_SERVICES = [
+    "cron-scheduler.service",
+    "slack-agent.service",
+    "meet-bot.service",
+]
 
 
 def log(msg: str, force: bool = False):
     """Log to stderr (doesn't interfere with stdio protocol)."""
     if DEBUG or force:
-        print(f"[mcp-proxy] {msg}", file=sys.stderr, flush=True)
+        timestamp = time.strftime("%H:%M:%S")
+        print(f"[mcp-proxy {timestamp}] {msg}", file=sys.stderr, flush=True)
+
+
+def restart_daemons():
+    """Restart dependent systemd user services."""
+    if NO_DAEMONS:
+        log("Daemon restart disabled")
+        return
+
+    for service in DAEMON_SERVICES:
+        try:
+            # Check if service is active before trying to restart
+            result = subprocess.run(
+                ["systemctl", "--user", "is-active", service],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                # Service is active, restart it
+                log(f"Restarting {service}...", force=True)
+                subprocess.run(
+                    ["systemctl", "--user", "restart", service],
+                    capture_output=True,
+                    timeout=10,
+                )
+                log(f"  ✓ {service} restarted", force=True)
+            else:
+                log(f"  - {service} not running, skipping")
+        except subprocess.TimeoutExpired:
+            log(f"  ⚠ {service} restart timed out")
+        except FileNotFoundError:
+            # systemctl not available
+            log("systemctl not found, skipping daemon restarts")
+            break
+        except Exception as e:
+            log(f"  ⚠ {service} restart failed: {e}")
 
 
 class HotReloadProxy:
@@ -91,7 +163,7 @@ class HotReloadProxy:
         self.last_mtimes: dict[Path, float] = {}
         self.restart_count = 0
 
-    def start_server(self) -> bool:
+    def start_server(self, restart_daemons_too: bool = False) -> bool:
         """Start or restart the real MCP server. Returns True if successful."""
         with self.restart_lock:
             # Kill existing process if any
@@ -107,6 +179,10 @@ class HotReloadProxy:
                         self.process.wait()
                 except Exception as e:
                     log(f"Error stopping server: {e}")
+
+            # Restart daemons if requested (only on file-change triggered restarts)
+            if restart_daemons_too:
+                restart_daemons()
 
             # Start new process
             log(f"Starting server: {' '.join(self.server_cmd)}")
@@ -221,14 +297,24 @@ class HotReloadProxy:
             if not watch_path.exists():
                 continue
             if watch_path.is_file():
+                # Direct file watch (e.g., config.json)
                 try:
-                    mtimes[watch_path] = watch_path.stat().st_mtime
+                    if watch_path.suffix in WATCH_EXTENSIONS:
+                        mtimes[watch_path] = watch_path.stat().st_mtime
                 except OSError:
                     pass
             else:
+                # Directory watch - find all matching files
                 for ext in WATCH_EXTENSIONS:
                     try:
                         for f in watch_path.rglob(f"*{ext}"):
+                            # Skip node_modules and other common excludes
+                            if "node_modules" in f.parts:
+                                continue
+                            if "__pycache__" in f.parts:
+                                continue
+                            if ".git" in f.parts:
+                                continue
                             try:
                                 mtimes[f] = f.stat().st_mtime
                             except OSError:
@@ -246,12 +332,14 @@ class HotReloadProxy:
         log(f"File watcher started (watching {len(self.watch_paths)} paths)")
         self.last_mtimes = self.get_file_mtimes()
         log(f"Tracking {len(self.last_mtimes)} files")
+        log(f"Debounce: {DEBOUNCE_SECONDS}s")
 
         last_change_time = 0.0
         needs_restart = False
+        changed_files_batch: list[tuple[str, Path]] = []
 
         while not self.shutting_down:
-            time.sleep(0.2)  # Poll every 200ms
+            time.sleep(0.5)  # Poll every 500ms
 
             current_mtimes = self.get_file_mtimes()
 
@@ -272,18 +360,23 @@ class HotReloadProxy:
 
             if changed_files:
                 for change_type, f in changed_files:
-                    rel_path = f.relative_to(self.working_dir) if f.is_relative_to(self.working_dir) else f
+                    try:
+                        rel_path = f.relative_to(self.working_dir)
+                    except ValueError:
+                        rel_path = f
                     log(f"File {change_type}: {rel_path}", force=True)
+                    changed_files_batch.append((change_type, f))
                 last_change_time = time.time()
                 needs_restart = True
                 self.last_mtimes = current_mtimes
 
             # Debounce: restart after DEBOUNCE_SECONDS of no changes
             if needs_restart and (time.time() - last_change_time) > DEBOUNCE_SECONDS:
-                log("Reloading server...", force=True)
-                self.start_server()
+                log(f"Reloading after {len(changed_files_batch)} file change(s)...", force=True)
+                self.start_server(restart_daemons_too=True)
                 needs_restart = False
-                log("Server reloaded", force=True)
+                changed_files_batch.clear()
+                log("Server reloaded ✓", force=True)
 
         log("File watcher stopped")
 
@@ -306,8 +399,8 @@ class HotReloadProxy:
         signal.signal(signal.SIGTERM, shutdown)
         signal.signal(signal.SIGINT, shutdown)
 
-        # Start the real server
-        if not self.start_server():
+        # Start the real server (don't restart daemons on initial start)
+        if not self.start_server(restart_daemons_too=False):
             log("Failed to start server, exiting", force=True)
             sys.exit(1)
 
@@ -367,6 +460,10 @@ def main():
             elif proxy_args[i] == "--cwd" and i + 1 < len(proxy_args):
                 working_dir = proxy_args[i + 1]
                 i += 2
+            elif proxy_args[i] == "--debounce" and i + 1 < len(proxy_args):
+                global DEBOUNCE_SECONDS
+                DEBOUNCE_SECONDS = float(proxy_args[i + 1])
+                i += 2
             elif proxy_args[i] == "--debug":
                 global DEBUG
                 DEBUG = True
@@ -374,6 +471,10 @@ def main():
             elif proxy_args[i] == "--no-watch":
                 global NO_WATCH
                 NO_WATCH = True
+                i += 1
+            elif proxy_args[i] == "--no-daemons":
+                global NO_DAEMONS
+                NO_DAEMONS = True
                 i += 1
             elif proxy_args[i] in ("--help", "-h"):
                 print(__doc__)
@@ -388,23 +489,28 @@ def main():
         print("Usage: mcp_proxy.py [OPTIONS] -- <server command>", file=sys.stderr)
         print("", file=sys.stderr)
         print("Options:", file=sys.stderr)
-        print("  --cwd DIR       Working directory for server (default: current)", file=sys.stderr)
-        print("  --watch PATH    Additional path to watch (can be repeated)", file=sys.stderr)
-        print("  --debug         Enable debug logging", file=sys.stderr)
-        print("  --no-watch      Disable file watching", file=sys.stderr)
+        print("  --cwd DIR         Working directory for server (default: current)", file=sys.stderr)
+        print("  --watch PATH      Additional path to watch (can be repeated)", file=sys.stderr)
+        print("  --debounce SECS   Debounce time in seconds (default: 3.0)", file=sys.stderr)
+        print("  --debug           Enable debug logging", file=sys.stderr)
+        print("  --no-watch        Disable file watching", file=sys.stderr)
+        print("  --no-daemons      Don't restart daemons on reload", file=sys.stderr)
         print("", file=sys.stderr)
         print("Example:", file=sys.stderr)
         print("  mcp_proxy.py --cwd /path/to/project -- uv run python -m server", file=sys.stderr)
         print("", file=sys.stderr)
         print("Environment variables:", file=sys.stderr)
-        print("  MCP_PROXY_DEBUG=1       Enable debug logging", file=sys.stderr)
-        print("  MCP_PROXY_NO_WATCH=1    Disable file watching", file=sys.stderr)
-        print("  MCP_PROXY_DEBOUNCE=1.0  Debounce time in seconds", file=sys.stderr)
+        print("  MCP_PROXY_DEBUG=1           Enable debug logging", file=sys.stderr)
+        print("  MCP_PROXY_NO_WATCH=1        Disable file watching", file=sys.stderr)
+        print("  MCP_PROXY_NO_DAEMONS=1      Don't restart daemons", file=sys.stderr)
+        print("  MCP_PROXY_DEBOUNCE=3.0      Debounce time in seconds", file=sys.stderr)
         sys.exit(1)
 
     log(f"Working directory: {working_dir}", force=True)
     log(f"Server command: {' '.join(server_cmd)}", force=True)
-    log(f"Watch paths: {watch_paths}", force=True)
+    log(f"Watch paths: {len(watch_paths)} directories/files", force=True)
+    log(f"Debounce: {DEBOUNCE_SECONDS}s", force=True)
+    log(f"Daemon restart: {'disabled' if NO_DAEMONS else 'enabled'}", force=True)
 
     proxy = HotReloadProxy(server_cmd, watch_paths, working_dir)
     proxy.run()
