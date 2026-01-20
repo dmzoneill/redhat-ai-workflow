@@ -254,6 +254,7 @@ interface CronJob {
   inputs?: Record<string, any>;
   notify?: string[];
   enabled: boolean;
+  persona?: string;
 }
 
 interface CronExecution {
@@ -7124,6 +7125,12 @@ print(result)
           color: var(--success);
         }
 
+        .cron-badge.persona {
+          background: rgba(59, 130, 246, 0.15);
+          border-color: var(--primary);
+          color: var(--primary);
+        }
+
         .cron-job-actions {
           flex-shrink: 0;
         }
@@ -9161,6 +9168,7 @@ print(result)
                       ${job.cron ? `<span class="cron-badge cron">⏰ ${job.cron}</span>` : ""}
                       ${job.trigger === "poll" ? `<span class="cron-badge poll">🔄 Poll: ${job.poll_interval || "5m"}</span>` : ""}
                       <span class="cron-badge skill">⚡ ${job.skill}</span>
+                      ${job.persona ? `<span class="cron-badge persona">👤 ${job.persona}</span>` : ""}
                       ${job.notify ? `<span class="cron-badge notify">🔔 ${job.notify.join(", ")}</span>` : ""}
                     </div>
                   </div>
@@ -10622,6 +10630,8 @@ print(result)
               updateText('cronJobCount', (message.config.jobs || []).length);
               const enabledJobs = (message.config.jobs || []).filter(j => j.enabled).length;
               updateText('cronEnabledCount', enabledJobs);
+              // Update the jobs list dynamically
+              updateCronJobs(message.config.jobs || []);
             }
             // Update execution history
             if (message.history !== undefined) {
@@ -11661,6 +11671,70 @@ print(result)
           }
 
           console.log('[CommandCenter] updateCronHistory completed');
+        }
+
+        function updateCronJobs(jobs) {
+          console.log('[CommandCenter] updateCronJobs called with', jobs?.length || 0, 'jobs');
+          const container = document.querySelector('.cron-jobs-list');
+          if (!container) {
+            console.error('[CommandCenter] updateCronJobs: .cron-jobs-list not found');
+            return;
+          }
+
+          if (!jobs || jobs.length === 0) {
+            container.innerHTML = \`
+              <div class="empty-state">
+                <div class="empty-state-icon">🕐</div>
+                <div>No cron jobs configured</div>
+                <div style="font-size: 0.8rem; margin-top: 8px;">Add jobs to config.json schedules section</div>
+                <button class="btn btn-primary btn-small" style="margin-top: 12px;" data-action="openConfigFile">Open Config</button>
+              </div>
+            \`;
+          } else {
+            container.innerHTML = jobs.map(job => \`
+              <div class="cron-job-item \${job.enabled ? '' : 'disabled'}" data-job="\${job.name}">
+                <div class="cron-job-toggle">
+                  <label class="toggle-switch">
+                    <input type="checkbox" \${job.enabled ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="cron-job-info">
+                  <div class="cron-job-name">\${job.name}</div>
+                  <div class="cron-job-desc">\${job.description || 'Runs skill: ' + job.skill}</div>
+                  <div class="cron-job-schedule">
+                    \${job.cron ? \`<span class="cron-badge cron">⏰ \${job.cron}</span>\` : ''}
+                    \${job.trigger === 'poll' ? \`<span class="cron-badge poll">🔄 Poll: \${job.poll_interval || '5m'}</span>\` : ''}
+                    <span class="cron-badge skill">⚡ \${job.skill}</span>
+                    \${job.persona ? \`<span class="cron-badge persona">👤 \${job.persona}</span>\` : ''}
+                    \${job.notify ? \`<span class="cron-badge notify">🔔 \${job.notify.join(', ')}</span>\` : ''}
+                  </div>
+                </div>
+                <div class="cron-job-actions">
+                  <button class="btn btn-ghost btn-small" data-run-job="\${job.name}" title="Run now">▶️</button>
+                </div>
+              </div>
+            \`).join('');
+
+            // Re-attach event listeners for toggle switches and run buttons
+            container.querySelectorAll('.cron-job-item').forEach(item => {
+              const jobName = item.getAttribute('data-job');
+              const toggle = item.querySelector('input[type="checkbox"]');
+              const runBtn = item.querySelector('[data-run-job]');
+              
+              if (toggle) {
+                toggle.addEventListener('change', (e) => {
+                  vscode.postMessage({ command: 'toggleCronJob', jobName: jobName, enabled: e.target.checked });
+                });
+              }
+              if (runBtn) {
+                runBtn.addEventListener('click', () => {
+                  vscode.postMessage({ command: 'runCronJobNow', jobName: jobName });
+                });
+              }
+            });
+          }
+          console.log('[CommandCenter] updateCronJobs completed');
         }
 
         function formatUptime(seconds) {
