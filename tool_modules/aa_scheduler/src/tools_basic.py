@@ -9,7 +9,6 @@ Provides:
 - cron_status: Show scheduler status and recent executions
 """
 
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +17,7 @@ from typing import TYPE_CHECKING
 from croniter import croniter
 from mcp.types import TextContent
 
+from server.config_manager import config as config_manager
 from server.tool_registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -27,34 +27,28 @@ logger = logging.getLogger(__name__)
 
 # Project paths
 PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-CONFIG_FILE = PROJECT_DIR / "config.json"
 
 
 def _load_config() -> dict:
-    """Load config from config.json."""
-    if CONFIG_FILE.exists():
-        with open(CONFIG_FILE) as f:
-            return json.load(f)
-    return {}
+    """Load config using ConfigManager."""
+    return config_manager.get_all()
 
 
 def _save_config(config: dict):
-    """Save config to config.json."""
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
+    """Save config using ConfigManager."""
+    for section, data in config.items():
+        config_manager.update_section(section, data, merge=False)
+    config_manager.flush()
 
 
 def _get_schedules_config() -> dict:
     """Get the schedules section from config."""
-    config = _load_config()
-    return config.get("schedules", {})
+    return config_manager.get("schedules", default={})
 
 
 def _update_schedules_config(schedules: dict):
     """Update the schedules section in config."""
-    config = _load_config()
-    config["schedules"] = schedules
-    _save_config(config)
+    config_manager.update_section("schedules", schedules, merge=False, flush=True)
 
 
 def register_tools(server: "FastMCP") -> int:

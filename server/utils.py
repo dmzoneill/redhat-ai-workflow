@@ -139,7 +139,8 @@ def format_list(
 
 # ==================== Config Loading ====================
 
-_config_cache: dict | None = None
+# Import ConfigManager for centralized config access
+from server.config_manager import config as _config_manager
 
 
 def get_project_root() -> Path:
@@ -152,33 +153,24 @@ def get_project_root() -> Path:
 def load_config(reload: bool = False) -> dict:
     """Load config.json from project root.
 
+    Uses ConfigManager for thread-safe, debounced access with
+    automatic cache invalidation when file changes externally.
+
     Args:
-        reload: Force reload from disk (default: use cache)
+        reload: Force reload from disk (default: use cached with mtime check)
 
     Returns:
         Parsed config dictionary
     """
-    global _config_cache
-
-    if _config_cache is not None and not reload:
-        return _config_cache
-
-    config_path = get_project_root() / "config.json"
-    try:
-        if config_path.exists():
-            with open(config_path) as f:
-                _config_cache = cast(dict, json.load(f))
-                return _config_cache
-    except json.JSONDecodeError as e:
-        logger.warning(f"Invalid JSON in config.json: {e}")
-    except OSError as e:
-        logger.warning(f"Failed to read config.json: {e}")
-
-    return {}
+    if reload:
+        _config_manager.reload()
+    return _config_manager.get_all()
 
 
 def get_section_config(section: str, default: dict | None = None) -> dict:
     """Get a specific section from config.json.
+
+    Uses ConfigManager for thread-safe access.
 
     Args:
         section: Config section name (e.g., 'bonfire', 'prometheus')
@@ -187,8 +179,10 @@ def get_section_config(section: str, default: dict | None = None) -> dict:
     Returns:
         Config section dictionary
     """
-    config = load_config()
-    return cast(dict, config.get(section, default or {}))
+    result = _config_manager.get(section)
+    if result is None:
+        return default or {}
+    return cast(dict, result)
 
 
 # ==================== Kubeconfig Handling ====================

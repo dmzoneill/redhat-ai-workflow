@@ -23,8 +23,10 @@ logger = logging.getLogger(__name__)
 
 # Project paths
 PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-CONFIG_FILE = PROJECT_DIR / "config.json"
 SKILLS_DIR = PROJECT_DIR / "skills"
+
+# Import ConfigManager for thread-safe config access
+from server.config_manager import config as config_manager
 
 
 class SchedulerConfig:
@@ -44,14 +46,8 @@ class SchedulerConfig:
         self.execution_mode = schedules.get("execution_mode", "claude_cli")
 
     def _load_config(self) -> dict:
-        """Load config from config.json."""
-        if CONFIG_FILE.exists():
-            try:
-                with open(CONFIG_FILE) as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"Failed to load config: {e}")
-        return {}
+        """Load config using ConfigManager (auto-reloads if file changed)."""
+        return config_manager.get_all()
 
     def get_cron_jobs(self) -> list[dict]:
         """Get jobs that use cron triggers (not poll triggers)."""

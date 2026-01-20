@@ -7,7 +7,6 @@ Provides tools for:
 - project_detect: Auto-detect project settings from a directory
 """
 
-import json
 import logging
 import subprocess
 from datetime import datetime
@@ -16,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from mcp.types import TextContent
 
+from server.config_manager import config as config_manager
 from server.tool_registry import ToolRegistry
 
 # Support both package import and direct loading
@@ -29,9 +29,6 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
-
-# Config file path
-CONFIG_FILE = PROJECT_DIR / "config.json"
 
 # Required fields for a repository entry
 REQUIRED_FIELDS = ["path", "gitlab", "jira_project", "default_branch"]
@@ -52,22 +49,21 @@ OPTIONAL_FIELDS = {
 
 
 def _load_config() -> dict:
-    """Load config.json."""
-    if not CONFIG_FILE.exists():
-        return {}
-    try:
-        with open(CONFIG_FILE) as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to load config: {e}")
-        return {}
+    """Load config.json using ConfigManager."""
+    return config_manager.get_all()
 
 
 def _save_config(config: dict) -> bool:
-    """Save config.json with pretty formatting."""
+    """Save config.json using ConfigManager.
+    
+    Note: This replaces the entire config. For partial updates,
+    use config_manager.update_section() instead.
+    """
     try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(config, f, indent=2)
+        # Update each section
+        for section, data in config.items():
+            config_manager.update_section(section, data, merge=False)
+        config_manager.flush()
         return True
     except Exception as e:
         logger.error(f"Failed to save config: {e}")
