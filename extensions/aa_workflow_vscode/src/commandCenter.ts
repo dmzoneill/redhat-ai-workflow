@@ -10883,6 +10883,12 @@ print(result)
               console.log('[AA-WORKFLOW-WEBVIEW] openChatSession action triggered');
               openChatSession(btn.getAttribute('data-session-id'), btn.getAttribute('data-session-name')); 
               break;
+            case 'changeSessionViewMode':
+              vscode.postMessage({ command: 'changeSessionViewMode', value: btn.getAttribute('data-value') });
+              break;
+            case 'changePersonaViewMode':
+              vscode.postMessage({ command: 'changePersonaViewMode', value: btn.getAttribute('data-value') });
+              break;
             default: break; // Unknown action
           }
         });
