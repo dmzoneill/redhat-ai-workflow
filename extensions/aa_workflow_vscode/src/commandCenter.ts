@@ -4028,15 +4028,16 @@ print(result)
           padding: 8px 12px;
           cursor: pointer;
           font-size: 1rem;
-          opacity: 0.6;
+          opacity: 0.5;
           transition: all 0.2s;
-          margin-left: 12px;
+          margin-right: 16px;
         }
 
         .header-reload-btn:hover {
           opacity: 1;
           background: rgba(255, 255, 255, 0.1);
           border-color: var(--accent);
+          transform: rotate(180deg);
         }
 
         /* ============================================ */
@@ -7514,6 +7515,9 @@ print(result)
           <h1 class="header-title">AI Workflow Command Center</h1>
           <p class="header-subtitle">Your intelligent development assistant • Session active</p>
         </div>
+        <button class="header-reload-btn" id="reloadUIBtn" title="Reload UI (Ctrl+Shift+R) - Use after extension recompilation">
+          🔄
+        </button>
         <div class="header-stats">
           <div class="header-stat">
             <div class="header-stat-value" id="statToolCalls">${this._formatNumber(lifetime.tool_calls)}</div>
@@ -7528,9 +7532,6 @@ print(result)
             <div class="header-stat-label">Sessions</div>
           </div>
         </div>
-        <button class="header-reload-btn" onclick="vscode.postMessage({ command: 'reloadUI' })" title="Reload UI (Ctrl+Shift+R) - Use after extension recompilation">
-          🔄
-        </button>
       </div>
 
       <!-- Tabs -->
@@ -8927,6 +8928,15 @@ print(result)
             vscode.postMessage({ command: 'reloadUI' });
           }
         });
+
+        // Reload UI button click handler
+        const reloadBtn = document.getElementById('reloadUIBtn');
+        if (reloadBtn) {
+          reloadBtn.addEventListener('click', function() {
+            console.log('[CommandCenter-Webview] Reload button clicked - requesting UI reload');
+            vscode.postMessage({ command: 'reloadUI' });
+          });
+        }
 
         // Simple YAML parser for skill files
         function parseSkillYaml(yaml) {
