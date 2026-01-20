@@ -22,6 +22,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { WorkflowDataProvider } from "./dataProvider";
 import { getSkillsDir, getMemoryDir } from "./paths";
+import { loadMeetBotState, getMeetingsTabStyles, getMeetingsTabContent, getMeetingsTabScript, MeetBotState } from "./meetingsTab";
 
 const execAsync = promisify(exec);
 
@@ -69,6 +70,13 @@ const CRON_HISTORY_FILE = path.join(
   "cron_history.json"
 );
 
+const WORKSPACE_STATES_FILE = path.join(
+  os.homedir(),
+  ".mcp",
+  "workspace_states",
+  "workspace_states.json"
+);
+
 const DBUS_SERVICES = [
   {
     name: "Slack Agent",
@@ -93,6 +101,39 @@ const DBUS_SERVICES = [
 // ============================================================================
 // Types
 // ============================================================================
+
+interface ChatSession {
+  session_id: string;
+  workspace_uri: string;
+  persona: string;
+  project: string | null;  // Per-session project (can differ from workspace)
+  is_project_auto_detected: boolean;  // Whether project was auto-detected
+  issue_key: string | null;
+  branch: string | null;
+  tool_count?: number;  // Number of tools loaded for this persona (new format)
+  active_tools?: string[];  // Deprecated: old format, use tool_count
+  started_at: string | null;
+  last_activity: string | null;
+  name: string | null;
+  last_tool: string | null;
+  last_tool_time: string | null;
+  tool_call_count: number;
+  is_active?: boolean;      // Added when flattened
+}
+
+interface WorkspaceState {
+  workspace_uri: string;
+  project: string | null;
+  is_auto_detected: boolean;
+  active_session_id: string | null;
+  sessions: { [sessionId: string]: ChatSession };
+  created_at: string | null;
+  last_activity: string | null;
+}
+
+interface WorkspaceExportedState {
+  [workspaceUri: string]: WorkspaceState;
+}
 
 interface AgentStats {
   lifetime: {
@@ -170,6 +211,8 @@ interface CronExecution {
   success: boolean;
   duration_ms?: number;
   error?: string;
+  output_preview?: string;
+  session_name?: string;
 }
 
 interface ToolModule {
@@ -210,8 +253,14 @@ export class CommandCenterPanel {
   private _disposables: vscode.Disposable[] = [];
   private _refreshInterval: NodeJS.Timeout | undefined;
   private _executionWatcher: fs.FSWatcher | undefined;
+  private _workspaceWatcher: fs.FSWatcher | undefined;
   private _currentExecution: SkillExecution | undefined;
   private _currentTab: string = "overview";
+  private _workspaceState: WorkspaceExportedState | null = null;
+  private _workspaceCount: number = 0;
+  private _sessionGroupBy: 'none' | 'project' | 'persona' = 'project';
+  private _sessionViewMode: 'card' | 'table' = 'card';
+  private _personaViewMode: 'card' | 'table' = 'card';
 
   public static createOrShow(
     extensionUri: vscode.Uri,
@@ -305,6 +354,41 @@ export class CommandCenterPanel {
             break;
           case "refresh":
             this.update(false); // Preserve UI state on manual refresh
+            break;
+          case "refreshWorkspaces":
+            this._loadWorkspaceState();
+            this._updateWorkspacesTab();
+            break;
+          case "changeSessionGroupBy":
+            this._sessionGroupBy = message.value as 'none' | 'project' | 'persona';
+            this._updateWorkspacesTab();
+            break;
+          case "changeSessionViewMode":
+            this._sessionViewMode = message.value as 'card' | 'table';
+            this._updateWorkspacesTab();
+            break;
+          case "changePersonaViewMode":
+            this._personaViewMode = message.value as 'card' | 'table';
+            this.update(false);
+            break;
+          case "viewWorkspaceTools":
+            this._viewWorkspaceTools(message.uri);
+            break;
+          case "switchToWorkspace":
+            this._switchToWorkspace(message.uri);
+            break;
+          case "changeWorkspacePersona":
+            this._changeWorkspacePersona(message.uri, message.persona);
+            break;
+          case "removeWorkspace":
+            this._removeWorkspace(message.uri);
+            break;
+          case "copySessionId":
+            await this._copySessionId(message.sessionId);
+            break;
+          case "openChatSession":
+            console.log('[AA-WORKFLOW] openChatSession message received:', message.sessionId, message.sessionName);
+            await this._openChatSession(message.sessionId, message.sessionName);
             break;
           case "switchTab":
             this._currentTab = message.tab;
@@ -414,19 +498,25 @@ export class CommandCenterPanel {
     // Now set up the rest of the panel after message handler is ready
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
+    // Load workspace state before first render
+    this._loadWorkspaceState();
+
     // Set the HTML content (this may trigger messages from the webview)
     this.update(true); // Force full render on initial load
     this.startExecutionWatcher();
+    this._setupWorkspaceWatcher();
 
-    // Fetch sprint issues and check environments asynchronously after initial render
+    // Fetch sprint issues, environments, and inference stats asynchronously after initial render
     setTimeout(() => {
       this.refreshSprintIssues();
       this.checkEnvironmentHealth();
+      this.getInferenceStats();
     }, 500);
 
     // Auto-refresh every 5 seconds with incremental DOM updates (no full re-render)
     this._refreshInterval = setInterval(() => {
       this.update(false); // Incremental update to preserve UI state
+      this.getInferenceStats(); // Refresh inference stats
     }, 5000);
 
     debugLog("Constructor complete - panel ready");
@@ -937,19 +1027,27 @@ except Exception as e:
         "inference_stats.json"
       );
 
+      // Get all available personas from the personas directory
+      const allPersonas = this.loadPersonas()
+        .filter(p => !p.isInternal && !p.isSlim)  // Filter out internal and slim variants
+        .map(p => p.name);
+
       if (fs.existsSync(statsPath)) {
         const data = JSON.parse(fs.readFileSync(statsPath, "utf-8"));
+        // Add the list of all available personas
+        data.available_personas = allPersonas;
         this._panel.webview.postMessage({
           command: "inferenceStatsUpdate",
           data,
         });
       } else {
-        // Return empty stats
+        // Return empty stats with all available personas
         this._panel.webview.postMessage({
           command: "inferenceStatsUpdate",
           data: {
             total_requests: 0,
             by_persona: {},
+            available_personas: allPersonas,
             latency: { "<10ms": 0, "10-100ms": 0, "100-500ms": 0, ">500ms": 0 },
             cache: { hits: 0, misses: 0, hit_rate: 0 },
             recent_history: [],
@@ -1155,6 +1253,10 @@ except Exception as e:
       this._executionWatcher.close();
     }
 
+    if (this._workspaceWatcher) {
+      this._workspaceWatcher.close();
+    }
+
     this._panel.dispose();
 
     while (this._disposables.length) {
@@ -1181,7 +1283,52 @@ except Exception as e:
     return null;
   }
 
-  private loadCurrentWork(): { activeIssue: any; activeMR: any; followUps: any[]; sprintIssues: any[]; activeRepo: string | null } {
+  private loadCurrentWork(): { 
+    activeIssue: any; 
+    activeMR: any; 
+    followUps: any[]; 
+    sprintIssues: any[]; 
+    activeRepo: string | null;
+    // Aggregated totals across all workspaces/sessions
+    totalActiveIssues: number;
+    totalActiveMRs: number;
+    allActiveIssues: { key: string; project: string; workspace: string }[];
+    allActiveMRs: { id: string; project: string; workspace: string }[];
+  } {
+    // First, aggregate from workspace state (multiple workspaces/sessions)
+    let totalActiveIssues = 0;
+    let totalActiveMRs = 0;
+    const allActiveIssues: { key: string; project: string; workspace: string }[] = [];
+    const allActiveMRs: { id: string; project: string; workspace: string }[] = [];
+    const seenIssues = new Set<string>();
+    const seenMRs = new Set<string>();
+
+    if (this._workspaceState) {
+      for (const [uri, ws] of Object.entries(this._workspaceState)) {
+        const workspaceName = ws.project || path.basename(uri.replace('file://', ''));
+        
+        // Check all sessions in this workspace
+        for (const session of Object.values(ws.sessions || {})) {
+          // Count active issues
+          if (session.issue_key && !seenIssues.has(session.issue_key)) {
+            seenIssues.add(session.issue_key);
+            totalActiveIssues++;
+            allActiveIssues.push({
+              key: session.issue_key,
+              project: session.project || ws.project || 'unknown',
+              workspace: workspaceName
+            });
+          }
+          
+          // Count active branches (as proxy for MRs - branches typically have associated MRs)
+          if (session.branch && !seenMRs.has(session.branch)) {
+            seenMRs.add(session.branch);
+            // We'll count branches as potential MRs
+          }
+        }
+      }
+    }
+
     try {
       const memoryDir = getMemoryDir();
       const workFile = path.join(memoryDir, "state", "current_work.yaml");
@@ -1324,12 +1471,45 @@ except Exception as e:
           activeMR = allOpenMRs[0];
         }
 
-        return { activeIssue, activeMR, followUps, sprintIssues, activeRepo };
+        // Add MRs from current_work.yaml to totals (deduplicate by ID)
+        for (const mr of allOpenMRs) {
+          if (mr.id && !seenMRs.has(mr.id)) {
+            seenMRs.add(mr.id);
+            totalActiveMRs++;
+            allActiveMRs.push({
+              id: mr.id,
+              project: activeRepo || 'unknown',
+              workspace: 'current'
+            });
+          }
+        }
+
+        return { 
+          activeIssue, 
+          activeMR, 
+          followUps, 
+          sprintIssues, 
+          activeRepo,
+          totalActiveIssues,
+          totalActiveMRs,
+          allActiveIssues,
+          allActiveMRs
+        };
       }
     } catch (e) {
       console.error("Failed to load current work:", e);
     }
-    return { activeIssue: null, activeMR: null, followUps: [], sprintIssues: [], activeRepo: null };
+    return { 
+      activeIssue: null, 
+      activeMR: null, 
+      followUps: [], 
+      sprintIssues: [], 
+      activeRepo: null,
+      totalActiveIssues,
+      totalActiveMRs,
+      allActiveIssues,
+      allActiveMRs
+    };
   }
 
   /**
@@ -2056,7 +2236,7 @@ print(result)
   // Cron Management
   // ============================================================================
 
-  private loadCronConfig(): { enabled: boolean; timezone: string; jobs: CronJob[] } {
+  private loadCronConfig(): { enabled: boolean; timezone: string; jobs: CronJob[]; execution_mode: string } {
     try {
       if (fs.existsSync(CONFIG_FILE)) {
         const config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
@@ -2065,12 +2245,13 @@ print(result)
           enabled: schedules.enabled || false,
           timezone: schedules.timezone || "UTC",
           jobs: schedules.jobs || [],
+          execution_mode: schedules.execution_mode || "claude_cli",
         };
       }
     } catch (e) {
       console.error("Failed to load cron config:", e);
     }
-    return { enabled: false, timezone: "UTC", jobs: [] };
+    return { enabled: false, timezone: "UTC", jobs: [], execution_mode: "claude_cli" };
   }
 
   private loadCronHistory(): CronExecution[] {
@@ -2098,29 +2279,38 @@ print(result)
   }
 
   private async toggleScheduler() {
+    console.log("[CommandCenter] toggleScheduler called");
     try {
       if (fs.existsSync(CONFIG_FILE)) {
         const config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
+        console.log("[CommandCenter] Current schedules.enabled:", config.schedules?.enabled);
         if (config.schedules) {
           const currentState = config.schedules.enabled !== false;
           config.schedules.enabled = !currentState;
           fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+          console.log("[CommandCenter] Updated schedules.enabled to:", config.schedules.enabled);
 
           const newState = config.schedules.enabled;
           vscode.window.showInformationMessage(
-            `Scheduler ${newState ? "enabled ✅" : "disabled ⏸️"}. ${newState ? "Jobs will run on schedule." : "Jobs are paused."}`
+            `Scheduler ${newState ? "enabled ✅" : "disabled ⏸️"}. ${newState ? "Jobs will start running within 30 seconds." : "Jobs are paused."}`
           );
 
           // Update the UI
+          console.log("[CommandCenter] Sending schedulerToggled message with enabled:", newState);
           this._panel.webview.postMessage({
             type: "schedulerToggled",
             enabled: newState,
           });
 
           await this.refreshCronData();
+        } else {
+          console.log("[CommandCenter] No schedules section in config");
         }
+      } else {
+        console.log("[CommandCenter] Config file does not exist:", CONFIG_FILE);
       }
     } catch (e) {
+      console.error("[CommandCenter] toggleScheduler error:", e);
       vscode.window.showErrorMessage(`Failed to toggle scheduler: ${e}`);
     }
   }
@@ -2165,14 +2355,19 @@ print(result)
   }
 
   private async openConfigFile() {
+    console.log("[CommandCenter] openConfigFile called, CONFIG_FILE:", CONFIG_FILE);
     try {
       if (fs.existsSync(CONFIG_FILE)) {
+        console.log("[CommandCenter] Config file exists, opening...");
         const doc = await vscode.workspace.openTextDocument(CONFIG_FILE);
         await vscode.window.showTextDocument(doc);
+        console.log("[CommandCenter] Config file opened successfully");
       } else {
+        console.log("[CommandCenter] Config file not found at:", CONFIG_FILE);
         vscode.window.showErrorMessage("Config file not found");
       }
     } catch (e) {
+      console.error("[CommandCenter] openConfigFile error:", e);
       vscode.window.showErrorMessage(`Failed to open config file: ${e}`);
     }
   }
@@ -2433,6 +2628,707 @@ print(result)
     return colorMap[name] || "purple";
   }
 
+  private _renderPersonaCards(personas: Persona[], activeAgent: { name: string }): string {
+    return personas.map(persona => {
+      const isActive = activeAgent.name === persona.name || activeAgent.name === persona.fileName;
+      const displayFileName = persona.fileName || persona.name;
+      const typeBadge = persona.isSlim ? '<span class="persona-type-badge slim">slim</span>' :
+                       persona.isInternal ? '<span class="persona-type-badge internal">internal</span>' :
+                       persona.isAgent ? '<span class="persona-type-badge agent">agent</span>' : '';
+      
+      const toolTags = persona.tools.slice(0, 6).map(t => `<span class="persona-tag tool">${t}</span>`).join("");
+      const moreTools = persona.tools.length > 6 ? `<span class="persona-tag">+${persona.tools.length - 6} more</span>` : '';
+      const noTools = persona.tools.length === 0 ? '<span class="persona-tag empty">none defined</span>' : '';
+      
+      const skillTags = persona.skills.slice(0, 8).map(s => `<span class="persona-tag skill">${s}</span>`).join("");
+      const moreSkills = persona.skills.length > 8 ? `<span class="persona-tag">+${persona.skills.length - 8} more</span>` : '';
+      const noSkills = persona.skills.length === 0 ? '<span class="persona-tag empty">all skills</span>' : '';
+      
+      return `
+      <div class="persona-card ${isActive ? "active" : ""} ${persona.isSlim ? "slim" : ""} ${persona.isInternal ? "internal" : ""} ${persona.isAgent ? "agent" : ""}" data-persona="${displayFileName}">
+        <div class="persona-header">
+          <div class="persona-icon ${this._getPersonaColor(persona.name)}">
+            ${this._getPersonaIcon(persona.name)}
+          </div>
+          <div class="persona-info">
+            <div class="persona-name">${persona.name}${typeBadge}</div>
+            <div class="persona-desc">${persona.description || displayFileName}</div>
+          </div>
+          ${isActive ? '<span class="persona-active-badge">Active</span>' : ''}
+        </div>
+        <div class="persona-body">
+          <div class="persona-section">
+            <div class="persona-section-title">🔧 Tool Modules (${persona.tools.length})</div>
+            <div class="persona-tags">
+              ${toolTags}${moreTools}${noTools}
+            </div>
+          </div>
+          <div class="persona-section">
+            <div class="persona-section-title">⚡ Skills (${persona.skills.length})</div>
+            <div class="persona-tags">
+              ${skillTags}${moreSkills}${noSkills}
+            </div>
+          </div>
+        </div>
+        <div class="persona-footer">
+          <button class="btn btn-${isActive ? "ghost" : "primary"} btn-small" data-action="loadPersona" data-persona="${displayFileName}" ${isActive ? "disabled" : ""}>
+            ${isActive ? "✓ Active" : "🔄 Load"}
+          </button>
+          <button class="btn btn-ghost btn-small" data-action="viewPersonaFile" data-persona="${displayFileName}">
+            📄 View Config
+          </button>
+        </div>
+      </div>
+      `;
+    }).join("");
+  }
+
+  private _formatRelativeTime(isoString: string): string {
+    try {
+      const date = new Date(isoString);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return "Just now";
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays < 7) return `${diffDays}d ago`;
+      return date.toLocaleDateString();
+    } catch {
+      return "Unknown";
+    }
+  }
+
+  // ============================================================================
+  // Workspace State Methods
+  // ============================================================================
+
+  private _loadWorkspaceState(): void {
+    try {
+      if (fs.existsSync(WORKSPACE_STATES_FILE)) {
+        const content = fs.readFileSync(WORKSPACE_STATES_FILE, "utf8");
+        const parsed = JSON.parse(content);
+        // Handle both direct workspace map and wrapped format with "workspaces" key
+        if (parsed.workspaces) {
+          this._workspaceState = parsed.workspaces as WorkspaceExportedState;
+          this._workspaceCount = parsed.workspace_count || Object.keys(this._workspaceState || {}).length;
+        } else {
+          this._workspaceState = parsed as WorkspaceExportedState;
+          this._workspaceCount = Object.keys(this._workspaceState || {}).length;
+        }
+        debugLog(`Loaded ${this._workspaceCount} workspace states`);
+      } else {
+        this._workspaceState = null;
+        this._workspaceCount = 0;
+        debugLog("No workspace states file found");
+      }
+    } catch (error) {
+      debugLog(`Error loading workspace states: ${error}`);
+      this._workspaceState = null;
+      this._workspaceCount = 0;
+    }
+  }
+
+  private _setupWorkspaceWatcher(): void {
+    try {
+      const dir = path.dirname(WORKSPACE_STATES_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      this._workspaceWatcher = fs.watch(dir, (eventType, filename) => {
+        if (filename === "workspace_states.json") {
+          debugLog(`Workspace states file changed: ${eventType}`);
+          this._loadWorkspaceState();
+          this._updateWorkspacesTab();
+        }
+      });
+      debugLog("Workspace watcher set up");
+    } catch (error) {
+      debugLog(`Error setting up workspace watcher: ${error}`);
+    }
+  }
+
+  private _updateWorkspacesTab(): void {
+    if (this._panel.webview) {
+      this._panel.webview.postMessage({
+        type: "updateWorkspaces",
+        workspaces: this._workspaceState,
+        count: this._workspaceCount,
+        totalSessions: this._getTotalSessionCount(),
+        uniquePersonas: this._getUniquePersonaCount(),
+        uniqueProjects: this._getUniqueProjectCount(),
+        groupBy: this._sessionGroupBy,
+        // Always send pre-rendered HTML to ensure consistency
+        renderedHtml: this._renderWorkspaces(),
+      });
+    }
+  }
+
+  private _getUniquePersonaCount(): number {
+    if (!this._workspaceState) return 0;
+    const personas = new Set<string>();
+    Object.values(this._workspaceState).forEach((ws) => {
+      // Count personas from all sessions
+      Object.values(ws.sessions || {}).forEach((session) => {
+        if (session.persona) personas.add(session.persona);
+      });
+    });
+    return personas.size;
+  }
+
+  private _getUniqueProjectCount(): number {
+    if (!this._workspaceState) return 0;
+    const projects = new Set<string>();
+    Object.values(this._workspaceState).forEach((ws) => {
+      // Count workspace-level project
+      if (ws.project) projects.add(ws.project);
+      // Also count per-session projects (sessions can have different projects)
+      Object.values(ws.sessions || {}).forEach((session) => {
+        if (session.project) projects.add(session.project);
+      });
+    });
+    return projects.size;
+  }
+
+  private _getTotalSessionCount(): number {
+    // Only count initialized MCP sessions
+    let count = 0;
+    if (this._workspaceState) {
+      Object.values(this._workspaceState).forEach((ws) => {
+        count += Object.keys(ws.sessions || {}).length;
+      });
+    }
+    return count;
+  }
+
+  private _renderWorkspaces(): string {
+    // Always try to render sessions grouped (shows Cursor chats if no MCP sessions)
+    if (this._sessionViewMode === 'table') {
+      return this._renderSessionsTable();
+    }
+    return this._renderSessionsGrouped();
+  }
+
+  private _renderSessionsTable(): string {
+    // Collect all sessions for table view
+    const allSessions: Array<{ session: ChatSession; workspaceUri: string; workspaceProject: string | null; isActive: boolean }> = [];
+    
+    if (this._workspaceState) {
+      for (const [uri, ws] of Object.entries(this._workspaceState)) {
+        const sessions = ws.sessions || {};
+        for (const [sid, session] of Object.entries(sessions)) {
+          allSessions.push({
+            session: session as ChatSession,
+            workspaceUri: uri,
+            workspaceProject: ws.project,
+            isActive: sid === ws.active_session_id
+          });
+        }
+      }
+    }
+
+    if (allSessions.length === 0) {
+      return `
+        <div class="empty-state">
+          <div class="empty-state-icon">💬</div>
+          <div>No active sessions</div>
+          <div style="font-size: 0.8rem; margin-top: 8px;">
+            Start a session with <code>session_start()</code> in a Cursor chat
+          </div>
+        </div>
+      `;
+    }
+
+    // Sort by last activity
+    allSessions.sort((a, b) => {
+      const aTime = a.session?.last_activity ? new Date(a.session.last_activity).getTime() : 0;
+      const bTime = b.session?.last_activity ? new Date(b.session.last_activity).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    return `
+      <div class="sessions-table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Name</th>
+              <th>Project</th>
+              <th>Persona</th>
+              <th>Issue</th>
+              <th>Last Active</th>
+              <th>Tools</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${allSessions.map(item => {
+              const session = item.session;
+              const sessionId = session.session_id;
+              const persona = session.persona || "developer";
+              const personaIcon = this._getPersonaIcon(persona);
+              const personaColor = this._getPersonaColor(persona);
+              const toolCount = session.tool_count ?? (session as any).active_tools?.length ?? 0;
+              const lastActivity = session.last_activity ? this._formatRelativeTime(session.last_activity) : "Unknown";
+              const sessionName = session.name || `Session ${sessionId.substring(0, 6)}`;
+              const sessionProject = (session as any).project || item.workspaceProject || '-';
+              const issue = session.issue_key || '-';
+              
+              return `
+              <tr class="${item.isActive ? 'row-active' : ''}" data-session-id="${sessionId}">
+                <td><span class="persona-icon-small ${personaColor}">${personaIcon}</span></td>
+                <td>
+                  <span class="clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, '&quot;')}" title="Click to find this chat">
+                    <strong>${sessionName}</strong>
+                  </span>
+                  ${item.isActive ? ' <span class="active-badge-small">Active</span>' : ''}
+                </td>
+                <td>${sessionProject}</td>
+                <td><span class="persona-badge-small ${personaColor}">${persona}</span></td>
+                <td>${issue !== '-' ? `<span class="issue-badge-small">${issue}</span>` : '-'}</td>
+                <td>${lastActivity}</td>
+                <td>${toolCount}</td>
+                <td>
+                  <button class="btn btn-ghost btn-small" data-action="copySessionId" data-session-id="${sessionId}" title="Copy Session ID">📋</button>
+                </td>
+              </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  private _renderSessionsGrouped(): string {
+    // Only show initialized MCP sessions
+    const allSessions: Array<{ session: ChatSession; workspaceUri: string; workspaceProject: string | null; isActive: boolean }> = [];
+    
+    if (this._workspaceState) {
+      for (const [uri, ws] of Object.entries(this._workspaceState)) {
+        const sessions = ws.sessions || {};
+        for (const [sid, session] of Object.entries(sessions)) {
+          allSessions.push({
+            session: session as ChatSession,
+            workspaceUri: uri,
+            workspaceProject: ws.project,
+            isActive: sid === ws.active_session_id
+          });
+        }
+      }
+    }
+
+    if (allSessions.length === 0) {
+      return `
+        <div class="empty-state">
+          <div class="empty-state-icon">💬</div>
+          <div>No active sessions</div>
+          <div style="font-size: 0.8rem; margin-top: 8px;">
+            Start a session with <code>session_start()</code> in a Cursor chat
+          </div>
+        </div>
+      `;
+    }
+
+    // Group sessions by project
+    const groups: Map<string, typeof allSessions> = new Map();
+    
+    for (const item of allSessions) {
+      const groupKey = (item.session as any)?.project || item.workspaceProject || 'No Project';
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, []);
+      }
+      groups.get(groupKey)!.push(item);
+    }
+
+    const sortedGroups = Array.from(groups.entries()).sort((a, b) => {
+      if (a[0] === 'No Project') return 1;
+      if (b[0] === 'No Project') return -1;
+      return a[0].localeCompare(b[0]);
+    });
+
+    return sortedGroups.map(([groupName, items]) => {
+      const groupIcon = this._getGroupIcon(groupName);
+      const groupColor = this._getGroupColor(groupName);
+      
+      items.sort((a, b) => {
+        const aTime = a.session?.last_activity ? new Date(a.session.last_activity).getTime() : 0;
+        const bTime = b.session?.last_activity ? new Date(b.session.last_activity).getTime() : 0;
+        return bTime - aTime;
+      });
+
+      const sessionsHtml = items.map(item => 
+        this._renderSessionCard(item.session!.session_id, item.session!, item.isActive)
+      ).join('');
+
+      return `
+        <div class="session-group">
+          <div class="session-group-header ${groupColor}">
+            <span class="group-icon">${groupIcon}</span>
+            <span class="group-name">${groupName}</span>
+            <span class="group-count">${items.length} session${items.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div class="session-group-content">
+            ${sessionsHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  private _getGroupIcon(groupName: string): string {
+    // Icons for personas
+    const personaIcons: Record<string, string> = {
+      'developer': '👨‍💻',
+      'devops': '🔧',
+      'incident': '🚨',
+      'release': '🚀'
+    };
+    
+    if (personaIcons[groupName.toLowerCase()]) {
+      return personaIcons[groupName.toLowerCase()];
+    }
+    
+    // Icons for projects (or default)
+    if (groupName === 'No Project') return '📁';
+    return '📦';
+  }
+
+  private _getGroupColor(groupName: string): string {
+    // Colors for personas
+    const personaColors: Record<string, string> = {
+      'developer': 'cyan',
+      'devops': 'green',
+      'incident': 'red',
+      'release': 'purple'
+    };
+    
+    if (personaColors[groupName.toLowerCase()]) {
+      return personaColors[groupName.toLowerCase()];
+    }
+    
+    // Default color for projects
+    if (groupName === 'No Project') return 'gray';
+    return 'blue';
+  }
+
+  private _renderWorkspaceCard(uri: string, ws: WorkspaceState): string {
+    const project = ws.project || "No project";
+    const shortUri = uri.replace("file://", "").split("/").slice(-2).join("/");
+    const isAutoDetected = ws.is_auto_detected ? " (auto)" : "";
+    const lastActivity = ws.last_activity ? this._formatRelativeTime(ws.last_activity) : "Unknown";
+    const sessionCount = Object.keys(ws.sessions || {}).length;
+
+    // Render sessions within this workspace
+    const sessionsHtml = this._renderWorkspaceSessions(ws);
+
+    return `
+      <div class="workspace-card" data-workspace-uri="${uri}">
+        <div class="workspace-header">
+          <div class="workspace-icon cyan">📁</div>
+          <div class="workspace-info">
+            <div class="workspace-project">${project}${isAutoDetected}</div>
+            <div class="workspace-uri" title="${uri}">${shortUri}</div>
+          </div>
+          <div class="workspace-badge">${sessionCount} session${sessionCount !== 1 ? 's' : ''}</div>
+        </div>
+        <div class="workspace-body">
+          <div class="workspace-row">
+            <span class="workspace-label">Last Active</span>
+            <span class="workspace-value">${lastActivity}</span>
+          </div>
+          ${sessionsHtml}
+        </div>
+        <div class="workspace-footer">
+          <button class="btn btn-ghost btn-small" data-action="removeWorkspace" data-uri="${uri}">
+            🗑️ Remove Workspace
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private _renderWorkspaceSessions(ws: WorkspaceState): string {
+    const sessions = ws.sessions || {};
+    const sessionEntries = Object.entries(sessions);
+
+    if (sessionEntries.length === 0) {
+      return `<div class="no-sessions">No active sessions. Run session_start() in a chat.</div>`;
+    }
+
+    return `
+      <div class="sessions-container">
+        <div class="sessions-header">💬 Chat Sessions</div>
+        ${sessionEntries.map(([sid, session]) => this._renderSessionCard(sid, session, ws.active_session_id === sid)).join("")}
+      </div>
+    `;
+  }
+
+  private _renderSessionCard(sessionId: string, session: ChatSession, isActive: boolean): string {
+    const persona = session.persona || "developer";
+    const personaIcon = this._getPersonaIcon(persona);
+    const personaColor = this._getPersonaColor(persona);
+    const toolCount = session.tool_count ?? session.active_tools?.length ?? 0;
+    const lastActivity = session.last_activity ? this._formatRelativeTime(session.last_activity) : "Unknown";
+    const sessionName = session.name || `Session ${sessionId.substring(0, 6)}`;
+    const activeClass = isActive ? "session-active" : "";
+
+    // Per-session project support
+    const sessionProject = (session as any).project || null;
+    const isProjectAutoDetected = (session as any).is_project_auto_detected || false;
+    const projectSuffix = isProjectAutoDetected ? " (auto)" : "";
+
+    // Format last tool info
+    const lastTool = session.last_tool || null;
+    const lastToolTime = session.last_tool_time ? this._formatRelativeTime(session.last_tool_time) : null;
+    const toolCallCount = session.tool_call_count || 0;
+
+    return `
+      <div class="session-card ${activeClass}" data-session-id="${sessionId}">
+        <div class="session-header clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, '&quot;')}" title="Click to find this chat session">
+          <div class="session-icon ${personaColor}">${personaIcon}</div>
+          <div class="session-info">
+            <div class="session-name">${sessionName}</div>
+          </div>
+          ${isActive ? '<span class="active-badge">Active</span>' : ''}
+          <span class="open-chat-hint">🔍</span>
+        </div>
+        <div class="session-body">
+          ${sessionProject ? `
+          <div class="session-row">
+            <span class="session-label">Project</span>
+            <span class="session-value project-badge">${sessionProject}${projectSuffix}</span>
+          </div>
+          ` : ""}
+          <div class="session-row">
+            <span class="session-label">Persona</span>
+            <span class="session-value persona-badge ${personaColor}">${persona}</span>
+          </div>
+          ${session.issue_key ? `
+          <div class="session-row">
+            <span class="session-label">Issue</span>
+            <span class="session-value issue-badge">${session.issue_key}</span>
+          </div>
+          ` : ""}
+          ${session.branch ? `
+          <div class="session-row">
+            <span class="session-label">Branch</span>
+            <span class="session-value branch-badge">${session.branch}</span>
+          </div>
+          ` : ""}
+          <div class="session-row">
+            <span class="session-label">Tools</span>
+            <span class="session-value">${toolCount} active</span>
+          </div>
+          <div class="session-row">
+            <span class="session-label">Last Active</span>
+            <span class="session-value">${lastActivity}</span>
+          </div>
+          ${lastTool ? `
+          <div class="session-row">
+            <span class="session-label">Last Tool</span>
+            <span class="session-value"><code>${lastTool}</code> ${lastToolTime ? `(${lastToolTime})` : ''}</span>
+          </div>
+          <div class="session-row">
+            <span class="session-label">Tool Calls</span>
+            <span class="session-value">${toolCallCount} total</span>
+          </div>
+          ` : ""}
+        </div>
+        <div class="session-footer">
+          <button class="btn btn-ghost btn-small" data-action="copySessionId" data-session-id="${sessionId}" title="Copy session ID to clipboard">
+            📋 Copy ID
+          </button>
+          <button class="btn btn-ghost btn-small" data-action="viewSessionTools" data-session-id="${sessionId}">
+            🔧 Tools
+          </button>
+          <button class="btn btn-ghost btn-small" data-action="removeSession" data-session-id="${sessionId}" data-workspace-uri="${session.workspace_uri}">
+            🗑️ Remove
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private _viewWorkspaceTools(uri: string): void {
+    if (!this._workspaceState || !this._workspaceState[uri]) {
+      vscode.window.showWarningMessage(`Workspace not found: ${uri}`);
+      return;
+    }
+
+    const ws = this._workspaceState[uri];
+    const activeSession = ws.active_session_id ? ws.sessions[ws.active_session_id] : null;
+    const toolCount = activeSession?.tool_count ?? activeSession?.active_tools?.length ?? 0;
+    const persona = activeSession?.persona || 'developer';
+
+    // Show info about tools (we no longer store the full list)
+    vscode.window.showInformationMessage(
+      `${persona} persona has ${toolCount} tools loaded. Use tool_list() in chat to see them.`
+    );
+  }
+
+  private async _switchToWorkspace(uri: string): Promise<void> {
+    if (!this._workspaceState || !this._workspaceState[uri]) {
+      vscode.window.showWarningMessage(`Workspace not found: ${uri}`);
+      return;
+    }
+
+    const ws = this._workspaceState[uri];
+    const folderPath = uri.replace("file://", "");
+
+    // Check if folder exists
+    if (!fs.existsSync(folderPath)) {
+      vscode.window.showWarningMessage(`Folder not found: ${folderPath}`);
+      return;
+    }
+
+    // Open the folder in a new window
+    const folderUri = vscode.Uri.file(folderPath);
+    await vscode.commands.executeCommand("vscode.openFolder", folderUri, { forceNewWindow: false });
+  }
+
+  private async _changeWorkspacePersona(uri: string, persona: string): Promise<void> {
+    if (!this._workspaceState || !this._workspaceState[uri]) {
+      vscode.window.showWarningMessage(`Workspace not found: ${uri}`);
+      return;
+    }
+
+    const ws = this._workspaceState[uri];
+    const project = ws.project || "unknown";
+    const activeSession = ws.active_session_id ? ws.sessions[ws.active_session_id] : null;
+    const currentPersona = activeSession?.persona || "none";
+
+    // Show notification that persona change was requested
+    vscode.window.showInformationMessage(
+      `Persona change requested for ${project}: ${currentPersona} → ${persona}. ` +
+      `Use persona_load("${persona}") in the chat to apply.`
+    );
+
+    // Note: Actually changing the persona requires calling the MCP server
+    // which should be done through the chat interface. This UI just shows
+    // the current state and provides a hint about how to change it.
+  }
+
+  private async _copySessionId(sessionId: string): Promise<void> {
+    try {
+      await vscode.env.clipboard.writeText(sessionId);
+      vscode.window.showInformationMessage(
+        `Session ID copied: ${sessionId}. Search for this in your Cursor chat history to find the session.`
+      );
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to copy session ID: ${error}`);
+    }
+  }
+
+  private async _openChatSession(sessionId: string, sessionName?: string): Promise<void> {
+    try {
+      // Session ID is now the Cursor chat UUID (full UUID from Cursor's database)
+      // We can look up the chat name directly from Cursor's database using the UUID
+      
+      let chatName: string | null = null;
+      
+      try {
+        const workspaceStorageDir = path.join(os.homedir(), '.config', 'Cursor', 'User', 'workspaceStorage');
+        const currentWorkspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri.toString();
+        
+        if (fs.existsSync(workspaceStorageDir) && currentWorkspaceUri) {
+          const storageDirs = fs.readdirSync(workspaceStorageDir);
+          
+          for (const dir of storageDirs) {
+            const workspaceJsonPath = path.join(workspaceStorageDir, dir, 'workspace.json');
+            if (fs.existsSync(workspaceJsonPath)) {
+              try {
+                const workspaceJson = JSON.parse(fs.readFileSync(workspaceJsonPath, 'utf8'));
+                if (workspaceJson.folder === currentWorkspaceUri) {
+                  const dbPath = path.join(workspaceStorageDir, dir, 'state.vscdb');
+                  if (fs.existsSync(dbPath)) {
+                    const { execSync } = require('child_process');
+                    const query = `SELECT value FROM ItemTable WHERE key = 'composer.composerData'`;
+                    const result = execSync(`sqlite3 "${dbPath}" "${query}"`, { encoding: 'utf8', timeout: 5000 });
+                    
+                    if (result.trim()) {
+                      const composerData = JSON.parse(result.trim());
+                      // Find the chat by its UUID (sessionId IS the Cursor chat UUID now)
+                      const chat = (composerData.allComposers || []).find(
+                        (c: any) => c.composerId === sessionId
+                      );
+                      if (chat) {
+                        chatName = chat.name;
+                      }
+                    }
+                  }
+                  break;
+                }
+              } catch {
+                // Skip invalid workspace.json
+              }
+            }
+          }
+        }
+      } catch (dbError) {
+        console.log('[AA-WORKFLOW] Could not read Cursor database:', dbError);
+      }
+      
+      // Open Quick Open with the chat name
+      const searchQuery = chatName ? `chat:${chatName}` : 'chat:';
+      await vscode.commands.executeCommand('workbench.action.quickOpen', searchQuery);
+      
+      if (chatName) {
+        vscode.window.showInformationMessage(`🔍 Opening "${chatName}"...`);
+      } else {
+        vscode.window.showInformationMessage(`💬 Select your chat from the list`);
+      }
+      
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to open chat picker: ${error}`);
+    }
+  }
+
+  private async _removeWorkspace(uri: string): Promise<void> {
+    if (!this._workspaceState || !this._workspaceState[uri]) {
+      vscode.window.showWarningMessage(`Workspace not found: ${uri}`);
+      return;
+    }
+
+    const ws = this._workspaceState[uri];
+    const project = ws.project || uri;
+
+    // Confirm removal
+    const result = await vscode.window.showWarningMessage(
+      `Remove workspace "${project}" from tracking?`,
+      { modal: true },
+      "Remove"
+    );
+
+    if (result === "Remove") {
+      // Remove from local state
+      delete this._workspaceState[uri];
+      this._workspaceCount = Object.keys(this._workspaceState).length;
+
+      // Update the JSON file
+      try {
+        const exportData = {
+          version: 1,
+          exported_at: new Date().toISOString(),
+          workspace_count: this._workspaceCount,
+          workspaces: this._workspaceState,
+        };
+        fs.writeFileSync(WORKSPACE_STATES_FILE, JSON.stringify(exportData, null, 2));
+        vscode.window.showInformationMessage(`Removed workspace: ${project}`);
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to save workspace state: ${error}`);
+      }
+
+      // Update UI
+      this._updateWorkspacesTab();
+      this.update(false);
+    }
+  }
+
   private async loadPersona(personaName: string) {
     try {
       // Copy the command to clipboard for user to paste in chat
@@ -2515,6 +3411,7 @@ print(result)
     const toolModules = this.loadToolModules();
     const activeAgent = this.getActiveAgent();
     const personas = this.loadPersonas();
+    const meetBotState = loadMeetBotState();
 
     // On first render or forced, do full HTML render
     if (forceFullRender || !this._panel.webview.html) {
@@ -2530,7 +3427,8 @@ print(result)
         cronHistory,
         toolModules,
         activeAgent,
-        personas
+        personas,
+        meetBotState
       );
       // Debug: Check if template literals are being evaluated
       if (html.includes('${JSON.stringify')) {
@@ -2561,6 +3459,7 @@ print(result)
         toolSuccessRate,
         workflowStatus,
         currentWork,
+        workspaceCount: this._workspaceCount,
         memoryHealth,
         cronConfig,
         cronHistory,
@@ -2660,16 +3559,27 @@ print(result)
   private _getHtmlForWebview(
     stats: AgentStats | null,
     workflowStatus: any,
-    currentWork: { activeIssue: any; activeMR: any; followUps: any[]; sprintIssues: any[]; activeRepo: string | null },
+    currentWork: { 
+      activeIssue: any; 
+      activeMR: any; 
+      followUps: any[]; 
+      sprintIssues: any[]; 
+      activeRepo: string | null;
+      totalActiveIssues: number;
+      totalActiveMRs: number;
+      allActiveIssues: { key: string; project: string; workspace: string }[];
+      allActiveMRs: { id: string; project: string; workspace: string }[];
+    },
     skills: SkillDefinition[],
     memoryHealth: { totalSize: string; sessionLogs: number; lastSession: string; patterns: number },
     memoryFiles: { state: string[]; learned: string[]; sessions: string[]; knowledge: { project: string; persona: string; confidence: number }[] },
     vectorStats: { projects: any[]; totals: { indexedCount: number; totalChunks: number; totalFiles: number; totalSize: string; totalSearches: number; watchersActive: number } },
-    cronConfig: { enabled: boolean; timezone: string; jobs: CronJob[] },
+    cronConfig: { enabled: boolean; timezone: string; jobs: CronJob[]; execution_mode: string },
     cronHistory: CronExecution[],
     toolModules: ToolModule[],
     activeAgent: { name: string; tools: string[] },
-    personas: Persona[]
+    personas: Persona[],
+    meetBotState: MeetBotState
   ): string {
     const nonce = getNonce();
 
@@ -2993,6 +3903,18 @@ print(result)
         .grid-4 {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
+          gap: 16px;
+        }
+
+        @media (max-width: 900px) {
+          .grid-4 {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+
+        .grid-4 {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
           gap: 12px;
         }
 
@@ -3049,6 +3971,50 @@ print(result)
         .card-subtitle {
           font-size: 0.8rem;
           color: var(--text-secondary);
+        }
+
+        /* Current Work List (aggregated issues/MRs) */
+        .current-work-list {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          margin: 8px 0;
+          padding: 8px;
+          background: var(--bg-tertiary);
+          border-radius: 6px;
+          max-height: 120px;
+          overflow-y: auto;
+        }
+
+        .current-work-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 4px 8px;
+          background: var(--bg-card);
+          border-radius: 4px;
+          font-size: 0.8rem;
+        }
+
+        .current-work-item:hover {
+          background: rgba(59, 130, 246, 0.1);
+        }
+
+        .work-item-key {
+          font-weight: 600;
+          color: var(--accent);
+        }
+
+        .work-item-project {
+          color: var(--text-muted);
+          font-size: 0.75rem;
+        }
+
+        .work-item-more {
+          text-align: center;
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          padding: 4px;
         }
 
         /* Sprint Issues */
@@ -3882,6 +4848,11 @@ print(result)
           border-color: var(--purple);
         }
 
+        .lifecycle-indicator.can-auto-heal {
+          background: rgba(236, 72, 153, 0.2);
+          border-color: var(--pink);
+        }
+
         .lifecycle-indicator.healed {
           background: rgba(16, 185, 129, 0.3);
           border-color: var(--success);
@@ -4031,6 +5002,7 @@ print(result)
         .step-tag.memory-write { background: rgba(16, 185, 129, 0.15); color: var(--success); }
         .step-tag.auto-heal { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
         .step-tag.can-retry { background: rgba(139, 92, 246, 0.1); color: var(--purple); }
+        .step-tag.can-auto-heal { background: rgba(236, 72, 153, 0.15); color: var(--pink); }
         .step-tag.healed { background: rgba(16, 185, 129, 0.2); color: var(--success); }
         .step-tag.retry-count { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
 
@@ -4252,6 +5224,109 @@ print(result)
 
         .memory-item-name {
           font-size: 0.85rem;
+        }
+
+        /* Vector Projects Table */
+        .vector-projects-table {
+          overflow-x: auto;
+        }
+
+        .vector-projects-table table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 0.85rem;
+        }
+
+        .vector-projects-table thead {
+          background: var(--bg-tertiary);
+          position: sticky;
+          top: 0;
+        }
+
+        .vector-projects-table th {
+          padding: 10px 12px;
+          text-align: left;
+          font-weight: 600;
+          color: var(--text-secondary);
+          font-size: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          border-bottom: 1px solid var(--border);
+          white-space: nowrap;
+        }
+
+        .vector-projects-table td {
+          padding: 12px;
+          border-bottom: 1px solid var(--border-light, rgba(255,255,255,0.05));
+          vertical-align: middle;
+        }
+
+        .vector-projects-table tbody tr {
+          transition: background 0.15s ease;
+        }
+
+        .vector-projects-table tbody tr:hover {
+          background: var(--bg-secondary);
+        }
+
+        .vector-projects-table tbody tr:last-child td {
+          border-bottom: none;
+        }
+
+        .vector-projects-table tbody tr.stale {
+          background: rgba(234, 179, 8, 0.05);
+        }
+
+        .vector-projects-table tbody tr.stale:hover {
+          background: rgba(234, 179, 8, 0.1);
+        }
+
+        .vector-projects-table .col-status {
+          width: 40px;
+          text-align: center;
+        }
+
+        .vector-projects-table .col-project {
+          min-width: 180px;
+        }
+
+        .vector-projects-table .project-name {
+          font-weight: 500;
+          color: var(--text-primary);
+        }
+
+        .vector-projects-table .col-files,
+        .vector-projects-table .col-chunks,
+        .vector-projects-table .col-size,
+        .vector-projects-table .col-searches,
+        .vector-projects-table .col-avg {
+          text-align: right;
+          color: var(--text-secondary);
+          font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+          font-size: 0.8rem;
+        }
+
+        .vector-projects-table .col-age {
+          text-align: right;
+          color: var(--text-tertiary);
+          white-space: nowrap;
+        }
+
+        .vector-projects-table .col-age.stale-text {
+          color: var(--yellow);
+        }
+
+        @media (max-width: 900px) {
+          .vector-projects-table .col-avg,
+          .vector-projects-table .col-searches {
+            display: none;
+          }
+        }
+
+        @media (max-width: 700px) {
+          .vector-projects-table .col-size {
+            display: none;
+          }
         }
 
         /* Semantic Search Box */
@@ -4873,6 +5948,413 @@ print(result)
         }
 
         /* ============================================ */
+        /* Workspace Tab */
+        /* ============================================ */
+        .workspaces-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+          gap: 20px;
+        }
+
+        /* Group By Select */
+        .group-by-select {
+          padding: 6px 12px;
+          border-radius: 6px;
+          background: var(--bg-secondary);
+          border: 1px solid var(--border);
+          color: var(--text-primary);
+          font-size: 0.85rem;
+          cursor: pointer;
+          outline: none;
+        }
+        .group-by-select:hover {
+          border-color: var(--accent);
+        }
+        .group-by-select:focus {
+          border-color: var(--accent);
+          box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+        }
+
+        /* Session Groups */
+        .session-group {
+          margin-bottom: 24px;
+        }
+        .session-group-header {
+          display: flex;
+          align-items: center;
+          padding: 12px 16px;
+          background: var(--bg-secondary);
+          border-radius: 10px;
+          margin-bottom: 12px;
+          border-left: 4px solid var(--accent);
+        }
+        .session-group-header.cyan { border-left-color: #06b6d4; }
+        .session-group-header.green { border-left-color: #22c55e; }
+        .session-group-header.red { border-left-color: #ef4444; }
+        .session-group-header.purple { border-left-color: #8b5cf6; }
+        .session-group-header.blue { border-left-color: #3b82f6; }
+        .session-group-header.gray { border-left-color: #6b7280; }
+        .session-group-header .group-icon {
+          font-size: 1.3rem;
+          margin-right: 12px;
+        }
+        .session-group-header .group-name {
+          flex: 1;
+          font-weight: 600;
+          font-size: 1rem;
+          color: var(--text-primary);
+        }
+        .session-group-header .group-count {
+          color: var(--text-muted);
+          font-size: 0.85rem;
+          background: var(--bg-tertiary);
+          padding: 4px 10px;
+          border-radius: 12px;
+        }
+        .session-group-content {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+          gap: 16px;
+          padding-left: 8px;
+        }
+
+        .workspace-card {
+          background: var(--bg-secondary);
+          border-radius: 12px;
+          overflow: hidden;
+          transition: all 0.2s;
+          border: 2px solid transparent;
+        }
+
+        .workspace-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+          border-color: var(--border);
+        }
+
+        .workspace-header {
+          padding: 16px 20px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          border-bottom: 1px solid var(--border);
+          background: var(--bg-tertiary);
+        }
+
+        .workspace-icon {
+          width: 48px;
+          height: 48px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1.5rem;
+        }
+
+        .workspace-icon.purple { background: rgba(139, 92, 246, 0.2); }
+        .workspace-icon.cyan { background: rgba(6, 182, 212, 0.2); }
+        .workspace-icon.pink { background: rgba(236, 72, 153, 0.2); }
+        .workspace-icon.green { background: rgba(16, 185, 129, 0.2); }
+        .workspace-icon.orange { background: rgba(249, 115, 22, 0.2); }
+        .workspace-icon.blue { background: rgba(59, 130, 246, 0.2); }
+        .workspace-icon.gray { background: rgba(107, 114, 128, 0.2); }
+
+        .workspace-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .workspace-project {
+          font-weight: 600;
+          font-size: 1.1rem;
+          color: var(--text-primary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .workspace-uri {
+          font-size: 0.8rem;
+          color: var(--text-muted);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .workspace-body {
+          padding: 16px 20px;
+        }
+
+        .workspace-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 8px 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .workspace-row:last-child {
+          border-bottom: none;
+        }
+
+        .workspace-label {
+          font-size: 0.85rem;
+          color: var(--text-muted);
+        }
+
+        .workspace-value {
+          font-size: 0.85rem;
+          color: var(--text-primary);
+          font-weight: 500;
+        }
+
+        .persona-badge {
+          padding: 4px 10px;
+          border-radius: 6px;
+          font-size: 0.8rem;
+        }
+
+        .persona-badge.purple { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
+        .persona-badge.cyan { background: rgba(6, 182, 212, 0.2); color: #22d3ee; }
+        .persona-badge.pink { background: rgba(236, 72, 153, 0.2); color: #f472b6; }
+        .persona-badge.green { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+        .persona-badge.orange { background: rgba(249, 115, 22, 0.2); color: #fb923c; }
+        .persona-badge.blue { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+        .persona-badge.gray { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
+
+        .issue-badge {
+          padding: 4px 10px;
+          background: rgba(59, 130, 246, 0.2);
+          color: #60a5fa;
+          border-radius: 6px;
+          font-family: monospace;
+        }
+
+        .branch-badge {
+          padding: 4px 10px;
+          background: rgba(16, 185, 129, 0.2);
+          color: #34d399;
+          border-radius: 6px;
+          font-family: monospace;
+          max-width: 200px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .project-badge {
+          padding: 4px 10px;
+          background: rgba(139, 92, 246, 0.2);
+          color: #a78bfa;
+          border-radius: 6px;
+          font-weight: 500;
+          max-width: 200px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .workspace-footer {
+          padding: 12px 20px;
+          border-top: 1px solid var(--border);
+          display: flex;
+          gap: 8px;
+          justify-content: flex-end;
+        }
+
+        .persona-select {
+          padding: 6px 12px;
+          border-radius: 6px;
+          border: 1px solid var(--border);
+          background: var(--bg-tertiary);
+          color: var(--text-primary);
+          font-size: 0.85rem;
+          cursor: pointer;
+          min-width: 140px;
+        }
+
+        .persona-select:hover {
+          border-color: var(--accent);
+        }
+
+        .persona-select:focus {
+          outline: none;
+          border-color: var(--accent);
+          box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+        }
+
+        .persona-select.purple { border-left: 3px solid #8b5cf6; }
+        .persona-select.cyan { border-left: 3px solid #06b6d4; }
+        .persona-select.pink { border-left: 3px solid #ec4899; }
+        .persona-select.green { border-left: 3px solid #10b981; }
+        .persona-select.orange { border-left: 3px solid #f97316; }
+        .persona-select.blue { border-left: 3px solid #3b82f6; }
+        .persona-select.gray { border-left: 3px solid #6b7280; }
+
+        .workspace-badge {
+          padding: 4px 10px;
+          background: rgba(6, 182, 212, 0.2);
+          color: #22d3ee;
+          border-radius: 6px;
+          font-size: 0.75rem;
+          font-weight: 500;
+        }
+
+        /* ============================================ */
+        /* Session Cards (within Workspaces) */
+        /* ============================================ */
+        .sessions-container {
+          margin-top: 16px;
+          padding-top: 16px;
+          border-top: 1px solid var(--border);
+        }
+
+        .sessions-header {
+          font-size: 0.9rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+          margin-bottom: 12px;
+        }
+
+        .no-sessions {
+          padding: 16px;
+          text-align: center;
+          color: var(--text-muted);
+          font-size: 0.85rem;
+          background: var(--bg-tertiary);
+          border-radius: 8px;
+        }
+
+        .session-card {
+          background: var(--bg-tertiary);
+          border-radius: 8px;
+          margin-bottom: 12px;
+          border: 1px solid var(--border);
+          transition: all 0.2s;
+        }
+
+        .session-card:last-child {
+          margin-bottom: 0;
+        }
+
+        .session-card:hover {
+          border-color: var(--accent);
+        }
+
+        .session-card.session-active {
+          border-color: #10b981;
+          box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3);
+        }
+
+        .session-header {
+          padding: 12px 16px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .session-header.clickable {
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+
+        .session-header.clickable:hover {
+          background: var(--bg-tertiary);
+        }
+
+        .session-header .open-chat-hint {
+          opacity: 0;
+          transition: opacity 0.15s ease;
+          margin-left: auto;
+          font-size: 1rem;
+        }
+
+        .session-header.clickable:hover .open-chat-hint {
+          opacity: 0.7;
+        }
+
+        .session-icon {
+          width: 36px;
+          height: 36px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1.1rem;
+        }
+
+        .session-icon.purple { background: rgba(139, 92, 246, 0.2); }
+        .session-icon.cyan { background: rgba(6, 182, 212, 0.2); }
+        .session-icon.pink { background: rgba(236, 72, 153, 0.2); }
+        .session-icon.green { background: rgba(16, 185, 129, 0.2); }
+        .session-icon.orange { background: rgba(249, 115, 22, 0.2); }
+        .session-icon.blue { background: rgba(59, 130, 246, 0.2); }
+        .session-icon.gray { background: rgba(107, 114, 128, 0.2); }
+
+        .session-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .session-name {
+          font-weight: 500;
+          font-size: 0.95rem;
+          color: var(--text-primary);
+        }
+
+        .session-id {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          font-family: monospace;
+        }
+
+        .active-badge {
+          padding: 2px 8px;
+          background: rgba(16, 185, 129, 0.2);
+          color: #34d399;
+          border-radius: 4px;
+          font-size: 0.7rem;
+          font-weight: 600;
+          text-transform: uppercase;
+        }
+
+        .session-body {
+          padding: 12px 16px;
+        }
+
+        .session-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 6px 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .session-row:last-child {
+          border-bottom: none;
+        }
+
+        .session-label {
+          font-size: 0.8rem;
+          color: var(--text-muted);
+        }
+
+        .session-value {
+          font-size: 0.8rem;
+          color: var(--text-primary);
+          font-weight: 500;
+        }
+
+        .session-footer {
+          padding: 10px 16px;
+          border-top: 1px solid var(--border);
+          display: flex;
+          gap: 8px;
+          justify-content: flex-end;
+        }
+
+        /* ============================================ */
         /* Cron Tab */
         /* ============================================ */
         .cron-jobs-list {
@@ -5042,6 +6524,13 @@ print(result)
           font-weight: 600;
           font-size: 0.9rem;
           margin-bottom: 4px;
+        }
+
+        .cron-history-session {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          margin-bottom: 4px;
+          font-family: var(--font-mono, monospace);
         }
 
         .cron-history-details {
@@ -5441,6 +6930,281 @@ print(result)
           align-items: center;
           gap: 4px;
         }
+
+        /* ============================================ */
+        /* Data Tables - Persona Statistics */
+        /* ============================================ */
+        .table-container {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          overflow: hidden;
+        }
+
+        .data-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 0.85rem;
+        }
+
+        .data-table thead {
+          background: linear-gradient(135deg,
+            rgba(139, 92, 246, 0.15) 0%,
+            rgba(6, 182, 212, 0.1) 100%);
+        }
+
+        .data-table th {
+          padding: 14px 12px;
+          text-align: left;
+          font-weight: 600;
+          font-size: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: var(--text-secondary);
+          border-bottom: 1px solid var(--border);
+        }
+
+        .data-table th:first-child {
+          padding-left: 20px;
+        }
+
+        .data-table th:last-child {
+          padding-right: 20px;
+        }
+
+        .data-table tbody tr {
+          transition: all 0.15s ease;
+        }
+
+        .data-table tbody tr:hover {
+          background: rgba(139, 92, 246, 0.08);
+        }
+
+        .data-table tbody tr:not(:last-child) {
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .data-table td {
+          padding: 14px 12px;
+          color: var(--text-primary);
+        }
+
+        .data-table td:first-child {
+          padding-left: 20px;
+          font-weight: 600;
+        }
+
+        .data-table td:last-child {
+          padding-right: 20px;
+        }
+
+        /* Persona name styling with dynamic accent color */
+        .data-table td:first-child {
+          position: relative;
+        }
+
+        .data-table tbody tr td:first-child::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 3px;
+          height: 60%;
+          border-radius: 0 2px 2px 0;
+          background: var(--row-accent, var(--purple));
+        }
+
+        .data-table tbody tr:hover td:first-child::before {
+          height: 80%;
+          width: 4px;
+        }
+
+        /* Numeric columns - right align */
+        .data-table td:not(:first-child) {
+          text-align: center;
+          font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+          font-size: 0.8rem;
+        }
+
+        .data-table th:not(:first-child) {
+          text-align: center;
+        }
+
+        /* Empty state */
+        .data-table .empty-state {
+          padding: 40px 20px;
+          text-align: center;
+          color: var(--text-secondary);
+          font-style: italic;
+        }
+
+        /* Table view active row */
+        .data-table tbody tr.row-active {
+          background: rgba(139, 92, 246, 0.1);
+        }
+
+        /* Small badges for table view */
+        .persona-icon-small {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          border-radius: 6px;
+          font-size: 0.9rem;
+        }
+        .persona-icon-small.cyan { background: rgba(6, 182, 212, 0.2); }
+        .persona-icon-small.green { background: rgba(16, 185, 129, 0.2); }
+        .persona-icon-small.red { background: rgba(239, 68, 68, 0.2); }
+        .persona-icon-small.purple { background: rgba(139, 92, 246, 0.2); }
+        .persona-icon-small.orange { background: rgba(249, 115, 22, 0.2); }
+        .persona-icon-small.pink { background: rgba(236, 72, 153, 0.2); }
+
+        .persona-badge-small {
+          display: inline-block;
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          font-weight: 500;
+        }
+        .persona-badge-small.cyan { background: rgba(6, 182, 212, 0.2); color: var(--cyan); }
+        .persona-badge-small.green { background: rgba(16, 185, 129, 0.2); color: var(--green); }
+        .persona-badge-small.red { background: rgba(239, 68, 68, 0.2); color: var(--red); }
+        .persona-badge-small.purple { background: rgba(139, 92, 246, 0.2); color: var(--purple); }
+        .persona-badge-small.orange { background: rgba(249, 115, 22, 0.2); color: var(--orange); }
+        .persona-badge-small.pink { background: rgba(236, 72, 153, 0.2); color: var(--pink); }
+
+        .active-badge-small {
+          display: inline-block;
+          padding: 1px 6px;
+          border-radius: 4px;
+          font-size: 0.65rem;
+          font-weight: 600;
+          background: rgba(16, 185, 129, 0.2);
+          color: var(--green);
+          text-transform: uppercase;
+        }
+
+        .issue-badge-small {
+          display: inline-block;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          background: rgba(249, 115, 22, 0.15);
+          color: var(--orange);
+        }
+
+        /* Table containers */
+        .sessions-table-container,
+        .personas-table-container {
+          overflow-x: auto;
+        }
+
+        /* Clickable cells in tables */
+        .data-table .clickable {
+          cursor: pointer;
+        }
+        .data-table .clickable:hover {
+          color: var(--cyan);
+          text-decoration: underline;
+        }
+
+        /* History list improvements */
+        .history-list .history-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 16px;
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          border-left: 3px solid var(--purple);
+          transition: all 0.15s ease;
+        }
+
+        .history-list .history-item:hover {
+          background: rgba(139, 92, 246, 0.08);
+          border-left-color: var(--cyan);
+        }
+
+        .history-list .history-message {
+          flex: 1;
+          font-size: 0.85rem;
+          color: var(--text-primary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          margin-right: 16px;
+        }
+
+        .history-list .history-tools {
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: var(--cyan);
+          background: rgba(6, 182, 212, 0.15);
+          padding: 4px 10px;
+          border-radius: 12px;
+          margin-right: 12px;
+          white-space: nowrap;
+        }
+
+        .history-list .history-time {
+          font-size: 0.75rem;
+          color: var(--text-secondary);
+          font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+          min-width: 70px;
+          text-align: right;
+        }
+
+        /* Latency histogram improvements */
+        .latency-histogram {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          padding: 16px 20px;
+        }
+
+        .latency-histogram h3 {
+          color: var(--text-secondary);
+          margin-bottom: 16px;
+        }
+
+        .histogram-bars {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .histogram-bar-container {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .histogram-label {
+          font-size: 0.8rem;
+          color: var(--text-secondary);
+          min-width: 70px;
+          text-align: right;
+        }
+
+        .histogram-bar {
+          height: 24px;
+          border-radius: 4px;
+          background: linear-gradient(90deg, var(--purple) 0%, var(--cyan) 100%);
+          transition: width 0.5s ease;
+          min-width: 4px;
+        }
+
+        .histogram-value {
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: var(--text-primary);
+          min-width: 40px;
+        }
+
+        ${getMeetingsTabStyles()}
       </style>
     </head>
     <body>
@@ -5483,6 +7247,10 @@ print(result)
         <button class="tab ${this._currentTab === "overview" ? "active" : ""}" data-tab="overview" id="tab-overview">
           📊 Overview
         </button>
+        <button class="tab ${this._currentTab === "workspaces" ? "active" : ""}" data-tab="workspaces" id="tab-workspaces">
+          💬 Sessions
+          <span class="tab-badge" id="workspacesBadge">${this._getTotalSessionCount()}</span>
+        </button>
         <button class="tab ${this._currentTab === "personas" ? "active" : ""}" data-tab="personas" id="tab-personas">
           🤖 Personas
         </button>
@@ -5505,6 +7273,10 @@ print(result)
         </button>
         <button class="tab ${this._currentTab === "inference" ? "active" : ""}" data-tab="inference" id="tab-inference">
           🧪 Inference
+        </button>
+        <button class="tab ${this._currentTab === "meetings" ? "active" : ""}" data-tab="meetings" id="tab-meetings">
+          🎥 Meetings
+          ${meetBotState.currentMeeting ? '<span class="tab-badge running">Live</span>' : meetBotState.upcomingMeetings.length > 0 ? `<span class="tab-badge">${meetBotState.upcomingMeetings.length}</span>` : ''}
         </button>
       </div>
 
@@ -5572,12 +7344,23 @@ print(result)
               <div class="card-header">
                 <div class="card-icon purple">📋</div>
                 <div>
-                  <div class="card-title" id="currentIssueKey">${currentWork.activeIssue?.key || "No Active Issue"}</div>
-                  <div class="card-subtitle" id="currentIssueStatus">${currentWork.activeIssue ? "In Progress" : "Start work to track an issue"}</div>
+                  <div class="card-title" id="currentIssueKey">${currentWork.totalActiveIssues > 0 ? `${currentWork.totalActiveIssues} Active Issue${currentWork.totalActiveIssues > 1 ? 's' : ''}` : "No Active Issues"}</div>
+                  <div class="card-subtitle" id="currentIssueStatus">${currentWork.totalActiveIssues > 0 ? `Across ${this._workspaceCount || 1} workspace${(this._workspaceCount || 1) > 1 ? 's' : ''}` : "Start work to track an issue"}</div>
                 </div>
               </div>
+              ${currentWork.allActiveIssues.length > 0 ? `
+              <div class="current-work-list" id="activeIssuesList">
+                ${currentWork.allActiveIssues.slice(0, 3).map(issue => `
+                  <div class="current-work-item" title="${issue.project} - ${issue.workspace}">
+                    <span class="work-item-key">${issue.key}</span>
+                    <span class="work-item-project">${issue.project}</span>
+                  </div>
+                `).join('')}
+                ${currentWork.allActiveIssues.length > 3 ? `<div class="work-item-more">+${currentWork.allActiveIssues.length - 3} more</div>` : ''}
+              </div>
+              ` : ''}
               <div id="currentIssueActions">
-              ${currentWork.activeIssue
+              ${currentWork.totalActiveIssues > 0
                 ? `<button class="btn btn-secondary btn-small" data-action="openJira">Open in Jira</button>`
                 : `<button class="btn btn-primary btn-small" data-action="startWork">Start Work</button>`
               }
@@ -5587,12 +7370,23 @@ print(result)
               <div class="card-header">
                 <div class="card-icon cyan">🔀</div>
                 <div>
-                  <div class="card-title" id="currentMRTitle">${currentWork.activeMR ? `MR !${currentWork.activeMR.id}` : "No Active MR"}</div>
-                  <div class="card-subtitle" id="currentMRStatus">${currentWork.activeMR ? "Open" : "Create an MR when ready"}</div>
+                  <div class="card-title" id="currentMRTitle">${currentWork.totalActiveMRs > 0 ? `${currentWork.totalActiveMRs} Active MR${currentWork.totalActiveMRs > 1 ? 's' : ''}` : "No Active MRs"}</div>
+                  <div class="card-subtitle" id="currentMRStatus">${currentWork.totalActiveMRs > 0 ? "Open" : "Create an MR when ready"}</div>
                 </div>
               </div>
+              ${currentWork.allActiveMRs.length > 0 ? `
+              <div class="current-work-list" id="activeMRsList">
+                ${currentWork.allActiveMRs.slice(0, 3).map(mr => `
+                  <div class="current-work-item" title="${mr.project} - ${mr.workspace}">
+                    <span class="work-item-key">!${mr.id}</span>
+                    <span class="work-item-project">${mr.project}</span>
+                  </div>
+                `).join('')}
+                ${currentWork.allActiveMRs.length > 3 ? `<div class="work-item-more">+${currentWork.allActiveMRs.length - 3} more</div>` : ''}
+              </div>
+              ` : ''}
               <div id="currentMRActions">
-              ${currentWork.activeMR
+              ${currentWork.totalActiveMRs > 0
                 ? `<button class="btn btn-secondary btn-small" data-action="openMR">Open in GitLab</button>`
                 : ``
               }
@@ -5659,6 +7453,55 @@ print(result)
             <button class="btn btn-secondary" data-action="coffee">☕ Coffee</button>
             <button class="btn btn-secondary" data-action="beer">🍺 Beer</button>
             <button class="btn btn-ghost" data-action="refresh">🔄 Refresh</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sessions Tab -->
+      <div class="tab-content ${this._currentTab === "workspaces" ? "active" : ""}" id="workspaces">
+        <div class="section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2 class="section-title" style="margin: 0;">💬 Sessions by Project</h2>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <div class="view-toggle" id="sessionViewToggle">
+                <button class="toggle-btn ${this._sessionViewMode === 'card' ? 'active' : ''}" data-action="changeSessionViewMode" data-value="card" title="Card View">🃏 Cards</button>
+                <button class="toggle-btn ${this._sessionViewMode === 'table' ? 'active' : ''}" data-action="changeSessionViewMode" data-value="table" title="Table View">📋 Table</button>
+              </div>
+              <span style="font-size: 0.9rem; color: var(--text-muted);">
+                ${this._getTotalSessionCount()} session(s)
+              </span>
+              <button class="btn btn-ghost btn-small" data-action="refreshWorkspaces">🔄 Refresh</button>
+            </div>
+          </div>
+
+          <div class="workspaces-grid" id="workspacesGrid">
+            ${this._renderWorkspaces()}
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">📊 Session Stats</h2>
+          <div class="grid-4">
+            <div class="stat-card purple">
+              <div class="stat-icon">🖥️</div>
+              <div class="stat-value" id="totalWorkspaces">${this._workspaceCount || 0}</div>
+              <div class="stat-label">Workspace</div>
+            </div>
+            <div class="stat-card orange">
+              <div class="stat-icon">💬</div>
+              <div class="stat-value" id="totalSessions">${this._getTotalSessionCount()}</div>
+              <div class="stat-label">Sessions</div>
+            </div>
+            <div class="stat-card cyan">
+              <div class="stat-icon">🤖</div>
+              <div class="stat-value" id="uniquePersonas">${this._getUniquePersonaCount()}</div>
+              <div class="stat-label">Personas</div>
+            </div>
+            <div class="stat-card green">
+              <div class="stat-icon">📁</div>
+              <div class="stat-value" id="uniqueProjects">${this._getUniqueProjectCount()}</div>
+              <div class="stat-label">Projects</div>
+            </div>
           </div>
         </div>
       </div>
@@ -6059,6 +7902,11 @@ print(result)
         </div>
       </div>
 
+      <!-- Meetings Tab -->
+      <div class="tab-content ${this._currentTab === "meetings" ? "active" : ""}" id="meetings">
+        ${getMeetingsTabContent(meetBotState)}
+      </div>
+
       <!-- Tools Tab -->
       <div class="tab-content ${this._currentTab === "tools" ? "active" : ""}" id="tools">
         <!-- Active Agent -->
@@ -6118,59 +7966,61 @@ print(result)
         <div class="section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <h2 class="section-title" style="margin: 0;">🤖 Available Personas</h2>
-            <div style="font-size: 0.9rem; color: var(--text-muted);">
-              ${personas.length} personas configured
+            <div style="display: flex; gap: 12px; align-items: center;">
+              <div class="view-toggle" id="personaViewToggle">
+                <button class="toggle-btn ${this._personaViewMode === 'card' ? 'active' : ''}" data-action="changePersonaViewMode" data-value="card" title="Card View">🃏 Cards</button>
+                <button class="toggle-btn ${this._personaViewMode === 'table' ? 'active' : ''}" data-action="changePersonaViewMode" data-value="table" title="Table View">📋 Table</button>
+              </div>
+              <span style="font-size: 0.9rem; color: var(--text-muted);">
+                ${personas.length} personas configured
+              </span>
             </div>
           </div>
 
-          <div class="personas-grid">
-            ${personas.map(persona => {
-              const isActive = activeAgent.name === persona.name || activeAgent.name === persona.fileName;
-              const displayFileName = persona.fileName || persona.name;
-              const typeBadge = persona.isSlim ? '<span class="persona-type-badge slim">slim</span>' :
-                               persona.isInternal ? '<span class="persona-type-badge internal">internal</span>' :
-                               persona.isAgent ? '<span class="persona-type-badge agent">agent</span>' : '';
-              return `
-              <div class="persona-card ${isActive ? "active" : ""} ${persona.isSlim ? "slim" : ""} ${persona.isInternal ? "internal" : ""} ${persona.isAgent ? "agent" : ""}" data-persona="${displayFileName}">
-                <div class="persona-header">
-                  <div class="persona-icon ${this._getPersonaColor(persona.name)}">
-                    ${this._getPersonaIcon(persona.name)}
-                  </div>
-                  <div class="persona-info">
-                    <div class="persona-name">${persona.name}${typeBadge}</div>
-                    <div class="persona-desc">${persona.description || displayFileName}</div>
-                  </div>
-                  ${isActive ? '<span class="persona-active-badge">Active</span>' : ''}
-                </div>
-                <div class="persona-body">
-                  <div class="persona-section">
-                    <div class="persona-section-title">🔧 Tool Modules (${persona.tools.length})</div>
-                    <div class="persona-tags">
-                      ${persona.tools.slice(0, 6).map(t => `<span class="persona-tag tool">${t}</span>`).join("")}
-                      ${persona.tools.length > 6 ? `<span class="persona-tag">+${persona.tools.length - 6} more</span>` : ''}
-                      ${persona.tools.length === 0 ? '<span class="persona-tag empty">none defined</span>' : ''}
-                    </div>
-                  </div>
-                  <div class="persona-section">
-                    <div class="persona-section-title">⚡ Skills (${persona.skills.length})</div>
-                    <div class="persona-tags">
-                      ${persona.skills.slice(0, 8).map(s => `<span class="persona-tag skill">${s}</span>`).join("")}
-                      ${persona.skills.length > 8 ? `<span class="persona-tag">+${persona.skills.length - 8} more</span>` : ''}
-                      ${persona.skills.length === 0 ? '<span class="persona-tag empty">all skills</span>' : ''}
-                    </div>
-                  </div>
-                </div>
-                <div class="persona-footer">
-                  <button class="btn btn-${isActive ? "ghost" : "primary"} btn-small" data-action="loadPersona" data-persona="${displayFileName}" ${isActive ? "disabled" : ""}>
-                    ${isActive ? "✓ Active" : "🔄 Load"}
-                  </button>
-                  <button class="btn btn-ghost btn-small" data-action="viewPersonaFile" data-persona="${displayFileName}">
-                    📄 View Config
-                  </button>
-                </div>
-              </div>
-            `}).join("")}
+          ${this._personaViewMode === 'table' ? `
+          <div class="personas-table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Name</th>
+                  <th>Description</th>
+                  <th>Tools</th>
+                  <th>Skills</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${personas.map(persona => {
+                  const isActive = activeAgent.name === persona.name || activeAgent.name === persona.fileName;
+                  const displayFileName = persona.fileName || persona.name;
+                  const typeBadge = persona.isSlim ? ' <span class="persona-type-badge slim">slim</span>' :
+                                   persona.isInternal ? ' <span class="persona-type-badge internal">internal</span>' :
+                                   persona.isAgent ? ' <span class="persona-type-badge agent">agent</span>' : '';
+                  return `
+                  <tr class="${isActive ? 'row-active' : ''}">
+                    <td><span class="persona-icon-small ${this._getPersonaColor(persona.name)}">${this._getPersonaIcon(persona.name)}</span></td>
+                    <td><strong>${persona.name}</strong>${typeBadge}${isActive ? ' <span class="active-badge-small">Active</span>' : ''}</td>
+                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${persona.description || displayFileName}</td>
+                    <td>${persona.tools.length}</td>
+                    <td>${persona.skills.length || 'all'}</td>
+                    <td>
+                      <button class="btn btn-${isActive ? "ghost" : "primary"} btn-small" data-action="loadPersona" data-persona="${displayFileName}" ${isActive ? "disabled" : ""}>
+                        ${isActive ? "✓" : "🔄"}
+                      </button>
+                      <button class="btn btn-ghost btn-small" data-action="viewPersonaFile" data-persona="${displayFileName}">📄</button>
+                    </td>
+                  </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
           </div>
+          ` : `
+          <div class="personas-grid">
+            ${this._renderPersonaCards(personas, activeAgent)}
+          </div>
+          `}
 
           <!-- Dynamic Persona Details Panel -->
           <div class="section persona-detail-section" id="personaDetailSection" style="margin-top: 24px;">
@@ -6340,23 +8190,37 @@ print(result)
               <div class="card-icon cyan">🗄️</div>
               <div class="card-title">Indexed Projects</div>
             </div>
-            <div class="memory-list">
-              ${vectorStats.projects.filter(p => p.indexed).map(p => `
-                <div class="memory-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0;">
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <div class="memory-item-icon">${p.isStale ? '⚠️' : '✅'}</div>
-                    <div class="memory-item-name">${p.project}</div>
-                  </div>
-                  <div style="display: flex; align-items: center; gap: 16px; font-size: 0.8rem; color: var(--text-secondary);">
-                    <span title="Files">${p.files} files</span>
-                    <span title="Chunks">${p.chunks?.toLocaleString()} chunks</span>
-                    <span title="Disk Size">${p.diskSize}</span>
-                    <span title="Searches">${p.searches} searches</span>
-                    <span title="Avg Search Time">${p.avgSearchMs?.toFixed(0)}ms avg</span>
-                    <span title="Last Indexed" style="color: ${p.isStale ? 'var(--yellow)' : 'var(--text-tertiary)'}">${p.indexAge}</span>
-                  </div>
-                </div>
-              `).join("")}
+            <div class="vector-projects-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th class="col-status"></th>
+                    <th class="col-project">Project</th>
+                    <th class="col-files">Files</th>
+                    <th class="col-chunks">Chunks</th>
+                    <th class="col-size">Size</th>
+                    <th class="col-searches">Searches</th>
+                    <th class="col-avg">Avg Time</th>
+                    <th class="col-age">Last Indexed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${vectorStats.projects.filter(p => p.indexed).map(p => `
+                  <tr class="${p.isStale ? 'stale' : ''}">
+                    <td class="col-status">${p.isStale ? '⚠️' : '✅'}</td>
+                    <td class="col-project">
+                      <span class="project-name">${p.project}</span>
+                    </td>
+                    <td class="col-files">${p.files?.toLocaleString()}</td>
+                    <td class="col-chunks">${p.chunks?.toLocaleString()}</td>
+                    <td class="col-size">${p.diskSize}</td>
+                    <td class="col-searches">${p.searches}</td>
+                    <td class="col-avg">${p.avgSearchMs?.toFixed(0)}ms</td>
+                    <td class="col-age ${p.isStale ? 'stale-text' : ''}">${p.indexAge}</td>
+                  </tr>
+                  `).join("")}
+                </tbody>
+              </table>
             </div>
           </div>
           ` : `
@@ -6437,11 +8301,11 @@ print(result)
         <div class="section">
           <h2 class="section-title">🕐 Scheduler Status</h2>
           <div class="grid-4">
-            <div class="stat-card ${cronConfig.enabled ? "green" : ""} clickable" id="cronEnabledCard" onclick="toggleScheduler()" title="Click to ${cronConfig.enabled ? 'disable' : 'enable'} scheduler">
+            <div class="stat-card ${cronConfig.enabled ? "green" : ""} clickable" id="cronEnabledCard" data-action="toggleScheduler" title="Click to ${cronConfig.enabled ? 'disable' : 'enable'} scheduler">
               <div class="stat-icon" id="cronEnabledIcon">${cronConfig.enabled ? "✅" : "⏸️"}</div>
               <div class="stat-value" id="cronEnabled">${cronConfig.enabled ? "Active" : "Disabled"}</div>
               <div class="stat-label">Scheduler</div>
-              <button class="btn ${cronConfig.enabled ? 'btn-secondary' : 'btn-primary'} btn-small" style="margin-top: 8px;" onclick="event.stopPropagation(); toggleScheduler()">
+              <button class="btn ${cronConfig.enabled ? 'btn-secondary' : 'btn-primary'} btn-small" style="margin-top: 8px;" data-action="toggleScheduler">
                 ${cronConfig.enabled ? "⏸️ Disable" : "▶️ Enable"}
               </button>
             </div>
@@ -6459,6 +8323,18 @@ print(result)
               <div class="stat-icon">🌍</div>
               <div class="stat-value" id="cronTimezone" style="font-size: 1rem;">${cronConfig.timezone}</div>
               <div class="stat-label">Timezone</div>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-top: 12px;">
+            <div class="stat-card ${cronConfig.execution_mode === 'claude_cli' ? 'green' : 'orange'}">
+              <div class="stat-icon">${cronConfig.execution_mode === 'claude_cli' ? '🤖' : '⚡'}</div>
+              <div class="stat-value" style="font-size: 0.9rem;">${cronConfig.execution_mode === 'claude_cli' ? 'Claude CLI' : 'Direct'}</div>
+              <div class="stat-label">Execution Mode</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon">📁</div>
+              <div class="stat-value" style="font-size: 0.75rem;">~/.config/aa-workflow/cron_logs/</div>
+              <div class="stat-label">Log Directory</div>
             </div>
           </div>
         </div>
@@ -6528,6 +8404,7 @@ print(result)
                   <div class="cron-history-status">${exec.success ? "✅" : "❌"}</div>
                   <div class="cron-history-info">
                     <div class="cron-history-name">${exec.job_name}</div>
+                    ${exec.session_name ? `<div class="cron-history-session">💬 ${exec.session_name}</div>` : ""}
                     <div class="cron-history-details">
                       <span>⚡ ${exec.skill}</span>
                       ${exec.duration_ms ? `<span>⏱️ ${exec.duration_ms}ms</span>` : ""}
@@ -6988,6 +8865,9 @@ print(result)
           if (step.isAutoRemediation) {
             lifecycleHtml += '<span class="lifecycle-indicator auto-heal" title="Auto-remediation step">🔄</span>';
           }
+          if (step.canAutoHeal && !step.isAutoRemediation) {
+            lifecycleHtml += '<span class="lifecycle-indicator can-auto-heal" title="Can auto-heal on error (kube_login, vpn_connect, auth refresh)">🩹</span>';
+          }
           if (step.canRetry && !step.isAutoRemediation) {
             lifecycleHtml += '<span class="lifecycle-indicator can-retry" title="Can retry on error">↩️</span>';
           }
@@ -7031,6 +8911,7 @@ print(result)
           if (step.memoryWrite && step.memoryWrite.length > 0) tagsHtml += '<span class="step-tag memory-write">💾 ' + escapeHtml(step.memoryWrite.join(', ')) + '</span>';
           if (step.semanticSearch && step.semanticSearch.length > 0) tagsHtml += '<span class="step-tag semantic-search">🔍 ' + escapeHtml(step.semanticSearch.join(', ')) + '</span>';
           if (step.isAutoRemediation) tagsHtml += '<span class="step-tag auto-heal">🔄 auto-remediation</span>';
+          if (step.canAutoHeal && !step.isAutoRemediation) tagsHtml += '<span class="step-tag can-auto-heal">🩹 auto-heal</span>';
           if (step.canRetry && !step.isAutoRemediation) tagsHtml += '<span class="step-tag can-retry">↩️ can retry</span>';
           if (step.healingApplied) tagsHtml += '<span class="step-tag healed">✨ healed</span>';
           if (step.retryCount > 0) tagsHtml += '<span class="step-tag retry-count">🔁 retried ' + step.retryCount + 'x</span>';
@@ -7168,12 +9049,42 @@ print(result)
         function beer() { vscode.postMessage({ command: 'beer' }); }
         function loadSlackHistory() { vscode.postMessage({ command: 'loadSlackHistory' }); }
 
+        // Sessions
+        function refreshWorkspaces() { vscode.postMessage({ command: 'refreshWorkspaces' }); }
+        function viewWorkspaceTools(uri) { vscode.postMessage({ command: 'viewWorkspaceTools', uri: uri }); }
+        function switchToWorkspace(uri) { vscode.postMessage({ command: 'switchToWorkspace', uri: uri }); }
+        function removeWorkspace(uri) { vscode.postMessage({ command: 'removeWorkspace', uri: uri }); }
+        function copySessionId(sessionId) { vscode.postMessage({ command: 'copySessionId', sessionId: sessionId }); }
+        function openChatSession(sessionId, sessionName) { 
+          console.log('[AA-WORKFLOW-WEBVIEW] openChatSession clicked, sessionId:', sessionId, 'name:', sessionName);
+          // Show immediate feedback
+          const toast = document.createElement('div');
+          toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#10b981;color:white;padding:12px 20px;border-radius:8px;z-index:9999;font-weight:bold;';
+          toast.textContent = '🔍 Finding: ' + (sessionName || sessionId) + '...';
+          document.body.appendChild(toast);
+          setTimeout(() => toast.remove(), 3000);
+          vscode.postMessage({ command: 'openChatSession', sessionId: sessionId, sessionName: sessionName }); 
+        }
+        function changeWorkspacePersona(selectEl) {
+          const uri = selectEl.getAttribute('data-workspace-uri');
+          const persona = selectEl.value;
+          vscode.postMessage({ command: 'changeWorkspacePersona', uri: uri, persona: persona });
+        }
+        // Make changeWorkspacePersona available globally for inline onchange
+        window.changeWorkspacePersona = changeWorkspacePersona;
+
         // Cron
         function refreshCron() { vscode.postMessage({ command: 'refreshCron' }); }
-        function toggleScheduler() { vscode.postMessage({ command: 'toggleScheduler' }); }
+        function toggleScheduler() { 
+          console.log('[Webview] toggleScheduler button clicked, sending message to extension');
+          vscode.postMessage({ command: 'toggleScheduler' }); 
+        }
         function toggleCronJob(jobName, enabled) { vscode.postMessage({ command: 'toggleCronJob', jobName, enabled }); }
         function runCronJobNow(jobName) { vscode.postMessage({ command: 'runCronJobNow', jobName }); }
-        function openConfigFile() { vscode.postMessage({ command: 'openConfigFile' }); }
+        function openConfigFile() { 
+          console.log('[Webview] openConfigFile called, sending message to extension');
+          vscode.postMessage({ command: 'openConfigFile' }); 
+        }
 
         // Skills
         function filterSkills() {
@@ -7848,12 +9759,32 @@ print(result)
           }
 
           if (message.type === 'schedulerToggled') {
+            console.log('[CommandCenter] Received schedulerToggled message:', message.enabled);
             updateSchedulerUI(message.enabled);
+          }
+
+          if (message.type === 'cronData') {
+            console.log('[CommandCenter] Received cronData message:', message.config, message.history);
+            // Update scheduler status from refreshed cron data
+            if (message.config) {
+              updateSchedulerUI(message.config.enabled);
+              updateText('cronJobCount', (message.config.jobs || []).length);
+              const enabledJobs = (message.config.jobs || []).filter(j => j.enabled).length;
+              updateText('cronEnabledCount', enabledJobs);
+            }
+            // Update execution history
+            if (message.history !== undefined) {
+              updateCronHistory(message.history);
+            }
           }
 
           if (message.type === 'dataUpdate') {
             // Update only dynamic data elements without destroying UI state
             updateDynamicData(message);
+          }
+
+          if (message.type === 'updateWorkspaces') {
+            updateWorkspacesTab(message);
           }
 
           if (message.type === 'sprintIssuesLoading') {
@@ -8255,12 +10186,132 @@ print(result)
             const historyEl = document.getElementById('inferenceHistory');
             if (historyEl && data.recent_history && data.recent_history.length > 0) {
               historyEl.innerHTML = data.recent_history.slice(0, 10).map(h => {
+                const msg = h.message_preview || h.message || '';
                 return '<div class="history-item">' +
-                  '<span class="history-message">' + (h.message || '').substring(0, 40) + '...</span>' +
+                  '<span class="history-message">' + msg.substring(0, 40) + (msg.length > 40 ? '...' : '') + '</span>' +
                   '<span class="history-tools">' + (h.tool_count || 0) + ' tools</span>' +
-                  '<span class="history-time">' + (h.latency_ms || 0) + 'ms</span>' +
+                  '<span class="history-time">' + (h.latency_ms || 0).toFixed(0) + 'ms</span>' +
                   '</div>';
               }).join('');
+            }
+
+            // Update persona stats table
+            const personaStatsBody = document.getElementById('personaStatsBody');
+            if (personaStatsBody) {
+              // Dynamic color palette - cycles through colors for any number of personas
+              const colorPalette = [
+                'var(--purple)',   // #8b5cf6
+                'var(--cyan)',     // #06b6d4
+                'var(--pink)',     // #ec4899
+                'var(--orange)',   // #f97316
+                'var(--success)',  // #10b981 (green)
+                'var(--info)',     // #3b82f6 (blue)
+                'var(--warning)',  // #f59e0b (amber)
+                '#a855f7',         // violet
+                '#14b8a6',         // teal
+                '#f43f5e',         // rose
+              ];
+              
+              // Generate a simple hash to get consistent color for each persona name
+              const getPersonaColor = (name, idx) => {
+                let hash = 0;
+                for (let i = 0; i < name.length; i++) {
+                  hash = ((hash << 5) - hash) + name.charCodeAt(i);
+                  hash = hash & hash;
+                }
+                return colorPalette[Math.abs(hash) % colorPalette.length];
+              };
+              
+              // Generate icon based on first letter or known patterns
+              const getPersonaIcon = (name) => {
+                const lower = name.toLowerCase();
+                // Check for common patterns in the name
+                if (lower.includes('dev') && lower.includes('ops')) return '🔧';
+                if (lower.includes('develop')) return '👨‍💻';
+                if (lower.includes('incident') || lower.includes('oncall')) return '🚨';
+                if (lower.includes('release') || lower.includes('ship')) return '📦';
+                if (lower.includes('admin')) return '👑';
+                if (lower.includes('slack')) return '💬';
+                if (lower.includes('test')) return '🧪';
+                if (lower.includes('security') || lower.includes('sec')) return '🔒';
+                if (lower.includes('data')) return '📊';
+                if (lower.includes('ml') || lower.includes('ai')) return '🤖';
+                if (lower.includes('infra')) return '🏗️';
+                if (lower.includes('platform')) return '🌐';
+                if (lower.includes('support')) return '🎧';
+                if (lower.includes('qa')) return '✅';
+                if (lower.includes('core')) return '⚙️';
+                if (lower.includes('universal')) return '🌍';
+                // Default: use first letter as emoji-style or generic icon
+                return '👤';
+              };
+              
+              // Build list of all personas to show (available + any with stats)
+              const availablePersonas = data.available_personas || [];
+              const personasWithStats = Object.keys(data.by_persona || {});
+              const allPersonas = [...new Set([...availablePersonas, ...personasWithStats])].sort();
+              
+              if (allPersonas.length > 0) {
+                personaStatsBody.innerHTML = allPersonas.map((persona, idx) => {
+                  const stats = (data.by_persona || {})[persona] || {};
+                  const hasStats = stats.requests > 0;
+                  const icon = getPersonaIcon(persona);
+                  const color = getPersonaColor(persona, idx);
+                  const tierTotal = (stats.tier1_only || 0) + (stats.tier2_skill || 0) + (stats.tier3_npu || 0);
+                  const rowOpacity = hasStats ? '1' : '0.5';
+                  
+                  return '<tr style="--row-accent: ' + color + '; opacity: ' + rowOpacity + ';">' +
+                    '<td><span style="margin-right: 8px;">' + icon + '</span>' + persona + '</td>' +
+                    '<td><span style="font-weight: 700; color: ' + color + ';">' + (stats.requests || 0) + '</span></td>' +
+                    '<td>' + (hasStats ? stats.tools_min : '-') + '</td>' +
+                    '<td>' + (hasStats ? stats.tools_max : '-') + '</td>' +
+                    '<td><span style="font-weight: 600;">' + (hasStats ? (stats.tools_mean || 0).toFixed(1) : '-') + '</span></td>' +
+                    '<td>' + (hasStats ? stats.tools_median : '-') + '</td>' +
+                    '<td>' + (tierTotal > 0 ? '<span style="opacity: ' + ((stats.tier1_only || 0) / tierTotal * 0.7 + 0.3) + ';">' + (stats.tier1_only || 0) + '</span>' : (hasStats ? '0' : '-')) + '</td>' +
+                    '<td>' + (tierTotal > 0 ? '<span style="color: var(--cyan); opacity: ' + ((stats.tier2_skill || 0) / tierTotal * 0.7 + 0.3) + ';">' + (stats.tier2_skill || 0) + '</span>' : (hasStats ? '0' : '-')) + '</td>' +
+                    '<td>' + (tierTotal > 0 ? '<span style="color: var(--pink); opacity: ' + ((stats.tier3_npu || 0) / tierTotal * 0.7 + 0.3) + ';">' + (stats.tier3_npu || 0) + '</span>' : (hasStats ? '0' : '-')) + '</td>' +
+                    '</tr>';
+                }).join('');
+              } else {
+                personaStatsBody.innerHTML = '<tr><td colspan="9" class="empty-state">No personas configured</td></tr>';
+              }
+            }
+
+            // Update performance metrics
+            const avgLatencyEl = document.getElementById('avgLatency');
+            const avgReductionEl = document.getElementById('avgReduction');
+            const cacheHitRateEl = document.getElementById('cacheHitRate');
+            const totalRequestsEl = document.getElementById('totalRequests');
+
+            if (totalRequestsEl) totalRequestsEl.textContent = data.total_requests || 0;
+            if (cacheHitRateEl && data.cache) {
+              cacheHitRateEl.textContent = ((data.cache.hit_rate || 0) * 100).toFixed(1) + '%';
+            }
+
+            // Calculate avg latency and reduction from recent history
+            if (data.recent_history && data.recent_history.length > 0) {
+              const avgLatency = data.recent_history.reduce((sum, h) => sum + (h.latency_ms || 0), 0) / data.recent_history.length;
+              const avgReduction = data.recent_history.reduce((sum, h) => sum + (h.reduction_pct || 0), 0) / data.recent_history.length;
+              if (avgLatencyEl) avgLatencyEl.textContent = avgLatency.toFixed(0) + 'ms';
+              if (avgReductionEl) avgReductionEl.textContent = avgReduction.toFixed(1) + '%';
+            }
+
+            // Update latency histogram
+            if (data.latency) {
+              const total = Object.values(data.latency).reduce((a, b) => a + b, 0);
+              if (total > 0) {
+                const updateBar = (id, count) => {
+                  const bar = document.getElementById(id);
+                  const pct = document.getElementById(id + '-pct');
+                  const percent = (count / total) * 100;
+                  if (bar) bar.style.width = percent + '%';
+                  if (pct) pct.textContent = percent.toFixed(0) + '%';
+                };
+                updateBar('latency-10', data.latency['<10ms'] || 0);
+                updateBar('latency-100', data.latency['10-100ms'] || 0);
+                updateBar('latency-500', data.latency['100-500ms'] || 0);
+                updateBar('latency-over', data.latency['>500ms'] || 0);
+              }
             }
           }
         });
@@ -8317,22 +10368,160 @@ print(result)
           });
         }
 
-        function updateDynamicData(data) {
-          // Helper to safely update element text
-          function updateText(id, value) {
-            const el = document.getElementById(id);
-            if (el && el.textContent !== String(value)) {
-              el.textContent = value;
-            }
+        function updateWorkspacesTab(data) {
+          // Update session count badge
+          const badge = document.getElementById('workspacesBadge');
+          if (badge) {
+            badge.textContent = data.totalSessions || '0';
           }
 
-          // Helper to safely update element HTML
-          function updateHtml(id, html) {
-            const el = document.getElementById(id);
-            if (el && el.innerHTML !== html) {
-              el.innerHTML = html;
-            }
+          // Update stats
+          const totalEl = document.getElementById('totalWorkspaces');
+          if (totalEl) totalEl.textContent = data.count || '0';
+
+          const personasEl = document.getElementById('uniquePersonas');
+          if (personasEl) personasEl.textContent = data.uniquePersonas || '0';
+
+          const projectsEl = document.getElementById('uniqueProjects');
+          if (projectsEl) projectsEl.textContent = data.uniqueProjects || '0';
+
+          // Update total sessions count in header
+          const sessionsCountEl = document.querySelector('.workspaces-grid')?.parentElement?.querySelector('[style*="font-size: 0.9rem"]');
+          if (sessionsCountEl) {
+            sessionsCountEl.textContent = \`\${data.totalSessions || 0} session(s)\`;
           }
+
+          // Update group by select to match current state
+          const groupBySelect = document.getElementById('sessionGroupBy');
+          if (groupBySelect && data.groupBy) {
+            groupBySelect.value = data.groupBy;
+          }
+
+          // Update workspace grid with pre-rendered HTML
+          const grid = document.getElementById('workspacesGrid');
+          if (grid && data.renderedHtml !== undefined) {
+            grid.innerHTML = data.renderedHtml;
+          }
+        }
+
+        function renderWorkspaceCard(uri, ws) {
+          const project = ws.project || ws.auto_detected_project || 'No project';
+          const shortUri = uri.replace('file://', '').split('/').slice(-2).join('/');
+
+          // Get active session data (sessions are now stored in ws.sessions)
+          const activeSessionId = ws.active_session_id;
+          const sessions = ws.sessions || {};
+          const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+
+          // Get persona, tools, and started_at from active session (with fallbacks)
+          const persona = activeSession?.persona || ws.persona || 'No persona';
+          const personaIcon = getPersonaIcon(persona);
+          const personaColor = getPersonaColor(persona);
+          const toolCount = activeSession?.tool_count ?? activeSession?.active_tools?.length ?? 0;
+          const startedAt = activeSession?.started_at
+            ? new Date(activeSession.started_at).toLocaleString()
+            : (ws.started_at ? new Date(ws.started_at).toLocaleString() : 'Unknown');
+
+          // Available personas for the dropdown
+          const availablePersonas = ['developer', 'devops', 'incident', 'release'];
+
+          return \`
+            <div class="workspace-card" data-workspace-uri="\${uri}">
+              <div class="workspace-header">
+                <div class="workspace-icon \${personaColor}">\${personaIcon}</div>
+                <div class="workspace-info">
+                  <div class="workspace-project">\${project}</div>
+                  <div class="workspace-uri" title="\${uri}">\${shortUri}</div>
+                </div>
+              </div>
+              <div class="workspace-body">
+                <div class="workspace-row">
+                  <span class="workspace-label">Persona</span>
+                  <select class="persona-select \${personaColor}" data-workspace-uri="\${uri}" onchange="changeWorkspacePersona(this)">
+                    \${availablePersonas.map(p => \`
+                      <option value="\${p}" \${p === persona ? 'selected' : ''}>\${getPersonaIcon(p)} \${p}</option>
+                    \`).join('')}
+                    \${!availablePersonas.includes(persona) && persona !== 'No persona' ? \`<option value="\${persona}" selected>\${personaIcon} \${persona}</option>\` : ''}
+                  </select>
+                </div>
+                \${(activeSession?.issue_key || ws.issue_key) ? \`
+                <div class="workspace-row">
+                  <span class="workspace-label">Issue</span>
+                  <span class="workspace-value issue-badge">\${activeSession?.issue_key || ws.issue_key}</span>
+                </div>
+                \` : ''}
+                \${(activeSession?.branch || ws.branch) ? \`
+                <div class="workspace-row">
+                  <span class="workspace-label">Branch</span>
+                  <span class="workspace-value branch-badge">\${activeSession?.branch || ws.branch}</span>
+                </div>
+                \` : ''}
+                <div class="workspace-row">
+                  <span class="workspace-label">Tools</span>
+                  <span class="workspace-value">\${toolCount} active</span>
+                </div>
+                <div class="workspace-row">
+                  <span class="workspace-label">Started</span>
+                  <span class="workspace-value">\${startedAt}</span>
+                </div>
+              </div>
+              <div class="workspace-footer">
+                <button class="btn btn-ghost btn-small" data-action="viewWorkspaceTools" data-uri="\${uri}">
+                  🔧 Tools
+                </button>
+                <button class="btn btn-ghost btn-small" data-action="switchToWorkspace" data-uri="\${uri}">
+                  🔄 Switch
+                </button>
+              </div>
+            </div>
+          \`;
+        }
+
+        function getPersonaIcon(name) {
+          const iconMap = {
+            developer: '👨‍💻',
+            devops: '🔧',
+            incident: '🚨',
+            release: '📦',
+            admin: '📊',
+            slack: '💬',
+            core: '⚙️',
+            universal: '🌐',
+          };
+          return iconMap[name] || '🤖';
+        }
+
+        function getPersonaColor(name) {
+          const colorMap = {
+            developer: 'purple',
+            devops: 'cyan',
+            incident: 'pink',
+            release: 'green',
+            admin: 'orange',
+            slack: 'blue',
+            core: 'gray',
+            universal: 'gray',
+          };
+          return colorMap[name] || 'purple';
+        }
+
+        // Global helper to safely update element text
+        function updateText(id, value) {
+          const el = document.getElementById(id);
+          if (el && el.textContent !== String(value)) {
+            el.textContent = value;
+          }
+        }
+
+        // Global helper to safely update element HTML
+        function updateHtml(id, html) {
+          const el = document.getElementById(id);
+          if (el && el.innerHTML !== html) {
+            el.innerHTML = html;
+          }
+        }
+
+        function updateDynamicData(data) {
 
           // Update stats in header
           if (data.stats && data.stats.lifetime) {
@@ -8359,17 +10548,44 @@ print(result)
             updateText('toolSuccessRate', data.toolSuccessRate + '%');
           }
 
-          // Update current work (issue and MR)
+          // Update current work (aggregated issues and MRs across workspaces)
           if (data.currentWork) {
-            const issue = data.currentWork.activeIssue;
-            const mr = data.currentWork.activeMR;
+            const totalIssues = data.currentWork.totalActiveIssues || 0;
+            const totalMRs = data.currentWork.totalActiveMRs || 0;
+            const allIssues = data.currentWork.allActiveIssues || [];
+            const allMRs = data.currentWork.allActiveMRs || [];
 
-            updateText('currentIssueKey', issue?.key || 'No Active Issue');
-            updateText('currentIssueStatus', issue ? 'In Progress' : 'Start work to track an issue');
+            // Update issue card title and status
+            const issueTitle = totalIssues > 0 
+              ? totalIssues + ' Active Issue' + (totalIssues > 1 ? 's' : '')
+              : 'No Active Issues';
+            const issueStatus = totalIssues > 0
+              ? 'Across ' + (data.workspaceCount || 1) + ' workspace' + ((data.workspaceCount || 1) > 1 ? 's' : '')
+              : 'Start work to track an issue';
+            
+            updateText('currentIssueKey', issueTitle);
+            updateText('currentIssueStatus', issueStatus);
+
+            // Update issue list
+            const issuesList = document.getElementById('activeIssuesList');
+            if (issuesList) {
+              if (allIssues.length > 0) {
+                const issuesHtml = allIssues.slice(0, 3).map(issue => 
+                  '<div class="current-work-item" title="' + issue.project + ' - ' + issue.workspace + '">' +
+                  '<span class="work-item-key">' + issue.key + '</span>' +
+                  '<span class="work-item-project">' + issue.project + '</span>' +
+                  '</div>'
+                ).join('') + (allIssues.length > 3 ? '<div class="work-item-more">+' + (allIssues.length - 3) + ' more</div>' : '');
+                issuesList.innerHTML = issuesHtml;
+                issuesList.style.display = 'flex';
+              } else {
+                issuesList.style.display = 'none';
+              }
+            }
 
             const issueActions = document.getElementById('currentIssueActions');
             if (issueActions) {
-              const newIssueHtml = issue
+              const newIssueHtml = totalIssues > 0
                 ? '<button class="btn btn-secondary btn-small" data-action="openJira">Open in Jira</button>'
                 : '<button class="btn btn-primary btn-small" data-action="startWork">Start Work</button>';
               if (issueActions.innerHTML.trim() !== newIssueHtml.trim()) {
@@ -8386,12 +10602,35 @@ print(result)
               }
             }
 
-            updateText('currentMRTitle', mr ? 'MR !' + mr.id : 'No Active MR');
-            updateText('currentMRStatus', mr ? 'Open' : 'Create an MR when ready');
+            // Update MR card title and status
+            const mrTitle = totalMRs > 0
+              ? totalMRs + ' Active MR' + (totalMRs > 1 ? 's' : '')
+              : 'No Active MRs';
+            const mrStatus = totalMRs > 0 ? 'Open' : 'Create an MR when ready';
+            
+            updateText('currentMRTitle', mrTitle);
+            updateText('currentMRStatus', mrStatus);
+
+            // Update MR list
+            const mrsList = document.getElementById('activeMRsList');
+            if (mrsList) {
+              if (allMRs.length > 0) {
+                const mrsHtml = allMRs.slice(0, 3).map(mr => 
+                  '<div class="current-work-item" title="' + mr.project + ' - ' + mr.workspace + '">' +
+                  '<span class="work-item-key">!' + mr.id + '</span>' +
+                  '<span class="work-item-project">' + mr.project + '</span>' +
+                  '</div>'
+                ).join('') + (allMRs.length > 3 ? '<div class="work-item-more">+' + (allMRs.length - 3) + ' more</div>' : '');
+                mrsList.innerHTML = mrsHtml;
+                mrsList.style.display = 'flex';
+              } else {
+                mrsList.style.display = 'none';
+              }
+            }
 
             const mrActions = document.getElementById('currentMRActions');
             if (mrActions) {
-              const newMRHtml = mr
+              const newMRHtml = totalMRs > 0
                 ? '<button class="btn btn-secondary btn-small" data-action="openMR">Open in GitLab</button>'
                 : '';
               if (mrActions.innerHTML.trim() !== newMRHtml.trim()) {
@@ -8447,8 +10686,10 @@ print(result)
 
           // Update cron status
           if (data.cronConfig) {
-            updateText('cronEnabled', data.cronConfig.enabled ? 'Active' : 'Disabled');
+            updateSchedulerUI(data.cronConfig.enabled);
             updateText('cronJobCount', (data.cronConfig.jobs || []).length);
+            const enabledJobs = (data.cronConfig.jobs || []).filter(j => j.enabled).length;
+            updateText('cronEnabledCount', enabledJobs);
           }
 
           // Update last updated timestamp
@@ -8478,9 +10719,16 @@ print(result)
         }
 
         function updateSchedulerUI(enabled) {
+          console.log('[CommandCenter] updateSchedulerUI called with enabled:', enabled);
           const card = document.getElementById('cronEnabledCard');
           const icon = document.getElementById('cronEnabledIcon');
           const value = document.getElementById('cronEnabled');
+          
+          if (!card || !icon || !value) {
+            console.error('[CommandCenter] updateSchedulerUI: Missing DOM elements', { card: !!card, icon: !!icon, value: !!value });
+            return;
+          }
+          
           const btn = card.querySelector('button');
 
           if (enabled) {
@@ -8488,18 +10736,60 @@ print(result)
             card.title = 'Click to disable scheduler';
             icon.textContent = '✅';
             value.textContent = 'Active';
-            btn.className = 'btn btn-secondary btn-small';
-            btn.innerHTML = '⏸️ Disable';
-            btn.style.marginTop = '8px';
+            if (btn) {
+              btn.className = 'btn btn-secondary btn-small';
+              btn.innerHTML = '⏸️ Disable';
+              btn.style.marginTop = '8px';
+            }
           } else {
             card.classList.remove('green');
             card.title = 'Click to enable scheduler';
             icon.textContent = '⏸️';
             value.textContent = 'Disabled';
-            btn.className = 'btn btn-primary btn-small';
-            btn.innerHTML = '▶️ Enable';
-            btn.style.marginTop = '8px';
+            if (btn) {
+              btn.className = 'btn btn-primary btn-small';
+              btn.innerHTML = '▶️ Enable';
+              btn.style.marginTop = '8px';
+            }
           }
+          console.log('[CommandCenter] updateSchedulerUI completed');
+        }
+
+        function updateCronHistory(history) {
+          console.log('[CommandCenter] updateCronHistory called with', history?.length || 0, 'entries');
+          const container = document.querySelector('.cron-history-list');
+          if (!container) {
+            console.error('[CommandCenter] updateCronHistory: .cron-history-list not found');
+            return;
+          }
+
+          if (!history || history.length === 0) {
+            container.innerHTML = \`
+              <div class="empty-state">
+                <div class="empty-state-icon">📜</div>
+                <div>No execution history</div>
+                <div style="font-size: 0.8rem; margin-top: 8px;">Jobs will appear here after they run</div>
+              </div>
+            \`;
+          } else {
+            container.innerHTML = history.map(exec => \`
+              <div class="cron-history-item \${exec.success ? 'success' : 'failed'}">
+                <div class="cron-history-status">\${exec.success ? '✅' : '❌'}</div>
+                <div class="cron-history-info">
+                  <div class="cron-history-name">\${exec.job_name}</div>
+                  \${exec.session_name ? \`<div class="cron-history-session">💬 \${exec.session_name}</div>\` : ''}
+                  <div class="cron-history-details">
+                    <span>⚡ \${exec.skill}</span>
+                    \${exec.duration_ms ? \`<span>⏱️ \${exec.duration_ms}ms</span>\` : ''}
+                    <span>🕐 \${new Date(exec.timestamp).toLocaleString()}</span>
+                  </div>
+                  \${exec.error ? \`<div class="cron-history-error">❌ \${exec.error}</div>\` : ''}
+                  \${exec.output_preview ? \`<div class="cron-history-output">\${exec.output_preview}</div>\` : ''}
+                </div>
+              </div>
+            \`).join('');
+          }
+          console.log('[CommandCenter] updateCronHistory completed');
         }
 
         function updateServiceStatus(message) {
@@ -8578,11 +10868,21 @@ print(result)
             case 'beer': beer(); break;
             case 'loadSlackHistory': loadSlackHistory(); break;
             case 'refreshCron': refreshCron(); break;
+            case 'toggleScheduler': toggleScheduler(); break;
             case 'openConfigFile': openConfigFile(); break;
             case 'runSelectedSkill': runSelectedSkill(); break;
             case 'openSelectedSkillFile': openSelectedSkillFile(); break;
             case 'setFlowchartHorizontal': setFlowchartView('horizontal'); break;
             case 'setFlowchartVertical': setFlowchartView('vertical'); break;
+            case 'refreshWorkspaces': refreshWorkspaces(); break;
+            case 'viewWorkspaceTools': viewWorkspaceTools(btn.getAttribute('data-uri')); break;
+            case 'switchToWorkspace': switchToWorkspace(btn.getAttribute('data-uri')); break;
+            case 'removeWorkspace': removeWorkspace(btn.getAttribute('data-uri')); break;
+            case 'copySessionId': copySessionId(btn.getAttribute('data-session-id')); break;
+            case 'openChatSession': 
+              console.log('[AA-WORKFLOW-WEBVIEW] openChatSession action triggered');
+              openChatSession(btn.getAttribute('data-session-id'), btn.getAttribute('data-session-name')); 
+              break;
             default: break; // Unknown action
           }
         });
@@ -8811,6 +11111,9 @@ print(result)
         setTimeout(() => {
           vscode.postMessage({ command: 'refreshOllamaStatus' });
         }, 500);
+
+        // Meetings Tab Functions
+        ${getMeetingsTabScript()}
 
       </script>
     </body>

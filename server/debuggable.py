@@ -580,4 +580,26 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
             except Exception:
                 pass  # Don't let stats tracking break tools
 
+            # Track activity in session (for UI display)
+            try:
+                # Try to get ctx from args (first arg is usually ctx for async tools)
+                ctx = None
+                if args and hasattr(args[0], "session"):
+                    ctx = args[0]
+                elif "ctx" in kwargs:
+                    ctx = kwargs["ctx"]
+
+                if ctx:
+                    from server.workspace_state import WorkspaceRegistry
+
+                    workspace = await WorkspaceRegistry.get_for_ctx(ctx, ensure_session=False)
+                    session = workspace.get_active_session(refresh_tools=False)
+                    if session:
+                        session.touch(tool_name=_name)
+                        # Save periodically (every 10 calls) to avoid too many writes
+                        if session.tool_call_count % 10 == 0:
+                            WorkspaceRegistry.save_to_disk()
+            except Exception:
+                pass  # Don't let session tracking break tools
+
     return wrapper

@@ -6,19 +6,16 @@ description: Coding, PRs, and code review
 persona: personas/developer.md
 
 # Tool modules to load (from tool_modules/aa_*)
-# Clean separation of concerns - each module has a single purpose
+# Tool counts are determined dynamically - use tool_list() to see actual counts
 tools:
-  - workflow        # 18 tools - Core (memory, persona, session, skill, infra, meta)
-  - git_basic       # 22 tools - Git operations (status, log, diff, commit, push, pull, branch)
-  - gitlab_basic    # 18 tools - MRs, CI/CD basics
-  - jira_basic      # 17 tools - Issue viewing, search, status updates, comments
-  - lint            # 2 tools - Code formatting and linting (black, flake8, ruff)
-  - docker          # 4 tools - Container management (compose, cp, exec)
-  - make            # 1 tool - Build automation (make targets)
-  - code_search     # 4 tools - Semantic code search with local vector embeddings
+  - workflow        # Core (memory, persona, session, skill, infra, meta)
+  - git_basic       # Git operations (status, log, diff, commit, push, pull, branch)
+  - gitlab_basic    # MRs, CI/CD basics
+  - jira_basic      # Issue viewing, search, status updates, comments
+  - lint            # Code formatting and linting
+  - code_search     # Semantic code search
 
-# Total: ~86 tools ✅
-# Note: knowledge, project, scheduler modules available via tool_exec() if needed
+# Note: docker, make, knowledge, project, scheduler available via tool_exec() if needed
 
 skills:
   # Daily workflow

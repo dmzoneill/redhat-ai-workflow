@@ -1,0 +1,12 @@
+[project]
+name = "aa_podman"
+version = "0.1.0"
+description = "Podman container management tools for AI Workflow"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+

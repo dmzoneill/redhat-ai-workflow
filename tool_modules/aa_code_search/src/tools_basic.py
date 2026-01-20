@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 from collections import OrderedDict
 from datetime import datetime, timedelta
@@ -30,6 +31,18 @@ from threading import Lock
 from typing import Any
 
 from mcp.types import TextContent
+
+# Setup project path for server imports and establish package context
+# This must be before any relative imports to work with spec_from_file_location
+from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+
+__project_root__ = PROJECT_ROOT  # Module initialization marker
+
+# Add current directory to sys.path to support relative imports inside functions
+# when loaded via spec_from_file_location (e.g., from server/main.py or persona_loader.py)
+_TOOLS_DIR = Path(__file__).parent.absolute()
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
 
 # Lazy imports for heavy dependencies
 _lancedb = None
@@ -57,6 +70,32 @@ CACHE_MAX_SIZE = 1000  # Max cached embeddings
 CACHE_TTL_SECONDS = 3600  # Cache entries expire after 1 hour
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Watcher Import Helper
+# ============================================================================
+# The watcher module needs special handling because this file can be loaded in
+# two different ways:
+# 1. As a package: `from aa_code_search.src.tools_basic import ...`
+# 2. Via spec_from_file_location: `importlib.util.spec_from_file_location(...)`
+#
+# In case 2, relative imports fail because __package__ is None.
+# This helper tries both import styles to work in all contexts.
+
+
+def _import_watcher():
+    """Import watcher module, handling both package and standalone loading."""
+    try:
+        # Try relative import first (works when loaded as package)
+        from . import watcher
+
+        return watcher
+    except ImportError:
+        # Fall back to absolute import (works when _TOOLS_DIR is in sys.path)
+        import watcher
+
+        return watcher
 
 
 # ============================================================================
@@ -1197,7 +1236,8 @@ def get_all_vector_stats() -> dict:
     - cache: global embedding cache stats
     - config: current vector search config
     """
-    from .watcher import get_watcher
+    watcher_mod = _import_watcher()
+    get_watcher = watcher_mod.get_watcher
 
     config = _load_config()
     projects = list(config.get("repositories", {}).keys())
@@ -1535,7 +1575,8 @@ def register_tools(registry: Any) -> None:
         Returns:
             Detailed indexing and search statistics.
         """
-        from .watcher import get_watcher
+        watcher_mod = _import_watcher()
+        get_watcher = watcher_mod.get_watcher
 
         config = _load_config()
         projects = list(config.get("repositories", {}).keys())
@@ -1730,7 +1771,10 @@ knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n
             code_watch("automation-analytics-backend", "stop")
             code_watch(action="status")  # Show all watchers
         """
-        from .watcher import get_all_watchers, get_watcher, start_watcher, stop_watcher
+        watcher_mod = _import_watcher()
+        get_all_watchers = watcher_mod.get_all_watchers
+        start_watcher = watcher_mod.start_watcher
+        stop_watcher = watcher_mod.stop_watcher
 
         if action == "status":
             watchers = get_all_watchers()
@@ -1831,7 +1875,9 @@ Use `code_watch('{project}', 'stop')` to stop watching.
         Returns:
             Status of all watchers.
         """
-        from .watcher import get_all_watchers, start_watcher, stop_all_watchers
+        watcher_mod = _import_watcher()
+        start_watcher = watcher_mod.start_watcher
+        stop_all_watchers = watcher_mod.stop_all_watchers
 
         config = _load_config()
         projects = list(config.get("repositories", {}).keys())
@@ -1997,3 +2043,5 @@ Use `code_cache('clear')` to clear the cache.
 """
 
         return [TextContent(type="text", text=output)]
+
+

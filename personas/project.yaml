@@ -1,0 +1,25 @@
+# Project Persona Configuration
+# Focused on project/repo context management and knowledge
+
+name: project
+description: Project context, knowledge management, and repo navigation
+persona: personas/project.md
+
+# Tool modules to load (from tool_modules/aa_*)
+# Tool counts are determined dynamically - use tool_list() to see actual counts
+tools:
+  - workflow        # Core (memory, persona, session, skill, infra, meta)
+  - git_basic       # Git operations for repo navigation
+  - code_search     # Semantic code search
+  - knowledge       # Project knowledge management
+  - project         # Project configuration
+
+# Note: Use tool_exec() for tools from other modules if needed
+
+skills:
+  # Project management
+  - memory_view         # View/manage persistent memory
+  - learn_pattern       # Save learned pattern
+  
+  # Code navigation
+  - start_work          # Start working on an issue (sets project context)

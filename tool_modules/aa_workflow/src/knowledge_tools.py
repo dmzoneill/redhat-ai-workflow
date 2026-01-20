@@ -191,7 +191,10 @@ def _emit_knowledge_notification(message: str, project: str, persona: str) -> No
 
 
 def _detect_project_from_path(path: str | Path | None = None) -> str | None:
-    """Detect project from a path by matching against config.json repositories."""
+    """Detect project from a path by matching against config.json repositories.
+
+    For workspace-aware detection, use _detect_project_from_ctx() instead.
+    """
     config = load_config()
     if not config:
         return None
@@ -218,8 +221,34 @@ def _detect_project_from_path(path: str | Path | None = None) -> str | None:
     return None
 
 
+async def _detect_project_from_ctx(ctx: Any) -> str | None:
+    """Detect project from MCP context using WorkspaceRegistry.
+
+    This is the preferred method for workspace-aware project detection.
+
+    Args:
+        ctx: MCP Context from tool call
+
+    Returns:
+        Project name or None
+    """
+    if ctx is None:
+        return _detect_project_from_path()
+
+    try:
+        from server.workspace_utils import get_workspace_project
+
+        return await get_workspace_project(ctx)
+    except Exception:
+        # Fall back to path-based detection
+        return _detect_project_from_path()
+
+
 def _get_current_persona() -> str | None:
-    """Get the currently loaded persona from the persona loader."""
+    """Get the currently loaded persona from the persona loader (sync).
+
+    For workspace-aware persona detection, use _get_persona_from_ctx() instead.
+    """
     try:
         from server.persona_loader import get_loader
 
@@ -229,6 +258,29 @@ def _get_current_persona() -> str | None:
     except Exception:
         pass
     return None
+
+
+async def _get_persona_from_ctx(ctx: Any) -> str:
+    """Get the persona for the current workspace.
+
+    This is the preferred method for workspace-aware persona detection.
+
+    Args:
+        ctx: MCP Context from tool call
+
+    Returns:
+        Persona name (defaults to "developer")
+    """
+    if ctx is None:
+        return _get_current_persona() or "developer"
+
+    try:
+        from server.workspace_utils import get_workspace_persona
+
+        return await get_workspace_persona(ctx)
+    except Exception:
+        # Fall back to global persona
+        return _get_current_persona() or "developer"
 
 
 def _scan_project_structure(project_path: Path) -> dict:
@@ -925,10 +977,13 @@ async def _knowledge_list_impl() -> list[TextContent]:
 
 def register_knowledge_tools(server: "FastMCP") -> int:
     """Register knowledge tools with the MCP server."""
+    from mcp.server.fastmcp import Context
+
     registry = ToolRegistry(server)
 
     @registry.tool()
     async def knowledge_load(
+        ctx: Context,
         project: str = "",
         persona: str = "",
         auto_scan: bool = True,
@@ -941,17 +996,23 @@ def register_knowledge_tools(server: "FastMCP") -> int:
         is True, will scan the project and generate initial knowledge.
 
         Args:
-            project: Project name (from config.json). Auto-detected from cwd if empty.
-            persona: Persona name. Uses current persona if empty.
+            project: Project name (from config.json). Auto-detected from workspace if empty.
+            persona: Persona name. Uses workspace persona if empty.
             auto_scan: If True, auto-scan project when knowledge doesn't exist.
 
         Returns:
             Project knowledge formatted for context injection.
         """
+        # Use workspace-aware detection if not provided
+        if not project:
+            project = await _detect_project_from_ctx(ctx) or ""
+        if not persona:
+            persona = await _get_persona_from_ctx(ctx)
         return await _knowledge_load_impl(project, persona, auto_scan)
 
     @registry.tool()
     async def knowledge_scan(
+        ctx: Context,
         project: str = "",
         persona: str = "",
         force: bool = False,
@@ -964,17 +1025,23 @@ def register_knowledge_tools(server: "FastMCP") -> int:
         force=True.
 
         Args:
-            project: Project name (from config.json). Auto-detected from cwd if empty.
-            persona: Persona name. Uses current persona if empty.
+            project: Project name (from config.json). Auto-detected from workspace if empty.
+            persona: Persona name. Uses workspace persona if empty.
             force: If True, overwrite existing knowledge. Otherwise merge.
 
         Returns:
             Summary of scanned knowledge.
         """
+        # Use workspace-aware detection if not provided
+        if not project:
+            project = await _detect_project_from_ctx(ctx) or ""
+        if not persona:
+            persona = await _get_persona_from_ctx(ctx)
         return await _knowledge_scan_impl(project, persona, force)
 
     @registry.tool()
     async def knowledge_update(
+        ctx: Context,
         project: str,
         persona: str,
         section: str,
@@ -1001,6 +1068,7 @@ def register_knowledge_tools(server: "FastMCP") -> int:
 
     @registry.tool()
     async def knowledge_query(
+        ctx: Context,
         project: str = "",
         persona: str = "",
         section: str = "",
@@ -1012,18 +1080,24 @@ def register_knowledge_tools(server: "FastMCP") -> int:
         the full context.
 
         Args:
-            project: Project name. Auto-detected if empty.
-            persona: Persona name. Uses current if empty.
+            project: Project name. Auto-detected from workspace if empty.
+            persona: Persona name. Uses workspace persona if empty.
             section: Dot-separated path to query (e.g., "architecture.key_modules", "gotchas")
                      Empty returns full knowledge summary.
 
         Returns:
             Requested knowledge section.
         """
+        # Use workspace-aware detection if not provided
+        if not project:
+            project = await _detect_project_from_ctx(ctx) or ""
+        if not persona:
+            persona = await _get_persona_from_ctx(ctx)
         return await _knowledge_query_impl(project, persona, section)
 
     @registry.tool()
     async def knowledge_learn(
+        ctx: Context,
         learning: str,
         task: str = "",
         section: str = "learned_from_tasks",
@@ -1040,16 +1114,21 @@ def register_knowledge_tools(server: "FastMCP") -> int:
             learning: What was learned (the insight)
             task: Task/issue that led to this learning (e.g., "AAP-12345")
             section: Where to store (default: learned_from_tasks, can be "gotchas", "patterns.coding", etc.)
-            project: Project name. Auto-detected if empty.
-            persona: Persona name. Uses current if empty.
+            project: Project name. Auto-detected from workspace if empty.
+            persona: Persona name. Uses workspace persona if empty.
 
         Returns:
             Confirmation of learning recorded.
         """
+        # Use workspace-aware detection if not provided
+        if not project:
+            project = await _detect_project_from_ctx(ctx) or ""
+        if not persona:
+            persona = await _get_persona_from_ctx(ctx)
         return await _knowledge_learn_impl(learning, task, section, project, persona)
 
     @registry.tool()
-    async def knowledge_list() -> list[TextContent]:
+    async def knowledge_list(ctx: Context) -> list[TextContent]:
         """
         List all available knowledge files.
 
@@ -1062,3 +1141,5 @@ def register_knowledge_tools(server: "FastMCP") -> int:
         return await _knowledge_list_impl()
 
     return registry.count
+
+

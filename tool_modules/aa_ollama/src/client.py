@@ -132,6 +132,7 @@ class OllamaClient:
             "model": model,
             "prompt": prompt,
             "stream": False,  # Always non-streaming for simplicity
+            "keep_alive": "30m",  # Keep model loaded for 30 minutes
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
@@ -364,3 +365,35 @@ def clear_clients() -> None:
     """Clear cached clients (useful for testing)."""
     global _clients
     _clients = {}
+
+
+def warmup_model(instance: str = "npu") -> bool:
+    """Pre-load the model to avoid cold start latency.
+
+    Call this at server startup to ensure the model is hot.
+    The model will stay loaded for 30 minutes after each request.
+
+    Args:
+        instance: Instance to warm up
+
+    Returns:
+        True if warmup succeeded
+    """
+    client = get_client(instance)
+    if not client.is_available():
+        logger.warning(f"Cannot warm up {instance} - not available")
+        return False
+
+    try:
+        logger.info(f"Warming up {instance} model...")
+        start = time.perf_counter()
+        # Simple prompt to load the model
+        client.generate("Hello", max_tokens=5, temperature=0)
+        elapsed = (time.perf_counter() - start) * 1000
+        logger.info(f"Model warmed up in {elapsed:.0f}ms")
+        return True
+    except Exception as e:
+        logger.error(f"Warmup failed: {e}")
+        return False
+
+

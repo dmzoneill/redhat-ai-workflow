@@ -76,8 +76,8 @@ except ImportError:
 
 # Import tool filtering for NPU-powered pre-filtering
 try:
-    from tool_modules.aa_ollama.src.tool_filter import filter_tools_detailed, get_filter
     from tool_modules.aa_ollama.src.skill_discovery import detect_skill
+    from tool_modules.aa_ollama.src.tool_filter import filter_tools_detailed, get_filter
 
     TOOL_FILTER_AVAILABLE = True
 except ImportError:

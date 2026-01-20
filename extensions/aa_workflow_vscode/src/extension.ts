@@ -7,6 +7,7 @@
  * - Status bar items showing Slack daemon, active issue, environment health, MR status
  * - Click actions to open Jira, GitLab, or run investigations
  * - Command palette integration for common workflows
+ * - Workspace state tracking from MCP server
  */
 
 import * as vscode from "vscode";
@@ -18,11 +19,13 @@ import { registerNotifications, NotificationManager } from "./notifications";
 import { registerCommandCenter, registerCommandCenterSerializer, getCommandCenterPanel } from "./commandCenter";
 import { registerSkillExecutionWatcher } from "./skillExecutionWatcher";
 import { registerSkillFlowchartPanel } from "./skillFlowchartPanel";
+import { getWorkspaceStateProvider, disposeWorkspaceStateProvider, WorkspaceStateProvider } from "./workspaceStateProvider";
 
 let statusBarManager: StatusBarManager | undefined;
 let dataProvider: WorkflowDataProvider | undefined;
 let treeProvider: WorkflowTreeProvider | undefined;
 let notificationManager: NotificationManager | undefined;
+let workspaceStateProvider: WorkspaceStateProvider | undefined;
 let refreshInterval: NodeJS.Timeout | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
@@ -30,6 +33,18 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Initialize the data provider FIRST (needed by serializers)
   dataProvider = new WorkflowDataProvider();
+
+  // Initialize workspace state provider (watches MCP server exports)
+  workspaceStateProvider = getWorkspaceStateProvider();
+  console.log("[Extension] Workspace state provider initialized");
+
+  // Listen for workspace state changes
+  workspaceStateProvider.onDidChange((state) => {
+    console.log(`[Extension] Workspace state changed: ${state?.workspace_count || 0} workspace(s)`);
+    // Refresh UI when workspace state changes
+    treeProvider?.refresh();
+    statusBarManager?.update();
+  });
 
   // IMPORTANT: Register webview serializers IMMEDIATELY after data provider
   // This ensures VS Code can restore panels even if other init takes time
@@ -115,4 +130,12 @@ export function deactivate() {
   statusBarManager?.dispose();
   notificationManager?.dispose();
   dataProvider?.dispose();
+  disposeWorkspaceStateProvider();
+}
+
+/**
+ * Get the workspace state provider instance (for use by other modules)
+ */
+export function getWorkspaceState(): WorkspaceStateProvider | undefined {
+  return workspaceStateProvider;
 }

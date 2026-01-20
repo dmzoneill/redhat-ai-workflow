@@ -1,7 +1,7 @@
 # AI Workflow Engineer Onboarding Slides
 
-> **Purpose**: Content outline for Google Slides presentation  
-> **Duration**: 30-45 minutes  
+> **Purpose**: Content outline for Google Slides presentation
+> **Duration**: 30-45 minutes
 > **Audience**: Mixed (some AI experience, some new)
 
 ---
@@ -47,8 +47,8 @@ Bad Prompt:
 "Fix the bug"
 
 Better Prompt:
-"The login page shows a 500 error when submitting 
-the form. The error logs show a NullPointerException 
+"The login page shows a 500 error when submitting
+the form. The error logs show a NullPointerException
 in AuthService.java line 45. How do I fix this?"
 ```
 
@@ -666,7 +666,7 @@ memory/
     └── tool_failures.yaml    # Auto-heal history
 ```
 
-**State**: What you're working on right now  
+**State**: What you're working on right now
 **Learned**: Knowledge accumulated over time
 
 **Visual**: Two boxes - "State (ephemeral)" and "Learned (permanent)"
@@ -880,7 +880,7 @@ Bot: 👀 Investigating alert...
 
 **Scenario**: You're in a meeting, someone asks "What's the status of the auth service?"
 
-**Today**: 
+**Today**:
 - Switch to laptop
 - Open terminal or Slack
 - Type query
@@ -1189,7 +1189,7 @@ graph TB
             FAIL[tool_failures.yaml]
         end
     end
-    
+
     SESSION[session_start] --> State
     SESSION --> Learned
     TOOLS[Tools] --> FAIL
@@ -1205,23 +1205,23 @@ flowchart LR
     subgraph Input["Input"]
         MIC[Microphone]
     end
-    
+
     subgraph NPU1["NPU: Speech-to-Text"]
         WHISPER[Whisper Model]
     end
-    
+
     subgraph LLM["Local LLM"]
         OLLAMA[Ollama / llama.cpp]
     end
-    
+
     subgraph NPU2["NPU: Text-to-Speech"]
         PIPER[Piper TTS]
     end
-    
+
     subgraph Output["Output"]
         SPEAKER[Speaker]
     end
-    
+
     MIC -->|Audio| WHISPER
     WHISPER -->|Text| OLLAMA
     OLLAMA -->|Response| PIPER

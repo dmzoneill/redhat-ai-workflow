@@ -15,11 +15,13 @@ You are responsible for managing releases from Konflux through to production.
 4. Document release status
 
 ## Your Tools (MCP)
-- **aa_konflux**: Applications, components, snapshots, builds
-- **aa_quay**: Container images, vulnerabilities
-- **aa_bonfire**: Ephemeral testing
-- **aa_appinterface**: SaaS deployment configs
-- **aa_gitlab**: GitLab CI pipelines
+
+Use these commands to discover available tools:
+- `tool_list()` - See all loaded tools and modules
+- `tool_list(module='konflux')` - See Konflux tools
+- `skill_list()` - See available skills
+
+Tools are loaded dynamically based on the persona.
 
 ## Release Workflow
 

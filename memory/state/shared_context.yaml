@@ -10,13 +10,13 @@ last_coffee:
     stage: 0
   failed_pipelines: 0
   feedback_waiting: 0
-  pr_count: 8
+  pr_count: 9
   review_assignments: 0
-  timestamp: '2026-01-16T15:33:37.670545'
-last_updated: '2026-01-16T15:33:37.670630'
+  timestamp: '2026-01-19T09:16:23.273421'
+last_updated: '2026-01-19T09:24:23.384666'
 prepared_standup:
-  date: '2026-01-16'
-  generated_at: '2026-01-15T18:00:12.709248'
+  date: '2026-01-20'
+  generated_at: '2026-01-19T09:24:23.384344'
   notes: '**Yesterday:**
 
     - (no commits today)
@@ -24,7 +24,9 @@ prepared_standup:
 
     **Today:**
 
-    - (check Jira board)
+    - Continue [!1491](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/1491):
+    [AAP-58394](https://issues.redhat.com/browse/AAP-58394) - fix(billing): calculate
+    accuracy after syncing r
 
 
     **Blockers:**

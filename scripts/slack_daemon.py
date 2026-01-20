@@ -43,27 +43,20 @@ from typing import TYPE_CHECKING, Any
 import slack_path_setup  # Sets up sys.path for imports
 from dotenv import load_dotenv
 
-from scripts.common.config_loader import load_config
-
 # @me command system imports
 from scripts.common.command_parser import CommandParser, ParsedCommand, TriggerType
-from scripts.common.command_registry import CommandRegistry, get_registry, CommandType
+from scripts.common.command_registry import CommandRegistry, CommandType, get_registry
+from scripts.common.config_loader import load_config
 from scripts.common.context_extractor import ContextExtractor, ConversationContext
-from scripts.common.response_router import (
-    ResponseRouter,
-    ResponseFormatter,
-    CommandContext,
-    ResponseMode,
-    get_router,
-)
+from scripts.common.response_router import CommandContext, ResponseFormatter, ResponseMode, ResponseRouter, get_router
 
 # Import PROJECT_ROOT after path setup
 PROJECT_ROOT = Path(slack_path_setup.PROJECT_ROOT)
 
 if TYPE_CHECKING:
     from src.listener import PendingMessage, SlackListener
-    from src.slack_client import SlackSession
     from src.persistence import SlackStateDB
+    from src.slack_client import SlackSession
 
 LOCK_FILE = Path("/tmp/slack-daemon.lock")
 PID_FILE = Path("/tmp/slack-daemon.pid")
@@ -760,9 +753,9 @@ class TerminalUI:
         bold = self.COLORS["bold"]
         yellow = self.COLORS["yellow"]
         reset = self.COLORS["reset"]
-        
+
         mode_indicator = f"{yellow}🐛 DEBUG MODE{reset}" if debug_mode else ""
-        
+
         print(
             f"""
 {cyan}╔══════════════════════════════════════════════════════════════════╗
@@ -912,9 +905,7 @@ class CommandHandler:
         # Config
         self.config = get_slack_config("commands", {})
         self.context_limit = self.config.get("context_messages_limit", 20)
-        self.contextual_skills = set(
-            self.config.get("contextual_skills", ["create_jira_issue", "investigate_alert"])
-        )
+        self.contextual_skills = set(self.config.get("contextual_skills", ["create_jira_issue", "investigate_alert"]))
 
     def is_command(self, text: str, is_self_dm: bool = False) -> bool:
         """Check if a message is an @me command."""
@@ -1031,17 +1022,12 @@ class CommandHandler:
         commands = self.registry.list_commands(command_type=filter_type)
         return self.registry.format_list(commands, "slack")
 
-    async def _handle_skill_or_tool(
-        self, parsed: ParsedCommand, message: "PendingMessage"
-    ) -> str:
+    async def _handle_skill_or_tool(self, parsed: ParsedCommand, message: "PendingMessage") -> str:
         """Handle a skill or tool command."""
         cmd_info = self.registry.get_command(parsed.command)
 
         if not cmd_info:
-            return (
-                f"❌ Unknown command: `{parsed.command}`\n\n"
-                f"Use `@me help` to list available commands."
-            )
+            return f"❌ Unknown command: `{parsed.command}`\n\n" f"Use `@me help` to list available commands."
 
         # Get explicit inputs from parsed command
         inputs = parsed.to_skill_inputs()
@@ -1093,15 +1079,14 @@ class CommandHandler:
 
         return "\n".join(lines) if lines else ""
 
-    async def _run_skill(
-        self, skill_name: str, inputs: dict, message: "PendingMessage"
-    ) -> str:
+    async def _run_skill(self, skill_name: str, inputs: dict, message: "PendingMessage") -> str:
         """Run a skill via Claude."""
         if not self.claude_agent:
             return "❌ Claude agent not available"
 
         # Build prompt for Claude to run the skill
         import json
+
         inputs_json = json.dumps(inputs) if inputs else "{}"
 
         prompt = f"""Execute the skill `{skill_name}` with these inputs:
@@ -1124,24 +1109,21 @@ Format the output for Slack (use *bold*, `code`, bullet points).
             }
             conversation_id = f"{message.channel_id}:{message.thread_ts or message.user_id}"
 
-            response = await self.claude_agent.process_message(
-                prompt, context, conversation_id=conversation_id
-            )
+            response = await self.claude_agent.process_message(prompt, context, conversation_id=conversation_id)
             return response
 
         except Exception as e:
             logger.error(f"Failed to run skill {skill_name}: {e}")
             return f"❌ Failed to run skill `{skill_name}`: {str(e)}"
 
-    async def _run_tool(
-        self, tool_name: str, inputs: dict, message: "PendingMessage"
-    ) -> str:
+    async def _run_tool(self, tool_name: str, inputs: dict, message: "PendingMessage") -> str:
         """Run a tool via Claude."""
         if not self.claude_agent:
             return "❌ Claude agent not available"
 
         # Build prompt for Claude to run the tool
         import json
+
         inputs_json = json.dumps(inputs) if inputs else "{}"
 
         prompt = f"""Execute the tool `{tool_name}` with these arguments:
@@ -1164,9 +1146,7 @@ Format the output for Slack (use *bold*, `code`, bullet points).
             }
             conversation_id = f"{message.channel_id}:{message.thread_ts or message.user_id}"
 
-            response = await self.claude_agent.process_message(
-                prompt, context, conversation_id=conversation_id
-            )
+            response = await self.claude_agent.process_message(prompt, context, conversation_id=conversation_id)
             return response
 
         except Exception as e:
@@ -1354,7 +1334,7 @@ class SlackDaemon:
         self.enable_dbus = enable_dbus
         self.enable_notify = enable_notify
         self.debug_mode = debug_mode
-        
+
         # Debug mode: redirect all messages to self
         self.debug_redirect_channel = get_slack_config("listener.self_dm_channel", "")
 
@@ -1787,7 +1767,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                     # In channels, reply in thread to keep things organized
                     is_dm = msg.channel_id.startswith("D")
                     thread_ts = None if is_dm else (msg.thread_ts or msg.timestamp)
-                
+
                 sent_msg = await self.session.send_message(
                     channel_id=target_channel,
                     text=response,
@@ -2049,7 +2029,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
 
         if self.dry_run:
             print("⚠️  DRY RUN MODE - no responses will be sent")
-        
+
         if self.debug_mode:
             if self.debug_redirect_channel:
                 print(f"🐛 DEBUG MODE - all responses redirected to self-DM ({self.debug_redirect_channel})")
@@ -2199,7 +2179,7 @@ Single Instance:
 
     # Debug mode: CLI flag overrides config.json setting
     debug_mode = args.debug or get_slack_config("debug", False)
-    
+
     daemon = SlackDaemon(
         dry_run=args.dry_run,
         verbose=args.verbose,

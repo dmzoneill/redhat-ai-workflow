@@ -119,6 +119,21 @@ export class WorkflowTreeProvider
     const status = this.dataProvider.getStatus();
     const items: WorkflowTreeItem[] = [];
 
+    // Workspace Context - show current workspace info
+    const workspaceItem = new WorkflowTreeItem(
+      "Workspace",
+      vscode.TreeItemCollapsibleState.Expanded,
+      "root"
+    );
+    workspaceItem.iconPath = new vscode.ThemeIcon(
+      "window",
+      new vscode.ThemeColor("charts.purple")
+    );
+    // Get workspace info from dataProvider if available
+    const workspaceInfo = this.dataProvider.getWorkspaceInfo?.() || {};
+    workspaceItem.description = workspaceInfo.project || workspaceInfo.persona || "Not set";
+    items.push(workspaceItem);
+
     // Quick Actions - always first
     const quickActionsItem = new WorkflowTreeItem(
       "Quick Actions",
@@ -230,7 +245,9 @@ export class WorkflowTreeProvider
   ): Promise<WorkflowTreeItem[]> {
     const status = this.dataProvider.getStatus();
 
-    if (category.includes("Quick Actions")) {
+    if (category.includes("Workspace")) {
+      return this.getWorkspaceItems();
+    } else if (category.includes("Quick Actions")) {
       return this.getQuickActionItems();
     } else if (category.includes("Active Work")) {
       return this.getActiveWorkItems(status);
@@ -245,6 +262,66 @@ export class WorkflowTreeProvider
     }
 
     return [];
+  }
+
+  private getWorkspaceItems(): WorkflowTreeItem[] {
+    const items: WorkflowTreeItem[] = [];
+    const workspaceInfo = this.dataProvider.getWorkspaceInfo?.() || {};
+
+    // Project
+    const projectItem = new WorkflowTreeItem(
+      `Project: ${workspaceInfo.project || "Not set"}`,
+      vscode.TreeItemCollapsibleState.None,
+      "issue-detail"
+    );
+    projectItem.iconPath = new vscode.ThemeIcon("folder");
+    if (workspaceInfo.auto_detected_project && !workspaceInfo.project) {
+      projectItem.description = "(auto-detected)";
+    }
+    items.push(projectItem);
+
+    // Persona
+    const personaItem = new WorkflowTreeItem(
+      `Persona: ${workspaceInfo.persona || "Not set"}`,
+      vscode.TreeItemCollapsibleState.None,
+      "issue-detail"
+    );
+    personaItem.iconPath = new vscode.ThemeIcon("account");
+    items.push(personaItem);
+
+    // Active Issue (if set)
+    if (workspaceInfo.issue_key) {
+      const issueItem = new WorkflowTreeItem(
+        `Issue: ${workspaceInfo.issue_key}`,
+        vscode.TreeItemCollapsibleState.None,
+        "issue-detail"
+      );
+      issueItem.iconPath = new vscode.ThemeIcon("issues");
+      items.push(issueItem);
+    }
+
+    // Branch (if set)
+    if (workspaceInfo.branch) {
+      const branchItem = new WorkflowTreeItem(
+        `Branch: ${workspaceInfo.branch}`,
+        vscode.TreeItemCollapsibleState.None,
+        "issue-detail"
+      );
+      branchItem.iconPath = new vscode.ThemeIcon("git-branch");
+      items.push(branchItem);
+    }
+
+    // Tools count
+    const toolCount = workspaceInfo.active_tools?.length || 0;
+    const toolsItem = new WorkflowTreeItem(
+      `Tools: ${toolCount} active`,
+      vscode.TreeItemCollapsibleState.None,
+      "issue-detail"
+    );
+    toolsItem.iconPath = new vscode.ThemeIcon("tools");
+    items.push(toolsItem);
+
+    return items;
   }
 
   private getQuickActionItems(): WorkflowTreeItem[] {

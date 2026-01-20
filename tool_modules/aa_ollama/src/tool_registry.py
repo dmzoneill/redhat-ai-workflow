@@ -177,3 +177,5 @@ def get_tools_for_categories(category_names: list[str]) -> list[str]:
 def keyword_match(text: str) -> list[str]:
     """Convenience function for keyword matching."""
     return load_registry().keyword_match(text)
+
+

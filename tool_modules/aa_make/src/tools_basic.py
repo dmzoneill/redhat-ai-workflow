@@ -79,3 +79,5 @@ def register_tools(server: FastMCP) -> int:
         return await _make_target_impl(repo, target, timeout)
 
     return registry.count
+
+

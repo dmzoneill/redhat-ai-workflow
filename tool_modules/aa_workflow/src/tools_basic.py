@@ -246,6 +246,7 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 try:
+    from .chat_context import register_chat_context_tools
     from .infra_tools import register_infra_tools
     from .memory_tools import register_memory_tools
     from .meta_tools import register_meta_tools
@@ -254,6 +255,7 @@ try:
     from .session_tools import register_prompts, register_session_tools
     from .skill_engine import register_skill_tools
 except ImportError:
+    from chat_context import register_chat_context_tools
     from infra_tools import register_infra_tools
     from memory_tools import register_memory_tools
     from meta_tools import register_meta_tools
@@ -302,7 +304,8 @@ def register_tools(server: "FastMCP") -> int:
         logger.debug("Claude Code integration module not available")
         ask_question_fn = None
 
-    # Register CORE tools only (18 tools)
+    # Register CORE tools only (19 tools)
+    tool_count += register_chat_context_tools(server)
     tool_count += register_memory_tools(server)
     tool_count += register_persona_tools(server)
     tool_count += register_session_tools(server)

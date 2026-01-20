@@ -28,23 +28,24 @@ from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 __project_root__ = PROJECT_ROOT  # Module initialization
 
 
+from server.tool_registry import ToolRegistry
 from server.utils import load_config
-
-# Setup project path for server imports
-
-
-# Initialize FastMCP
-mcp = FastMCP("aa_google_calendar")
 
 
 def _get_google_calendar_config_dir() -> Path:
     """Get Google Calendar config directory from config.json or default."""
     config = load_config()
+    # Check google_calendar.config_dir first (primary location)
+    gc_config = config.get("google_calendar", {}).get("config_dir")
+    if gc_config:
+        return Path(os.path.expanduser(gc_config))
+    # Fallback to paths.google_calendar_config
     paths_cfg = config.get("paths", {})
     gc_config = paths_cfg.get("google_calendar_config")
     if gc_config:
         return Path(os.path.expanduser(gc_config))
-    return Path.home() / ".config" / "google_calendar"
+    # Default (with hyphen to match existing setup)
+    return Path.home() / ".config" / "google-calendar"
 
 
 # Config paths - use config.json paths section if available
@@ -74,21 +75,21 @@ def get_irish_time() -> datetime:
     return datetime.now(ZoneInfo(TIMEZONE))
 
 
-def _try_load_oauth_token(Credentials, SCOPES):
+def _try_load_oauth_token(credentials_cls, scopes):
     """Try to load OAuth token from file."""
     if TOKEN_FILE.exists():
         try:
-            return Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+            return credentials_cls.from_authorized_user_file(str(TOKEN_FILE), scopes)
         except Exception:
             pass
     return None
 
 
-def _try_refresh_credentials(creds, Request):
+def _try_refresh_credentials(creds, request_cls):
     """Try to refresh expired credentials."""
     if creds and creds.expired and creds.refresh_token:
         try:
-            creds.refresh(Request())
+            creds.refresh(request_cls())
             with open(TOKEN_FILE, "w") as f:
                 f.write(creds.to_json())
             return creds
@@ -97,23 +98,25 @@ def _try_refresh_credentials(creds, Request):
     return None
 
 
-def _try_service_account(service_account, SCOPES):
+def _try_service_account(service_account, scopes):
     """Try to load service account credentials."""
     if SERVICE_ACCOUNT_FILE.exists():
         try:
-            return service_account.Credentials.from_service_account_file(str(SERVICE_ACCOUNT_FILE), scopes=SCOPES)
+            return service_account.Credentials.from_service_account_file(
+                str(SERVICE_ACCOUNT_FILE), scopes=scopes
+            )
         except Exception:
             pass
     return None
 
 
-def _try_oauth_flow(SCOPES):
+def _try_oauth_flow(scopes):
     """Try to run OAuth flow for new credentials."""
     if CREDENTIALS_FILE.exists():
         try:
             from google_auth_oauthlib.flow import InstalledAppFlow
 
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
             creds = flow.run_local_server(port=0)
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             with open(TOKEN_FILE, "w") as f:
@@ -382,7 +385,7 @@ def find_existing_meeting(
         return {"error": str(e)}
 
 
-# ==================== TOOLS USED IN SKILLS ====================
+# ==================== HELPER FUNCTIONS ====================
 
 
 def _parse_check_dates(date: str, days_ahead: int, tz: ZoneInfo, now: datetime) -> list[datetime] | str:
@@ -451,28 +454,16 @@ def _format_availability_output(
         lines.append("```")
 
 
-@mcp.tool()
-async def google_calendar_check_mutual_availability(
+# ==================== TOOL IMPLEMENTATIONS ====================
+
+
+async def _google_calendar_check_mutual_availability_impl(
     attendee_email: str,
     date: str = "",
     days_ahead: int = 5,
     duration_minutes: int = 30,
 ) -> str:
-    """
-    Check mutual availability between you and an attendee.
-
-    Finds free slots within the allowed meeting window (15:00-19:00 Irish time).
-    Checks both your calendar and the attendee's calendar.
-
-    Args:
-        attendee_email: Email of the person to meet with
-        date: Specific date to check (YYYY-MM-DD), or empty to scan next few days
-        days_ahead: Number of days to scan if no specific date (default: 5)
-        duration_minutes: Required meeting duration (default: 30)
-
-    Returns:
-        Available time slots that work for both parties
-    """
+    """Check mutual availability between you and an attendee."""
     service, error = get_calendar_service()
 
     if error:
@@ -539,27 +530,13 @@ async def google_calendar_check_mutual_availability(
     return "\n".join(lines)
 
 
-@mcp.tool()
-async def google_calendar_find_meeting(
+async def _google_calendar_find_meeting_impl(
     mr_id: str = "",
     jira_key: str = "",
     attendee_email: str = "",
     search_text: str = "",
 ) -> str:
-    """
-    Check if a meeting already exists for a specific MR, Jira issue, or topic.
-
-    Use this before scheduling to avoid duplicate meeting requests.
-
-    Args:
-        mr_id: GitLab MR ID (e.g., "1445" or "!1445")
-        jira_key: Jira issue key (e.g., "AAP-60034")
-        attendee_email: Optional - also check if this person is invited
-        search_text: Custom search text for the meeting title
-
-    Returns:
-        Meeting details if found, or confirmation none exists
-    """
+    """Check if a meeting already exists for a specific MR, Jira issue, or topic."""
     service, error = get_calendar_service()
 
     if error:
@@ -622,21 +599,11 @@ async def google_calendar_find_meeting(
     return "\n".join(lines)
 
 
-@mcp.tool()
-async def google_calendar_list_events(
+async def _google_calendar_list_events_impl(
     days: int = 7,
     max_results: int = 10,
 ) -> str:
-    """
-    List upcoming calendar events.
-
-    Args:
-        days: Number of days to look ahead (default: 7)
-        max_results: Maximum number of events to return (default: 10)
-
-    Returns:
-        List of upcoming events (displayed in Irish time)
-    """
+    """List upcoming calendar events."""
     service, error = get_calendar_service()
 
     if error:
@@ -708,34 +675,16 @@ async def google_calendar_list_events(
         return f"❌ Failed to list events: {e}"
 
 
-@mcp.tool()
-async def google_calendar_quick_meeting(
+async def _google_calendar_quick_meeting_impl(
     title: str,
     attendee_email: str,
     when: str = "auto",
     duration_minutes: int = 30,
 ) -> str:
-    """
-    Quickly schedule a meeting - finds the next available slot automatically.
-
-    This is the easiest way to schedule a meeting. It will:
-    1. Check both your and the attendee's calendar
-    2. Find the next mutually free slot (15:00-19:00 Irish time)
-    3. Create the meeting with a Google Meet link
-    4. Send an invite to the attendee
-
-    Args:
-        title: Meeting title (e.g., "MR !1445 Race Condition Discussion")
-        attendee_email: Email of the person to meet with (e.g., "bthomass@redhat.com")
-        when: "auto" to find next available, or "YYYY-MM-DD HH:MM" for specific time
-        duration_minutes: Meeting duration (default: 30)
-
-    Returns:
-        Meeting details and Google Meet link
-    """
+    """Quickly schedule a meeting - finds the next available slot automatically."""
     if when.lower() == "auto":
         # Auto-find next slot
-        return await google_calendar_schedule_meeting(
+        return await _google_calendar_schedule_meeting_impl(
             title=title,
             attendee_email=attendee_email,
             start_time="",
@@ -791,7 +740,7 @@ async def google_calendar_quick_meeting(
         # Build datetime
         start_time = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0, tzinfo=tz)
 
-        return await google_calendar_schedule_meeting(
+        return await _google_calendar_schedule_meeting_impl(
             title=title,
             attendee_email=attendee_email,
             start_time=start_time.isoformat(),
@@ -801,10 +750,7 @@ async def google_calendar_quick_meeting(
 
 
 def _check_duplicate_meeting(service, title: str, attendee_email: str, skip_duplicate_check: bool) -> str | None:
-    """Check if a meeting for this topic already exists.
-
-    Returns error message if duplicate found, None otherwise.
-    """
+    """Check if a meeting for this topic already exists."""
     if skip_duplicate_check:
         return None
 
@@ -846,10 +792,7 @@ def _check_duplicate_meeting(service, title: str, attendee_email: str, skip_dupl
 
 
 def _find_next_available_slot(service, now, attendee_email: str, duration_minutes: int):
-    """Find next available meeting slot.
-
-    Returns datetime of available slot, or None if none found.
-    """
+    """Find next available meeting slot."""
     # Check next 5 business days
     check_dates = []
     current = now
@@ -884,10 +827,7 @@ def _find_next_available_slot(service, now, attendee_email: str, duration_minute
 
 
 def _parse_and_validate_start_time(start_time: str, now, duration_minutes: int):
-    """Parse start time and validate it's within allowed window.
-
-    Returns (datetime, error_message) tuple. If error, datetime is None.
-    """
+    """Parse start time and validate it's within allowed window."""
     tz = ZoneInfo(TIMEZONE)
 
     # Parse provided start time
@@ -934,7 +874,7 @@ def _parse_and_validate_start_time(start_time: str, now, duration_minutes: int):
     return start_dt, None
 
 
-async def google_calendar_schedule_meeting(
+async def _google_calendar_schedule_meeting_impl(
     title: str,
     attendee_email: str,
     start_time: str = "",
@@ -943,29 +883,7 @@ async def google_calendar_schedule_meeting(
     auto_find_slot: bool = True,
     skip_duplicate_check: bool = False,
 ) -> str:
-    """
-    Schedule a meeting with an attendee, enforcing Irish time constraints.
-
-    AUTOMATICALLY checks if a meeting already exists for this topic before creating.
-
-    CONSTRAINTS:
-    - All times in Irish time (Europe/Dublin)
-    - Meetings only between 15:00-19:00 Irish time
-    - Checks attendee availability before scheduling
-    - Won't create duplicate meetings for the same topic
-
-    Args:
-        title: Meeting title (e.g., "MR !1445 Race Condition Discussion")
-        attendee_email: Email of the person to meet with
-        start_time: Start time in ISO format, or empty to auto-find a slot
-        duration_minutes: Duration in minutes (default: 30)
-        description: Meeting agenda/description
-        auto_find_slot: If start_time not specified, find next available slot (default: True)
-        skip_duplicate_check: Skip the existing meeting check (default: False)
-
-    Returns:
-        Event details including Google Meet link
-    """
+    """Schedule a meeting with an attendee, enforcing Irish time constraints."""
     service, error = get_calendar_service()
 
     if error:
@@ -1068,14 +986,8 @@ async def google_calendar_schedule_meeting(
         return f"❌ Failed to create event: {e}"
 
 
-@mcp.tool()
-async def google_calendar_status() -> str:
-    """
-    Check Google Calendar integration status and configuration.
-
-    Returns:
-        Configuration status and setup instructions if needed
-    """
+async def _google_calendar_status_impl() -> str:
+    """Check Google Calendar integration status and configuration."""
     tz = ZoneInfo(TIMEZONE)
     now = datetime.now(tz)
 
@@ -1146,19 +1058,488 @@ async def google_calendar_status() -> str:
     return "\n".join(lines)
 
 
+async def _google_calendar_list_calendars_impl() -> str:
+    """List all calendars accessible to your account."""
+    service, error = get_calendar_service()
+
+    if error:
+        return f"❌ {error}"
+
+    if not service:
+        return "❌ Google Calendar service not available"
+
+    try:
+        calendar_list = service.calendarList().list().execute()
+        calendars = calendar_list.get("items", [])
+
+        if not calendars:
+            return "📅 No calendars found."
+
+        lines = [
+            "# 📅 Your Calendars",
+            "",
+            "Use the **Calendar ID** to monitor or query specific calendars.",
+            "",
+        ]
+
+        # Group by access role
+        primary = []
+        owned = []
+        shared = []
+
+        for cal in calendars:
+            cal_info = {
+                "id": cal.get("id", ""),
+                "name": cal.get("summary", "Unnamed"),
+                "description": cal.get("description", ""),
+                "access": cal.get("accessRole", "reader"),
+                "primary": cal.get("primary", False),
+                "color": cal.get("backgroundColor", ""),
+            }
+
+            if cal_info["primary"]:
+                primary.append(cal_info)
+            elif cal_info["access"] == "owner":
+                owned.append(cal_info)
+            else:
+                shared.append(cal_info)
+
+        # Primary calendar
+        if primary:
+            lines.append("## 🏠 Primary Calendar")
+            for cal in primary:
+                lines.append(f"- **{cal['name']}**")
+                lines.append(f"  - ID: `{cal['id']}`")
+                lines.append(f"  - Access: {cal['access']}")
+            lines.append("")
+
+        # Owned calendars
+        if owned:
+            lines.append("## 👤 Your Calendars")
+            for cal in owned:
+                lines.append(f"- **{cal['name']}**")
+                lines.append(f"  - ID: `{cal['id']}`")
+                if cal["description"]:
+                    lines.append(f"  - Description: {cal['description'][:100]}")
+            lines.append("")
+
+        # Shared calendars
+        if shared:
+            lines.append("## 🤝 Shared Calendars")
+            for cal in shared:
+                lines.append(f"- **{cal['name']}**")
+                lines.append(f"  - ID: `{cal['id']}`")
+                lines.append(f"  - Access: {cal['access']}")
+                if cal["description"]:
+                    lines.append(f"  - Description: {cal['description'][:100]}")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+        lines.append("**To list events from a specific calendar:**")
+        lines.append("```")
+        lines.append("google_calendar_list_events_from(calendar_id=\"calendar@group.calendar.google.com\")")
+        lines.append("```")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"❌ Failed to list calendars: {e}"
+
+
+async def _google_calendar_list_events_from_impl(
+    calendar_id: str,
+    days: int = 7,
+    max_results: int = 25,
+) -> str:
+    """List upcoming events from a specific calendar."""
+    service, error = get_calendar_service()
+
+    if error:
+        return f"❌ {error}"
+
+    if not service:
+        return "❌ Google Calendar service not available"
+
+    try:
+        tz = ZoneInfo(TIMEZONE)
+        now = datetime.now(tz)
+
+        time_min = now.isoformat()
+        time_max = (now + timedelta(days=days)).isoformat()
+
+        # Get calendar info first
+        try:
+            cal_info = service.calendars().get(calendarId=calendar_id).execute()
+            cal_name = cal_info.get("summary", calendar_id)
+        except Exception:
+            cal_name = calendar_id
+
+        events_result = (
+            service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=time_min,
+                timeMax=time_max,
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy="startTime",
+                timeZone=TIMEZONE,
+            )
+            .execute()
+        )
+
+        events = events_result.get("items", [])
+
+        if not events:
+            return f"📅 No upcoming events in **{cal_name}** for the next {days} days."
+
+        lines = [
+            f"# 📅 Events from: {cal_name}",
+            "📍 Times shown in Irish time (Europe/Dublin)",
+            f"📆 Next {days} days",
+            "",
+        ]
+
+        # Group events by day
+        events_by_day: dict[str, list] = {}
+        for event in events:
+            start = event["start"].get("dateTime", event["start"].get("date"))
+            summary = event.get("summary", "No title")
+
+            # Parse start time
+            try:
+                if "T" in start:
+                    dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                    dt = dt.astimezone(tz)
+                    day_key = dt.strftime("%A, %B %d")
+                    time_str = dt.strftime("%H:%M")
+                else:
+                    day_key = start
+                    time_str = "All day"
+            except (ValueError, TypeError):
+                day_key = "Unknown"
+                time_str = start
+
+            # Check for Meet link
+            meet_link = ""
+            meet_url = ""
+            if event.get("conferenceData", {}).get("entryPoints"):
+                for entry in event["conferenceData"]["entryPoints"]:
+                    if entry.get("entryPointType") == "video":
+                        meet_link = " 📹"
+                        meet_url = entry.get("uri", "")
+                        break
+
+            if day_key not in events_by_day:
+                events_by_day[day_key] = []
+
+            events_by_day[day_key].append({
+                "time": time_str,
+                "summary": summary,
+                "meet_link": meet_link,
+                "meet_url": meet_url,
+                "event_id": event.get("id", ""),
+                "organizer": event.get("organizer", {}).get("email", ""),
+            })
+
+        for day, day_events in events_by_day.items():
+            lines.append(f"## {day}")
+            for evt in day_events:
+                lines.append(f"- **{evt['time']}** - {evt['summary']}{evt['meet_link']}")
+                if evt["meet_url"]:
+                    lines.append(f"  - Meet: {evt['meet_url']}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        error_str = str(e)
+        if "404" in error_str or "notFound" in error_str:
+            return f"❌ Calendar not found: `{calendar_id}`\n\nMake sure the calendar is shared with your account."
+        return f"❌ Failed to list events: {e}"
+
+
+async def _google_calendar_get_events_with_meet_impl(
+    calendar_id: str = "primary",
+    days: int = 1,
+) -> str:
+    """Get upcoming events that have Google Meet links."""
+    service, error = get_calendar_service()
+
+    if error:
+        return f"❌ {error}"
+
+    if not service:
+        return "❌ Google Calendar service not available"
+
+    try:
+        tz = ZoneInfo(TIMEZONE)
+        now = datetime.now(tz)
+
+        time_min = now.isoformat()
+        time_max = (now + timedelta(days=days)).isoformat()
+
+        events_result = (
+            service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=time_min,
+                timeMax=time_max,
+                maxResults=50,
+                singleEvents=True,
+                orderBy="startTime",
+                timeZone=TIMEZONE,
+            )
+            .execute()
+        )
+
+        events = events_result.get("items", [])
+
+        # Filter to only events with Meet links
+        meet_events = []
+        for event in events:
+            meet_url = None
+            if event.get("conferenceData", {}).get("entryPoints"):
+                for entry in event["conferenceData"]["entryPoints"]:
+                    if entry.get("entryPointType") == "video":
+                        meet_url = entry.get("uri", "")
+                        break
+
+            if meet_url:
+                start = event["start"].get("dateTime", event["start"].get("date"))
+                end = event["end"].get("dateTime", event["end"].get("date"))
+
+                try:
+                    if "T" in start:
+                        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone(tz)
+                        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00")).astimezone(tz)
+                    else:
+                        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=tz)
+                        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=tz)
+                except (ValueError, TypeError):
+                    continue
+
+                meet_events.append({
+                    "event_id": event.get("id", ""),
+                    "title": event.get("summary", "No title"),
+                    "start": start_dt,
+                    "end": end_dt,
+                    "meet_url": meet_url,
+                    "organizer": event.get("organizer", {}).get("email", ""),
+                    "attendees": [a.get("email", "") for a in event.get("attendees", [])],
+                    "description": event.get("description", ""),
+                })
+
+        if not meet_events:
+            return f"📅 No meetings with Google Meet links in the next {days} day(s)."
+
+        lines = [
+            "# 📹 Meetings with Google Meet",
+            f"📆 Next {days} day(s)",
+            "",
+        ]
+
+        for evt in meet_events:
+            lines.append(f"## {evt['title']}")
+            lines.append(f"- **When:** {evt['start'].strftime('%A %H:%M')} - {evt['end'].strftime('%H:%M')}")
+            lines.append(f"- **Meet URL:** {evt['meet_url']}")
+            lines.append(f"- **Organizer:** {evt['organizer']}")
+            if evt['attendees']:
+                lines.append(f"- **Attendees:** {', '.join(evt['attendees'][:5])}")
+                if len(evt['attendees']) > 5:
+                    lines.append(f"  ... and {len(evt['attendees']) - 5} more")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+        lines.append("**To have the bot join a meeting:**")
+        lines.append("```")
+        first_url = meet_events[0]["meet_url"]
+        first_title = meet_events[0]["title"]
+        lines.append(f'meet_bot_approve_meeting("{first_url}", "{first_title}")')
+        lines.append("meet_bot_join_meeting()")
+        lines.append("```")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"❌ Failed to get events: {e}"
+
+
+# ==================== TOOL REGISTRATION ====================
+
+
 def register_tools(server: "FastMCP") -> int:
     """Register Google Calendar tools with the MCP server.
 
-    Note: This module uses the @mcp.tool() decorator pattern directly.
-    The tools are registered on the module-level 'mcp' instance.
-    This function is provided for compatibility with the skill engine.
-
     Args:
-        server: FastMCP server instance (not used - tools are on module mcp)
+        server: FastMCP server instance to register tools with
 
     Returns:
-        Number of tools registered (0 - tools are on module mcp)
+        Number of tools registered
     """
-    # Tools are already registered on the module-level 'mcp' instance
-    # This function exists for compatibility with the skill engine
-    return 0
+    registry = ToolRegistry(server)
+
+    @registry.tool()
+    async def google_calendar_check_mutual_availability(
+        attendee_email: str,
+        date: str = "",
+        days_ahead: int = 5,
+        duration_minutes: int = 30,
+    ) -> str:
+        """
+        Check mutual availability between you and an attendee.
+
+        Finds free slots within the allowed meeting window (15:00-19:00 Irish time).
+        Checks both your calendar and the attendee's calendar.
+
+        Args:
+            attendee_email: Email of the person to meet with
+            date: Specific date to check (YYYY-MM-DD), or empty to scan next few days
+            days_ahead: Number of days to scan if no specific date (default: 5)
+            duration_minutes: Required meeting duration (default: 30)
+
+        Returns:
+            Available time slots that work for both parties
+        """
+        return await _google_calendar_check_mutual_availability_impl(
+            attendee_email, date, days_ahead, duration_minutes
+        )
+
+    @registry.tool()
+    async def google_calendar_find_meeting(
+        mr_id: str = "",
+        jira_key: str = "",
+        attendee_email: str = "",
+        search_text: str = "",
+    ) -> str:
+        """
+        Check if a meeting already exists for a specific MR, Jira issue, or topic.
+
+        Use this before scheduling to avoid duplicate meeting requests.
+
+        Args:
+            mr_id: GitLab MR ID (e.g., "1445" or "!1445")
+            jira_key: Jira issue key (e.g., "AAP-60034")
+            attendee_email: Optional - also check if this person is invited
+            search_text: Custom search text for the meeting title
+
+        Returns:
+            Meeting details if found, or confirmation none exists
+        """
+        return await _google_calendar_find_meeting_impl(mr_id, jira_key, attendee_email, search_text)
+
+    @registry.tool()
+    async def google_calendar_list_events(
+        days: int = 7,
+        max_results: int = 10,
+    ) -> str:
+        """
+        List upcoming calendar events.
+
+        Args:
+            days: Number of days to look ahead (default: 7)
+            max_results: Maximum number of events to return (default: 10)
+
+        Returns:
+            List of upcoming events (displayed in Irish time)
+        """
+        return await _google_calendar_list_events_impl(days, max_results)
+
+    @registry.tool()
+    async def google_calendar_quick_meeting(
+        title: str,
+        attendee_email: str,
+        when: str = "auto",
+        duration_minutes: int = 30,
+    ) -> str:
+        """
+        Quickly schedule a meeting - finds the next available slot automatically.
+
+        This is the easiest way to schedule a meeting. It will:
+        1. Check both your and the attendee's calendar
+        2. Find the next mutually free slot (15:00-19:00 Irish time)
+        3. Create the meeting with a Google Meet link
+        4. Send an invite to the attendee
+
+        Args:
+            title: Meeting title (e.g., "MR !1445 Race Condition Discussion")
+            attendee_email: Email of the person to meet with (e.g., "bthomass@redhat.com")
+            when: "auto" to find next available, or "YYYY-MM-DD HH:MM" for specific time
+            duration_minutes: Meeting duration (default: 30)
+
+        Returns:
+            Meeting details and Google Meet link
+        """
+        return await _google_calendar_quick_meeting_impl(title, attendee_email, when, duration_minutes)
+
+    @registry.tool()
+    async def google_calendar_status() -> str:
+        """
+        Check Google Calendar integration status and configuration.
+
+        Returns:
+            Configuration status and setup instructions if needed
+        """
+        return await _google_calendar_status_impl()
+
+    @registry.tool()
+    async def google_calendar_list_calendars() -> str:
+        """
+        List all calendars accessible to your account.
+
+        This includes:
+        - Your primary calendar
+        - Shared calendars (team calendars, project calendars)
+        - Subscribed calendars
+
+        Use this to find calendar IDs for monitoring or scheduling.
+
+        Returns:
+            List of calendars with their IDs and access levels
+        """
+        return await _google_calendar_list_calendars_impl()
+
+    @registry.tool()
+    async def google_calendar_list_events_from(
+        calendar_id: str,
+        days: int = 7,
+        max_results: int = 25,
+    ) -> str:
+        """
+        List upcoming events from a specific calendar.
+
+        Use this to view events from shared calendars like team calendars,
+        project calendars, or the Ansible Engineering calendar.
+
+        Args:
+            calendar_id: The calendar ID (email or calendar ID from google_calendar_list_calendars)
+            days: Number of days to look ahead (default: 7)
+            max_results: Maximum number of events to return (default: 25)
+
+        Returns:
+            List of upcoming events from the specified calendar
+        """
+        return await _google_calendar_list_events_from_impl(calendar_id, days, max_results)
+
+    @registry.tool()
+    async def google_calendar_get_events_with_meet(
+        calendar_id: str = "primary",
+        days: int = 1,
+    ) -> str:
+        """
+        Get upcoming events that have Google Meet links.
+
+        This is useful for finding meetings to join with the meet bot.
+
+        Args:
+            calendar_id: Calendar ID (default: "primary" for your main calendar)
+            days: Number of days to look ahead (default: 1)
+
+        Returns:
+            List of events with Google Meet links
+        """
+        return await _google_calendar_get_events_with_meet_impl(calendar_id, days)
+
+    return registry.count

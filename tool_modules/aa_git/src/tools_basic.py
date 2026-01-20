@@ -1448,7 +1448,7 @@ def _register_code_quality_tools(registry: ToolRegistry) -> None:
 
     @auto_heal()
     @registry.tool()
-    async def code_format(
+    async def git_format(
         repo: str,
         check_only: bool = False,
         tool: str = "black",
@@ -1470,7 +1470,7 @@ def _register_code_quality_tools(registry: ToolRegistry) -> None:
 
     @auto_heal()
     @registry.tool()
-    async def code_lint(
+    async def git_lint(
         repo: str,
         tool: str = "flake8",
         paths: str = ".",
@@ -2035,10 +2035,11 @@ def register_tools(server: FastMCP) -> int:
     """
     Register git tools with the MCP server.
 
-    Note: Docker, lint, and make tools have been moved to separate modules:
+    Note: Some tools have been moved to separate modules:
     - aa_docker: docker_compose_*, docker_cp, docker_exec
-    - aa_lint: code_format, code_lint
     - aa_make: make_target
+
+    This module includes git_format and git_lint for code quality checks.
 
     Args:
         server: FastMCP server instance

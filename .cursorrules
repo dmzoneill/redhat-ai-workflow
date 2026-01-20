@@ -1,16 +1,35 @@
 # AI Workflow Project Rules
 
-## On Session Start
+## On Session Start - TRACK YOUR SESSION ID!
 
-**ALWAYS call `session_start()` at the beginning of every session.**
+**IMPORTANT:** Multiple Cursor chats share the same MCP server. You MUST track your session_id to maintain separate context per chat.
 
-This loads your current work context, today's history, and shows available agents and skills.
+```python
+# Start a NEW session - SAVE the returned session_id!
+session_start()  # Returns something like "Session ID: abc123" - REMEMBER THIS!
 
-If you know the type of work:
-- DevOps/monitoring: `session_start(agent="devops")`
-- Coding/PRs: `session_start(agent="developer")`
-- Incidents: `session_start(agent="incident")`
-- Releases: `session_start(agent="release")`
+# To check YOUR session (not another chat's), pass your session_id:
+session_info(session_id="abc123")  # Gets YOUR session info
+
+# To resume a previous session:
+session_start(session_id="abc123")  # Resumes existing session
+
+# Start with specific options:
+session_start(agent="devops")       # DevOps/monitoring
+session_start(agent="developer")    # Coding/PRs  
+session_start(agent="incident")     # Incidents
+session_start(agent="release")      # Releases
+session_start(name="Fixing AAP-12345")  # Named session
+```
+
+**Session Management:**
+```python
+session_list()                    # List all sessions
+session_switch(session_id="...")  # Switch to different session
+session_rename(name="...")        # Rename session
+```
+
+**Why track session_id?** Without it, `session_info()` returns whichever session was most recently active - which might be from a DIFFERENT chat window!
 
 ## 🔄 Dynamic Agent Loading
 

@@ -213,7 +213,7 @@ steps:
   - name: run_black_check
     description: "Check code formatting before marking ready"
     condition: "inputs.run_linting and lint_repo and lint_repo.get('path')"
-    tool: code_format
+    tool: git_format
     args:
       repo: "{{ lint_repo.path }}"
       tool: "black"
@@ -224,7 +224,7 @@ steps:
   - name: run_flake8_check
     description: "Run flake8 linting before marking ready"
     condition: "inputs.run_linting and lint_repo and lint_repo.get('path')"
-    tool: code_lint
+    tool: git_lint
     args:
       repo: "{{ lint_repo.path }}"
       tool: "flake8"

@@ -137,3 +137,5 @@ make ext-clean
 ### Status bar items missing
 
 Check settings: `Ctrl+,` → Search "aa_workflow" → Enable desired indicators
+
+

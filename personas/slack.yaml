@@ -104,13 +104,15 @@ persona: |
   - `standup_summary` - Generate standup report
   - `jira_hygiene` - Check issue quality
 
-# Tools loaded for this agent
+# Tool modules to load (from tool_modules/aa_*)
+# Tool counts are determined dynamically - use tool_list() to see actual counts
 tools:
-  - workflow   # 18 tools - Skills, agents, memory (REQUIRED)
-  - slack      # 9 tools - Core Slack integration
-  - jira       # 28 tools - Issue tracking
-  - gitlab     # 30 tools - Code review, MRs, pipelines
-  # Total: ~85 tools (under 128 limit)
+  - workflow      # Core (memory, persona, session, skill, infra, meta)
+  - slack         # Core Slack integration
+  - jira_basic    # Issue viewing and basic operations
+  - gitlab_basic  # MR viewing and basic operations
+
+# Note: Use tool_exec() for jira_extra, gitlab_extra tools if needed
 
 skills:
   - start_work

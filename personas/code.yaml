@@ -1,0 +1,26 @@
+# Code Persona Configuration
+# Focused on pure coding without issue tracking
+
+name: code
+description: Pure coding - git, linting, search, no issue tracking
+persona: personas/code.md
+
+# Tool modules to load (from tool_modules/aa_*)
+# Tool counts are determined dynamically - use tool_list() to see actual counts
+tools:
+  - workflow        # Core (memory, persona, session, skill, infra, meta)
+  - git_basic       # Git operations
+  - lint            # Code formatting and linting
+  - code_search     # Semantic code search
+  - make            # Build automation
+
+# Note: Use tool_exec() for jira, gitlab tools if needed
+
+skills:
+  # Git operations
+  - sync_branch         # Quick sync with main
+  - cleanup_branches    # Delete merged/stale branches
+  - rebase_pr           # Rebase PR onto main
+  
+  # Code quality
+  - check_ci_health     # Diagnose CI issues

@@ -1,7 +1,7 @@
 # Context Engineering: Knowledge & Project Management
 
-> **Purpose**: Explain the new Knowledge Layer and Project Management features  
-> **Duration**: 15-20 minutes  
+> **Purpose**: Explain the new Knowledge Layer and Project Management features
+> **Duration**: 15-20 minutes
 > **Audience**: Developers using AI Workflow
 
 ---
@@ -160,7 +160,7 @@ gotchas:
 deployment:
   platform: Konflux
   namespace: aap-aa-tenant
-  
+
 ephemeral:
   clowdapp: tower-analytics-clowdapp
   image_base: quay.io/redhat-user-workloads/...
@@ -180,7 +180,7 @@ ephemeral:
 User: "Add a new API endpoint"
 
 AI: [reads directory structure]      ← 1 tool call
-AI: [reads existing endpoint]        ← 1 tool call  
+AI: [reads existing endpoint]        ← 1 tool call
 AI: [reads test file]                ← 1 tool call
 AI: [reads conftest.py]              ← 1 tool call
 AI: [makes changes]

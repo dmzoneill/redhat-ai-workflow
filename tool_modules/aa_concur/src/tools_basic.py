@@ -847,3 +847,5 @@ def register_tools(server: FastMCP) -> int:
         return [TextContent(type="text", text="\n".join(lines))]
 
     return registry.count
+
+

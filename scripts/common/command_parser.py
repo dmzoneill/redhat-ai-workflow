@@ -136,8 +136,7 @@ class CommandParser:
 
         # Compile regex patterns
         self._patterns = [
-            (re.compile(pattern, re.IGNORECASE), trigger_type)
-            for pattern, trigger_type in self.TRIGGERS.items()
+            (re.compile(pattern, re.IGNORECASE), trigger_type) for pattern, trigger_type in self.TRIGGERS.items()
         ]
 
     def parse(self, text: str, is_self_dm: bool = False) -> ParsedCommand:
@@ -240,9 +239,7 @@ class CommandParser:
             result.reply_thread = True
             result.reply_dm = False
 
-    def _parse_option(
-        self, token: str, tokens: list[str], index: int, result: ParsedCommand
-    ) -> None:
+    def _parse_option(self, token: str, tokens: list[str], index: int, result: ParsedCommand) -> None:
         """Parse a --option or --option=value token."""
         # Remove leading --
         option = token[2:]

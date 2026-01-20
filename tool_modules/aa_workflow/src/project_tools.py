@@ -838,3 +838,5 @@ def register_project_tools(server: "FastMCP") -> int:
         )
 
     return registry.count
+
+

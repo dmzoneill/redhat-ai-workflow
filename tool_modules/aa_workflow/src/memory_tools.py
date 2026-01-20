@@ -10,11 +10,21 @@ Provides tools for reading, writing, and managing persistent memory:
 - memory_stats: Get memory health and usage statistics
 - check_known_issues: Search for known fixes
 - learn_tool_fix: Save solutions to memory
+
+Memory paths can be:
+- Global: "state/environments", "learned/patterns"
+- Project-specific: "state/current_work" (auto-resolves to workspace project path)
+
+Project-specific paths are stored under:
+  memory/state/projects/<project>/current_work.yaml
+
+This module is workspace-aware: project-specific paths use the workspace's
+project from WorkspaceRegistry when ctx is available.
 """
 
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from mcp.types import TextContent
@@ -30,7 +40,93 @@ except ImportError:
     MEMORY_DIR = PROJECT_DIR / "memory"
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp import Context, FastMCP
+
+
+# Keys that are project-specific (stored per-project)
+PROJECT_SPECIFIC_KEYS = {"state/current_work"}
+
+
+def _resolve_memory_path(key: str) -> Path:
+    """Resolve a memory key to its actual file path (sync version).
+
+    Handles project-specific keys by routing them to the project's directory.
+    For workspace-aware resolution, use _resolve_memory_path_async() instead.
+
+    Args:
+        key: Memory key like "state/current_work" or "learned/patterns"
+
+    Returns:
+        Resolved Path to the memory file.
+    """
+    # Normalize key
+    if not key.endswith(".yaml"):
+        key_normalized = key
+    else:
+        key_normalized = key[:-5]  # Remove .yaml
+
+    # Check if this is a project-specific key
+    if key_normalized in PROJECT_SPECIFIC_KEYS:
+        try:
+            from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+            return get_project_work_state_path()
+        except ImportError:
+            try:
+                from .chat_context import get_project_work_state_path
+                return get_project_work_state_path()
+            except ImportError:
+                # Fallback to global path if chat_context not available
+                pass
+
+    # Global path
+    if not key.endswith(".yaml"):
+        key = f"{key}.yaml"
+    return MEMORY_DIR / key
+
+
+async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
+    """Resolve a memory key to its actual file path (async, workspace-aware).
+
+    Uses WorkspaceRegistry to get the workspace's project for project-specific keys.
+
+    Args:
+        key: Memory key like "state/current_work" or "learned/patterns"
+        ctx: MCP Context for workspace identification (optional)
+
+    Returns:
+        Resolved Path to the memory file.
+    """
+    # Normalize key
+    if not key.endswith(".yaml"):
+        key_normalized = key
+    else:
+        key_normalized = key[:-5]  # Remove .yaml
+
+    # Check if this is a project-specific key
+    if key_normalized in PROJECT_SPECIFIC_KEYS:
+        if ctx is not None:
+            try:
+                from server.workspace_utils import get_workspace_project
+                project = await get_workspace_project(ctx)
+                return MEMORY_DIR / "state" / "projects" / project / "current_work.yaml"
+            except Exception:
+                pass
+
+        # Fall back to sync version
+        try:
+            from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+            return get_project_work_state_path()
+        except ImportError:
+            try:
+                from .chat_context import get_project_work_state_path
+                return get_project_work_state_path()
+            except ImportError:
+                pass
+
+    # Global path
+    if not key.endswith(".yaml"):
+        key = f"{key}.yaml"
+    return MEMORY_DIR / key
 
 
 # ==================== TOOL IMPLEMENTATIONS ====================
@@ -270,19 +366,20 @@ def _format_memory_stats(stats: dict) -> list[str]:
     return lines
 
 
-async def _memory_read_impl(key: str = "") -> list[TextContent]:
+async def _memory_read_impl(key: str = "", ctx: Any = None) -> list[TextContent]:
     """
     Read from persistent memory.
 
     Memory stores context that persists across Claude sessions:
-    - state/current_work.yaml - Active issues, branches, MRs
-    - state/environments.yaml - Stage/prod health status
-    - learned/patterns.yaml - Error patterns and solutions
-    - learned/runbooks.yaml - Procedures that worked
+    - state/current_work - Active issues, branches, MRs (workspace-specific)
+    - state/environments - Stage/prod health status
+    - learned/patterns - Error patterns and solutions
+    - learned/runbooks - Procedures that worked
 
     Args:
         key: Memory key to read (e.g., "state/current_work", "learned/patterns")
              Leave empty to list available memory files.
+        ctx: MCP Context for workspace-aware path resolution (optional)
 
     Returns:
         Memory contents or list of available memory files.
@@ -301,14 +398,32 @@ async def _memory_read_impl(key: str = "") -> list[TextContent]:
                 lines.append(f"### {subdir}/")
                 for f in d.glob("*.yaml"):
                     lines.append(f"- {subdir}/{f.stem}")
+                # Also list project-specific state
+                if subdir == "state":
+                    projects_dir = d / "projects"
+                    if projects_dir.exists():
+                        for project_dir in projects_dir.iterdir():
+                            if project_dir.is_dir():
+                                lines.append(f"  - {subdir}/projects/{project_dir.name}/")
+                                for f in project_dir.glob("*.yaml"):
+                                    lines.append(f"    - {f.stem}")
         return [TextContent(type="text", text="\n".join(lines))]
 
-    # Handle with or without .yaml extension
-    if not key.endswith(".yaml"):
-        key = f"{key}.yaml"
+    # Resolve the memory path (handles project-specific keys, workspace-aware)
+    memory_file = await _resolve_memory_path_async(key, ctx)
 
-    memory_file = MEMORY_DIR / key
     if not memory_file.exists():
+        # Show helpful message for project-specific keys
+        key_normalized = key.replace(".yaml", "")
+        if key_normalized in PROJECT_SPECIFIC_KEYS:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ No work state for current project.\n\n"
+                    f"File would be at: `{memory_file}`\n\n"
+                    "Use `start_work` skill to begin tracking work for this project.",
+                )
+            ]
         return [
             TextContent(
                 type="text",
@@ -318,23 +433,25 @@ async def _memory_read_impl(key: str = "") -> list[TextContent]:
 
     try:
         content = memory_file.read_text()
-        return [TextContent(type="text", text=f"## Memory: {key}\n\n```yaml\n{content}\n```")]
+        display_key = str(memory_file.relative_to(MEMORY_DIR))
+        return [TextContent(type="text", text=f"## Memory: {display_key}\n\n```yaml\n{content}\n```")]
     except Exception as e:
         return [TextContent(type="text", text=f"❌ Error reading memory: {e}")]
 
 
-async def _memory_write_impl(key: str, content: str) -> list[TextContent]:
+async def _memory_write_impl(key: str, content: str, ctx: Any = None) -> list[TextContent]:
     """
     Write to persistent memory.
 
     Updates a memory file with new content. Use this to save:
-    - Current work state (what you're working on)
+    - Current work state (what you're working on) - workspace-specific
     - Learned patterns (solutions that worked)
     - Session notes (context for next session)
 
     Args:
         key: Memory key to write (e.g., "state/current_work", "learned/patterns")
         content: YAML content to write
+        ctx: MCP Context for workspace-aware path resolution (optional)
 
     Returns:
         Confirmation of the write.
@@ -344,11 +461,8 @@ async def _memory_write_impl(key: str, content: str) -> list[TextContent]:
 
     record_memory_write()
 
-    # Handle with or without .yaml extension
-    if not key.endswith(".yaml"):
-        key = f"{key}.yaml"
-
-    memory_file = MEMORY_DIR / key
+    # Resolve the memory path (handles project-specific keys, workspace-aware)
+    memory_file = await _resolve_memory_path_async(key, ctx)
 
     # Ensure parent directory exists
     memory_file.parent.mkdir(parents=True, exist_ok=True)
@@ -360,14 +474,15 @@ async def _memory_write_impl(key: str, content: str) -> list[TextContent]:
         # Write to file
         memory_file.write_text(content)
 
-        return [TextContent(type="text", text=f"✅ Memory saved: {key}")]
+        display_key = str(memory_file.relative_to(MEMORY_DIR))
+        return [TextContent(type="text", text=f"✅ Memory saved: {display_key}")]
     except yaml.YAMLError as e:
         return [TextContent(type="text", text=f"❌ Invalid YAML: {e}")]
     except Exception as e:
         return [TextContent(type="text", text=f"❌ Error writing memory: {e}")]
 
 
-async def _memory_update_impl(key: str, path: str, value: str) -> list[TextContent]:
+async def _memory_update_impl(key: str, path: str, value: str, ctx: Any = None) -> list[TextContent]:
     """
     Update a specific field in memory.
 
@@ -377,6 +492,7 @@ async def _memory_update_impl(key: str, path: str, value: str) -> list[TextConte
         key: Memory file (e.g., "state/current_work")
         path: Dot-separated path to the field (e.g., "active_issues", "notes")
         value: New value (as YAML string)
+        ctx: MCP Context for workspace-aware path resolution (optional)
 
     Returns:
         Confirmation of the update.
@@ -386,12 +502,18 @@ async def _memory_update_impl(key: str, path: str, value: str) -> list[TextConte
 
     record_memory_write()
 
-    if not key.endswith(".yaml"):
-        key = f"{key}.yaml"
+    # Resolve the memory path (handles project-specific keys, workspace-aware)
+    memory_file = await _resolve_memory_path_async(key, ctx)
 
-    memory_file = MEMORY_DIR / key
+    # For project-specific keys, create the file if it doesn't exist
+    key_normalized = key.replace(".yaml", "")
     if not memory_file.exists():
-        return [TextContent(type="text", text=f"❌ Memory not found: {key}")]
+        if key_normalized in PROJECT_SPECIFIC_KEYS:
+            # Create empty file for project-specific keys
+            memory_file.parent.mkdir(parents=True, exist_ok=True)
+            memory_file.write_text("{}")
+        else:
+            return [TextContent(type="text", text=f"❌ Memory not found: {key}")]
 
     try:
         # Load existing
@@ -414,12 +536,13 @@ async def _memory_update_impl(key: str, path: str, value: str) -> list[TextConte
         with open(memory_file, "w") as f:
             yaml.dump(data, f, default_flow_style=False)
 
-        return [TextContent(type="text", text=f"✅ Updated {key}: {path} = {value}")]
+        display_key = str(memory_file.relative_to(MEMORY_DIR))
+        return [TextContent(type="text", text=f"✅ Updated {display_key}: {path} = {value}")]
     except Exception as e:
         return [TextContent(type="text", text=f"❌ Error updating memory: {e}")]
 
 
-async def _memory_append_impl(key: str, list_path: str, item: str) -> list[TextContent]:
+async def _memory_append_impl(key: str, list_path: str, item: str, ctx: Any = None) -> list[TextContent]:
     """
     Append an item to a list in memory.
 
@@ -429,6 +552,7 @@ async def _memory_append_impl(key: str, list_path: str, item: str) -> list[TextC
         key: Memory file (e.g., "state/current_work")
         list_path: Path to the list (e.g., "active_issues", "follow_ups")
         item: Item to append (as YAML string)
+        ctx: MCP Context for workspace-aware path resolution (optional)
 
     Returns:
         Confirmation of the append.
@@ -438,12 +562,18 @@ async def _memory_append_impl(key: str, list_path: str, item: str) -> list[TextC
 
     record_memory_write()
 
-    if not key.endswith(".yaml"):
-        key = f"{key}.yaml"
+    # Resolve the memory path (handles project-specific keys, workspace-aware)
+    memory_file = await _resolve_memory_path_async(key, ctx)
 
-    memory_file = MEMORY_DIR / key
+    # For project-specific keys, create the file if it doesn't exist
+    key_normalized = key.replace(".yaml", "")
     if not memory_file.exists():
-        return [TextContent(type="text", text=f"❌ Memory not found: {key}")]
+        if key_normalized in PROJECT_SPECIFIC_KEYS:
+            # Create empty file for project-specific keys
+            memory_file.parent.mkdir(parents=True, exist_ok=True)
+            memory_file.write_text("{}")
+        else:
+            return [TextContent(type="text", text=f"❌ Memory not found: {key}")]
 
     try:
         # Load existing
@@ -473,12 +603,13 @@ async def _memory_append_impl(key: str, list_path: str, item: str) -> list[TextC
         with open(memory_file, "w") as f:
             yaml.dump(data, f, default_flow_style=False)
 
-        return [TextContent(type="text", text=f"✅ Appended to {key}: {list_path}")]
+        display_key = str(memory_file.relative_to(MEMORY_DIR))
+        return [TextContent(type="text", text=f"✅ Appended to {display_key}: {list_path}")]
     except Exception as e:
         return [TextContent(type="text", text=f"❌ Error appending to memory: {e}")]
 
 
-async def _memory_query_impl(key: str, query: str) -> list[TextContent]:
+async def _memory_query_impl(key: str, query: str, ctx: Any = None) -> list[TextContent]:
     """
     Query memory using JSONPath expressions.
 
@@ -488,6 +619,7 @@ async def _memory_query_impl(key: str, query: str) -> list[TextContent]:
     Args:
         key: Memory file (e.g., "state/current_work", "learned/patterns")
         query: JSONPath query expression
+        ctx: MCP Context for workspace-aware path resolution (optional)
 
     JSONPath Examples:
         - `$.active_issues[0]` - First active issue
@@ -515,13 +647,12 @@ async def _memory_query_impl(key: str, query: str) -> list[TextContent]:
             )
         ]
 
-    # Handle with or without .yaml extension
-    if not key.endswith(".yaml"):
-        key = f"{key}.yaml"
+    # Resolve the memory path (handles project-specific keys, workspace-aware)
+    memory_file = await _resolve_memory_path_async(key, ctx)
 
-    memory_file = MEMORY_DIR / key
     if not memory_file.exists():
-        return [TextContent(type="text", text=f"❌ Memory not found: {key}")]
+        display_key = str(memory_file.relative_to(MEMORY_DIR))
+        return [TextContent(type="text", text=f"❌ Memory not found: {display_key}")]
 
     try:
         # Load memory file
@@ -532,12 +663,13 @@ async def _memory_query_impl(key: str, query: str) -> list[TextContent]:
         expr = parse(query)
         matches = [match.value for match in expr.find(data)]
 
+        display_key = str(memory_file.relative_to(MEMORY_DIR))
         if not matches:
             return [
                 TextContent(
                     type="text",
                     text=f"No matches found for query: `{query}`\n\n"
-                    f"**File:** {key}\n\n"
+                    f"**File:** {display_key}\n\n"
                     "Try a different JSONPath expression or use memory_read() to see full contents.",
                 )
             ]
@@ -547,13 +679,14 @@ async def _memory_query_impl(key: str, query: str) -> list[TextContent]:
         return [
             TextContent(
                 type="text",
-                text=f"## Query Results: {key}\n\n"
+                text=f"## Query Results: {display_key}\n\n"
                 f"**Query:** `{query}`\n"
                 f"**Matches:** {len(matches)}\n\n"
                 f"```yaml\n{result_yaml}```",
             )
         ]
     except Exception as e:
+        key_normalized = key.replace(".yaml", "")
         return [
             TextContent(
                 type="text",
@@ -562,7 +695,7 @@ async def _memory_query_impl(key: str, query: str) -> list[TextContent]:
                 "- Invalid JSONPath syntax\n"
                 "- Path doesn't exist in data\n"
                 "- Check query with simpler expressions first\n\n"
-                f"Use memory_read('{key.replace('.yaml', '')}') to see full structure.",
+                f"Use memory_read('{key_normalized}') to see full structure.",
             )
         ]
 
@@ -850,15 +983,17 @@ async def _memory_stats_impl() -> list[TextContent]:
 
 def register_memory_tools(server: "FastMCP") -> int:
     """Register memory tools with the MCP server."""
+    from mcp.server.fastmcp import Context
+
     registry = ToolRegistry(server)
 
     @registry.tool()
-    async def memory_read(key: str = "") -> list[TextContent]:
+    async def memory_read(ctx: Context, key: str = "") -> list[TextContent]:
         """
         Read from persistent memory.
 
         Memory stores context that persists across Claude sessions:
-        - state/current_work.yaml - Active issues, branches, MRs
+        - state/current_work.yaml - Active issues, branches, MRs (workspace-specific)
         - state/environments.yaml - Stage/prod health status
         - learned/patterns.yaml - Error patterns and solutions
         - learned/runbooks.yaml - Procedures that worked
@@ -870,10 +1005,11 @@ def register_memory_tools(server: "FastMCP") -> int:
         Returns:
             Memory contents or list of available memory files.
         """
-        return await _memory_read_impl(key)
+        # Use workspace-aware path resolution for project-specific keys
+        return await _memory_read_impl(key, ctx)
 
     @registry.tool()
-    async def memory_write(key: str, content: str) -> list[TextContent]:
+    async def memory_write(ctx: Context, key: str, content: str) -> list[TextContent]:
         """
         Write to persistent memory.
 
@@ -889,10 +1025,10 @@ def register_memory_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of the write.
         """
-        return await _memory_write_impl(key, content)
+        return await _memory_write_impl(key, content, ctx)
 
     @registry.tool()
-    async def memory_update(key: str, path: str, value: str) -> list[TextContent]:
+    async def memory_update(ctx: Context, key: str, path: str, value: str) -> list[TextContent]:
         """
         Update a specific field in memory.
 
@@ -906,10 +1042,10 @@ def register_memory_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of the update.
         """
-        return await _memory_update_impl(key, path, value)
+        return await _memory_update_impl(key, path, value, ctx)
 
     @registry.tool()
-    async def memory_append(key: str, list_path: str, item: str) -> list[TextContent]:
+    async def memory_append(ctx: Context, key: str, list_path: str, item: str) -> list[TextContent]:
         """
         Append an item to a list in memory.
 
@@ -923,10 +1059,10 @@ def register_memory_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of the append.
         """
-        return await _memory_append_impl(key, list_path, item)
+        return await _memory_append_impl(key, list_path, item, ctx)
 
     @registry.tool()
-    async def memory_query(key: str, query: str) -> list[TextContent]:
+    async def memory_query(ctx: Context, key: str, query: str) -> list[TextContent]:
         """
         Query memory using JSONPath expressions.
 
@@ -947,10 +1083,10 @@ def register_memory_tools(server: "FastMCP") -> int:
         Returns:
             Matching data as YAML.
         """
-        return await _memory_query_impl(key, query)
+        return await _memory_query_impl(key, query, ctx)
 
     @registry.tool()
-    async def memory_session_log(action: str, details: str = "") -> list[TextContent]:
+    async def memory_session_log(ctx: Context, action: str, details: str = "") -> list[TextContent]:
         """
         Log an action to today's session log.
 
@@ -967,7 +1103,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         return await _memory_session_log_impl(action, details)
 
     @registry.tool()
-    async def check_known_issues(tool_name: str = "", error_text: str = "") -> list[TextContent]:
+    async def check_known_issues(ctx: Context, tool_name: str = "", error_text: str = "") -> list[TextContent]:
         """
         Check memory for known fixes before or after an error.
 
@@ -985,6 +1121,7 @@ def register_memory_tools(server: "FastMCP") -> int:
 
     @registry.tool()
     async def learn_tool_fix(
+        ctx: Context,
         tool_name: str,
         error_pattern: str,
         root_cause: str,
@@ -1008,7 +1145,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         return await _learn_tool_fix_impl(tool_name, error_pattern, root_cause, fix_description)
 
     @registry.tool()
-    async def memory_stats() -> list[TextContent]:
+    async def memory_stats(ctx: Context) -> list[TextContent]:
         """
         Get memory system statistics and health metrics.
 

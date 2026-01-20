@@ -522,7 +522,7 @@ steps:
   - name: run_black
     description: "Run black formatter check"
     condition: "inputs.run_linting and (not lint_tools_check or lint_tools_check.get('available', True))"
-    tool: code_format
+    tool: git_format
     args:
       repo: "{{ resolved_repo.path }}"
       tool: "black"
@@ -580,7 +580,7 @@ steps:
   - name: run_flake8
     description: "Run flake8 linting on changed files only"
     condition: "inputs.run_linting and changed_files and changed_files.get('count', 0) > 0"
-    tool: code_lint
+    tool: git_lint
     args:
       repo: "{{ resolved_repo.path }}"
       tool: "flake8"

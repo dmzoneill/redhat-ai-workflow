@@ -38,21 +38,28 @@ environments:
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.p
-    last_check: '2026-01-17T14:54:36.137Z'
+    last_check: '2026-01-20T00:39:53.214Z'
     namespace: tower-analytics-prod
     notes: ''
-    status: healthy
+    status: degraded
   stage:
     alerts: []
     cluster: crcs02ue1
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.s
-    last_check: '2026-01-17T14:54:36.137Z'
+    last_check: '2026-01-20T00:39:53.214Z'
     namespace: tower-analytics-stage
     notes: ''
-    status: healthy
+    status: degraded
 known_issues: []
 last_checked: null
-last_updated: '2026-01-17T00:12:46.951279'
+last_updated: '2026-01-19T08:59:40.382700'
 recent_deployments: []
+stage.alerts:
+- alert: AutomationAnalyticsProcessorStoppedProcessing
+  fired_at: '2026-01-18T23:30:45Z'
+  status: investigating
+  namespace: tower-analytics-stage
+  note: processor stopped processing payloads for 24hrs - likely kafka consumer or
+    db issue

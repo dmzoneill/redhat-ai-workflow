@@ -25,11 +25,20 @@ if TYPE_CHECKING:
 
 
 async def _get_current_work() -> str:
-    """Get current work state resource."""
-    work_file = MEMORY_DIR / "state" / "current_work.yaml"
+    """Get current work state resource for the current project."""
+    # Import here to avoid circular imports
+    try:
+        from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+    except ImportError:
+        try:
+            from .chat_context import get_project_work_state_path
+        except ImportError:
+            from chat_context import get_project_work_state_path
+
+    work_file = get_project_work_state_path()
     if work_file.exists():
         return work_file.read_text()
-    return "# No current work tracked\nactive_issues: []\nopen_mrs: []\nfollow_ups: []"
+    return "# No current work tracked for this project\nactive_issues: []\nopen_mrs: []\nfollow_ups: []"
 
 
 async def _get_patterns() -> str:

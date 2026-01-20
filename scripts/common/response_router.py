@@ -13,13 +13,12 @@ Supports:
 - Configurable per-command defaults
 """
 
+import json
 import logging
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -202,9 +201,7 @@ class ResponseRouter:
 
         return response
 
-    def _route_to_dm(
-        self, context: CommandContext, response: ResponseConfig
-    ) -> ResponseConfig:
+    def _route_to_dm(self, context: CommandContext, response: ResponseConfig) -> ResponseConfig:
         """Route response to DM."""
         response.mode = ResponseMode.DM
         # DM channel will be opened by the sender
@@ -307,9 +304,7 @@ class ResponseFormatter:
                 header = lines[0].strip()
                 content = lines[1].strip() if len(lines) > 1 else ""
 
-                blocks.append(
-                    {"type": "header", "text": {"type": "plain_text", "text": header}}
-                )
+                blocks.append({"type": "header", "text": {"type": "plain_text", "text": header}})
 
                 if content:
                     blocks.append(

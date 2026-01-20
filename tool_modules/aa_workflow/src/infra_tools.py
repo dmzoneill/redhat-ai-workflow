@@ -179,8 +179,33 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
 
         output = stdout + stderr
 
-        if success:
+        # Detect OAuth callback failures - token generated but login failed
+        oauth_failure_patterns = [
+            "error: login failed",
+            "error: the server doesn't have a resource type",
+            "error: you must be logged in",
+            "error: unauthorized",
+            "error: the token provided is invalid",
+            "oauth callback error",
+            "failed to get token",
+            "login error",
+        ]
+        oauth_failed = any(pattern in output.lower() for pattern in oauth_failure_patterns)
+
+        if success and not oauth_failed:
             lines.append(f"✅ Logged into {cluster_names[short_cluster]} cluster")
+        elif oauth_failed:
+            lines.append("❌ OAuth authentication failed")
+            lines.append("")
+            lines.append("**Common causes:**")
+            lines.append("1. Browser didn't complete SSO flow")
+            lines.append("2. OAuth token was generated but callback to cluster failed")
+            lines.append("3. Network issue during token exchange")
+            lines.append("")
+            lines.append("**To fix:**")
+            lines.append("1. Try running `kube-clean {short_cluster}` to clear stale tokens")
+            lines.append("2. Run `kube {short_cluster}` manually and complete browser SSO")
+            lines.append("3. Ensure VPN is connected if required")
         else:
             lines.append("⚠️ Login may have issues")
 
@@ -189,10 +214,11 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
         lines.append(truncate_output(output, max_length=1500, mode="tail"))
         lines.append("```")
 
-        if os.path.exists(kubeconfig):
-            lines.append("")
-            lines.append("### Testing connection...")
+        # Always verify connection after login attempt
+        lines.append("")
+        lines.append("### Testing connection...")
 
+        if os.path.exists(kubeconfig):
             test_success, test_out, test_err = await run_cmd_full(
                 [
                     "kubectl",
@@ -211,7 +237,35 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                 ns_count = len(test_out.strip().split("\n")) if test_out.strip() else 0
                 lines.append(f"✅ Connection verified ({ns_count} namespaces accessible)")
             else:
-                lines.append(f"⚠️ Connection test failed: {test_err}")
+                # Detailed error analysis for connection test failure
+                test_error = (test_err or test_out or "").lower()
+                lines.append(f"❌ Connection test failed")
+                lines.append("")
+
+                if "unauthorized" in test_error or "401" in test_error:
+                    lines.append("**Issue:** Token is invalid or expired")
+                    lines.append("**Fix:** OAuth callback may have failed. Try:")
+                    lines.append(f"  1. `kube-clean {short_cluster}`")
+                    lines.append(f"  2. `kube {short_cluster}` (complete browser SSO)")
+                elif "forbidden" in test_error or "403" in test_error:
+                    lines.append("**Issue:** Token valid but lacks permissions")
+                    lines.append("**Fix:** Check your cluster role bindings")
+                elif "no route" in test_error or "connection refused" in test_error:
+                    lines.append("**Issue:** Cannot reach cluster API")
+                    lines.append("**Fix:** Ensure VPN is connected")
+                elif "certificate" in test_error:
+                    lines.append("**Issue:** TLS certificate error")
+                    lines.append("**Fix:** Kubeconfig may have stale CA data. Try `kube-clean`")
+                else:
+                    lines.append(f"**Error:** {test_err[:200] if test_err else 'Unknown'}")
+
+                lines.append("")
+                lines.append("```")
+                lines.append(truncate_output(test_err or test_out or "No output", max_length=500, mode="tail"))
+                lines.append("```")
+        else:
+            lines.append(f"⚠️ Kubeconfig not found at {kubeconfig}")
+            lines.append("Login may not have completed successfully.")
 
     except FileNotFoundError:
         lines.append("❌ `kube` command not found")

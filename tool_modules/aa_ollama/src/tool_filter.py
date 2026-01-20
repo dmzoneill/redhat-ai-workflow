@@ -5,6 +5,9 @@ Implements the core filtering logic:
 2. Persona baseline (from config.json)
 3. Skill tools (dynamic from YAML)
 4. NPU classification (with fallback)
+
+This module is workspace-aware: cache keys include workspace_uri to ensure
+different Cursor chats/workspaces have separate cache entries.
 """
 
 import json
@@ -12,15 +15,18 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .cache import FilterCache
 from .categories import CORE_CATEGORIES, TOOL_CATEGORIES, format_categories_for_prompt
-from .client import OllamaClient, get_available_client
+from .client import OllamaClient, get_available_client, warmup_model
 from .context_enrichment import enrich_context
 from .skill_discovery import SkillToolDiscovery, detect_skill
-from .stats import FilterStats, get_stats
+from .stats import FilterStats, get_stats, save_stats
 from .tool_registry import ToolRegistry, load_registry
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import Context
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +129,9 @@ class HybridToolFilter:
 
         if self.inference_client:
             logger.info(f"Inference client initialized: {self.inference_client.name}")
+            # Warm up the model to avoid cold start latency
+            if npu_config.get("warmup", True):
+                warmup_model(self.inference_client.name)
         else:
             logger.warning("No inference instances available")
 
@@ -322,6 +331,7 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
         persona: str = "developer",
         detected_skill: Optional[str] = None,
         auto_detect_persona: bool = True,
+        workspace_uri: str = "default",
     ) -> dict:
         """4-layer filtering with graceful degradation.
 
@@ -331,6 +341,7 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
                      Used as default if auto_detect_persona is True
             detected_skill: Pre-detected skill name (optional)
             auto_detect_persona: If True, detect persona from message keywords
+            workspace_uri: Workspace URI for cache isolation
 
         Returns:
             Dict with:
@@ -345,6 +356,7 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
                 - persona_detection_reason: why this persona was chosen
                 - skill_detected: detected skill or None
                 - latency_ms: filter latency
+                - workspace_uri: workspace used for cache
         """
         start_time = time.perf_counter()
 
@@ -369,9 +381,9 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
                 persona_auto_detected = True  # Mark as auto-detected even if same as default
                 persona_detection_reason = detection_reason
 
-        # Check cache first (after persona detection)
+        # Check cache first (after persona detection) - workspace-aware
         if self.cache_enabled:
-            cached_tools = self.cache.get(message, persona)
+            cached_tools = self.cache.get(message, persona, workspace_uri)
             if cached_tools is not None:
                 self.stats.record_cache_hit()
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -388,6 +400,7 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
                     "skill_detected": detected_skill,
                     "latency_ms": round(elapsed_ms, 1),
                     "message_preview": message[:50],
+                    "workspace_uri": workspace_uri,
                 }
             self.stats.record_cache_miss()
 
@@ -428,13 +441,11 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
         if not detected_skill:
             detected_skill = detect_skill(message)
 
-        needs_npu = False
         if detected_skill:
             skill_tools = self.skill_discovery.discover_tools(detected_skill)
-            if "__has_compute_block__" in skill_tools:
-                skill_tools = skill_tools - {"__has_compute_block__"}
-                needs_npu = True
-                logger.info(f"Skill {detected_skill} has compute blocks - will use NPU")
+            # Remove the compute block flag - we don't need NPU for tool filtering
+            # when we already have the skill's explicit tools
+            skill_tools = skill_tools - {"__has_compute_block__"}
             explicit_tools.update(skill_tools)
             methods_used.append("layer3_skill")
 
@@ -455,7 +466,9 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             context_details["fast_match"]["tools"] = self.registry.get_tools_for_categories(fast_matches)
 
         # === LAYER 4: NPU Classification (with fallback) ===
-        if needs_npu or (not detected_skill and self._is_ambiguous(message, fast_matches)):
+        # Only use NPU if no skill detected AND message is ambiguous
+        # This saves ~8 seconds when a skill is detected
+        if not detected_skill and self._is_ambiguous(message, fast_matches):
             npu_categories, npu_method = self._classify_with_fallback(message, categories, persona)
             categories.update(npu_categories)
             methods_used.append(f"layer4_{npu_method}")
@@ -468,12 +481,14 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
         all_tools = list(set(category_tools) | explicit_tools)
 
         # === Load context enrichment ===
+        # Skip semantic search for speed - it adds 4+ seconds on first call
+        # The tool list is already filtered; semantic search is for extra context
         enrichment = enrich_context(
             persona=persona,
             detected_skill=detected_skill,
             tool_names=all_tools,
             message=message,
-            include_semantic_search=True,
+            include_semantic_search=False,  # Disabled for speed
         )
         context_details["memory_state"] = enrichment["memory_state"]
         context_details["environment"] = enrichment["environment"]
@@ -484,9 +499,9 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        # Cache result (tools only, not full context)
+        # Cache result (tools only, not full context) - workspace-aware
         if self.cache_enabled:
-            self.cache.set(message, persona, all_tools)
+            self.cache.set(message, persona, all_tools, workspace_uri)
 
         result = {
             "tools": all_tools,
@@ -502,10 +517,12 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             "latency_ms": round(elapsed_ms, 1),
             "message_preview": message[:50],
             "context": context_details,  # Detailed breakdown for inspector
+            "workspace_uri": workspace_uri,  # Workspace used for cache isolation
         }
 
-        # Record stats
+        # Record stats and persist to disk
         self.stats.record(result)
+        save_stats()
 
         logger.info(
             f"Tool filter: {len(all_tools)} tools ({result['reduction_pct']}% reduction) "
@@ -575,6 +592,7 @@ def filter_tools_detailed(
     message: str,
     persona: str = "developer",
     detected_skill: Optional[str] = None,
+    workspace_uri: str = "default",
 ) -> dict:
     """Convenience function for detailed tool filtering.
 
@@ -582,8 +600,11 @@ def filter_tools_detailed(
         message: User message
         persona: Active persona
         detected_skill: Pre-detected skill (optional)
+        workspace_uri: Workspace URI for cache isolation
 
     Returns:
         Full filter result dict
     """
-    return get_filter().filter(message, persona, detected_skill)
+    return get_filter().filter(message, persona, detected_skill, workspace_uri=workspace_uri)
+
+

@@ -1,0 +1,63 @@
+active_issues: []
+daily_summaries:
+- commits: 0
+  date: '2026-01-18'
+  merged_today: 30
+  open_prs: 8
+  uncommitted_repos: 0
+- commits: 0
+  date: '2026-01-18'
+  merged_today: 0
+  open_prs: 8
+  uncommitted_repos: 0
+- commits: 0
+  date: '2026-01-18'
+  merged_today: 0
+  open_prs: 8
+  uncommitted_repos: 0
+- commits: 0
+  date: '2026-01-19'
+  merged_today: 5
+  open_prs: 8
+  uncommitted_repos: 0
+feedback_waiting: []
+follow_ups: []
+last_beer: '2026-01-19T09:24:23.168707'
+last_coffee: '2026-01-19T09:16:23.068227'
+last_updated: '2026-01-19T09:24:23.174311'
+notes: 'Work state for redhat-ai-workflow project.
+
+  Use memory_append("state/current_work", "active_issues", ''{"key": "...", ...}'')
+
+  to add issues.
+
+  '
+open_mrs:
+- id: 1491
+  status: open
+  title: 'AAP-58394 - fix(billing): calculate accuracy after'
+- id: 1462
+  status: open
+  title: 'AAP-61661 - feat(test): Enable pytest-xdist parall'
+- id: 1450
+  status: open
+  title: 'AAP-60420 - chore(core): Python 3.12 (RHEL 10) rea'
+- id: 1446
+  status: open
+  title: 'AAP-60036 - style(processor): fix conditional logi'
+- id: 1445
+  status: open
+  title: 'AAP-60034 - fix(billing): add concurrency controls'
+- id: 1444
+  status: open
+  title: 'AAP-60037 - refactor(aap-billing): improve logging'
+- id: 1441
+  status: open
+  title: 'AAP-41047 - feat(testing): prom alerts activation '
+- id: 1440
+  status: open
+  title: 'AAP-59793 - fix(billing): AttributeError: ''str'' ob'
+- id: 170580
+  status: open
+  title: 'AAP-58394 - chore(tower-analytics): remove data-ge'
+reviews_assigned: []

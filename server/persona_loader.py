@@ -5,11 +5,15 @@ Enables loading different persona toolsets mid-session by:
 2. Loading new persona's tool modules
 3. Notifying the client that tools changed
 
+This module is workspace-aware: persona state is stored per-workspace
+in the WorkspaceRegistry, allowing different Cursor chats to have
+different active personas.
+
 Usage:
     from .persona_loader import PersonaLoader
 
     loader = PersonaLoader(server)
-    await loader.switch_persona("devops", ctx)
+    await loader.switch_persona("devops", ctx)  # ctx provides workspace context
 """
 
 import importlib.util
@@ -29,56 +33,78 @@ PROJECT_DIR = Path(__file__).parent.parent  # ai-workflow root
 TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
 PERSONAS_DIR = PROJECT_DIR / "personas"
 
-# Tool counts per module
-# Removed duplicates, low-value, and interactive-only tools
-TOOL_MODULES = {
-    # Legacy names (deprecated, use _basic variants)
-    "git": 15,
-    "jira": 23,  # Removed: jira_open_browser (interactive)
-    "gitlab": 29,  # Removed: 2 interactive + 4 duplicates/low-value
-    "k8s": 26,
-    "prometheus": 13,
-    "alertmanager": 6,
-    "kibana": 9,
-    "konflux": 35,  # Removed: 5 duplicate/low-value tkn tools
-    "bonfire": 20,  # Removed: bonfire_version (low value)
-    "quay": 7,  # 6 basic + skopeo_get_digest
-    "appinterface": 6,
-    "workflow": 18,  # Core only (memory, persona, session, skill, infra, meta)
-    "lint": 7,  # Developer-specific linting/testing tools
-    "dev_workflow": 9,  # Developer-specific workflow tools
-    "slack": 8,  # Removed: 7 daemon/internal tools
-    "google_calendar": 6,
-    # New basic/extra split (based on skill usage analysis)
-    "git_basic": 27,  # Tools used in skills
-    "git_extra": 3,  # Tools not used in skills
-    "jira_basic": 17,
-    "jira_extra": 11,
-    "gitlab_basic": 17,  # includes gitlab_mr_sha
-    "gitlab_extra": 14,
-    "k8s_basic": 22,
-    "k8s_extra": 6,
-    "prometheus_basic": 5,
-    "prometheus_extra": 8,
-    "alertmanager_basic": 4,
-    "alertmanager_extra": 3,
-    "kibana_basic": 1,
-    "kibana_extra": 8,
-    "konflux_basic": 22,
-    "konflux_extra": 13,
-    "bonfire_basic": 10,
-    "bonfire_extra": 10,
-    "quay_basic": 5,
-    "quay_extra": 2,
-    "appinterface_basic": 4,
-    "appinterface_extra": 3,
-    "lint_basic": 1,
-    "lint_extra": 6,
-    "dev_workflow_basic": 9,  # All used in skills
-    "slack_basic": 6,
-    "slack_extra": 3,
-    "google_calendar_basic": 6,  # No extra (all used)
-}
+# Tool file naming conventions
+TOOLS_FILE = "tools.py"
+TOOLS_BASIC_FILE = "tools_basic.py"
+TOOLS_EXTRA_FILE = "tools_extra.py"
+
+
+def discover_tool_modules() -> set[str]:
+    """
+    Dynamically discover available tool modules from the tool_modules directory.
+
+    Scans for:
+    - Base modules: aa_*/src/tools.py or aa_*/src/tools_basic.py
+    - Basic variants: aa_*/src/tools_basic.py -> module_basic
+    - Extra variants: aa_*/src/tools_extra.py -> module_extra
+
+    Returns:
+        Set of available module names (e.g., {'git', 'git_basic', 'git_extra', 'jira', ...})
+    """
+    modules = set()
+
+    if not TOOL_MODULES_DIR.exists():
+        logger.warning(f"Tool modules directory not found: {TOOL_MODULES_DIR}")
+        return modules
+
+    for module_dir in TOOL_MODULES_DIR.iterdir():
+        if not module_dir.is_dir() or not module_dir.name.startswith("aa_"):
+            continue
+
+        # Extract base name (e.g., "aa_git" -> "git")
+        base_name = module_dir.name[3:]  # Remove "aa_" prefix
+        src_dir = module_dir / "src"
+
+        if not src_dir.exists():
+            continue
+
+        # Check for tools files
+        tools_py = src_dir / TOOLS_FILE
+        tools_basic_py = src_dir / TOOLS_BASIC_FILE
+        tools_extra_py = src_dir / TOOLS_EXTRA_FILE
+
+        # Add base module if tools.py or tools_basic.py exists
+        if tools_py.exists() or tools_basic_py.exists():
+            modules.add(base_name)
+
+        # Add _basic variant if tools_basic.py exists
+        if tools_basic_py.exists():
+            modules.add(f"{base_name}_basic")
+
+        # Add _extra variant if tools_extra.py exists
+        if tools_extra_py.exists():
+            modules.add(f"{base_name}_extra")
+
+    logger.debug(f"Discovered {len(modules)} tool modules: {sorted(modules)}")
+    return modules
+
+
+# Dynamically discovered tool modules (cached on first access)
+_discovered_modules: set[str] | None = None
+
+
+def get_available_modules() -> set[str]:
+    """Get available tool modules, discovering them if needed."""
+    global _discovered_modules
+    if _discovered_modules is None:
+        _discovered_modules = discover_tool_modules()
+    return _discovered_modules
+
+
+def is_valid_module(module_name: str) -> bool:
+    """Check if a module name is valid (exists in tool_modules)."""
+    return module_name in get_available_modules()
+
 
 # Core tools that should never be removed
 CORE_TOOLS = {
@@ -111,17 +137,38 @@ class PersonaLoader:
             logger.error(f"Failed to load persona config {persona_name}: {e}")
             return None
 
+    def _get_tools_file_path(self, module_name: str) -> Path:
+        """
+        Determine the correct tools file path for a tool module name.
+
+        Handles _basic and _extra suffixes properly:
+        - k8s_basic -> aa_k8s/src/tools_basic.py
+        - k8s_extra -> aa_k8s/src/tools_extra.py
+        - workflow -> aa_workflow/src/tools_basic.py (or tools.py fallback)
+        """
+        if module_name.endswith("_basic"):
+            base_name = module_name[:-6]  # Remove "_basic"
+            module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+            return module_dir / "src" / TOOLS_BASIC_FILE
+        elif module_name.endswith("_extra"):
+            base_name = module_name[:-6]  # Remove "_extra"
+            module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+            return module_dir / "src" / TOOLS_EXTRA_FILE
+        else:
+            # For non-suffixed modules, try tools_basic.py first, then tools.py
+            module_dir = TOOL_MODULES_DIR / f"aa_{module_name}"
+            tools_basic = module_dir / "src" / TOOLS_BASIC_FILE
+            if tools_basic.exists():
+                return tools_basic
+            # Fallback to legacy tools.py
+            return module_dir / "src" / TOOLS_FILE
+
     async def _load_tool_module(self, module_name: str) -> list[str]:
         """Load a tool module and return list of tool names added."""
-        module_dir = TOOL_MODULES_DIR / f"aa_{module_name}"
-
-        # Try tools_basic.py first (new structure), then tools.py (legacy)
-        tools_file = module_dir / "src" / "tools_basic.py"
-        if not tools_file.exists():
-            tools_file = module_dir / "src" / "tools.py"
+        tools_file = self._get_tools_file_path(module_name)
 
         if not tools_file.exists():
-            logger.warning(f"Tools file not found: {module_dir / 'src'}")
+            logger.warning(f"Tools file not found: {tools_file}")
             return []
 
         try:
@@ -131,8 +178,8 @@ class PersonaLoader:
 
             module = importlib.util.module_from_spec(spec)
 
-            # Get tools before loading
-            tools_before = set(await self.server.list_tools())
+            # Get tool names before loading (Tool objects aren't hashable, so use names)
+            tools_before = {t.name for t in await self.server.list_tools()}
 
             # Load the module (registers tools with server)
             spec.loader.exec_module(module)
@@ -140,16 +187,13 @@ class PersonaLoader:
             if hasattr(module, "register_tools"):
                 module.register_tools(self.server)
 
-            # Get tools after loading
-            tools_after = set(await self.server.list_tools())
-            new_tools = tools_after - tools_before
+            # Get tool names after loading
+            tools_after = {t.name for t in await self.server.list_tools()}
+            new_tool_names = list(tools_after - tools_before)
 
-            # Track which tools came from this module and extract names
-            new_tool_names = []
-            for tool in new_tools:
-                tool_name = tool.name if hasattr(tool, "name") else str(tool)
+            # Track which tools came from this module
+            for tool_name in new_tool_names:
                 self._tool_to_module[tool_name] = module_name
-                new_tool_names.append(tool_name)
 
             self.loaded_modules.add(module_name)
             logger.info(f"Loaded {module_name}: {len(new_tool_names)} tools")
@@ -203,9 +247,13 @@ class PersonaLoader:
         """
         Switch to a different persona, loading its tools.
 
+        This method is workspace-aware: it stores the persona in the
+        WorkspaceRegistry for the current workspace, allowing different
+        Cursor chats to have different active personas.
+
         Args:
             persona_name: Persona to switch to (e.g., "devops", "developer")
-            ctx: MCP Context for sending notifications
+            ctx: MCP Context for sending notifications and workspace identification
 
         Returns:
             dict with status, tools loaded, and persona info
@@ -228,14 +276,39 @@ class PersonaLoader:
         # Load new persona's tools
         loaded_tools = []
         for module_name in tool_modules:
-            if module_name not in TOOL_MODULES:
+            if not is_valid_module(module_name):
                 logger.warning(f"Unknown module: {module_name}")
                 continue
 
             new_tools = await self._load_tool_module(module_name)
             loaded_tools.extend(new_tools)
 
+        # Update global persona (for backward compatibility)
         self.current_persona = persona_name
+
+        # Update workspace-specific persona
+        try:
+            from .workspace_state import WorkspaceRegistry, update_persona_tool_count
+
+            workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
+            workspace_state.persona = persona_name
+            
+            # Update tool count (not the full list)
+            session = workspace_state.get_active_session()
+            if session:
+                session.tool_count = len(loaded_tools)
+            
+            workspace_state.clear_filter_cache()  # Clear NPU cache when persona changes
+            
+            # Update the global persona tool count cache
+            update_persona_tool_count(persona_name, len(loaded_tools))
+            
+            logger.info(f"Set persona '{persona_name}' for workspace {workspace_state.workspace_uri} with {len(loaded_tools)} tools")
+            
+            # Persist to disk so UI can see the change
+            WorkspaceRegistry.save_to_disk()
+        except Exception as e:
+            logger.warning(f"Failed to update workspace state: {e}")
 
         # Notify client that tools changed
         try:
@@ -260,14 +333,77 @@ class PersonaLoader:
             "persona_context": persona,
         }
 
+    async def get_workspace_persona(self, ctx: "Context") -> str:
+        """Get the persona for the current workspace.
+
+        Args:
+            ctx: MCP Context for workspace identification
+
+        Returns:
+            Persona name for the current workspace
+        """
+        try:
+            from .workspace_state import WorkspaceRegistry
+
+            workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
+            return workspace_state.persona
+        except Exception:
+            return self.current_persona or "developer"
+
+    async def set_workspace_persona(self, ctx: "Context", persona_name: str) -> None:
+        """Set the persona for the current workspace without loading tools.
+
+        Use this when you want to track persona per-workspace but not
+        reload tools (e.g., when tools are already loaded globally).
+
+        Args:
+            ctx: MCP Context for workspace identification
+            persona_name: Persona name to set
+        """
+        try:
+            from .workspace_state import WorkspaceRegistry
+
+            workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
+            workspace_state.persona = persona_name
+            workspace_state.clear_filter_cache()
+            logger.debug(f"Set workspace persona to '{persona_name}'")
+        except Exception as e:
+            logger.warning(f"Failed to set workspace persona: {e}")
+
     def get_status(self) -> dict:
-        """Get current persona loader status."""
+        """Get current persona loader status (global)."""
         return {
             "current_persona": self.current_persona,
             "loaded_modules": list(self.loaded_modules),
             "tool_count": len(self._tool_to_module),
             "tools": list(self._tool_to_module.keys()),
         }
+
+    async def get_workspace_status(self, ctx: "Context") -> dict:
+        """Get persona loader status for the current workspace.
+
+        Args:
+            ctx: MCP Context for workspace identification
+
+        Returns:
+            dict with workspace-specific persona status
+        """
+        try:
+            from .workspace_state import WorkspaceRegistry
+
+            workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
+            return {
+                "workspace_uri": workspace_state.workspace_uri,
+                "persona": workspace_state.persona,
+                "project": workspace_state.project,
+                "active_tools": list(workspace_state.active_tools),
+                "global_persona": self.current_persona,
+                "loaded_modules": list(self.loaded_modules),
+                "tool_count": len(self._tool_to_module),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get workspace status: {e}")
+            return self.get_status()
 
 
 # Global instance (set by server on startup)

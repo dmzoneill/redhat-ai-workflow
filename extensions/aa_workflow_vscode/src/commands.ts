@@ -773,4 +773,99 @@ export function registerCommands(
       await sendOrCopyToChat("/beer", "Running end of day summary 🍺");
     })
   );
+
+  // Work Analysis - generate work activity report
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.workAnalysis", async () => {
+      // Ask for optional date range
+      const rangeChoice = await vscode.window.showQuickPick(
+        [
+          {
+            label: "$(calendar) Last 6 months (default)",
+            value: "default",
+            description: "Full 6-month analysis",
+          },
+          {
+            label: "$(calendar) Last month",
+            value: "1month",
+            description: "Past 30 days",
+          },
+          {
+            label: "$(calendar) Last 2 weeks",
+            value: "2weeks",
+            description: "Sprint review period",
+          },
+          {
+            label: "$(calendar) Custom range...",
+            value: "custom",
+            description: "Specify start and end dates",
+          },
+        ],
+        {
+          placeHolder: "Select time period for work analysis",
+          title: "Work Analysis Report",
+        }
+      );
+
+      if (!rangeChoice) {
+        return;
+      }
+
+      let args = "{}";
+
+      if (rangeChoice.value === "1month") {
+        const endDate = new Date().toISOString().split("T")[0];
+        const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .split("T")[0];
+        args = `{"start_date": "${startDate}", "end_date": "${endDate}"}`;
+      } else if (rangeChoice.value === "2weeks") {
+        const endDate = new Date().toISOString().split("T")[0];
+        const startDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .split("T")[0];
+        args = `{"start_date": "${startDate}", "end_date": "${endDate}"}`;
+      } else if (rangeChoice.value === "custom") {
+        const startDate = await vscode.window.showInputBox({
+          prompt: "Start date (YYYY-MM-DD)",
+          placeHolder: "2025-01-01",
+          validateInput: (value) => {
+            if (!value) return "Start date is required";
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+              return "Use YYYY-MM-DD format";
+            }
+            return null;
+          },
+        });
+
+        if (!startDate) {
+          return;
+        }
+
+        const endDate = await vscode.window.showInputBox({
+          prompt: "End date (YYYY-MM-DD)",
+          placeHolder: new Date().toISOString().split("T")[0],
+          value: new Date().toISOString().split("T")[0],
+          validateInput: (value) => {
+            if (!value) return "End date is required";
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+              return "Use YYYY-MM-DD format";
+            }
+            return null;
+          },
+        });
+
+        if (!endDate) {
+          return;
+        }
+
+        args = `{"start_date": "${startDate}", "end_date": "${endDate}"}`;
+      }
+
+      await sendOrCopyToChat(
+        `skill_run("work_analysis", '${args}')`,
+        "Generating work analysis report 📊"
+      );
+    })
+  );
 }

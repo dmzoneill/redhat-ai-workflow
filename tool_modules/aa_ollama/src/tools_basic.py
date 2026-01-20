@@ -380,3 +380,5 @@ To enable NPU inference:
             return [TextContent(type="text", text=f"❌ Inference test failed: {e}")]
 
     return registry.count
+
+

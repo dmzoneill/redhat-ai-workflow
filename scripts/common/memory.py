@@ -7,7 +7,9 @@ to memory files, reducing code duplication across skills.
 Memory directory structure:
   ~/src/redhat-ai-workflow/memory/
   ├── state/
-  │   ├── current_work.yaml  - Active issues, MRs, follow-ups
+  │   ├── projects/           - Project-specific state
+  │   │   └── <project>/
+  │   │       └── current_work.yaml  - Active issues, MRs, follow-ups
   │   └── environments.yaml  - Stage/prod health, namespaces
   ├── learned/
   │   ├── patterns.yaml      - Error patterns for debugging
@@ -16,10 +18,16 @@ Memory directory structure:
   │   └── service_quirks.yaml
   └── logs/
       └── YYYY-MM-DD.yaml    - Session logs
+
+Project-specific state:
+  Work state (current_work) is stored per-project to avoid mixing
+  issues/MRs from different codebases. Use get_project_memory_path()
+  for project-specific files.
 """
 
 import fcntl
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,22 +37,92 @@ import yaml
 # Memory directory - relative to project root
 MEMORY_DIR = Path.home() / "src/redhat-ai-workflow/memory"
 
+# Keys that are project-specific (stored per-project)
+PROJECT_SPECIFIC_KEYS = {"state/current_work"}
+
 logger = logging.getLogger(__name__)
 
 
-def get_memory_path(key: str) -> Path:
+def _get_current_project() -> str:
+    """Get the current project from environment or default.
+
+    Skills should set AA_CURRENT_PROJECT env var when running.
+    Falls back to detecting from cwd or using default.
+    """
+    # Check environment variable first (set by skill runner)
+    project = os.environ.get("AA_CURRENT_PROJECT")
+    if project:
+        return project
+
+    # Try to detect from cwd
+    try:
+        import json
+
+        config_path = MEMORY_DIR.parent / "config.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                config = json.load(f)
+
+            cwd = Path.cwd().resolve()
+            for project_name, project_config in config.get("repositories", {}).items():
+                project_path = Path(project_config.get("path", "")).expanduser().resolve()
+                try:
+                    cwd.relative_to(project_path)
+                    return project_name
+                except ValueError:
+                    continue
+    except Exception:
+        pass
+
+    # Default to redhat-ai-workflow
+    return "redhat-ai-workflow"
+
+
+def get_memory_path(key: str, project: Optional[str] = None) -> Path:
     """
     Get the full path to a memory file.
 
+    For project-specific keys (like state/current_work), routes to the
+    project's directory under memory/state/projects/<project>/.
+
     Args:
         key: Memory key like "state/current_work" or "learned/patterns"
+        project: Project name for project-specific keys. Auto-detected if None.
 
     Returns:
         Full path to the memory file (with .yaml extension)
     """
+    # Normalize key
+    key_normalized = key.replace(".yaml", "") if key.endswith(".yaml") else key
+
+    # Check if this is a project-specific key
+    if key_normalized in PROJECT_SPECIFIC_KEYS:
+        if project is None:
+            project = _get_current_project()
+        # Route to project-specific path
+        # state/current_work -> state/projects/<project>/current_work.yaml
+        parts = key_normalized.split("/")
+        if len(parts) == 2:
+            return MEMORY_DIR / parts[0] / "projects" / project / f"{parts[1]}.yaml"
+
+    # Global path
     if not key.endswith(".yaml"):
         key = f"{key}.yaml"
     return MEMORY_DIR / key
+
+
+def get_project_memory_path(project: str, filename: str = "current_work") -> Path:
+    """
+    Get the path to a project-specific memory file.
+
+    Args:
+        project: Project name (e.g., "automation-analytics-backend")
+        filename: File name without extension (default: "current_work")
+
+    Returns:
+        Full path to the project's memory file
+    """
+    return MEMORY_DIR / "state" / "projects" / project / f"{filename}.yaml"
 
 
 def read_memory(key: str) -> Dict[str, Any]:
@@ -663,10 +741,7 @@ def learn_tool_fix(
 
         # Check if this pattern already exists
         for existing in data["tool_fixes"]:
-            if (
-                existing.get("tool_name") == tool_name
-                and existing.get("error_pattern") == error_pattern
-            ):
+            if existing.get("tool_name") == tool_name and existing.get("error_pattern") == error_pattern:
                 # Update existing entry
                 existing["root_cause"] = root_cause
                 existing["fix_applied"] = fix_description

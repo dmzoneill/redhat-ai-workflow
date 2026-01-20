@@ -1,45 +1,19 @@
 # Core Agent Configuration
 # Essential tools that support ALL agent personas
-# Stays under 128 tool limit - use persona_load() to switch personas
+# Use persona_load() to switch to specialized personas
 
 name: core
-description: Shared tools for all 4 agents with persona switching
+description: Shared tools for all agents with persona switching
 
-# Essential tools covering all workflows
-# Using split modules to stay under 100 tools
+# Tool modules to load (from tool_modules/aa_*)
+# Tool counts are determined dynamically - use tool_list() to see actual counts
 tools:
-  # Orchestration (required - skills, personas, memory)
-  - workflow        # 18 - Core (memory, persona, session, skill, infra, meta)
+  - workflow        # Core (memory, persona, session, skill, infra, meta)
+  - git_basic       # Essential git operations
+  - jira_basic      # Issue viewing, search, status updates
+  - k8s_basic       # Essential k8s (pods, logs, deployments)
 
-  # Version Control (developer, all personas)
-  - git_basic       # 27 - Essential git operations
-
-  # Issue Tracking (all personas)
-  - jira_basic      # 17 - Issue viewing, search, status updates
-
-  # Kubernetes (devops, incident)
-  - k8s_basic       # 22 - Essential k8s (pods, logs, deployments)
-
-# Total: ~84 tools ✅
-# Note: git_extra, jira_extra, k8s_extra, prometheus available via tool_exec()
-
-# What's available with these tools:
-# ✅ Git operations (status, branch, commit, push)
-# ✅ Jira operations (view, create, update issues)
-# ✅ Kubernetes operations (pods, deployments, logs)
-# ✅ Prometheus (alerts, queries, metrics)
-# ✅ Skills (start_work, create_mr, investigate_alert)
-# ✅ Agents (devops, developer, incident, release personas)
-# ✅ Memory (persistent context)
-# ✅ Infrastructure (vpn_connect, kube_login)
-
-# What's missing (load full agent for these):
-# ❌ GitLab (MRs, pipelines) - use --agent developer
-# ❌ Konflux (builds, snapshots) - use --agent release
-# ❌ Kibana (logs) - use --agent incident
-# ❌ Bonfire (ephemeral) - use --agent devops
-# ❌ Alertmanager (silences) - use --agent incident
-# ❌ Quay (images) - use --agent release
+# Note: Use tool_exec() for additional modules or load a specialized persona
 
 skills:
   # Core workflows (work with git, jira, k8s, prometheus)

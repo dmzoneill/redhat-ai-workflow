@@ -10,6 +10,9 @@ Tracks and persists agent activity metrics:
 
 Stats are persisted to: ~/.config/aa-workflow/agent_stats.json
 Daily stats are rolled up and historical data is kept for 30 days.
+
+This module is workspace-aware: stats can be tracked per-workspace in addition
+to global stats. Use workspace_uri parameter to track workspace-specific stats.
 """
 
 import json
@@ -26,9 +29,26 @@ logger = logging.getLogger(__name__)
 STATS_FILE = Path.home() / ".config" / "aa-workflow" / "agent_stats.json"
 STATS_DIR = STATS_FILE.parent
 
+# Current workspace for tracking (set by tools)
+_current_workspace_uri: str = "default"
+
+
+def set_current_workspace(workspace_uri: str) -> None:
+    """Set the current workspace for stats tracking."""
+    global _current_workspace_uri
+    _current_workspace_uri = workspace_uri
+
+
+def get_current_workspace() -> str:
+    """Get the current workspace for stats tracking."""
+    return _current_workspace_uri
+
 
 class AgentStats:
-    """Tracks and persists agent activity statistics."""
+    """Tracks and persists agent activity statistics.
+
+    Workspace-aware: tracks both global and per-workspace stats.
+    """
 
     _instance: "AgentStats | None" = None
     _lock = Lock()
@@ -64,7 +84,7 @@ class AgentStats:
     def _create_empty_stats(self) -> dict[str, Any]:
         """Create empty stats structure."""
         return {
-            "version": 1,
+            "version": 2,  # Bumped for workspace support
             "created": datetime.now().isoformat(),
             "last_updated": datetime.now().isoformat(),
             "lifetime": {
@@ -84,11 +104,13 @@ class AgentStats:
             "daily": {},  # date -> daily stats
             "tools": {},  # tool_name -> {calls, successes, failures, duration_ms}
             "skills": {},  # skill_name -> {executions, successes, failures, duration_ms}
+            "workspaces": {},  # workspace_uri -> workspace-specific stats
             "current_session": {
                 "started": datetime.now().isoformat(),
                 "tool_calls": 0,
                 "skill_executions": 0,
                 "memory_ops": 0,
+                "workspace_uri": "default",
             },
         }
 
@@ -139,15 +161,47 @@ class AgentStats:
     # Tool Tracking
     # =========================================================================
 
+    def _ensure_workspace(self, workspace_uri: str) -> dict:
+        """Ensure workspace entry exists and return it."""
+        if "workspaces" not in self._stats:
+            self._stats["workspaces"] = {}
+
+        if workspace_uri not in self._stats["workspaces"]:
+            self._stats["workspaces"][workspace_uri] = {
+                "tool_calls": 0,
+                "tool_successes": 0,
+                "tool_failures": 0,
+                "skill_executions": 0,
+                "skill_successes": 0,
+                "skill_failures": 0,
+                "memory_reads": 0,
+                "memory_writes": 0,
+                "lines_written": 0,
+                "first_seen": datetime.now().isoformat(),
+                "last_active": datetime.now().isoformat(),
+            }
+        return self._stats["workspaces"][workspace_uri]
+
     def record_tool_call(
         self,
         tool_name: str,
         success: bool,
         duration_ms: int = 0,
+        workspace_uri: str | None = None,
     ) -> None:
-        """Record a tool call."""
+        """Record a tool call.
+
+        Args:
+            tool_name: Name of the tool called.
+            success: Whether the call succeeded.
+            duration_ms: Duration in milliseconds.
+            workspace_uri: Workspace URI for workspace-specific tracking.
+        """
         with self._stats_lock:
+            # Reload stats from disk to avoid overwriting changes from other processes
+            self._stats = self._load_stats()
             today = self._ensure_today()
+            ws_uri = workspace_uri or get_current_workspace()
 
             # Lifetime stats
             self._stats["lifetime"]["tool_calls"] += 1
@@ -164,6 +218,15 @@ class AgentStats:
                 self._stats["daily"][today]["tool_successes"] += 1
             else:
                 self._stats["daily"][today]["tool_failures"] += 1
+
+            # Workspace stats
+            ws_stats = self._ensure_workspace(ws_uri)
+            ws_stats["tool_calls"] += 1
+            ws_stats["last_active"] = datetime.now().isoformat()
+            if success:
+                ws_stats["tool_successes"] += 1
+            else:
+                ws_stats["tool_failures"] += 1
 
             # Per-tool stats
             if tool_name not in self._stats["tools"]:
@@ -204,6 +267,8 @@ class AgentStats:
     ) -> None:
         """Record a skill execution."""
         with self._stats_lock:
+            # Reload stats from disk to avoid overwriting changes from other processes
+            self._stats = self._load_stats()
             today = self._ensure_today()
 
             # Lifetime stats
@@ -254,6 +319,7 @@ class AgentStats:
     def record_memory_read(self, key: str = "") -> None:
         """Record a memory read operation."""
         with self._stats_lock:
+            self._stats = self._load_stats()
             today = self._ensure_today()
             self._stats["lifetime"]["memory_reads"] += 1
             self._stats["daily"][today]["memory_reads"] += 1
@@ -263,6 +329,7 @@ class AgentStats:
     def record_memory_write(self, key: str = "") -> None:
         """Record a memory write operation."""
         with self._stats_lock:
+            self._stats = self._load_stats()
             today = self._ensure_today()
             self._stats["lifetime"]["memory_writes"] += 1
             self._stats["daily"][today]["memory_writes"] += 1
@@ -276,6 +343,7 @@ class AgentStats:
     def record_lines_written(self, lines: int) -> None:
         """Record lines of code written."""
         with self._stats_lock:
+            self._stats = self._load_stats()
             today = self._ensure_today()
             self._stats["lifetime"]["lines_written"] += lines
             self._stats["daily"][today]["lines_written"] += lines
@@ -288,6 +356,7 @@ class AgentStats:
     def start_session(self) -> None:
         """Start a new session."""
         with self._stats_lock:
+            self._stats = self._load_stats()
             today = self._ensure_today()
             self._stats["lifetime"]["sessions"] += 1
             self._stats["daily"][today]["sessions"] += 1
@@ -424,9 +493,9 @@ def get_agent_stats() -> AgentStats:
 
 
 # Convenience functions
-def record_tool_call(tool_name: str, success: bool, duration_ms: int = 0) -> None:
+def record_tool_call(tool_name: str, success: bool, duration_ms: int = 0, workspace_uri: str | None = None) -> None:
     """Record a tool call."""
-    get_agent_stats().record_tool_call(tool_name, success, duration_ms)
+    get_agent_stats().record_tool_call(tool_name, success, duration_ms, workspace_uri)
 
 
 def record_skill_execution(
@@ -435,26 +504,36 @@ def record_skill_execution(
     duration_ms: int = 0,
     steps_completed: int = 0,
     total_steps: int = 0,
+    workspace_uri: str | None = None,
 ) -> None:
     """Record a skill execution."""
     get_agent_stats().record_skill_execution(skill_name, success, duration_ms, steps_completed, total_steps)
 
 
-def record_memory_read(key: str = "") -> None:
+def record_memory_read(key: str = "", workspace_uri: str | None = None) -> None:
     """Record a memory read."""
     get_agent_stats().record_memory_read(key)
 
 
-def record_memory_write(key: str = "") -> None:
+def record_memory_write(key: str = "", workspace_uri: str | None = None) -> None:
     """Record a memory write."""
     get_agent_stats().record_memory_write(key)
 
 
-def record_lines_written(lines: int) -> None:
+def record_lines_written(lines: int, workspace_uri: str | None = None) -> None:
     """Record lines written."""
     get_agent_stats().record_lines_written(lines)
+
+
+def get_workspace_stats(workspace_uri: str) -> dict:
+    """Get stats for a specific workspace."""
+    stats = get_agent_stats()
+    with stats._stats_lock:
+        return stats._ensure_workspace(workspace_uri).copy()
 
 
 def start_session() -> None:
     """Start a new session."""
     get_agent_stats().start_session()
+
+

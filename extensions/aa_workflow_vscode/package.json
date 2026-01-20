@@ -1,5 +1,5 @@
 {
-  "name": "aa_workflow",
+  "name": "aa-workflow",
   "displayName": "AI Workflow",
   "description": "Status bar and quick actions for AI Workflow automation",
   "version": "0.1.0",
@@ -111,6 +111,13 @@
         "title": "AI Workflow: End of Day Summary",
         "shortTitle": "End of Day 🍺",
         "icon": "$(beaker)",
+        "category": "AI Workflow"
+      },
+      {
+        "command": "aa-workflow.workAnalysis",
+        "title": "AI Workflow: Work Analysis Report",
+        "shortTitle": "Work Analysis 📊",
+        "icon": "$(graph)",
         "category": "AI Workflow"
       },
       {
@@ -296,6 +303,10 @@
         {
           "command": "aa-workflow.beer",
           "group": "3_actions@4"
+        },
+        {
+          "command": "aa-workflow.workAnalysis",
+          "group": "3_actions@5"
         },
         {
           "command": "aa-workflow.openJiraIssue",

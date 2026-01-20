@@ -108,9 +108,7 @@ class CommandHelp:
             for inp in self.inputs:
                 required = " (required)" if inp.get("required") else ""
                 default = f" [default: {inp.get('default')}]" if "default" in inp else ""
-                lines.append(
-                    f"• `{inp['name']}`{required}: {inp.get('description', '')}{default}"
-                )
+                lines.append(f"• `{inp['name']}`{required}: {inp.get('description', '')}{default}")
 
         if self.parameters:
             props = self.parameters.get("properties", {})
@@ -119,9 +117,7 @@ class CommandHelp:
                 required_params = self.parameters.get("required", [])
                 for name, info in props.items():
                     required = " (required)" if name in required_params else ""
-                    lines.append(
-                        f"• `{name}`{required}: {info.get('description', info.get('type', ''))}"
-                    )
+                    lines.append(f"• `{name}`{required}: {info.get('description', info.get('type', ''))}")
 
         if self.examples:
             lines.append("\n*Examples:*")
@@ -246,12 +242,7 @@ class CommandRegistry:
         # Apply filters
         if filter_text:
             filter_lower = filter_text.lower()
-            commands = [
-                c
-                for c in commands
-                if filter_lower in c.name.lower()
-                or filter_lower in c.description.lower()
-            ]
+            commands = [c for c in commands if filter_lower in c.name.lower() or filter_lower in c.description.lower()]
 
         if category:
             commands = [c for c in commands if c.category == category]
@@ -362,9 +353,7 @@ class CommandRegistry:
                 if inputs:
                     required_inputs = [i for i in inputs if i.get("required")]
                     if required_inputs:
-                        args = " ".join(
-                            f"--{i['name']}=<value>" for i in required_inputs[:2]
-                        )
+                        args = " ".join(f"--{i['name']}=<value>" for i in required_inputs[:2])
                         examples.append(f"@me {name} {args}")
 
                 self._skills_cache[name] = CommandInfo(

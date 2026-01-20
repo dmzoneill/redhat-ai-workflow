@@ -13,34 +13,27 @@ WORKFLOW_SRC = PROJECT_ROOT / "tool_modules" / "aa_workflow" / "src"
 if str(WORKFLOW_SRC) not in sys.path:
     sys.path.append(str(WORKFLOW_SRC))
 
-from skill_engine import SkillExecutor
 import yaml
+from skill_engine import SkillExecutor
+
 
 async def run_coffee():
     skill_file = PROJECT_ROOT / "skills" / "coffee.yaml"
     with open(skill_file) as f:
         skill = yaml.safe_load(f)
-    
+
     # Inputs for coffee skill
-    inputs = {
-        "full_email_scan": False,
-        "auto_archive_email": False,
-        "days_back": 1,
-        "slack_format": False
-    }
-    
+    inputs = {"full_email_scan": False, "auto_archive_email": False, "days_back": 1, "slack_format": False}
+
     executor = SkillExecutor(
-        skill=skill,
-        inputs=inputs,
-        debug=True,
-        server=None, # We'll let it load modules dynamically
-        emit_events=False
+        skill=skill, inputs=inputs, debug=True, server=None, emit_events=False  # We'll let it load modules dynamically
     )
-    
+
     print("Starting coffee skill...")
     result = await executor.execute()
     print("\n--- RESULT ---\n")
     print(result)
+
 
 if __name__ == "__main__":
     asyncio.run(run_coffee())

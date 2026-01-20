@@ -112,7 +112,7 @@ tool_fixes:
     report's More Actions menu (in header)
   times_prevented: 0
   tool_name: concur_cleanup_unsubmitted
-- date_learned: '2026-01-16'
+- date_learned: '2026-01-18'
   error_pattern: no such host
   fix_applied: Run vpn_connect() to connect to Red Hat VPN
   root_cause: VPN not connected - internal GitLab not reachable

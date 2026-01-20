@@ -5,14 +5,20 @@ This module provides the context that gets injected alongside filtered tools:
 - Learned patterns (error fixes, gotchas)
 - Semantic knowledge (relevant code from vector search)
 - Environment status (VPN, cluster auth)
+
+This module is workspace-aware: when ctx is provided, it uses the workspace's
+project for loading project-specific memory and semantic search.
 """
 
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import yaml
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import Context
 
 logger = logging.getLogger(__name__)
 
@@ -30,15 +36,28 @@ def _get_memory_dir() -> Path:
     return MEMORY_DIR
 
 
-def load_memory_state() -> dict:
+def _get_project_memory_path(project: str) -> Path:
+    """Get the memory path for a specific project.
+
+    Args:
+        project: Project name
+
+    Returns:
+        Path to project's current_work.yaml
+    """
+    memory_dir = _get_memory_dir()
+    return memory_dir / "state" / "projects" / project / "current_work.yaml"
+
+
+def load_memory_state(project: Optional[str] = None) -> dict:
     """Load current work state from memory.
+
+    Args:
+        project: Project name for project-specific memory. If None, uses global.
 
     Returns:
         Dict with active_issues, current_branch, current_repo, notes
     """
-    memory_dir = _get_memory_dir()
-    current_work_path = memory_dir / "state" / "current_work.yaml"
-
     result = {
         "active_issues": [],
         "current_branch": None,
@@ -47,6 +66,14 @@ def load_memory_state() -> dict:
         "open_mrs": [],
         "follow_ups": [],
     }
+
+    # Determine which memory file to load
+    if project:
+        current_work_path = _get_project_memory_path(project)
+        result["current_repo"] = project  # Set repo from project
+    else:
+        memory_dir = _get_memory_dir()
+        current_work_path = memory_dir / "state" / "current_work.yaml"
 
     if not current_work_path.exists():
         return result
@@ -57,7 +84,8 @@ def load_memory_state() -> dict:
 
         result["active_issues"] = data.get("active_issues", [])[:5]  # Limit to 5
         result["current_branch"] = data.get("current_branch") or data.get("branch")
-        result["current_repo"] = data.get("repo") or data.get("current_repo")
+        if not result["current_repo"]:
+            result["current_repo"] = data.get("repo") or data.get("current_repo")
         result["notes"] = data.get("notes", "")[:300] if data.get("notes") else None
         result["open_mrs"] = data.get("open_mrs", [])[:3]
         result["follow_ups"] = data.get("follow_ups", [])[:3]
@@ -66,6 +94,27 @@ def load_memory_state() -> dict:
         logger.warning(f"Failed to load current_work.yaml: {e}")
 
     return result
+
+
+async def load_memory_state_async(ctx: "Context" = None) -> dict:
+    """Load current work state from memory (workspace-aware).
+
+    Args:
+        ctx: MCP Context for workspace identification
+
+    Returns:
+        Dict with active_issues, current_branch, current_repo, notes
+    """
+    project = None
+
+    if ctx:
+        try:
+            from server.workspace_utils import get_workspace_project
+            project = await get_workspace_project(ctx)
+        except Exception as e:
+            logger.warning(f"Failed to get workspace project: {e}")
+
+    return load_memory_state(project)
 
 
 def load_environment_status() -> dict:
@@ -331,12 +380,41 @@ def run_semantic_search(
         return []
 
 
+async def run_semantic_search_async(
+    message: str,
+    ctx: "Context" = None,
+    project: Optional[str] = None,
+    limit: int = 3,
+) -> list[dict]:
+    """Run semantic search on the message (workspace-aware).
+
+    Args:
+        message: User message to search for
+        ctx: MCP Context for workspace identification
+        project: Project to search in (uses workspace project if not provided)
+        limit: Maximum results to return
+
+    Returns:
+        List of code snippets with file, lines, content, relevance
+    """
+    # Get project from workspace if not provided
+    if not project and ctx:
+        try:
+            from server.workspace_utils import get_workspace_project
+            project = await get_workspace_project(ctx)
+        except Exception as e:
+            logger.warning(f"Failed to get workspace project: {e}")
+
+    return run_semantic_search(message, project, limit)
+
+
 def enrich_context(
     persona: str,
     detected_skill: Optional[str] = None,
     tool_names: Optional[list[str]] = None,
     message: Optional[str] = None,
     include_semantic_search: bool = True,
+    project: Optional[str] = None,
 ) -> dict:
     """Load all context enrichment data.
 
@@ -346,12 +424,13 @@ def enrich_context(
         tool_names: List of filtered tool names (optional)
         message: User message for semantic search (optional)
         include_semantic_search: Whether to run semantic search
+        project: Project name for workspace-specific context (optional)
 
     Returns:
         Dict with all context sections
     """
     result = {
-        "memory_state": load_memory_state(),
+        "memory_state": load_memory_state(project),
         "environment": load_environment_status(),
         "learned_patterns": load_learned_patterns(tool_names, detected_skill),
         "session_log": load_session_log(),
@@ -361,6 +440,54 @@ def enrich_context(
 
     # Run semantic search if message provided
     if include_semantic_search and message:
-        result["semantic_knowledge"] = run_semantic_search(message)
+        result["semantic_knowledge"] = run_semantic_search(message, project)
 
     return result
+
+
+async def enrich_context_async(
+    persona: str,
+    ctx: "Context" = None,
+    detected_skill: Optional[str] = None,
+    tool_names: Optional[list[str]] = None,
+    message: Optional[str] = None,
+    include_semantic_search: bool = True,
+) -> dict:
+    """Load all context enrichment data (workspace-aware).
+
+    Args:
+        persona: Active persona name
+        ctx: MCP Context for workspace identification
+        detected_skill: Detected skill name (optional)
+        tool_names: List of filtered tool names (optional)
+        message: User message for semantic search (optional)
+        include_semantic_search: Whether to run semantic search
+
+    Returns:
+        Dict with all context sections
+    """
+    # Get project from workspace
+    project = None
+    if ctx:
+        try:
+            from server.workspace_utils import get_workspace_project
+            project = await get_workspace_project(ctx)
+        except Exception as e:
+            logger.warning(f"Failed to get workspace project: {e}")
+
+    result = {
+        "memory_state": load_memory_state(project),
+        "environment": load_environment_status(),
+        "learned_patterns": load_learned_patterns(tool_names, detected_skill),
+        "session_log": load_session_log(),
+        "persona_prompt": load_persona_prompt(persona),
+        "semantic_knowledge": [],
+    }
+
+    # Run semantic search if message provided
+    if include_semantic_search and message:
+        result["semantic_knowledge"] = run_semantic_search(message, project)
+
+    return result
+
+

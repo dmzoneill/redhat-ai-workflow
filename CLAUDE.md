@@ -1,251 +1,168 @@
 # AI Workflow Assistant
 
-This is a complete AI-powered development workflow system with **MCP Tools**, **Personas**, **Skills**, and **Memory**.
+## Your Role
 
-## ⚠️ CRITICAL: Tool Usage Rules
+You are an AI assistant managing software development workflows across multiple projects. Your job is to help developers with:
+- **Daily work**: Starting issues, creating branches, making commits, opening MRs
+- **DevOps**: Deploying to ephemeral environments, monitoring, debugging
+- **Incidents**: Investigating alerts, checking logs, coordinating response
+- **Releases**: Building images, promoting to environments, tracking deployments
 
-**ALWAYS prefer MCP tools over CLI commands!** You have ~261 specialized tools - use them.
+## How This System Works
 
-| ❌ DON'T DO THIS | ✅ DO THIS INSTEAD |
-|------------------|-------------------|
-| `rh-issue set-status AAP-123 "In Progress"` | `jira_set_status(issue_key="AAP-123", status="In Progress")` |
-| `git checkout -b feature-branch` | `git_branch_create(repo="backend", branch_name="feature-branch")` |
-| `glab mr create ...` | `gitlab_mr_create(project="backend", title="...")` |
-| `kubectl get pods -n stage` | `kubectl_get_pods(namespace="stage", environment="stage")` |
-| `bonfire namespace list --mine` | `bonfire_namespace_list(mine_only=True)` |
-| `curl https://issues.redhat.com/...` | `jira_view_issue(issue_key="AAP-123")` |
+1. **`config.json`** defines the projects you manage (repos, namespaces, URLs, credentials)
+2. **Personas** load tool sets optimized for different work types
+3. **Skills** are pre-built workflows that chain tools together with logic
+4. **MCP Tools** are individual operations (git, jira, gitlab, k8s, etc.)
+5. **Memory** persists context across sessions (active issues, learned patterns)
 
-### Why Use MCP Tools?
+**Key Principles:**
+1. **Use skills** for common workflows (they chain tools automatically)
+2. **Use MCP tools** instead of CLI commands (they handle auth/errors)
+3. **CLI only** for running app code (`pytest`, `python app.py`) or when no tool exists
+4. **Never hardcode** project-specific values - they come from `config.json`
 
-1. **Auto-healing**: MCP tools automatically fix VPN/auth issues and retry
-2. **Memory integration**: Failures are logged, patterns are learned
-3. **Consistent output**: Formatted for AI parsing
-4. **Error handling**: Proper error messages with fix suggestions
-5. **Debug support**: `debug_tool()` can fix broken tools
+## Starting a Session
 
-### When CLI Is Acceptable
+**IMPORTANT: Track Your Session ID!**
 
-- Running actual application code (e.g., `python app.py`, `pytest`)
-- No MCP tool exists for the operation
-- User explicitly requests CLI
+When you have multiple Cursor chats open, each chat needs its own session ID to maintain separate context. The MCP server is shared, so you must explicitly track your session.
 
-### Use Skills for Common Workflows
-
-Instead of chaining tools manually, use pre-built skills:
-
-| Task | Skill to Use |
-|------|-------------|
-| Start work on Jira issue | `skill_run("start_work", '{"issue_key": "AAP-123"}')` |
-| Create an MR | `skill_run("create_mr", '{"issue_key": "AAP-123"}')` |
-| Deploy to ephemeral | `skill_run("test_mr_ephemeral", '{"mr_id": 1459}')` |
-| Investigate an alert | `skill_run("investigate_alert", '{"environment": "stage"}')` |
-| Morning briefing | `skill_run("coffee")` |
-
----
-
-## Terminology
-
-| Term | Meaning |
-|------|---------|
-| **Agent / Persona** | A tool configuration profile (developer, devops, incident, release). NOT a separate AI instance - just a different set of tools. |
-| **Tool Module** | A plugin directory (e.g., `aa_git/`, `aa_jira/`) containing MCP tool implementations. |
-| **Skill** | A YAML-defined multi-step workflow that chains tools. |
-| **Memory** | Persistent YAML files for context across sessions. |
-
-> **This is a single-agent system.** When you "load an agent," you're configuring which tools are available, not spawning a separate AI.
-
----
-
-## Architecture Overview
-
-```text
-┌─────────────────────────────────────────────────────────┐
-│                    Claude Session                        │
-├─────────────────────────────────────────────────────────┤
-│  AGENTS (personas/)           SKILLS (skills/)            │
-│  Specialized personas       Reusable workflows          │
-│  - devops.md                - start_work.yaml           │
-│  - developer.md             - create_mr.yaml            │
-│  - incident.md              - investigate_alert.yaml    │
-│  - release.md                                           │
-├─────────────────────────────────────────────────────────┤
-│  MEMORY (memory/)                                        │
-│  Persistent context across sessions                      │
-│  - state/current_work.yaml  - learned/patterns.yaml    │
-│  - state/environments.yaml  - learned/runbooks.yaml    │
-├─────────────────────────────────────────────────────────┤
-│  MCP TOOLS (tool_modules/)                               │
-│  263 tools: 188 basic (used) + 75 extra (unused)       │
-│  aa_git, aa_jira, aa_gitlab, aa_k8s, aa_prometheus...  │
-│  30% context reduction with basic-only loading         │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-## Quick Start
-
-### Load an Agent (Dynamic!)
-```text
-Load the devops agent
-```
-Tools switch dynamically! You get k8s_basic, bonfire_basic, jira_basic, quay (~74 tools).
-
-```text
-Load the developer agent
-```
-Now you have git_basic, gitlab_basic, jira_basic (~78 tools).
-
-### Run a Skill
-```text
-Run the start_work skill for issue PROJ-12345 in my-backend
-```
-Claude follows the workflow in `skills/start_work.yaml`.
-
-### Use Memory
-```text
-What am I currently working on?
-```
-Claude reads `memory/state/current_work.yaml`.
-
-### Deploy to Ephemeral
-```text
-Deploy MR 1459 to ephemeral
-Test AAP-61214 in ephemeral
-```
-Claude runs the `test_mr_ephemeral` skill automatically.
-
----
-
-## MCP Tools (263 total: 188 basic + 75 extra)
-
-### Tool Organization
-
-**All tools are split into `_basic` (used in skills) and `_extra` (rarely used) to reduce context window by 30%.**
-
-> **Data-Driven:** Analyzed 55 skills to identify which 188 tools are actually used. See `.claude/skill-tool-usage-report.md` for details.
-
-### Tool Categories
-
-| Module | Total | Basic (Used) | Extra (Unused) | Purpose |
-|--------|-------|--------------|----------------|---------|
-| `aa_workflow` | 18 | 18 | 0 | Core: agents, skills, memory, vpn, kube_login |
-| `aa_git` | 30 | 27 | 3 | Git operations (90% usage) |
-| `aa_gitlab` | 30 | 16 | 14 | GitLab MRs, CI/CD pipelines (53% usage) |
-| `aa_jira` | 28 | 17 | 11 | Jira issues (61% usage) |
-| `aa_k8s` | 28 | 22 | 6 | Kubernetes (79% usage) |
-| `aa_bonfire` | 20 | 10 | 10 | Ephemeral namespace management (50% usage) |
-| `aa_quay` | 7 | 5 | 2 | Container registry, vulnerabilities (71% usage) |
-| `aa_prometheus` | 13 | 5 | 8 | Prometheus queries, alerts (38% usage) |
-| `aa_alertmanager` | 7 | 4 | 3 | Silences, alert management (57% usage) |
-| `aa_kibana` | 9 | 1 | 8 | Log search and analysis (11% usage) |
-| `aa_konflux` | 35 | 22 | 13 | Konflux builds, Tekton (63% usage) |
-| `aa_appinterface` | 7 | 4 | 3 | App-Interface validation (57% usage) |
-| `aa_google_calendar` | 6 | 6 | 0 | Calendar & meetings (100% usage) |
-| `aa_slack` | 9 | 6 | 3 | Slack integration (67% usage) |
-| `aa_lint` | 7 | 1 | 6 | Code linting and testing (14% usage) |
-| `aa_dev_workflow` | 9 | 9 | 0 | Development workflow helpers (100% usage) |
-
-**Total:** 263 tools (188 basic used in skills, 75 extra rarely used)
-
-### Most-Used Tools
-
-**Starting Work:**
 ```python
-jira_view_issue(issue_key="AAP-12345")
-git_branch_create(repo="backend", branch_name="aap-12345-feature")
-jira_set_status(issue_key="AAP-12345", status="In Progress")
+# Start a NEW session and SAVE the returned session_id
+session_start()  # Returns session_id like "abc123" - SAVE THIS!
+
+# To check YOUR session (not another chat's), pass your session_id:
+session_info(session_id="abc123")  # Gets YOUR session info
+
+# To resume a previous session:
+session_start(session_id="abc123")  # Resumes existing session
+
+# Start with specific options:
+session_start(agent="developer")     # Start with developer tools
+session_start(agent="devops")        # Start with devops tools
+session_start(project="automation-analytics-backend")  # Work on specific project
+session_start(name="Fixing AAP-12345")  # Named session for easy identification
 ```
 
-**Creating MR:**
+**Session Management Commands:**
 ```python
-git_push(repo="backend", set_upstream=True)
-gitlab_mr_create(project="backend", title="AAP-12345 - feat: description")
-gitlab_ci_status(project="backend")
+session_list()                    # List all sessions in workspace
+session_switch(session_id="...")  # Switch to a different session
+session_rename(name="...")        # Rename current session
+session_info(session_id="...")    # Get specific session info
 ```
 
-**Investigating Issues:**
-```python
-prometheus_alerts(environment="stage")
-kubectl_get_pods(namespace="your-app-stage", environment="stage")
-kibana_get_errors(environment="stage", time_range="30m")
-```
-
-**Deploying:**
-```python
-konflux_list_snapshots(namespace="your-tenant")
-bonfire_namespace_reserve(duration="2h")
-bonfire_deploy(app="your-app", namespace="ephemeral-xxx")
-```text
+**Why track session_id?** Multiple Cursor chats share the same MCP server process. Without passing your session_id, you'll see whichever session was most recently active (which might be from a different chat).
 
 ---
 
-## Personas (Dynamic Tool Loading!)
+## Chat Context (Multiple Chats)
 
-Personas are tool configuration profiles. **Load one and tools switch dynamically!**
+When you have **multiple Cursor chats open**, each chat should track its own session ID to maintain separate context.
 
-### How Persona Loading Works
+### Per-Chat Session Tracking
 
-```text
-You: Load the devops agent
+```python
+# Chat 1: Start session and save ID
+session_start(name="Working on billing")  # Returns session_id="abc123"
+# Save "abc123" - use it for all subsequent session_info() calls
 
-[Server unloads current tools, loads k8s_basic/bonfire_basic/jira_basic/quay/docker]
-[Server sends tools/list_changed to Cursor]
-[Cursor refreshes available tools]
+# Chat 2: Start its own session
+session_start(name="Debugging auth")  # Returns session_id="def456"
+# Save "def456" - this chat uses this ID
 
-Claude: DevOps persona loaded with ~79 tools!
+# Later in Chat 1:
+session_info(session_id="abc123")  # Gets Chat 1's session, not Chat 2's
 ```
 
-### Available Personas
+### Setting Project Context
 
-| Persona | Modules | ~Tools | Best For |
-|---------|---------|--------|----------|
-| **developer** | workflow, git_basic, gitlab_basic, jira_basic, lint, docker, make, code_search | ~86 | Coding, PRs, code review |
-| **devops** | workflow, k8s_basic, bonfire_basic, jira_basic, quay, docker | ~79 | Ephemeral deployments, K8s ops |
-| **incident** | workflow, k8s_basic, prometheus_basic, kibana, jira_basic, alertmanager | ~78 | Production debugging |
-| **release** | workflow, konflux_basic, quay, jira_basic, git_basic, appinterface | ~94 | Shipping releases |
-| **admin** | workflow, knowledge, project, scheduler, concur, slack, jira_basic | ~71 | Expenses, calendar, team comms |
-| **slack** | workflow, slack, jira, gitlab | ~85 | Autonomous Slack responder |
-| **universal** | workflow, git_basic, gitlab_basic, jira_basic, k8s_basic, code_search | ~104 | All-in-one |
-| **core** | workflow, git_basic, jira_basic, k8s_basic | ~84 | Essential shared |
+```python
+# Set project when starting session
+session_start(project="automation-analytics-backend")
 
-> **Note:** All personas include `jira_basic` for issue tracking. Use `tool_exec()` for `_extra` tools.
+# Or change project mid-session
+project_context(project="pdf-generator")
 
-### Developer Persona (`personas/developer.yaml`) ~86 tools
-- Focus: Coding, PRs, code review
-- Tools: workflow (18), git_basic (22), gitlab_basic (18), jira_basic (17), lint (2), docker (4), make (1), code_search (4)
-- Use when: Writing code, creating MRs
-- Skills: coffee, beer, start_work, create_mr, review_pr, check_my_prs, sync_branch, cleanup_branches
+# Associate a Jira issue with this chat
+project_context(issue_key="AAP-12345")
 
-### DevOps Persona (`personas/devops.yaml`) ~79 tools
-- Focus: Infrastructure, ephemeral environments, deployments
-- Tools: workflow (18), k8s_basic (22), bonfire_basic (10), jira_basic (17), quay (8), docker (4)
-- Use when: Deploying to ephemeral, checking namespaces
-- Skills: test_mr_ephemeral, deploy_to_ephemeral, investigate_alert, rollout_restart, scale_deployment
+# View current context
+project_context()
+```
 
-### Incident Persona (`personas/incident.yaml`) ~78 tools
-- Focus: Rapid triage, mitigation, recovery
-- Tools: workflow (18), k8s_basic (22), prometheus_basic (5), kibana (9), jira_basic (17), alertmanager (7)
-- Use when: Production incidents
-- Skills: investigate_alert, debug_prod, silence_alert, rollout_restart, scale_deployment
+### How It Works
 
-### Release Persona (`personas/release.yaml`) ~94 tools
-- Focus: Release coordination, deployment
-- Tools: workflow (18), konflux_basic (22), quay (8), jira_basic (17), git_basic (22), appinterface (7)
-- Use when: Managing releases
-- Skills: release_aa_backend_prod, release_to_prod, scan_vulnerabilities, konflux_status, appinterface_check
+1. **All chats share ONE MCP server** → you must track session_id per chat
+2. **session_start()** creates a new session and returns a unique session_id
+3. **Pass session_id** to session_info() to get YOUR session's info
+4. **Default project:** `redhat-ai-workflow` (this project) when none specified
+5. **Auto-detection:** If you're in a project directory, it's auto-detected from `config.json`
 
-### Admin Persona (`personas/admin.yaml`) ~71 tools
-- Focus: Administrative tasks - expenses, scheduling, team communication
-- Tools: workflow (18), knowledge (6), project (5), scheduler (7), concur (9), slack (9), jira_basic (17)
-- Use when: Submitting expenses, scheduling meetings, team notifications
-- Skills: submit_expenses, coffee, beer, notify_team, schedule_meeting
+### Available Projects (from config.json)
 
-### Slack Persona (`personas/slack.yaml`) ~85 tools
-- Focus: Autonomous Slack responder that monitors channels
-- Tools: workflow (18), slack (9), jira (28), gitlab (30)
-- Use when: Running as Slack bot daemon
-- Skills: start_work, create_jira_issue, create_mr, review_pr, investigate_alert, slack_daemon_control
+| Project | Description |
+|---------|-------------|
+| `automation-analytics-backend` | Main AA backend service |
+| `pdf-generator` | PDF generation service |
+| `app-interface` | App-SRE configuration |
+| `konflux-release-data` | Release data management |
+| `redhat-ai-workflow` | This project (default) |
+
+## Discovery Tools
+
+Use these to find available skills and tools:
+
+| To Discover | Tool | Example |
+|-------------|------|---------|
+| List all skills | `skill_list` | `skill_list()` |
+| List all tools | `tool_list` | `tool_list()` or `tool_list(module="git")` |
+| List personas | `persona_list` | `persona_list()` |
+| **View/set chat project** | `project_context` | `project_context()` or `project_context(project="backend")` |
+| Run any tool dynamically | `tool_exec` | `tool_exec("gitlab_mr_list", '{"project": "backend"}')` |
+| Get tool recommendations | `context_filter` | `context_filter(message="deploy MR to ephemeral")` |
+| **Apply tool filtering** | `apply_tool_filter` | `apply_tool_filter(message="deploy MR to ephemeral")` |
+| Preview a skill (dry run) | `skill_run` | `skill_run("start_work", '{"issue_key": "AAP-123"}', execute=False)` |
+
+---
+
+## Tool Filtering (Reduce Context)
+
+When you have too many tools loaded, use `apply_tool_filter` to dynamically hide irrelevant tools:
+
+```python
+# Before a complex task, filter to relevant tools only
+apply_tool_filter(message="deploy MR 1459 to ephemeral")
+# → Hides git, jira, lint tools; keeps k8s, bonfire, gitlab, quay
+
+apply_tool_filter(message="investigate the firing alert on stage")
+# → Keeps prometheus, alertmanager, kibana, k8s; hides git, gitlab
+```
+
+**How it works:**
+1. **Core tools** always stay (memory, persona, session, skill)
+2. **Persona baseline** adds tools for your work type
+3. **Skill detection** adds tools needed for detected skill
+4. **NPU classification** (if available) adds semantically relevant tools
+
+**To restore all tools:** Use `persona_load("developer")` or similar.
+
+---
+
+## Personas
+
+Personas configure which tools are loaded. Use `session_start(agent="name")` or `persona_load("name")`.
+
+| Persona | Tools | Best For |
+|---------|-------|----------|
+| **developer** | git, gitlab, jira, lint, docker, make, code_search | Coding, PRs, code review |
+| **devops** | k8s, bonfire, jira, quay, docker | Ephemeral deployments, K8s ops |
+| **incident** | k8s, prometheus, kibana, jira, alertmanager | Production debugging |
+| **release** | konflux, quay, jira, git, appinterface | Shipping releases |
+| **admin** | knowledge, project, scheduler, concur, slack, jira | Expenses, calendar, team comms |
+| **slack** | slack, jira, gitlab | Autonomous Slack responder |
+| **universal** | git, gitlab, jira, k8s, code_search | All-in-one |
 
 ---
 
@@ -263,7 +180,7 @@ Skills are multi-step workflows. **Always prefer skills over manual tool chainin
 | "What's firing?" / "Check alerts" | `investigate_alert` | `skill_run("investigate_alert", '{"environment": "stage"}')` |
 | "Morning briefing" / "What's up?" | `coffee` | `skill_run("coffee")` |
 | "End of day" / "Wrap up" | `beer` | `skill_run("beer")` |
-| "Review this PR" / "Check MR 1234" | `review_pr` | `skill_run("review_pr", '{"mr_id": 1234}')` |
+| "Review this PR" | `review_pr` | `skill_run("review_pr", '{"mr_id": 1234}')` |
 | "Create a Jira issue" | `create_jira_issue` | `skill_run("create_jira_issue", '{"summary": "...", "issue_type": "story"}')` |
 | "Close this issue" | `close_issue` | `skill_run("close_issue", '{"issue_key": "AAP-12345"}')` |
 | "Sync my branch" / "Rebase" | `sync_branch` | `skill_run("sync_branch", '{"repo": "backend"}')` |
@@ -282,113 +199,105 @@ Skills are multi-step workflows. **Always prefer skills over manual tool chainin
 
 ### Skill Categories
 
-**Daily Workflow:**
-- `coffee` - Morning briefing (PRs, Jira, calendar, alerts)
-- `beer` - End of day wrap-up
-- `standup_summary` - Generate standup notes
-- `weekly_summary` - Weekly work summary
-
-**Development:**
-- `start_work` - Begin work on Jira issue (creates branch, updates status)
-- `create_mr` - Create MR with proper formatting and Jira links
-- `review_pr` - Review a PR (auto-approves or posts feedback)
-- `check_my_prs` - Check your PRs for feedback
-- `check_mr_feedback` - See comments needing response
-- `sync_branch` - Rebase onto main
-- `rebase_pr` - Rebase PR with conflict handling
-- `cleanup_branches` - Delete merged/stale branches
-- `hotfix` - Cherry-pick to release branch
-
-**Ephemeral Testing:**
-- `test_mr_ephemeral` - Deploy MR to ephemeral (auto-detects billing vs main)
-- `deploy_to_ephemeral` - Deploy apps to ephemeral
-- `extend_ephemeral` - Extend namespace reservation
-
-**Incident Response:**
-- `investigate_alert` - Systematic alert investigation
-- `investigate_slack_alert` - Investigate from Slack context
-- `debug_prod` - Debug production issues
-- `silence_alert` - Create alert silences
-- `rollout_restart` - Restart deployments
-- `scale_deployment` - Scale pods
-
-**Release:**
-- `release_to_prod` - Production release workflow
-- `release_aa_backend_prod` - AA-specific prod release
-- `scan_vulnerabilities` - CVE scanning
-- `konflux_status` - Check Konflux builds
-- `appinterface_check` - Validate app-interface config
-
-**CI/CD:**
-- `ci_retry` - Retry failed pipelines
-- `cancel_pipeline` - Cancel stuck pipelines
-- `check_ci_health` - Diagnose CI issues
-
-**Jira:**
-- `create_jira_issue` - Create issue (supports Markdown)
-- `clone_jira_issue` - Clone existing issue
-- `close_issue` - Close with commit summary
-- `jira_hygiene` - Issue quality checks
-- `sprint_planning` - Prepare sprint backlog
-
-**Communication:**
-- `notify_mr` - Notify team about MR
-- `notify_team` - Send Slack notifications
-- `schedule_meeting` - Schedule Google Calendar meetings
+| Category | Skills |
+|----------|--------|
+| **Daily** | `coffee`, `beer`, `standup_summary`, `weekly_summary` |
+| **Development** | `start_work`, `create_mr`, `review_pr`, `check_my_prs`, `sync_branch`, `cleanup_branches`, `hotfix` |
+| **Ephemeral** | `test_mr_ephemeral`, `deploy_to_ephemeral`, `extend_ephemeral` |
+| **Incident** | `investigate_alert`, `debug_prod`, `silence_alert`, `rollout_restart`, `scale_deployment` |
+| **Release** | `release_to_prod`, `scan_vulnerabilities`, `konflux_status`, `appinterface_check` |
+| **CI/CD** | `ci_retry`, `cancel_pipeline`, `check_ci_health` |
+| **Jira** | `create_jira_issue`, `clone_jira_issue`, `close_issue`, `jira_hygiene`, `sprint_planning` |
+| **Communication** | `notify_mr`, `notify_team`, `schedule_meeting` |
 
 ---
 
-## Search & Context Tools
+## MCP Tools
 
-Use these tools to find information and understand context.
+Tools are organized by module. Each persona loads a subset of these.
 
-### Code Search (Semantic Vector Search)
+| Module | Purpose | Key Tools |
+|--------|---------|-----------|
+| `aa_workflow` | Core orchestration | `session_start`, `skill_run`, `persona_load`, `memory_read`, `vpn_connect`, `kube_login` |
+| `aa_git` | Git operations | `git_status`, `git_commit`, `git_push`, `git_branch_create`, `git_log` |
+| `aa_gitlab` | GitLab MRs & CI | `gitlab_mr_create`, `gitlab_mr_list`, `gitlab_ci_status`, `gitlab_mr_view` |
+| `aa_jira` | Issue tracking | `jira_view_issue`, `jira_set_status`, `jira_create_issue`, `jira_search` |
+| `aa_k8s` | Kubernetes | `kubectl_get_pods`, `kubectl_logs`, `kubectl_get_events`, `kubectl_exec` |
+| `aa_bonfire` | Ephemeral envs | `bonfire_namespace_reserve`, `bonfire_deploy`, `bonfire_namespace_release` |
+| `aa_quay` | Container registry | `quay_get_tag`, `quay_list_tags`, `skopeo_get_digest` |
+| `aa_prometheus` | Metrics & alerts | `prometheus_alerts`, `prometheus_query` |
+| `aa_alertmanager` | Alert silences | `alertmanager_alerts`, `alertmanager_silence_create` |
+| `aa_kibana` | Log search | `kibana_search_logs`, `kibana_get_errors` |
+| `aa_konflux` | CI/CD builds | `konflux_list_builds`, `konflux_list_snapshots`, `tkn_pipelinerun_list` |
+| `aa_slack` | Team notifications | `slack_post_message`, `slack_list_channels` |
+| `aa_code_search` | Semantic search | `code_search`, `code_index` |
+| `aa_knowledge` | Project knowledge | `knowledge_query`, `knowledge_scan` |
 
-Find code by meaning, not just text matching:
+### Search & Context Tools
 
 | User Request | Tool | Example |
 |--------------|------|---------|
 | "Find where we handle auth" | `code_search` | `code_search(query="authentication handling", project="backend")` |
-| "Show billing-related code" | `code_search` | `code_search(query="billing subscription processing", project="backend")` |
-| "Where do we validate input?" | `code_search` | `code_search(query="input validation sanitization", project="backend")` |
-
-### Memory Tools
-
-Query what you're working on or what you've learned:
-
-| User Request | Tool | Example |
-|--------------|------|---------|
 | "What am I working on?" | `memory_read` | `memory_read(key="state/current_work")` |
 | "Any known issues with bonfire?" | `check_known_issues` | `check_known_issues(tool_name="bonfire")` |
-| "Show my session history" | `memory_read` | `memory_read(key="")` to list files |
-
-### Knowledge Tools
-
-Project-specific gotchas, patterns, and architecture:
-
-| User Request | Tool | Example |
-|--------------|------|---------|
 | "What gotchas should I know?" | `knowledge_query` | `knowledge_query(project="backend", section="gotchas")` |
-| "Show architecture overview" | `knowledge_query` | `knowledge_query(project="backend", section="architecture")` |
-| "Bootstrap knowledge for project" | skill | `skill_run("bootstrap_knowledge", '{"project": "backend"}')` |
-
-> **Note:** Knowledge auto-loads during `session_start()`. Skills automatically search code and check known issues.
 
 ---
 
-## Environment Configuration
+## Configuration
 
-All configuration is in `config.json`. Tools read URLs, namespaces, and credentials from there automatically.
+All configuration is in `config.json`. Tools read URLs, namespaces, and credentials automatically.
 
-> **Note:** Use MCP tools instead of raw CLI commands. Tools handle kubeconfig selection automatically.
+> **Note:** Tools auto-heal common errors. If auth fails, use `kube_login("stage")`. If network fails, use `vpn_connect()`.
 
 ---
 
-## Key Principles
+## Managing This Project
 
-1. **Use skills over manual tool chaining** - Skills handle complexity automatically
-2. **Use MCP tools over CLI commands** - Tools handle auth, config, and error recovery
-3. **Link Jira + GitLab** - Always reference issues in commits/MRs
-4. **Trust the config** - Repository-specific settings are in `config.json`
+You also maintain this workflow project itself. Key maintenance tasks:
 
-> **Note:** Tools and skills auto-heal auth/network errors automatically.
+### Sync Commands (Cursor ↔ Claude Code)
+
+When commands are added/updated in `.cursor/commands/`, sync them to `.claude/commands/`:
+
+```bash
+make sync-commands           # Cursor → Claude Code (adds YAML frontmatter)
+make sync-commands-dry       # Preview without changes
+make sync-commands-reverse   # Claude Code → Cursor (removes frontmatter)
+```
+
+Or directly: `python ptools/sync_commands.py`
+
+### Keep config.json.example Updated
+
+When adding new config keys to `config.json`, sync to the example:
+
+```bash
+make sync-config-example      # Check for missing keys
+make sync-config-example-fix  # Add missing keys with placeholders
+```
+
+### Project Structure
+
+| Directory | Purpose |
+|-----------|---------|
+| `personas/` | Agent definitions (`.yaml` for tools, `.md` for context) |
+| `skills/` | Workflow definitions (`.yaml`) |
+| `tool_modules/` | MCP tool implementations (`aa-*/src/tools.py`) |
+| `.cursor/commands/` | Cursor slash commands |
+| `.claude/commands/` | Claude Code commands (synced from Cursor) |
+| `ptools/` | Project maintenance scripts |
+| `memory/` | Persistent state and learned patterns |
+| `config.json` | Project configuration (repos, URLs, credentials) |
+
+### Common Maintenance
+
+| Task | Command |
+|------|---------|
+| Run tests | `make test` |
+| Lint code | `make lint` |
+| Format code | `make format` |
+| List all skills | `make list-skills` |
+| List all tools | `make list-tools` |
+| Validate config | `make config-validate` |
+| Build VSCode extension | `make ext-build` |

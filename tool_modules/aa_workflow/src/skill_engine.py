@@ -4,6 +4,9 @@ Provides:
 - skill_list: List available skills
 - skill_run: Execute a skill
 - SkillExecutor: Class that handles step-by-step execution
+
+This module is workspace-aware: skill execution context includes workspace_uri
+for proper isolation of skill state and events per workspace.
 """
 
 import json
@@ -11,7 +14,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import yaml
 from mcp.server.fastmcp import FastMCP
@@ -32,7 +35,7 @@ except ImportError:
     SKILLS_DIR = PROJECT_DIR / "skills"
 
 if TYPE_CHECKING:
-    pass
+    from mcp.server.fastmcp import Context
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,31 @@ try:
 except ImportError:
     LAYER5_AVAILABLE = False
     logger.warning("Layer 5 (Usage Pattern Learning) not available - errors won't be learned from")
+
+
+# Agent stats helper - handles import in both package and direct load contexts
+def _get_agent_stats_module():
+    """Get the agent_stats module, handling both package and direct load contexts."""
+    try:
+        # Try relative import first (works when loaded as package)
+        from . import agent_stats
+        return agent_stats
+    except ImportError:
+        # Fall back to direct file loading (works when loaded dynamically)
+        # Force fresh load by removing from sys.modules cache
+        import importlib.util
+        import sys
+        agent_stats_path = Path(__file__).parent / "agent_stats.py"
+        
+        # Remove cached version to force fresh load
+        if "agent_stats" in sys.modules:
+            del sys.modules["agent_stats"]
+        
+        spec = importlib.util.spec_from_file_location("agent_stats", agent_stats_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["agent_stats"] = module  # Register before exec to handle circular imports
+        spec.loader.exec_module(module)
+        return module
 
 
 # Known issues checking - loads patterns from memory
@@ -135,7 +163,11 @@ def _format_known_issues(matches: list) -> str:
 
 
 class SkillExecutor:
-    """Full skill execution engine with debug support."""
+    """Full skill execution engine with debug support.
+
+    Workspace-aware: tracks workspace_uri for proper isolation of skill
+    state and events per workspace.
+    """
 
     def __init__(
         self,
@@ -147,6 +179,8 @@ class SkillExecutor:
         ask_question_fn=None,
         enable_interactive_recovery: bool = True,
         emit_events: bool = True,
+        workspace_uri: str = "default",
+        ctx: Optional["Context"] = None,
     ):
         self.skill = skill
         self.inputs = inputs
@@ -156,18 +190,21 @@ class SkillExecutor:
         self.ask_question_fn = ask_question_fn
         self.enable_interactive_recovery = enable_interactive_recovery
         self.emit_events = emit_events
+        self.workspace_uri = workspace_uri
+        self.ctx = ctx
         # Load config.json config for compute blocks
         self.config = load_config()
         self.context = {
             "inputs": inputs,
             "config": self.config,
+            "workspace_uri": workspace_uri,
         }
         self.log: list[str] = []
         self.step_results: list[dict] = []
         self.start_time: float | None = None
         self.error_recovery = None  # Initialized when needed
 
-        # Event emitter for VS Code extension
+        # Event emitter for VS Code extension (workspace-aware)
         self.event_emitter = None
         if emit_events:
             try:
@@ -177,9 +214,10 @@ class SkillExecutor:
                 self.event_emitter = SkillExecutionEmitter(
                     skill.get("name", "unknown"),
                     skill.get("steps", []),
+                    workspace_uri=workspace_uri,
                 )
-                set_emitter(self.event_emitter)
-                logger.info(f"Event emitter initialized for skill: {skill.get('name', 'unknown')}")
+                set_emitter(self.event_emitter, workspace_uri)
+                logger.info(f"Event emitter initialized for skill: {skill.get('name', 'unknown')} (workspace: {workspace_uri})")
                 # Debug: write to a file to confirm emitter is created
                 from pathlib import Path
 
@@ -1046,9 +1084,8 @@ class SkillExecutor:
 
             # Record tool call stats
             try:
-                from .agent_stats import record_tool_call
-
-                record_tool_call(tool_name, True, duration_ms)
+                agent_stats = _get_agent_stats_module()
+                agent_stats.record_tool_call(tool_name, True, duration_ms)
             except Exception as stats_err:
                 logger.debug(f"Failed to record tool stats: {stats_err}")
 
@@ -1056,9 +1093,8 @@ class SkillExecutor:
         except Exception as e:
             # Record failed tool call
             try:
-                from .agent_stats import record_tool_call
-
-                record_tool_call(tool_name, False, 0)
+                agent_stats = _get_agent_stats_module()
+                agent_stats.record_tool_call(tool_name, False, 0)
             except Exception:
                 pass
             return {"success": False, "error": str(e)}
@@ -1103,9 +1139,8 @@ class SkillExecutor:
 
             # Record tool call stats
             try:
-                from .agent_stats import record_tool_call
-
-                record_tool_call(tool_name, True, duration_ms)
+                agent_stats = _get_agent_stats_module()
+                agent_stats.record_tool_call(tool_name, True, duration_ms)
             except Exception as stats_err:
                 logger.debug(f"Failed to record tool stats: {stats_err}")
 
@@ -1114,9 +1149,8 @@ class SkillExecutor:
         except Exception as e:
             # Record failed tool call
             try:
-                from .agent_stats import record_tool_call
-
-                record_tool_call(tool_name, False, 0)
+                agent_stats = _get_agent_stats_module()
+                agent_stats.record_tool_call(tool_name, False, 0)
             except Exception:
                 pass
             return {
@@ -1184,9 +1218,8 @@ class SkillExecutor:
 
                             # Record successful retry
                             try:
-                                from .agent_stats import record_tool_call
-
-                                record_tool_call(tool_name, True, duration_ms)
+                                agent_stats = _get_agent_stats_module()
+                                agent_stats.record_tool_call(tool_name, True, duration_ms)
                             except Exception:
                                 pass
 
@@ -1270,6 +1303,14 @@ class SkillExecutor:
                 output_lines.append(f"   🔧 Auto-healing: running kube_login({cluster})...")
                 self._debug(f"Auto-heal: kube_login({cluster})")
 
+                # Emit remediation step event
+                if self.event_emitter:
+                    self.event_emitter.remediation_step(
+                        self.event_emitter.current_step_index,
+                        "kube_login",
+                        f"Auth error on {tool}",
+                    )
+
                 # Call kube_login tool
                 heal_result = await self._exec_tool("kube_login", {"cluster": cluster})
                 if not heal_result.get("success"):
@@ -1280,6 +1321,14 @@ class SkillExecutor:
             elif heal_type == "network":
                 output_lines.append("   🔧 Auto-healing: running vpn_connect()...")
                 self._debug("Auto-heal: vpn_connect()")
+
+                # Emit remediation step event
+                if self.event_emitter:
+                    self.event_emitter.remediation_step(
+                        self.event_emitter.current_step_index,
+                        "vpn_connect",
+                        f"Network error on {tool}",
+                    )
 
                 # Call vpn_connect tool
                 heal_result = await self._exec_tool("vpn_connect", {})
@@ -1506,6 +1555,55 @@ class SkillExecutor:
         except Exception:
             pass
 
+    def _detect_soft_failure(self, result_text: str) -> tuple[bool, str | None]:
+        """Detect if a successful tool result actually contains an error (soft failure).
+
+        Many tools return success=True but include error messages in the result text.
+        This method detects those cases so auto-heal can be triggered.
+
+        Returns:
+            (is_soft_failure, error_message) - True if result contains error patterns
+        """
+        if not result_text:
+            return False, None
+
+        result_lower = result_text.lower()
+
+        # Patterns that indicate a soft failure (tool returned success but result is an error)
+        soft_failure_patterns = [
+            # Explicit failure markers
+            ("❌ failed", "Tool returned failure marker"),
+            ("❌ error", "Tool returned error marker"),
+            # Network/DNS errors
+            ("no such host", "DNS resolution failed - VPN may be disconnected"),
+            ("dial tcp", "TCP connection failed - network issue"),
+            ("connection refused", "Connection refused - service may be down"),
+            ("no route to host", "No route to host - VPN may be disconnected"),
+            ("network unreachable", "Network unreachable - VPN may be disconnected"),
+            # Auth errors
+            ("unauthorized", "Authentication failed - token may be expired"),
+            ("forbidden", "Access forbidden - permissions issue"),
+            ("401", "HTTP 401 - authentication required"),
+            ("403", "HTTP 403 - access forbidden"),
+            ("token expired", "Token expired - need to re-authenticate"),
+            # Cluster errors
+            ("the server has asked for the client to provide credentials", "Kubernetes auth required"),
+            ("error from server", "Kubernetes API error"),
+            # Bonfire/ephemeral errors
+            ("traceback (most recent call last)", "Python exception in tool"),
+        ]
+
+        for pattern, error_desc in soft_failure_patterns:
+            if pattern in result_lower:
+                # Extract a snippet around the error for context
+                idx = result_lower.find(pattern)
+                start = max(0, idx - 50)
+                end = min(len(result_text), idx + len(pattern) + 100)
+                snippet = result_text[start:end].strip()
+                return True, f"{error_desc}: ...{snippet}..."
+
+        return False, None
+
     async def _process_tool_step(self, step: dict, step_num: int, step_name: str, output_lines: list[str]) -> bool:
         """Process a 'tool' step and append results to output_lines.
 
@@ -1523,16 +1621,37 @@ class SkillExecutor:
 
         if result["success"]:
             output_name = step.get("output", step_name)
-            self.context[output_name] = result["result"]
+            result_text = result["result"]
 
-            # Try to parse key:value output
-            self._parse_and_store_tool_result(result["result"], output_name)
+            # Check for soft failures - tool returned success but result contains error
+            is_soft_failure, soft_error = self._detect_soft_failure(result_text)
+
+            if is_soft_failure and step.get("on_error") == "auto_heal":
+                # Treat as error and trigger auto-heal
+                output_lines.append(f"   ⚠️ Soft failure detected: {soft_error[:100]}")
+                self._debug(f"Soft failure in {tool}: {soft_error}")
+
+                # Store result anyway (some steps may need it even if failed)
+                self.context[output_name] = result_text
+                self._parse_and_store_tool_result(result_text, output_name)
+
+                # Trigger auto-heal flow
+                should_continue = await self._handle_tool_error(
+                    tool, step, step_name, soft_error or "Soft failure detected", output_lines
+                )
+                if not should_continue:
+                    output_lines.append(f"\n⛔ **Skill failed at step {step_num}**")
+                return should_continue
+
+            # Normal success path
+            self.context[output_name] = result_text
+            self._parse_and_store_tool_result(result_text, output_name)
 
             duration = result.get("duration", 0)
             output_lines.append(f"   ✅ Success ({duration:.2f}s)")
 
-            result_preview = result["result"][:300]
-            if len(result["result"]) > 300:
+            result_preview = result_text[:300]
+            if len(result_text) > 300:
                 result_preview += "..."
             output_lines.append(f"   ```\n   {result_preview}\n   ```\n")
 
@@ -1739,10 +1858,9 @@ class SkillExecutor:
 
         # Track skill execution in agent stats
         try:
-            from .agent_stats import record_skill_execution
-
+            agent_stats = _get_agent_stats_module()
             overall_success = fail_count == 0
-            record_skill_execution(
+            agent_stats.record_skill_execution(
                 skill_name=skill_name,
                 success=overall_success,
                 duration_ms=int(total_time * 1000),
@@ -1790,6 +1908,17 @@ class SkillExecutor:
         if any(t in tool_name for t in memory_write_tools):
             key = args.get("key", tool_name)
             self.event_emitter.memory_write(step_index, key)
+
+        # Semantic search tools
+        semantic_search_tools = [
+            "code_search",
+            "knowledge_query",
+            "semantic_search",
+            "vector_search",
+        ]
+        if any(t in tool_name for t in semantic_search_tools):
+            query = args.get("query", args.get("section", tool_name))
+            self.event_emitter.semantic_search(step_index, query)
 
     async def _extract_and_save_learnings(self, output_lines: list[str]) -> None:
         """Extract learnings from successful skill execution and save to knowledge.
@@ -1988,15 +2117,6 @@ async def _skill_run_impl(
     ask_question_fn=None,
 ) -> list[TextContent]:
     """Implementation of skill_run tool."""
-    # Debug: confirm this code path is reached
-    from datetime import datetime
-    from pathlib import Path
-
-    debug_file = Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
-    debug_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(debug_file, "a") as f:
-        f.write(f"{datetime.now().isoformat()} - _skill_run_impl called for {skill_name}\n")
-
     skill_file = SKILLS_DIR / f"{skill_name}.yaml"
     if not skill_file.exists():
         available = [f.stem for f in SKILLS_DIR.glob("*.yaml")] if SKILLS_DIR.exists() else []
@@ -2080,7 +2200,11 @@ def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_f
 
     @registry.tool()
     async def skill_run(
-        skill_name: str, inputs: str = "{}", execute: bool = True, debug: bool = False
+        skill_name: str,
+        inputs: str = "{}",
+        args: str = "",
+        execute: bool = True,
+        debug: bool = False,
     ) -> list[TextContent]:
         """
         Execute a skill (multi-step workflow).
@@ -2089,13 +2213,16 @@ def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_f
 
         Args:
             skill_name: Name of the skill (e.g., "start_work", "investigate_alert")
-            inputs: JSON object with input parameters
+            inputs: JSON object with input parameters (preferred)
+            args: Alias for inputs (for convenience)
             execute: If True (default), run the tools. If False, just show the plan.
             debug: If True, show detailed execution trace with timing.
 
         Returns:
             Execution results or plan preview.
         """
-        return await _skill_run_impl(skill_name, inputs, execute, debug, server, create_issue_fn, ask_question_fn)
+        # Support both 'inputs' and 'args' parameter names
+        actual_inputs = args if args else inputs
+        return await _skill_run_impl(skill_name, actual_inputs, execute, debug, server, create_issue_fn, ask_question_fn)
 
     return registry.count

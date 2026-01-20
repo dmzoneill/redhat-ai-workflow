@@ -45,15 +45,17 @@ def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, A
     current_mr: Dict[str, Any] = {}
 
     for line in lines:
-        # Try single-line format first: "!1452  project!1452  Title (main) ← (branch-name)"
+        # Try single-line format first: "!1452  project!1452  Title (target-branch) ← (source-branch)"
         # The branch is in the format: (target) ← (source)
-        single_match = re.search(r"!(\d+)\s+\S+\s+(.+?)\s*\(main\)\s*←\s*\(([^)]+)\)", line)
+        # Target branch can be main, master, or any other branch name
+        single_match = re.search(r"!(\d+)\s+\S+\s+(.+?)\s*\((\w+)\)\s*←\s*\(([^)]+)\)", line)
         if single_match:
             mr = {
                 "iid": int(single_match.group(1)),
                 "id": int(single_match.group(1)),  # Alias for compatibility
                 "title": single_match.group(2).strip()[:60],
-                "branch": single_match.group(3).strip(),
+                "target_branch": single_match.group(3).strip(),  # e.g., main, master
+                "branch": single_match.group(4).strip(),  # source branch
             }
             if include_author:
                 author_match = re.search(r"@(\w+)", line)
@@ -62,14 +64,15 @@ def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, A
             mrs.append(mr)
             continue
 
-        # Fallback: Try without branch info (older format)
-        single_match_no_branch = re.search(r"!(\d+)\s+\S+\s+(.+?)\s*\(main\)", line)
+        # Fallback: Try without branch info (older format) - any target branch
+        single_match_no_branch = re.search(r"!(\d+)\s+\S+\s+(.+?)\s*\((\w+)\)$", line)
         if single_match_no_branch:
             mr = {
                 "iid": int(single_match_no_branch.group(1)),
                 "id": int(single_match_no_branch.group(1)),  # Alias for compatibility
                 "title": single_match_no_branch.group(2).strip()[:60],
-                "branch": "",  # No branch info available
+                "target_branch": single_match_no_branch.group(3).strip(),
+                "branch": "",  # No source branch info available
             }
             if include_author:
                 author_match = re.search(r"@(\w+)", line)

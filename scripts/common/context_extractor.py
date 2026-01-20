@@ -108,9 +108,7 @@ class ConversationContext:
                     "low": "Low",
                     "critical": "Highest",
                 }
-                inputs["priority"] = priority_map.get(
-                    self.inferred_priority.lower(), "Medium"
-                )
+                inputs["priority"] = priority_map.get(self.inferred_priority.lower(), "Medium")
 
             if self.jira_issues:
                 inputs["link_to"] = self.jira_issues[0]
@@ -161,12 +159,8 @@ class ContextExtractor:
 
     # Regex patterns for entity extraction
     JIRA_PATTERN = re.compile(r"\b([A-Z]{2,10}-\d+)\b")
-    GITLAB_MR_PATTERN = re.compile(
-        r"https?://[^/]+/([^/]+/[^/]+)/-/merge_requests/(\d+)"
-    )
-    GITLAB_ISSUE_PATTERN = re.compile(
-        r"https?://[^/]+/([^/]+/[^/]+)/-/issues/(\d+)"
-    )
+    GITLAB_MR_PATTERN = re.compile(r"https?://[^/]+/([^/]+/[^/]+)/-/merge_requests/(\d+)")
+    GITLAB_ISSUE_PATTERN = re.compile(r"https?://[^/]+/([^/]+/[^/]+)/-/issues/(\d+)")
     URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
     SLACK_USER_PATTERN = re.compile(r"<@([A-Z0-9]+)>")
 
@@ -256,9 +250,7 @@ class ContextExtractor:
 
         return context
 
-    async def _fetch_messages(
-        self, channel_id: str, thread_ts: str | None
-    ) -> list[dict[str, Any]]:
+    async def _fetch_messages(self, channel_id: str, thread_ts: str | None) -> list[dict[str, Any]]:
         """Fetch messages from Slack."""
         if not self._slack_client:
             logger.warning("No Slack client available for context extraction")

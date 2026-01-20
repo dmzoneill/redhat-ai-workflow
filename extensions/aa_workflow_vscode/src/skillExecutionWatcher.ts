@@ -31,7 +31,9 @@ export interface SkillExecutionEvent {
     | "memory_read"
     | "memory_write"
     | "auto_heal"
-    | "retry";
+    | "retry"
+    | "semantic_search"
+    | "remediation_step";
   timestamp: string;
   skillName: string;
   stepIndex?: number;
@@ -45,6 +47,9 @@ export interface SkillExecutionEvent {
     retryCount?: number;
     totalSteps?: number;
     success?: boolean;
+    searchQuery?: string;
+    tool?: string;
+    reason?: string;
     steps?: Array<{
       name: string;
       description?: string;
@@ -225,11 +230,30 @@ export class SkillExecutionWatcher {
       if (event.type === "skill_start" && event.data?.steps) {
         // Initialize steps from skill_start event
         event.data.steps.forEach((step: any, index: number) => {
+          const onError = step.on_error || "";
+          const tool = step.tool || "";
+          const lowerName = (step.name || "").toLowerCase();
+          const lowerDesc = (step.description || "").toLowerCase();
+
+          // Detect static remediation steps from name/description patterns
+          const remediationPatterns = ["retry", "heal", "fix", "recover", "fallback", "remediat"];
+          const isStaticRemediation = remediationPatterns.some(p =>
+            lowerName.includes(p) || lowerDesc.includes(p)
+          ) || (lowerName.startsWith("learn_") && tool.includes("learn_tool_fix"));
+
           stepMap.set(index, {
             name: step.name,
             description: step.description,
             tool: step.tool,
             status: "pending",
+            compute: step.compute,
+            condition: step.condition,
+            canAutoHeal: onError === "auto_heal",
+            // canRetry: steps with continue/retry on_error, or common API tools
+            canRetry: onError === "continue" || onError === "retry" ||
+                      tool.startsWith("jira_") || tool.startsWith("gitlab_"),
+            // isAutoRemediation: static detection from step name/description
+            isAutoRemediation: isStaticRemediation,
           });
         });
       } else if (event.stepIndex !== undefined) {
@@ -270,6 +294,17 @@ export class SkillExecutionWatcher {
             break;
           case "retry":
             step.retryCount = (step.retryCount || 0) + 1;
+            break;
+          case "semantic_search":
+            step.semanticSearch = step.semanticSearch || [];
+            if (event.data?.searchQuery && !step.semanticSearch.includes(event.data.searchQuery)) {
+              step.semanticSearch.push(event.data.searchQuery);
+            }
+            break;
+          case "remediation_step":
+            step.isAutoRemediation = true;
+            step.remediationTool = event.data?.tool;
+            step.remediationReason = event.data?.reason;
             break;
         }
 

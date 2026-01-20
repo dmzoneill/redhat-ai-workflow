@@ -110,7 +110,7 @@ flowchart TD
 
 **Description:** Check code formatting before marking ready
 
-**Tool:** `code_format`
+**Tool:** `git_format`
 
 **Condition:** `inputs.run_linting and lint_repo and lint_repo.get('path')`
 
@@ -118,7 +118,7 @@ flowchart TD
 
 **Description:** Run flake8 linting before marking ready
 
-**Tool:** `code_lint`
+**Tool:** `git_lint`
 
 **Condition:** `inputs.run_linting and lint_repo and lint_repo.get('path')`
 
@@ -209,8 +209,8 @@ flowchart TD
 
 ## MCP Tools Used (9 total)
 
-- `code_format`
-- `code_lint`
+- `git_format`
+- `git_lint`
 - `gitlab_mr_update`
 - `gitlab_mr_view`
 - `jira_set_status`

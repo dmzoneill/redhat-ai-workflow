@@ -217,13 +217,24 @@ export class StatusBarManager {
       release: "charts.purple",
     };
 
-    const agent = this.currentAgent || "";
+    // Get workspace info for enhanced display
+    const workspaceInfo = this.dataProvider.getWorkspaceInfo?.() || {};
+    const persona = workspaceInfo.persona || this.currentAgent || "";
+    const project = workspaceInfo.project || workspaceInfo.auto_detected_project || "";
+
+    const agent = persona || "";
     const icon = agentIcons[agent] || "$(robot)";
     const displayName = agent
       ? agent.charAt(0).toUpperCase() + agent.slice(1)
       : "Core";
 
-    this.agentItem.text = `${icon} ${displayName}`;
+    // Show project in status bar if available
+    if (project) {
+      const shortProject = project.split("/").pop() || project;
+      this.agentItem.text = `${icon} ${displayName} • ${shortProject}`;
+    } else {
+      this.agentItem.text = `${icon} ${displayName}`;
+    }
 
     if (agent && agentColors[agent]) {
       // Use a subtle color indicator
@@ -232,16 +243,35 @@ export class StatusBarManager {
       this.agentItem.color = undefined;
     }
 
-    this.agentItem.tooltip = new vscode.MarkdownString(
-      `### $(robot) AI Workflow Agent\n\n` +
-        `**Active:** ${displayName}\n\n` +
-        `Click to switch agents:\n` +
-        `- $(code) Developer - coding, PRs\n` +
-        `- $(server-process) DevOps - deployments, k8s\n` +
-        `- $(flame) Incident - production issues\n` +
-        `- $(package) Release - shipping`,
-      true
-    );
+    // Build tooltip with workspace context
+    let tooltipContent = `### $(robot) AI Workflow Agent\n\n`;
+    tooltipContent += `**Persona:** ${displayName}\n`;
+
+    if (project) {
+      tooltipContent += `**Project:** ${project}\n`;
+    }
+
+    if (workspaceInfo.issue_key) {
+      tooltipContent += `**Issue:** ${workspaceInfo.issue_key}\n`;
+    }
+
+    if (workspaceInfo.branch) {
+      tooltipContent += `**Branch:** ${workspaceInfo.branch}\n`;
+    }
+
+    const toolCount = workspaceInfo.active_tools?.length || 0;
+    if (toolCount > 0) {
+      tooltipContent += `**Tools:** ${toolCount} active\n`;
+    }
+
+    tooltipContent += `\n---\n\n`;
+    tooltipContent += `Click to switch agents:\n`;
+    tooltipContent += `- $(code) Developer - coding, PRs\n`;
+    tooltipContent += `- $(server-process) DevOps - deployments, k8s\n`;
+    tooltipContent += `- $(flame) Incident - production issues\n`;
+    tooltipContent += `- $(package) Release - shipping`;
+
+    this.agentItem.tooltip = new vscode.MarkdownString(tooltipContent, true);
     this.agentItem.tooltip.isTrusted = true;
   }
 

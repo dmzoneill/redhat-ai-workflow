@@ -538,81 +538,162 @@ steps:
     output: email_summary
     on_error: continue
 
-  # ==================== OPEN PRs (using MCP tools) ====================
+  # ==================== EXTRACT GITLAB PROJECTS ====================
 
-  - name: get_open_prs
-    description: "Get all open PRs in the repo"
+  - name: extract_gitlab_projects
+    description: "Extract all GitLab projects from config for multi-project queries"
+    compute: |
+      # Get all repositories with gitlab paths (excluding github: prefixed ones)
+      repos = ctx.get('config', {}).get('repositories', {})
+      gitlab_projects = []
+
+      for name, repo_config in repos.items():
+          gitlab_path = repo_config.get('gitlab', '')
+          # Skip github repos and empty paths
+          if gitlab_path and not gitlab_path.startswith('github:'):
+              gitlab_projects.append({
+                  'name': name,
+                  'gitlab': gitlab_path,
+                  'path': repo_config.get('path', ''),
+              })
+
+      result = gitlab_projects
+    output: gitlab_projects
+
+  # ==================== OPEN PRs (using MCP tools - multi-project) ====================
+
+  # Get PRs for project 1 (automation-analytics-backend)
+  - name: get_my_prs_project1
+    description: "Get PRs authored by me in automation-analytics-backend"
+    condition: "{{ gitlab_projects|length > 0 }}"
     tool: gitlab_mr_list
     args:
-      project: "automation-analytics/automation-analytics-backend"
-    output: all_open_prs_raw
+      project: "{{ gitlab_projects[0].gitlab if gitlab_projects|length > 0 else '' }}"
+      author: "@me"
+    output: my_prs_raw_p1
     on_error: auto_heal  # GitLab API - may need auth refresh
 
-  - name: get_my_prs
-    description: "Get PRs authored by me"
+  # Get PRs for project 2 (pdf-generator)
+  - name: get_my_prs_project2
+    description: "Get PRs authored by me in pdf-generator"
+    condition: "{{ gitlab_projects|length > 1 }}"
     tool: gitlab_mr_list
     args:
-      project: "automation-analytics/automation-analytics-backend"
+      project: "{{ gitlab_projects[1].gitlab if gitlab_projects|length > 1 else '' }}"
       author: "@me"
-    output: my_prs_raw
+    output: my_prs_raw_p2
+    on_error: auto_heal  # GitLab API - may need auth refresh
+
+  # Get PRs for project 3 (app-interface)
+  - name: get_my_prs_project3
+    description: "Get PRs authored by me in app-interface"
+    condition: "{{ gitlab_projects|length > 2 }}"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ gitlab_projects[2].gitlab if gitlab_projects|length > 2 else '' }}"
+      author: "@me"
+    output: my_prs_raw_p3
+    on_error: auto_heal  # GitLab API - may need auth refresh
+
+  # Get PRs for project 4 (konflux-release-data)
+  - name: get_my_prs_project4
+    description: "Get PRs authored by me in konflux-release-data"
+    condition: "{{ gitlab_projects|length > 3 }}"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ gitlab_projects[3].gitlab if gitlab_projects|length > 3 else '' }}"
+      author: "@me"
+    output: my_prs_raw_p4
     on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_my_prs
-    description: "Parse MR list output and detect network errors"
+    description: "Parse and aggregate MR lists from all projects, detect network errors"
     compute: |
       from scripts.common.parsers import parse_mr_list
 
-      # Check for network errors in the raw output
+      # Check for network errors in any raw output
       network_error = False
-      raw_text = str(my_prs_raw) if my_prs_raw else ""
-      if "no such host" in raw_text.lower() or "dial tcp" in raw_text.lower():
-          network_error = True
+      all_prs = []
+
+      # Process each project's PRs
+      project_results = [
+          (gitlab_projects[0] if gitlab_projects and len(gitlab_projects) > 0 else None,
+           my_prs_raw_p1 if 'my_prs_raw_p1' in dir() else None),
+          (gitlab_projects[1] if gitlab_projects and len(gitlab_projects) > 1 else None,
+           my_prs_raw_p2 if 'my_prs_raw_p2' in dir() else None),
+          (gitlab_projects[2] if gitlab_projects and len(gitlab_projects) > 2 else None,
+           my_prs_raw_p3 if 'my_prs_raw_p3' in dir() else None),
+          (gitlab_projects[3] if gitlab_projects and len(gitlab_projects) > 3 else None,
+           my_prs_raw_p4 if 'my_prs_raw_p4' in dir() else None),
+      ]
+
+      for project_info, raw in project_results:
+          if not raw:
+              continue
+
+          raw_text = str(raw)
+          if "no such host" in raw_text.lower() or "dial tcp" in raw_text.lower():
+              network_error = True
+              continue
+
+          prs = parse_mr_list(raw)
+          # Add project info to each PR for display
+          for pr in prs:
+              pr['project'] = project_info.get('name', 'unknown') if project_info else 'unknown'
+              pr['gitlab_path'] = project_info.get('gitlab', '') if project_info else ''
+          all_prs.extend(prs)
 
       # Store network error state for later use
       ctx['network_error'] = network_error
 
-      result = parse_mr_list(my_prs_raw) if my_prs_raw and not network_error else []
+      result = all_prs
     output: my_prs
 
-  # Get MR IDs for comments check
+  # Get MR IDs and projects for comments check
   - name: get_pr_ids_for_feedback
-    description: "Extract MR IDs for feedback check"
+    description: "Extract MR IDs and their projects for feedback check"
     compute: |
-      # Get up to 5 MR IDs to check
-      pr_ids = [pr['id'] for pr in (my_prs or [])[:5]]
-      result = pr_ids
+      # Get up to 5 PRs with their project info
+      pr_info = []
+      for pr in (my_prs or [])[:5]:
+          pr_info.append({
+              'id': pr['id'],
+              'project': pr.get('gitlab_path', ''),
+              'title': pr.get('title', '')[:40],
+          })
+      result = pr_info
     output: pr_ids_to_check
 
   # Get comments for MR 1
   - name: get_pr1_comments
     description: "Get comments for first PR"
-    condition: "{{ pr_ids_to_check|length > 0 }}"
+    condition: "{{ pr_ids_to_check|length > 0 and pr_ids_to_check[0].project }}"
     tool: gitlab_mr_comments
     args:
-      project: "automation-analytics/automation-analytics-backend"
-      mr_id: "{{ pr_ids_to_check[0] }}"
+      project: "{{ pr_ids_to_check[0].project }}"
+      mr_id: "{{ pr_ids_to_check[0].id }}"
     output: pr1_comments_raw
     on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Get comments for MR 2
   - name: get_pr2_comments
     description: "Get comments for second PR"
-    condition: "{{ pr_ids_to_check|length > 1 }}"
+    condition: "{{ pr_ids_to_check|length > 1 and pr_ids_to_check[1].project }}"
     tool: gitlab_mr_comments
     args:
-      project: "automation-analytics/automation-analytics-backend"
-      mr_id: "{{ pr_ids_to_check[1] }}"
+      project: "{{ pr_ids_to_check[1].project }}"
+      mr_id: "{{ pr_ids_to_check[1].id }}"
     output: pr2_comments_raw
     on_error: auto_heal  # GitLab API - may need auth refresh
 
   # Get comments for MR 3
   - name: get_pr3_comments
     description: "Get comments for third PR"
-    condition: "{{ pr_ids_to_check|length > 2 }}"
+    condition: "{{ pr_ids_to_check|length > 2 and pr_ids_to_check[2].project }}"
     tool: gitlab_mr_comments
     args:
-      project: "automation-analytics/automation-analytics-backend"
-      mr_id: "{{ pr_ids_to_check[2] }}"
+      project: "{{ pr_ids_to_check[2].project }}"
+      mr_id: "{{ pr_ids_to_check[2].id }}"
     output: pr3_comments_raw
     on_error: auto_heal  # GitLab API - may need auth refresh
 
@@ -624,20 +705,21 @@ steps:
       feedback = []
       current_user = ctx.get('config', {}).get('user', {}).get('username', os.getenv('USER', 'unknown'))
 
-      # Process each MR's comments
+      # Process each MR's comments - now pr_ids_to_check contains full PR info
       comments_data = [
         (pr_ids_to_check[0] if pr_ids_to_check else None, pr1_comments_raw if 'pr1_comments_raw' in dir() else None),
         (pr_ids_to_check[1] if len(pr_ids_to_check) > 1 else None, pr2_comments_raw if 'pr2_comments_raw' in dir() else None),
         (pr_ids_to_check[2] if len(pr_ids_to_check) > 2 else None, pr3_comments_raw if 'pr3_comments_raw' in dir() else None),
       ]
 
-      # Map MR IDs back to titles
-      mr_titles = {pr['id']: pr.get('title', '')[:40] for pr in (my_prs or [])}
+      # Map MR IDs back to titles and projects
+      mr_info = {pr['id']: {'title': pr.get('title', '')[:40], 'project': pr.get('gitlab_path', '')} for pr in (my_prs or [])}
 
-      for mr_id, comments_raw in comments_data:
-        if not mr_id or not comments_raw:
+      for pr_data, comments_raw in comments_data:
+        if not pr_data or not comments_raw:
           continue
 
+        mr_id = pr_data.get('id') if isinstance(pr_data, dict) else pr_data
         comments_text = str(comments_raw)
 
         # Find human comments
@@ -646,10 +728,12 @@ steps:
             if not parsers.is_bot_comment(line, ''):
               match = re.match(r'^(\w+) commented', line)
               if match:
+                info = mr_info.get(mr_id, {})
                 feedback.append({
                   "mr_id": mr_id,
                   "author": match.group(1),
-                  "title": mr_titles.get(mr_id, '')
+                  "title": info.get('title', ''),
+                  "project": info.get('project', ''),
                 })
                 break
 
@@ -689,24 +773,60 @@ steps:
     output: jira_activity
     on_error: continue
 
-  # ==================== MERGED CODE (using MCP tool) ====================
+  # ==================== MERGED CODE (using MCP tool - multi-project) ====================
 
-  - name: get_recent_merges
-    description: "Get recently merged MRs"
+  # Get recent merges for project 1
+  - name: get_recent_merges_p1
+    description: "Get recently merged MRs in project 1"
+    condition: "{{ gitlab_projects|length > 0 }}"
     tool: gitlab_mr_list
     args:
-      project: "automation-analytics/automation-analytics-backend"
+      project: "{{ gitlab_projects[0].gitlab if gitlab_projects|length > 0 else '' }}"
       state: "merged"
-    output: recent_merges_raw
+    output: recent_merges_raw_p1
+    on_error: auto_heal  # GitLab API - may need auth refresh
+
+  # Get recent merges for project 2
+  - name: get_recent_merges_p2
+    description: "Get recently merged MRs in project 2"
+    condition: "{{ gitlab_projects|length > 1 }}"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ gitlab_projects[1].gitlab if gitlab_projects|length > 1 else '' }}"
+      state: "merged"
+    output: recent_merges_raw_p2
     on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_recent_merges
-    description: "Parse merged MRs"
+    description: "Parse and aggregate merged MRs from all projects"
     compute: |
       from scripts.common.parsers import parse_mr_list
 
-      merged_mrs = parse_mr_list(recent_merges_raw) if recent_merges_raw else []
-      result = merged_mrs[:5]  # Last 5
+      all_merged = []
+
+      # Process each project's merged MRs
+      merge_results = [
+          (gitlab_projects[0] if gitlab_projects and len(gitlab_projects) > 0 else None,
+           recent_merges_raw_p1 if 'recent_merges_raw_p1' in dir() else None),
+          (gitlab_projects[1] if gitlab_projects and len(gitlab_projects) > 1 else None,
+           recent_merges_raw_p2 if 'recent_merges_raw_p2' in dir() else None),
+      ]
+
+      for project_info, raw in merge_results:
+          if not raw:
+              continue
+          raw_text = str(raw)
+          if "no such host" in raw_text.lower() or "❌" in raw_text:
+              continue
+
+          merged_mrs = parse_mr_list(raw)
+          for mr in merged_mrs:
+              mr['project'] = project_info.get('name', 'unknown') if project_info else 'unknown'
+              mr['gitlab_path'] = project_info.get('gitlab', '') if project_info else ''
+          all_merged.extend(merged_mrs)
+
+      # Sort by merge date (most recent first) and take top 5
+      result = all_merged[:5]
     output: recent_merges
     on_error: continue
 
@@ -965,24 +1085,59 @@ steps:
     output: yesterdays_commits
     on_error: continue
 
-  # ==================== REVIEW REQUESTS (using MCP tool) ====================
+  # ==================== REVIEW REQUESTS (using MCP tool - multi-project) ====================
 
-  - name: get_review_requests
-    description: "Get PRs where you're assigned as reviewer"
+  # Get review requests for project 1
+  - name: get_review_requests_p1
+    description: "Get PRs where you're assigned as reviewer in project 1"
+    condition: "{{ gitlab_projects|length > 0 }}"
     tool: gitlab_mr_list
     args:
-      project: "automation-analytics/automation-analytics-backend"
+      project: "{{ gitlab_projects[0].gitlab if gitlab_projects|length > 0 else '' }}"
       reviewer: "@me"
-    output: review_requests_raw
+    output: review_requests_raw_p1
+    on_error: auto_heal  # GitLab API - may need auth refresh
+
+  # Get review requests for project 2
+  - name: get_review_requests_p2
+    description: "Get PRs where you're assigned as reviewer in project 2"
+    condition: "{{ gitlab_projects|length > 1 }}"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ gitlab_projects[1].gitlab if gitlab_projects|length > 1 else '' }}"
+      reviewer: "@me"
+    output: review_requests_raw_p2
     on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: parse_review_requests
-    description: "Parse review request list"
+    description: "Parse and aggregate review request lists from all projects"
     compute: |
       from scripts.common.parsers import parse_mr_list
 
-      review_requests = parse_mr_list(review_requests_raw) if review_requests_raw else []
-      result = review_requests[:5]  # Limit to 5
+      all_reviews = []
+
+      # Process each project's review requests
+      review_results = [
+          (gitlab_projects[0] if gitlab_projects and len(gitlab_projects) > 0 else None,
+           review_requests_raw_p1 if 'review_requests_raw_p1' in dir() else None),
+          (gitlab_projects[1] if gitlab_projects and len(gitlab_projects) > 1 else None,
+           review_requests_raw_p2 if 'review_requests_raw_p2' in dir() else None),
+      ]
+
+      for project_info, raw in review_results:
+          if not raw:
+              continue
+          raw_text = str(raw)
+          if "no such host" in raw_text.lower() or "❌" in raw_text:
+              continue
+
+          reviews = parse_mr_list(raw)
+          for rr in reviews:
+              rr['project'] = project_info.get('name', 'unknown') if project_info else 'unknown'
+              rr['gitlab_path'] = project_info.get('gitlab', '') if project_info else ''
+          all_reviews.extend(reviews)
+
+      result = all_reviews[:5]  # Limit to 5
     output: review_requests
     on_error: continue
 
@@ -1047,15 +1202,30 @@ steps:
 
       # Calendar
       lines.append("## 📅 Today's Calendar")
-      if calendar_events and not any('error' in e for e in calendar_events):
-        if calendar_events:
-          for event in calendar_events:
-            meet_icon = "📹" if event.get('meet_link') else ""
-            lines.append(f"- **{event['time']}** - {event['title']} {meet_icon}")
-        else:
-          lines.append("- No meetings scheduled! 🎉")
+      # Check if calendar_events is a list (could be None if step failed)
+      # and check if any event has an 'error' key (indicates API failure)
+      has_calendar_error = (
+          calendar_events is None or
+          (isinstance(calendar_events, list) and any(isinstance(e, dict) and 'error' in e for e in calendar_events))
+      )
+
+      if has_calendar_error:
+        # Extract error message if available
+        error_msg = "Calendar not accessible"
+        if isinstance(calendar_events, list):
+          for e in calendar_events:
+            if isinstance(e, dict) and 'error' in e:
+              error_msg = f"Calendar error: {e['error'][:50]}"
+              break
+        lines.append(f"- ⚠️ {error_msg}")
+      elif not calendar_events:
+        # Empty list = no events today (success case)
+        lines.append("- No meetings scheduled! 🎉")
       else:
-        lines.append("- ⚠️ Calendar not accessible")
+        # Has events
+        for event in calendar_events:
+          meet_icon = "📹" if event.get('meet_link') else ""
+          lines.append(f"- **{event['time']}** - {event['title']} {meet_icon}")
       lines.append("")
 
       # Email with smart triage
@@ -1115,21 +1285,46 @@ steps:
         lines.append(f"- ⚠️ {error}")
         lines.append("")
 
-      # PRs needing attention
+      # Helper to build GitLab MR URL from project path
+      def build_mr_url(gitlab_path, mr_id):
+          # Handle different GitLab instances
+          if gitlab_path.startswith('service/'):
+              return f"https://gitlab.cee.redhat.com/{gitlab_path}/-/merge_requests/{mr_id}"
+          elif gitlab_path.startswith('releng/'):
+              return f"https://gitlab.cee.redhat.com/{gitlab_path}/-/merge_requests/{mr_id}"
+          else:
+              return f"https://gitlab.cee.redhat.com/{gitlab_path}/-/merge_requests/{mr_id}"
+
+      # PRs needing attention (multi-project)
       lines.append("## 🔀 Your PRs")
       lines.append(f"")
       lines.append(f"**Open PRs:** {len(my_prs) if my_prs else 0}")
       if my_prs:
-        for pr in my_prs[:5]:
-          title_with_links = linkify_jira_keys(pr['title'], slack_format=is_slack)
-          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{pr['id']}"
-          lines.append(f"- {build_link(mr_url, '!' + str(pr['id']))} - {title_with_links}")
+        # Group by project for cleaner display
+        by_project = {}
+        for pr in my_prs[:10]:
+            proj = pr.get('project', 'unknown')
+            if proj not in by_project:
+                by_project[proj] = []
+            by_project[proj].append(pr)
+
+        for proj, prs in by_project.items():
+            if len(by_project) > 1:
+                lines.append(f"**{proj}:**")
+            for pr in prs[:5]:
+                pr_title = pr.get('title', 'No title')
+                title_with_links = linkify_jira_keys(pr_title, slack_format=is_slack)
+                gitlab_path = pr.get('gitlab_path', 'automation-analytics/automation-analytics-backend')
+                mr_id = pr.get('id', pr.get('iid', 0))
+                mr_url = build_mr_url(gitlab_path, mr_id)
+                lines.append(f"- {build_link(mr_url, '!' + str(mr_id))} - {title_with_links}")
       lines.append("")
 
       if pr_feedback:
         lines.append(f"**⚠️ Feedback Waiting ({len(pr_feedback)}):**")
         for fb in pr_feedback:
-          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fb['mr_id']}"
+          gitlab_path = fb.get('project', 'automation-analytics/automation-analytics-backend')
+          mr_url = build_mr_url(gitlab_path, fb['mr_id'])
           lines.append(f"- {build_link(mr_url, '!' + str(fb['mr_id']))} - Comment from **{fb['author']}**")
       else:
         lines.append("✅ No pending feedback on your PRs")
@@ -1139,7 +1334,8 @@ steps:
       if failed_pipelines:
         lines.append(f"**🔴 Failed Pipelines ({len(failed_pipelines)}):**")
         for fp in failed_pipelines:
-          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{fp['mr_id']}"
+          gitlab_path = fp.get('gitlab_path', 'automation-analytics/automation-analytics-backend')
+          mr_url = build_mr_url(gitlab_path, fp['mr_id'])
           failed_jobs_str = ", ".join(fp.get('failed_jobs', [])[:3])
           if len(fp.get('failed_jobs', [])) > 3:
             failed_jobs_str += f" +{len(fp['failed_jobs']) - 3} more"
@@ -1156,9 +1352,12 @@ steps:
       if review_requests:
         lines.append(f"**Assigned to you:** {len(review_requests)}")
         for rr in review_requests:
-          title_with_links = linkify_jira_keys(rr['title'], slack_format=is_slack)
-          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{rr['id']}"
-          lines.append(f"- {build_link(mr_url, '!' + str(rr['id']))} - {title_with_links}")
+          rr_title = rr.get('title', 'No title')
+          title_with_links = linkify_jira_keys(rr_title, slack_format=is_slack)
+          gitlab_path = rr.get('gitlab_path', 'automation-analytics/automation-analytics-backend')
+          rr_id = rr.get('id', rr.get('iid', 0))
+          mr_url = build_mr_url(gitlab_path, rr_id)
+          lines.append(f"- {build_link(mr_url, '!' + str(rr_id))} - {title_with_links}")
       else:
         lines.append("✅ No PRs waiting for your review")
       lines.append("")
@@ -1174,13 +1373,17 @@ steps:
         lines.append("- No Jira activity in the last day")
       lines.append("")
 
-      # Merges
+      # Merges (multi-project)
       lines.append("## 🚀 Recent Merges")
       if recent_merges:
         for mr in recent_merges:
-          title_with_links = linkify_jira_keys(mr['title'], slack_format=is_slack)
-          mr_url = f"https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/{mr['id']}"
-          lines.append(f"- {build_link(mr_url, '!' + str(mr['id']))} - {title_with_links}")
+          mr_title = mr.get('title', 'No title')
+          title_with_links = linkify_jira_keys(mr_title, slack_format=is_slack)
+          gitlab_path = mr.get('gitlab_path', 'automation-analytics/automation-analytics-backend')
+          mr_id = mr.get('id', mr.get('iid', 0))
+          mr_url = build_mr_url(gitlab_path, mr_id)
+          project_tag = f"[{mr.get('project', '')}] " if mr.get('project') and len(recent_merges) > 1 else ""
+          lines.append(f"- {project_tag}{build_link(mr_url, '!' + str(mr_id))} - {title_with_links}")
       else:
         lines.append("- No recent merges")
       lines.append("")

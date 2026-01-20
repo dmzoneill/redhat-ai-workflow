@@ -350,7 +350,7 @@ steps:
   - name: run_black_check
     description: "Check code formatting before push"
     condition: "rebase_result.success and inputs.force_push and inputs.run_linting"
-    tool: code_format
+    tool: git_format
     args:
       repo: "{{ resolved_repo.path }}"
       tool: "black"
@@ -361,7 +361,7 @@ steps:
   - name: run_flake8_check
     description: "Run flake8 linting before push"
     condition: "rebase_result.success and inputs.force_push and inputs.run_linting"
-    tool: code_lint
+    tool: git_lint
     args:
       repo: "{{ resolved_repo.path }}"
       tool: "flake8"

@@ -1,0 +1,36 @@
+# Skill: Hello World
+# Simple test skill for cron scheduler testing
+
+name: hello_world
+description: |
+  A simple test skill that prints "Hello World" with a timestamp.
+  Used for testing the cron scheduler functionality.
+
+version: "1.0"
+
+inputs: []
+
+steps:
+  - name: say_hello
+    description: "Print hello world with timestamp"
+    compute: |
+      from datetime import datetime
+      from zoneinfo import ZoneInfo
+      
+      tz = ZoneInfo("Europe/Dublin")
+      now = datetime.now(tz)
+      
+      result = f"🌍 Hello World!\n\nTimestamp: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\nThe cron scheduler is working!"
+    output: greeting
+
+  - name: log_execution
+    description: "Log the execution to session"
+    tool: memory_session_log
+    args:
+      action: "Hello World skill executed"
+      details: "Cron test at {{ greeting.split('Timestamp: ')[1].split('\\n')[0] if 'Timestamp:' in greeting else 'unknown time' }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: "{{ greeting }}"

@@ -74,6 +74,17 @@ export interface VpnStatus {
   error?: string;
 }
 
+export interface WorkspaceInfo {
+  workspace_uri?: string;
+  project?: string;
+  auto_detected_project?: string;
+  issue_key?: string;
+  branch?: string;
+  persona?: string;
+  active_tools?: string[];
+  started_at?: string;
+}
+
 export interface WorkflowStatus {
   slack?: SlackStatus;
   activeIssue?: ActiveIssue;
@@ -91,13 +102,24 @@ export class WorkflowDataProvider {
   private configPath: string;
   private jiraUrl: string = "https://issues.redhat.com";
   private gitlabUrl: string = "https://gitlab.cee.redhat.com";
+  private workspaceInfo: WorkspaceInfo = {};
+  private workspaceStatesPath: string;
 
   constructor() {
     this.memoryDir = getMemoryDir();
     this.configPath = getConfigPath();
+    this.workspaceStatesPath = path.join(
+      os.homedir(),
+      ".mcp",
+      "workspace_states",
+      "workspace_states.json"
+    );
 
     // Load config for URLs
     this.loadConfig();
+
+    // Load workspace info
+    this.loadWorkspaceInfo();
   }
 
   private loadConfig() {
@@ -114,6 +136,73 @@ export class WorkflowDataProvider {
 
   public getStatus(): WorkflowStatus {
     return this.status;
+  }
+
+  public getWorkspaceInfo(): WorkspaceInfo {
+    return this.workspaceInfo;
+  }
+
+  private loadWorkspaceInfo(): void {
+    try {
+      if (fs.existsSync(this.workspaceStatesPath)) {
+        const content = fs.readFileSync(this.workspaceStatesPath, "utf-8");
+        const data = JSON.parse(content);
+
+        // Handle new format with 'workspaces' wrapper (version 2+)
+        const workspaces = data.workspaces || data;
+
+        // Get the current workspace folder
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (workspaceFolders && workspaceFolders.length > 0) {
+          const currentUri = workspaceFolders[0].uri.toString();
+          const currentPath = workspaceFolders[0].uri.fsPath;
+          const fileUri = `file://${currentPath}`;
+
+          // Find matching workspace state
+          let workspaceState = workspaces[currentUri] || workspaces[fileUri];
+          
+          if (!workspaceState) {
+            // Try to find by path match
+            for (const [uri, state] of Object.entries(workspaces)) {
+              const statePath = uri.replace("file://", "");
+              if (statePath === currentPath || currentPath.startsWith(statePath)) {
+                workspaceState = state as any;
+                break;
+              }
+            }
+          }
+
+          if (workspaceState) {
+            // Get active session's info if available (per-session project support)
+            const activeSessionId = (workspaceState as any).active_session_id;
+            const sessions = (workspaceState as any).sessions || {};
+            const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+
+            // Merge workspace and active session info
+            // Session-level fields override workspace-level for per-session support
+            this.workspaceInfo = {
+              workspace_uri: (workspaceState as any).workspace_uri,
+              // Use session's project if available, fall back to workspace project
+              project: activeSession?.project || (workspaceState as any).project,
+              auto_detected_project: activeSession?.is_project_auto_detected 
+                ? activeSession.project 
+                : ((workspaceState as any).is_auto_detected ? (workspaceState as any).project : undefined),
+              issue_key: activeSession?.issue_key || (workspaceState as any).issue_key,
+              branch: activeSession?.branch || (workspaceState as any).branch,
+              persona: activeSession?.persona || (workspaceState as any).persona,
+              active_tools: activeSession?.active_tools || (workspaceState as any).active_tools,
+              started_at: activeSession?.started_at || (workspaceState as any).started_at,
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load workspace info:", e);
+    }
+  }
+
+  public refreshWorkspaceInfo(): void {
+    this.loadWorkspaceInfo();
   }
 
   public getJiraUrl(): string {

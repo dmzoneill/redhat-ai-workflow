@@ -7,6 +7,7 @@ Provides:
 - cron_enable: Enable/disable a job
 - cron_run_now: Manually trigger a scheduled job
 - cron_status: Show scheduler status and recent executions
+- cron_scheduler_toggle: Enable/disable the entire scheduler at runtime
 """
 
 import json
@@ -382,7 +383,10 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         Returns:
             Job execution result.
         """
-        from .scheduler import get_scheduler
+        try:
+            from tool_modules.aa_workflow.src.scheduler import get_scheduler
+        except ImportError:
+            from .scheduler import get_scheduler
 
         scheduler = get_scheduler()
 
@@ -405,21 +409,25 @@ def register_scheduler_tools(server: "FastMCP") -> int:
                     )
                 ]
 
-            # Execute the skill directly
+            # Execute the skill directly via the MCP server
             skill = job_config.get("skill", "")
             inputs = job_config.get("inputs", {})
 
             try:
-                from .skill_engine import _skill_run_impl
-
-                result = await _skill_run_impl(
-                    skill_name=skill,
-                    inputs=json.dumps(inputs),
-                    execute=True,
-                    debug=False,
-                    server=server,
+                # Use the server's call_tool to invoke skill_run
+                result = await server.call_tool(
+                    "skill_run",
+                    {
+                        "skill_name": skill,
+                        "inputs": json.dumps(inputs),
+                        "execute": True,
+                        "debug": False,
+                    },
                 )
-                return result
+                # Extract text from result
+                if hasattr(result, "content") and result.content:
+                    return result.content
+                return [TextContent(type="text", text=f"✅ Job `{name}` executed")]
             except Exception as e:
                 return [TextContent(type="text", text=f"❌ Failed to run job: {e}")]
 
@@ -450,7 +458,10 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             Scheduler status including running state, job counts,
             and recent execution history.
         """
-        from .scheduler import get_scheduler
+        try:
+            from tool_modules.aa_workflow.src.scheduler import get_scheduler
+        except ImportError:
+            from .scheduler import get_scheduler
 
         scheduler = get_scheduler()
         schedules = _get_schedules_config()
@@ -552,4 +563,86 @@ def register_scheduler_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @registry.tool()
+    async def cron_scheduler_toggle(enabled: bool = True) -> list[TextContent]:
+        """
+        Enable or disable the entire scheduler at runtime.
+
+        This updates the config and starts/stops the scheduler immediately,
+        without requiring a server restart.
+
+        Args:
+            enabled: True to enable and start the scheduler, False to disable and stop it
+
+        Returns:
+            Confirmation of scheduler state change.
+        """
+        try:
+            from tool_modules.aa_workflow.src.scheduler import get_scheduler, start_scheduler, stop_scheduler
+        except ImportError:
+            from .scheduler import get_scheduler, start_scheduler, stop_scheduler
+
+        # Update config file
+        schedules = _get_schedules_config()
+        schedules["enabled"] = enabled
+        _update_schedules_config(schedules)
+
+        scheduler = get_scheduler()
+
+        if enabled:
+            # Start the scheduler if not already running
+            if scheduler and not scheduler.is_running:
+                # Reload config to pick up any job changes
+                scheduler.config = scheduler.config.__class__()
+                await scheduler.start()
+                return [
+                    TextContent(
+                        type="text",
+                        text="✅ Scheduler **enabled** and started.\n\n"
+                        f"**Active cron jobs:** {len(scheduler.config.get_cron_jobs())}\n"
+                        f"**Active poll jobs:** {len(scheduler.config.get_poll_jobs())}\n\n"
+                        "Jobs will now run on their configured schedules.",
+                    )
+                ]
+            elif scheduler and scheduler.is_running:
+                # Already running, just reload config
+                scheduler.reload_config()
+                return [
+                    TextContent(
+                        type="text",
+                        text="✅ Scheduler already running. Config reloaded.\n\n"
+                        f"**Active cron jobs:** {len(scheduler.config.get_cron_jobs())}\n"
+                        f"**Active poll jobs:** {len(scheduler.config.get_poll_jobs())}",
+                    )
+                ]
+            else:
+                return [
+                    TextContent(
+                        type="text",
+                        text="✅ Scheduler **enabled** in config.\n\n"
+                        "⚠️ Scheduler instance not found. It will start on next server restart.",
+                    )
+                ]
+        else:
+            # Stop the scheduler
+            if scheduler and scheduler.is_running:
+                await scheduler.stop()
+                return [
+                    TextContent(
+                        type="text",
+                        text="⏸️ Scheduler **disabled** and stopped.\n\n"
+                        "All scheduled jobs are paused. Enable again to resume.",
+                    )
+                ]
+            else:
+                return [
+                    TextContent(
+                        type="text",
+                        text="⏸️ Scheduler **disabled** in config.\n\n"
+                        "Scheduler was not running.",
+                    )
+                ]
+
     return registry.count
+
+

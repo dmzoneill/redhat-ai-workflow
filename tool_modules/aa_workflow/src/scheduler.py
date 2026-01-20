@@ -41,6 +41,8 @@ class SchedulerConfig:
         self.timezone = schedules.get("timezone", "UTC")
         self.jobs = schedules.get("jobs", [])
         self.poll_sources = schedules.get("poll_sources", {})
+        # Execution mode: "claude_cli" (default) or "direct"
+        self.execution_mode = schedules.get("execution_mode", "claude_cli")
 
     def _load_config(self) -> dict:
         """Load config from config.json."""
@@ -62,11 +64,36 @@ class SchedulerConfig:
 
 
 class JobExecutionLog:
-    """Track job execution history."""
+    """Track job execution history with file persistence."""
+
+    # File path that VSCode extension expects
+    HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "cron_history.json"
 
     def __init__(self, max_entries: int = 100):
         self.max_entries = max_entries
         self.entries: list[dict] = []
+        self._load_from_file()
+
+    def _load_from_file(self):
+        """Load execution history from file."""
+        try:
+            if self.HISTORY_FILE.exists():
+                with open(self.HISTORY_FILE) as f:
+                    data = json.load(f)
+                    self.entries = data.get("executions", [])[-self.max_entries:]
+        except Exception as e:
+            logger.warning(f"Failed to load cron history: {e}")
+            self.entries = []
+
+    def _save_to_file(self):
+        """Save execution history to file."""
+        try:
+            # Ensure directory exists
+            self.HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.HISTORY_FILE, "w") as f:
+                json.dump({"executions": self.entries}, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save cron history: {e}")
 
     def log_execution(
         self,
@@ -76,6 +103,7 @@ class JobExecutionLog:
         duration_ms: int,
         error: str | None = None,
         output_preview: str | None = None,
+        session_name: str | None = None,
     ):
         """Log a job execution."""
         entry = {
@@ -86,12 +114,16 @@ class JobExecutionLog:
             "duration_ms": duration_ms,
             "error": error,
             "output_preview": output_preview[:200] if output_preview else None,
+            "session_name": session_name,
         }
         self.entries.append(entry)
 
         # Trim to max entries
         if len(self.entries) > self.max_entries:
-            self.entries = self.entries[-self.max_entries :]
+            self.entries = self.entries[-self.max_entries:]
+
+        # Persist to file
+        self._save_to_file()
 
     def get_recent(self, limit: int = 10) -> list[dict]:
         """Get recent execution entries."""
@@ -139,28 +171,59 @@ class CronScheduler:
             },
         )
 
+    def _log_to_file(self, message: str):
+        """Write a log message to file for debugging."""
+        try:
+            log_file = Path.home() / ".config" / "aa-workflow" / "scheduler.log"
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_file, "a") as f:
+                f.write(f"{datetime.now().isoformat()} - {message}\n")
+        except Exception:
+            pass
+
     async def start(self):
-        """Start the scheduler."""
+        """Start the scheduler.
+
+        The scheduler always starts to enable config watching.
+        Jobs are only added if the scheduler is enabled in config.
+        """
+        self._log_to_file(f"start() called, _running={self._running}")
+        
         if self._running:
             logger.warning("Scheduler already running")
-            return
-
-        if not self.config.enabled:
-            logger.info("Scheduler disabled in config")
+            self._log_to_file("Scheduler already running, returning")
             return
 
         self.scheduler = self._create_scheduler()
+        self._log_to_file(f"Created scheduler, config.enabled={self.config.enabled}")
 
-        # Add cron jobs
-        for job in self.config.get_cron_jobs():
-            self._add_cron_job(job)
+        # Add config watcher job (runs every 30 seconds, always active)
+        self.scheduler.add_job(
+            self._check_config_and_reload,
+            "interval",
+            seconds=30,
+            id="_config_watcher",
+            name="Config Watcher",
+            replace_existing=True,
+        )
+        self._log_to_file("Added config watcher job")
+
+        # Only add cron jobs if scheduler is enabled
+        if self.config.enabled:
+            cron_jobs = self.config.get_cron_jobs()
+            self._log_to_file(f"Adding {len(cron_jobs)} cron jobs: {[j.get('name') for j in cron_jobs]}")
+            for job in cron_jobs:
+                self._add_cron_job(job)
+            logger.info(f"Scheduler started with {len(cron_jobs)} cron jobs")
+        else:
+            logger.info("Scheduler started (disabled in config, watching for changes)")
+            self._log_to_file("Scheduler disabled in config")
 
         # Start the scheduler
         self.scheduler.start()
         self._running = True
         self._config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
-
-        logger.info(f"Scheduler started with {len(self.config.get_cron_jobs())} cron jobs")
+        self._log_to_file(f"Scheduler started, _running={self._running}")
 
     async def stop(self):
         """Stop the scheduler gracefully."""
@@ -237,29 +300,50 @@ class CronScheduler:
         inputs: dict,
         notify: list[str],
     ):
-        """Execute a scheduled job."""
+        """Execute a scheduled job using Claude CLI for AI-powered execution."""
+        import shutil
         import time
 
         start_time = time.time()
-        logger.info(f"Executing scheduled job: {job_name} (skill: {skill})")
+        now = datetime.now()
+        session_name = f"cron-{skill}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
+        logger.info(f"Executing scheduled job: {job_name} (skill: {skill}) in session: {session_name}")
+        self._log_to_file(f"_execute_job called: job={job_name}, skill={skill}, session={session_name}")
 
         success = False
         error_msg = None
         output = None
 
-        try:
-            # Execute the skill
-            output = await self._run_skill(skill, inputs)
-            success = True
-            logger.info(f"Job {job_name} completed successfully")
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Job {job_name} failed: {e}")
+        # Check execution mode from config
+        use_claude_cli = self.config.execution_mode == "claude_cli"
+        claude_path = shutil.which("claude") if use_claude_cli else None
+        
+        if use_claude_cli and claude_path:
+            # Use Claude CLI for AI-powered execution
+            self._log_to_file(f"Using Claude CLI at {claude_path}")
+            success, output, error_msg = await self._run_with_claude_cli(
+                job_name=job_name,
+                skill=skill,
+                inputs=inputs,
+                session_name=session_name,
+            )
+        else:
+            # Direct skill execution (no AI reasoning)
+            if use_claude_cli and not claude_path:
+                self._log_to_file("Claude CLI not found, falling back to direct execution")
+            else:
+                self._log_to_file("Using direct execution mode (execution_mode=direct)")
+            try:
+                output = await self._run_skill(skill, inputs)
+                success = True
+                logger.info(f"Job {job_name} completed successfully (direct execution)")
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Job {job_name} failed: {e}")
 
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Log execution
+        # Log execution with session name
         self.execution_log.log_execution(
             job_name=job_name,
             skill=skill,
@@ -267,6 +351,7 @@ class CronScheduler:
             duration_ms=duration_ms,
             error=error_msg,
             output_preview=output,
+            session_name=session_name,
         )
 
         # Send notifications
@@ -279,6 +364,106 @@ class CronScheduler:
                 error=error_msg,
                 notify_channels=notify,
             )
+
+    async def _run_with_claude_cli(
+        self,
+        job_name: str,
+        skill: str,
+        inputs: dict,
+        session_name: str,
+    ) -> tuple[bool, str | None, str | None]:
+        """Run a skill using Claude CLI for AI-powered execution.
+        
+        Args:
+            job_name: Name of the cron job
+            skill: Skill name to execute
+            inputs: Input parameters for the skill
+            session_name: Session name for logging
+            
+        Returns:
+            Tuple of (success, output, error_message)
+        """
+        import asyncio
+        import subprocess
+        
+        # Build the prompt for Claude
+        inputs_str = json.dumps(inputs) if inputs else "{}"
+        prompt = f"""You are running a scheduled cron job. Execute the following skill and report the results.
+
+Job: {job_name}
+Skill: {skill}
+Inputs: {inputs_str}
+Session: {session_name}
+
+Instructions:
+1. Call skill_run("{skill}", inputs='{inputs_str}')
+2. If the skill fails, try to diagnose and fix the issue
+3. Log the result to memory using memory_session_log()
+4. Summarize what happened
+
+Begin execution now."""
+
+        # Create output log file
+        log_dir = Path.home() / ".config" / "aa-workflow" / "cron_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"{session_name}.log"
+        
+        self._log_to_file(f"Running Claude CLI, output to {log_file}")
+        
+        try:
+            # Run Claude CLI with --print flag for non-interactive mode
+            # Use the project directory as working directory
+            process = await asyncio.create_subprocess_exec(
+                "claude",
+                "--print",  # Non-interactive, just print output
+                "--dangerously-skip-permissions",  # Skip permission prompts for automation
+                prompt,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(Path.home() / "src" / "redhat-ai-workflow"),
+            )
+            
+            # Wait for completion with timeout (5 minutes max)
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=300,  # 5 minute timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return False, None, "Claude CLI timed out after 5 minutes"
+            
+            # Decode output
+            output = stdout.decode("utf-8", errors="replace") if stdout else ""
+            error_output = stderr.decode("utf-8", errors="replace") if stderr else ""
+            
+            # Write to log file
+            with open(log_file, "w") as f:
+                f.write(f"=== Cron Job: {job_name} ===\n")
+                f.write(f"Skill: {skill}\n")
+                f.write(f"Session: {session_name}\n")
+                f.write(f"Started: {datetime.now().isoformat()}\n")
+                f.write(f"Exit Code: {process.returncode}\n")
+                f.write(f"\n=== STDOUT ===\n{output}\n")
+                if error_output:
+                    f.write(f"\n=== STDERR ===\n{error_output}\n")
+            
+            self._log_to_file(f"Claude CLI completed with exit code {process.returncode}")
+            
+            if process.returncode == 0:
+                # Truncate output for preview
+                preview = output[:500] if len(output) > 500 else output
+                return True, preview, None
+            else:
+                error_msg = error_output or f"Claude CLI exited with code {process.returncode}"
+                return False, output[:200] if output else None, error_msg
+                
+        except FileNotFoundError:
+            return False, None, "Claude CLI not found in PATH"
+        except Exception as e:
+            self._log_to_file(f"Claude CLI error: {e}")
+            return False, None, str(e)
 
     async def _run_skill(self, skill_name: str, inputs: dict) -> str:
         """Run a skill and return its output."""
@@ -364,6 +549,42 @@ class CronScheduler:
             return False
 
         return current_mtime > self._config_mtime
+
+    async def _check_config_and_reload(self):
+        """Periodically check for config changes and reload if needed.
+
+        This method is called by the config watcher job every 30 seconds.
+        It handles:
+        - Reloading job configurations when they change
+        - Stopping the scheduler if it's been disabled in config
+        """
+        if not self.check_config_changed():
+            return
+
+        logger.info("Config file changed, checking for updates...")
+        self._config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+
+        # Reload config
+        old_enabled = self.config.enabled
+        self.config = SchedulerConfig()
+
+        # Check if scheduler was disabled
+        if old_enabled and not self.config.enabled:
+            logger.info("Scheduler disabled in config, stopping...")
+            # Remove all jobs except the config watcher
+            if self.scheduler:
+                for job in self.scheduler.get_jobs():
+                    if job.id != "_config_watcher":
+                        self.scheduler.remove_job(job.id)
+            logger.info("Scheduler jobs paused (config watcher still running)")
+            return
+
+        # Check if scheduler was enabled
+        if not old_enabled and self.config.enabled:
+            logger.info("Scheduler enabled in config, starting jobs...")
+
+        # Reload jobs
+        self.reload_config()
 
     async def run_job_now(self, job_name: str) -> dict:
         """Manually trigger a job to run immediately.
@@ -509,3 +730,5 @@ async def stop_scheduler():
     """Stop the global scheduler."""
     if _scheduler:
         await _scheduler.stop()
+
+

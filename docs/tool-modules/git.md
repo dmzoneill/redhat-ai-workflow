@@ -36,8 +36,8 @@ The `aa_git` module provides tools for Git operations including status, branches
 | `git_config_get` | Get config values |
 | `git_rev_parse` | Parse and resolve git references |
 | `git_remote_info` | Get remote repository info |
-| `code_format` | Format code with black/isort/ruff |
-| `code_lint` | Run linting with flake8/ruff/pylint |
+| `git_format` | Format code with black/isort/ruff |
+| `git_lint` | Run linting with flake8/ruff/pylint |
 | `make_target` | Run make targets |
 | `docker_compose_status` | Check container status |
 | `docker_compose_up` | Start services |

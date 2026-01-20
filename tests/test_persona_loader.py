@@ -7,7 +7,16 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
-from persona_loader import CORE_TOOLS, PERSONAS_DIR, PROJECT_DIR, TOOL_MODULES, TOOL_MODULES_DIR, PersonaLoader
+from persona_loader import (
+    CORE_TOOLS,
+    PERSONAS_DIR,
+    PROJECT_DIR,
+    TOOL_MODULES_DIR,
+    PersonaLoader,
+    discover_tool_modules,
+    get_available_modules,
+    is_valid_module,
+)
 
 
 class TestPaths:
@@ -28,23 +37,35 @@ class TestPaths:
         assert PERSONAS_DIR.name == "personas"
 
 
-class TestToolModules:
-    """Tests for TOOL_MODULES constant."""
+class TestToolModuleDiscovery:
+    """Tests for dynamic tool module discovery."""
 
-    def test_tool_modules_not_empty(self):
-        """TOOL_MODULES should contain entries."""
-        assert len(TOOL_MODULES) > 0
+    def test_discover_tool_modules_not_empty(self):
+        """discover_tool_modules should find modules."""
+        modules = discover_tool_modules()
+        assert len(modules) > 0
 
-    def test_expected_modules_present(self):
-        """Expected core modules should be in TOOL_MODULES."""
+    def test_expected_modules_discovered(self):
+        """Expected core modules should be discovered."""
+        modules = get_available_modules()
         expected = ["git", "jira", "gitlab", "k8s", "workflow"]
         for module in expected:
-            assert module in TOOL_MODULES, f"Missing module: {module}"
+            assert module in modules, f"Missing module: {module}"
 
-    def test_tool_counts_positive(self):
-        """Tool counts should be positive numbers."""
-        for module, count in TOOL_MODULES.items():
-            assert count > 0, f"Invalid count for {module}: {count}"
+    def test_basic_extra_variants_discovered(self):
+        """Should discover _basic and _extra variants."""
+        modules = get_available_modules()
+        # Check that at least some _basic and _extra variants exist
+        basic_modules = [m for m in modules if m.endswith("_basic")]
+        extra_modules = [m for m in modules if m.endswith("_extra")]
+        assert len(basic_modules) > 0, "No _basic modules found"
+        assert len(extra_modules) > 0, "No _extra modules found"
+
+    def test_is_valid_module(self):
+        """is_valid_module should correctly validate modules."""
+        assert is_valid_module("workflow") is True
+        assert is_valid_module("k8s_basic") is True
+        assert is_valid_module("nonexistent_module_xyz") is False
 
 
 class TestCoreTools:
@@ -127,13 +148,15 @@ class TestPersonaFiles:
         """Persona configs should reference valid tool modules."""
         import yaml
 
+        available_modules = get_available_modules()
+
         for persona_file in PERSONAS_DIR.glob("*.yaml"):
             with open(persona_file) as f:
                 config = yaml.safe_load(f)
 
             tools = config.get("tools", [])
             for tool in tools:
-                assert tool in TOOL_MODULES, f"Persona {persona_file.stem} references unknown module: {tool}"
+                assert tool in available_modules, f"Persona {persona_file.stem} references unknown module: {tool}"
 
 
 class TestGlobalLoader:

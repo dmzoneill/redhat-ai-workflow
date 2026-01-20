@@ -176,8 +176,8 @@ if DBUS_AVAILABLE:
             """JSON stats about the daemon."""
             # Get listener stats if available (includes polls, errors, etc.)
             listener_stats = {}
-            if hasattr(self.daemon, 'listener') and self.daemon.listener:
-                listener_stats = getattr(self.daemon.listener, 'stats', {})
+            if hasattr(self.daemon, "listener") and self.daemon.listener:
+                listener_stats = getattr(self.daemon.listener, "stats", {})
 
             stats = {
                 "running": self.daemon.is_running,

@@ -100,12 +100,12 @@ When local inference is unavailable:
 {
   "tool_filtering": {
     "enabled": true,
-    
+
     "core_tools": {
       "description": "Always included, every request",
       "categories": ["skills", "session", "memory"]
     },
-    
+
     "persona_baselines": {
       "developer": {
         "categories": ["jira_read", "gitlab_mr_read", "gitlab_ci"],
@@ -124,9 +124,9 @@ When local inference is unavailable:
         "description": "Core release tools"
       }
     },
-    
+
     "fallback_strategy": "keyword_match",
-    
+
     "expanded_baseline": {
       "description": "Categories to add when NPU unavailable (if fallback_strategy=expanded_baseline)",
       "developer": ["k8s_read", "git_read", "git_write"],
@@ -134,7 +134,7 @@ When local inference is unavailable:
       "incident": ["jira_write", "gitlab_ci"],
       "release": ["jira_write", "git_write"]
     },
-    
+
     "npu": {
       "enabled": true,
       "instance": "npu",
@@ -144,14 +144,14 @@ When local inference is unavailable:
       "max_categories": 3,
       "max_retries": 1
     },
-    
+
     "cache": {
       "enabled": true,
       "ttl_seconds": 300,
       "max_size": 500
     }
   },
-  
+
   "ollama": {
     "instances": {
       "npu": {
@@ -187,7 +187,7 @@ TOOL_CATEGORIES = {
     "jira_read": {
         "description": "View and search Jira issues",
         "keywords": ["issue", "ticket", "aap-", "jira", "story", "bug", "task"],
-        "tools": ["jira_view_issue", "jira_search", "jira_list_issues", 
+        "tools": ["jira_view_issue", "jira_search", "jira_list_issues",
                   "jira_my_issues", "jira_list_blocked"],
         "priority": 9,
     },
@@ -204,7 +204,7 @@ TOOL_CATEGORIES = {
         "tools": ["jira_create_issue", "jira_clone_issue"],
         "priority": 5,
     },
-    
+
     # === GITLAB MR ===
     "gitlab_mr_read": {
         "description": "View merge requests - details, diff, comments",
@@ -220,7 +220,7 @@ TOOL_CATEGORIES = {
                   "gitlab_mr_comment", "gitlab_mr_close"],
         "priority": 6,
     },
-    
+
     # === GITLAB CI ===
     "gitlab_ci": {
         "description": "CI/CD pipelines - status, logs, jobs",
@@ -229,7 +229,7 @@ TOOL_CATEGORIES = {
                   "gitlab_ci_trace", "gitlab_ci_lint"],
         "priority": 8,
     },
-    
+
     # === GIT ===
     "git_read": {
         "description": "View git status, log, diff",
@@ -244,7 +244,7 @@ TOOL_CATEGORIES = {
                   "git_checkout", "git_merge", "git_rebase", "git_stash"],
         "priority": 6,
     },
-    
+
     # === KUBERNETES ===
     "k8s_read": {
         "description": "View Kubernetes resources - pods, logs, events",
@@ -259,7 +259,7 @@ TOOL_CATEGORIES = {
         "tools": ["kubectl_delete", "kubectl_scale", "kubectl_rollout"],
         "priority": 4,
     },
-    
+
     # === EPHEMERAL ===
     "ephemeral": {
         "description": "Ephemeral environments - reserve, deploy, release",
@@ -268,7 +268,7 @@ TOOL_CATEGORIES = {
                   "bonfire_namespace_release", "bonfire_deploy"],
         "priority": 7,
     },
-    
+
     # === QUAY ===
     "quay": {
         "description": "Container images - check, list tags",
@@ -276,7 +276,7 @@ TOOL_CATEGORIES = {
         "tools": ["quay_check_image", "quay_list_tags", "quay_get_manifest"],
         "priority": 6,
     },
-    
+
     # === MONITORING ===
     "alerts": {
         "description": "Alerts - view firing alerts, silences",
@@ -296,7 +296,7 @@ TOOL_CATEGORIES = {
         "tools": ["prometheus_query", "prometheus_range_query"],
         "priority": 6,
     },
-    
+
     # === SKILLS (Always available) ===
     "skills": {
         "description": "Workflow automation skills",
@@ -360,7 +360,7 @@ INSTANCES = {
         best_for=["classification", "extraction", "simple_queries"]
     ),
     "igpu": OllamaInstance(
-        name="igpu", 
+        name="igpu",
         host=os.getenv("OLLAMA_IGPU_HOST", "http://localhost:11435"),
         default_model="llama3.2:3b",
         power_watts="8-15W",
@@ -401,21 +401,21 @@ logger = logging.getLogger(__name__)
 
 class OllamaClient:
     """HTTP client for Ollama API with fallback support."""
-    
+
     def __init__(self, instance: str = "npu", timeout: int = 30, fallback_chain: list[str] = None):
         self.instance = get_instance(instance)
         self.timeout = timeout
         self.fallback_chain = fallback_chain or []
         self._available: Optional[bool] = None
-    
+
     @property
     def host(self) -> str:
         return self.instance.host
-    
+
     @property
     def default_model(self) -> str:
         return self.instance.default_model
-    
+
     def is_available(self, force_check: bool = False) -> bool:
         """Check if instance is online."""
         if self._available is not None and not force_check:
@@ -426,7 +426,7 @@ class OllamaClient:
         except:
             self._available = False
         return self._available
-    
+
     def generate(
         self,
         prompt: str,
@@ -437,7 +437,7 @@ class OllamaClient:
     ) -> str:
         """Generate text completion."""
         model = model or self.default_model
-        
+
         response = requests.post(
             f"{self.host}/api/generate",
             json={
@@ -453,7 +453,7 @@ class OllamaClient:
         )
         response.raise_for_status()
         return response.json()["response"]
-    
+
     def classify(
         self,
         text: str,
@@ -470,13 +470,13 @@ Category:"""
         try:
             result = self.generate(prompt, max_tokens=20, temperature=0)
             result_lower = result.strip().lower()
-            
+
             for cat in categories:
                 if cat.lower() in result_lower:
                     return cat
-            
+
             return categories[-1]  # Default fallback
-            
+
         except Exception as e:
             logger.error(f"Classification failed: {e}")
             return None
@@ -489,7 +489,7 @@ def get_available_client(
     """Get first available client from primary + fallback chain."""
     fallback_chain = fallback_chain or ["igpu", "nvidia", "cpu"]
     instances_to_try = [primary] + [f for f in fallback_chain if f != primary]
-    
+
     for instance_name in instances_to_try:
         try:
             client = OllamaClient(instance=instance_name, timeout=2)
@@ -500,7 +500,7 @@ def get_available_client(
                 logger.warning(f"{instance_name} not available, trying next...")
         except Exception as e:
             logger.warning(f"Failed to connect to {instance_name}: {e}")
-    
+
     logger.warning("No inference instances available")
     return None
 ```
@@ -534,11 +534,11 @@ class ToolCategory:
     tools: list[str]
     priority: int = 5  # 1-10, higher = more likely to be selected
 
-@dataclass  
+@dataclass
 class ToolRegistry:
     """Registry of all tools organized by category."""
     categories: dict[str, ToolCategory] = field(default_factory=dict)
-    
+
     def get_tools_for_categories(self, category_names: list[str]) -> list[str]:
         """Get all tools for given categories."""
         tools = set()
@@ -546,7 +546,7 @@ class ToolRegistry:
             if name in self.categories:
                 tools.update(self.categories[name].tools)
         return list(tools)
-    
+
     def keyword_match(self, text: str) -> list[str]:
         """Match text against category keywords."""
         text_lower = text.lower()
@@ -557,7 +557,7 @@ class ToolRegistry:
                     matched.append(name)
                     break
         return matched
-    
+
     def to_prompt_format(self) -> str:
         """Format categories for NPU prompt."""
         lines = []
@@ -591,30 +591,30 @@ logger = logging.getLogger(__name__)
 
 class SkillToolDiscovery:
     """Dynamically discover tools required by a skill from YAML."""
-    
+
     def __init__(self, skills_dir: Path = Path("skills")):
         self.skills_dir = skills_dir
         self._cache: dict[str, set[str]] = {}
-    
+
     def discover_tools(self, skill_name: str) -> set[str]:
         """Parse skill YAML and extract all tool references."""
         if skill_name in self._cache:
             return self._cache[skill_name]
-        
+
         skill_path = self.skills_dir / f"{skill_name}.yaml"
         if not skill_path.exists():
             return set()
-        
+
         with open(skill_path) as f:
             skill = yaml.safe_load(f)
-        
+
         tools = set()
         for step in skill.get("steps", []):
             self._extract_tools_from_step(step, tools)
-        
+
         self._cache[skill_name] = tools
         return tools
-    
+
     def _extract_tools_from_step(self, step: dict, tools: set[str]) -> None:
         """Recursively extract tools from a step."""
         if "tool" in step:
@@ -670,9 +670,9 @@ def detect_skill(message: str) -> str | None:
 ```python
 class HybridToolFilter:
     """4-layer tool filtering with graceful degradation."""
-    
+
     FALLBACK_STRATEGIES = ["keyword_match", "expanded_baseline", "all_tools"]
-    
+
     FAST_PATTERNS = [
         (re.compile(r"MR\s*#?(\d+)|!(\d+)", re.I), ["gitlab_mr_read", "gitlab_ci"]),
         (re.compile(r"AAP-\d+", re.I), ["jira_read"]),
@@ -680,7 +680,7 @@ class HybridToolFilter:
         (re.compile(r"ephemeral|bonfire", re.I), ["ephemeral"]),
         (re.compile(r"alert|firing", re.I), ["alerts"]),
     ]
-    
+
     def __init__(self, config_path: Path = Path("config.json")):
         self.config = self._load_config(config_path)
         self.registry = load_registry()
@@ -690,18 +690,18 @@ class HybridToolFilter:
             "fallback_strategy", "keyword_match"
         )
         self.stats = FilterStats()
-    
+
     def _init_inference_client(self) -> Optional[OllamaClient]:
         """Initialize inference client with fallback chain."""
         npu_config = self.config.get("tool_filtering", {}).get("npu", {})
         if not npu_config.get("enabled", True):
             return None
-        
+
         return get_available_client(
             primary=npu_config.get("instance", "npu"),
             fallback_chain=npu_config.get("fallback_chain", ["igpu", "nvidia", "cpu"])
         )
-    
+
     def filter(
         self,
         message: str,
@@ -710,7 +710,7 @@ class HybridToolFilter:
     ) -> dict:
         """
         4-layer filtering with graceful degradation.
-        
+
         Returns dict with:
             - tools: list of tool names
             - methods: list of methods used
@@ -721,21 +721,21 @@ class HybridToolFilter:
         categories = set()
         explicit_tools = set()
         methods_used = []
-        
+
         # === LAYER 1: Core Tools (always) ===
         core_cats = self.config.get("tool_filtering", {}).get("core_tools", {}).get("categories", ["skills"])
         categories.update(core_cats)
         methods_used.append("layer1_core")
-        
+
         # === LAYER 2: Persona Baseline (from config.json) ===
         baseline = self._get_baseline_categories(persona)
         categories.update(baseline)
         methods_used.append("layer2_persona")
-        
+
         # === LAYER 3: Skill Tool Discovery (dynamic from YAML) ===
         if not detected_skill:
             detected_skill = detect_skill(message)
-        
+
         needs_npu = False
         if detected_skill:
             skill_tools = self.skill_discovery.discover_tools(detected_skill)
@@ -744,25 +744,25 @@ class HybridToolFilter:
                 needs_npu = True
             explicit_tools.update(skill_tools)
             methods_used.append("layer3_skill")
-        
+
         # === Fast Path: Regex matching ===
         fast_matches = self._fast_match(message)
         if fast_matches:
             categories.update(fast_matches)
             methods_used.append("fast_path")
-        
+
         # === LAYER 4: NPU Classification (with fallback) ===
         if needs_npu or (not detected_skill and not fast_matches):
             npu_categories, npu_method = self._classify_with_fallback(message, categories, persona)
             categories.update(npu_categories)
             methods_used.append(f"layer4_{npu_method}")
-        
+
         # === Combine all tools ===
         category_tools = self.registry.get_tools_for_categories(list(categories))
         all_tools = list(set(category_tools) | explicit_tools)
-        
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000
-        
+
         result = {
             "tools": all_tools,
             "tool_count": len(all_tools),
@@ -774,12 +774,12 @@ class HybridToolFilter:
             "skill_detected": detected_skill,
             "latency_ms": round(elapsed_ms, 1),
         }
-        
+
         # Record stats
         self.stats.record(result)
-        
+
         return result
-    
+
     def _classify_with_fallback(
         self,
         message: str,
@@ -787,7 +787,7 @@ class HybridToolFilter:
         persona: str,
     ) -> tuple[list[str], str]:
         """Classify with NPU, falling back gracefully if unavailable."""
-        
+
         # Try NPU/inference if available
         if self.inference_client and self.inference_client.is_available():
             try:
@@ -795,21 +795,21 @@ class HybridToolFilter:
                 return categories, "npu"
             except Exception as e:
                 logger.warning(f"NPU classification failed: {e}")
-        
+
         # Fallback strategies
         if self.fallback_strategy == "keyword_match":
             categories = self.registry.keyword_match(message)
             categories = [c for c in categories if c not in already_included]
             return categories[:3], "keyword_fallback"
-        
+
         elif self.fallback_strategy == "expanded_baseline":
             expanded = self._get_expanded_baseline(persona)
             extra = [c for c in expanded if c not in already_included]
             return extra, "expanded_baseline"
-        
+
         elif self.fallback_strategy == "all_tools":
             return list(TOOL_CATEGORIES.keys()), "all_tools"
-        
+
         return [], "none"
 ```
 
@@ -839,28 +839,28 @@ class ClaudeAgent:
         self.tool_filter = HybridToolFilter()
         self.use_tool_filtering = True
         self.persona = "developer"
-    
+
     async def process_message(self, message: str, ...) -> str:
         all_tools = self.tool_registry.list_tools()
-        
+
         if self.use_tool_filtering:
             result = self.tool_filter.filter(
                 message=message,
                 persona=self.persona,
             )
-            
+
             filtered_tools = [
                 tool for tool in all_tools
                 if tool["name"] in result["tools"]
             ]
-            
+
             logger.info(
                 f"Tool filtering: {len(all_tools)} → {len(filtered_tools)} tools "
                 f"({result['reduction_pct']}% reduction, {result['latency_ms']}ms)"
             )
         else:
             filtered_tools = all_tools
-        
+
         response = self.client.messages.create(
             model=self.model,
             tools=filtered_tools,
@@ -898,21 +898,21 @@ class FilterStats:
     npu_calls: int = 0
     npu_timeouts: int = 0
     recent_history: list = field(default_factory=list)
-    
+
     def record(self, result: dict) -> None:
         """Record a filter result."""
         self.total_requests += 1
-        
+
         # Update persona stats
         persona = result["persona"]
         if persona not in self.by_persona:
             self.by_persona[persona] = {
-                "requests": 0, "tools": [], 
+                "requests": 0, "tools": [],
                 "tier1_only": 0, "tier2_skill": 0, "tier3_npu": 0
             }
         self.by_persona[persona]["requests"] += 1
         self.by_persona[persona]["tools"].append(result["tool_count"])
-        
+
         # Update latency histogram
         latency = result["latency_ms"]
         if latency < 10:
@@ -923,14 +923,14 @@ class FilterStats:
             self.latency_histogram["100-500ms"] += 1
         else:
             self.latency_histogram[">500ms"] += 1
-        
+
         # Add to recent history (keep last 20)
         self.recent_history.append({
             "timestamp": datetime.now().isoformat(),
             **result
         })
         self.recent_history = self.recent_history[-20:]
-    
+
     def to_dict(self) -> dict:
         """Export stats for dashboard."""
         return {
@@ -961,12 +961,12 @@ class CacheEntry:
 
 class FilterCache:
     """LRU cache with TTL for tool filter results."""
-    
+
     def __init__(self, max_size: int = 500, ttl_seconds: int = 300):
         self.max_size = max_size
         self.ttl = timedelta(seconds=ttl_seconds)
         self._cache: dict[str, CacheEntry] = {}
-    
+
     def get(self, key: str) -> Optional[list[str]]:
         entry = self._cache.get(key)
         if entry is None:
@@ -976,7 +976,7 @@ class FilterCache:
             return None
         entry.hits += 1
         return entry.tools
-    
+
     def set(self, key: str, tools: list[str]) -> None:
         if len(self._cache) >= self.max_size:
             oldest_key = min(self._cache, key=lambda k: self._cache[k].created_at)
@@ -1156,20 +1156,20 @@ class TestLayerFiltering:
     def test_layer1_core_always_included(self):
         result = filter_tools("hello", persona="developer")
         assert "skill_run" in result["tools"]
-    
+
     def test_layer2_persona_baseline(self):
         result = filter_tools("hello", persona="developer")
         assert "jira_view_issue" in result["tools"]
         assert "gitlab_mr_view" in result["tools"]
-    
+
     def test_layer3_skill_discovery(self):
         result = filter_tools("deploy MR 1459 to ephemeral", persona="developer")
         assert "bonfire_deploy" in result["tools"]
-    
+
     def test_layer4_npu_classification(self):
         result = filter_tools("help debug this error", persona="developer")
         assert len(result["tools"]) > 20  # More than baseline
-    
+
     def test_fallback_when_npu_offline(self):
         # Simulate NPU offline
         result = filter_tools("help debug this error", persona="developer")
@@ -1179,7 +1179,7 @@ class TestToolReduction:
     def test_significant_reduction(self):
         result = filter_tools("check MR 1459", persona="developer")
         assert result["reduction_pct"] > 80
-    
+
     def test_baseline_reasonable_size(self):
         result = filter_tools("hello", persona="developer")
         assert 15 <= result["tool_count"] <= 25
@@ -1200,7 +1200,7 @@ MESSAGES = [
 
 def benchmark():
     filter = HybridToolFilter()
-    
+
     for msg, expected in MESSAGES:
         filter.clear_cache()
         result = filter.filter(msg, persona="developer")

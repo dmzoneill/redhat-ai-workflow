@@ -23,7 +23,6 @@ Usage:
 import argparse
 import asyncio
 import logging
-import signal
 import sys
 from pathlib import Path
 from typing import cast
@@ -41,50 +40,26 @@ from mcp.server.fastmcp import FastMCP
 PROJECT_DIR = Path(__file__).parent.parent  # ai-workflow root
 TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
 
-# Available tool modules - we'll load them dynamically
-# Tool counts updated 2025-01-08
-# Modules with _basic/_extra variants load from tools_basic.py/tools_extra.py
-TOOL_MODULES = {
-    "workflow": 33,  # Core: memory, persona, session, skill, infra, meta
-    # Git - split into basic and extra
-    "git": 31,  # All git tools (loads both basic + extra)
-    "git_basic": 14,  # Basic: status, log, diff, add, commit, push, pull, fetch, etc.
-    "git_extra": 17,  # Extra: rebase, merge, reset, clean, docker, make, lint
-    # Jira - split into basic and extra
-    "jira": 29,  # All jira tools
-    "jira_basic": 15,  # Basic: view, search, list, my_issues, set_status, comment
-    "jira_extra": 14,  # Extra: create, clone, links, flags, sprints
-    # GitLab - split into basic and extra
-    "gitlab": 32,  # All gitlab tools (includes gitlab_mr_sha)
-    "gitlab_basic": 17,  # Basic: mr_list, mr_view, mr_create, mr_sha, ci_status, ci_list
-    "gitlab_extra": 15,  # Extra: mr_approve, mr_merge, ci_run, issues, releases
-    # K8s - split into basic and extra
-    "k8s": 28,  # All k8s tools
-    "k8s_basic": 14,  # Basic: get_pods, logs, describe, deployments
-    "k8s_extra": 14,  # Extra: exec, cp, scale, rollout, secrets
-    # Konflux - split into basic and extra
-    "konflux": 36,  # All konflux tools
-    "konflux_basic": 18,  # Basic: list_pipelines, status, components, snapshots
-    "konflux_extra": 18,  # Extra: releases, builds, integration tests, tkn commands
-    # Bonfire - split into basic and extra
-    "bonfire": 21,  # All bonfire tools
-    "bonfire_basic": 10,  # Basic: reserve, list, describe, release, extend
-    "bonfire_extra": 11,  # Extra: deploy, deploy_aa, process, iqe
-    # Prometheus - split into basic and extra
-    "prometheus": 15,  # All prometheus tools
-    "prometheus_basic": 8,  # Basic: query, alerts, health, targets
-    "prometheus_extra": 7,  # Extra: query_range, rules, series, labels, pre_deploy
-    # Other modules (no split needed)
-    "alertmanager": 9,  # Silence management
-    "kibana": 10,  # Log search
-    "quay": 9,  # Container images (6 basic + 2 extra + skopeo_get_digest)
-    "appinterface": 7,  # GitOps config
-    "slack": 48,  # Slack messaging
-    "google_calendar": 6,  # Calendar/meetings
-    "lint": 7,  # Linting tools
-    "dev_workflow": 9,  # Development helpers
-    "concur": 8,  # Expense automation (GOMO + Concur)
-}
+# Tool file naming conventions (shared with persona_loader)
+TOOLS_FILE = "tools.py"
+TOOLS_BASIC_FILE = "tools_basic.py"
+TOOLS_EXTRA_FILE = "tools_extra.py"
+
+
+def get_available_modules() -> set[str]:
+    """
+    Dynamically discover available tool modules from the tool_modules directory.
+
+    Uses the same discovery logic as persona_loader to ensure consistency.
+    """
+    from .persona_loader import get_available_modules as _get_available_modules
+
+    return _get_available_modules()
+
+
+def is_valid_module(module_name: str) -> bool:
+    """Check if a module name is valid (exists in tool_modules)."""
+    return module_name in get_available_modules()
 
 
 def load_agent_config(agent_name: str) -> list[str] | None:
@@ -130,11 +105,22 @@ def get_tool_module(name: str):
 def setup_logging(web_mode: bool = False) -> logging.Logger:
     """Configure logging based on mode."""
     # In web mode, log to stdout; in MCP mode, log to stderr (stdout is for JSON-RPC)
-    handler = logging.StreamHandler(sys.stdout if web_mode else sys.stderr)
+    handlers = []
+
+    # Stream handler
+    stream_handler = logging.StreamHandler(sys.stdout if web_mode else sys.stderr)
+    handlers.append(stream_handler)
+
+    # File handler for debugging (always enabled)
+    log_dir = Path.home() / ".mcp" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.FileHandler(log_dir / "aa-workflow.log")
+    handlers.append(file_handler)
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[handler],
+        handlers=handlers,
     )
     return logging.getLogger(__name__)
 
@@ -168,16 +154,17 @@ def _get_tools_file_path(tool_name: str) -> Path:
         return module_dir / "src" / "tools.py"
 
 
-def _load_single_tool_module(tool_name: str, server: FastMCP) -> bool:
+def _load_single_tool_module(tool_name: str, server: FastMCP, tools_before: set[str] | None = None) -> list[str]:
     """
     Load a single tool module and register its tools.
 
     Args:
         tool_name: Tool module name
         server: FastMCP server instance
+        tools_before: Set of tool names before loading (to detect new tools)
 
     Returns:
-        True if loaded successfully, False otherwise
+        List of tool names that were loaded, empty list on failure
     """
     logger = logging.getLogger(__name__)
 
@@ -185,25 +172,30 @@ def _load_single_tool_module(tool_name: str, server: FastMCP) -> bool:
 
     if not tools_file.exists():
         logger.warning(f"Tools file not found: {tools_file}")
-        return False
+        return []
 
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(f"aa_{tool_name}_tools", tools_file)
     if spec is None or spec.loader is None:
         logger.warning(f"Could not create spec for {tool_name}")
-        return False
+        return []
 
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
     if hasattr(module, "register_tools"):
         module.register_tools(server)
-        logger.info(f"Loaded {tool_name} tools")
-        return True
+        
+        # Detect which tools were added by this module
+        tools_after = {t.name for t in server._tool_manager._tools.values()}
+        new_tools = list(tools_after - (tools_before or set()))
+        
+        logger.info(f"Loaded {tool_name}: {len(new_tools)} tools")
+        return new_tools
     else:
         logger.warning(f"Module aa_{tool_name} has no register_tools function")
-        return False
+        return []
 
 
 def _register_debug_for_module(server: FastMCP, tool_name: str):
@@ -247,27 +239,38 @@ def create_mcp_server(
     logger = logging.getLogger(__name__)
     server = FastMCP(name)
 
+    # Get available modules dynamically
+    available_modules = get_available_modules()
+
     # Determine which tools to load
     if tools is None:
-        tools = list(TOOL_MODULES.keys())
+        tools = list(available_modules)
 
-    # Calculate estimated tool count
-    estimated = sum(TOOL_MODULES.get(t, 0) for t in tools)
-    if estimated > 128:
-        logger.warning(f"Loading ~{estimated} tools, may exceed Cursor's limit of 128!")
+    # Warn if loading many tools
+    if len(tools) > 128:
+        logger.warning(f"Loading {len(tools)} tools, may exceed Cursor's limit of 128!")
 
-    # Load all requested tool modules
+    # Load all requested tool modules, tracking which tools come from which module
     loaded_modules = []
-    for tool_name in tools:
-        if tool_name not in TOOL_MODULES:
-            logger.warning(f"Unknown tool module: {tool_name}. Available: {list(TOOL_MODULES.keys())}")
+    tool_to_module: dict[str, str] = {}  # tool_name -> module_name
+    
+    for module_name in tools:
+        if module_name not in available_modules:
+            logger.warning(f"Unknown tool module: {module_name}. Available: {sorted(available_modules)}")
             continue
 
         try:
-            if _load_single_tool_module(tool_name, server):
-                loaded_modules.append(tool_name)
+            # Get current tools before loading
+            tools_before = {t.name for t in server._tool_manager._tools.values()}
+            
+            new_tools = _load_single_tool_module(module_name, server, tools_before)
+            if new_tools:
+                loaded_modules.append(module_name)
+                # Track which tools came from this module
+                for tool_name in new_tools:
+                    tool_to_module[tool_name] = module_name
         except Exception as e:
-            logger.error(f"Error loading {tool_name}: {e}")
+            logger.error(f"Error loading {module_name}: {e}")
 
     # Register debug_tool and wrap all tools with auto-fix hints
     try:
@@ -286,15 +289,29 @@ def create_mcp_server(
     except Exception as e:
         logger.warning(f"Could not register debug_tool: {e}")
 
-    # Initialize dynamic persona loader
+    # Initialize dynamic persona loader with tool-to-module mapping
     try:
         from .persona_loader import init_loader
 
         loader = init_loader(server)
         loader.loaded_modules = set(loaded_modules)
-        logger.info("Initialized dynamic persona loader")
+        loader._tool_to_module = tool_to_module.copy()
+        logger.info(
+            f"Initialized PersonaLoader: {len(loader.loaded_modules)} modules, "
+            f"{len(loader._tool_to_module)} tools"
+        )
     except Exception as e:
         logger.warning(f"Could not initialize persona loader: {e}")
+
+    # Restore workspace sessions from disk (survives server restarts)
+    try:
+        from .workspace_state import WorkspaceRegistry
+
+        restored = WorkspaceRegistry.restore_if_empty()
+        if restored > 0:
+            logger.info(f"Restored {restored} session(s) from previous server run")
+    except Exception as e:
+        logger.warning(f"Could not restore workspace sessions: {e}")
 
     logger.info(f"Server ready with tools from {len(loaded_modules)} modules: {loaded_modules}")
     return server
@@ -306,6 +323,9 @@ def create_mcp_server(
 async def init_scheduler(server: FastMCP) -> bool:
     """Initialize and start the scheduler subsystem.
 
+    The scheduler always starts to enable config watching.
+    Jobs are only scheduled if enabled in config.
+
     Args:
         server: FastMCP server instance for skill execution
 
@@ -315,21 +335,19 @@ async def init_scheduler(server: FastMCP) -> bool:
     logger = logging.getLogger(__name__)
 
     try:
+        from tool_modules.aa_workflow.src.notification_engine import init_notification_engine, send_notification
+        from tool_modules.aa_workflow.src.poll_engine import init_poll_engine
         from tool_modules.aa_workflow.src.scheduler import init_scheduler as init_cron_scheduler
         from tool_modules.aa_workflow.src.scheduler import start_scheduler
-        from tool_modules.aa_workflow.src.poll_engine import init_poll_engine
-        from tool_modules.aa_workflow.src.notification_engine import (
-            init_notification_engine,
-            send_notification,
-        )
+
         from .utils import load_config
 
         config = load_config()
         schedules_config = config.get("schedules", {})
 
-        if not schedules_config.get("enabled", False):
-            logger.info("Scheduler disabled in config (schedules.enabled = false)")
-            return False
+        scheduler_enabled = schedules_config.get("enabled", False)
+        if not scheduler_enabled:
+            logger.info("Scheduler disabled in config (will start config watcher only)")
 
         # Initialize notification engine
         notification_engine = init_notification_engine(server=server, config=config)
@@ -377,17 +395,23 @@ async def init_scheduler(server: FastMCP) -> bool:
             job_callback=poll_job_callback,
         )
 
-        # Configure poll engine with sources and jobs
-        poll_engine.configure(
-            poll_sources=schedules_config.get("poll_sources", {}),
-            poll_jobs=scheduler.config.get_poll_jobs(),
-        )
+        # Configure poll engine with sources and jobs (only if enabled)
+        if scheduler_enabled:
+            poll_engine.configure(
+                poll_sources=schedules_config.get("poll_sources", {}),
+                poll_jobs=scheduler.config.get_poll_jobs(),
+            )
 
-        # Start scheduler and poll engine
+        # Start scheduler (always starts for config watching)
         await start_scheduler()
-        await poll_engine.start()
 
-        logger.info("Scheduler subsystem initialized and started")
+        # Start poll engine only if scheduler is enabled
+        if scheduler_enabled:
+            await poll_engine.start()
+            logger.info("Scheduler subsystem initialized and started")
+        else:
+            logger.info("Scheduler config watcher started (jobs disabled)")
+
         return True
 
     except ImportError as e:
@@ -404,8 +428,8 @@ async def stop_scheduler():
     logger = logging.getLogger(__name__)
 
     try:
-        from tool_modules.aa_workflow.src.scheduler import stop_scheduler as stop_cron_scheduler
         from tool_modules.aa_workflow.src.poll_engine import get_poll_engine
+        from tool_modules.aa_workflow.src.scheduler import stop_scheduler as stop_cron_scheduler
 
         await stop_cron_scheduler()
 
@@ -463,12 +487,19 @@ def run_web_server(server: FastMCP, host: str = "127.0.0.1", port: int = 8765):
 
 def main():
     """Main entry point with tool selection."""
+    # Get available modules for help text
+    available = sorted(get_available_modules())
+    # Show base modules (without _basic/_extra suffixes) for cleaner help
+    base_modules = sorted({m.replace("_basic", "").replace("_extra", "") for m in available})
+
     parser = argparse.ArgumentParser(
         description="AA Modular MCP Server",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
-Available tool modules:
-  {', '.join(sorted(TOOL_MODULES.keys()))}
+Available tool modules (dynamically discovered):
+  {', '.join(base_modules)}
+
+  Note: Most modules support _basic and _extra variants (e.g., git_basic, git_extra)
 
 Available agents (recommended - stays under tool limit):
   devops, developer, incident, release
@@ -536,8 +567,7 @@ Examples:
             logger.info("Available agents: devops, developer, incident, release, universal")
             sys.exit(1)
         server_name = args.name or f"aa-{args.agent}"
-        estimated = sum(TOOL_MODULES.get(t, 0) for t in tools)
-        logger.info(f"Loading agent '{args.agent}' with ~{estimated} tools: {tools}")
+        logger.info(f"Loading agent '{args.agent}' with {len(tools)} modules: {tools}")
     elif args.all:
         tools = None  # Load all
         server_name = args.name or "aa_workflow"
@@ -557,8 +587,7 @@ Examples:
             logger.info("Starting in dynamic mode - use persona_load() to switch personas")
         else:
             server_name = args.name or f"aa-{default_agent}"
-            estimated = sum(TOOL_MODULES.get(t, 0) for t in tools)
-            logger.info(f"Loading default agent '{default_agent}' with ~{estimated} tools: {tools}")
+            logger.info(f"Loading default agent '{default_agent}' with {len(tools)} modules: {tools}")
 
     try:
         server = create_mcp_server(name=server_name, tools=tools)

@@ -1,6 +1,7 @@
 """Caching for tool filter results.
 
 Provides LRU cache with TTL for efficient repeated queries.
+The cache is workspace-aware: different workspaces have separate cache entries.
 """
 
 import logging
@@ -21,7 +22,11 @@ class CacheEntry:
 
 
 class FilterCache:
-    """LRU cache with TTL for tool filter results."""
+    """LRU cache with TTL for tool filter results.
+
+    The cache is workspace-aware: cache keys include workspace_uri to ensure
+    different Cursor chats/workspaces have separate cache entries.
+    """
 
     def __init__(self, max_size: int = 500, ttl_seconds: int = 300):
         """Initialize cache.
@@ -35,31 +40,34 @@ class FilterCache:
         self._cache: dict[str, CacheEntry] = {}
         self._stats = {"hits": 0, "misses": 0, "evictions": 0}
 
-    def _make_key(self, message: str, persona: str) -> str:
-        """Create cache key from message and persona.
+    def _make_key(self, message: str, persona: str, workspace_uri: str = "default") -> str:
+        """Create cache key from message, persona, and workspace.
 
         Args:
             message: User message
             persona: Active persona
+            workspace_uri: Workspace URI for isolation
 
         Returns:
             Cache key string
         """
         # Normalize message: lowercase, truncate, strip whitespace
         normalized = message.lower().strip()[:100]
-        return f"{persona}:{normalized}"
+        # Include workspace in key for isolation
+        return f"{workspace_uri}:{persona}:{normalized}"
 
-    def get(self, message: str, persona: str) -> Optional[list[str]]:
+    def get(self, message: str, persona: str, workspace_uri: str = "default") -> Optional[list[str]]:
         """Get cached tools if valid.
 
         Args:
             message: User message
             persona: Active persona
+            workspace_uri: Workspace URI for isolation
 
         Returns:
             Cached tool list, or None if not found/expired
         """
-        key = self._make_key(message, persona)
+        key = self._make_key(message, persona, workspace_uri)
         entry = self._cache.get(key)
 
         if entry is None:
@@ -78,15 +86,16 @@ class FilterCache:
         logger.debug(f"Cache hit: {key[:30]}... (hits: {entry.hits})")
         return entry.tools
 
-    def set(self, message: str, persona: str, tools: list[str]) -> None:
-        """Cache tools for message/persona.
+    def set(self, message: str, persona: str, tools: list[str], workspace_uri: str = "default") -> None:
+        """Cache tools for message/persona/workspace.
 
         Args:
             message: User message
             persona: Active persona
             tools: Tool list to cache
+            workspace_uri: Workspace URI for isolation
         """
-        key = self._make_key(message, persona)
+        key = self._make_key(message, persona, workspace_uri)
 
         # Evict oldest if at capacity
         if len(self._cache) >= self.max_size:
@@ -98,21 +107,38 @@ class FilterCache:
         self._cache[key] = CacheEntry(tools=tools, created_at=datetime.now())
         logger.debug(f"Cache set: {key[:30]}... ({len(tools)} tools)")
 
-    def invalidate(self, message: str, persona: str) -> bool:
+    def invalidate(self, message: str, persona: str, workspace_uri: str = "default") -> bool:
         """Invalidate a specific cache entry.
 
         Args:
             message: User message
             persona: Active persona
+            workspace_uri: Workspace URI for isolation
 
         Returns:
             True if entry was found and removed
         """
-        key = self._make_key(message, persona)
+        key = self._make_key(message, persona, workspace_uri)
         if key in self._cache:
             del self._cache[key]
             return True
         return False
+
+    def invalidate_workspace(self, workspace_uri: str) -> int:
+        """Invalidate all cache entries for a workspace.
+
+        Args:
+            workspace_uri: Workspace URI to invalidate
+
+        Returns:
+            Number of entries invalidated
+        """
+        keys_to_remove = [k for k in self._cache if k.startswith(f"{workspace_uri}:")]
+        for key in keys_to_remove:
+            del self._cache[key]
+        if keys_to_remove:
+            logger.debug(f"Invalidated {len(keys_to_remove)} cache entries for workspace {workspace_uri}")
+        return len(keys_to_remove)
 
     def clear(self) -> int:
         """Clear all cache entries.
@@ -159,3 +185,5 @@ class FilterCache:
     def reset_stats(self) -> None:
         """Reset statistics counters."""
         self._stats = {"hits": 0, "misses": 0, "evictions": 0}
+
+

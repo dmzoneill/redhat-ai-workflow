@@ -1,0 +1,53 @@
+[project]
+name = "aa_meet_bot"
+version = "0.1.0"
+description = "Google Meet Bot - AI-powered meeting assistant with voice/video avatar"
+requires-python = ">=3.11"
+dependencies = [
+    # Browser automation
+    "playwright>=1.40.0",
+    "undetected-playwright>=0.3.0",
+    
+    # Audio processing
+    "pyaudio>=0.2.14",
+    "numpy>=1.24.0",
+    "soundfile>=0.12.1",
+    "pydub>=0.25.1",
+    
+    # Wake word detection (text-based primary, audio fallback)
+    "openwakeword>=0.6.0",
+    
+    # Voice cloning (GPT-SoVITS)
+    # Note: GPT-SoVITS installed separately via git clone
+    
+    # Lip sync (Wav2Lip)
+    # Note: Wav2Lip installed separately via git clone
+    
+    # Google Calendar integration
+    "google-api-python-client>=2.100.0",
+    "google-auth-httplib2>=0.1.1",
+    "google-auth-oauthlib>=1.1.0",
+    
+    # Async utilities
+    "aiofiles>=23.2.1",
+    "aiohttp>=3.9.0",
+    
+    # Video/Image processing
+    "opencv-python>=4.8.0",
+    "pillow>=10.0.0",
+    
+    # MCP server
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+

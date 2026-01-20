@@ -239,7 +239,7 @@ flowchart TD
 
 **Description:** Run black formatter check
 
-**Tool:** `code_format`
+**Tool:** `git_format`
 
 **Condition:** `inputs.run_linting and (not lint_tools_check or lint_tools_check.get('available', True))`
 
@@ -271,7 +271,7 @@ flowchart TD
 
 **Description:** Run flake8 linting on changed files only
 
-**Tool:** `code_lint`
+**Tool:** `git_lint`
 
 **Condition:** `inputs.run_linting and changed_files and changed_files.get('count', 0) > 0`
 
@@ -446,8 +446,8 @@ flowchart TD
 
 ## MCP Tools Used (19 total)
 
-- `code_format`
-- `code_lint`
+- `git_format`
+- `git_lint`
 - `git_fetch`
 - `git_log`
 - `git_merge`

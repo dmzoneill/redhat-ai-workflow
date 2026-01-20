@@ -332,3 +332,5 @@ def resolve_context(message: str) -> ResolvedContext:
 def get_repo_path(gitlab_project: str) -> Optional[str]:
     """Quick lookup of repo path from GitLab project."""
     return ContextResolver().get_repo_path(gitlab_project)
+
+

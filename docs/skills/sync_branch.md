@@ -187,7 +187,7 @@ flowchart TD
 
 **Description:** Check code formatting before push
 
-**Tool:** `code_format`
+**Tool:** `git_format`
 
 **Condition:** `rebase_result.success and inputs.force_push and inputs.run_linting`
 
@@ -195,7 +195,7 @@ flowchart TD
 
 **Description:** Run flake8 linting before push
 
-**Tool:** `code_lint`
+**Tool:** `git_lint`
 
 **Condition:** `rebase_result.success and inputs.force_push and inputs.run_linting`
 
@@ -232,8 +232,8 @@ flowchart TD
 
 ## MCP Tools Used (9 total)
 
-- `code_format`
-- `code_lint`
+- `git_format`
+- `git_lint`
 - `git_fetch`
 - `git_log`
 - `git_push`
