@@ -205,4 +205,54 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
         """Get recent activity."""
         return {"activity": activity_log[:limit]}
 
+    @app.post("/api/sessions/sync")
+    async def sync_sessions():
+        """Sync sessions with Cursor's database and export workspace state.
+        
+        This endpoint:
+        1. Syncs all workspaces with Cursor's database (add/remove/rename sessions)
+        2. Exports the updated state to workspace_states.json
+        3. Returns sync results
+        """
+        from server.workspace_state import WorkspaceRegistry
+        from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state
+
+        log_activity("Session Sync", "Syncing with Cursor DB")
+
+        try:
+            # Perform full sync with Cursor
+            sync_result = WorkspaceRegistry.sync_all_with_cursor()
+            
+            # Export for UI
+            export_result = export_workspace_state()
+
+            total_changes = sum(sync_result.values())
+            log_activity(
+                "Session Sync",
+                f"+{sync_result['added']} -{sync_result['removed']} ~{sync_result['renamed']}",
+                "success"
+            )
+
+            return {
+                "success": True,
+                "sync": sync_result,
+                "export": export_result,
+                "total_changes": total_changes,
+            }
+        except Exception as e:
+            log_activity("Session Sync", str(e), "error")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/sessions")
+    async def list_sessions():
+        """Get all sessions across all workspaces."""
+        from server.workspace_state import WorkspaceRegistry
+
+        sessions = WorkspaceRegistry.get_all_sessions()
+        return {
+            "sessions": sessions,
+            "count": len(sessions),
+            "workspace_count": len(WorkspaceRegistry._workspaces),
+        }
+
     return app

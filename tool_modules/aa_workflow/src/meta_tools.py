@@ -1005,6 +1005,53 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         return [TextContent(type="text", text="\n".join(lines))]
 
     @registry.tool()
+    async def session_sync(ctx: Context) -> list[TextContent]:
+        """
+        Sync sessions with Cursor's database.
+
+        This synchronizes the MCP server's session list with Cursor's internal
+        database. It will:
+        - Add sessions for Cursor chats that don't have MCP sessions
+        - Remove sessions for chats that were deleted/archived in Cursor
+        - Update session names to match Cursor's chat names
+
+        This is called automatically when exporting workspace state, but can
+        be called manually to force a sync.
+
+        Returns:
+            Summary of sync operations performed.
+        """
+        from server.workspace_state import WorkspaceRegistry
+        from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
+
+        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+        
+        # Perform sync
+        result = workspace.sync_with_cursor_db()
+        
+        # Save changes
+        WorkspaceRegistry.save_to_disk()
+        
+        # Export for UI
+        await export_workspace_state_async(ctx)
+
+        total = sum(result.values())
+        if total == 0:
+            return [TextContent(type="text", text="✅ Sessions already in sync with Cursor.")]
+
+        lines = ["## 🔄 Session Sync Complete\n"]
+        if result["added"] > 0:
+            lines.append(f"- **Added:** {result['added']} session(s)")
+        if result["removed"] > 0:
+            lines.append(f"- **Removed:** {result['removed']} session(s)")
+        if result["renamed"] > 0:
+            lines.append(f"- **Renamed:** {result['renamed']} session(s)")
+        
+        lines.append(f"\n*Total sessions: {len(workspace.sessions)}*")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
     async def session_switch(ctx: Context, session_id: str) -> list[TextContent]:
         """
         Switch to a different session.

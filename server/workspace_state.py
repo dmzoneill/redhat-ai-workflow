@@ -179,14 +179,14 @@ def get_cursor_chat_id_from_db(workspace_uri: str) -> str | None:
     return chat_id
 
 
-def list_cursor_chats(workspace_uri: str) -> list[dict]:
-    """List all Cursor chats for a workspace.
+def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
+    """List all Cursor chats for a workspace and get the active chat ID.
 
     Args:
         workspace_uri: The workspace URI
 
     Returns:
-        List of chat info dicts with composerId, name, createdAt, lastUpdatedAt
+        Tuple of (list of chat info dicts, active_chat_id or None)
     """
     import subprocess
 
@@ -194,7 +194,7 @@ def list_cursor_chats(workspace_uri: str) -> list[dict]:
         workspace_storage_dir = Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
 
         if not workspace_storage_dir.exists():
-            return []
+            return [], None
 
         for storage_dir in workspace_storage_dir.iterdir():
             if not storage_dir.is_dir():
@@ -219,16 +219,21 @@ def list_cursor_chats(workspace_uri: str) -> list[dict]:
                     result = subprocess.run(["sqlite3", str(db_path), query], capture_output=True, text=True, timeout=5)
 
                     if result.returncode != 0 or not result.stdout.strip():
-                        return []
+                        return [], None
 
                     composer_data = json.loads(result.stdout.strip())
                     all_composers = composer_data.get("allComposers", [])
 
+                    # Get the active/focused chat ID (first in lastFocusedComposerIds)
+                    last_focused = composer_data.get("lastFocusedComposerIds", [])
+                    active_chat_id = last_focused[0] if last_focused else None
+
                     # Return relevant fields for active chats, sorted by lastUpdatedAt
+                    # Keep name as None if Cursor hasn't set one yet (don't default to "unnamed")
                     chats = [
                         {
                             "composerId": c.get("composerId"),
-                            "name": c.get("name", "unnamed"),
+                            "name": c.get("name"),  # Keep None if not set
                             "createdAt": c.get("createdAt", 0),
                             "lastUpdatedAt": c.get("lastUpdatedAt", 0),
                             "isArchived": c.get("isArchived", False),
@@ -237,16 +242,16 @@ def list_cursor_chats(workspace_uri: str) -> list[dict]:
                         for c in all_composers
                         if not c.get("isArchived") and not c.get("isDraft")
                     ]
-                    return sorted(chats, key=lambda x: x["lastUpdatedAt"], reverse=True)
+                    return sorted(chats, key=lambda x: x["lastUpdatedAt"], reverse=True), active_chat_id
 
             except (json.JSONDecodeError, KeyError):
                 continue
 
-        return []
+        return [], None
 
     except Exception as e:
         logger.warning(f"Error listing Cursor chats: {e}")
-        return []
+        return [], None
 
 
 def get_cursor_chat_ids(workspace_uri: str) -> set[str]:
@@ -258,8 +263,227 @@ def get_cursor_chat_ids(workspace_uri: str) -> set[str]:
     Returns:
         Set of chat IDs that exist in Cursor's database
     """
-    chats = list_cursor_chats(workspace_uri)
+    chats, _ = list_cursor_chats(workspace_uri)
     return {c["composerId"] for c in chats if c.get("composerId")}
+
+
+def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, str]:
+    """Scan Cursor chat content for Jira issue keys (AAP-XXXXX pattern).
+
+    Reads the global Cursor database to find issue references in chat messages.
+    Returns all unique issue keys found in each chat, sorted and comma-separated.
+
+    Args:
+        chat_ids: Optional list of chat IDs to scan. If None, scans all chats.
+
+    Returns:
+        Dict mapping chat ID to comma-separated issue keys (e.g., "AAP-12345, AAP-12346")
+    """
+    import re
+    import subprocess
+
+    try:
+        global_db = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "state.vscdb"
+        if not global_db.exists():
+            logger.debug("Cursor global storage not found")
+            return {}
+
+        # Build query - either for specific chats or all
+        if chat_ids:
+            # Query for specific chat IDs
+            like_clauses = " OR ".join(f"key LIKE 'bubbleId:{cid}:%'" for cid in chat_ids)
+            query = f"SELECT key, value FROM cursorDiskKV WHERE ({like_clauses}) AND value LIKE '%text%'"
+        else:
+            query = "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%' AND value LIKE '%AAP-%'"
+
+        result = subprocess.run(
+            ["sqlite3", str(global_db), query],
+            capture_output=True,
+            text=True,
+            timeout=30  # Longer timeout for large DB
+        )
+
+        if result.returncode != 0:
+            logger.debug(f"Failed to query Cursor global DB: {result.stderr}")
+            return {}
+
+        # Parse results and collect all unique issue keys per chat
+        chat_issue_sets: dict[str, set[str]] = {}
+        issue_pattern = re.compile(r'AAP-\d{4,7}', re.IGNORECASE)
+
+        for line in result.stdout.strip().split('\n'):
+            if not line or '|' not in line:
+                continue
+            try:
+                key, value = line.split('|', 1)
+                # Extract chat ID from key: bubbleId:<chatId>:<bubbleId>
+                parts = key.split(':')
+                if len(parts) >= 2:
+                    chat_id = parts[1]
+                    data = json.loads(value)
+                    text = data.get('text', '')
+                    if text:
+                        matches = issue_pattern.findall(text)
+                        if matches:
+                            if chat_id not in chat_issue_sets:
+                                chat_issue_sets[chat_id] = set()
+                            for m in matches:
+                                chat_issue_sets[chat_id].add(m.upper())
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+        # Return sorted, comma-separated issue keys for each chat
+        result_map = {}
+        for chat_id, issues in chat_issue_sets.items():
+            if issues:
+                # Sort by the numeric part of the issue key
+                sorted_issues = sorted(issues, key=lambda x: int(x.split('-')[1]))
+                result_map[chat_id] = ", ".join(sorted_issues)
+
+        if result_map:
+            logger.info(f"Found issue keys in {len(result_map)} chat(s)")
+
+        return result_map
+
+    except subprocess.TimeoutExpired:
+        logger.warning("Timeout scanning Cursor DB for issue keys")
+        return {}
+    except Exception as e:
+        logger.warning(f"Error scanning Cursor chats for issue keys: {e}")
+        return {}
+
+
+def get_meeting_transcript_issue_keys(issue_keys: list[str] | None = None) -> dict[str, list[dict]]:
+    """Scan meeting transcripts for Jira issue keys.
+
+    Searches the meet_bot database for mentions of issue keys in transcripts.
+    Uses flexible matching to handle spoken variations like:
+    - "AAP 12345" (without hyphen)
+    - "issue 12345" or "issue number 12345"
+    - "aap twelve three four five" (spelled out - future enhancement)
+    - "ticket 12345"
+
+    Args:
+        issue_keys: Optional list of issue keys to search for. If None, finds all AAP-XXXXX patterns.
+
+    Returns:
+        Dict mapping issue key to list of meeting info dicts:
+        {
+            "AAP-12345": [
+                {"meeting_id": 1, "title": "Sprint Planning", "date": "2025-01-20", "matches": 3},
+                ...
+            ]
+        }
+    """
+    import re
+    import subprocess
+    from collections import defaultdict
+
+    try:
+        db_path = Path.home() / ".local/share/meet_bot/meetings.db"
+        if not db_path.exists():
+            logger.debug("Meet bot database not found")
+            return {}
+
+        # Build patterns for flexible matching
+        # Pattern 1: Standard AAP-XXXXX (with or without hyphen)
+        # Pattern 2: "issue" or "ticket" followed by number
+        # Pattern 3: Just "AAP" followed by number (spoken without hyphen)
+        
+        # Query all transcript text with meeting info
+        query = """
+            SELECT t.meeting_id, t.text, m.title, m.scheduled_start
+            FROM transcripts t
+            JOIN meetings m ON t.meeting_id = m.id
+            WHERE m.status = 'completed'
+        """
+        
+        result = subprocess.run(
+            ["sqlite3", "-separator", "|||", str(db_path), query],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            logger.debug(f"Failed to query meet bot DB: {result.stderr}")
+            return {}
+
+        # Flexible patterns for spoken issue references
+        patterns = [
+            # Standard: AAP-12345 or AAP12345 or AAP 12345
+            re.compile(r'\bAAP[-\s]?(\d{4,7})\b', re.IGNORECASE),
+            # Spoken: "issue 12345" or "issue number 12345"
+            re.compile(r'\bissue\s+(?:number\s+)?(\d{4,7})\b', re.IGNORECASE),
+            # Spoken: "ticket 12345"
+            re.compile(r'\bticket\s+(?:number\s+)?(\d{4,7})\b', re.IGNORECASE),
+            # Spoken: "jira 12345"
+            re.compile(r'\bjira\s+(?:issue\s+)?(?:number\s+)?(\d{4,7})\b', re.IGNORECASE),
+        ]
+
+        # Track matches per meeting per issue
+        # Structure: {issue_key: {meeting_id: {"title": ..., "date": ..., "count": N}}}
+        issue_meetings: dict[str, dict[int, dict]] = defaultdict(lambda: defaultdict(lambda: {"title": "", "date": "", "count": 0}))
+
+        for line in result.stdout.strip().split('\n'):
+            if not line or '|||' not in line:
+                continue
+            try:
+                parts = line.split('|||')
+                if len(parts) < 4:
+                    continue
+                meeting_id = int(parts[0])
+                text = parts[1]
+                title = parts[2]
+                date = parts[3][:10] if parts[3] else ""  # Just the date part
+
+                # Find all issue references in this transcript entry
+                found_numbers: set[str] = set()
+                for pattern in patterns:
+                    for match in pattern.finditer(text):
+                        # Extract just the number part
+                        number = match.group(1)
+                        found_numbers.add(number)
+
+                # Convert to standard AAP-XXXXX format and record
+                for number in found_numbers:
+                    issue_key = f"AAP-{number}"
+                    
+                    # If we're filtering to specific keys, check if this matches
+                    if issue_keys and issue_key not in issue_keys:
+                        continue
+                    
+                    issue_meetings[issue_key][meeting_id]["title"] = title
+                    issue_meetings[issue_key][meeting_id]["date"] = date
+                    issue_meetings[issue_key][meeting_id]["count"] += 1
+
+            except (ValueError, IndexError):
+                continue
+
+        # Convert to final format
+        result_map: dict[str, list[dict]] = {}
+        for issue_key, meetings in issue_meetings.items():
+            result_map[issue_key] = [
+                {
+                    "meeting_id": mid,
+                    "title": info["title"],
+                    "date": info["date"],
+                    "matches": info["count"],
+                }
+                for mid, info in sorted(meetings.items(), key=lambda x: x[1]["date"], reverse=True)
+            ]
+
+        if result_map:
+            logger.info(f"Found {len(result_map)} issue(s) mentioned in meeting transcripts")
+
+        return result_map
+
+    except subprocess.TimeoutExpired:
+        logger.warning("Timeout scanning meet bot DB for issue keys")
+        return {}
+    except Exception as e:
+        logger.warning(f"Error scanning meeting transcripts for issue keys: {e}")
+        return {}
 
 
 def get_cursor_chat_names(workspace_uri: str) -> dict[str, str]:
@@ -271,7 +495,7 @@ def get_cursor_chat_names(workspace_uri: str) -> dict[str, str]:
     Returns:
         Dict mapping chat ID to chat name
     """
-    chats = list_cursor_chats(workspace_uri)
+    chats, _ = list_cursor_chats(workspace_uri)
     return {c["composerId"]: c.get("name") for c in chats if c.get("composerId")}
 
 
@@ -308,6 +532,10 @@ class ChatSession:
     last_tool: str | None = None  # Last tool called in this session
     last_tool_time: datetime | None = None  # When the last tool was called
     tool_call_count: int = 0  # Total tool calls in this session
+    
+    # Meeting transcript references (meetings where session's issues were discussed)
+    # Format: [{"meeting_id": 1, "title": "Sprint Planning", "date": "2025-01-20", "matches": 3}, ...]
+    meeting_references: list[dict] = field(default_factory=list)
 
     # Backward compatibility property
     @property
@@ -361,6 +589,7 @@ class ChatSession:
             "last_tool": self.last_tool,
             "last_tool_time": self.last_tool_time.isoformat() if self.last_tool_time else None,
             "tool_call_count": self.tool_call_count,
+            "meeting_references": self.meeting_references,
         }
 
     def clear_filter_cache(self) -> None:
@@ -612,30 +841,208 @@ class WorkspaceState:
         """Get number of sessions in this workspace."""
         return len(self.sessions)
 
-    def sync_session_names_from_cursor(self) -> int:
-        """Sync session names from Cursor's database.
+    def sync_with_cursor_db(self) -> dict:
+        """Full sync with Cursor's database.
 
-        Updates session names to match what's in Cursor's database.
-        This ensures the UI shows the correct chat names.
+        This keeps our sessions in sync with Cursor:
+        - Adds sessions that exist in Cursor but not in our system
+        - Removes sessions that no longer exist in Cursor (archived/deleted)
+        - Updates names when Cursor's name changes
+        - Updates last_activity from Cursor's lastUpdatedAt
+        - Updates tool_count based on persona
+        - Scans chat content for Jira issue keys (AAP-XXXXX)
 
         Returns:
-            Number of sessions updated
+            Dict with counts: {"added": N, "removed": N, "renamed": N, "updated": N}
         """
-        cursor_names = get_cursor_chat_names(self.workspace_uri)
-        updated = 0
+        cursor_chats, cursor_active_id = list_cursor_chats(self.workspace_uri)
+        cursor_chat_map = {c["composerId"]: c for c in cursor_chats}
+        cursor_ids = set(cursor_chat_map.keys())
+        our_ids = set(self.sessions.keys())
 
-        for session_id, session in self.sessions.items():
-            if session_id in cursor_names:
-                cursor_name = cursor_names[session_id]
-                if cursor_name and cursor_name != session.name:
-                    logger.debug(f"Syncing session {session_id} name: '{session.name}' -> '{cursor_name}'")
-                    session.name = cursor_name
-                    updated += 1
+        result = {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
 
-        if updated > 0:
-            logger.info(f"Synced {updated} session name(s) from Cursor DB for {self.workspace_uri}")
+        # Update active session from Cursor's lastFocusedComposerIds
+        if cursor_active_id and cursor_active_id in cursor_ids:
+            if self.active_session_id != cursor_active_id:
+                logger.info(f"Updating active session from Cursor: {cursor_active_id}")
+                self.active_session_id = cursor_active_id
 
-        return updated
+        # Get currently loaded tools count (for active session)
+        current_tool_count = len(self._get_loaded_tools())
+
+        # Extract all issue keys from chat names and content
+        # Pattern: AAP-XXXXX (4-7 digits, case insensitive)
+        import re
+        issue_pattern = re.compile(r'AAP-\d{4,7}', re.IGNORECASE)
+        
+        # First pass: extract all issue keys from chat names
+        issue_keys_from_names: dict[str, set[str]] = {}
+        for sid, chat in cursor_chat_map.items():
+            name = chat.get("name") or ""
+            matches = issue_pattern.findall(name)
+            if matches:
+                issue_keys_from_names[sid] = {m.upper() for m in matches}
+        
+        # Second pass: scan chat content for all chats to get additional issue keys
+        # Always scan to find any new issue keys mentioned in content
+        issue_keys_from_content = get_cursor_chat_issue_keys(list(cursor_ids))
+        
+        # Merge: combine keys from name and content, deduplicate and sort
+        issue_keys: dict[str, str] = {}
+        for sid in cursor_ids:
+            all_keys: set[str] = set()
+            # Add keys from name
+            if sid in issue_keys_from_names:
+                all_keys.update(issue_keys_from_names[sid])
+            # Add keys from content (already comma-separated string)
+            if sid in issue_keys_from_content:
+                content_keys = [k.strip() for k in issue_keys_from_content[sid].split(",")]
+                all_keys.update(content_keys)
+            
+            if all_keys:
+                # Sort by numeric part and join
+                sorted_keys = sorted(all_keys, key=lambda x: int(x.split('-')[1]))
+                issue_keys[sid] = ", ".join(sorted_keys)
+
+        # 1. Remove sessions that no longer exist in Cursor
+        removed_ids = our_ids - cursor_ids
+        for sid in removed_ids:
+            logger.info(f"Removing session {sid} - no longer in Cursor DB")
+            del self.sessions[sid]
+            result["removed"] += 1
+            # Update active session if needed
+            if self.active_session_id == sid:
+                self.active_session_id = None
+
+        # 2. Add sessions that exist in Cursor but not in our system
+        # (These are chats the user created but never called session_start())
+        # We create minimal session entries for them
+        added_ids = cursor_ids - our_ids
+        for sid in added_ids:
+            cursor_chat = cursor_chat_map[sid]
+            logger.info(f"Adding session {sid} from Cursor DB: {cursor_chat.get('name')}")
+            
+            # Convert Cursor's lastUpdatedAt (ms timestamp) to datetime
+            last_updated = None
+            if cursor_chat.get("lastUpdatedAt"):
+                last_updated = datetime.fromtimestamp(cursor_chat["lastUpdatedAt"] / 1000)
+            
+            session = ChatSession(
+                session_id=sid,
+                workspace_uri=self.workspace_uri,
+                persona="developer",  # Default persona
+                project=self.project,
+                is_project_auto_detected=self.is_auto_detected,
+                name=cursor_chat.get("name"),
+                tool_count=get_persona_tool_count("developer"),  # Use cached persona count
+                issue_key=issue_keys.get(sid),  # Set issue key if found in chat
+            )
+            if last_updated:
+                session.last_activity = last_updated
+                session.started_at = datetime.fromtimestamp(
+                    cursor_chat.get("createdAt", cursor_chat["lastUpdatedAt"]) / 1000
+                )
+            self.sessions[sid] = session
+            result["added"] += 1
+
+        # 3. Update existing sessions (names, last_activity, tool_count, issue_key)
+        for sid in our_ids & cursor_ids:
+            cursor_chat = cursor_chat_map[sid]
+            session = self.sessions[sid]
+            updated = False
+
+            # Update name if Cursor has one and it's different
+            cursor_name = cursor_chat.get("name")
+            if cursor_name and cursor_name != session.name:
+                logger.debug(f"Renaming session {sid}: '{session.name}' -> '{cursor_name}'")
+                session.name = cursor_name
+                result["renamed"] += 1
+            # Clear "unnamed" placeholder so UI uses better fallback
+            elif not cursor_name and session.name == "unnamed":
+                session.name = None
+                result["renamed"] += 1
+
+            # Update last_activity from Cursor's lastUpdatedAt
+            if cursor_chat.get("lastUpdatedAt"):
+                cursor_last_activity = datetime.fromtimestamp(cursor_chat["lastUpdatedAt"] / 1000)
+                if session.last_activity is None or cursor_last_activity > session.last_activity:
+                    session.last_activity = cursor_last_activity
+                    updated = True
+
+            # Update tool_count
+            # - For active session: use currently loaded tools
+            # - For inactive sessions: use cached persona tool count if current is 0
+            is_active = (sid == self.active_session_id)
+            if is_active and current_tool_count > 0:
+                if session.tool_count != current_tool_count:
+                    session.tool_count = current_tool_count
+                    updated = True
+            elif session.tool_count == 0:
+                # Get from persona cache
+                persona_count = get_persona_tool_count(session.persona)
+                if persona_count > 0:
+                    session.tool_count = persona_count
+                    updated = True
+
+            # Update issue_key if not already set and found in chat content
+            if not session.issue_key and sid in issue_keys:
+                session.issue_key = issue_keys[sid]
+                logger.info(f"Found issue key {issue_keys[sid]} in chat {sid}")
+                updated = True
+
+            if updated:
+                result["updated"] += 1
+
+        # 4. Scan meeting transcripts for issue key mentions
+        # Collect all unique issue keys from all sessions
+        all_issue_keys: set[str] = set()
+        for session in self.sessions.values():
+            if session.issue_key:
+                for key in session.issue_key.split(", "):
+                    all_issue_keys.add(key.strip())
+        
+        if all_issue_keys:
+            # Get meeting references for all issue keys
+            meeting_refs = get_meeting_transcript_issue_keys(list(all_issue_keys))
+            
+            # Update each session's meeting_references based on its issue keys
+            for session in self.sessions.values():
+                if session.issue_key:
+                    session_keys = [k.strip() for k in session.issue_key.split(", ")]
+                    # Collect all meetings that mention any of this session's issue keys
+                    all_meetings: dict[int, dict] = {}  # meeting_id -> meeting info
+                    for key in session_keys:
+                        if key in meeting_refs:
+                            for meeting in meeting_refs[key]:
+                                mid = meeting["meeting_id"]
+                                if mid not in all_meetings:
+                                    all_meetings[mid] = meeting.copy()
+                                else:
+                                    # Aggregate match counts
+                                    all_meetings[mid]["matches"] += meeting["matches"]
+                    
+                    # Sort by date (most recent first) and update
+                    new_refs = sorted(all_meetings.values(), key=lambda x: x.get("date", ""), reverse=True)
+                    if new_refs != session.meeting_references:
+                        session.meeting_references = new_refs
+                        if new_refs:
+                            logger.debug(f"Session {session.session_id[:8]} has {len(new_refs)} meeting reference(s)")
+
+        total_changes = sum(result.values())
+        if total_changes > 0:
+            logger.info(
+                f"Synced with Cursor DB for {self.workspace_uri}: "
+                f"+{result['added']} -{result['removed']} ~{result['renamed']} ↻{result['updated']}"
+            )
+
+        return result
+
+    # Keep old name as alias for backward compatibility
+    def sync_session_names_from_cursor(self) -> int:
+        """Deprecated: Use sync_with_cursor_db() instead."""
+        result = self.sync_with_cursor_db()
+        return result["renamed"]
 
     def _get_loaded_tools(self) -> set[str]:
         """Get currently loaded tool names from PersonaLoader."""
@@ -1165,6 +1572,7 @@ class WorkspaceRegistry:
                     except (ValueError, TypeError):
                         pass
                 session.tool_call_count = sess_data.get("tool_call_count", 0)
+                session.meeting_references = sess_data.get("meeting_references", [])
 
                 workspace.sessions[session_id] = session
 
@@ -1263,25 +1671,40 @@ class WorkspaceRegistry:
         return sum(ws.session_count() for ws in cls._workspaces.values())
 
     @classmethod
-    def sync_all_session_names(cls) -> int:
-        """Sync session names from Cursor's database for all workspaces.
+    def sync_all_with_cursor(cls) -> dict:
+        """Full sync with Cursor's database for all workspaces.
 
         This should be called before exporting workspace state to ensure
-        session names are up-to-date with Cursor's database.
+        sessions are in sync with Cursor's database (adds, removes, renames, updates).
 
         Returns:
-            Total number of sessions updated
+            Dict with total counts: {"added": N, "removed": N, "renamed": N, "updated": N}
         """
-        total_updated = 0
+        totals = {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
+        
         for workspace in cls._workspaces.values():
-            total_updated += workspace.sync_session_names_from_cursor()
+            result = workspace.sync_with_cursor_db()
+            totals["added"] += result["added"]
+            totals["removed"] += result["removed"]
+            totals["renamed"] += result["renamed"]
+            totals["updated"] += result.get("updated", 0)
 
-        if total_updated > 0:
-            logger.info(f"Synced {total_updated} session name(s) from Cursor DB")
+        total_changes = sum(totals.values())
+        if total_changes > 0:
+            logger.info(
+                f"Synced all workspaces with Cursor DB: "
+                f"+{totals['added']} -{totals['removed']} ~{totals['renamed']} ↻{totals['updated']}"
+            )
             # Persist changes to disk
             cls.save_to_disk()
 
-        return total_updated
+        return totals
+
+    @classmethod
+    def sync_all_session_names(cls) -> int:
+        """Deprecated: Use sync_all_with_cursor() instead."""
+        result = cls.sync_all_with_cursor()
+        return result["renamed"]
 
     @classmethod
     def remove(cls, workspace_uri: str) -> bool:
@@ -1589,13 +2012,18 @@ class WorkspaceRegistry:
                     except (ValueError, TypeError):
                         pass
                 session.tool_call_count = sess_data.get("tool_call_count", 0)
+                session.meeting_references = sess_data.get("meeting_references", [])
 
                 workspace.sessions[session_id] = session
                 restored_sessions += 1
 
             # Update session names from Cursor's database (sync names if changed)
-            cursor_chats = list_cursor_chats(workspace_uri)
+            cursor_chats, cursor_active_id = list_cursor_chats(workspace_uri)
             cursor_chat_map = {c["composerId"]: c for c in cursor_chats}
+            
+            # Update active session from Cursor
+            if cursor_active_id and cursor_active_id in workspace.sessions:
+                workspace.active_session_id = cursor_active_id
             for session_id, session in workspace.sessions.items():
                 if session_id in cursor_chat_map:
                     cursor_name = cursor_chat_map[session_id].get("name")

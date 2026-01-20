@@ -71,11 +71,14 @@ def export_workspace_state(cleanup_stale: bool = False, max_stale_hours: int = 2
 
     _ensure_export_dir()
 
-    # Sync session names from Cursor's database before export
-    # This ensures the UI shows the correct chat names
-    synced_count = WorkspaceRegistry.sync_all_session_names()
-    if synced_count > 0:
-        logger.info(f"Synced {synced_count} session name(s) from Cursor DB before export")
+    # Full sync with Cursor's database before export
+    # This ensures sessions are in sync (adds, removes, renames)
+    sync_result = WorkspaceRegistry.sync_all_with_cursor()
+    if sum(sync_result.values()) > 0:
+        logger.info(
+            f"Synced with Cursor DB before export: "
+            f"+{sync_result['added']} -{sync_result['removed']} ~{sync_result['renamed']}"
+        )
 
     # Clean up stale workspaces before export (disabled by default to preserve sessions)
     cleaned_count = 0

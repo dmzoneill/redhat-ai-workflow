@@ -139,6 +139,13 @@ const DBUS_SERVICES = [
 // Types
 // ============================================================================
 
+interface MeetingReference {
+  meeting_id: number;
+  title: string;
+  date: string;
+  matches: number;
+}
+
 interface ChatSession {
   session_id: string;
   workspace_uri: string;
@@ -155,6 +162,7 @@ interface ChatSession {
   last_tool: string | null;
   last_tool_time: string | null;
   tool_call_count: number;
+  meeting_references?: MeetingReference[];  // Meetings where session's issues were discussed
   is_active?: boolean;      // Added when flattened
 }
 
@@ -390,15 +398,15 @@ export class CommandCenterPanel {
             this._panel.webview.postMessage({ command: "pong" });
             break;
           case "refresh":
-            this.update(false); // Preserve UI state on manual refresh
+            // Sync with Cursor DB and refresh UI (same as refreshWorkspaces)
+            await this._syncAndRefreshSessions();
             break;
           case "reloadUI":
             // Force full HTML re-render - useful after extension recompilation
             this.update(true);
             break;
           case "refreshWorkspaces":
-            this._loadWorkspaceState();
-            this._updateWorkspacesTab();
+            await this._syncAndRefreshSessions();
             break;
           case "changeSessionGroupBy":
             this._sessionGroupBy = message.value as 'none' | 'project' | 'persona';
@@ -431,6 +439,9 @@ export class CommandCenterPanel {
           case "openChatSession":
             console.log('[AA-WORKFLOW] openChatSession message received:', message.sessionId, message.sessionName);
             await this._openChatSession(message.sessionId, message.sessionName);
+            break;
+          case "viewMeetingNotes":
+            await this._viewMeetingNotes(message.sessionId);
             break;
           case "switchTab":
             this._currentTab = message.tab;
@@ -2960,6 +2971,81 @@ print(result)
     }
   }
 
+  private async _syncAndRefreshSessions(): Promise<void> {
+    // Show loading state
+    this._panel.webview.postMessage({
+      command: "updateSessionsLoading",
+      loading: true,
+    });
+
+    try {
+      // Directly run Python to sync and export workspace state
+      // This is more reliable than file watchers or HTTP endpoints
+      const { execSync } = require('child_process');
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      
+      // Find the project root (where server/ directory is)
+      let projectRoot = workspacePath;
+      if (!fs.existsSync(path.join(projectRoot, 'server', 'workspace_state.py'))) {
+        // Try common locations
+        const possibleRoots = [
+          path.join(os.homedir(), 'src', 'redhat-ai-workflow'),
+          '/home/daoneill/src/redhat-ai-workflow',
+        ];
+        for (const root of possibleRoots) {
+          if (fs.existsSync(path.join(root, 'server', 'workspace_state.py'))) {
+            projectRoot = root;
+            break;
+          }
+        }
+      }
+
+      const pythonScript = `
+import sys
+sys.path.insert(0, '${projectRoot.replace(/\\/g, '/')}')
+from server.workspace_state import WorkspaceRegistry
+WorkspaceRegistry.load_from_disk()
+result = WorkspaceRegistry.sync_all_with_cursor()
+from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state
+export_workspace_state()
+print(f"added={result['added']},removed={result['removed']},renamed={result['renamed']},updated={result.get('updated',0)}")
+`;
+
+      debugLog('Running session sync via Python subprocess');
+      const result = execSync(`python3 -c "${pythonScript.replace(/"/g, '\\"').replace(/\n/g, ';')}"`, {
+        encoding: 'utf8',
+        timeout: 30000,
+        cwd: projectRoot,
+      });
+      
+      debugLog(`Session sync result: ${result.trim()}`);
+      
+      // Parse result and show message if changes were made
+      const match = result.match(/added=(\d+),removed=(\d+),renamed=(\d+),updated=(\d+)/);
+      if (match) {
+        const [, added, removed, renamed, updated] = match.map(Number);
+        const total = added + removed + renamed + updated;
+        if (total > 0) {
+          vscode.window.showInformationMessage(
+            `Sessions synced: +${added} added, -${removed} removed, ~${renamed} renamed, ↻${updated} updated`
+          );
+        }
+      }
+    } catch (error: any) {
+      debugLog(`Session sync error: ${error.message || error}`);
+      vscode.window.showWarningMessage('Session sync failed. Showing cached data.');
+    }
+
+    // Reload from file and refresh UI
+    this._loadWorkspaceState();
+    this._updateWorkspacesTab();
+
+    this._panel.webview.postMessage({
+      command: "updateSessionsLoading",
+      loading: false,
+    });
+  }
+
   private _updateWorkspacesTab(): void {
     if (this._panel.webview) {
       this._panel.webview.postMessage({
@@ -3034,8 +3120,13 @@ print(result)
     // Collect all sessions for table view
     const allSessions: Array<{ session: ChatSession; workspaceUri: string; workspaceProject: string | null; isActive: boolean }> = [];
 
+    // Get the active session ID from workspace state (synced from Cursor's lastFocusedComposerIds)
+    let activeSessionId: string | null = null;
     if (this._workspaceState) {
       for (const [uri, ws] of Object.entries(this._workspaceState)) {
+        if (ws.active_session_id) {
+          activeSessionId = ws.active_session_id;
+        }
         const sessions = ws.sessions || {};
         for (const [sid, session] of Object.entries(sessions)) {
           allSessions.push({
@@ -3060,12 +3151,18 @@ print(result)
       `;
     }
 
-    // Sort by last activity
+    // Sort by last activity (most recent first)
     allSessions.sort((a, b) => {
       const aTime = a.session?.last_activity ? new Date(a.session.last_activity).getTime() : 0;
       const bTime = b.session?.last_activity ? new Date(b.session.last_activity).getTime() : 0;
       return bTime - aTime;
     });
+
+    // If no active session from Cursor, mark the most recent as active
+    const hasActiveSession = allSessions.some(s => s.isActive);
+    if (!hasActiveSession && allSessions.length > 0) {
+      allSessions[0].isActive = true;
+    }
 
     return `
       <div class="sessions-table-container">
@@ -3093,7 +3190,7 @@ print(result)
               const lastActivity = session.last_activity ? this._formatRelativeTime(session.last_activity) : "Unknown";
               const sessionName = session.name || `Session ${sessionId.substring(0, 6)}`;
               const sessionProject = (session as any).project || item.workspaceProject || '-';
-              const issue = session.issue_key || '-';
+              const issueKeys = session.issue_key ? session.issue_key.split(', ') : [];
 
               return `
               <tr class="${item.isActive ? 'row-active' : ''}" data-session-id="${sessionId}">
@@ -3106,11 +3203,12 @@ print(result)
                 </td>
                 <td>${sessionProject}</td>
                 <td><span class="persona-badge-small ${personaColor}">${persona}</span></td>
-                <td>${issue !== '-' ? `<span class="issue-badge-small">${issue}</span>` : '-'}</td>
+                <td>${issueKeys.length > 0 ? issueKeys.map(k => `<a href="https://issues.redhat.com/browse/${k}" class="issue-badge-small issue-link" title="Open ${k} in Jira">${k}</a>`).join(' ') : '-'}</td>
                 <td>${lastActivity}</td>
                 <td>${toolCount}</td>
                 <td>
                   <button class="btn btn-ghost btn-small" data-action="copySessionId" data-session-id="${sessionId}" title="Copy Session ID">📋</button>
+                  ${session.meeting_references && session.meeting_references.length > 0 ? `<button class="btn btn-ghost btn-small meeting-notes-btn" data-action="viewMeetingNotes" data-session-id="${sessionId}" title="View ${session.meeting_references.length} meeting(s) where issues were discussed">📝</button>` : ''}
                 </td>
               </tr>
               `;
@@ -3133,7 +3231,7 @@ print(result)
             session: session as ChatSession,
             workspaceUri: uri,
             workspaceProject: ws.project,
-            isActive: sid === ws.active_session_id
+            isActive: sid === ws.active_session_id  // From Cursor's lastFocusedComposerIds
           });
         }
       }
@@ -3149,6 +3247,19 @@ print(result)
           </div>
         </div>
       `;
+    }
+
+    // Sort all sessions by last_activity to find the most recent one
+    allSessions.sort((a, b) => {
+      const aTime = a.session?.last_activity ? new Date(a.session.last_activity).getTime() : 0;
+      const bTime = b.session?.last_activity ? new Date(b.session.last_activity).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    // If no active session from Cursor, mark the most recent as active
+    const hasActiveSession = allSessions.some(s => s.isActive);
+    if (!hasActiveSession && allSessions.length > 0) {
+      allSessions[0].isActive = true;
     }
 
     // Group sessions by project
@@ -3172,6 +3283,7 @@ print(result)
       const groupIcon = this._getGroupIcon(groupName);
       const groupColor = this._getGroupColor(groupName);
 
+      // Sort within group by last_activity (already sorted globally, but re-sort for display)
       items.sort((a, b) => {
         const aTime = a.session?.last_activity ? new Date(a.session.last_activity).getTime() : 0;
         const bTime = b.session?.last_activity ? new Date(b.session.last_activity).getTime() : 0;
@@ -3277,6 +3389,13 @@ print(result)
       return `<div class="no-sessions">No active sessions. Run session_start() in a chat.</div>`;
     }
 
+    // Sort by last_activity, most recent first
+    sessionEntries.sort((a, b) => {
+      const aTime = a[1].last_activity ? new Date(a[1].last_activity).getTime() : 0;
+      const bTime = b[1].last_activity ? new Date(b[1].last_activity).getTime() : 0;
+      return bTime - aTime;
+    });
+
     return `
       <div class="sessions-container">
         <div class="sessions-header">💬 Chat Sessions</div>
@@ -3327,8 +3446,8 @@ print(result)
           </div>
           ${session.issue_key ? `
           <div class="session-row">
-            <span class="session-label">Issue</span>
-            <span class="session-value issue-badge">${session.issue_key}</span>
+            <span class="session-label">Issue${session.issue_key.includes(',') ? 's' : ''}</span>
+            <span class="session-value issue-badges">${session.issue_key.split(', ').map((k: string) => `<a href="https://issues.redhat.com/browse/${k}" class="issue-badge issue-link" title="Open ${k} in Jira">${k}</a>`).join(' ')}</span>
           </div>
           ` : ""}
           ${session.branch ? `
@@ -3363,6 +3482,11 @@ print(result)
           <button class="btn btn-ghost btn-small" data-action="viewSessionTools" data-session-id="${sessionId}">
             🔧 Tools
           </button>
+          ${session.meeting_references && session.meeting_references.length > 0 ? `
+          <button class="btn btn-ghost btn-small meeting-notes-btn" data-action="viewMeetingNotes" data-session-id="${sessionId}" title="View meeting notes where issues were discussed">
+            📝 Notes (${session.meeting_references.length})
+          </button>
+          ` : ''}
           <button class="btn btn-ghost btn-small" data-action="removeSession" data-session-id="${sessionId}" data-workspace-uri="${session.workspace_uri}">
             🗑️ Remove
           </button>
@@ -3406,6 +3530,82 @@ print(result)
     // Open the folder in a new window
     const folderUri = vscode.Uri.file(folderPath);
     await vscode.commands.executeCommand("vscode.openFolder", folderUri, { forceNewWindow: false });
+  }
+
+  private async _viewMeetingNotes(sessionId: string): Promise<void> {
+    // Find the session across all workspaces
+    let session: ChatSession | null = null;
+    if (this._workspaceState) {
+      for (const ws of Object.values(this._workspaceState)) {
+        if (ws.sessions && ws.sessions[sessionId]) {
+          session = ws.sessions[sessionId];
+          break;
+        }
+      }
+    }
+
+    if (!session || !session.meeting_references || session.meeting_references.length === 0) {
+      vscode.window.showInformationMessage('No meeting notes found for this session.');
+      return;
+    }
+
+    // Build a quick pick list of meetings
+    const items = session.meeting_references.map((ref: MeetingReference) => ({
+      label: `📝 ${ref.title}`,
+      description: ref.date,
+      detail: `${ref.matches} mention${ref.matches > 1 ? 's' : ''} of session issues`,
+      meetingId: ref.meeting_id,
+    }));
+
+    const selected = await vscode.window.showQuickPick(items, {
+      placeHolder: `Select a meeting to view notes (${session.issue_key || 'no issues'})`,
+      title: 'Meeting Notes',
+    });
+
+    if (selected) {
+      // Open the meeting notes - for now, show info about how to access them
+      // In the future, this could open a webview with the transcript
+      const dbPath = path.join(os.homedir(), '.local/share/meet_bot/meetings.db');
+      
+      if (fs.existsSync(dbPath)) {
+        // Query the transcript for this meeting
+        try {
+          const { execSync } = require('child_process');
+          const query = `SELECT speaker, text, timestamp FROM transcripts WHERE meeting_id = ${selected.meetingId} ORDER BY timestamp LIMIT 50`;
+          const result = execSync(`sqlite3 -separator '|||' "${dbPath}" "${query}"`, { encoding: 'utf8', timeout: 5000 });
+          
+          if (result.trim()) {
+            // Create a markdown preview of the transcript
+            const lines = result.trim().split('\n');
+            let markdown = `# ${selected.label.replace('📝 ', '')}\n\n**Date:** ${selected.description}\n\n## Transcript (first 50 entries)\n\n`;
+            
+            for (const line of lines) {
+              const parts = line.split('|||');
+              if (parts.length >= 3) {
+                const [speaker, text, timestamp] = parts;
+                const time = timestamp.split('T')[1]?.substring(0, 5) || '';
+                markdown += `**${speaker}** (${time}): ${text}\n\n`;
+              }
+            }
+            
+            // Show in a new untitled document
+            const doc = await vscode.workspace.openTextDocument({
+              content: markdown,
+              language: 'markdown'
+            });
+            await vscode.window.showTextDocument(doc, { preview: true });
+          } else {
+            vscode.window.showInformationMessage(`No transcript found for meeting: ${selected.label}`);
+          }
+        } catch (error: any) {
+          vscode.window.showWarningMessage(`Failed to load transcript: ${error.message}`);
+        }
+      } else {
+        vscode.window.showInformationMessage(
+          `Meeting: ${selected.label}\nDate: ${selected.description}\n\nMeeting database not found at ${dbPath}`
+        );
+      }
+    }
   }
 
   private async _changeWorkspacePersona(uri: string, persona: string): Promise<void> {
@@ -6385,12 +6585,31 @@ print(result)
         .persona-badge.blue { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
         .persona-badge.gray { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
 
+        .issue-badges {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px;
+        }
+
         .issue-badge {
+          display: inline-block;
           padding: 4px 10px;
           background: rgba(59, 130, 246, 0.2);
           color: #60a5fa;
           border-radius: 6px;
           font-family: monospace;
+          font-size: 0.85rem;
+        }
+
+        .issue-link {
+          text-decoration: none;
+          cursor: pointer;
+          transition: background 0.2s, color 0.2s;
+        }
+
+        .issue-link:hover {
+          background: rgba(59, 130, 246, 0.4);
+          color: #93c5fd;
         }
 
         .branch-badge {
@@ -7368,6 +7587,17 @@ print(result)
           font-size: 0.75rem;
           background: rgba(249, 115, 22, 0.15);
           color: var(--orange);
+          margin-right: 2px;
+          margin-bottom: 2px;
+        }
+
+        .meeting-notes-btn {
+          background: rgba(139, 92, 246, 0.15) !important;
+          color: var(--purple) !important;
+        }
+
+        .meeting-notes-btn:hover {
+          background: rgba(139, 92, 246, 0.3) !important;
         }
 
         /* Table containers - need to span full width when inside grid */
