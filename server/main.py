@@ -186,11 +186,11 @@ def _load_single_tool_module(tool_name: str, server: FastMCP, tools_before: set[
 
     if hasattr(module, "register_tools"):
         module.register_tools(server)
-        
+
         # Detect which tools were added by this module
         tools_after = {t.name for t in server._tool_manager._tools.values()}
         new_tools = list(tools_after - (tools_before or set()))
-        
+
         logger.info(f"Loaded {tool_name}: {len(new_tools)} tools")
         return new_tools
     else:
@@ -253,7 +253,7 @@ def create_mcp_server(
     # Load all requested tool modules, tracking which tools come from which module
     loaded_modules = []
     tool_to_module: dict[str, str] = {}  # tool_name -> module_name
-    
+
     for module_name in tools:
         if module_name not in available_modules:
             logger.warning(f"Unknown tool module: {module_name}. Available: {sorted(available_modules)}")
@@ -262,7 +262,7 @@ def create_mcp_server(
         try:
             # Get current tools before loading
             tools_before = {t.name for t in server._tool_manager._tools.values()}
-            
+
             new_tools = _load_single_tool_module(module_name, server, tools_before)
             if new_tools:
                 loaded_modules.append(module_name)
@@ -297,8 +297,7 @@ def create_mcp_server(
         loader.loaded_modules = set(loaded_modules)
         loader._tool_to_module = tool_to_module.copy()
         logger.info(
-            f"Initialized PersonaLoader: {len(loader.loaded_modules)} modules, "
-            f"{len(loader._tool_to_module)} tools"
+            f"Initialized PersonaLoader: {len(loader.loaded_modules)} modules, " f"{len(loader._tool_to_module)} tools"
         )
     except Exception as e:
         logger.warning(f"Could not initialize persona loader: {e}")
@@ -334,6 +333,21 @@ async def init_scheduler(server: FastMCP) -> bool:
     """
     logger = logging.getLogger(__name__)
 
+    # File-based logging for debugging
+    from datetime import datetime
+    from pathlib import Path
+
+    def _log(msg):
+        try:
+            log_file = Path.home() / ".config" / "aa-workflow" / "scheduler.log"
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_file, "a") as f:
+                f.write(f"{datetime.now().isoformat()} - [main.py] {msg}\n")
+        except Exception:
+            pass
+
+    _log("init_scheduler called")
+
     try:
         from tool_modules.aa_workflow.src.notification_engine import init_notification_engine, send_notification
         from tool_modules.aa_workflow.src.poll_engine import init_poll_engine
@@ -350,7 +364,7 @@ async def init_scheduler(server: FastMCP) -> bool:
             logger.info("Scheduler disabled in config (will start config watcher only)")
 
         # Initialize notification engine
-        notification_engine = init_notification_engine(server=server, config=config)
+        init_notification_engine(server=server, config=config)
 
         # Create notification callback for scheduler
         async def notification_callback(
@@ -403,23 +417,32 @@ async def init_scheduler(server: FastMCP) -> bool:
             )
 
         # Start scheduler (always starts for config watching)
+        _log("Calling start_scheduler()")
         await start_scheduler()
+        _log("start_scheduler() completed")
 
         # Start poll engine only if scheduler is enabled
         if scheduler_enabled:
             await poll_engine.start()
             logger.info("Scheduler subsystem initialized and started")
+            _log("Scheduler subsystem initialized and started")
         else:
             logger.info("Scheduler config watcher started (jobs disabled)")
+            _log("Scheduler config watcher started (jobs disabled)")
 
         return True
 
     except ImportError as e:
         logger.warning(f"Scheduler dependencies not available: {e}")
         logger.info("Install with: pip install apscheduler croniter")
+        _log(f"ImportError: {e}")
         return False
     except Exception as e:
         logger.error(f"Failed to initialize scheduler: {e}")
+        _log(f"Exception: {e}")
+        import traceback
+
+        _log(f"Traceback: {traceback.format_exc()}")
         return False
 
 

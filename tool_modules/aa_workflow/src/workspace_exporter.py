@@ -71,6 +71,12 @@ def export_workspace_state(cleanup_stale: bool = False, max_stale_hours: int = 2
 
     _ensure_export_dir()
 
+    # Sync session names from Cursor's database before export
+    # This ensures the UI shows the correct chat names
+    synced_count = WorkspaceRegistry.sync_all_session_names()
+    if synced_count > 0:
+        logger.info(f"Synced {synced_count} session name(s) from Cursor DB before export")
+
     # Clean up stale workspaces before export (disabled by default to preserve sessions)
     cleaned_count = 0
     if cleanup_stale:
@@ -189,5 +195,3 @@ def _on_workspace_change() -> None:
     This can be hooked into WorkspaceRegistry to auto-export on changes.
     """
     export_workspace_state()
-
-

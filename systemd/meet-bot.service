@@ -1,0 +1,22 @@
+[Unit]
+Description=AI Workflow Google Meet Bot Daemon
+After=network.target dbus.socket
+Wants=dbus.socket
+
+[Service]
+Type=simple
+WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
+# Environment variables for Claude (Vertex AI)
+Environment=CLAUDE_CODE_USE_VERTEX=1
+Environment=ANTHROPIC_VERTEX_PROJECT_ID=itpc-gcp-ansible-pe-eng-claude
+Environment=ANTHROPIC_VERTEX_REGION=us-east5
+# Use the virtual environment's python with D-Bus enabled
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 scripts/meet_daemon.py --dbus
+Restart=always
+RestartSec=30
+# Logs go to journald + file
+StandardOutput=append:/home/daoneill/.config/aa-workflow/meet_daemon.log
+StandardError=append:/home/daoneill/.config/aa-workflow/meet_daemon.log
+
+[Install]
+WantedBy=default.target

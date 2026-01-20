@@ -38,7 +38,7 @@ environments:
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.p
-    last_check: '2026-01-20T00:39:53.214Z'
+    last_check: '2026-01-20T11:04:29.069Z'
     namespace: tower-analytics-prod
     notes: ''
     status: degraded
@@ -48,7 +48,7 @@ environments:
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.s
-    last_check: '2026-01-20T00:39:53.214Z'
+    last_check: '2026-01-20T11:04:29.069Z'
     namespace: tower-analytics-stage
     notes: ''
     status: degraded

@@ -2,7 +2,7 @@
 
 Implements the core filtering logic:
 1. Core tools (always included)
-2. Persona baseline (from config.json)
+2. Persona baseline (dynamically from persona YAML files)
 3. Skill tools (dynamic from YAML)
 4. NPU classification (with fallback)
 
@@ -17,18 +17,72 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+import yaml
+
 from .cache import FilterCache
 from .categories import CORE_CATEGORIES, TOOL_CATEGORIES, format_categories_for_prompt
 from .client import OllamaClient, get_available_client, warmup_model
 from .context_enrichment import enrich_context
 from .skill_discovery import SkillToolDiscovery, detect_skill
-from .stats import FilterStats, get_stats, save_stats
-from .tool_registry import ToolRegistry, load_registry
+from .stats import get_stats, save_stats
+from .tool_registry import load_registry
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context
+    pass  # Context import removed - not currently used
 
 logger = logging.getLogger(__name__)
+
+# Project paths
+PROJECT_DIR = Path(__file__).parents[4]  # tool_modules/aa_ollama/src -> project root
+PERSONAS_DIR = PROJECT_DIR / "personas"
+
+# Cache for loaded persona configs
+_persona_cache: dict[str, dict] = {}
+
+
+def _load_persona_config(persona_name: str) -> dict:
+    """Load persona configuration from YAML file with caching.
+
+    Args:
+        persona_name: Name of the persona (e.g., "developer", "devops")
+
+    Returns:
+        Persona config dict with 'tools', 'skills', etc. or empty dict if not found
+    """
+    if persona_name in _persona_cache:
+        return _persona_cache[persona_name]
+
+    persona_file = PERSONAS_DIR / f"{persona_name}.yaml"
+    if not persona_file.exists():
+        logger.warning(f"Persona file not found: {persona_file}")
+        return {}
+
+    try:
+        with open(persona_file) as f:
+            config = yaml.safe_load(f) or {}
+            _persona_cache[persona_name] = config
+            return config
+    except Exception as e:
+        logger.error(f"Failed to load persona config {persona_name}: {e}")
+        return {}
+
+
+def _get_persona_tool_modules(persona_name: str) -> list[str]:
+    """Get tool modules for a persona from its YAML file.
+
+    Args:
+        persona_name: Name of the persona
+
+    Returns:
+        List of tool module names (e.g., ["workflow", "git_basic", "jira_basic"])
+    """
+    config = _load_persona_config(persona_name)
+    return config.get("tools", [])
+
+
+def clear_persona_cache() -> None:
+    """Clear the persona config cache (useful for testing or hot-reload)."""
+    _persona_cache.clear()
 
 
 class HybridToolFilter:
@@ -36,17 +90,16 @@ class HybridToolFilter:
 
     Layers:
     1. Core tools - Always included (skills, session, memory)
-    2. Persona baseline - From config.json per persona
+    2. Persona baseline - Dynamically loaded from persona YAML files
     3. Skill tools - Dynamically discovered from YAML
     4. NPU classification - Semantic understanding with fallback
 
     Fallback strategies when NPU unavailable:
     - keyword_match: Regex/keyword matching
-    - expanded_baseline: Add common categories
     - all_tools: Return all tools (original behavior)
     """
 
-    FALLBACK_STRATEGIES = ["keyword_match", "expanded_baseline", "all_tools"]
+    FALLBACK_STRATEGIES = ["keyword_match", "all_tools"]
 
     # Fast patterns for common requests (bypass NPU)
     FAST_PATTERNS = [
@@ -136,28 +189,23 @@ class HybridToolFilter:
             logger.warning("No inference instances available")
 
     def _get_baseline_categories(self, persona: str) -> list[str]:
-        """Get baseline categories from config.json.
+        """Get baseline tool modules from persona YAML file.
+
+        Dynamically loads the persona's tool modules from its YAML config,
+        ensuring the filter always uses the same source of truth as persona_load().
 
         Args:
-            persona: Persona name
+            persona: Persona name (e.g., "developer", "devops")
 
         Returns:
-            List of category names
+            List of tool module names (e.g., ["workflow", "git_basic", "jira_basic"])
         """
-        baselines = self.config.get("tool_filtering", {}).get("persona_baselines", {})
-        return baselines.get(persona, {}).get("categories", [])
-
-    def _get_expanded_baseline(self, persona: str) -> list[str]:
-        """Get expanded baseline categories for fallback.
-
-        Args:
-            persona: Persona name
-
-        Returns:
-            List of additional category names
-        """
-        expanded = self.config.get("tool_filtering", {}).get("expanded_baseline", {})
-        return expanded.get(persona, [])
+        modules = _get_persona_tool_modules(persona)
+        if modules:
+            logger.debug(f"Loaded {len(modules)} tool modules for persona '{persona}': {modules}")
+        else:
+            logger.warning(f"No tool modules found for persona '{persona}', using empty baseline")
+        return modules
 
     def _detect_persona(self, message: str, default_persona: str = "developer") -> tuple[str, str]:
         """Auto-detect persona from message keywords.
@@ -314,11 +362,6 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             categories = self.registry.keyword_match(message)
             categories = [c for c in categories if c not in already_included]
             return categories[:3], "keyword_fallback"
-
-        elif self.fallback_strategy == "expanded_baseline":
-            expanded = self._get_expanded_baseline(persona)
-            extra = [c for c in expanded if c not in already_included]
-            return extra, "expanded_baseline"
 
         elif self.fallback_strategy == "all_tools":
             return list(TOOL_CATEGORIES.keys()), "all_tools"
@@ -606,5 +649,3 @@ def filter_tools_detailed(
         Full filter result dict
     """
     return get_filter().filter(message, persona, detected_skill, workspace_uri=workspace_uri)
-
-

@@ -25,7 +25,7 @@ Usage:
     # In a tool function
     workspace = await WorkspaceRegistry.get_for_ctx(ctx)
     session = workspace.get_active_session()
-    
+
     # Or create a new session
     session = workspace.create_session()
 """
@@ -83,91 +83,84 @@ def _generate_session_id() -> str:
 
 def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | None]:
     """Read Cursor's database to get the current chat's UUID and name.
-    
+
     Cursor stores chat data in workspace-specific SQLite databases.
     We find the most recently updated chat for this workspace and return its ID and name.
-    
+
     Args:
         workspace_uri: The workspace URI (e.g., "file:///home/user/project")
-        
+
     Returns:
         Tuple of (chat_id, chat_name) if found, (None, None) otherwise
     """
     import subprocess
-    
+
     try:
         workspace_storage_dir = Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
-        
+
         if not workspace_storage_dir.exists():
             logger.debug("Cursor workspace storage not found")
             return None, None
-        
+
         # Find the workspace storage folder matching our workspace
         for storage_dir in workspace_storage_dir.iterdir():
             if not storage_dir.is_dir():
                 continue
-                
+
             workspace_json = storage_dir / "workspace.json"
             if not workspace_json.exists():
                 continue
-                
+
             try:
                 import json
+
                 workspace_data = json.loads(workspace_json.read_text())
                 folder_uri = workspace_data.get("folder", "")
-                
+
                 # Check if this matches our workspace
                 if folder_uri == workspace_uri:
                     # Found it! Now read the composer data
                     db_path = storage_dir / "state.vscdb"
                     if not db_path.exists():
                         continue
-                    
+
                     # Query the database for composer data
                     query = "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
-                    result = subprocess.run(
-                        ["sqlite3", str(db_path), query],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    
+                    result = subprocess.run(["sqlite3", str(db_path), query], capture_output=True, text=True, timeout=5)
+
                     if result.returncode != 0 or not result.stdout.strip():
                         logger.debug(f"No composer data in {db_path}")
                         return None, None
-                    
+
                     composer_data = json.loads(result.stdout.strip())
                     all_composers = composer_data.get("allComposers", [])
-                    
+
                     if not all_composers:
                         logger.debug("No composers found in database")
                         return None, None
-                    
+
                     # Filter out archived/draft chats and sort by lastUpdatedAt
-                    active_chats = [
-                        c for c in all_composers 
-                        if not c.get("isArchived") and not c.get("isDraft")
-                    ]
-                    
+                    active_chats = [c for c in all_composers if not c.get("isArchived") and not c.get("isDraft")]
+
                     if not active_chats:
                         logger.debug("No active chats found")
                         return None, None
-                    
+
                     # Get the most recently updated chat (likely the current one)
                     most_recent = max(active_chats, key=lambda x: x.get("lastUpdatedAt", 0))
                     chat_id = most_recent.get("composerId")
                     chat_name = most_recent.get("name")
-                    
+
                     logger.info(f"Found Cursor chat: {chat_id} ({chat_name})")
                     return chat_id, chat_name
-                    
+
             except (json.JSONDecodeError, KeyError) as e:
                 logger.debug(f"Error parsing workspace.json in {storage_dir}: {e}")
                 continue
-                
+
         logger.debug(f"No matching workspace storage found for {workspace_uri}")
         return None, None
-        
+
     except Exception as e:
         logger.warning(f"Error reading Cursor database: {e}")
         return None, None
@@ -175,10 +168,10 @@ def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | 
 
 def get_cursor_chat_id_from_db(workspace_uri: str) -> str | None:
     """Read Cursor's database to get the current chat's UUID (backward compat wrapper).
-    
+
     Args:
         workspace_uri: The workspace URI
-        
+
     Returns:
         The Cursor chat UUID if found, None otherwise
     """
@@ -188,53 +181,49 @@ def get_cursor_chat_id_from_db(workspace_uri: str) -> str | None:
 
 def list_cursor_chats(workspace_uri: str) -> list[dict]:
     """List all Cursor chats for a workspace.
-    
+
     Args:
         workspace_uri: The workspace URI
-        
+
     Returns:
         List of chat info dicts with composerId, name, createdAt, lastUpdatedAt
     """
     import subprocess
-    
+
     try:
         workspace_storage_dir = Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
-        
+
         if not workspace_storage_dir.exists():
             return []
-        
+
         for storage_dir in workspace_storage_dir.iterdir():
             if not storage_dir.is_dir():
                 continue
-                
+
             workspace_json = storage_dir / "workspace.json"
             if not workspace_json.exists():
                 continue
-                
+
             try:
                 import json
+
                 workspace_data = json.loads(workspace_json.read_text())
                 folder_uri = workspace_data.get("folder", "")
-                
+
                 if folder_uri == workspace_uri:
                     db_path = storage_dir / "state.vscdb"
                     if not db_path.exists():
                         continue
-                    
+
                     query = "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
-                    result = subprocess.run(
-                        ["sqlite3", str(db_path), query],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    
+                    result = subprocess.run(["sqlite3", str(db_path), query], capture_output=True, text=True, timeout=5)
+
                     if result.returncode != 0 or not result.stdout.strip():
                         return []
-                    
+
                     composer_data = json.loads(result.stdout.strip())
                     all_composers = composer_data.get("allComposers", [])
-                    
+
                     # Return relevant fields for active chats, sorted by lastUpdatedAt
                     chats = [
                         {
@@ -249,12 +238,12 @@ def list_cursor_chats(workspace_uri: str) -> list[dict]:
                         if not c.get("isArchived") and not c.get("isDraft")
                     ]
                     return sorted(chats, key=lambda x: x["lastUpdatedAt"], reverse=True)
-                    
+
             except (json.JSONDecodeError, KeyError):
                 continue
-                
+
         return []
-        
+
     except Exception as e:
         logger.warning(f"Error listing Cursor chats: {e}")
         return []
@@ -262,15 +251,28 @@ def list_cursor_chats(workspace_uri: str) -> list[dict]:
 
 def get_cursor_chat_ids(workspace_uri: str) -> set[str]:
     """Get all active Cursor chat IDs for a workspace.
-    
+
     Args:
         workspace_uri: The workspace URI
-        
+
     Returns:
         Set of chat IDs that exist in Cursor's database
     """
     chats = list_cursor_chats(workspace_uri)
     return {c["composerId"] for c in chats if c.get("composerId")}
+
+
+def get_cursor_chat_names(workspace_uri: str) -> dict[str, str]:
+    """Get a mapping of Cursor chat IDs to their names.
+
+    Args:
+        workspace_uri: The workspace URI
+
+    Returns:
+        Dict mapping chat ID to chat name
+    """
+    chats = list_cursor_chats(workspace_uri)
+    return {c["composerId"]: c.get("name") for c in chats if c.get("composerId")}
 
 
 @dataclass
@@ -306,13 +308,13 @@ class ChatSession:
     last_tool: str | None = None  # Last tool called in this session
     last_tool_time: datetime | None = None  # When the last tool was called
     tool_call_count: int = 0  # Total tool calls in this session
-    
+
     # Backward compatibility property
     @property
     def active_tools(self) -> set[str]:
         """Deprecated: Use tool_count instead. Returns empty set for compatibility."""
         return set()
-    
+
     @active_tools.setter
     def active_tools(self, value: set[str]) -> None:
         """Deprecated: Sets tool_count from the length of the provided set."""
@@ -432,11 +434,11 @@ class WorkspaceState:
             else:
                 session_id = _generate_session_id()
                 logger.info(f"Generated fallback session ID: {session_id}")
-        
+
         # Use Cursor's chat name if no name provided
         if name is None and cursor_chat_name:
             name = cursor_chat_name
-        
+
         # Get tool count from currently loaded tools
         loaded_tools = self._get_loaded_tools()
         tool_count = len(loaded_tools)
@@ -460,9 +462,29 @@ class WorkspaceState:
         self.touch()
 
         logger.info(f"Created session {session_id} in workspace {self.workspace_uri} with project '{session_project}'")
-        
+
         # #region agent log
-        import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:create_session", "message": "Created new session with per-session project", "data": {"session_id": session_id, "session_project": session_project, "is_auto_detected": session_auto_detected, "workspace_project": self.project, "explicit_project_arg": project}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "per-session"}) + '\n')
+        import json as _debug_json  # noqa: F811
+
+        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+            _debug_json.dumps(
+                {
+                    "location": "workspace_state.py:create_session",
+                    "message": "Created new session with per-session project",
+                    "data": {
+                        "session_id": session_id,
+                        "session_project": session_project,
+                        "is_auto_detected": session_auto_detected,
+                        "workspace_project": self.project,
+                        "explicit_project_arg": project,
+                    },
+                    "timestamp": __import__("time").time() * 1000,
+                    "sessionId": "debug-session",
+                    "hypothesisId": "per-session",
+                }
+            )
+            + "\n"
+        )
         # #endregion
 
         # Persist to disk after creating session
@@ -543,10 +565,7 @@ class WorkspaceState:
             if self.active_session_id == session_id:
                 # Set active to most recent remaining session
                 if self.sessions:
-                    most_recent = max(
-                        self.sessions.values(),
-                        key=lambda s: s.last_activity
-                    )
+                    most_recent = max(self.sessions.values(), key=lambda s: s.last_activity)
                     self.active_session_id = most_recent.session_id
                 else:
                     self.active_session_id = None
@@ -561,7 +580,7 @@ class WorkspaceState:
     def cleanup_stale_sessions(self, max_age_hours: int = SESSION_STALE_HOURS) -> int:
         """Remove stale sessions that no longer exist in Cursor.
 
-        Sessions are only removed if they are stale AND no longer exist in 
+        Sessions are only removed if they are stale AND no longer exist in
         Cursor's database. This ensures we don't lose session data for chats
         that are still open in Cursor.
 
@@ -573,10 +592,11 @@ class WorkspaceState:
         """
         # Get all chat IDs that still exist in Cursor
         cursor_chat_ids = get_cursor_chat_ids(self.workspace_uri)
-        
+
         # Only remove sessions that are stale AND not in Cursor's database
         stale_ids = [
-            sid for sid, session in self.sessions.items()
+            sid
+            for sid, session in self.sessions.items()
             if session.is_stale(max_age_hours) and sid not in cursor_chat_ids
         ]
 
@@ -591,6 +611,31 @@ class WorkspaceState:
     def session_count(self) -> int:
         """Get number of sessions in this workspace."""
         return len(self.sessions)
+
+    def sync_session_names_from_cursor(self) -> int:
+        """Sync session names from Cursor's database.
+
+        Updates session names to match what's in Cursor's database.
+        This ensures the UI shows the correct chat names.
+
+        Returns:
+            Number of sessions updated
+        """
+        cursor_names = get_cursor_chat_names(self.workspace_uri)
+        updated = 0
+
+        for session_id, session in self.sessions.items():
+            if session_id in cursor_names:
+                cursor_name = cursor_names[session_id]
+                if cursor_name and cursor_name != session.name:
+                    logger.debug(f"Syncing session {session_id} name: '{session.name}' -> '{cursor_name}'")
+                    session.name = cursor_name
+                    updated += 1
+
+        if updated > 0:
+            logger.info(f"Synced {updated} session name(s) from Cursor DB for {self.workspace_uri}")
+
+        return updated
 
     def _get_loaded_tools(self) -> set[str]:
         """Get currently loaded tool names from PersonaLoader."""
@@ -706,9 +751,7 @@ class WorkspaceRegistry:
     _workspaces: dict[str, WorkspaceState] = {}
 
     @classmethod
-    async def get_for_ctx(
-        cls, ctx: "Context", ensure_session: bool = True
-    ) -> WorkspaceState:
+    async def get_for_ctx(cls, ctx: "Context", ensure_session: bool = True) -> WorkspaceState:
         """Get or create workspace state from MCP context.
 
         Args:
@@ -719,7 +762,24 @@ class WorkspaceRegistry:
             WorkspaceState for the current workspace
         """
         # #region agent log
-        import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:get_for_ctx:entry", "message": "get_for_ctx called", "data": {"registry_count": len(cls._workspaces), "existing_workspaces": list(cls._workspaces.keys())}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,E"}) + '\n')
+        import json as _debug_json  # noqa: F811
+
+        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+            _debug_json.dumps(
+                {
+                    "location": "workspace_state.py:get_for_ctx:entry",
+                    "message": "get_for_ctx called",
+                    "data": {
+                        "registry_count": len(cls._workspaces),
+                        "existing_workspaces": list(cls._workspaces.keys()),
+                    },
+                    "timestamp": __import__("time").time() * 1000,
+                    "sessionId": "debug-session",
+                    "hypothesisId": "A,E",
+                }
+            )
+            + "\n"
+        )
         # #endregion
         logger.info(f"get_for_ctx called, current registry has {len(cls._workspaces)} workspace(s)")
         workspace_uri = await cls._get_workspace_uri(ctx)
@@ -727,7 +787,21 @@ class WorkspaceRegistry:
 
         is_new_workspace = workspace_uri not in cls._workspaces
         # #region agent log
-        import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:get_for_ctx:check_new", "message": "Checking if workspace is new", "data": {"workspace_uri": workspace_uri, "is_new_workspace": is_new_workspace}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,E"}) + '\n')
+        import json as _debug_json  # noqa: F811
+
+        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+            _debug_json.dumps(
+                {
+                    "location": "workspace_state.py:get_for_ctx:check_new",
+                    "message": "Checking if workspace is new",
+                    "data": {"workspace_uri": workspace_uri, "is_new_workspace": is_new_workspace},
+                    "timestamp": __import__("time").time() * 1000,
+                    "sessionId": "debug-session",
+                    "hypothesisId": "A,E",
+                }
+            )
+            + "\n"
+        )
         # #endregion
 
         if is_new_workspace:
@@ -742,7 +816,26 @@ class WorkspaceRegistry:
                 is_new_workspace = False
                 # #region agent log
                 restored_ws = cls._workspaces[workspace_uri]
-                import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:get_for_ctx:restored", "message": "Restored workspace from disk", "data": {"workspace_uri": workspace_uri, "restored_project": restored_ws.project, "is_auto_detected": restored_ws.is_auto_detected, "session_count": len(restored_ws.sessions)}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "E"}) + '\n')
+                import json as _debug_json  # noqa: F811
+
+                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+                    _debug_json.dumps(
+                        {
+                            "location": "workspace_state.py:get_for_ctx:restored",
+                            "message": "Restored workspace from disk",
+                            "data": {
+                                "workspace_uri": workspace_uri,
+                                "restored_project": restored_ws.project,
+                                "is_auto_detected": restored_ws.is_auto_detected,
+                                "session_count": len(restored_ws.sessions),
+                            },
+                            "timestamp": __import__("time").time() * 1000,
+                            "sessionId": "debug-session",
+                            "hypothesisId": "E",
+                        }
+                    )
+                    + "\n"
+                )
                 # #endregion
             else:
                 # Create new workspace state
@@ -751,7 +844,21 @@ class WorkspaceRegistry:
                 # Auto-detect project from workspace path
                 detected_project = cls._detect_project(workspace_uri)
                 # #region agent log
-                import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:get_for_ctx:detect", "message": "Auto-detecting project", "data": {"workspace_uri": workspace_uri, "detected_project": detected_project}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "B"}) + '\n')
+                import json as _debug_json  # noqa: F811
+
+                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+                    _debug_json.dumps(
+                        {
+                            "location": "workspace_state.py:get_for_ctx:detect",
+                            "message": "Auto-detecting project",
+                            "data": {"workspace_uri": workspace_uri, "detected_project": detected_project},
+                            "timestamp": __import__("time").time() * 1000,
+                            "sessionId": "debug-session",
+                            "hypothesisId": "B",
+                        }
+                    )
+                    + "\n"
+                )
                 # #endregion
                 if detected_project:
                     state.project = detected_project
@@ -759,12 +866,35 @@ class WorkspaceRegistry:
                     logger.info(f"Auto-detected project '{detected_project}' for workspace {workspace_uri}")
 
                 cls._workspaces[workspace_uri] = state
-                logger.info(f"Created new workspace state for {workspace_uri}, registry now has {len(cls._workspaces)} workspace(s)")
+                logger.info(
+                    f"Created new workspace state for {workspace_uri}, "
+                    f"registry now has {len(cls._workspaces)} workspace(s)"
+                )
         else:
             logger.info(f"Found existing workspace state for {workspace_uri}")
             existing_ws = cls._workspaces[workspace_uri]
             # #region agent log
-            import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:get_for_ctx:existing", "message": "Using existing workspace", "data": {"workspace_uri": workspace_uri, "project": existing_ws.project, "is_auto_detected": existing_ws.is_auto_detected, "active_session_id": existing_ws.active_session_id, "session_count": len(existing_ws.sessions)}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,C"}) + '\n')
+            import json as _debug_json  # noqa: F811
+
+            open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+                _debug_json.dumps(
+                    {
+                        "location": "workspace_state.py:get_for_ctx:existing",
+                        "message": "Using existing workspace",
+                        "data": {
+                            "workspace_uri": workspace_uri,
+                            "project": existing_ws.project,
+                            "is_auto_detected": existing_ws.is_auto_detected,
+                            "active_session_id": existing_ws.active_session_id,
+                            "session_count": len(existing_ws.sessions),
+                        },
+                        "timestamp": __import__("time").time() * 1000,
+                        "sessionId": "debug-session",
+                        "hypothesisId": "A,C",
+                    }
+                )
+                + "\n"
+            )
             # #endregion
             cls._workspaces[workspace_uri].touch()
 
@@ -832,7 +962,21 @@ class WorkspaceRegistry:
         config = load_config()
         if not config:
             # #region agent log
-            import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:_detect_project:no_config", "message": "No config loaded", "data": {"workspace_uri": workspace_uri}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "B"}) + '\n')
+            import json as _debug_json  # noqa: F811
+
+            open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+                _debug_json.dumps(
+                    {
+                        "location": "workspace_state.py:_detect_project:no_config",
+                        "message": "No config loaded",
+                        "data": {"workspace_uri": workspace_uri},
+                        "timestamp": __import__("time").time() * 1000,
+                        "sessionId": "debug-session",
+                        "hypothesisId": "B",
+                    }
+                )
+                + "\n"
+            )
             # #endregion
             return None
 
@@ -855,7 +999,25 @@ class WorkspaceRegistry:
 
         repositories = config.get("repositories", {})
         # #region agent log
-        import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:_detect_project:checking", "message": "Checking repositories", "data": {"workspace_uri": workspace_uri, "workspace_path": str(workspace_path), "repo_names": list(repositories.keys())}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "B"}) + '\n')
+        import json as _debug_json  # noqa: F811
+
+        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+            _debug_json.dumps(
+                {
+                    "location": "workspace_state.py:_detect_project:checking",
+                    "message": "Checking repositories",
+                    "data": {
+                        "workspace_uri": workspace_uri,
+                        "workspace_path": str(workspace_path),
+                        "repo_names": list(repositories.keys()),
+                    },
+                    "timestamp": __import__("time").time() * 1000,
+                    "sessionId": "debug-session",
+                    "hypothesisId": "B",
+                }
+            )
+            + "\n"
+        )
         # #endregion
         for project_name, project_config in repositories.items():
             project_path_str = project_config.get("path", "")
@@ -865,7 +1027,25 @@ class WorkspaceRegistry:
             try:
                 project_path = Path(project_path_str).expanduser().resolve()
                 # #region agent log
-                import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:_detect_project:compare", "message": "Comparing paths", "data": {"project_name": project_name, "project_path": str(project_path), "workspace_path": str(workspace_path)}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "B"}) + '\n')
+                import json as _debug_json  # noqa: F811
+
+                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+                    _debug_json.dumps(
+                        {
+                            "location": "workspace_state.py:_detect_project:compare",
+                            "message": "Comparing paths",
+                            "data": {
+                                "project_name": project_name,
+                                "project_path": str(project_path),
+                                "workspace_path": str(workspace_path),
+                            },
+                            "timestamp": __import__("time").time() * 1000,
+                            "sessionId": "debug-session",
+                            "hypothesisId": "B",
+                        }
+                    )
+                    + "\n"
+                )
                 # #endregion
                 # Check if workspace is the project path or a subdirectory
                 workspace_path.relative_to(project_path)
@@ -941,12 +1121,12 @@ class WorkspaceRegistry:
                 # Get session's project - use persisted value or fall back to workspace project
                 session_project = sess_data.get("project")
                 session_auto_detected = sess_data.get("is_project_auto_detected", False)
-                
+
                 # If session has no project, inherit from workspace (for backward compat)
                 if session_project is None:
                     session_project = workspace.project
                     session_auto_detected = workspace.is_auto_detected
-                
+
                 session = ChatSession(
                     session_id=session_id,
                     workspace_uri=workspace_uri,
@@ -1010,9 +1190,7 @@ class WorkspaceRegistry:
         return cls._workspaces.get(workspace_uri)
 
     @classmethod
-    def get_or_create(
-        cls, workspace_uri: str, ensure_session: bool = True
-    ) -> WorkspaceState:
+    def get_or_create(cls, workspace_uri: str, ensure_session: bool = True) -> WorkspaceState:
         """Get or create workspace state by URI (synchronous).
 
         Args:
@@ -1068,7 +1246,7 @@ class WorkspaceRegistry:
             List of session dicts with workspace info
         """
         sessions = []
-        for workspace_uri, workspace in cls._workspaces.items():
+        for _workspace_uri, workspace in cls._workspaces.items():
             for session_id, session in workspace.sessions.items():
                 session_dict = session.to_dict()
                 # Use session's own project if set, otherwise fall back to workspace project
@@ -1083,6 +1261,27 @@ class WorkspaceRegistry:
     def total_session_count(cls) -> int:
         """Get total number of sessions across all workspaces."""
         return sum(ws.session_count() for ws in cls._workspaces.values())
+
+    @classmethod
+    def sync_all_session_names(cls) -> int:
+        """Sync session names from Cursor's database for all workspaces.
+
+        This should be called before exporting workspace state to ensure
+        session names are up-to-date with Cursor's database.
+
+        Returns:
+            Total number of sessions updated
+        """
+        total_updated = 0
+        for workspace in cls._workspaces.values():
+            total_updated += workspace.sync_session_names_from_cursor()
+
+        if total_updated > 0:
+            logger.info(f"Synced {total_updated} session name(s) from Cursor DB")
+            # Persist changes to disk
+            cls.save_to_disk()
+
+        return total_updated
 
     @classmethod
     def remove(cls, workspace_uri: str) -> bool:
@@ -1152,7 +1351,8 @@ class WorkspaceRegistry:
 
         # Then cleanup stale workspaces (no sessions and no activity)
         stale_uris = [
-            uri for uri, state in cls._workspaces.items()
+            uri
+            for uri, state in cls._workspaces.items()
             if state.is_stale(max_age_hours) and state.session_count() == 0
         ]
 
@@ -1228,13 +1428,41 @@ class WorkspaceRegistry:
         if not PERSIST_FILE.exists():
             logger.info("load_from_disk: No persisted workspace state found")
             # #region agent log
-            import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:load_from_disk:no_file", "message": "No persist file found", "data": {"persist_file": str(PERSIST_FILE)}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "E"}) + '\n')
+            import json as _debug_json  # noqa: F811
+
+            open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+                _debug_json.dumps(
+                    {
+                        "location": "workspace_state.py:load_from_disk:no_file",
+                        "message": "No persist file found",
+                        "data": {"persist_file": str(PERSIST_FILE)},
+                        "timestamp": __import__("time").time() * 1000,
+                        "sessionId": "debug-session",
+                        "hypothesisId": "E",
+                    }
+                )
+                + "\n"
+            )
             # #endregion
             return 0
 
         logger.info(f"load_from_disk: Loading from {PERSIST_FILE}")
         # #region agent log
-        import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:load_from_disk:loading", "message": "Loading from disk", "data": {"persist_file": str(PERSIST_FILE)}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "E"}) + '\n')
+        import json as _debug_json  # noqa: F811
+
+        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+            _debug_json.dumps(
+                {
+                    "location": "workspace_state.py:load_from_disk:loading",
+                    "message": "Loading from disk",
+                    "data": {"persist_file": str(PERSIST_FILE)},
+                    "timestamp": __import__("time").time() * 1000,
+                    "sessionId": "debug-session",
+                    "hypothesisId": "E",
+                }
+            )
+            + "\n"
+        )
         # #endregion
 
         try:
@@ -1257,7 +1485,7 @@ class WorkspaceRegistry:
                 persisted_project = ws_data.get("project")
                 workspace.is_auto_detected = ws_data.get("is_auto_detected", False)
                 workspace.active_session_id = ws_data.get("active_session_id")
-                
+
                 # FIX: Re-detect project from workspace URI to ensure it matches
                 # This handles the case where the persisted project is stale/incorrect
                 detected_project = cls._detect_project(workspace_uri)
@@ -1266,13 +1494,35 @@ class WorkspaceRegistry:
                     workspace.project = detected_project
                     workspace.is_auto_detected = True
                     if detected_project != persisted_project:
-                        logger.info(f"Re-detected project '{detected_project}' for workspace {workspace_uri} (was '{persisted_project}')")
+                        logger.info(
+                            f"Re-detected project '{detected_project}' for workspace "
+                            f"{workspace_uri} (was '{persisted_project}')"
+                        )
                 else:
                     # No project detected from URI, use persisted value
                     workspace.project = persisted_project
-                
+
                 # #region agent log
-                import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "workspace_state.py:load_from_disk:restore_workspace", "message": "Restoring workspace from disk", "data": {"workspace_uri": workspace_uri, "persisted_project": persisted_project, "detected_project": detected_project, "final_project": workspace.project, "is_auto_detected": workspace.is_auto_detected, "active_session_id": workspace.active_session_id}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "E"}) + '\n')
+                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+                    json.dumps(
+                        {
+                            "location": "workspace_state.py:load_from_disk:restore_workspace",
+                            "message": "Restoring workspace from disk",
+                            "data": {
+                                "workspace_uri": workspace_uri,
+                                "persisted_project": persisted_project,
+                                "detected_project": detected_project,
+                                "final_project": workspace.project,
+                                "is_auto_detected": workspace.is_auto_detected,
+                                "active_session_id": workspace.active_session_id,
+                            },
+                            "timestamp": __import__("time").time() * 1000,
+                            "sessionId": "debug-session",
+                            "hypothesisId": "E",
+                        }
+                    )
+                    + "\n"
+                )
                 # #endregion
 
                 # Parse timestamps
@@ -1294,12 +1544,12 @@ class WorkspaceRegistry:
                 # Get session's project - use persisted value or fall back to workspace project
                 session_project = sess_data.get("project")
                 session_auto_detected = sess_data.get("is_project_auto_detected", False)
-                
+
                 # If session has no project, inherit from workspace (for backward compat)
                 if session_project is None:
                     session_project = workspace.project
                     session_auto_detected = workspace.is_auto_detected
-                
+
                 session = ChatSession(
                     session_id=session_id,
                     workspace_uri=workspace_uri,
@@ -1366,6 +1616,7 @@ class WorkspaceRegistry:
         except Exception as e:
             logger.error(f"Failed to load workspace state: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             return 0
 
@@ -1380,7 +1631,10 @@ class WorkspaceRegistry:
         """
         if cls._workspaces:
             total_sessions = sum(ws.session_count() for ws in cls._workspaces.values())
-            logger.info(f"restore_if_empty: Registry already has {len(cls._workspaces)} workspace(s) with {total_sessions} session(s), skipping restore")
+            logger.info(
+                f"restore_if_empty: Registry already has {len(cls._workspaces)} workspace(s) "
+                f"with {total_sessions} session(s), skipping restore"
+            )
             return 0
         logger.info("restore_if_empty: Registry is empty, loading from disk")
         return cls.load_from_disk()
@@ -1399,5 +1653,3 @@ async def get_workspace_state(ctx: "Context") -> WorkspaceState:
         WorkspaceState for the current workspace
     """
     return await WorkspaceRegistry.get_for_ctx(ctx)
-
-

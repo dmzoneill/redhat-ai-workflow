@@ -1,0 +1,15 @@
+notifications:
+- job_name: hello_world_test
+  message: "\u274C Skill `hello_world` failed.\n\nError: Claude CLI timed out after\
+    \ 5 minutes"
+  skill: hello_world
+  success: false
+  timestamp: '2026-01-20T10:25:00.029188'
+  title: 'Scheduled Job: hello_world_test'
+- job_name: hello_world_test
+  message: "\u274C Skill `hello_world` failed.\n\nError: Claude CLI timed out after\
+    \ 5 minutes"
+  skill: hello_world
+  success: false
+  timestamp: '2026-01-20T10:35:00.033151'
+  title: 'Scheduled Job: hello_world_test'

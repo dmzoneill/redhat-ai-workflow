@@ -6,12 +6,11 @@ Provides:
 - Integration with SkillExecutor for task execution
 """
 
-import asyncio
 import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -80,7 +79,7 @@ class JobExecutionLog:
             if self.HISTORY_FILE.exists():
                 with open(self.HISTORY_FILE) as f:
                     data = json.load(f)
-                    self.entries = data.get("executions", [])[-self.max_entries:]
+                    self.entries = data.get("executions", [])[-self.max_entries :]
         except Exception as e:
             logger.warning(f"Failed to load cron history: {e}")
             self.entries = []
@@ -120,7 +119,7 @@ class JobExecutionLog:
 
         # Trim to max entries
         if len(self.entries) > self.max_entries:
-            self.entries = self.entries[-self.max_entries:]
+            self.entries = self.entries[-self.max_entries :]
 
         # Persist to file
         self._save_to_file()
@@ -188,7 +187,7 @@ class CronScheduler:
         Jobs are only added if the scheduler is enabled in config.
         """
         self._log_to_file(f"start() called, _running={self._running}")
-        
+
         if self._running:
             logger.warning("Scheduler already running")
             self._log_to_file("Scheduler already running, returning")
@@ -317,7 +316,7 @@ class CronScheduler:
         # Check execution mode from config
         use_claude_cli = self.config.execution_mode == "claude_cli"
         claude_path = shutil.which("claude") if use_claude_cli else None
-        
+
         if use_claude_cli and claude_path:
             # Use Claude CLI for AI-powered execution
             self._log_to_file(f"Using Claude CLI at {claude_path}")
@@ -373,19 +372,18 @@ class CronScheduler:
         session_name: str,
     ) -> tuple[bool, str | None, str | None]:
         """Run a skill using Claude CLI for AI-powered execution.
-        
+
         Args:
             job_name: Name of the cron job
             skill: Skill name to execute
             inputs: Input parameters for the skill
             session_name: Session name for logging
-            
+
         Returns:
             Tuple of (success, output, error_message)
         """
         import asyncio
-        import subprocess
-        
+
         # Build the prompt for Claude
         inputs_str = json.dumps(inputs) if inputs else "{}"
         prompt = f"""You are running a scheduled cron job. Execute the following skill and report the results.
@@ -407,9 +405,9 @@ Begin execution now."""
         log_dir = Path.home() / ".config" / "aa-workflow" / "cron_logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"{session_name}.log"
-        
+
         self._log_to_file(f"Running Claude CLI, output to {log_file}")
-        
+
         try:
             # Run Claude CLI with --print flag for non-interactive mode
             # Use the project directory as working directory
@@ -422,7 +420,7 @@ Begin execution now."""
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(Path.home() / "src" / "redhat-ai-workflow"),
             )
-            
+
             # Wait for completion with timeout (5 minutes max)
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -433,11 +431,11 @@ Begin execution now."""
                 process.kill()
                 await process.wait()
                 return False, None, "Claude CLI timed out after 5 minutes"
-            
+
             # Decode output
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
             error_output = stderr.decode("utf-8", errors="replace") if stderr else ""
-            
+
             # Write to log file
             with open(log_file, "w") as f:
                 f.write(f"=== Cron Job: {job_name} ===\n")
@@ -448,9 +446,9 @@ Begin execution now."""
                 f.write(f"\n=== STDOUT ===\n{output}\n")
                 if error_output:
                     f.write(f"\n=== STDERR ===\n{error_output}\n")
-            
+
             self._log_to_file(f"Claude CLI completed with exit code {process.returncode}")
-            
+
             if process.returncode == 0:
                 # Truncate output for preview
                 preview = output[:500] if len(output) > 500 else output
@@ -458,7 +456,7 @@ Begin execution now."""
             else:
                 error_msg = error_output or f"Claude CLI exited with code {process.returncode}"
                 return False, output[:200] if output else None, error_msg
-                
+
         except FileNotFoundError:
             return False, None, "Claude CLI not found in PATH"
         except Exception as e:
@@ -520,19 +518,21 @@ Begin execution now."""
         if not self.scheduler:
             return
 
-        old_config = self.config
         self.config = SchedulerConfig()
 
-        # Remove jobs that no longer exist
+        # Remove jobs that no longer exist (but keep internal jobs like _config_watcher)
         current_job_ids = {j.id for j in self.scheduler.get_jobs()}
         new_job_names = {j.get("name") for j in self.config.get_cron_jobs()}
 
         for job_id in current_job_ids:
+            # Skip internal jobs (prefixed with _)
+            if job_id.startswith("_"):
+                continue
             if job_id not in new_job_names:
                 self.scheduler.remove_job(job_id)
                 logger.info(f"Removed job: {job_id}")
 
-        # Add/update jobs
+        # Add/update jobs (replace_existing=True in _add_cron_job handles updates)
         for job in self.config.get_cron_jobs():
             self._add_cron_job(job)
 
@@ -730,5 +730,3 @@ async def stop_scheduler():
     """Stop the global scheduler."""
     if _scheduler:
         await _scheduler.stop()
-
-

@@ -83,6 +83,8 @@ const DBUS_SERVICES = [
     service: "com.aiworkflow.SlackAgent",
     path: "/com/aiworkflow/SlackAgent",
     interface: "com.aiworkflow.SlackAgent",
+    icon: "💬",
+    systemdUnit: "slack-agent.service",
     methods: [
       { name: "GetStatus", description: "Get daemon status and stats", args: [] },
       { name: "GetPending", description: "Get pending approval messages", args: [] },
@@ -94,6 +96,41 @@ const DBUS_SERVICES = [
       ]},
       { name: "ApproveAll", description: "Approve all pending messages", args: [] },
       { name: "ReloadConfig", description: "Reload daemon configuration", args: [] },
+      { name: "Shutdown", description: "Gracefully shutdown the daemon", args: [] },
+    ],
+  },
+  {
+    name: "Cron Scheduler",
+    service: "com.aiworkflow.CronScheduler",
+    path: "/com/aiworkflow/CronScheduler",
+    interface: "com.aiworkflow.CronScheduler",
+    icon: "🕐",
+    systemdUnit: "cron-scheduler.service",
+    methods: [
+      { name: "GetStatus", description: "Get scheduler status and stats", args: [] },
+      { name: "GetStats", description: "Get scheduler statistics", args: [] },
+      { name: "CallMethod", description: "Call a custom method", args: [
+        { name: "method_name", type: "string", default: "list_jobs" },
+        { name: "args_json", type: "string", default: "[]" },
+      ]},
+      { name: "Shutdown", description: "Gracefully shutdown the scheduler", args: [] },
+    ],
+  },
+  {
+    name: "Meet Bot",
+    service: "com.aiworkflow.MeetBot",
+    path: "/com/aiworkflow/MeetBot",
+    interface: "com.aiworkflow.MeetBot",
+    icon: "🎥",
+    systemdUnit: "meet-bot.service",
+    methods: [
+      { name: "GetStatus", description: "Get bot status and upcoming meetings", args: [] },
+      { name: "GetStats", description: "Get bot statistics", args: [] },
+      { name: "CallMethod", description: "Call a custom method", args: [
+        { name: "method_name", type: "string", default: "list_meetings" },
+        { name: "args_json", type: "string", default: "[]" },
+      ]},
+      { name: "Shutdown", description: "Gracefully shutdown the bot", args: [] },
     ],
   },
 ];
@@ -421,8 +458,17 @@ export class CommandCenterPanel {
           case "refreshServices":
             await this.refreshServiceStatus();
             break;
+          case "serviceControl":
+            await this.handleServiceControl(message.action, message.service);
+            break;
           case "loadSlackHistory":
             await this.loadSlackHistory();
+            break;
+          case "sendSlackMessage":
+            await this.sendSlackMessage(message.channel, message.text);
+            break;
+          case "refreshSlackChannels":
+            await this.refreshSlackChannels();
             break;
           case "loadSkill":
             await this.loadSkillDefinition(message.skillName);
@@ -442,6 +488,9 @@ export class CommandCenterPanel {
           case "refreshCron":
             await this.refreshCronData();
             break;
+          case "loadMoreCronHistory":
+            await this.refreshCronData(message.limit || 20);
+            break;
           case "toggleScheduler":
             await this.toggleScheduler();
             break;
@@ -452,6 +501,7 @@ export class CommandCenterPanel {
             await this.runCronJobNow(message.jobName);
             break;
           case "openConfigFile":
+            console.log("[CommandCenter] Received openConfigFile command from webview");
             await this.openConfigFile();
             break;
           case "loadPersona":
@@ -1284,11 +1334,11 @@ except Exception as e:
     return null;
   }
 
-  private loadCurrentWork(): { 
-    activeIssue: any; 
-    activeMR: any; 
-    followUps: any[]; 
-    sprintIssues: any[]; 
+  private loadCurrentWork(): {
+    activeIssue: any;
+    activeMR: any;
+    followUps: any[];
+    sprintIssues: any[];
     activeRepo: string | null;
     // Aggregated totals across all workspaces/sessions
     totalActiveIssues: number;
@@ -1307,7 +1357,7 @@ except Exception as e:
     if (this._workspaceState) {
       for (const [uri, ws] of Object.entries(this._workspaceState)) {
         const workspaceName = ws.project || path.basename(uri.replace('file://', ''));
-        
+
         // Check all sessions in this workspace
         for (const session of Object.values(ws.sessions || {})) {
           // Count active issues
@@ -1320,7 +1370,7 @@ except Exception as e:
               workspace: workspaceName
             });
           }
-          
+
           // Count active branches (as proxy for MRs - branches typically have associated MRs)
           if (session.branch && !seenMRs.has(session.branch)) {
             seenMRs.add(session.branch);
@@ -1485,11 +1535,11 @@ except Exception as e:
           }
         }
 
-        return { 
-          activeIssue, 
-          activeMR, 
-          followUps, 
-          sprintIssues, 
+        return {
+          activeIssue,
+          activeMR,
+          followUps,
+          sprintIssues,
           activeRepo,
           totalActiveIssues,
           totalActiveMRs,
@@ -1500,11 +1550,11 @@ except Exception as e:
     } catch (e) {
       console.error("Failed to load current work:", e);
     }
-    return { 
-      activeIssue: null, 
-      activeMR: null, 
-      followUps: [], 
-      sprintIssues: [], 
+    return {
+      activeIssue: null,
+      activeMR: null,
+      followUps: [],
+      sprintIssues: [],
       activeRepo: null,
       totalActiveIssues,
       totalActiveMRs,
@@ -2186,6 +2236,81 @@ print(result)
     }
   }
 
+  private async handleServiceControl(action: string, service: string) {
+    // Map service names to systemd units
+    const serviceUnits: Record<string, string> = {
+      slack: "slack-agent.service",
+      cron: "cron-scheduler.service",
+      meet: "meet-bot.service",
+    };
+
+    const logFiles: Record<string, string> = {
+      slack: "/tmp/slack-daemon.log",
+      cron: `${process.env.HOME}/.config/aa-workflow/cron_daemon.log`,
+      meet: `${process.env.HOME}/.config/aa-workflow/meet_daemon.log`,
+    };
+
+    const unit = serviceUnits[service];
+    if (!unit) {
+      vscode.window.showErrorMessage(`Unknown service: ${service}`);
+      return;
+    }
+
+    try {
+      switch (action) {
+        case "start":
+          await execAsync(`systemctl --user start ${unit}`);
+          vscode.window.showInformationMessage(`Started ${service} service`);
+          // Refresh status after a short delay
+          setTimeout(() => this.refreshServiceStatus(), 1000);
+          break;
+
+        case "stop":
+          // Try D-Bus shutdown first for graceful stop
+          const dbusService = DBUS_SERVICES.find(s => s.name.toLowerCase().includes(service));
+          if (dbusService) {
+            try {
+              await this.queryDBus(
+                dbusService.service,
+                dbusService.path,
+                dbusService.interface,
+                "Shutdown"
+              );
+              vscode.window.showInformationMessage(`Stopping ${service} service...`);
+            } catch {
+              // Fall back to systemctl
+              await execAsync(`systemctl --user stop ${unit}`);
+              vscode.window.showInformationMessage(`Stopped ${service} service`);
+            }
+          } else {
+            await execAsync(`systemctl --user stop ${unit}`);
+            vscode.window.showInformationMessage(`Stopped ${service} service`);
+          }
+          setTimeout(() => this.refreshServiceStatus(), 1000);
+          break;
+
+        case "logs":
+          const logFile = logFiles[service];
+          if (logFile) {
+            // Open log file in editor
+            const uri = vscode.Uri.file(logFile);
+            try {
+              const doc = await vscode.workspace.openTextDocument(uri);
+              await vscode.window.showTextDocument(doc, { preview: true });
+            } catch {
+              // File might not exist, show journalctl instead
+              const terminal = vscode.window.createTerminal(`${service} logs`);
+              terminal.show();
+              terminal.sendText(`journalctl --user -u ${unit} -f`);
+            }
+          }
+          break;
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Service control failed: ${e.message}`);
+    }
+  }
+
   private async loadSlackHistory() {
     try {
       const result = await this.queryDBus(
@@ -2233,6 +2358,66 @@ print(result)
     }
   }
 
+  private async sendSlackMessage(channel: string, text: string) {
+    try {
+      if (!channel || !text) {
+        vscode.window.showWarningMessage("Please select a channel and enter a message");
+        return;
+      }
+
+      const result = await this.queryDBus(
+        "com.aiworkflow.SlackAgent",
+        "/com/aiworkflow/SlackAgent",
+        "com.aiworkflow.SlackAgent",
+        "SendMessage",
+        [
+          { type: "string", value: channel },
+          { type: "string", value: text }
+        ]
+      );
+
+      if (result.success) {
+        vscode.window.showInformationMessage("Message sent successfully");
+        // Refresh history to show the new message
+        await this.loadSlackHistory();
+      } else {
+        vscode.window.showErrorMessage(`Failed to send message: ${result.error || "Unknown error"}`);
+      }
+    } catch (e) {
+      vscode.window.showErrorMessage(`Failed to send message: ${e}`);
+    }
+  }
+
+  private async refreshSlackChannels() {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.SlackAgent",
+        "/com/aiworkflow/SlackAgent",
+        "com.aiworkflow.SlackAgent",
+        "GetChannels",
+        []
+      );
+
+      if (result.success && result.data) {
+        const channels = Array.isArray(result.data) ? result.data : (result.data.channels || []);
+        this._panel.webview.postMessage({
+          type: "slackChannels",
+          channels: channels,
+        });
+      } else {
+        this._panel.webview.postMessage({
+          type: "slackChannels",
+          channels: [],
+        });
+      }
+    } catch (e) {
+      this._panel.webview.postMessage({
+        type: "slackChannels",
+        channels: [],
+      });
+    }
+  }
+
   // ============================================================================
   // Cron Management
   // ============================================================================
@@ -2255,12 +2440,14 @@ print(result)
     return { enabled: false, timezone: "UTC", jobs: [], execution_mode: "claude_cli" };
   }
 
-  private loadCronHistory(): CronExecution[] {
+  private loadCronHistory(limit: number = 10): CronExecution[] {
     try {
       if (fs.existsSync(CRON_HISTORY_FILE)) {
         const content = fs.readFileSync(CRON_HISTORY_FILE, "utf-8");
         const history = JSON.parse(content);
-        return (history.executions || []).slice(-20);
+        const executions = history.executions || [];
+        // Get last N executions and reverse so newest is first
+        return executions.slice(-limit).reverse();
       }
     } catch (e) {
       console.error("Failed to load cron history:", e);
@@ -2268,14 +2455,30 @@ print(result)
     return [];
   }
 
-  private async refreshCronData() {
+  private getCronHistoryTotal(): number {
+    try {
+      if (fs.existsSync(CRON_HISTORY_FILE)) {
+        const content = fs.readFileSync(CRON_HISTORY_FILE, "utf-8");
+        const history = JSON.parse(content);
+        return (history.executions || []).length;
+      }
+    } catch (e) {
+      console.error("Failed to get cron history count:", e);
+    }
+    return 0;
+  }
+
+  private async refreshCronData(historyLimit: number = 10) {
     const cronConfig = this.loadCronConfig();
-    const cronHistory = this.loadCronHistory();
+    const cronHistory = this.loadCronHistory(historyLimit);
+    const totalHistory = this.getCronHistoryTotal();
 
     this._panel.webview.postMessage({
       type: "cronData",
       config: cronConfig,
       history: cronHistory,
+      totalHistory: totalHistory,
+      currentLimit: historyLimit,
     });
   }
 
@@ -2636,15 +2839,15 @@ print(result)
       const typeBadge = persona.isSlim ? '<span class="persona-type-badge slim">slim</span>' :
                        persona.isInternal ? '<span class="persona-type-badge internal">internal</span>' :
                        persona.isAgent ? '<span class="persona-type-badge agent">agent</span>' : '';
-      
+
       const toolTags = persona.tools.slice(0, 6).map(t => `<span class="persona-tag tool">${t}</span>`).join("");
       const moreTools = persona.tools.length > 6 ? `<span class="persona-tag">+${persona.tools.length - 6} more</span>` : '';
       const noTools = persona.tools.length === 0 ? '<span class="persona-tag empty">none defined</span>' : '';
-      
+
       const skillTags = persona.skills.slice(0, 8).map(s => `<span class="persona-tag skill">${s}</span>`).join("");
       const moreSkills = persona.skills.length > 8 ? `<span class="persona-tag">+${persona.skills.length - 8} more</span>` : '';
       const noSkills = persona.skills.length === 0 ? '<span class="persona-tag empty">all skills</span>' : '';
-      
+
       return `
       <div class="persona-card ${isActive ? "active" : ""} ${persona.isSlim ? "slim" : ""} ${persona.isInternal ? "internal" : ""} ${persona.isAgent ? "agent" : ""}" data-persona="${displayFileName}">
         <div class="persona-header">
@@ -2826,7 +3029,7 @@ print(result)
   private _renderSessionsTable(): string {
     // Collect all sessions for table view
     const allSessions: Array<{ session: ChatSession; workspaceUri: string; workspaceProject: string | null; isActive: boolean }> = [];
-    
+
     if (this._workspaceState) {
       for (const [uri, ws] of Object.entries(this._workspaceState)) {
         const sessions = ws.sessions || {};
@@ -2887,7 +3090,7 @@ print(result)
               const sessionName = session.name || `Session ${sessionId.substring(0, 6)}`;
               const sessionProject = (session as any).project || item.workspaceProject || '-';
               const issue = session.issue_key || '-';
-              
+
               return `
               <tr class="${item.isActive ? 'row-active' : ''}" data-session-id="${sessionId}">
                 <td><span class="persona-icon-small ${personaColor}">${personaIcon}</span></td>
@@ -2917,7 +3120,7 @@ print(result)
   private _renderSessionsGrouped(): string {
     // Only show initialized MCP sessions
     const allSessions: Array<{ session: ChatSession; workspaceUri: string; workspaceProject: string | null; isActive: boolean }> = [];
-    
+
     if (this._workspaceState) {
       for (const [uri, ws] of Object.entries(this._workspaceState)) {
         const sessions = ws.sessions || {};
@@ -2946,7 +3149,7 @@ print(result)
 
     // Group sessions by project
     const groups: Map<string, typeof allSessions> = new Map();
-    
+
     for (const item of allSessions) {
       const groupKey = (item.session as any)?.project || item.workspaceProject || 'No Project';
       if (!groups.has(groupKey)) {
@@ -2964,14 +3167,14 @@ print(result)
     return sortedGroups.map(([groupName, items]) => {
       const groupIcon = this._getGroupIcon(groupName);
       const groupColor = this._getGroupColor(groupName);
-      
+
       items.sort((a, b) => {
         const aTime = a.session?.last_activity ? new Date(a.session.last_activity).getTime() : 0;
         const bTime = b.session?.last_activity ? new Date(b.session.last_activity).getTime() : 0;
         return bTime - aTime;
       });
 
-      const sessionsHtml = items.map(item => 
+      const sessionsHtml = items.map(item =>
         this._renderSessionCard(item.session!.session_id, item.session!, item.isActive)
       ).join('');
 
@@ -2998,11 +3201,11 @@ print(result)
       'incident': '🚨',
       'release': '🚀'
     };
-    
+
     if (personaIcons[groupName.toLowerCase()]) {
       return personaIcons[groupName.toLowerCase()];
     }
-    
+
     // Icons for projects (or default)
     if (groupName === 'No Project') return '📁';
     return '📦';
@@ -3016,11 +3219,11 @@ print(result)
       'incident': 'red',
       'release': 'purple'
     };
-    
+
     if (personaColors[groupName.toLowerCase()]) {
       return personaColors[groupName.toLowerCase()];
     }
-    
+
     // Default color for projects
     if (groupName === 'No Project') return 'gray';
     return 'blue';
@@ -3238,16 +3441,16 @@ print(result)
     try {
       // Session ID is now the Cursor chat UUID (full UUID from Cursor's database)
       // We can look up the chat name directly from Cursor's database using the UUID
-      
+
       let chatName: string | null = null;
-      
+
       try {
         const workspaceStorageDir = path.join(os.homedir(), '.config', 'Cursor', 'User', 'workspaceStorage');
         const currentWorkspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri.toString();
-        
+
         if (fs.existsSync(workspaceStorageDir) && currentWorkspaceUri) {
           const storageDirs = fs.readdirSync(workspaceStorageDir);
-          
+
           for (const dir of storageDirs) {
             const workspaceJsonPath = path.join(workspaceStorageDir, dir, 'workspace.json');
             if (fs.existsSync(workspaceJsonPath)) {
@@ -3259,7 +3462,7 @@ print(result)
                     const { execSync } = require('child_process');
                     const query = `SELECT value FROM ItemTable WHERE key = 'composer.composerData'`;
                     const result = execSync(`sqlite3 "${dbPath}" "${query}"`, { encoding: 'utf8', timeout: 5000 });
-                    
+
                     if (result.trim()) {
                       const composerData = JSON.parse(result.trim());
                       // Find the chat by its UUID (sessionId IS the Cursor chat UUID now)
@@ -3282,17 +3485,17 @@ print(result)
       } catch (dbError) {
         console.log('[AA-WORKFLOW] Could not read Cursor database:', dbError);
       }
-      
+
       // Open Quick Open with the chat name
       const searchQuery = chatName ? `chat:${chatName}` : 'chat:';
       await vscode.commands.executeCommand('workbench.action.quickOpen', searchQuery);
-      
+
       if (chatName) {
         vscode.window.showInformationMessage(`🔍 Opening "${chatName}"...`);
       } else {
         vscode.window.showInformationMessage(`💬 Select your chat from the list`);
       }
-      
+
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to open chat picker: ${error}`);
     }
@@ -3569,11 +3772,11 @@ print(result)
   private _getHtmlForWebview(
     stats: AgentStats | null,
     workflowStatus: any,
-    currentWork: { 
-      activeIssue: any; 
-      activeMR: any; 
-      followUps: any[]; 
-      sprintIssues: any[]; 
+    currentWork: {
+      activeIssue: any;
+      activeMR: any;
+      followUps: any[];
+      sprintIssues: any[];
       activeRepo: string | null;
       totalActiveIssues: number;
       totalActiveMRs: number;
@@ -3826,17 +4029,17 @@ print(result)
         }
 
         .tab {
-          padding: 12px 20px;
+          padding: 12px 14px;
           border: none;
           background: transparent;
           color: var(--text-secondary);
-          font-size: 0.9rem;
+          font-size: 0.85rem;
           cursor: pointer;
           border-bottom: 2px solid transparent;
           transition: all 0.2s;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
         }
 
         .tab:hover {
@@ -5103,6 +5306,28 @@ print(result)
           color: var(--text-secondary);
         }
 
+        .service-actions {
+          display: flex;
+          gap: 8px;
+          padding: 12px 16px;
+          border-top: 1px solid var(--border);
+          background: var(--bg-secondary);
+        }
+
+        .service-actions .btn {
+          flex: 1;
+          font-size: 0.75rem;
+          padding: 6px 8px;
+        }
+
+        .service-card.service-offline {
+          opacity: 0.7;
+        }
+
+        .service-card.service-offline .service-header {
+          background: var(--bg-tertiary);
+        }
+
         /* Slack Messages */
         .slack-messages {
           max-height: 300px;
@@ -5348,9 +5573,10 @@ print(result)
           display: flex;
           gap: 8px;
           margin-bottom: 12px;
+          align-items: flex-start;
         }
 
-        .semantic-search-box input {
+        .semantic-search-box textarea {
           flex: 1;
           padding: 10px 14px;
           border: 1px solid var(--border);
@@ -5358,15 +5584,19 @@ print(result)
           background: var(--bg-secondary);
           color: var(--text-primary);
           font-size: 0.9rem;
+          min-height: 80px;
+          resize: vertical;
+          font-family: inherit;
+          line-height: 1.4;
         }
 
-        .semantic-search-box input:focus {
+        .semantic-search-box textarea:focus {
           outline: none;
           border-color: var(--accent);
           box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
         }
 
-        .semantic-search-box input::placeholder {
+        .semantic-search-box textarea::placeholder {
           color: var(--text-tertiary);
         }
 
@@ -6560,6 +6790,18 @@ print(result)
           color: var(--error);
         }
 
+        .cron-history-load-more {
+          display: flex;
+          justify-content: center;
+          padding: 12px;
+          border-top: 1px solid var(--border);
+          margin-top: 8px;
+        }
+
+        .cron-history-load-more button {
+          font-size: 0.85rem;
+        }
+
         .cron-reference {
           display: grid;
           gap: 8px;
@@ -7288,19 +7530,22 @@ print(result)
         <button class="tab ${this._currentTab === "memory" ? "active" : ""}" data-tab="memory" id="tab-memory">
           🧠 Memory
         </button>
+        <button class="tab ${this._currentTab === "meetings" ? "active" : ""}" data-tab="meetings" id="tab-meetings">
+          🎥 Meetings
+          ${meetBotState.currentMeeting ? '<span class="tab-badge running">Live</span>' : meetBotState.upcomingMeetings.length > 0 ? `<span class="tab-badge">${meetBotState.upcomingMeetings.length}</span>` : ''}
+        </button>
+        <button class="tab ${this._currentTab === "slack" ? "active" : ""}" data-tab="slack" id="tab-slack">
+          💬 Slack
+        </button>
+        <button class="tab ${this._currentTab === "inference" ? "active" : ""}" data-tab="inference" id="tab-inference">
+          🧪 Inference
+        </button>
         <button class="tab ${this._currentTab === "cron" ? "active" : ""}" data-tab="cron" id="tab-cron">
           🕐 Cron
           ${cronConfig.enabled ? `<span class="tab-badge">${cronConfig.jobs.filter(j => j.enabled).length}</span>` : ""}
         </button>
         <button class="tab ${this._currentTab === "services" ? "active" : ""}" data-tab="services" id="tab-services">
           🔌 Services
-        </button>
-        <button class="tab ${this._currentTab === "inference" ? "active" : ""}" data-tab="inference" id="tab-inference">
-          🧪 Inference
-        </button>
-        <button class="tab ${this._currentTab === "meetings" ? "active" : ""}" data-tab="meetings" id="tab-meetings">
-          🎥 Meetings
-          ${meetBotState.currentMeeting ? '<span class="tab-badge running">Live</span>' : meetBotState.upcomingMeetings.length > 0 ? `<span class="tab-badge">${meetBotState.upcomingMeetings.length}</span>` : ''}
         </button>
       </div>
 
@@ -7580,80 +7825,6 @@ print(result)
 
       <!-- Services Tab -->
       <div class="tab-content ${this._currentTab === "services" ? "active" : ""}" id="services">
-        <div class="grid-2">
-          <!-- Slack Agent -->
-          <div class="service-card">
-            <div class="service-header">
-              <div class="service-title">💬 Slack Agent</div>
-              <div class="service-status" id="slackStatus">
-                <span class="status-dot checking"></span> Checking...
-              </div>
-            </div>
-            <div class="service-content" id="slackDetails">
-              <div class="service-row"><span>Status</span><span>Checking...</span></div>
-            </div>
-          </div>
-
-          <!-- MCP Server -->
-          <div class="service-card">
-            <div class="service-header">
-              <div class="service-title">🔧 MCP Server</div>
-              <div class="service-status" id="mcpStatus">
-                <span class="status-dot checking"></span> Checking...
-              </div>
-            </div>
-            <div class="service-content" id="mcpDetails">
-              <div class="service-row"><span>Status</span><span>Checking...</span></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Slack Messages -->
-        <div class="section" style="margin-top: 20px;">
-          <h2 class="section-title">💬 Slack Message Feed</h2>
-          <div class="service-card">
-            <div class="service-header">
-              <div class="service-title">Recent Messages</div>
-              <button class="btn btn-ghost btn-small" data-action="loadSlackHistory">🔄 Refresh</button>
-            </div>
-            <div class="slack-messages" id="slackMessages">
-              <div class="empty-state">
-                <div class="empty-state-icon">💬</div>
-                <div>No messages yet</div>
-                <button class="btn btn-secondary btn-small" style="margin-top: 12px;" data-action="loadSlackHistory">Load History</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- D-Bus Explorer -->
-        <div class="section" style="margin-top: 20px;">
-          <h2 class="section-title">🔌 D-Bus Explorer</h2>
-          <div class="service-card">
-            <div class="service-content">
-              <div class="dbus-controls">
-                <select id="dbusService">
-                  <option value="">Select Service...</option>
-                  ${DBUS_SERVICES.map(s => `<option value="${s.name}">${s.name}</option>`).join("")}
-                </select>
-                <select id="dbusMethod">
-                  <option value="">Select Method...</option>
-                </select>
-                <button class="btn btn-primary btn-small" id="dbusQueryBtn">Execute</button>
-              </div>
-              <div class="dbus-args" id="dbusArgs" style="display: none; margin-top: 12px;">
-                <!-- Dynamic argument inputs will be inserted here -->
-              </div>
-              <div class="dbus-result" id="dbusResult">
-                Select a service and method to query
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Inference Tab -->
-      <div class="tab-content ${this._currentTab === "inference" ? "active" : ""}" id="inference">
         <!-- Ollama Instance Status -->
         <div class="section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -7732,6 +7903,113 @@ print(result)
           </div>
         </div>
 
+        <!-- Service Status Cards -->
+        <div class="section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 class="section-title" style="margin: 0;">🔌 Background Services</h2>
+            <button class="btn btn-secondary btn-small" data-action="refreshServices">↻ Refresh</button>
+          </div>
+          <div class="grid-2">
+            <!-- Slack Agent -->
+            <div class="service-card" id="slackServiceCard">
+              <div class="service-header">
+                <div class="service-title">💬 Slack Agent</div>
+                <div class="service-status" id="slackStatus">
+                  <span class="status-dot checking"></span> Checking...
+                </div>
+              </div>
+              <div class="service-content" id="slackDetails">
+                <div class="service-row"><span>Status</span><span>Checking...</span></div>
+              </div>
+              <div class="service-actions">
+                <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="slack">▶ Start</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="slack">⏹ Stop</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="slack">📋 Logs</button>
+              </div>
+            </div>
+
+            <!-- Cron Scheduler -->
+            <div class="service-card" id="cronServiceCard">
+              <div class="service-header">
+                <div class="service-title">🕐 Cron Scheduler</div>
+                <div class="service-status" id="cronStatus">
+                  <span class="status-dot checking"></span> Checking...
+                </div>
+              </div>
+              <div class="service-content" id="cronDetails">
+                <div class="service-row"><span>Status</span><span>Checking...</span></div>
+              </div>
+              <div class="service-actions">
+                <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="cron">▶ Start</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="cron">⏹ Stop</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="cron">📋 Logs</button>
+              </div>
+            </div>
+
+            <!-- Meet Bot -->
+            <div class="service-card" id="meetServiceCard">
+              <div class="service-header">
+                <div class="service-title">🎥 Meet Bot</div>
+                <div class="service-status" id="meetStatus">
+                  <span class="status-dot checking"></span> Checking...
+                </div>
+              </div>
+              <div class="service-content" id="meetDetails">
+                <div class="service-row"><span>Status</span><span>Checking...</span></div>
+              </div>
+              <div class="service-actions">
+                <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="meet">▶ Start</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="meet">⏹ Stop</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="meet">📋 Logs</button>
+              </div>
+            </div>
+
+            <!-- MCP Server -->
+            <div class="service-card" id="mcpServiceCard">
+              <div class="service-header">
+                <div class="service-title">🔧 MCP Server</div>
+                <div class="service-status" id="mcpStatus">
+                  <span class="status-dot checking"></span> Checking...
+                </div>
+              </div>
+              <div class="service-content" id="mcpDetails">
+                <div class="service-row"><span>Status</span><span>Checking...</span></div>
+              </div>
+              <div class="service-actions">
+                <span class="text-muted" style="font-size: 0.8rem;">Managed by Cursor</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- D-Bus Explorer -->
+        <div class="section" style="margin-top: 20px;">
+          <h2 class="section-title">🔌 D-Bus Explorer</h2>
+          <div class="service-card">
+            <div class="service-content">
+              <div class="dbus-controls">
+                <select id="dbusService">
+                  <option value="">Select Service...</option>
+                  ${DBUS_SERVICES.map(s => `<option value="${s.name}">${s.icon} ${s.name}</option>`).join("")}
+                </select>
+                <select id="dbusMethod">
+                  <option value="">Select Method...</option>
+                </select>
+                <button class="btn btn-primary btn-small" id="dbusQueryBtn">Execute</button>
+              </div>
+              <div class="dbus-args" id="dbusArgs" style="display: none; margin-top: 12px;">
+                <!-- Dynamic argument inputs will be inserted here -->
+              </div>
+              <div class="dbus-result" id="dbusResult">
+                Select a service and method to query
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inference Tab -->
+      <div class="tab-content ${this._currentTab === "inference" ? "active" : ""}" id="inference">
         <!-- Configuration -->
         <div class="section">
           <h2 class="section-title">⚙️ Tool Filtering Configuration</h2>
@@ -7929,6 +8207,79 @@ print(result)
       <!-- Meetings Tab -->
       <div class="tab-content ${this._currentTab === "meetings" ? "active" : ""}" id="meetings">
         ${getMeetingsTabContent(meetBotState)}
+      </div>
+
+      <!-- Slack Tab -->
+      <div class="tab-content ${this._currentTab === "slack" ? "active" : ""}" id="slack">
+        <!-- Slack Agent Status -->
+        <div class="section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 class="section-title" style="margin: 0;">💬 Slack Agent</h2>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="slack">▶ Start</button>
+              <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="slack">⏹ Stop</button>
+              <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="slack">📋 Logs</button>
+            </div>
+          </div>
+          <div class="grid-4">
+            <div class="stat-card" id="slackStatusCard">
+              <div class="stat-icon">📡</div>
+              <div class="stat-value" id="slackAgentStatus">--</div>
+              <div class="stat-label">Status</div>
+            </div>
+            <div class="stat-card cyan">
+              <div class="stat-icon">⏱️</div>
+              <div class="stat-value" id="slackUptime">--</div>
+              <div class="stat-label">Uptime</div>
+            </div>
+            <div class="stat-card purple">
+              <div class="stat-icon">📨</div>
+              <div class="stat-value" id="slackProcessed">0</div>
+              <div class="stat-label">Processed</div>
+            </div>
+            <div class="stat-card pink">
+              <div class="stat-icon">⏳</div>
+              <div class="stat-value" id="slackPending">0</div>
+              <div class="stat-label">Pending</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Message Composer -->
+        <div class="section">
+          <h2 class="section-title">✍️ Send Message</h2>
+          <div class="service-card">
+            <div class="service-content">
+              <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+                <select id="slackChannel" style="flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
+                  <option value="">Select Channel...</option>
+                </select>
+                <button class="btn btn-secondary btn-small" data-action="refreshSlackChannels">↻ Refresh</button>
+              </div>
+              <div style="display: flex; gap: 12px;">
+                <input type="text" id="slackMessageInput" placeholder="Type a message..." style="flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
+                <button class="btn btn-primary" data-action="sendSlackMessage">Send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Message Feed -->
+        <div class="section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 class="section-title" style="margin: 0;">📬 Message Feed</h2>
+            <button class="btn btn-secondary btn-small" data-action="loadSlackHistory">↻ Refresh</button>
+          </div>
+          <div class="service-card">
+            <div class="slack-messages" id="slackMessages" style="max-height: 500px;">
+              <div class="empty-state">
+                <div class="empty-state-icon">💬</div>
+                <div>No messages yet</div>
+                <button class="btn btn-secondary btn-small" style="margin-top: 12px;" data-action="loadSlackHistory">Load History</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Tools Tab -->
@@ -8268,11 +8619,11 @@ print(result)
                   Ask questions about your code in natural language. The search finds code by meaning, not just text matching.
                 </p>
                 <div class="semantic-search-box">
-                  <input
-                    type="text"
+                  <textarea
                     id="semanticSearchInput"
                     placeholder="e.g., How does billing calculate vCPU hours?"
-                  >
+                    rows="3"
+                  ></textarea>
                   <select id="semanticSearchProject">
                     <option value="">Select project...</option>
                     <option value="__all__">🔍 Search All Projects</option>
@@ -8416,14 +8767,14 @@ print(result)
         <div class="section">
           <h2 class="section-title">📜 Recent Executions</h2>
           <div class="card">
-            <div class="cron-history-list">
+            <div class="cron-history-list" data-current-limit="10" data-total="${this.getCronHistoryTotal()}">
               ${cronHistory.length === 0 ? `
                 <div class="empty-state">
                   <div class="empty-state-icon">📜</div>
                   <div>No execution history</div>
                   <div style="font-size: 0.8rem; margin-top: 8px;">Jobs will appear here after they run</div>
                 </div>
-              ` : cronHistory.map(exec => `
+              ` : cronHistory.slice(0, 10).map(exec => `
                 <div class="cron-history-item ${exec.success ? "success" : "failed"}">
                   <div class="cron-history-status">${exec.success ? "✅" : "❌"}</div>
                   <div class="cron-history-info">
@@ -8439,6 +8790,13 @@ print(result)
                 </div>
               `).join("")}
             </div>
+            ${this.getCronHistoryTotal() > 10 ? `
+              <div class="cron-history-load-more">
+                <button class="btn btn-ghost" data-action="loadMoreCronHistory" data-current="10">
+                  📜 Load 10 more (${this.getCronHistoryTotal() - 10} remaining)
+                </button>
+              </div>
+            ` : ""}
           </div>
         </div>
 
@@ -9072,6 +9430,21 @@ print(result)
         function coffee() { vscode.postMessage({ command: 'coffee' }); }
         function beer() { vscode.postMessage({ command: 'beer' }); }
         function loadSlackHistory() { vscode.postMessage({ command: 'loadSlackHistory' }); }
+        function sendSlackMessage() {
+          const channel = document.getElementById('slackChannel')?.value;
+          const text = document.getElementById('slackMessageInput')?.value;
+          if (channel && text) {
+            vscode.postMessage({ command: 'sendSlackMessage', channel: channel, text: text });
+            document.getElementById('slackMessageInput').value = '';
+          }
+        }
+        function refreshSlackChannels() { vscode.postMessage({ command: 'refreshSlackChannels' }); }
+
+        // Services
+        function refreshServices() { vscode.postMessage({ command: 'refreshServices' }); }
+        function serviceControl(action, service) {
+          vscode.postMessage({ command: 'serviceControl', action: action, service: service });
+        }
 
         // Sessions
         function refreshWorkspaces() { vscode.postMessage({ command: 'refreshWorkspaces' }); }
@@ -9079,7 +9452,7 @@ print(result)
         function switchToWorkspace(uri) { vscode.postMessage({ command: 'switchToWorkspace', uri: uri }); }
         function removeWorkspace(uri) { vscode.postMessage({ command: 'removeWorkspace', uri: uri }); }
         function copySessionId(sessionId) { vscode.postMessage({ command: 'copySessionId', sessionId: sessionId }); }
-        function openChatSession(sessionId, sessionName) { 
+        function openChatSession(sessionId, sessionName) {
           console.log('[AA-WORKFLOW-WEBVIEW] openChatSession clicked, sessionId:', sessionId, 'name:', sessionName);
           // Show immediate feedback
           const toast = document.createElement('div');
@@ -9087,7 +9460,7 @@ print(result)
           toast.textContent = '🔍 Finding: ' + (sessionName || sessionId) + '...';
           document.body.appendChild(toast);
           setTimeout(() => toast.remove(), 3000);
-          vscode.postMessage({ command: 'openChatSession', sessionId: sessionId, sessionName: sessionName }); 
+          vscode.postMessage({ command: 'openChatSession', sessionId: sessionId, sessionName: sessionName });
         }
         function changeWorkspacePersona(selectEl) {
           const uri = selectEl.getAttribute('data-workspace-uri');
@@ -9099,15 +9472,28 @@ print(result)
 
         // Cron
         function refreshCron() { vscode.postMessage({ command: 'refreshCron' }); }
-        function toggleScheduler() { 
+        function toggleScheduler() {
           console.log('[Webview] toggleScheduler button clicked, sending message to extension');
-          vscode.postMessage({ command: 'toggleScheduler' }); 
+          vscode.postMessage({ command: 'toggleScheduler' });
         }
         function toggleCronJob(jobName, enabled) { vscode.postMessage({ command: 'toggleCronJob', jobName, enabled }); }
         function runCronJobNow(jobName) { vscode.postMessage({ command: 'runCronJobNow', jobName }); }
-        function openConfigFile() { 
+        function loadMoreCronHistory(btn) {
+          const currentLimit = parseInt(btn.getAttribute('data-current') || '10', 10);
+          const newLimit = currentLimit + 10;
+          btn.setAttribute('data-current', newLimit.toString());
+          btn.innerHTML = '⏳ Loading...';
+          btn.disabled = true;
+          vscode.postMessage({ command: 'loadMoreCronHistory', limit: newLimit });
+        }
+        function openConfigFile() {
           console.log('[Webview] openConfigFile called, sending message to extension');
-          vscode.postMessage({ command: 'openConfigFile' }); 
+          try {
+            vscode.postMessage({ command: 'openConfigFile' });
+            console.log('[Webview] openConfigFile message sent successfully');
+          } catch (err) {
+            console.error('[Webview] openConfigFile error:', err);
+          }
         }
 
         // Skills
@@ -9778,6 +10164,19 @@ print(result)
             renderSlackMessages(message.messages);
           }
 
+          if (message.type === 'slackChannels') {
+            const select = document.getElementById('slackChannel');
+            if (select) {
+              select.innerHTML = '<option value="">Select Channel...</option>';
+              (message.channels || []).forEach(ch => {
+                const opt = document.createElement('option');
+                opt.value = ch.id || ch.name;
+                opt.textContent = '#' + (ch.name || ch.id);
+                select.appendChild(opt);
+              });
+            }
+          }
+
           if (message.type === 'serviceStatus') {
             updateServiceStatus(message);
           }
@@ -9798,7 +10197,7 @@ print(result)
             }
             // Update execution history
             if (message.history !== undefined) {
-              updateCronHistory(message.history);
+              updateCronHistory(message.history, message.totalHistory, message.currentLimit);
             }
           }
 
@@ -10235,7 +10634,7 @@ print(result)
                 '#14b8a6',         // teal
                 '#f43f5e',         // rose
               ];
-              
+
               // Generate a simple hash to get consistent color for each persona name
               const getPersonaColor = (name, idx) => {
                 let hash = 0;
@@ -10245,7 +10644,7 @@ print(result)
                 }
                 return colorPalette[Math.abs(hash) % colorPalette.length];
               };
-              
+
               // Generate icon based on first letter or known patterns
               const getPersonaIcon = (name) => {
                 const lower = name.toLowerCase();
@@ -10269,12 +10668,12 @@ print(result)
                 // Default: use first letter as emoji-style or generic icon
                 return '👤';
               };
-              
+
               // Build list of all personas to show (available + any with stats)
               const availablePersonas = data.available_personas || [];
               const personasWithStats = Object.keys(data.by_persona || {});
               const allPersonas = [...new Set([...availablePersonas, ...personasWithStats])].sort();
-              
+
               if (allPersonas.length > 0) {
                 personaStatsBody.innerHTML = allPersonas.map((persona, idx) => {
                   const stats = (data.by_persona || {})[persona] || {};
@@ -10283,7 +10682,7 @@ print(result)
                   const color = getPersonaColor(persona, idx);
                   const tierTotal = (stats.tier1_only || 0) + (stats.tier2_skill || 0) + (stats.tier3_npu || 0);
                   const rowOpacity = hasStats ? '1' : '0.5';
-                  
+
                   return '<tr style="--row-accent: ' + color + '; opacity: ' + rowOpacity + ';">' +
                     '<td><span style="margin-right: 8px;">' + icon + '</span>' + persona + '</td>' +
                     '<td><span style="font-weight: 700; color: ' + color + ';">' + (stats.requests || 0) + '</span></td>' +
@@ -10580,13 +10979,13 @@ print(result)
             const allMRs = data.currentWork.allActiveMRs || [];
 
             // Update issue card title and status
-            const issueTitle = totalIssues > 0 
+            const issueTitle = totalIssues > 0
               ? totalIssues + ' Active Issue' + (totalIssues > 1 ? 's' : '')
               : 'No Active Issues';
             const issueStatus = totalIssues > 0
               ? 'Across ' + (data.workspaceCount || 1) + ' workspace' + ((data.workspaceCount || 1) > 1 ? 's' : '')
               : 'Start work to track an issue';
-            
+
             updateText('currentIssueKey', issueTitle);
             updateText('currentIssueStatus', issueStatus);
 
@@ -10594,7 +10993,7 @@ print(result)
             const issuesList = document.getElementById('activeIssuesList');
             if (issuesList) {
               if (allIssues.length > 0) {
-                const issuesHtml = allIssues.slice(0, 3).map(issue => 
+                const issuesHtml = allIssues.slice(0, 3).map(issue =>
                   '<div class="current-work-item" title="' + issue.project + ' - ' + issue.workspace + '">' +
                   '<span class="work-item-key">' + issue.key + '</span>' +
                   '<span class="work-item-project">' + issue.project + '</span>' +
@@ -10631,7 +11030,7 @@ print(result)
               ? totalMRs + ' Active MR' + (totalMRs > 1 ? 's' : '')
               : 'No Active MRs';
             const mrStatus = totalMRs > 0 ? 'Open' : 'Create an MR when ready';
-            
+
             updateText('currentMRTitle', mrTitle);
             updateText('currentMRStatus', mrStatus);
 
@@ -10639,7 +11038,7 @@ print(result)
             const mrsList = document.getElementById('activeMRsList');
             if (mrsList) {
               if (allMRs.length > 0) {
-                const mrsHtml = allMRs.slice(0, 3).map(mr => 
+                const mrsHtml = allMRs.slice(0, 3).map(mr =>
                   '<div class="current-work-item" title="' + mr.project + ' - ' + mr.workspace + '">' +
                   '<span class="work-item-key">!' + mr.id + '</span>' +
                   '<span class="work-item-project">' + mr.project + '</span>' +
@@ -10747,12 +11146,12 @@ print(result)
           const card = document.getElementById('cronEnabledCard');
           const icon = document.getElementById('cronEnabledIcon');
           const value = document.getElementById('cronEnabled');
-          
+
           if (!card || !icon || !value) {
             console.error('[CommandCenter] updateSchedulerUI: Missing DOM elements', { card: !!card, icon: !!icon, value: !!value });
             return;
           }
-          
+
           const btn = card.querySelector('button');
 
           if (enabled) {
@@ -10779,8 +11178,8 @@ print(result)
           console.log('[CommandCenter] updateSchedulerUI completed');
         }
 
-        function updateCronHistory(history) {
-          console.log('[CommandCenter] updateCronHistory called with', history?.length || 0, 'entries');
+        function updateCronHistory(history, totalHistory, currentLimit) {
+          console.log('[CommandCenter] updateCronHistory called with', history?.length || 0, 'entries, total:', totalHistory, 'limit:', currentLimit);
           const container = document.querySelector('.cron-history-list');
           if (!container) {
             console.error('[CommandCenter] updateCronHistory: .cron-history-list not found');
@@ -10813,40 +11212,143 @@ print(result)
               </div>
             \`).join('');
           }
+
+          // Update or create the "Load More" button
+          let loadMoreContainer = document.querySelector('.cron-history-load-more');
+          const remaining = (totalHistory || 0) - (currentLimit || history?.length || 0);
+
+          if (remaining > 0) {
+            if (!loadMoreContainer) {
+              loadMoreContainer = document.createElement('div');
+              loadMoreContainer.className = 'cron-history-load-more';
+              container.parentElement.appendChild(loadMoreContainer);
+            }
+            loadMoreContainer.innerHTML = \`
+              <button class="btn btn-ghost" data-action="loadMoreCronHistory" data-current="\${currentLimit || history?.length || 10}">
+                📜 Load 10 more (\${remaining} remaining)
+              </button>
+            \`;
+          } else if (loadMoreContainer) {
+            loadMoreContainer.remove();
+          }
+
           console.log('[CommandCenter] updateCronHistory completed');
         }
 
+        function formatUptime(seconds) {
+          if (!seconds || seconds < 0) return '--';
+          if (seconds < 60) return Math.floor(seconds) + 's';
+          if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
+          if (seconds < 86400) return (seconds / 3600).toFixed(1) + 'h';
+          return (seconds / 86400).toFixed(1) + 'd';
+        }
+
         function updateServiceStatus(message) {
-          // Slack
+          // Slack Agent
           const slackService = message.services.find(s => s.name === 'Slack Agent');
           if (slackService) {
             const slackStatus = document.getElementById('slackStatus');
             const slackDetails = document.getElementById('slackDetails');
+            const slackCard = document.getElementById('slackServiceCard');
+
+            // Update Slack Tab stats
+            const slackAgentStatus = document.getElementById('slackAgentStatus');
+            const slackStatusCard = document.getElementById('slackStatusCard');
+            const slackUptime = document.getElementById('slackUptime');
+            const slackProcessed = document.getElementById('slackProcessed');
+            const slackPending = document.getElementById('slackPending');
 
             if (slackService.running) {
               slackStatus.innerHTML = '<span class="status-dot online"></span> Online';
+              slackCard?.classList.remove('service-offline');
               const status = slackService.status || {};
               slackDetails.innerHTML = \`
-                <div class="service-row"><span>Uptime</span><span>\${Math.floor((status.uptime || 0) / 60)}m</span></div>
+                <div class="service-row"><span>Uptime</span><span>\${formatUptime(status.uptime)}</span></div>
                 <div class="service-row"><span>Polls</span><span>\${status.polls || 0}</span></div>
                 <div class="service-row"><span>Processed</span><span>\${status.messages_processed || 0}</span></div>
-                <div class="service-row"><span>Responded</span><span>\${status.messages_responded || 0}</span></div>
+                <div class="service-row"><span>Pending</span><span>\${status.pending_approvals || 0}</span></div>
               \`;
+
+              // Update Slack Tab
+              if (slackAgentStatus) slackAgentStatus.textContent = 'Online';
+              if (slackStatusCard) slackStatusCard.classList.add('green');
+              if (slackUptime) slackUptime.textContent = formatUptime(status.uptime);
+              if (slackProcessed) slackProcessed.textContent = status.messages_processed || 0;
+              if (slackPending) slackPending.textContent = status.pending_approvals || 0;
             } else {
               slackStatus.innerHTML = '<span class="status-dot offline"></span> Offline';
+              slackCard?.classList.add('service-offline');
               slackDetails.innerHTML = '<div class="service-row"><span>Status</span><span>Not running</span></div>';
+
+              // Update Slack Tab
+              if (slackAgentStatus) slackAgentStatus.textContent = 'Offline';
+              if (slackStatusCard) slackStatusCard.classList.remove('green');
+              if (slackUptime) slackUptime.textContent = '--';
+              if (slackProcessed) slackProcessed.textContent = '0';
+              if (slackPending) slackPending.textContent = '0';
             }
           }
 
-          // MCP
+          // Cron Scheduler
+          const cronService = message.services.find(s => s.name === 'Cron Scheduler');
+          if (cronService) {
+            const cronStatus = document.getElementById('cronStatus');
+            const cronDetails = document.getElementById('cronDetails');
+            const cronCard = document.getElementById('cronServiceCard');
+
+            if (cronService.running) {
+              cronStatus.innerHTML = '<span class="status-dot online"></span> Online';
+              cronCard?.classList.remove('service-offline');
+              const status = cronService.status || {};
+              cronDetails.innerHTML = \`
+                <div class="service-row"><span>Uptime</span><span>\${formatUptime(status.uptime)}</span></div>
+                <div class="service-row"><span>Jobs</span><span>\${status.job_count || 0}</span></div>
+                <div class="service-row"><span>Executed</span><span>\${status.jobs_executed || 0}</span></div>
+                <div class="service-row"><span>Mode</span><span>\${status.execution_mode || 'direct'}</span></div>
+              \`;
+            } else {
+              cronStatus.innerHTML = '<span class="status-dot offline"></span> Offline';
+              cronCard?.classList.add('service-offline');
+              cronDetails.innerHTML = '<div class="service-row"><span>Status</span><span>Not running</span></div>';
+            }
+          }
+
+          // Meet Bot
+          const meetService = message.services.find(s => s.name === 'Meet Bot');
+          if (meetService) {
+            const meetStatus = document.getElementById('meetStatus');
+            const meetDetails = document.getElementById('meetDetails');
+            const meetCard = document.getElementById('meetServiceCard');
+
+            if (meetService.running) {
+              meetStatus.innerHTML = '<span class="status-dot online"></span> Online';
+              meetCard?.classList.remove('service-offline');
+              const status = meetService.status || {};
+              meetDetails.innerHTML = \`
+                <div class="service-row"><span>Uptime</span><span>\${formatUptime(status.uptime)}</span></div>
+                <div class="service-row"><span>Current</span><span>\${status.current_meeting || 'None'}</span></div>
+                <div class="service-row"><span>Upcoming</span><span>\${status.upcoming_count || 0}</span></div>
+                <div class="service-row"><span>Completed</span><span>\${status.completed_today || 0}</span></div>
+              \`;
+            } else {
+              meetStatus.innerHTML = '<span class="status-dot offline"></span> Offline';
+              meetCard?.classList.add('service-offline');
+              meetDetails.innerHTML = '<div class="service-row"><span>Status</span><span>Not running</span></div>';
+            }
+          }
+
+          // MCP Server
           const mcpStatus = document.getElementById('mcpStatus');
           const mcpDetails = document.getElementById('mcpDetails');
+          const mcpCard = document.getElementById('mcpServiceCard');
 
-          if (message.mcp.running) {
+          if (message.mcp && message.mcp.running) {
             mcpStatus.innerHTML = '<span class="status-dot online"></span> Running';
+            mcpCard?.classList.remove('service-offline');
             mcpDetails.innerHTML = '<div class="service-row"><span>PID</span><span>' + (message.mcp.pid || '-') + '</span></div>';
           } else {
             mcpStatus.innerHTML = '<span class="status-dot offline"></span> Stopped';
+            mcpCard?.classList.add('service-offline');
             mcpDetails.innerHTML = '<div class="service-row"><span>Status</span><span>Not running</span></div>';
           }
         }
@@ -10891,9 +11393,19 @@ print(result)
             case 'coffee': coffee(); break;
             case 'beer': beer(); break;
             case 'loadSlackHistory': loadSlackHistory(); break;
+            case 'sendSlackMessage': sendSlackMessage(); break;
+            case 'refreshSlackChannels': refreshSlackChannels(); break;
             case 'refreshCron': refreshCron(); break;
+            case 'loadMoreCronHistory': loadMoreCronHistory(btn); break;
             case 'toggleScheduler': toggleScheduler(); break;
-            case 'openConfigFile': openConfigFile(); break;
+            case 'openConfigFile':
+              console.log('[Webview] openConfigFile action triggered from button');
+              openConfigFile();
+              break;
+            case 'refreshServices': refreshServices(); break;
+            case 'serviceStart': serviceControl('start', btn.getAttribute('data-service')); break;
+            case 'serviceStop': serviceControl('stop', btn.getAttribute('data-service')); break;
+            case 'serviceLogs': serviceControl('logs', btn.getAttribute('data-service')); break;
             case 'runSelectedSkill': runSelectedSkill(); break;
             case 'openSelectedSkillFile': openSelectedSkillFile(); break;
             case 'setFlowchartHorizontal': setFlowchartView('horizontal'); break;
@@ -10903,9 +11415,9 @@ print(result)
             case 'switchToWorkspace': switchToWorkspace(btn.getAttribute('data-uri')); break;
             case 'removeWorkspace': removeWorkspace(btn.getAttribute('data-uri')); break;
             case 'copySessionId': copySessionId(btn.getAttribute('data-session-id')); break;
-            case 'openChatSession': 
+            case 'openChatSession':
               console.log('[AA-WORKFLOW-WEBVIEW] openChatSession action triggered');
-              openChatSession(btn.getAttribute('data-session-id'), btn.getAttribute('data-session-name')); 
+              openChatSession(btn.getAttribute('data-session-id'), btn.getAttribute('data-session-name'));
               break;
             case 'changeSessionViewMode':
               vscode.postMessage({ command: 'changeSessionViewMode', value: btn.getAttribute('data-value') });
@@ -11050,7 +11562,9 @@ print(result)
 
         if (semanticSearchInput) {
           semanticSearchInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
+            // Enter triggers search, Shift+Enter allows newlines
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
               executeSemanticSearch();
             }
           });
