@@ -37,14 +37,15 @@ def _resolve_gitlab_to_local(gitlab_path: str) -> str | None:
     Resolve a GitLab project path to a local directory.
 
     Args:
-        gitlab_path: e.g., "automation-analytics/automation-analytics-backend"
+        gitlab_path: e.g., "automation-analytics/automation-analytics-backend" or just "app-interface"
 
     Returns:
         Local directory path or None if not found.
     """
     repos = _load_repo_config()
-    for _repo_name, repo_config in repos.items():
-        if repo_config.get("gitlab") == gitlab_path:
+    for repo_name, repo_config in repos.items():
+        # Match by full gitlab path OR by repo name (short name)
+        if repo_config.get("gitlab") == gitlab_path or repo_name == gitlab_path:
             local_path = repo_config.get("path")
             if local_path and Path(local_path).exists():
                 return local_path

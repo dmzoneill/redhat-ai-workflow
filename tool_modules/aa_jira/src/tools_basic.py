@@ -197,7 +197,8 @@ async def _jira_add_comment_impl(issue_key: str, comment: str) -> str:
     Returns:
         Confirmation of the comment.
     """
-    success, output = await run_rh_issue(["add-comment", issue_key, comment])
+    # rh-issue add-comment requires -t flag for comment text and --no-ai to skip AI improvement
+    success, output = await run_rh_issue(["add-comment", issue_key, "-t", comment, "--no-ai"])
 
     if not success:
         return f"❌ Failed to add comment: {output}"
