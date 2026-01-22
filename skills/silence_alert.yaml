@@ -59,6 +59,15 @@ inputs:
     description: "Silence ID (required for 'delete' action)"
 
 steps:
+  # ==================== LOAD INCIDENT PERSONA ====================
+  # This skill requires alertmanager tools which are only in incident persona
+
+  - name: load_incident_persona
+    description: "Load incident persona for Alertmanager tools"
+    tool: persona_load
+    args:
+      persona_name: "incident"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_alert_patterns

@@ -177,6 +177,13 @@ steps:
 
   # ==================== GET COMMIT SHA ====================
 
+  # Load developer persona for GitLab/Git/Jira tools
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab, Git, and Jira operations"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # Step 1: Get full 40-char SHA directly from GitLab API (if mr_id provided)
   - name: get_mr_sha
     description: "Get full 40-char commit SHA from GitLab MR"
@@ -472,6 +479,14 @@ steps:
     output: quay_result
     on_error: auto_heal  # Quay API - may need auth/network
 
+  # Load release persona for Konflux/Tekton tools
+  - name: load_release_persona
+    description: "Load release persona for Konflux and Tekton operations"
+    condition: "{{ not quay_result or 'not found' in str(quay_result).lower() }}"
+    tool: persona_load
+    args:
+      persona_name: "release"
+
   # Step 5: If image not found, check Konflux build status
   - name: check_konflux_build
     description: "Check Konflux build status for this commit"
@@ -696,6 +711,14 @@ steps:
 
   # ==================== RESERVE NAMESPACE ====================
   # Only proceed if image is available (image_check.error == False)
+
+  # Load devops persona for Bonfire and Kubernetes operations
+  - name: load_devops_persona
+    description: "Load devops persona for Bonfire and Kubernetes operations"
+    condition: "{{ image_status.get('available', False) and not image_check.get('error', True) }}"
+    tool: persona_load
+    args:
+      persona_name: "devops"
 
   # Step 7: Reserve ephemeral namespace
   - name: reserve_namespace
@@ -1180,6 +1203,40 @@ steps:
       else:
           result = "hook skipped: emit_event not available"
     output: ephemeral_hook_result
+    on_error: continue
+
+  # Step 18: Notify team about ephemeral deployment (skill chain)
+  - name: notify_team_ephemeral_ready
+    description: "Notify team channel about ephemeral environment ready"
+    condition: "namespace_name and deploy_result and 'fail' not in str(deploy_result).lower()"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "Ephemeral environment ready for MR !{{ inputs.mr_id }}",
+          "type": "deployment",
+          "context": "Namespace: {{ namespace_name }}\nMR: !{{ inputs.mr_id }}\nSHA: {{ resolved_sha.sha[:12] if resolved_sha else 'latest' }}"
+        }
+      execute: true
+    output: slack_ephemeral_notification
+    on_error: continue
+
+  # Step 19: Notify team about test failures (skill chain)
+  - name: notify_team_test_failure
+    description: "Notify team channel about test failures in ephemeral"
+    condition: "test_result and not test_result.get('passed')"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "Tests failed in ephemeral for MR !{{ inputs.mr_id }}",
+          "type": "warning",
+          "context": "Namespace: {{ namespace_name or 'unknown' }}\nMR: !{{ inputs.mr_id }}\nFailed: {{ test_result.get('failed_count', 'unknown') }} tests"
+        }
+      execute: true
+    output: slack_test_failure_notification
     on_error: continue
 
   # ==================== KNOWLEDGE INTEGRATION ====================

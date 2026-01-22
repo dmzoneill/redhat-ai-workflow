@@ -52,6 +52,16 @@ inputs:
     description: "Wait for pipeline to complete (up to 15 min)"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # Start with developer persona for GitLab CI tools
+  # Will switch to release persona for Tekton tools as needed
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab CI tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_ci_patterns
@@ -267,6 +277,14 @@ steps:
     on_error: auto_heal  # GitLab API - may need auth refresh
 
   # ==================== TEKTON PIPELINE ====================
+  # Switch to release persona for Tekton tools
+
+  - name: load_release_persona_for_tekton
+    description: "Load release persona for Tekton tools"
+    condition: "ci_system.system == 'tekton'"
+    tool: persona_load
+    args:
+      persona_name: "release"
 
   - name: get_tekton_status
     description: "Get Tekton PipelineRun status"

@@ -1,0 +1,429 @@
+# Sprint Autopilot Skill
+# Orchestrates work on a single sprint issue with dynamic persona switching.
+# Different stages load different personas for their required tools.
+#
+# This skill:
+# 1. Loads developer persona for issue analysis
+# 2. Checks git safety (uncommitted changes, protected branches)
+# 3. Analyzes the issue for clarity
+# 4. Sets up branch via start_work skill
+# 5. Researches codebase for relevant context
+# 6. Creates MR via create_mr skill
+# 7. Optionally switches to devops for deployment verification
+# 8. Updates Jira with progress
+# 9. Logs timeline events for UI display
+
+name: sprint_autopilot
+description: |
+  Work on a sprint issue with dynamic persona switching.
+  Different stages load different personas for their required tools.
+
+  Stages:
+  1. Issue Analysis (developer) - Analyze requirements, check clarity
+  2. Branch Setup (developer) - Create feature branch via start_work
+  3. Code Research (developer) - Search codebase for relevant patterns
+  4. Implementation (in Cursor chat) - Human/Claude does actual coding
+  5. MR Creation (developer) - Create merge request
+  6. Deployment Check (devops) - Optional ephemeral deployment
+  7. Finalize (developer) - Update Jira, log timeline
+
+inputs:
+  - name: issue_key
+    description: Jira issue key (e.g., AAP-12345)
+    required: true
+  - name: repo_path
+    description: Path to the repository
+    default: "."
+  - name: needs_deployment_check
+    description: Whether to deploy to ephemeral for testing
+    default: false
+  - name: auto_stash
+    description: Automatically stash uncommitted changes
+    default: true
+  - name: skip_clarity_check
+    description: Skip the issue clarity check
+    default: false
+
+outputs:
+  - name: success
+    description: Whether the skill completed successfully
+  - name: mr_url
+    description: URL of the created merge request
+  - name: mr_id
+    description: ID of the created merge request
+  - name: branch_name
+    description: Name of the feature branch
+  - name: timeline_events
+    description: List of timeline events logged
+
+steps:
+  # ==================== STAGE 1: Issue Analysis (developer) ====================
+  - name: load_developer_persona
+    description: Load developer persona for issue analysis
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  - name: safety_check
+    description: Check git status for uncommitted changes
+    tool: git_status
+    args:
+      repo: "{{ repo_path }}"
+
+  - name: evaluate_safety
+    description: Evaluate if worktree is safe to proceed
+    compute: |
+      status_text = str(safety_check).lower()
+
+      # Check for dangerous states
+      has_uncommitted = "modified:" in status_text or "changes not staged" in status_text
+      has_staged = "changes to be committed" in status_text
+      in_rebase = "rebase in progress" in status_text
+      in_merge = "merge in progress" in status_text or "unmerged paths" in status_text
+
+      # Extract branch name
+      branch = ""
+      for line in str(safety_check).split("\n"):
+          if "on branch" in line.lower():
+              parts = line.split()
+              if len(parts) >= 3:
+                  branch = parts[-1]
+                  break
+
+      protected_branches = {"main", "master", "develop", "production", "staging"}
+      on_protected = branch.lower() in protected_branches
+
+      needs_stash = has_uncommitted or has_staged
+      can_proceed = not in_rebase and not in_merge and not on_protected
+
+      result = {
+          "can_proceed": can_proceed,
+          "needs_stash": needs_stash,
+          "branch": branch,
+          "on_protected_branch": on_protected,
+          "in_rebase": in_rebase,
+          "in_merge": in_merge,
+          "reason": ""
+      }
+
+      if in_rebase:
+          result["reason"] = "Rebase in progress - please complete or abort first"
+      elif in_merge:
+          result["reason"] = "Merge in progress - please complete or abort first"
+      elif on_protected:
+          result["reason"] = f"On protected branch '{branch}' - please create a feature branch"
+
+  - name: abort_if_unsafe
+    description: Abort if worktree is in unsafe state
+    condition: "{{ not evaluate_safety.can_proceed }}"
+    compute: |
+      raise Exception(f"Cannot proceed: {evaluate_safety.get('reason', 'Unknown safety issue')}")
+
+  - name: stash_if_needed
+    description: Stash uncommitted changes if present
+    condition: "{{ evaluate_safety.needs_stash and auto_stash }}"
+    tool: git_stash
+    args:
+      repo: "{{ repo_path }}"
+      action: "push"
+      message: "Auto-stash before {{ issue_key }} - Sprint Bot"
+
+  - name: analyze_issue
+    description: Fetch issue details from Jira
+    tool: jira_view_issue
+    args:
+      issue_key: "{{ issue_key }}"
+
+  - name: check_clarity
+    description: Check if issue has enough detail to work on
+    condition: "{{ not skip_clarity_check }}"
+    compute: |
+      issue_text = str(analyze_issue).lower()
+
+      # Check for acceptance criteria or clear requirements
+      has_ac = any(term in issue_text for term in [
+          "acceptance criteria",
+          "ac:",
+          "requirements:",
+          "expected behavior",
+          "given",
+          "when",
+          "then"
+      ])
+
+      # Check if description is substantial
+      has_description = len(issue_text) > 200
+
+      # Check for technical details
+      has_technical = any(term in issue_text for term in [
+          "api",
+          "endpoint",
+          "database",
+          "function",
+          "class",
+          "component",
+          "file",
+          "test"
+      ])
+
+      needs_clarification = not (has_ac or (has_description and has_technical))
+
+      result = {
+          "needs_clarification": needs_clarification,
+          "has_acceptance_criteria": has_ac,
+          "has_description": has_description,
+          "has_technical_details": has_technical,
+          "reason": ""
+      }
+
+      if needs_clarification:
+          missing = []
+          if not has_ac:
+              missing.append("acceptance criteria")
+          if not has_description:
+              missing.append("detailed description")
+          if not has_technical:
+              missing.append("technical details")
+          result["reason"] = f"Missing: {', '.join(missing)}"
+
+  - name: request_clarification
+    description: Ask for clarification if issue is unclear
+    condition: "{{ check_clarity.needs_clarification if check_clarity else false }}"
+    tool: jira_add_comment
+    args:
+      issue_key: "{{ issue_key }}"
+      comment: |
+        I'm reviewing this issue and would appreciate some clarification to ensure I implement it correctly.
+
+        Could you please provide:
+        {{ '- Acceptance criteria or expected behavior' if not check_clarity.has_acceptance_criteria else '' }}
+        {{ '- More details about the requirements' if not check_clarity.has_description else '' }}
+        {{ '- Technical context (which files/components are involved)' if not check_clarity.has_technical_details else '' }}
+
+        This will help me deliver exactly what you need. Thanks!
+
+  - name: mark_waiting_if_unclear
+    description: Mark issue as waiting for clarification
+    condition: "{{ check_clarity.needs_clarification if check_clarity else false }}"
+    compute: |
+      # This would update the sprint state to mark as waiting
+      # The cron job will check back later
+      result = {
+          "status": "waiting",
+          "waiting_reason": check_clarity.get("reason", "Needs clarification"),
+          "skip_remaining_steps": True
+      }
+
+  # ==================== STAGE 2: Branch Setup (developer) ====================
+  - name: start_work
+    description: Create feature branch and set up for work
+    condition: "{{ not (check_clarity.needs_clarification if check_clarity else false) }}"
+    tool: skill_run
+    args:
+      skill_name: start_work
+      inputs: '{"issue_key": "{{ issue_key }}", "auto_stash": false}'
+
+  - name: extract_branch_name
+    description: Extract branch name from start_work result
+    condition: "{{ start_work is defined }}"
+    compute: |
+      result_text = str(start_work)
+      branch_name = ""
+
+      # Try to extract branch name from result
+      for line in result_text.split("\n"):
+          if "branch" in line.lower() and ("created" in line.lower() or "switched" in line.lower()):
+              # Extract branch name - usually after "to" or last word
+              parts = line.split()
+              for i, part in enumerate(parts):
+                  if part.lower() in ["to", "branch"]:
+                      if i + 1 < len(parts):
+                          branch_name = parts[i + 1].strip("'\"")
+                          break
+
+      # Fallback: construct from issue key
+      if not branch_name:
+          branch_name = "{{ issue_key }}".lower().replace("-", "-")
+
+      result = {"branch_name": branch_name}
+
+  # ==================== STAGE 3: Code Research (developer) ====================
+  - name: research_codebase
+    description: Search codebase for relevant patterns
+    condition: "{{ not (check_clarity.needs_clarification if check_clarity else false) }}"
+    tool: code_search
+    args:
+      query: "{{ analyze_issue[:200] if analyze_issue else issue_key }}"
+      limit: 10
+
+  - name: load_project_knowledge
+    description: Load project-specific patterns and gotchas
+    condition: "{{ not (check_clarity.needs_clarification if check_clarity else false) }}"
+    tool: knowledge_query
+    args:
+      project: ""
+      section: "patterns"
+
+  - name: prepare_context
+    description: Prepare context for implementation
+    condition: "{{ not (check_clarity.needs_clarification if check_clarity else false) }}"
+    compute: |
+      # Combine research results into context for the Cursor chat
+      context_parts = []
+
+      # Issue details
+      context_parts.append(f"## Issue: {inputs.get('issue_key')}")
+      context_parts.append(str(analyze_issue)[:500] if analyze_issue else "")
+
+      # Relevant code
+      if research_codebase:
+          context_parts.append("\n## Relevant Code")
+          context_parts.append(str(research_codebase)[:1000])
+
+      # Project patterns
+      if load_project_knowledge:
+          context_parts.append("\n## Project Patterns")
+          context_parts.append(str(load_project_knowledge)[:500])
+
+      result = {
+          "context": "\n".join(context_parts),
+          "ready_for_implementation": True
+      }
+
+  # ==================== STAGE 4: Implementation ====================
+  # Note: Actual implementation happens in a dedicated Cursor chat
+  # The bot prepares context but doesn't write code directly
+
+  - name: log_ready_for_implementation
+    description: Log that issue is ready for implementation
+    condition: "{{ prepare_context.ready_for_implementation if prepare_context else false }}"
+    tool: memory_append
+    args:
+      key: "state/sprint_timeline"
+      list_path: "{{ issue_key }}"
+      item: |
+        timestamp: "{{ now }}"
+        action: "ready_for_implementation"
+        description: "Context prepared, ready for coding in dedicated chat"
+
+  # ==================== STAGE 5: MR Creation (developer) ====================
+  # This step would be called after implementation is complete
+  # For now, we mark it as conditional on having changes to commit
+
+  - name: check_for_changes
+    description: Check if there are changes to commit
+    condition: "{{ not (check_clarity.needs_clarification if check_clarity else false) }}"
+    tool: git_status
+    args:
+      repo: "{{ repo_path }}"
+
+  - name: has_changes_to_commit
+    description: Determine if there are changes to create MR for
+    condition: "{{ check_for_changes is defined }}"
+    compute: |
+      status_text = str(check_for_changes).lower()
+      has_changes = "modified:" in status_text or "changes" in status_text
+      result = {"has_changes": has_changes}
+
+  - name: create_mr
+    description: Create merge request for the changes
+    condition: "{{ has_changes_to_commit.has_changes if has_changes_to_commit else false }}"
+    tool: skill_run
+    args:
+      skill_name: create_mr
+      inputs: '{"issue_key": "{{ issue_key }}", "draft": true}'
+
+  - name: extract_mr_info
+    description: Extract MR URL and ID from result
+    condition: "{{ create_mr is defined }}"
+    compute: |
+      result_text = str(create_mr)
+      mr_url = ""
+      mr_id = ""
+
+      # Extract MR URL
+      import re
+      url_match = re.search(r'https?://[^\s]+merge_requests/\d+', result_text)
+      if url_match:
+          mr_url = url_match.group(0)
+          # Extract ID from URL
+          id_match = re.search(r'/merge_requests/(\d+)', mr_url)
+          if id_match:
+              mr_id = id_match.group(1)
+
+      result = {"mr_url": mr_url, "mr_id": mr_id}
+
+  # ==================== STAGE 6: Deployment Check (devops) ====================
+  - name: switch_to_devops
+    description: Switch to devops persona for deployment
+    condition: "{{ needs_deployment_check and extract_mr_info.mr_id if extract_mr_info else false }}"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  - name: deploy_to_ephemeral
+    description: Deploy to ephemeral for testing
+    condition: "{{ needs_deployment_check and extract_mr_info.mr_id if extract_mr_info else false }}"
+    tool: skill_run
+    args:
+      skill_name: test_mr_ephemeral
+      inputs: '{"mr_id": "{{ extract_mr_info.mr_id }}"}'
+
+  # ==================== STAGE 7: Finalize (developer) ====================
+  - name: switch_back_to_developer
+    description: Switch back to developer persona
+    condition: "{{ needs_deployment_check }}"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  - name: update_jira_with_mr
+    description: Add MR link to Jira issue
+    condition: "{{ extract_mr_info.mr_url if extract_mr_info else false }}"
+    tool: jira_add_comment
+    args:
+      issue_key: "{{ issue_key }}"
+      comment: |
+        Merge request ready for review: {{ extract_mr_info.mr_url }}
+
+        The changes address the requirements in this issue. Please review when you have a chance.
+
+  - name: log_mr_created
+    description: Log MR creation to timeline
+    condition: "{{ extract_mr_info.mr_url if extract_mr_info else false }}"
+    tool: memory_append
+    args:
+      key: "state/sprint_timeline"
+      list_path: "{{ issue_key }}"
+      item: |
+        timestamp: "{{ now }}"
+        action: "mr_created"
+        description: "MR {{ extract_mr_info.mr_id }} created"
+        mr_url: "{{ extract_mr_info.mr_url }}"
+
+  - name: final_summary
+    description: Prepare final summary
+    compute: |
+      summary_parts = []
+      summary_parts.append(f"## Sprint Autopilot Summary for {inputs.get('issue_key')}")
+
+      if check_clarity and check_clarity.get("needs_clarification"):
+          summary_parts.append("\n**Status:** Waiting for clarification")
+          summary_parts.append(f"Reason: {check_clarity.get('reason', 'Unknown')}")
+      elif extract_mr_info and extract_mr_info.get("mr_url"):
+          summary_parts.append("\n**Status:** MR Created")
+          summary_parts.append(f"MR URL: {extract_mr_info.get('mr_url')}")
+          if extract_branch_name:
+              summary_parts.append(f"Branch: {extract_branch_name.get('branch_name', 'unknown')}")
+      else:
+          summary_parts.append("\n**Status:** Ready for implementation")
+          summary_parts.append("Context has been prepared. Work can continue in a dedicated chat.")
+
+      result = {
+          "success": not (check_clarity and check_clarity.get("needs_clarification")),
+          "summary": "\n".join(summary_parts),
+          "mr_url": extract_mr_info.get("mr_url", "") if extract_mr_info else "",
+          "mr_id": extract_mr_info.get("mr_id", "") if extract_mr_info else "",
+          "branch_name": extract_branch_name.get("branch_name", "") if extract_branch_name else "",
+          "waiting": check_clarity.get("needs_clarification", False) if check_clarity else False
+      }

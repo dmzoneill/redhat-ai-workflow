@@ -59,6 +59,14 @@ inputs:
     description: "Use Slack link format in report"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses git_basic and jira_basic tools - developer has both
+
+  - name: load_developer_persona
+    description: "Load developer persona for Git and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   - name: init_autoheal
     description: "Initialize auto-heal tracking"
@@ -433,6 +441,23 @@ steps:
     args:
       action: "Created hotfix on {{ inputs.target_branch }}"
       details: "Cherry-picked {{ inputs.commit[:12] }}{% if inputs.tag %}, tagged {{ inputs.tag }}{% endif %}"
+    on_error: continue
+
+  # Notify team about hotfix (skill chain)
+  - name: notify_team_hotfix
+    description: "Notify team channel about hotfix creation"
+    condition: "pick_status and pick_status.get('success') and push_status and push_status.get('success')"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "🔥 Hotfix pushed to {{ inputs.target_branch }}",
+          "type": "warning",
+          "context": "Commit: {{ inputs.commit[:12] }}\nBranch: {{ inputs.target_branch }}{% if inputs.tag %}\nTag: {{ inputs.tag }}{% endif %}{% if inputs.jira_key %}\nJira: {{ inputs.jira_key }}{% endif %}"
+        }
+      execute: true
+    output: slack_hotfix_notification
     on_error: continue
 
   - name: learn_hotfix_pattern

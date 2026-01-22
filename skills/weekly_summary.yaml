@@ -46,6 +46,15 @@ inputs:
     description: "Use Slack link format"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # Start with developer persona for GitLab, Jira, and Git tools
+  # Will switch to release persona for konflux/quay tools as needed
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab, Jira, and Git tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   # ==================== PROACTIVE ISSUE DETECTION ====================
 
@@ -104,6 +113,13 @@ steps:
     output: mrs_raw
     on_error: auto_heal  # GitLab API - may need auth refresh
 
+  # Switch to release persona for Konflux and Quay tools
+  - name: load_release_persona_for_releases
+    description: "Load release persona for Konflux and Quay tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
+
   - name: get_recent_releases
     description: "Get recent Konflux releases"
     tool: konflux_list_releases
@@ -120,6 +136,13 @@ steps:
       limit: 10
     output: quay_tags_raw
     on_error: continue
+
+  # Switch to slack persona for Slack tools
+  - name: load_slack_persona_for_search
+    description: "Load slack persona for Slack search"
+    tool: persona_load
+    args:
+      persona_name: "slack"
 
   - name: search_slack_discussions
     description: "Search Slack for relevant team discussions"

@@ -28,6 +28,15 @@ inputs:
     description: "Environment (stage, production, ephemeral)"
 
 steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+  # This skill requires k8s_basic tools which are in devops/incident persona
+
+  - name: load_devops_persona
+    description: "Load devops persona for Kubernetes tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_devops_gotchas

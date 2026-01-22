@@ -70,6 +70,14 @@ inputs:
 # No hardcoded constants - resolved dynamically
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses gitlab_basic tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   # ==================== PROACTIVE ISSUE DETECTION ====================
 

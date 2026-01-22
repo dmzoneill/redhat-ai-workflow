@@ -29,6 +29,15 @@ inputs:
     description: "Specific application to check (optional)"
 
 steps:
+  # ==================== LOAD RELEASE PERSONA ====================
+  # This skill requires konflux_basic tools which are only in release persona
+
+  - name: load_release_persona
+    description: "Load release persona for Konflux status tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: check_konflux_known_issues

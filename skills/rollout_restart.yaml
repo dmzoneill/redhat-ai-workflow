@@ -38,6 +38,15 @@ inputs:
     description: "Wait for rollout to complete"
 
 steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+  # This skill uses k8s_basic tools
+
+  - name: load_devops_persona
+    description: "Load devops persona for Kubernetes tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
   # ==================== MEMORY CONTEXT ====================
 
   - name: check_known_issues

@@ -45,6 +45,15 @@ inputs:
     description: "Just list running pipelines without cancelling"
 
 steps:
+  # ==================== LOAD RELEASE PERSONA ====================
+  # This skill requires konflux_basic/tkn tools which are only in release persona
+
+  - name: load_release_persona
+    description: "Load release persona for Tekton pipeline tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_pipeline_patterns

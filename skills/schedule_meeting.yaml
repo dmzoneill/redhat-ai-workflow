@@ -51,6 +51,15 @@ inputs:
     description: "Meeting description/agenda"
 
 steps:
+  # ==================== LOAD MEETINGS PERSONA ====================
+  # This skill requires google_calendar tools which are only in meetings persona
+
+  - name: load_meetings_persona
+    description: "Load meetings persona for Google Calendar tools"
+    tool: persona_load
+    args:
+      persona_name: "meetings"
+
   # ==================== SEMANTIC SEARCH ====================
 
   - name: search_meeting_code

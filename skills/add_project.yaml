@@ -51,6 +51,15 @@ inputs:
     description: Generate initial project knowledge
 
 steps:
+  # ==================== LOAD PROJECT PERSONA ====================
+  # This skill uses project management tools
+
+  - name: load_project_persona
+    description: "Load project persona for project management tools"
+    tool: persona_load
+    args:
+      persona_name: "project"
+
   # ==================== PROACTIVE ISSUE DETECTION ====================
 
   - name: check_gitlab_known_issues

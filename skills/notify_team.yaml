@@ -54,6 +54,14 @@ inputs:
     description: "Additional context (e.g., MR ID, namespace, issue key)"
 
 steps:
+  # ==================== LOAD SLACK PERSONA ====================
+  # This skill requires slack tools which are only in slack/admin personas
+
+  - name: load_slack_persona
+    description: "Load slack persona for Slack notification tools"
+    tool: persona_load
+    args:
+      persona_name: "slack"
 
   # ==================== PROACTIVE ISSUE DETECTION ====================
 

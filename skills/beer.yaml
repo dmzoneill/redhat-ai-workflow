@@ -36,6 +36,16 @@ inputs:
     description: "Use Slack link format"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # Start with developer persona for GitLab, Git, and Jira tools
+  # Will switch to devops persona for bonfire tools as needed
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab, Git, and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # ==================== SEMANTIC SEARCH ====================
 
   - name: search_eod_code
@@ -409,6 +419,13 @@ steps:
     on_error: continue
 
   # ==================== EPHEMERAL CLEANUP ====================
+  # Switch to devops persona for bonfire tools
+
+  - name: load_devops_persona_for_ephemeral
+    description: "Load devops persona for Bonfire tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
 
   - name: check_ephemeral
     description: "Check ephemeral namespaces for cleanup"

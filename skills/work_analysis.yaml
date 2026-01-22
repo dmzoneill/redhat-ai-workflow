@@ -5,7 +5,7 @@
 name: work_analysis
 description: |
   Analyze work activity across all configured repositories for a given time period.
-  
+
   This skill:
   - Gathers commits from all repos (excluding redhat-ai-workflow by default)
   - Categorizes work into: DevOps, Development, Testing, Bug Fixes, Documentation,
@@ -13,7 +13,7 @@ description: |
   - Pulls Jira data (issues completed, story points)
   - Pulls GitLab MR data (created, reviewed, merged)
   - Generates a markdown report showing effort distribution
-  
+
   Useful for sprint reviews, management reports, and time tracking.
 
 version: "1.0"
@@ -56,6 +56,14 @@ inputs:
     description: "Repos to exclude from analysis"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses gitlab_basic and jira_basic tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   # ==================== CONFIGURATION ====================
 
@@ -68,7 +76,7 @@ steps:
 
       config = load_config()
       user_config = config.get("user", {})
-      
+
       # Get authors - support single author or list of authors
       authors_list = inputs.get("authors", [])
       if authors_list:
@@ -80,26 +88,26 @@ steps:
           if not author:
               author = user_config.get("email", "")
           authors = [author] if author else []
-      
+
       # Calculate date range - default to 6 months if not provided
       end_date = inputs.get("end_date", "")
       start_date = inputs.get("start_date", "")
-      
+
       if not end_date:
           end_date = datetime.now().strftime("%Y-%m-%d")
-      
+
       if not start_date:
           # Default to 6 months ago
           six_months_ago = datetime.now() - relativedelta(months=6)
           start_date = six_months_ago.strftime("%Y-%m-%d")
-      
+
       # Get all repos from config
       all_repos = config.get("repositories", {})
-      
+
       # Determine which repos to analyze
       requested_repos = inputs.get("repos", [])
       exclude_repos = inputs.get("exclude_repos", ["redhat-ai-workflow"])
-      
+
       repos_to_analyze = []
       if requested_repos:
           # Use specific repos if provided
@@ -122,7 +130,7 @@ steps:
                       "gitlab": repo_cfg.get("gitlab", ""),
                       "jira_project": repo_cfg.get("jira_project", ""),
                   })
-      
+
       result = {
           "config": config,
           "authors": authors,
@@ -140,7 +148,7 @@ steps:
     description: "Define work category patterns for commit classification"
     compute: |
       import re
-      
+
       # Category patterns - commits can match multiple categories
       categories = {
           "devops": {
@@ -277,7 +285,7 @@ steps:
               "lines_removed": 0,
           },
       }
-      
+
       result = categories
     output: categories
 
@@ -290,21 +298,21 @@ steps:
       import re
       import os
       from copy import deepcopy
-      
+
       # Initialize category stats
       cat_stats = deepcopy(categories)
-      
+
       # Collect all commits with repo info
       all_commits = []
       repo_stats = {}
-      
+
       def get_git_commits(repo_path, repo_name, author, since, until):
           """Get commits from a repo using git log directly."""
           commits = []
-          
+
           if not repo_path or not os.path.isdir(repo_path):
               return commits, f"Path not found: {repo_path}"
-          
+
           try:
               # Run git log with numstat
               cmd = [
@@ -316,7 +324,7 @@ steps:
                   "--numstat",
                   "-n", "500"
               ]
-              
+
               result = subprocess.run(
                   cmd,
                   cwd=repo_path,
@@ -324,10 +332,10 @@ steps:
                   text=True,
                   timeout=60
               )
-              
+
               if result.returncode != 0:
                   return commits, f"Git error: {result.stderr}"
-              
+
               # Parse output
               current_commit = None
               for line in result.stdout.split('\n'):
@@ -335,12 +343,12 @@ steps:
                       # Save previous commit
                       if current_commit:
                           commits.append(current_commit)
-                      
+
                       # Parse new commit
                       parts = line[7:].split('|', 1)
                       sha = parts[0][:7] if parts else "unknown"
                       message = parts[1] if len(parts) > 1 else ""
-                      
+
                       current_commit = {
                           "sha": sha,
                           "message": message[:200],
@@ -357,27 +365,27 @@ steps:
                           removed = numstat_match.group(2)
                           current_commit["lines_added"] += int(added) if added != '-' else 0
                           current_commit["lines_removed"] += int(removed) if removed != '-' else 0
-              
+
               # Don't forget last commit
               if current_commit:
                   commits.append(current_commit)
-              
+
               return commits, None
-              
+
           except subprocess.TimeoutExpired:
               return commits, "Timeout"
           except Exception as e:
               return commits, str(e)
-      
+
       # Collect from all repos and all authors
       repo_errors = []
       authors = ctx.get("authors", [])
       seen_commits = set()  # Track by SHA to avoid duplicates across authors
-      
+
       for repo_info in ctx.get("repos", []):
           repo_name = repo_info.get("name", "unknown")
           repo_path = repo_info.get("path", "")
-          
+
           # Collect commits for each author
           for author in authors:
               commits, error = get_git_commits(
@@ -387,18 +395,18 @@ steps:
                   ctx.get("start_date", ""),
                   ctx.get("end_date", "")
               )
-              
+
               if error:
                   repo_errors.append(f"{repo_name} ({author}): {error}")
                   continue
-              
+
               # Deduplicate commits (same SHA across different author emails)
               for commit in commits:
                   commit_key = f"{repo_name}:{commit['sha']}"
                   if commit_key not in seen_commits:
                       seen_commits.add(commit_key)
                       all_commits.append(commit)
-                      
+
                       # Initialize repo stats
                       if repo_name not in repo_stats:
                           repo_stats[repo_name] = {
@@ -408,12 +416,12 @@ steps:
                               "primary_category": None,
                               "category_counts": {},
                           }
-                      
+
                       # Update repo stats
                       repo_stats[repo_name]["commits"] += 1
                       repo_stats[repo_name]["lines_added"] += commit.get("lines_added", 0)
                       repo_stats[repo_name]["lines_removed"] += commit.get("lines_removed", 0)
-      
+
       result = {
           "all_commits": all_commits,
           "repo_stats": repo_stats,
@@ -428,35 +436,35 @@ steps:
     description: "Categorize commits by work type"
     compute: |
       import re
-      
+
       all_commits = git_data.get("all_commits", [])
       repo_stats = git_data.get("repo_stats", {})
       cat_stats = git_data.get("categories", {})
-      
+
       def categorize_commit(commit, cat_patterns):
           """Categorize a commit based on its message. Can match multiple categories."""
           message = commit.get("message", "").lower()
           matched_categories = []
-          
+
           for cat_key, cat_info in cat_patterns.items():
               if cat_key == "other":
                   continue  # Handle "other" separately
-              
+
               for pattern in cat_info.get("patterns", []):
                   if re.search(pattern, message, re.IGNORECASE):
                       matched_categories.append(cat_key)
                       break
-          
+
           # If no category matched, mark as "other"
           if not matched_categories:
               matched_categories = ["other"]
-          
+
           return matched_categories
-      
+
       # Categorize each commit and update stats
       for commit in all_commits:
           repo_name = commit.get("repo", "unknown")
-          
+
           # Ensure repo stats exist
           if repo_name not in repo_stats:
               repo_stats[repo_name] = {
@@ -466,33 +474,33 @@ steps:
                   "primary_category": None,
                   "category_counts": {},
               }
-          
+
           # Categorize
           matched_cats = categorize_commit(commit, cat_stats)
           commit["categories"] = matched_cats
-          
+
           # Update category stats
           for cat in matched_cats:
               cat_stats[cat]["commits"] += 1
               cat_stats[cat]["lines_added"] += commit.get("lines_added", 0)
               cat_stats[cat]["lines_removed"] += commit.get("lines_removed", 0)
-              
+
               # Track for repo stats
               if cat not in repo_stats[repo_name]["category_counts"]:
                   repo_stats[repo_name]["category_counts"][cat] = 0
               repo_stats[repo_name]["category_counts"][cat] += 1
-      
+
       # Determine primary category for each repo
       for repo_name, stats in repo_stats.items():
           if stats.get("category_counts"):
               primary = max(stats["category_counts"].items(), key=lambda x: x[1])
               stats["primary_category"] = primary[0]
-      
+
       # Calculate totals
       total_commits = len(all_commits)
       total_lines_added = sum(c.get("lines_added", 0) for c in all_commits)
       total_lines_removed = sum(c.get("lines_removed", 0) for c in all_commits)
-      
+
       result = {
           "categories": cat_stats,
           "repo_stats": repo_stats,
@@ -529,10 +537,10 @@ steps:
     compute: |
       import re
       from scripts.common.parsers import parse_jira_issues
-      
+
       completed_issues = parse_jira_issues(str(jira_completed_raw) if jira_completed_raw else "")
       worked_issues = parse_jira_issues(str(jira_worked_raw) if jira_worked_raw else "")
-      
+
       # Extract story points if available (look for patterns like "SP: 5" or "Story Points: 5")
       total_story_points = 0
       for issue in completed_issues:
@@ -544,7 +552,7 @@ steps:
                   total_story_points += int(sp_match.group(1))
               except ValueError:
                   pass
-      
+
       result = {
           "completed": completed_issues,
           "completed_count": len(completed_issues),
@@ -583,20 +591,20 @@ steps:
     compute: |
       from scripts.common.parsers import parse_mr_list
       from datetime import datetime
-      
+
       start_date = datetime.strptime(ctx["start_date"], "%Y-%m-%d")
       end_date = datetime.strptime(ctx["end_date"], "%Y-%m-%d")
-      
+
       # Parse MR lists
       created_mrs = parse_mr_list(str(mrs_created_raw) if mrs_created_raw else "")
       reviewed_mrs = parse_mr_list(str(mrs_reviewed_raw) if mrs_reviewed_raw else "")
-      
+
       # Filter by date range (if dates available in MR data)
       # For now, just use the counts as-is since date filtering is complex
-      
+
       # Count merged MRs from created list
       merged_count = sum(1 for mr in created_mrs if mr.get("status", "").lower() == "merged")
-      
+
       result = {
           "created": created_mrs[:20],
           "created_count": len(created_mrs),
@@ -612,7 +620,7 @@ steps:
     description: "Generate markdown report"
     compute: |
       lines = []
-      
+
       # Header
       lines.append("# Work Analysis Report")
       lines.append("")
@@ -628,7 +636,7 @@ steps:
       lines.append("")
       lines.append("---")
       lines.append("")
-      
+
       # Summary
       lines.append("## Summary")
       lines.append("")
@@ -641,23 +649,23 @@ steps:
       if jira_data.get('story_points', 0) > 0:
           lines.append(f"- **Story Points:** {jira_data['story_points']}")
       lines.append("")
-      
+
       # Work Distribution
       lines.append("## Work Distribution")
       lines.append("")
       lines.append("| Category | Commits | Lines (+/-) | % of Work |")
       lines.append("|----------|---------|-------------|-----------|")
-      
+
       # Sort categories by commit count
       cat_stats = commit_analysis.get("categories", {})
       total = commit_analysis.get("total_commits", 1) or 1
-      
+
       sorted_cats = sorted(
           [(k, v) for k, v in cat_stats.items() if v.get("commits", 0) > 0],
           key=lambda x: x[1].get("commits", 0),
           reverse=True
       )
-      
+
       for cat_key, cat_data in sorted_cats:
           name = cat_data.get("name", cat_key)
           commits = cat_data.get("commits", 0)
@@ -665,15 +673,15 @@ steps:
           removed = cat_data.get("lines_removed", 0)
           pct = (commits / total) * 100 if total > 0 else 0
           lines.append(f"| {name} | {commits} | +{added:,}/-{removed:,} | {pct:.0f}% |")
-      
+
       lines.append("")
-      
+
       # By Repository
       lines.append("## By Repository")
       lines.append("")
       lines.append("| Repository | Commits | Lines (+/-) | Primary Category |")
       lines.append("|------------|---------|-------------|------------------|")
-      
+
       repo_stats = commit_analysis.get("repo_stats", {})
       for repo_name, stats in sorted(repo_stats.items(), key=lambda x: x[1].get("commits", 0), reverse=True):
           commits = stats.get("commits", 0)
@@ -682,9 +690,9 @@ steps:
           primary = stats.get("primary_category", "other")
           primary_name = cat_stats.get(primary, {}).get("name", primary)
           lines.append(f"| {repo_name} | {commits} | +{added:,}/-{removed:,} | {primary_name} |")
-      
+
       lines.append("")
-      
+
       # Jira Activity
       if jira_data.get("completed"):
           lines.append("## Jira Issues Completed")
@@ -696,7 +704,7 @@ steps:
           if len(jira_data["completed"]) > 10:
               lines.append(f"- ... and {len(jira_data['completed']) - 10} more")
           lines.append("")
-      
+
       # MR Activity
       if gitlab_data.get("created"):
           lines.append("## MRs Created")
@@ -707,7 +715,7 @@ steps:
               status = mr.get("status", "open")
               lines.append(f"- !{mr_id}: {title} ({status})")
           lines.append("")
-      
+
       if gitlab_data.get("reviewed"):
           lines.append("## MRs Reviewed")
           lines.append("")
@@ -716,7 +724,7 @@ steps:
               title = mr.get("title", "")[:50]
               lines.append(f"- !{mr_id}: {title}")
           lines.append("")
-      
+
       # Recent Commits Sample
       if commit_analysis.get("commits"):
           lines.append("## Recent Commits (Sample)")
@@ -728,12 +736,12 @@ steps:
               cats = ", ".join(commit.get("categories", ["other"]))
               lines.append(f"- `{sha}` [{repo}] {msg} *({cats})*")
           lines.append("")
-      
+
       # Footer
       lines.append("---")
       lines.append("")
       lines.append(f"*Generated by work_analysis skill on {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}*")
-      
+
       result = "\n".join(lines)
     output: report
 
@@ -751,12 +759,12 @@ steps:
     description: "Save analysis summary to memory for future reference"
     compute: |
       from datetime import datetime
-      
+
       # Load patterns
       patterns = memory.read_memory("learned/patterns") or {}
       if "work_analyses" not in patterns:
           patterns["work_analyses"] = []
-      
+
       # Record this analysis
       analysis_record = {
           "start_date": ctx["start_date"],
@@ -770,12 +778,12 @@ steps:
           "mrs_reviewed": gitlab_data.get("reviewed_count", 0),
           "timestamp": datetime.now().isoformat(),
       }
-      
+
       patterns["work_analyses"].append(analysis_record)
-      
+
       # Keep last 20 analyses
       patterns["work_analyses"] = patterns["work_analyses"][-20:]
-      
+
       memory.write_memory("learned/patterns", patterns)
       result = "analysis saved to memory"
     output: memory_save_result

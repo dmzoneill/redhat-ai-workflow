@@ -56,6 +56,14 @@ inputs:
     description: "Run linting before force push (if force_push is true)"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses git_basic tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for Git tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   - name: init_autoheal
     description: "Initialize failure tracking"

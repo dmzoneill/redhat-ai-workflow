@@ -63,6 +63,15 @@ inputs:
 # jira_url loaded from config.json in load_config step
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # Start with developer persona for GitLab, Jira, and Git tools
+  # Will switch to meetings persona for calendar tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab, Jira, and Git tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   # ==================== PROACTIVE ISSUE DETECTION ====================
 
@@ -220,6 +229,13 @@ steps:
     output: commit_info
 
   # ==================== GET TODAY'S CALENDAR ====================
+  # Switch to meetings persona for Google Calendar tools
+
+  - name: load_meetings_persona_for_calendar
+    description: "Load meetings persona for Google Calendar tools"
+    tool: persona_load
+    args:
+      persona_name: "meetings"
 
   - name: get_todays_meetings
     description: "Get today's calendar events"
@@ -253,6 +269,13 @@ steps:
     on_error: continue
 
   # ==================== GET SLACK UPDATES ====================
+  # Switch to slack persona for Slack tools
+
+  - name: load_slack_persona_for_mentions
+    description: "Load slack persona for Slack channel reading"
+    tool: persona_load
+    args:
+      persona_name: "slack"
 
   - name: get_slack_mentions
     description: "Get recent Slack mentions"

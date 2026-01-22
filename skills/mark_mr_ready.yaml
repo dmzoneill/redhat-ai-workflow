@@ -52,6 +52,15 @@ inputs:
     description: "Check documentation before marking ready (if docs.check_on_mr=true in config)"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # Start with developer persona for GitLab, Git, and Jira tools
+  # Will switch to slack persona for Slack notifications
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab, Git, and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   # ==================== KNOWLEDGE INTEGRATION ====================
 
@@ -340,6 +349,14 @@ steps:
     output: slack_message
 
   # Step 6: Post to Slack
+  # Switch to slack persona for Slack tools
+  - name: load_slack_persona_for_notification
+    description: "Load slack persona for Slack notification tools"
+    condition: "slack_message"
+    tool: persona_load
+    args:
+      persona_name: "slack"
+
   - name: notify_team_slack
     description: "Post to team channel asking for review"
     condition: "slack_message"

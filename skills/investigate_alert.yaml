@@ -46,6 +46,16 @@ inputs:
 # No hardcoded constants - resolved dynamically from config.json
 
 steps:
+  # ==================== LOAD INCIDENT PERSONA ====================
+  # This skill requires prometheus_basic, alertmanager, kibana, and k8s_basic tools
+  # which are only all available in the incident persona
+
+  - name: load_incident_persona
+    description: "Load incident persona for Prometheus, Alertmanager, Kibana, and K8s tools"
+    tool: persona_load
+    args:
+      persona_name: "incident"
+
   # ==================== PROACTIVE ISSUE DETECTION ====================
 
   - name: check_prometheus_known_issues
@@ -672,6 +682,40 @@ steps:
       else:
           result = "hook skipped: emit_event not available"
     output: alert_hook_result
+    on_error: continue
+
+  # Notify team about critical alerts (skill chain)
+  - name: notify_team_critical_alert
+    description: "Notify team channel about critical alerts via Slack"
+    condition: "assessment.get('severity') == 'critical'"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "🚨 Critical alert in {{ target.get('environment', 'unknown') }}",
+          "type": "error",
+          "context": "Alert: {{ alert_info.get('alerts', [{}])[0].get('name', inputs.alert_name or 'unknown') }}\nNamespace: {{ target.get('namespace', 'unknown') }}\nEnvironment: {{ target.get('environment', 'unknown') }}"
+        }
+      execute: true
+    output: slack_critical_alert_notification
+    on_error: continue
+
+  # Notify team about escalated alerts (skill chain)
+  - name: notify_team_escalated_alert
+    description: "Notify team channel about escalated alerts"
+    condition: "assessment.get('needs_escalation') and debug_result and assessment.get('severity') != 'critical'"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "Alert escalated - investigation in progress",
+          "type": "warning",
+          "context": "Alert: {{ inputs.alert_name or 'unknown' }}\nNamespace: {{ target.get('namespace', 'unknown') }}\nSeverity: {{ assessment.get('severity', 'unknown') }}"
+        }
+      execute: true
+    output: slack_escalated_alert_notification
     on_error: continue
 
   # ==================== MEMORY INTEGRATION ====================

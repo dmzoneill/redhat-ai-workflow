@@ -103,6 +103,14 @@ inputs:
     description: "Use Slack link format in report"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses jira_basic tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   - name: init_autoheal
     description: "Initialize failure tracking"

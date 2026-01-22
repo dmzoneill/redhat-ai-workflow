@@ -49,6 +49,16 @@ inputs:
     description: "Use Slack's <URL|Text> link format instead of standard markdown"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # Start with developer persona for GitLab, Git, and Jira tools
+  # Will switch to incident/devops as needed for specific sections
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab, Git, and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # ==================== CONFIGURATION ====================
 
   - name: load_config
@@ -831,6 +841,13 @@ steps:
     on_error: continue
 
   # ==================== ALERTS (using Alertmanager MCP tools) ====================
+  # Switch to incident persona for alertmanager tools
+
+  - name: load_incident_persona_for_alerts
+    description: "Load incident persona for Alertmanager tools"
+    tool: persona_load
+    args:
+      persona_name: "incident"
 
   - name: check_alerts_stage
     description: "Check for Automation Analytics alerts in stage"
@@ -1032,6 +1049,13 @@ steps:
     output: failed_pipelines
 
   # ==================== EPHEMERAL NAMESPACES (using MCP tool) ====================
+  # Switch to devops persona for bonfire tools
+
+  - name: load_devops_persona_for_ephemeral
+    description: "Load devops persona for Bonfire tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
 
   - name: check_ephemeral_namespaces
     description: "List your active ephemeral environments"
@@ -1051,6 +1075,13 @@ steps:
     on_error: continue
 
   # ==================== YESTERDAY'S WORK (using MCP tool) ====================
+  # Switch back to developer persona for git tools
+
+  - name: load_developer_persona_for_git
+    description: "Load developer persona for Git and GitLab tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   - name: get_yesterdays_commits_raw
     description: "Get your commits from yesterday (for standup)"

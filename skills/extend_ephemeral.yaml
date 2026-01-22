@@ -37,6 +37,15 @@ inputs:
     description: "Just list namespaces without extending"
 
 steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+  # This skill requires bonfire_basic tools which are only in devops persona
+
+  - name: load_devops_persona
+    description: "Load devops persona for Bonfire tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: check_bonfire_known_issues

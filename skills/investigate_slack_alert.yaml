@@ -56,6 +56,15 @@ inputs:
     description: "URL to AlertManager (extracted from message)"
 
 steps:
+  # ==================== LOAD INCIDENT PERSONA ====================
+  # Start with incident persona for K8s investigation tools
+  # Will switch to slack persona for Slack replies
+
+  - name: load_incident_persona
+    description: "Load incident persona for Kubernetes investigation tools"
+    tool: persona_load
+    args:
+      persona_name: "incident"
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -177,6 +186,13 @@ steps:
     output: alert_info
 
   # ==================== ACKNOWLEDGE ====================
+  # Switch to slack persona for Slack tools
+
+  - name: load_slack_persona_for_ack
+    description: "Load slack persona for Slack reply tools"
+    tool: persona_load
+    args:
+      persona_name: "slack"
 
   - name: acknowledge_alert
     description: "Reply to Slack thread to acknowledge we're looking into it"
@@ -189,6 +205,13 @@ steps:
     on_error: continue
 
   # ==================== INVESTIGATE ====================
+  # Switch back to incident persona for K8s tools
+
+  - name: load_incident_persona_for_investigation
+    description: "Load incident persona for Kubernetes investigation tools"
+    tool: persona_load
+    args:
+      persona_name: "incident"
 
   - name: get_kubeconfig
     description: "Determine correct kubeconfig for environment"
@@ -561,6 +584,13 @@ steps:
 
       result = response
     output: slack_response
+
+  # Switch to slack persona for final reply
+  - name: load_slack_persona_for_reply
+    description: "Load slack persona for Slack reply"
+    tool: persona_load
+    args:
+      persona_name: "slack"
 
   - name: reply_with_findings
     description: "Reply to Slack with investigation findings"

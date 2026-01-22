@@ -197,6 +197,15 @@ error_patterns:
     category: selector
 
 steps:
+  # ==================== LOAD ADMIN PERSONA ====================
+  # This skill uses concur tools which are only in admin persona
+
+  - name: load_admin_persona
+    description: "Load admin persona for Concur expense tools"
+    tool: persona_load
+    args:
+      persona_name: "admin"
+
   # ==================== SEMANTIC SEARCH ====================
 
   - name: search_expense_code

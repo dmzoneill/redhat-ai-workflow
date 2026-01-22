@@ -38,6 +38,15 @@ inputs:
     description: "Assign cloned issue to current user"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses jira_basic tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: check_jira_known_issues

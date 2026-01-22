@@ -28,6 +28,15 @@ inputs:
     description: "Number of results to show"
 
 steps:
+  # ==================== LOAD RELEASE PERSONA ====================
+  # This skill requires konflux_basic tools which are only in release persona
+
+  - name: load_release_persona
+    description: "Load release persona for Konflux integration test tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: check_test_known_issues

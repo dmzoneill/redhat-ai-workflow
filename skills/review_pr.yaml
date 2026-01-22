@@ -66,6 +66,16 @@ inputs:
 # No hardcoded constants - resolved dynamically
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # Start with developer persona for GitLab, Git, and Jira tools
+  # Will switch to release persona for Konflux tools as needed
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab, Git, and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # ==================== RESOLVE REPOSITORY ====================
 
   - name: resolve_repo
@@ -690,6 +700,13 @@ steps:
     on_error: continue
 
   # Step 6: Check Konflux pipelines
+  # Switch to release persona for Konflux tools
+  - name: load_release_persona_for_konflux
+    description: "Load release persona for Konflux tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
+
   - name: check_konflux
     description: "Check Konflux integration tests"
     tool: konflux_list_pipelines
@@ -1412,6 +1429,14 @@ steps:
     on_error: continue
 
   # Step 18e: Slack DM author on approval
+  # Switch to slack persona for Slack tools
+  - name: load_slack_persona_for_dm
+    description: "Load slack persona for Slack DM tools"
+    condition: "review_action.get('action') in ['approve', 'request_changes'] and author_info.get('author')"
+    tool: persona_load
+    args:
+      persona_name: "slack"
+
   - name: slack_notify_approval
     description: "Send Slack DM to author that MR was approved"
     condition: "review_action.get('action') == 'approve' and author_info.get('author')"

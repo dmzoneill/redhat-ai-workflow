@@ -50,6 +50,15 @@ inputs:
     description: "Return error if high severity vulnerabilities found"
 
 steps:
+  # ==================== LOAD RELEASE PERSONA ====================
+  # This skill requires quay tools which are in release (and devops) persona
+
+  - name: load_release_persona
+    description: "Load release persona for Quay vulnerability scanning tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: check_security_known_issues

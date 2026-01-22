@@ -52,6 +52,15 @@ inputs:
     description: "Use Slack link format"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses git_basic, gitlab_basic, and jira_basic tools - developer has all
+
+  - name: load_developer_persona
+    description: "Load developer persona for Git, GitLab, and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # ==================== RESOLVE REPOSITORY ====================
 
   # Step 0: Resolve repository from issue key if not provided

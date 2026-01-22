@@ -49,6 +49,15 @@ inputs:
     description: "If true, just show what would be released without creating"
 
 steps:
+  # ==================== LOAD RELEASE PERSONA ====================
+  # This skill requires konflux_basic, quay, and appinterface tools
+
+  - name: load_release_persona
+    description: "Load release persona for Konflux release tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_release_gotchas
@@ -400,6 +409,14 @@ steps:
       tags: ["release", "{{ inputs.component }}", "{{ inputs.application }}"]
     output: grafana_annotation_result
     on_error: continue
+
+  # Switch to slack persona for Slack announcement
+  - name: load_slack_persona_for_announcement
+    description: "Load slack persona for Slack announcement"
+    condition: "release_result and release_result.success"
+    tool: persona_load
+    args:
+      persona_name: "slack"
 
   - name: announce_release
     description: "Announce release to team channel"

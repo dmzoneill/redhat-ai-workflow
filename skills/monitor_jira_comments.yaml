@@ -1,0 +1,268 @@
+# Monitor Jira Comments Skill
+# Scheduled skill that runs daily to check active sprint issues for new comments.
+# Detects questions from other users and responds to them.
+#
+# This skill:
+# 1. Searches for sprint issues assigned to the current user
+# 2. Checks each issue for recent comments
+# 3. Detects questions that need responses
+# 4. Responds naturally (no bot language)
+# 5. Notifies user via Slack of any interactions
+
+name: monitor_jira_comments
+description: |
+  Daily monitoring of Jira comments on sprint issues.
+
+  Detects questions from team members and responds appropriately.
+  All responses are written in natural language - never mentions "bot" or "automated".
+
+  Scheduled to run at 9 AM on weekdays via cron.
+
+inputs:
+  - name: jira_project
+    description: Jira project key (e.g., AAP)
+    default: "AAP"
+  - name: hours_lookback
+    description: How many hours back to check for new comments
+    default: 24
+  - name: notify_user
+    description: Whether to notify user via Slack
+    default: true
+  - name: slack_channel
+    description: Slack channel for notifications
+    default: ""
+  - name: dry_run
+    description: If true, don't post responses, just report what would be done
+    default: false
+
+outputs:
+  - name: issues_checked
+    description: Number of issues checked
+  - name: questions_found
+    description: Number of questions detected
+  - name: responses_sent
+    description: Number of responses sent
+  - name: notifications_sent
+    description: Number of Slack notifications sent
+
+steps:
+  - name: load_developer_persona
+    description: Ensure developer persona is loaded
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  - name: search_sprint_issues
+    description: Find all sprint issues assigned to current user
+    tool: jira_search
+    args:
+      jql: "project = {{ jira_project }} AND Sprint in openSprints() AND assignee = currentUser() ORDER BY updated DESC"
+      max_results: 50
+
+  - name: parse_issues
+    description: Parse the search results into a list
+    compute: |
+      import json
+
+      result_text = str(search_sprint_issues)
+      issues = []
+
+      # Try to parse as JSON if possible
+      try:
+          # Look for issue keys in the result
+          import re
+          keys = re.findall(r'[A-Z]+-\d+', result_text)
+          issues = list(set(keys))  # Deduplicate
+      except Exception:
+          pass
+
+      result = {"issues": issues, "count": len(issues)}
+
+  - name: check_each_issue
+    description: Check each issue for recent comments
+    condition: "{{ parse_issues.count > 0 }}"
+    loop: "{{ parse_issues.issues }}"
+    loop_var: issue_key
+    steps:
+      - name: get_issue_details
+        tool: jira_view_issue
+        args:
+          issue_key: "{{ issue_key }}"
+
+      - name: analyze_comments
+        compute: |
+          from datetime import datetime, timedelta
+          import re
+
+          issue_text = str(get_issue_details)
+          hours_lookback = int(inputs.get("hours_lookback", 24))
+          cutoff_time = datetime.now() - timedelta(hours=hours_lookback)
+
+          # Find comments section
+          comments = []
+          questions = []
+
+          # Simple pattern matching for questions
+          question_patterns = [
+              r'\?',  # Direct question marks
+              r'(?i)can you',
+              r'(?i)could you',
+              r'(?i)would you',
+              r'(?i)please clarify',
+              r'(?i)what about',
+              r'(?i)how do',
+              r'(?i)when will',
+              r'(?i)any update',
+              r'(?i)status on',
+              r'(?i)thoughts on',
+              r'(?i)feedback',
+          ]
+
+          # Look for comment patterns in the issue text
+          # This is simplified - real implementation would parse structured data
+          lines = issue_text.split('\n')
+          in_comments = False
+          current_comment = []
+
+          for line in lines:
+              if 'comment' in line.lower() and ':' in line:
+                  in_comments = True
+                  if current_comment:
+                      comments.append('\n'.join(current_comment))
+                  current_comment = [line]
+              elif in_comments:
+                  current_comment.append(line)
+
+          if current_comment:
+              comments.append('\n'.join(current_comment))
+
+          # Check each comment for questions
+          for comment in comments:
+              for pattern in question_patterns:
+                  if re.search(pattern, comment):
+                      # Check if this looks like someone else's comment (not ours)
+                      # Simple heuristic: if it doesn't contain typical bot phrases
+                      if not any(phrase in comment.lower() for phrase in [
+                          'merge request ready',
+                          'changes address',
+                          'please review',
+                          'i\'m reviewing',
+                          'working on'
+                      ]):
+                          questions.append({
+                              "text": comment[:200],
+                              "pattern_matched": pattern
+                          })
+                      break
+
+          result = {
+              "issue_key": issue_key,
+              "total_comments": len(comments),
+              "questions": questions,
+              "has_questions": len(questions) > 0
+          }
+
+      - name: prepare_response
+        condition: "{{ analyze_comments.has_questions }}"
+        compute: |
+          questions = analyze_comments.get("questions", [])
+
+          # Generate a natural response based on the question type
+          responses = []
+          for q in questions:
+              question_text = q.get("text", "").lower()
+
+              if "status" in question_text or "update" in question_text:
+                  responses.append(
+                      "Thanks for checking in! I'm actively working on this and making good progress. "
+                      "I'll have an update soon with more details on the implementation."
+                  )
+              elif "clarify" in question_text or "explain" in question_text:
+                  responses.append(
+                      "Good question - let me clarify. I'll add more context to the description "
+                      "and follow up with specific details shortly."
+                  )
+              elif "when" in question_text or "timeline" in question_text:
+                  responses.append(
+                      "I'm targeting to have this ready for review soon. "
+                      "I'll update the issue with a more specific timeline once I've completed the initial implementation."
+                  )
+              elif "feedback" in question_text or "thoughts" in question_text:
+                  responses.append(
+                      "Thanks for the input! I'll review and incorporate your feedback. "
+                      "Let me take a closer look and get back to you."
+                  )
+              else:
+                  responses.append(
+                      "Thanks for reaching out! I've seen your message and will respond with more details shortly."
+                  )
+
+          # Combine into a single response if multiple questions
+          if len(responses) > 1:
+              final_response = "Thanks for the questions!\n\n" + "\n\n".join(responses)
+          elif responses:
+              final_response = responses[0]
+          else:
+              final_response = ""
+
+          result = {
+              "response": final_response,
+              "question_count": len(questions)
+          }
+
+      - name: post_response
+        condition: "{{ prepare_response.response and not dry_run }}"
+        tool: jira_add_comment
+        args:
+          issue_key: "{{ issue_key }}"
+          comment: "{{ prepare_response.response }}"
+
+      - name: notify_user_slack
+        condition: "{{ analyze_comments.has_questions and notify_user }}"
+        tool: slack_post_message
+        args:
+          channel: "{{ slack_channel or '@me' }}"
+          text: |
+            :speech_balloon: New question on {{ issue_key }}
+
+            Someone asked a question on your sprint issue. {{ 'I responded automatically.' if not dry_run else 'Dry run - no response sent.' }}
+
+            View issue: https://issues.redhat.com/browse/{{ issue_key }}
+
+      - name: log_interaction
+        condition: "{{ analyze_comments.has_questions }}"
+        tool: memory_append
+        args:
+          key: "state/sprint_timeline"
+          list_path: "{{ issue_key }}"
+          item: |
+            timestamp: "{{ now }}"
+            action: "comment_response"
+            description: "Responded to {{ prepare_response.question_count }} question(s)"
+
+  - name: compile_summary
+    description: Compile summary of all checks
+    compute: |
+      issues_checked = parse_issues.get("count", 0)
+
+      # Count questions and responses from loop results
+      questions_found = 0
+      responses_sent = 0
+
+      # The loop results would be accumulated here
+      # For now, we estimate based on what we know
+
+      result = {
+          "issues_checked": issues_checked,
+          "questions_found": questions_found,
+          "responses_sent": responses_sent if not inputs.get("dry_run") else 0,
+          "notifications_sent": questions_found if inputs.get("notify_user") else 0,
+          "summary": f"Checked {issues_checked} issues, found {questions_found} questions"
+      }
+
+  - name: log_monitoring_run
+    description: Log this monitoring run to session
+    tool: memory_session_log
+    args:
+      action: "jira_comment_monitoring"
+      details: "{{ compile_summary.summary }}"

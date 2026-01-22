@@ -34,6 +34,15 @@ inputs:
     description: "Number of pipelines to show"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses gitlab_basic tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab CI tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   - name: list_pipelines
     description: "List recent pipelines"
     tool: gitlab_ci_list

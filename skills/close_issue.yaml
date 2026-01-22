@@ -30,6 +30,15 @@ inputs:
 # No hardcoded constants - resolved from config.json
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses git_basic, gitlab_basic, and jira_basic tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for Git, GitLab, and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_jira_patterns
@@ -403,6 +412,23 @@ steps:
       else:
           result = "hook skipped: emit_event not available"
     output: close_hook_result
+    on_error: continue
+
+  # Notify team about issue closure (skill chain)
+  - name: notify_team_issue_closed
+    description: "Notify team channel about issue closure"
+    condition: "not status_check.already_done and transition_result"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "Issue {{ inputs.issue_key }} closed",
+          "type": "success",
+          "context": "Issue: {{ inputs.issue_key }}\nCommits: {{ commit_info.get('count', 0) if commit_info else 0 }}\nMR Merged: {{ mr_info.get('merged', 'N/A') if mr_info else 'N/A' }}"
+        }
+      execute: true
+    output: slack_issue_closed_notification
     on_error: continue
 
   # ==================== MEMORY INTEGRATION ====================

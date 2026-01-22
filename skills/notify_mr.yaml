@@ -51,6 +51,15 @@ inputs:
     description: "Use Slack link format in summary"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # Start with developer persona for GitLab and Jira tools
+  # Will switch to slack persona for Slack notifications
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -305,6 +314,13 @@ steps:
           "mr_url": mr_web_url,
       }
     output: notification
+
+  # Switch to slack persona for Slack tools
+  - name: load_slack_persona_for_notification
+    description: "Load slack persona for Slack notification tools"
+    tool: persona_load
+    args:
+      persona_name: "slack"
 
   - name: post_to_team
     description: "Post notification to team channel"

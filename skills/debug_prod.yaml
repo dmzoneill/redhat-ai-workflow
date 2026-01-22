@@ -42,6 +42,15 @@ inputs:
 # No hardcoded constants - resolved dynamically from config.json
 
 steps:
+  # ==================== LOAD INCIDENT PERSONA ====================
+  # This skill requires prometheus_basic, alertmanager, kibana, grafana, and k8s_basic tools
+
+  - name: load_incident_persona
+    description: "Load incident persona for Prometheus, Alertmanager, Kibana, and K8s tools"
+    tool: persona_load
+    args:
+      persona_name: "incident"
+
   # ==================== PROACTIVE ISSUE DETECTION ====================
 
   - name: check_k8s_known_issues
@@ -482,6 +491,13 @@ steps:
     output: kibana_check
 
   # ==================== SLACK CONTEXT ====================
+  # Switch to slack persona for Slack tools
+
+  - name: load_slack_persona_for_context
+    description: "Load slack persona for Slack channel reading"
+    tool: persona_load
+    args:
+      persona_name: "slack"
 
   - name: check_slack_discussions
     description: "Check team Slack channel for recent relevant discussions"

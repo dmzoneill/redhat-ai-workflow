@@ -31,6 +31,15 @@ inputs:
 # No hardcoded constants - resolved dynamically from config.json
 
 steps:
+  # ==================== LOAD RELEASE PERSONA ====================
+  # Start with release persona for git, quay, and appinterface tools
+  # Will switch to developer for jira/gitlab tools as needed
+
+  - name: load_release_persona
+    description: "Load release persona for Git, Quay, and app-interface tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
 
   - name: init_autoheal
     description: "Initialize failure tracking"
@@ -212,6 +221,13 @@ steps:
     output: changelog
 
   # ==================== CREATE JIRA ISSUE ====================
+  # Switch to developer persona for Jira tools
+
+  - name: load_developer_persona_for_jira
+    description: "Load developer persona for Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   # Step 5: Create release Jira issue
   - name: create_jira_issue
@@ -224,6 +240,13 @@ steps:
     on_error: auto_heal  # Jira API - may need auth refresh
 
   # ==================== PREPARE APP-INTERFACE ====================
+  # Switch back to release persona for git and app-interface tools
+
+  - name: load_release_persona_for_appinterface
+    description: "Load release persona for Git and app-interface tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
 
   # Step 6: Ensure app-interface is clean and up to date
   - name: check_appinterface_status
@@ -431,6 +454,13 @@ steps:
       result = title
     output: mr_title
 
+  # Switch to developer persona for GitLab tools
+  - name: load_developer_persona_for_gitlab
+    description: "Load developer persona for GitLab tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # Step 14: Create merge request
   - name: create_mr
     description: "Create merge request for team approval"
@@ -503,6 +533,23 @@ steps:
       else:
           result = "hooks skipped: emit_event not available"
     output: release_hook_result
+    on_error: continue
+
+  # Step 16: Notify team via Slack (skill chain)
+  - name: notify_team_release_ready
+    description: "Notify team channel about production release MR"
+    condition: "mr_result and mr_result.get('web_url')"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "Production release MR ready for {{ inputs.release_date }}",
+          "type": "release",
+          "context": "SHA: {{ inputs.commit_sha[:12] }}\nMR: {{ mr_result.get('web_url', 'N/A') }}\nJira: {{ jira_issue.get('key', 'N/A') if jira_issue else 'N/A' }}"
+        }
+      execute: true
+    output: slack_release_notification
     on_error: continue
 
   # ==================== SEMANTIC SEARCH ====================

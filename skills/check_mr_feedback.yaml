@@ -42,6 +42,15 @@ inputs:
     description: "Use Slack link format in summary"
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses gitlab_basic tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab MR tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_review_patterns

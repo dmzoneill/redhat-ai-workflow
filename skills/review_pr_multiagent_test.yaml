@@ -39,6 +39,15 @@ outputs:
   - name: stats
 
 steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+  # This skill uses gitlab_basic tools
+
+  - name: load_developer_persona
+    description: "Load developer persona for GitLab tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   - name: get_mr_diff
     description: "Get MR diff"
     tool: gitlab_mr_diff

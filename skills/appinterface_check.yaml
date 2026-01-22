@@ -54,6 +54,15 @@ inputs:
     description: "GitLab project to check for pending MRs"
 
 steps:
+  # ==================== LOAD RELEASE PERSONA ====================
+  # This skill requires appinterface tools which are only in release persona
+
+  - name: load_release_persona
+    description: "Load release persona for app-interface tools"
+    tool: persona_load
+    args:
+      persona_name: "release"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: check_appinterface_known_issues
@@ -219,6 +228,13 @@ steps:
     output: validation_result
 
   # ==================== GET LIVE STATE ====================
+  # Switch to devops persona for kubectl tools
+
+  - name: load_devops_persona_for_k8s
+    description: "Load devops persona for Kubernetes tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
 
   - name: get_live_stage
     description: "Get live deployment from stage cluster"
@@ -463,6 +479,13 @@ steps:
     output: quota_info
 
   # ==================== GET PENDING MRs ====================
+  # Switch to developer persona for GitLab tools
+
+  - name: load_developer_persona_for_gitlab
+    description: "Load developer persona for GitLab tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
 
   - name: get_pending_mrs
     description: "Get open MRs that might affect this service"

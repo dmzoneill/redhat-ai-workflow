@@ -47,6 +47,15 @@ inputs:
     description: "Component to deploy (main or billing)"
 
 steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+  # This skill requires bonfire_basic and k8s_basic tools which are in devops persona
+
+  - name: load_devops_persona
+    description: "Load devops persona for Bonfire and Kubernetes tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: check_deployment_known_issues
@@ -469,6 +478,40 @@ steps:
       root_cause: "Image tag not found in registry - wrong SHA or image not built"
       fix_description: "Verify image exists in Quay with quay_get_tag() before deploying"
     output: manifest_fix_learned
+    on_error: continue
+
+  # Notify team about successful deployment (skill chain)
+  - name: notify_team_deployment_success
+    description: "Notify team channel about successful ephemeral deployment"
+    condition: "deploy_status and deploy_status.get('success') and namespace_info and namespace_info.get('namespace')"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "Ephemeral deployment complete for {{ inputs.app }}",
+          "type": "deployment",
+          "context": "Namespace: {{ namespace_info.get('namespace', 'unknown') }}\nApp: {{ inputs.app }}\nComponent: {{ inputs.component }}\nImage: {{ inputs.image_tag or 'latest' }}"
+        }
+      execute: true
+    output: slack_deployment_notification
+    on_error: continue
+
+  # Notify team about deployment failure (skill chain)
+  - name: notify_team_deployment_failure
+    description: "Notify team channel about failed ephemeral deployment"
+    condition: "deploy_status and not deploy_status.get('success')"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "Ephemeral deployment failed for {{ inputs.app }}",
+          "type": "error",
+          "context": "App: {{ inputs.app }}\nComponent: {{ inputs.component }}\nError: {{ deploy_status.get('output', 'unknown')[:200] }}"
+        }
+      execute: true
+    output: slack_deployment_failure_notification
     on_error: continue
 
 outputs:
