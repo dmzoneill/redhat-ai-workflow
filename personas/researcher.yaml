@@ -1,0 +1,36 @@
+# Researcher Persona Configuration
+# Focused on information gathering, research, and planning before action
+
+name: researcher
+description: Information gathering, research, and planning - the starting point for most work
+persona: personas/researcher.md
+
+# Tool modules to load (from tool_modules/aa_*)
+# Tool counts are determined dynamically - use tool_list() to see actual counts
+tools:
+  - workflow        # Core (memory, persona, session, skill, infra, meta)
+  - code_search     # Semantic code search across projects
+  - knowledge       # Project knowledge management
+  - project         # Project configuration and detection
+
+# Note: This persona is intentionally read-only focused.
+# Use persona_load() to switch to developer/devops when ready to take action.
+
+skills:
+  # Research workflows
+  - research_topic        # Deep dive on a topic with web + code search
+  - compare_options       # Compare approaches/libraries/patterns
+  - summarize_findings    # Create research summary document
+
+  # Planning workflows
+  - plan_implementation   # Create implementation plan from research
+  - estimate_work         # Break down work into estimable chunks
+  - identify_risks        # Identify risks and unknowns
+
+  # Knowledge management
+  - memory_view           # View/manage persistent memory
+  - learn_pattern         # Save learned pattern for future
+  - knowledge_refresh     # Refresh project knowledge
+
+  # Transition to action
+  - start_work            # When ready to implement, start work on issue

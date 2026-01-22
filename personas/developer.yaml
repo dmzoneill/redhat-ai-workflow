@@ -30,6 +30,7 @@ skills:
   - clone_jira_issue    # Clone existing issue for similar work
   - close_issue         # Close issue with commit summary
   - jira_hygiene        # Issue quality checks
+  - jira_hygiene_all    # Batch Jira hygiene on all issues
   - sprint_planning     # Prepare sprint backlog
 
   # MR/PR workflow

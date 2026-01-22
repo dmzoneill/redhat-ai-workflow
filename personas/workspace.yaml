@@ -18,7 +18,14 @@ tools:
 skills:
   # Session management
   - memory_view         # View/manage persistent memory
-  
+
   # Workspace operations
   - coffee              # Morning briefing across projects
   - beer                # End of day wrap-up
+
+  # Knowledge & indexing
+  - reindex_all_vectors # Reindex all vector databases for semantic search
+  - knowledge_refresh   # Refresh single project knowledge
+
+  # Testing
+  - hello_world         # Simple test skill for cron scheduler testing
