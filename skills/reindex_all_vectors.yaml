@@ -1,0 +1,362 @@
+# Skill: Reindex All Vectors
+# Reindex all configured projects' vector databases
+
+name: reindex_all_vectors
+description: |
+  Reindex all vector databases for all configured projects.
+
+  This skill iterates through all repositories in config.json and
+  updates their vector indexes for semantic code search.
+
+  Use this skill to:
+  - Keep all vector indexes fresh
+  - Ensure semantic search works across all projects
+  - Scheduled hourly via cron for automatic maintenance
+
+  The skill:
+  1. Gets list of all configured repositories
+  2. For each project, runs code_index to update vectors
+  3. Restarts file watchers for automatic updates
+  4. Reports summary of all indexing operations
+
+version: "1.0"
+
+inputs:
+  - name: force
+    type: boolean
+    required: false
+    default: false
+    description: If true, force full re-index of all files (not just changed)
+  - name: projects
+    type: string
+    required: false
+    default: ""
+    description: Comma-separated list of projects to reindex. If empty, reindex all.
+  - name: restart_watchers
+    type: boolean
+    required: false
+    default: true
+    description: If true, restart file watchers after indexing
+
+outputs:
+  - name: summary
+    value: "{{ reindex_summary }}"
+
+steps:
+  # ==================== GET PROJECT LIST ====================
+
+  - name: get_all_projects
+    description: "Get list of all configured projects"
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      repositories = config.get("repositories", {})
+
+      # Filter to projects with valid paths
+      projects_to_index = []
+      skipped_projects = []
+
+      # Check if specific projects requested
+      requested = inputs.get("projects", "").strip()
+      if requested:
+          requested_list = [p.strip() for p in requested.split(",") if p.strip()]
+      else:
+          requested_list = None
+
+      for name, cfg in repositories.items():
+          # Skip if specific projects requested and this isn't one
+          if requested_list and name not in requested_list:
+              continue
+
+          project_path = Path(cfg.get("path", "")).expanduser()
+          if project_path.exists():
+              projects_to_index.append({
+                  "name": name,
+                  "path": str(project_path)
+              })
+          else:
+              skipped_projects.append({
+                  "name": name,
+                  "reason": f"Path not found: {cfg.get('path', 'no path')}"
+              })
+
+      all_projects = {
+          "to_index": projects_to_index,
+          "skipped": skipped_projects,
+          "total": len(repositories)
+      }
+    output: all_projects
+
+  # ==================== REINDEX EACH PROJECT ====================
+
+  - name: reindex_projects
+    description: "Reindex all projects"
+    compute: |
+      from datetime import datetime
+      import sys
+      from pathlib import Path
+
+      # Import the code search tools
+      try:
+          from tool_modules.aa_code_search.src.tools_basic import (
+              _index_project,
+              _get_index_stats,
+              get_all_vector_stats
+          )
+      except ImportError as e:
+          raise RuntimeError(f"Code search module not available: {e}")
+
+      results = []
+      total_files = 0
+      total_chunks = 0
+      errors = []
+      force = inputs.get("force", False)
+
+      for project_info in all_projects["to_index"]:
+          project_name = project_info["name"]
+
+          try:
+              # Get stats before
+              stats_before = _get_index_stats(project_name)
+              chunks_before = stats_before.get("chunks_count", 0) if stats_before.get("indexed") else 0
+
+              # Run indexing
+              index_result = _index_project(project_name, force=force)
+
+              if "error" in index_result:
+                  errors.append({
+                      "project": project_name,
+                      "error": index_result["error"]
+                  })
+                  results.append({
+                      "project": project_name,
+                      "status": "error",
+                      "error": index_result["error"]
+                  })
+              else:
+                  files_indexed = index_result.get("files_indexed", 0)
+                  chunks_created = index_result.get("chunks_created", 0)
+                  files_skipped = index_result.get("files_skipped", 0)
+
+                  total_files += files_indexed
+                  total_chunks += chunks_created
+
+                  # Get stats after
+                  stats_after = _get_index_stats(project_name)
+                  chunks_after = stats_after.get("chunks_count", 0) if stats_after.get("indexed") else 0
+
+                  results.append({
+                      "project": project_name,
+                      "status": "success",
+                      "files_indexed": files_indexed,
+                      "files_skipped": files_skipped,
+                      "chunks_created": chunks_created,
+                      "chunks_before": chunks_before,
+                      "chunks_after": chunks_after,
+                      "index_type": index_result.get("index_type", "FLAT")
+                  })
+
+          except Exception as e:
+              errors.append({
+                  "project": project_name,
+                  "error": str(e)
+              })
+              results.append({
+                  "project": project_name,
+                  "status": "error",
+                  "error": str(e)
+              })
+
+      index_results = {
+          "results": results,
+          "total_files": total_files,
+          "total_chunks": total_chunks,
+          "errors": errors,
+          "success_count": len([r for r in results if r["status"] == "success"]),
+          "error_count": len(errors)
+      }
+    output: index_results
+
+  # ==================== RESTART WATCHERS ====================
+
+  - name: restart_watchers
+    description: "Restart file watchers for indexed projects"
+    condition: "{{ inputs.restart_watchers | default(true) }}"
+    compute: |
+      import asyncio
+      from pathlib import Path
+
+      try:
+          from tool_modules.aa_code_search.src.tools_basic import (
+              _index_project,
+              _get_project_path
+          )
+          from tool_modules.aa_code_search.src.watcher import start_watcher, get_all_watchers
+      except ImportError:
+          watcher_results = {"status": "skipped", "reason": "Watcher module not available"}
+      else:
+          watcher_results = {"started": [], "failed": []}
+
+          for result in index_results["results"]:
+              if result["status"] == "success":
+                  project_name = result["project"]
+                  project_path = _get_project_path(project_name)
+
+                  if project_path and project_path.exists():
+                      try:
+                          # Start watcher (async)
+                          loop = asyncio.get_event_loop()
+                          loop.run_until_complete(
+                              start_watcher(
+                                  project=project_name,
+                                  project_path=project_path,
+                                  index_func=_index_project,
+                                  debounce_seconds=5.0
+                              )
+                          )
+                          watcher_results["started"].append(project_name)
+                      except Exception as e:
+                          watcher_results["failed"].append({
+                              "project": project_name,
+                              "error": str(e)
+                          })
+    output: watcher_results
+    on_error: continue
+
+  # ==================== BUILD SUMMARY ====================
+
+  - name: build_summary
+    description: "Build summary report"
+    compute: |
+      from datetime import datetime
+      from zoneinfo import ZoneInfo
+
+      tz = ZoneInfo("Europe/Dublin")
+      now = datetime.now(tz)
+
+      lines = [
+          "## 🔄 Vector Reindex Complete",
+          "",
+          f"**Timestamp:** {now.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+          "",
+          "---",
+          "",
+          "### 📊 Summary",
+          "",
+          f"- **Projects indexed:** {index_results['success_count']} / {len(all_projects['to_index'])}",
+          f"- **Total files processed:** {index_results['total_files']}",
+          f"- **Total chunks created:** {index_results['total_chunks']}",
+      ]
+
+      if index_results['error_count'] > 0:
+          lines.append(f"- **Errors:** {index_results['error_count']}")
+
+      lines.append("")
+
+      # Per-project results
+      if index_results["results"]:
+          lines.append("### 📁 Project Details")
+          lines.append("")
+          lines.append("| Project | Status | Files | Chunks | Index Type |")
+          lines.append("|---------|--------|-------|--------|------------|")
+
+          for r in index_results["results"]:
+              if r["status"] == "success":
+                  status = "✅"
+                  files = r.get("files_indexed", 0)
+                  chunks = r.get("chunks_after", 0)
+                  idx_type = r.get("index_type", "FLAT")
+                  lines.append(f"| {r['project']} | {status} | {files} | {chunks} | {idx_type} |")
+              else:
+                  status = "❌"
+                  error = r.get("error", "Unknown error")[:30]
+                  lines.append(f"| {r['project']} | {status} | - | - | {error}... |")
+
+          lines.append("")
+
+      # Skipped projects
+      if all_projects["skipped"]:
+          lines.append("### ⏭️ Skipped Projects")
+          lines.append("")
+          for s in all_projects["skipped"]:
+              lines.append(f"- **{s['name']}**: {s['reason']}")
+          lines.append("")
+
+      # Watcher status
+      if 'watcher_results' in dir() and watcher_results:
+          if watcher_results.get("status") == "skipped":
+              lines.append(f"### 👁️ Watchers: {watcher_results.get('reason', 'Skipped')}")
+          else:
+              started = watcher_results.get("started", [])
+              failed = watcher_results.get("failed", [])
+              if started:
+                  lines.append(f"### 👁️ Watchers Started: {len(started)}")
+                  lines.append("")
+                  for p in started:
+                      lines.append(f"- ✅ {p}")
+              if failed:
+                  lines.append("")
+                  lines.append("**Failed to start:**")
+                  for f in failed:
+                      lines.append(f"- ❌ {f['project']}: {f['error']}")
+          lines.append("")
+
+      # Errors detail
+      if index_results["errors"]:
+          lines.append("### ❌ Errors")
+          lines.append("")
+          for e in index_results["errors"]:
+              lines.append(f"- **{e['project']}**: {e['error']}")
+          lines.append("")
+
+      lines.append("---")
+      lines.append("")
+      lines.append("*Use `code_stats()` to view detailed statistics.*")
+      lines.append("*Use `code_health()` to check vector search health.*")
+
+      reindex_summary = "\n".join(lines)
+    output: reindex_summary
+
+  # ==================== LOG TO SESSION ====================
+
+  - name: log_execution
+    description: "Log the reindex to session memory"
+    tool: memory_session_log
+    args:
+      action: "Vector reindex completed"
+      details: "{{ index_results.success_count }} projects, {{ index_results.total_files }} files, {{ index_results.total_chunks }} chunks"
+    on_error: continue
+
+  # ==================== TRACK IN PATTERNS ====================
+
+  - name: track_reindex
+    description: "Track reindex in learned patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "vector_reindexes" not in patterns:
+          patterns["vector_reindexes"] = []
+
+      # Record this reindex
+      reindex_record = {
+          "timestamp": datetime.now().isoformat(),
+          "projects_indexed": index_results["success_count"],
+          "total_files": index_results["total_files"],
+          "total_chunks": index_results["total_chunks"],
+          "errors": index_results["error_count"],
+          "force": inputs.get("force", False),
+      }
+
+      patterns["vector_reindexes"].append(reindex_record)
+
+      # Keep last 50 reindexes
+      patterns["vector_reindexes"] = patterns["vector_reindexes"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "reindex tracked"
+    output: tracking_result
+    on_error: continue

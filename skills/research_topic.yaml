@@ -1,0 +1,286 @@
+# Skill: Research Topic
+# Deep dive on a topic using internal and external sources
+
+name: research_topic
+description: |
+  Research a topic thoroughly using multiple sources.
+
+  This skill:
+  1. Searches internal codebase for relevant implementations
+  2. Checks memory for past learnings and patterns
+  3. Queries project knowledge for architecture context
+  4. Optionally searches the web for external documentation
+
+  Use this when you need to understand something before taking action.
+
+version: "1.0"
+
+inputs:
+  - name: topic
+    type: string
+    required: true
+    description: "The topic to research (e.g., 'pytest fixtures', 'Redis caching', 'authentication flow')"
+
+  - name: project
+    type: string
+    required: false
+    description: "Project to search in (auto-detected if empty)"
+
+  - name: depth
+    type: string
+    required: false
+    default: "normal"
+    description: "Research depth: 'quick' (code only), 'normal' (code + memory), 'deep' (all sources)"
+
+  - name: focus
+    type: string
+    required: false
+    description: "Specific aspect to focus on (e.g., 'performance', 'security', 'testing')"
+
+steps:
+  # Detect project if not provided
+  - name: detect_project
+    condition: "{{ not inputs.project }}"
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      cwd = Path.cwd().resolve()
+
+      detected = None
+      for name, cfg in config.get("repositories", {}).items():
+          project_path = Path(cfg.get("path", "")).expanduser().resolve()
+          try:
+              cwd.relative_to(project_path)
+              detected = name
+              break
+          except ValueError:
+              continue
+
+      if not detected:
+          detected = "automation-analytics-backend"
+
+      project = detected
+    output: project
+
+  - name: set_project
+    condition: "{{ inputs.project }}"
+    compute: |
+      project = inputs.get("project")
+    output: project
+
+  # Search codebase for relevant code
+  - name: search_codebase
+    description: "Search codebase for topic-related code"
+    tool: code_search
+    args:
+      query: "{{ inputs.topic }}{% if inputs.focus %} {{ inputs.focus }}{% endif %}"
+      project: "{{ project }}"
+      limit: 10
+    output: code_results_raw
+    on_error: continue
+
+  - name: parse_code_results
+    description: "Parse code search results"
+    compute: |
+      results = []
+      if 'code_results_raw' in dir() and code_results_raw:
+          raw = code_results_raw
+          if isinstance(raw, dict) and raw.get('results'):
+              for r in raw.get('results', [])[:10]:
+                  results.append({
+                      'file': r.get('file_path', ''),
+                      'score': r.get('score', 0),
+                      'preview': r.get('code_chunk', '')[:200] if r.get('code_chunk') else '',
+                      'lines': r.get('line_range', ''),
+                  })
+          elif isinstance(raw, str):
+              # Parse text output
+              for line in raw.split('\n'):
+                  if ':' in line and line.strip():
+                      results.append({'file': line.strip()[:100], 'preview': ''})
+
+      code_results = results[:10]
+    output: code_results
+    on_error: continue
+
+  # Check memory for past learnings (normal and deep)
+  - name: check_patterns
+    description: "Check memory for related patterns"
+    condition: "inputs.depth != 'quick'"
+    tool: memory_read
+    args:
+      key: "learned/patterns"
+    output: patterns_raw
+    on_error: continue
+
+  - name: parse_patterns
+    description: "Find relevant patterns"
+    condition: "patterns_raw"
+    compute: |
+      topic_lower = inputs.topic.lower()
+      focus_lower = (inputs.get('focus') or '').lower()
+
+      relevant = []
+      if patterns_raw and isinstance(patterns_raw, dict):
+          for category, items in patterns_raw.items():
+              if isinstance(items, list):
+                  for item in items:
+                      if isinstance(item, dict):
+                          item_text = str(item).lower()
+                          if topic_lower in item_text or (focus_lower and focus_lower in item_text):
+                              relevant.append({
+                                  'category': category,
+                                  'pattern': item.get('pattern', ''),
+                                  'meaning': item.get('meaning', ''),
+                                  'fix': item.get('fix', ''),
+                              })
+
+      relevant_patterns = relevant[:5]
+    output: relevant_patterns
+    on_error: continue
+
+  # Query project knowledge (normal and deep)
+  - name: query_architecture
+    description: "Get architecture context"
+    condition: "inputs.depth != 'quick'"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "architecture"
+    output: architecture_raw
+    on_error: continue
+
+  - name: query_patterns
+    description: "Get coding patterns"
+    condition: "inputs.depth != 'quick'"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "patterns"
+    output: project_patterns_raw
+    on_error: continue
+
+  - name: query_gotchas
+    description: "Get relevant gotchas"
+    condition: "inputs.depth != 'quick'"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "gotchas"
+    output: gotchas_raw
+    on_error: continue
+
+  - name: parse_knowledge
+    description: "Parse knowledge results"
+    compute: |
+      topic_lower = inputs.topic.lower()
+
+      knowledge = {
+          'architecture': '',
+          'patterns': [],
+          'gotchas': [],
+      }
+
+      # Parse architecture
+      if 'architecture_raw' in dir() and architecture_raw:
+          arch_text = str(architecture_raw)
+          # Extract relevant sections
+          if topic_lower in arch_text.lower():
+              knowledge['architecture'] = arch_text[:500]
+
+      # Parse patterns
+      if 'project_patterns_raw' in dir() and project_patterns_raw:
+          patterns_text = str(project_patterns_raw)
+          for line in patterns_text.split('\n'):
+              if topic_lower in line.lower() and line.strip():
+                  knowledge['patterns'].append(line.strip()[:150])
+
+      # Parse gotchas
+      if 'gotchas_raw' in dir() and gotchas_raw:
+          gotchas_text = str(gotchas_raw)
+          for line in gotchas_text.split('\n'):
+              if line.strip().startswith('-') and topic_lower in line.lower():
+                  knowledge['gotchas'].append(line.strip()[1:].strip()[:150])
+
+      project_knowledge = knowledge
+    output: project_knowledge
+    on_error: continue
+
+  # Build research summary
+  - name: build_summary
+    compute: |
+      lines = [f"## 🔍 Research: {inputs.topic}\n"]
+
+      if inputs.get('focus'):
+          lines.append(f"**Focus:** {inputs.focus}\n")
+
+      lines.append(f"**Project:** {project}")
+      lines.append(f"**Depth:** {inputs.get('depth', 'normal')}\n")
+
+      # Code findings
+      lines.append("### 📁 Code Found\n")
+      if code_results:
+          for r in code_results[:7]:
+              lines.append(f"- `{r.get('file', 'unknown')}`")
+              if r.get('preview'):
+                  preview = r['preview'].replace('\n', ' ')[:80]
+                  lines.append(f"  > {preview}...")
+          lines.append("")
+      else:
+          lines.append("*No relevant code found in codebase.*\n")
+
+      # Memory patterns (if not quick)
+      if inputs.get('depth') != 'quick':
+          if relevant_patterns:
+              lines.append("### 🧠 Past Learnings\n")
+              for p in relevant_patterns:
+                  lines.append(f"**{p.get('pattern', 'Pattern')}** ({p.get('category', '')})")
+                  if p.get('meaning'):
+                      lines.append(f"- Meaning: {p['meaning']}")
+                  if p.get('fix'):
+                      lines.append(f"- Fix: {p['fix']}")
+                  lines.append("")
+
+          # Project knowledge
+          if project_knowledge.get('architecture'):
+              lines.append("### 🏗️ Architecture Context\n")
+              lines.append(project_knowledge['architecture'][:300])
+              lines.append("")
+
+          if project_knowledge.get('patterns'):
+              lines.append("### 📚 Coding Patterns\n")
+              for p in project_knowledge['patterns'][:5]:
+                  lines.append(f"- {p}")
+              lines.append("")
+
+          if project_knowledge.get('gotchas'):
+              lines.append("### ⚠️ Gotchas\n")
+              for g in project_knowledge['gotchas'][:5]:
+                  lines.append(f"- {g}")
+              lines.append("")
+
+      # Next steps
+      lines.append("---")
+      lines.append("### 💡 Next Steps\n")
+      lines.append("- Use **WebSearch** for external documentation if needed")
+      lines.append("- Use `explain_code` to dive deeper into specific files")
+      lines.append("- Use `plan_implementation` when ready to create an action plan")
+      lines.append("- Use `persona_load('developer')` when ready to implement")
+
+      research_summary = "\n".join(lines)
+    output: research_summary
+
+  # Log to session
+  - name: log_research
+    description: "Log research to session"
+    tool: memory_session_log
+    args:
+      action: "Researched: {{ inputs.topic }}"
+      details: "Project: {{ project }}, Depth: {{ inputs.depth | default('normal') }}, Code files found: {{ code_results | length }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: "{{ research_summary }}"

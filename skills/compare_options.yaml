@@ -1,0 +1,247 @@
+# Skill: Compare Options
+# Compare multiple approaches, libraries, or patterns
+
+name: compare_options
+description: |
+  Compare multiple options for implementing something.
+
+  This skill:
+  1. Takes a list of options to compare
+  2. Searches codebase for existing usage of each
+  3. Checks memory for past experiences
+  4. Creates a comparison matrix with pros/cons
+
+  Use this when deciding between approaches before implementation.
+
+version: "1.0"
+
+inputs:
+  - name: question
+    type: string
+    required: true
+    description: "What decision are you trying to make? (e.g., 'Which caching solution to use?')"
+
+  - name: options
+    type: string
+    required: true
+    description: "Comma-separated options to compare (e.g., 'Redis, Memcached, Django cache')"
+
+  - name: criteria
+    type: string
+    required: false
+    description: "Comma-separated criteria to evaluate (e.g., 'performance, complexity, cost')"
+
+  - name: project
+    type: string
+    required: false
+    description: "Project context (auto-detected if empty)"
+
+steps:
+  # Parse options
+  - name: parse_options
+    compute: |
+      options_list = [o.strip() for o in inputs.options.split(',') if o.strip()]
+      criteria_list = []
+      if inputs.get('criteria'):
+          criteria_list = [c.strip() for c in inputs.criteria.split(',') if c.strip()]
+      else:
+          # Default criteria
+          criteria_list = ['complexity', 'performance', 'maintainability', 'existing usage']
+
+      parsed = {
+          'options': options_list,
+          'criteria': criteria_list,
+      }
+    output: parsed
+
+  # Detect project
+  - name: detect_project
+    condition: "{{ not inputs.project }}"
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      cwd = Path.cwd().resolve()
+
+      detected = None
+      for name, cfg in config.get("repositories", {}).items():
+          project_path = Path(cfg.get("path", "")).expanduser().resolve()
+          try:
+              cwd.relative_to(project_path)
+              detected = name
+              break
+          except ValueError:
+              continue
+
+      project = detected or "automation-analytics-backend"
+    output: project
+
+  - name: set_project
+    condition: "{{ inputs.project }}"
+    compute: |
+      project = inputs.get("project")
+    output: project
+
+  # Search for each option in codebase
+  - name: search_option_1
+    description: "Search for first option"
+    condition: "len(parsed.options) >= 1"
+    tool: code_search
+    args:
+      query: "{{ parsed.options[0] }}"
+      project: "{{ project }}"
+      limit: 5
+    output: option_1_results
+    on_error: continue
+
+  - name: search_option_2
+    description: "Search for second option"
+    condition: "len(parsed.options) >= 2"
+    tool: code_search
+    args:
+      query: "{{ parsed.options[1] }}"
+      project: "{{ project }}"
+      limit: 5
+    output: option_2_results
+    on_error: continue
+
+  - name: search_option_3
+    description: "Search for third option"
+    condition: "len(parsed.options) >= 3"
+    tool: code_search
+    args:
+      query: "{{ parsed.options[2] }}"
+      project: "{{ project }}"
+      limit: 5
+    output: option_3_results
+    on_error: continue
+
+  # Check memory for past decisions
+  - name: check_patterns
+    description: "Check memory for related patterns"
+    tool: memory_read
+    args:
+      key: "learned/patterns"
+    output: patterns_raw
+    on_error: continue
+
+  # Analyze results
+  - name: analyze_options
+    compute: |
+      analysis = {}
+
+      for i, option in enumerate(parsed['options'][:3]):
+          option_key = f"option_{i+1}_results"
+          results = locals().get(option_key) or globals().get(option_key)
+
+          usage_count = 0
+          usage_files = []
+
+          if results:
+              if isinstance(results, dict) and results.get('results'):
+                  usage_count = len(results.get('results', []))
+                  usage_files = [r.get('file_path', '') for r in results.get('results', [])[:3]]
+              elif isinstance(results, str):
+                  usage_count = results.count('\n')
+
+          analysis[option] = {
+              'usage_count': usage_count,
+              'usage_files': usage_files,
+              'in_codebase': usage_count > 0,
+          }
+
+      options_analysis = analysis
+    output: options_analysis
+
+  # Build comparison
+  - name: build_comparison
+    compute: |
+      lines = [f"## ⚖️ Options Comparison\n"]
+      lines.append(f"**Question:** {inputs.question}\n")
+      lines.append(f"**Project:** {project}\n")
+
+      # Options overview
+      lines.append("### 📊 Options Overview\n")
+      lines.append("| Option | In Codebase | Usage Count | Files |")
+      lines.append("|--------|-------------|-------------|-------|")
+
+      for option in parsed['options'][:3]:
+          info = options_analysis.get(option, {})
+          in_codebase = "✅" if info.get('in_codebase') else "❌"
+          count = info.get('usage_count', 0)
+          files = ', '.join(info.get('usage_files', [])[:2]) or '-'
+          if len(files) > 40:
+              files = files[:40] + '...'
+          lines.append(f"| {option} | {in_codebase} | {count} | {files} |")
+
+      lines.append("")
+
+      # Detailed analysis per option
+      lines.append("### 📝 Detailed Analysis\n")
+
+      for option in parsed['options'][:3]:
+          info = options_analysis.get(option, {})
+          lines.append(f"#### {option}\n")
+
+          if info.get('in_codebase'):
+              lines.append(f"✅ **Already used in codebase** ({info.get('usage_count', 0)} occurrences)")
+              if info.get('usage_files'):
+                  lines.append("\nFound in:")
+                  for f in info.get('usage_files', [])[:3]:
+                      lines.append(f"- `{f}`")
+          else:
+              lines.append("❌ **Not currently used in codebase**")
+
+          lines.append("")
+          lines.append("**Pros:**")
+          lines.append("- [ ] *Add pros from research*")
+          lines.append("")
+          lines.append("**Cons:**")
+          lines.append("- [ ] *Add cons from research*")
+          lines.append("")
+
+      # Evaluation matrix
+      lines.append("### 📋 Evaluation Matrix\n")
+      lines.append("Rate each option 1-5 for each criterion:\n")
+
+      header = "| Criterion | " + " | ".join(parsed['options'][:3]) + " |"
+      separator = "|-----------|" + "|".join(["---" for _ in parsed['options'][:3]]) + "|"
+      lines.append(header)
+      lines.append(separator)
+
+      for criterion in parsed['criteria']:
+          row = f"| {criterion} | " + " | ".join(["?" for _ in parsed['options'][:3]]) + " |"
+          lines.append(row)
+
+      lines.append("")
+
+      # Recommendation placeholder
+      lines.append("### 💡 Recommendation\n")
+      lines.append("*Based on the analysis above, fill in your recommendation:*\n")
+      lines.append("**Recommended option:** ___")
+      lines.append("**Rationale:** ___")
+      lines.append("")
+
+      # Next steps
+      lines.append("---")
+      lines.append("### 🔍 Next Steps\n")
+      lines.append("- Use **WebSearch** to research pros/cons of each option")
+      lines.append("- Review existing usage with `explain_code` if found in codebase")
+      lines.append("- Use `plan_implementation` once you've decided")
+
+      comparison = "\n".join(lines)
+    output: comparison
+
+  # Log to session
+  - name: log_comparison
+    description: "Log comparison to session"
+    tool: memory_session_log
+    args:
+      action: "Compared options: {{ inputs.options }}"
+      details: "Question: {{ inputs.question }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: "{{ comparison }}"

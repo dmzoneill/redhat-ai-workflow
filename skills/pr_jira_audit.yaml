@@ -1,0 +1,572 @@
+# Skill: PR Jira Audit
+# Audit open PRs for missing Jira issue references and create issues as needed
+
+name: pr_jira_audit
+description: |
+  Audit open MRs/PRs for missing Jira issue references.
+
+  Scans each open MR in the project and checks:
+  - MR title for Jira issue key (e.g., AAP-12345)
+  - MR description/body for Jira issue key
+  - Git commit messages for Jira issue key
+
+  For MRs without a linked Jira issue:
+  - Reports the missing link
+  - Optionally creates a new Jira issue for the MR
+  - Optionally adds the issue key as a comment on the MR
+
+  Use for:
+  - Sprint hygiene audits
+  - Ensuring all work is tracked in Jira
+  - Compliance/traceability requirements
+
+  Resolves project from repo_name or current directory if not explicitly provided.
+
+version: "1.0"
+
+inputs:
+  - name: project
+    type: string
+    required: false
+    default: ""
+    description: "GitLab project path (resolved from repo_name if not provided)"
+
+  - name: repo_name
+    type: string
+    required: false
+    default: "automation-analytics-backend"
+    description: "Repository name from config"
+
+  - name: jira_project
+    type: string
+    required: false
+    default: "AAP"
+    description: "Jira project key for creating new issues"
+
+  - name: limit
+    type: integer
+    required: false
+    default: 20
+    description: "Maximum number of MRs to audit"
+
+  - name: auto_create
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically create Jira issues for MRs without one"
+
+  - name: add_comment
+    type: boolean
+    required: false
+    default: false
+    description: "Add a comment to the MR with the created Jira issue key"
+
+  - name: dry_run
+    type: boolean
+    required: false
+    default: true
+    description: "If true, report what would be done without taking action"
+
+  - name: slack_format
+    type: boolean
+    required: false
+    default: false
+    description: "Use Slack link format in summary"
+
+steps:
+
+  - name: init_autoheal
+    description: "Initialize failure tracking"
+    compute: |
+      result = {"gitlab_failures": [], "jira_failures": []}
+    output: autoheal_state
+    on_error: continue
+
+  # ==================== RESOLVE PROJECT ====================
+
+  - name: resolve_project
+    description: "Determine which GitLab project to audit"
+    compute: |
+      import os
+      from scripts.common.config_loader import load_config
+
+      gitlab_project = None
+
+      # Load config using shared loader
+      config = load_config()
+      repos = config.get("repositories", {})
+
+      # Explicit project
+      if inputs.get("project"):
+          gitlab_project = inputs.get("project")
+      # Repo name from config
+      elif inputs.get("repo_name") and inputs.get("repo_name") in repos:
+          gitlab_project = repos[inputs.get("repo_name")].get("gitlab")
+      # Fall back to cwd
+      else:
+          cwd = os.getcwd()
+          for name, cfg in repos.items():
+              if cfg.get("path") == cwd:
+                  gitlab_project = cfg.get("gitlab")
+                  break
+
+      if not gitlab_project:
+          gitlab_project = "automation-analytics/automation-analytics-backend"
+
+      result = {"gitlab_project": gitlab_project}
+    output: resolved
+
+  # ==================== GET OPEN MRs ====================
+
+  - name: list_open_mrs
+    description: "Fetch all open MRs from GitLab"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ resolved.gitlab_project }}"
+      state: opened
+      per_page: "{{ inputs.limit }}"
+    output: open_mrs_raw
+    on_error: auto_heal
+
+  - name: parse_mrs
+    description: "Parse MR list to extract IDs and titles"
+    compute: |
+      from scripts.common.parsers import parse_mr_list
+
+      # Parse all MRs with author information
+      all_mrs = parse_mr_list(open_mrs_raw or "", include_author=True)
+
+      result = {
+        'mrs': all_mrs,
+        'count': len(all_mrs)
+      }
+    output: parsed_mrs
+
+  # ==================== AUDIT EACH MR FOR JIRA REFERENCE ====================
+
+  - name: prep_first_mr
+    description: "Extract first MR info for detailed check"
+    condition: "parsed_mrs.get('mrs') and len(parsed_mrs.get('mrs', [])) > 0"
+    compute: |
+      mrs = parsed_mrs.get('mrs', [])
+      first_mr = mrs[0] if mrs else {}
+      result = {
+        'iid': first_mr.get('iid', 0),
+        'title': first_mr.get('title', ''),
+        'author': first_mr.get('author', 'unknown')
+      }
+    output: first_mr_info
+
+  - name: get_first_mr_details
+    description: "Get full details of first MR including description"
+    condition: "first_mr_info and first_mr_info.get('iid', 0) > 0"
+    tool: gitlab_mr_view
+    args:
+      project: "{{ resolved.gitlab_project }}"
+      mr_id: "{{ first_mr_info.iid }}"
+    output: first_mr_details
+    on_error: auto_heal
+
+  - name: get_first_mr_commits
+    description: "Get commits for first MR to check for Jira refs"
+    condition: "first_mr_info and first_mr_info.get('iid', 0) > 0"
+    tool: gitlab_mr_commits
+    args:
+      project: "{{ resolved.gitlab_project }}"
+      mr_id: "{{ first_mr_info.iid }}"
+    output: first_mr_commits
+    on_error: continue
+
+  - name: audit_first_mr
+    description: "Check first MR for Jira issue reference"
+    condition: "first_mr_info and first_mr_info.get('iid', 0) > 0"
+    compute: |
+      import re
+
+      # Jira issue pattern (e.g., AAP-12345, RHCLOUD-1234)
+      jira_pattern = r'[A-Z]{2,10}-\d+'
+
+      mr_iid = first_mr_info.get('iid', 0)
+      mr_title = first_mr_info.get('title', '')
+      mr_author = first_mr_info.get('author', 'unknown')
+
+      # Get description from details
+      details = first_mr_details if isinstance(first_mr_details, str) else ""
+      commits = first_mr_commits if isinstance(first_mr_commits, str) else ""
+
+      # Search for Jira keys in title
+      title_matches = re.findall(jira_pattern, mr_title)
+
+      # Search for Jira keys in description
+      desc_matches = re.findall(jira_pattern, details)
+
+      # Search for Jira keys in commits
+      commit_matches = re.findall(jira_pattern, commits)
+
+      # Combine all found keys (deduplicated)
+      all_keys = list(set(title_matches + desc_matches + commit_matches))
+
+      # Determine if MR has a Jira reference
+      has_jira = len(all_keys) > 0
+
+      result = {
+        'iid': mr_iid,
+        'title': mr_title,
+        'author': mr_author,
+        'has_jira': has_jira,
+        'jira_keys': all_keys,
+        'found_in_title': len(title_matches) > 0,
+        'found_in_description': len(desc_matches) > 0,
+        'found_in_commits': len(commit_matches) > 0,
+      }
+    output: first_mr_audit
+
+  # ==================== AUDIT REMAINING MRs (simplified) ====================
+
+  - name: audit_all_mrs
+    description: "Quick audit of all MRs based on title pattern"
+    compute: |
+      import re
+
+      jira_pattern = r'[A-Z]{2,10}-\d+'
+      mrs = parsed_mrs.get('mrs', [])
+
+      audited = []
+      missing_jira = []
+      has_jira = []
+
+      for mr in mrs:
+        mr_iid = mr.get('iid', 0)
+        mr_title = mr.get('title', '')
+        mr_author = mr.get('author', 'unknown')
+
+        # Quick check: look for Jira key in title
+        title_matches = re.findall(jira_pattern, mr_title)
+
+        audit_result = {
+          'iid': mr_iid,
+          'title': mr_title,
+          'author': mr_author,
+          'has_jira_in_title': len(title_matches) > 0,
+          'jira_keys': title_matches,
+        }
+
+        audited.append(audit_result)
+
+        if len(title_matches) > 0:
+          has_jira.append(audit_result)
+        else:
+          missing_jira.append(audit_result)
+
+      result = {
+        'audited': audited,
+        'missing_jira': missing_jira,
+        'has_jira': has_jira,
+        'total': len(mrs),
+        'missing_count': len(missing_jira),
+        'compliant_count': len(has_jira),
+      }
+    output: audit_results
+
+  # ==================== CREATE JIRA ISSUES FOR MISSING ====================
+
+  - name: prep_first_missing
+    description: "Prepare first missing MR for Jira creation"
+    condition: "audit_results.get('missing_count', 0) > 0 and inputs.get('auto_create', False) and not inputs.get('dry_run', True)"
+    compute: |
+      missing = audit_results.get('missing_jira', [])
+      first_missing = missing[0] if missing else {}
+      result = {
+        'iid': first_missing.get('iid', 0),
+        'title': first_missing.get('title', ''),
+        'author': first_missing.get('author', 'unknown'),
+      }
+    output: first_missing_mr
+
+  - name: create_jira_for_first_missing
+    description: "Create Jira issue for first MR without one"
+    condition: "first_missing_mr and first_missing_mr.get('iid', 0) > 0 and inputs.get('auto_create', False) and not inputs.get('dry_run', True)"
+    tool: jira_create_issue
+    args:
+      project: "{{ inputs.jira_project }}"
+      summary: "{{ first_missing_mr.title }}"
+      description: |
+        This Jira issue was auto-created for GitLab MR !{{ first_missing_mr.iid }}.
+
+        **MR Title:** {{ first_missing_mr.title }}
+        **Author:** {{ first_missing_mr.author }}
+        **Project:** {{ resolved.gitlab_project }}
+
+        ---
+        _Auto-generated by PR Jira Audit skill_
+      issue_type: "Task"
+      priority: "Normal"
+    output: created_issue_raw
+    on_error: continue
+
+  - name: parse_created_issue
+    description: "Parse created issue result"
+    condition: "created_issue_raw"
+    compute: |
+      import re
+
+      result_text = str(created_issue_raw) if created_issue_raw else ""
+
+      # Extract issue key
+      issue_key = None
+      key_match = re.search(r'([A-Z]+-\d+)', result_text)
+      if key_match:
+          issue_key = key_match.group(1)
+
+      success = issue_key is not None
+
+      result = {
+        "success": success,
+        "issue_key": issue_key,
+        "message": result_text[:300] if result_text else "No response",
+      }
+    output: created_issue
+
+  - name: comment_on_mr
+    description: "Add comment to MR with created Jira issue"
+    condition: "created_issue and created_issue.get('success') and inputs.get('add_comment', False)"
+    tool: gitlab_mr_comment
+    args:
+      project: "{{ resolved.gitlab_project }}"
+      mr_id: "{{ first_missing_mr.iid }}"
+      message: |
+        ## 🎫 Jira Issue Created
+
+        A Jira issue has been created for this MR: **{{ created_issue.issue_key }}**
+
+        View: https://issues.redhat.com/browse/{{ created_issue.issue_key }}
+
+        ---
+        _Auto-generated by PR Jira Audit_
+    output: comment_result
+    on_error: continue
+
+  # ==================== BUILD SUMMARY ====================
+
+  - name: build_summary
+    description: "Compile audit results"
+    compute: |
+      from scripts.common.parsers import linkify_mr_ids, linkify_jira_keys
+      is_slack = inputs.get('slack_format', True)
+
+      _resolved = resolved if isinstance(resolved, dict) else {}
+      gitlab_project = _resolved.get('gitlab_project', 'unknown')
+
+      _audit = audit_results if isinstance(audit_results, dict) else {}
+      total = _audit.get('total', 0)
+      missing_count = _audit.get('missing_count', 0)
+      compliant_count = _audit.get('compliant_count', 0)
+      missing_mrs = _audit.get('missing_jira', [])
+      compliant_mrs = _audit.get('has_jira', [])
+
+      lines = ["## 🔍 PR Jira Audit Results", ""]
+      lines.append(f"**Project:** {gitlab_project}")
+      lines.append(f"**Total MRs Audited:** {total}")
+      lines.append(f"**Dry Run:** {'Yes' if inputs.get('dry_run', True) else 'No'}")
+      lines.append("")
+
+      # Summary stats
+      compliance_pct = (compliant_count / total * 100) if total > 0 else 0
+      if compliance_pct >= 90:
+        health_emoji = "🟢"
+      elif compliance_pct >= 70:
+        health_emoji = "🟡"
+      elif compliance_pct >= 50:
+        health_emoji = "🟠"
+      else:
+        health_emoji = "🔴"
+
+      lines.append(f"### {health_emoji} Compliance: {compliance_pct:.0f}%")
+      lines.append(f"- ✅ **With Jira:** {compliant_count}")
+      lines.append(f"- ❌ **Missing Jira:** {missing_count}")
+      lines.append("")
+
+      # List MRs missing Jira
+      if missing_mrs:
+        lines.append("### ❌ MRs Missing Jira Reference")
+        lines.append("")
+        for mr in missing_mrs[:10]:
+          mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+          title = mr.get('title', '')[:60]
+          author = mr.get('author', 'unknown')
+          lines.append(f"- {mr_id}: {title}")
+          lines.append(f"  - Author: {author}")
+        if len(missing_mrs) > 10:
+          lines.append(f"  - *... and {len(missing_mrs) - 10} more*")
+        lines.append("")
+
+      # List compliant MRs (abbreviated)
+      if compliant_mrs:
+        lines.append("### ✅ MRs With Jira Reference")
+        lines.append("")
+        for mr in compliant_mrs[:5]:
+          mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
+          jira_keys = mr.get('jira_keys', [])
+          jira_str = ", ".join(jira_keys[:3]) if jira_keys else "?"
+          if is_slack:
+            jira_links = ", ".join([f"<https://issues.redhat.com/browse/{k}|{k}>" for k in jira_keys[:3]])
+          else:
+            jira_links = ", ".join([f"[{k}](https://issues.redhat.com/browse/{k})" for k in jira_keys[:3]])
+          title = mr.get('title', '')[:40]
+          lines.append(f"- {mr_id}: {title} → {jira_links}")
+        if len(compliant_mrs) > 5:
+          lines.append(f"  - *... and {len(compliant_mrs) - 5} more*")
+        lines.append("")
+
+      # Created issues section
+      _created = created_issue if 'created_issue' in dir() and isinstance(created_issue, dict) else None
+      if _created and _created.get('success'):
+        lines.append("### 🎫 Jira Issues Created")
+        lines.append("")
+        if is_slack:
+          lines.append(f"- <https://issues.redhat.com/browse/{_created['issue_key']}|{_created['issue_key']}> for !{first_missing_mr.get('iid', '?')}")
+        else:
+          lines.append(f"- [{_created['issue_key']}](https://issues.redhat.com/browse/{_created['issue_key']}) for !{first_missing_mr.get('iid', '?')}")
+        lines.append("")
+
+      result = '\n'.join(lines)
+    output: audit_summary
+
+  # ==================== MEMORY INTEGRATION ====================
+
+  - name: log_audit
+    description: "Log audit to session"
+    tool: memory_session_log
+    args:
+      action: "PR Jira Audit on {{ resolved.gitlab_project }}"
+      details: "{{ audit_results.missing_count }} of {{ audit_results.total }} MRs missing Jira"
+    on_error: continue
+
+  - name: track_audit_results
+    description: "Track audit results for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "pr_jira_audits" not in patterns:
+          patterns["pr_jira_audits"] = []
+
+      _audit = audit_results if isinstance(audit_results, dict) else {}
+      _resolved = resolved if isinstance(resolved, dict) else {}
+
+      # Record this audit
+      audit_record = {
+          "project": _resolved.get("gitlab_project", ""),
+          "total": _audit.get("total", 0),
+          "missing_count": _audit.get("missing_count", 0),
+          "compliant_count": _audit.get("compliant_count", 0),
+          "compliance_pct": (_audit.get("compliant_count", 0) / _audit.get("total", 1) * 100) if _audit.get("total", 0) > 0 else 0,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["pr_jira_audits"].append(audit_record)
+
+      # Keep last 50 audits
+      patterns["pr_jira_audits"] = patterns["pr_jira_audits"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "audit tracked"
+    output: audit_tracking_result
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_audit_failures
+    description: "Detect failure patterns from audit"
+    compute: |
+      errors_detected = []
+
+      # Check GitLab API failures
+      mrs_text = str(open_mrs_raw) if 'open_mrs_raw' in dir() and open_mrs_raw else ""
+
+      if "no such host" in mrs_text.lower() or "dial tcp" in mrs_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "unauthorized" in mrs_text.lower() or "401" in mrs_text:
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "unauthorized",
+              "cause": "GitLab authentication failed or token expired",
+              "fix": "Check GitLab token in config.json"
+          })
+
+      result = errors_detected
+    output: audit_errors_detected
+    on_error: continue
+
+  - name: learn_audit_vpn_failure
+    description: "Learn from GitLab VPN failures"
+    condition: "audit_errors_detected and any(e.get('pattern') == 'no such host' for e in audit_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gitlab_mr_list"
+      error_pattern: "no such host"
+      root_cause: "VPN not connected - internal GitLab not reachable"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: audit_vpn_fix_learned
+    on_error: continue
+
+# ==================== OUTPUT ====================
+
+outputs:
+  - name: summary
+    value: |
+      {{ audit_summary }}
+
+      ---
+
+      ## Quick Actions
+
+      {% if audit_results.missing_count > 0 %}
+      ### Create Jira Issues for Missing MRs
+
+      {% if inputs.dry_run %}
+      **Dry run mode** - To actually create issues, run:
+      ```python
+      skill_run("pr_jira_audit", '{"dry_run": false, "auto_create": true}')
+      ```
+
+      Or create issues manually:
+      {% for mr in audit_results.missing_jira[:3] %}
+      ```python
+      skill_run("create_jira_issue", '{"summary": "{{ mr.title[:50] }}", "project": "{{ inputs.jira_project }}"}')
+      ```
+      {% endfor %}
+      {% else %}
+      {% if created_issue and created_issue.success %}
+      ✅ Created {{ created_issue.issue_key }} for !{{ first_missing_mr.iid }}
+
+      To create issues for remaining MRs, run the audit again.
+      {% else %}
+      Run with `auto_create: true` to create Jira issues automatically.
+      {% endif %}
+      {% endif %}
+      {% else %}
+      🎉 **All MRs have Jira references!**
+      {% endif %}
+
+      ---
+
+      ### Other Actions
+
+      - **Re-run audit:** `skill_run("pr_jira_audit", '{}')`
+      - **View specific MR:** `gitlab_mr_view(project="{{ resolved.gitlab_project }}", mr_id=<id>)`
+      - **Create Jira issue:** `skill_run("create_jira_issue", '{"summary": "...", "project": "{{ inputs.jira_project }}"}')`
+
+  - name: context
+    value:
+      project: "{{ resolved.gitlab_project }}"
+      total_audited: "{{ audit_results.total }}"
+      missing_count: "{{ audit_results.missing_count }}"
+      compliant_count: "{{ audit_results.compliant_count }}"
+      dry_run: "{{ inputs.dry_run }}"

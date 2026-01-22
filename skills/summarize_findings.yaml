@@ -1,0 +1,191 @@
+# Skill: Summarize Findings
+# Create a summary document from research session
+
+name: summarize_findings
+description: |
+  Create a summary of research findings from the current session.
+
+  This skill:
+  1. Reviews session logs for research activities
+  2. Compiles findings into a structured summary
+  3. Optionally saves to memory for future reference
+
+  Use this at the end of a research session to capture learnings.
+
+version: "1.0"
+
+inputs:
+  - name: topic
+    type: string
+    required: true
+    description: "Topic of the research (e.g., 'caching strategies')"
+
+  - name: conclusion
+    type: string
+    required: false
+    description: "Your conclusion or recommendation"
+
+  - name: save_to_memory
+    type: boolean
+    required: false
+    default: true
+    description: "Save summary to memory for future reference"
+
+steps:
+  # Get session logs
+  - name: get_session_logs
+    description: "Get today's session logs"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      today = datetime.now().strftime("%Y-%m-%d")
+      logs_dir = Path.home() / "src/redhat-ai-workflow/memory/sessions"
+      log_file = logs_dir / f"{today}.yaml"
+
+      session_entries = []
+      if log_file.exists():
+          try:
+              with open(log_file) as f:
+                  data = yaml.safe_load(f) or {}
+              session_entries = data.get('entries', [])[-20:]  # Last 20 entries
+          except:
+              pass
+
+      session_logs = session_entries
+    output: session_logs
+    on_error: continue
+
+  # Filter research-related entries
+  - name: filter_research_entries
+    compute: |
+      topic_lower = inputs.topic.lower()
+
+      research_entries = []
+      for entry in session_logs:
+          action = str(entry.get('action', '')).lower()
+          details = str(entry.get('details', '')).lower()
+
+          # Include research-related actions
+          if any(kw in action for kw in ['research', 'search', 'compare', 'explain', 'plan']):
+              research_entries.append(entry)
+          elif topic_lower in action or topic_lower in details:
+              research_entries.append(entry)
+
+      filtered_entries = research_entries
+    output: filtered_entries
+    on_error: continue
+
+  # Build summary
+  - name: build_summary
+    compute: |
+      from datetime import datetime
+
+      lines = [f"## 📄 Research Summary: {inputs.topic}\n"]
+      lines.append(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+
+      # Session activity
+      if filtered_entries:
+          lines.append("### 📋 Research Activity\n")
+          for entry in filtered_entries:
+              action = entry.get('action', '')
+              details = entry.get('details', '')
+              timestamp = entry.get('timestamp', '')
+              if timestamp:
+                  time_str = timestamp.split('T')[1][:5] if 'T' in timestamp else timestamp
+                  lines.append(f"- **{time_str}** - {action}")
+              else:
+                  lines.append(f"- {action}")
+              if details:
+                  lines.append(f"  - {details}")
+          lines.append("")
+
+      # Conclusion
+      if inputs.get('conclusion'):
+          lines.append("### 💡 Conclusion\n")
+          lines.append(inputs.conclusion)
+          lines.append("")
+
+      # Key findings placeholder
+      lines.append("### 🔑 Key Findings\n")
+      lines.append("*Add key findings from your research:*")
+      lines.append("1. ")
+      lines.append("2. ")
+      lines.append("3. ")
+      lines.append("")
+
+      # Next steps
+      lines.append("### ➡️ Next Steps\n")
+      lines.append("*What should happen next?*")
+      lines.append("- [ ] ")
+      lines.append("")
+
+      # References
+      lines.append("### 📚 References\n")
+      lines.append("*Add links to documentation, files, or resources:*")
+      lines.append("- ")
+      lines.append("")
+
+      summary_text = "\n".join(lines)
+    output: summary_text
+
+  # Save to memory if requested
+  - name: save_summary
+    description: "Save summary to memory"
+    condition: "inputs.save_to_memory"
+    compute: |
+      from pathlib import Path
+      from datetime import datetime
+      import yaml
+
+      # Save to research summaries
+      summaries_file = Path.home() / "src/redhat-ai-workflow/memory/learned/research_summaries.yaml"
+      summaries_file.parent.mkdir(parents=True, exist_ok=True)
+
+      try:
+          if summaries_file.exists():
+              with open(summaries_file) as f:
+                  data = yaml.safe_load(f) or {}
+          else:
+              data = {'summaries': []}
+
+          # Add new summary
+          new_summary = {
+              'topic': inputs.topic,
+              'date': datetime.now().isoformat(),
+              'conclusion': inputs.get('conclusion', ''),
+              'activity_count': len(filtered_entries) if filtered_entries else 0,
+          }
+
+          data['summaries'].append(new_summary)
+          data['summaries'] = data['summaries'][-50:]  # Keep last 50
+          data['last_updated'] = datetime.now().isoformat()
+
+          with open(summaries_file, 'w') as f:
+              yaml.dump(data, f, default_flow_style=False)
+
+          save_result = {'success': True, 'file': str(summaries_file)}
+      except Exception as e:
+          save_result = {'success': False, 'error': str(e)}
+    output: save_result
+    on_error: continue
+
+  # Log to session
+  - name: log_summary
+    description: "Log summary creation to session"
+    tool: memory_session_log
+    args:
+      action: "Created research summary: {{ inputs.topic }}"
+      details: "{% if inputs.conclusion %}Conclusion: {{ inputs.conclusion[:100] }}{% endif %}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {{ summary_text }}
+
+      {% if save_result.success %}
+      ---
+      *Summary saved to memory for future reference.*
+      {% endif %}

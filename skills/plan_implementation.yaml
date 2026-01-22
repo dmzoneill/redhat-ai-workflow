@@ -1,0 +1,239 @@
+# Skill: Plan Implementation
+# Create an implementation plan from research findings
+
+name: plan_implementation
+description: |
+  Create a structured implementation plan for a feature or change.
+
+  This skill:
+  1. Analyzes the goal and breaks it into steps
+  2. Identifies files that need to be modified
+  3. Checks for existing patterns to follow
+  4. Identifies risks and unknowns
+  5. Creates a checklist-style plan
+
+  Use this after researching to create an actionable plan before coding.
+
+version: "1.0"
+
+inputs:
+  - name: goal
+    type: string
+    required: true
+    description: "What you want to implement (e.g., 'Add Redis caching to billing API')"
+
+  - name: project
+    type: string
+    required: false
+    description: "Project to plan for (auto-detected if empty)"
+
+  - name: issue_key
+    type: string
+    required: false
+    description: "Jira issue key if this is for a specific ticket"
+
+  - name: constraints
+    type: string
+    required: false
+    description: "Any constraints or requirements (e.g., 'must be backwards compatible')"
+
+steps:
+  # Detect project
+  - name: detect_project
+    condition: "{{ not inputs.project }}"
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      cwd = Path.cwd().resolve()
+
+      detected = None
+      for name, cfg in config.get("repositories", {}).items():
+          project_path = Path(cfg.get("path", "")).expanduser().resolve()
+          try:
+              cwd.relative_to(project_path)
+              detected = name
+              break
+          except ValueError:
+              continue
+
+      project = detected or "automation-analytics-backend"
+    output: project
+
+  - name: set_project
+    condition: "{{ inputs.project }}"
+    compute: |
+      project = inputs.get("project")
+    output: project
+
+  # Get Jira issue details if provided
+  - name: get_issue_details
+    description: "Get Jira issue details"
+    condition: "{{ inputs.issue_key }}"
+    tool: jira_view_issue
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: issue_details
+    on_error: continue
+
+  # Search for related code
+  - name: search_related_code
+    description: "Find code related to the goal"
+    tool: code_search
+    args:
+      query: "{{ inputs.goal }}"
+      project: "{{ project }}"
+      limit: 10
+    output: related_code_raw
+    on_error: continue
+
+  - name: parse_related_code
+    compute: |
+      files_to_modify = []
+      if 'related_code_raw' in dir() and related_code_raw:
+          raw = related_code_raw
+          if isinstance(raw, dict) and raw.get('results'):
+              for r in raw.get('results', [])[:10]:
+                  files_to_modify.append({
+                      'file': r.get('file_path', ''),
+                      'relevance': r.get('score', 0),
+                      'reason': 'Semantic match to goal',
+                  })
+
+      candidate_files = files_to_modify[:10]
+    output: candidate_files
+    on_error: continue
+
+  # Get project patterns
+  - name: get_patterns
+    description: "Get coding patterns to follow"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "patterns.coding"
+    output: patterns_raw
+    on_error: continue
+
+  # Get architecture info
+  - name: get_architecture
+    description: "Get architecture context"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "architecture.key_modules"
+    output: architecture_raw
+    on_error: continue
+
+  # Get gotchas
+  - name: get_gotchas
+    description: "Get relevant gotchas"
+    tool: knowledge_query
+    args:
+      project: "{{ project }}"
+      section: "gotchas"
+    output: gotchas_raw
+    on_error: continue
+
+  # Build implementation plan
+  - name: build_plan
+    compute: |
+      lines = [f"## 📋 Implementation Plan\n"]
+      lines.append(f"**Goal:** {inputs.goal}\n")
+
+      if inputs.get('issue_key'):
+          lines.append(f"**Issue:** {inputs.issue_key}")
+      lines.append(f"**Project:** {project}")
+      if inputs.get('constraints'):
+          lines.append(f"**Constraints:** {inputs.constraints}")
+      lines.append("")
+
+      # Issue context if available
+      if 'issue_details' in dir() and issue_details:
+          lines.append("### 📝 Issue Context\n")
+          if isinstance(issue_details, dict):
+              if issue_details.get('summary'):
+                  lines.append(f"**Summary:** {issue_details['summary']}")
+              if issue_details.get('acceptance_criteria'):
+                  lines.append(f"\n**Acceptance Criteria:**")
+                  lines.append(issue_details['acceptance_criteria'][:500])
+          lines.append("")
+
+      # Files to modify
+      lines.append("### 📁 Files to Modify\n")
+      if candidate_files:
+          lines.append("Based on semantic search, these files are likely relevant:\n")
+          for f in candidate_files[:7]:
+              lines.append(f"- [ ] `{f.get('file', 'unknown')}`")
+          lines.append("")
+      else:
+          lines.append("*No existing files identified - may need new files.*\n")
+
+      # Implementation steps (template)
+      lines.append("### 🔨 Implementation Steps\n")
+      lines.append("1. [ ] **Setup** - Create branch, update Jira status")
+      lines.append("2. [ ] **Research** - Review existing patterns in codebase")
+      lines.append("3. [ ] **Implement** - Write the code changes")
+      lines.append("4. [ ] **Test** - Add/update tests")
+      lines.append("5. [ ] **Document** - Update docstrings/README if needed")
+      lines.append("6. [ ] **Review** - Self-review, run lints")
+      lines.append("7. [ ] **Submit** - Create MR, request review")
+      lines.append("")
+
+      # Patterns to follow
+      if 'patterns_raw' in dir() and patterns_raw:
+          lines.append("### 📚 Patterns to Follow\n")
+          patterns_text = str(patterns_raw)
+          pattern_lines = [l.strip() for l in patterns_text.split('\n') if l.strip().startswith('-')]
+          for p in pattern_lines[:5]:
+              lines.append(p)
+          lines.append("")
+
+      # Risks and gotchas
+      lines.append("### ⚠️ Risks & Gotchas\n")
+      if 'gotchas_raw' in dir() and gotchas_raw:
+          gotchas_text = str(gotchas_raw)
+          gotcha_lines = [l.strip() for l in gotchas_text.split('\n') if l.strip().startswith('-')]
+          for g in gotcha_lines[:5]:
+              lines.append(g)
+      else:
+          lines.append("- [ ] Check for backwards compatibility")
+          lines.append("- [ ] Consider performance implications")
+          lines.append("- [ ] Review security considerations")
+      lines.append("")
+
+      # Unknowns
+      lines.append("### ❓ Unknowns to Resolve\n")
+      lines.append("- [ ] *Add unknowns discovered during research*")
+      lines.append("")
+
+      # Ready to start
+      lines.append("---")
+      lines.append("### 🚀 Ready to Start?\n")
+      if inputs.get('issue_key'):
+          lines.append(f"```python")
+          lines.append(f"# Switch to developer persona and start work")
+          lines.append(f"persona_load('developer')")
+          lines.append(f"skill_run('start_work', '{{\"issue_key\": \"{inputs.issue_key}\"}}')")
+          lines.append(f"```")
+      else:
+          lines.append("```python")
+          lines.append("# Switch to developer persona when ready")
+          lines.append("persona_load('developer')")
+          lines.append("```")
+
+      implementation_plan = "\n".join(lines)
+    output: implementation_plan
+
+  # Log to session
+  - name: log_plan
+    description: "Log plan creation to session"
+    tool: memory_session_log
+    args:
+      action: "Created implementation plan"
+      details: "Goal: {{ inputs.goal }}{% if inputs.issue_key %}, Issue: {{ inputs.issue_key }}{% endif %}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: "{{ implementation_plan }}"

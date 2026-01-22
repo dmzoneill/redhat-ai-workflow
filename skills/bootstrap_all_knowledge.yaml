@@ -1,0 +1,493 @@
+# Skill: Bootstrap All Knowledge
+# Iterate all projects and personas to build/refresh project knowledge
+
+name: bootstrap_all_knowledge
+description: |
+  Iterate all configured projects and all available personas to build project knowledge.
+
+  This skill:
+  1. Gets all configured projects from config.json (dynamic)
+  2. Gets all available personas from personas/*.yaml (dynamic)
+  3. For each project/persona combination:
+     - Skip if knowledge already exists (unless force=true)
+     - Run knowledge_scan to generate knowledge
+  4. Reports summary of all operations
+
+  Use this skill to:
+  - Initialize knowledge for all projects at once
+  - Ensure all personas have knowledge for all projects
+  - Scheduled via cron for automatic maintenance
+
+version: "1.0"
+
+inputs:
+  - name: force
+    type: boolean
+    required: false
+    default: false
+    description: If true, regenerate all knowledge even if it exists
+  - name: projects
+    type: string
+    required: false
+    default: ""
+    description: Comma-separated list of projects. If empty, process all configured projects.
+  - name: personas
+    type: string
+    required: false
+    default: ""
+    description: Comma-separated list of personas. If empty, use default knowledge personas.
+  - name: skip_existing
+    type: boolean
+    required: false
+    default: true
+    description: If true, skip project/persona combinations that already have knowledge
+
+outputs:
+  - name: summary
+    value: "{{ bootstrap_summary }}"
+
+steps:
+  # ==================== GET ALL PROJECTS ====================
+
+  - name: get_all_projects
+    description: "Get list of all configured projects"
+    compute: |
+      from pathlib import Path
+      from server.utils import load_config
+
+      config = load_config()
+      repositories = config.get("repositories", {})
+
+      # Filter to projects with valid paths
+      projects_to_process = []
+      skipped_projects = []
+
+      # Check if specific projects requested
+      requested = inputs.get("projects", "").strip()
+      if requested:
+          requested_list = [p.strip() for p in requested.split(",") if p.strip()]
+      else:
+          requested_list = None
+
+      for name, cfg in repositories.items():
+          # Skip if specific projects requested and this isn't one
+          if requested_list and name not in requested_list:
+              continue
+
+          project_path = Path(cfg.get("path", "")).expanduser()
+          if project_path.exists():
+              projects_to_process.append({
+                  "name": name,
+                  "path": str(project_path)
+              })
+          else:
+              skipped_projects.append({
+                  "name": name,
+                  "reason": f"Path not found: {cfg.get('path', 'no path')}"
+              })
+
+      all_projects = {
+          "to_process": projects_to_process,
+          "skipped": skipped_projects,
+          "total": len(repositories)
+      }
+    output: all_projects
+
+  # ==================== GET ALL PERSONAS ====================
+
+  - name: get_all_personas
+    description: "Get list of all available personas dynamically"
+    compute: |
+      from pathlib import Path
+
+      # Find personas directory
+      for candidate in [
+          Path.cwd() / "personas",
+          Path.home() / "src" / "redhat-ai-workflow" / "personas",
+      ]:
+          if candidate.exists():
+              personas_dir = candidate
+              break
+      else:
+          personas_dir = None
+
+      # Discover all personas from YAML files
+      discovered_personas = []
+      if personas_dir:
+          for yaml_file in sorted(personas_dir.glob("*.yaml")):
+              persona_name = yaml_file.stem
+              # Skip 'core' as it's a base config, not a persona
+              if persona_name != "core":
+                  discovered_personas.append(persona_name)
+
+      # Check if specific personas requested (filter the discovered list)
+      requested = inputs.get("personas", "").strip()
+      if requested:
+          requested_list = [p.strip() for p in requested.split(",") if p.strip()]
+          # Filter to only requested personas that exist
+          valid_personas = [p for p in requested_list if p in discovered_personas]
+          invalid_personas = [{"name": p, "reason": "Not found in personas/"}
+                             for p in requested_list if p not in discovered_personas]
+      else:
+          # Use all discovered personas
+          valid_personas = discovered_personas
+          invalid_personas = []
+
+      all_personas = {
+          "to_process": valid_personas,
+          "invalid": invalid_personas,
+          "discovered": discovered_personas,
+          "total": len(valid_personas)
+      }
+    output: all_personas
+
+  # ==================== CHECK EXISTING KNOWLEDGE ====================
+
+  - name: check_existing_knowledge
+    description: "Check which project/persona combinations already have knowledge"
+    compute: |
+      from pathlib import Path
+
+      # Find knowledge directory
+      for candidate in [
+          Path.home() / "src" / "redhat-ai-workflow" / "memory" / "knowledge" / "personas",
+          Path("/home/daoneill/src/redhat-ai-workflow/memory/knowledge/personas"),
+      ]:
+          if candidate.exists():
+              knowledge_dir = candidate
+              break
+      else:
+          knowledge_dir = None
+
+      existing = {}
+      missing = []
+
+      skip_existing = inputs.get("skip_existing", True)
+      force = inputs.get("force", False)
+
+      for project in all_projects["to_process"]:
+          project_name = project["name"]
+          existing[project_name] = {}
+
+          for persona in all_personas["to_process"]:
+              if knowledge_dir:
+                  knowledge_file = knowledge_dir / persona / f"{project_name}.yaml"
+                  has_knowledge = knowledge_file.exists()
+              else:
+                  has_knowledge = False
+
+              existing[project_name][persona] = has_knowledge
+
+              # Determine if we should process this combination
+              should_process = force or not has_knowledge or not skip_existing
+
+              if should_process:
+                  missing.append({
+                      "project": project_name,
+                      "persona": persona,
+                      "exists": has_knowledge,
+                      "reason": "force" if force else ("missing" if not has_knowledge else "refresh")
+                  })
+
+      knowledge_status = {
+          "existing": existing,
+          "to_generate": missing,
+          "total_combinations": len(all_projects["to_process"]) * len(all_personas["to_process"]),
+          "existing_count": sum(1 for p in existing.values() for v in p.values() if v),
+          "to_generate_count": len(missing)
+      }
+    output: knowledge_status
+
+  # ==================== GENERATE KNOWLEDGE ====================
+
+  - name: generate_all_knowledge
+    description: "Generate knowledge for all missing project/persona combinations"
+    compute: |
+      from pathlib import Path
+
+      # Import the knowledge helper functions directly (all synchronous)
+      try:
+          from tool_modules.aa_knowledge.src.tools_basic import (
+              _load_knowledge,
+              _save_knowledge,
+              _generate_initial_knowledge,
+              _format_knowledge_summary,
+          )
+          from server.utils import load_config
+      except ImportError as e:
+          raise RuntimeError(f"Knowledge tools not available: {e}")
+
+      config = load_config()
+
+      results = []
+      success_count = 0
+      error_count = 0
+      skipped_count = 0
+      force = inputs.get("force", False)
+
+      for item in knowledge_status["to_generate"]:
+          project_name = item["project"]
+          persona = item["persona"]
+
+          try:
+              # Get project path
+              project_config = config.get("repositories", {}).get(project_name)
+              if not project_config:
+                  results.append({
+                      "project": project_name,
+                      "persona": persona,
+                      "status": "error",
+                      "error": "Project not in config"
+                  })
+                  error_count += 1
+                  continue
+
+              project_path = Path(project_config.get("path", "")).expanduser()
+              if not project_path.exists():
+                  results.append({
+                      "project": project_name,
+                      "persona": persona,
+                      "status": "error",
+                      "error": f"Path not found: {project_path}"
+                  })
+                  error_count += 1
+                  continue
+
+              # Load existing knowledge if not forcing
+              existing = None if force else _load_knowledge(persona, project_name)
+
+              # Generate new knowledge
+              new_knowledge = _generate_initial_knowledge(project_name, persona, project_path)
+
+              if existing and not force:
+                  # Merge: keep existing learned items, update structure
+                  new_knowledge["gotchas"] = existing.get("gotchas", [])
+                  new_knowledge["learned_from_tasks"] = existing.get("learned_from_tasks", [])
+
+                  # Merge patterns
+                  for category in ["coding", "testing", "deployment"]:
+                      existing_patterns = existing.get("patterns", {}).get(category, [])
+                      new_patterns = new_knowledge.get("patterns", {}).get(category, [])
+                      existing_texts = {p.get("pattern", "") for p in existing_patterns}
+                      merged = existing_patterns + [p for p in new_patterns if p.get("pattern", "") not in existing_texts]
+                      new_knowledge["patterns"][category] = merged
+
+                  # Increase confidence
+                  new_knowledge["metadata"]["confidence"] = min(
+                      existing.get("metadata", {}).get("confidence", 0.3) + 0.1, 1.0
+                  )
+
+              # Save knowledge
+              _save_knowledge(persona, project_name, new_knowledge)
+
+              results.append({
+                  "project": project_name,
+                  "persona": persona,
+                  "status": "success",
+                  "existed": item["exists"],
+                  "action": item["reason"]
+              })
+              success_count += 1
+
+          except Exception as e:
+              results.append({
+                  "project": project_name,
+                  "persona": persona,
+                  "status": "error",
+                  "error": str(e)
+              })
+              error_count += 1
+
+      # Count combinations that were already complete (not in to_generate)
+      already_complete = knowledge_status["total_combinations"] - knowledge_status["to_generate_count"]
+
+      generation_results = {
+          "results": results,
+          "success_count": success_count,
+          "error_count": error_count,
+          "skipped_count": skipped_count,
+          "already_complete": already_complete,
+          "total_processed": len(results)
+      }
+    output: generation_results
+
+  # ==================== BUILD SUMMARY ====================
+
+  - name: build_summary
+    description: "Build summary report"
+    compute: |
+      from datetime import datetime
+      from zoneinfo import ZoneInfo
+
+      tz = ZoneInfo("Europe/Dublin")
+      now = datetime.now(tz)
+
+      lines = [
+          "## 🧠 Knowledge Bootstrap Complete",
+          "",
+          f"**Timestamp:** {now.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+          "",
+          "---",
+          "",
+          "### 📊 Summary",
+          "",
+          f"- **Projects processed:** {len(all_projects['to_process'])}",
+          f"- **Personas processed:** {len(all_personas['to_process'])}",
+          f"- **Total combinations:** {knowledge_status['total_combinations']}",
+          f"- **Already had knowledge:** {knowledge_status['existing_count']}",
+          f"- **Generated/refreshed:** {generation_results['success_count']}",
+      ]
+
+      if generation_results['error_count'] > 0:
+          lines.append(f"- **Errors:** {generation_results['error_count']}")
+      if generation_results['skipped_count'] > 0:
+          lines.append(f"- **Skipped:** {generation_results['skipped_count']}")
+
+      lines.append("")
+
+      # Projects table
+      if all_projects["to_process"]:
+          lines.append("### 📁 Projects")
+          lines.append("")
+          lines.append("| Project | Path |")
+          lines.append("|---------|------|")
+          for p in all_projects["to_process"]:
+              lines.append(f"| {p['name']} | `{p['path'][:50]}...` |")
+          lines.append("")
+
+      # Personas processed
+      if all_personas["to_process"]:
+          lines.append(f"### 🎭 Personas: {', '.join(all_personas['to_process'])}")
+          lines.append("")
+
+      # Results matrix
+      if generation_results["results"]:
+          lines.append("### 📋 Generation Results")
+          lines.append("")
+          lines.append("| Project | Persona | Status | Action |")
+          lines.append("|---------|---------|--------|--------|")
+
+          for r in generation_results["results"]:
+              status_icon = "✅" if r["status"] == "success" else "⏭️" if r["status"] == "skipped" else "❌"
+              action = r.get("action", r.get("reason", "-"))
+              lines.append(f"| {r['project']} | {r['persona']} | {status_icon} | {action} |")
+
+          lines.append("")
+
+      # Skipped projects
+      if all_projects["skipped"]:
+          lines.append("### ⏭️ Skipped Projects (path not found)")
+          lines.append("")
+          for s in all_projects["skipped"]:
+              lines.append(f"- **{s['name']}**: {s['reason']}")
+          lines.append("")
+
+      # Invalid personas
+      if all_personas["invalid"]:
+          lines.append("### ⚠️ Invalid Personas")
+          lines.append("")
+          for p in all_personas["invalid"]:
+              lines.append(f"- **{p['name']}**: {p['reason']}")
+          lines.append("")
+
+      # Errors detail
+      errors = [r for r in generation_results["results"] if r["status"] == "error"]
+      if errors:
+          lines.append("### ❌ Errors")
+          lines.append("")
+          for e in errors:
+              lines.append(f"- **{e['project']}/{e['persona']}**: {e.get('error', 'Unknown error')}")
+          lines.append("")
+
+      lines.append("---")
+      lines.append("")
+      lines.append("### Next Steps")
+      lines.append("")
+      lines.append("- View knowledge: `knowledge_query(project='...', persona='...')`")
+      lines.append("- Update knowledge: `knowledge_update(project='...', persona='...', section='gotchas', content='...')`")
+      lines.append("- Check status in VS Code: Memory tab → Project Knowledge")
+
+      bootstrap_summary = "\n".join(lines)
+    output: bootstrap_summary
+
+  # ==================== LOG TO SESSION ====================
+
+  - name: log_execution
+    description: "Log the bootstrap to session memory"
+    tool: memory_session_log
+    args:
+      action: "Knowledge bootstrap completed"
+      details: "{{ generation_results.success_count }} generated, {{ generation_results.error_count }} errors, {{ knowledge_status.existing_count }} already existed"
+    on_error: continue
+
+  # ==================== TRACK IN PATTERNS ====================
+
+  - name: track_bootstrap
+    description: "Track bootstrap in learned patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "knowledge_bootstraps_all" not in patterns:
+          patterns["knowledge_bootstraps_all"] = []
+
+      # Record this bootstrap
+      bootstrap_record = {
+          "timestamp": datetime.now().isoformat(),
+          "projects_processed": len(all_projects["to_process"]),
+          "personas_processed": len(all_personas["to_process"]),
+          "total_combinations": knowledge_status["total_combinations"],
+          "generated": generation_results["success_count"],
+          "errors": generation_results["error_count"],
+          "skipped": generation_results["skipped_count"],
+          "force": inputs.get("force", False),
+      }
+
+      patterns["knowledge_bootstraps_all"].append(bootstrap_record)
+
+      # Keep last 50 bootstraps
+      patterns["knowledge_bootstraps_all"] = patterns["knowledge_bootstraps_all"][-50:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "bootstrap tracked"
+    output: tracking_result
+    on_error: continue
+
+  # ==================== UPDATE KNOWLEDGE STATE ====================
+
+  - name: update_knowledge_state
+    description: "Update knowledge state tracking"
+    compute: |
+      from datetime import datetime
+
+      # Update knowledge state
+      state = memory.read_memory("state/knowledge") or {}
+
+      state["last_full_bootstrap"] = {
+          "timestamp": datetime.now().isoformat(),
+          "projects": [p["name"] for p in all_projects["to_process"]],
+          "personas": all_personas["to_process"],
+          "success_count": generation_results["success_count"],
+          "error_count": generation_results["error_count"],
+      }
+
+      # Update per-project state
+      if "projects" not in state:
+          state["projects"] = {}
+
+      for r in generation_results["results"]:
+          if r["status"] == "success":
+              project_name = r["project"]
+              if project_name not in state["projects"]:
+                  state["projects"][project_name] = {"personas": {}}
+
+              state["projects"][project_name]["personas"][r["persona"]] = {
+                  "last_generated": datetime.now().isoformat(),
+                  "action": r.get("action", "generated")
+              }
+
+      memory.write_memory("state/knowledge", state)
+      result = "knowledge state updated"
+    output: state_result
+    on_error: continue

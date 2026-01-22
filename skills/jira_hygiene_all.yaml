@@ -97,8 +97,8 @@ steps:
 
       for issue_key in parsed_issues.get('issue_keys', []):
           try:
-              # Run hygiene skill on this issue
-              hygiene_result = skill_engine.run_skill(
+              # Run hygiene skill on this issue using the run_skill helper
+              hygiene_result = run_skill(
                   "jira_hygiene",
                   {
                       "issue_key": issue_key,
@@ -107,8 +107,15 @@ steps:
                   }
               )
 
-              # Parse result
-              result_text = str(hygiene_result) if hygiene_result else ""
+              # run_skill returns {"success": bool, "result": ..., "error": ...}
+              if not hygiene_result or not hygiene_result.get('success'):
+                  error_msg = hygiene_result.get('error', 'Unknown error') if hygiene_result else 'No result'
+                  results.append({"key": issue_key, "status": "error", "error": str(error_msg)[:100]})
+                  continue
+
+              # Parse the nested skill's result
+              result_data = hygiene_result.get('result', {})
+              result_text = str(result_data) if result_data else ""
 
               if "100%" in result_text or "All Checks Passed" in result_text:
                   healthy_count += 1
