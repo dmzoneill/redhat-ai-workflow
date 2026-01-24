@@ -1,0 +1,349 @@
+# Skill: Gather Context
+# Common context gathering pattern used by many skills
+# Combines code_search, knowledge_query, and check_known_issues
+
+name: gather_context
+description: |
+  Gather relevant context for a task using semantic search and knowledge base.
+
+  This skill consolidates the common pattern of:
+  1. Searching codebase for related code (code_search)
+  2. Loading project knowledge/gotchas (knowledge_query)
+  3. Checking for known issues/patterns (check_known_issues)
+
+  Use this at the start of any skill that needs context about:
+  - A Jira issue being worked on
+  - A feature being implemented
+  - A bug being investigated
+  - Code being reviewed
+
+  Returns structured context that can be used by other skills.
+
+version: "1.0"
+
+inputs:
+  - name: query
+    type: string
+    required: true
+    description: "What to search for (issue description, feature name, error message, etc.)"
+
+  - name: project
+    type: string
+    required: false
+    default: "automation-analytics-backend"
+    description: "Project name from config for knowledge lookup"
+
+  - name: tool_name
+    type: string
+    required: false
+    description: "Tool name to check for known issues (optional)"
+
+  - name: code_limit
+    type: integer
+    required: false
+    default: 5
+    description: "Max code search results"
+
+  - name: include_architecture
+    type: boolean
+    required: false
+    default: true
+    description: "Include architecture overview in context"
+
+  - name: include_gotchas
+    type: boolean
+    required: false
+    default: true
+    description: "Include project gotchas in context"
+
+  - name: include_patterns
+    type: boolean
+    required: false
+    default: true
+    description: "Include coding patterns in context"
+
+steps:
+  # ==================== CODE SEARCH ====================
+
+  - name: search_related_code
+    description: "Search codebase for related code using semantic search"
+    tool: code_search
+    args:
+      query: "{{ inputs.query }}"
+      project: "{{ inputs.project }}"
+      limit: "{{ inputs.code_limit }}"
+    output: code_search_raw
+    on_error: continue
+
+  - name: parse_code_results
+    description: "Parse code search results into structured format"
+    compute: |
+      code_results = []
+      code_text = str(code_search_raw) if 'code_search_raw' in dir() and code_search_raw else ""
+
+      if code_text and "No results" not in code_text:
+          # Parse results - expecting file:line format
+          for line in code_text.split('\n'):
+              line = line.strip()
+              if line and ':' in line and not line.startswith('#'):
+                  code_results.append(line[:150])
+
+      result = {
+          "found": len(code_results) > 0,
+          "results": code_results[:inputs.get("code_limit", 5)],
+          "count": len(code_results),
+          "raw_preview": code_text[:500] if code_text else "",
+      }
+    output: related_code
+
+  # ==================== KNOWLEDGE QUERY - GOTCHAS ====================
+
+  - name: load_gotchas
+    description: "Load project gotchas from knowledge base"
+    condition: "inputs.get('include_gotchas', True)"
+    tool: knowledge_query
+    args:
+      project: "{{ inputs.project }}"
+      section: "gotchas"
+    output: gotchas_raw
+    on_error: continue
+
+  - name: parse_gotchas
+    description: "Parse gotchas into actionable list"
+    condition: "inputs.get('include_gotchas', True)"
+    compute: |
+      gotchas = []
+      gotchas_text = str(gotchas_raw) if 'gotchas_raw' in dir() and gotchas_raw else ""
+
+      if gotchas_text:
+          import re
+          # Look for gotcha entries (list items)
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', gotchas_text, re.DOTALL):
+              gotcha = match.group(1).strip()[:150]
+              if gotcha and len(gotcha) > 10:
+                  gotchas.append(gotcha)
+
+      result = {
+          "found": len(gotchas) > 0,
+          "gotchas": gotchas[:5],
+          "count": len(gotchas),
+      }
+    output: project_gotchas
+    on_error: continue
+
+  # ==================== KNOWLEDGE QUERY - PATTERNS ====================
+
+  - name: load_patterns
+    description: "Load coding patterns from knowledge base"
+    condition: "inputs.get('include_patterns', True)"
+    tool: knowledge_query
+    args:
+      project: "{{ inputs.project }}"
+      section: "patterns.coding"
+    output: patterns_raw
+    on_error: continue
+
+  - name: parse_patterns
+    description: "Parse coding patterns"
+    condition: "inputs.get('include_patterns', True)"
+    compute: |
+      patterns = []
+      patterns_text = str(patterns_raw) if 'patterns_raw' in dir() and patterns_raw else ""
+
+      if patterns_text:
+          import re
+          for match in re.finditer(r'-\s*(.+?)(?=\n-|\n\n|$)', patterns_text, re.DOTALL):
+              pattern = match.group(1).strip()[:150]
+              if pattern and len(pattern) > 10:
+                  patterns.append(pattern)
+
+      result = {
+          "found": len(patterns) > 0,
+          "patterns": patterns[:5],
+          "count": len(patterns),
+      }
+    output: coding_patterns
+    on_error: continue
+
+  # ==================== KNOWLEDGE QUERY - ARCHITECTURE ====================
+
+  - name: load_architecture
+    description: "Load architecture overview from knowledge base"
+    condition: "inputs.get('include_architecture', True)"
+    tool: knowledge_query
+    args:
+      project: "{{ inputs.project }}"
+      section: "architecture.overview"
+    output: architecture_raw
+    on_error: continue
+
+  - name: parse_architecture
+    description: "Parse architecture context"
+    condition: "inputs.get('include_architecture', True)"
+    compute: |
+      arch_text = str(architecture_raw)[:500] if 'architecture_raw' in dir() and architecture_raw else ""
+
+      result = {
+          "found": len(arch_text) > 20,
+          "overview": arch_text,
+      }
+    output: architecture_context
+    on_error: continue
+
+  # ==================== CHECK KNOWN ISSUES ====================
+
+  - name: check_known_issues
+    description: "Check memory for known issues related to query"
+    tool: check_known_issues
+    args:
+      tool_name: "{{ inputs.tool_name or '' }}"
+      error_text: "{{ inputs.query[:100] }}"
+    output: known_issues_raw
+    on_error: continue
+
+  - name: parse_known_issues
+    description: "Parse known issues into structured format"
+    compute: |
+      issues = []
+      issues_text = str(known_issues_raw) if 'known_issues_raw' in dir() and known_issues_raw else ""
+
+      if issues_text and "No known issues" not in issues_text:
+          import re
+          for match in re.finditer(r'pattern[:\s]+([^\n]+)', issues_text, re.I):
+              issues.append(match.group(1).strip()[:100])
+
+      result = {
+          "found": len(issues) > 0,
+          "issues": issues[:3],
+          "count": len(issues),
+      }
+    output: known_issues
+    on_error: continue
+
+  # ==================== BUILD COMBINED CONTEXT ====================
+
+  - name: build_context
+    description: "Combine all context into single output"
+    compute: |
+      context = {
+          "query": inputs.query,
+          "project": inputs.project,
+      }
+
+      # Code search results
+      if 'related_code' in dir() and related_code:
+          context["code"] = {
+              "found": related_code.get("found", False),
+              "count": related_code.get("count", 0),
+              "results": related_code.get("results", []),
+          }
+
+      # Gotchas
+      if 'project_gotchas' in dir() and project_gotchas:
+          context["gotchas"] = {
+              "found": project_gotchas.get("found", False),
+              "count": project_gotchas.get("count", 0),
+              "items": project_gotchas.get("gotchas", []),
+          }
+
+      # Patterns
+      if 'coding_patterns' in dir() and coding_patterns:
+          context["patterns"] = {
+              "found": coding_patterns.get("found", False),
+              "count": coding_patterns.get("count", 0),
+              "items": coding_patterns.get("patterns", []),
+          }
+
+      # Architecture
+      if 'architecture_context' in dir() and architecture_context:
+          context["architecture"] = {
+              "found": architecture_context.get("found", False),
+              "overview": architecture_context.get("overview", ""),
+          }
+
+      # Known issues
+      if 'known_issues' in dir() and known_issues:
+          context["known_issues"] = {
+              "found": known_issues.get("found", False),
+              "count": known_issues.get("count", 0),
+              "items": known_issues.get("issues", []),
+          }
+
+      # Summary stats
+      context["summary"] = {
+          "has_code": context.get("code", {}).get("found", False),
+          "has_gotchas": context.get("gotchas", {}).get("found", False),
+          "has_patterns": context.get("patterns", {}).get("found", False),
+          "has_architecture": context.get("architecture", {}).get("found", False),
+          "has_known_issues": context.get("known_issues", {}).get("found", False),
+          "total_items": (
+              context.get("code", {}).get("count", 0) +
+              context.get("gotchas", {}).get("count", 0) +
+              context.get("patterns", {}).get("count", 0) +
+              context.get("known_issues", {}).get("count", 0)
+          ),
+      }
+
+      result = context
+    output: combined_context
+
+  - name: log_context_gathering
+    description: "Log context gathering to session"
+    tool: memory_session_log
+    args:
+      action: "Gathered context for: {{ inputs.query[:50] }}"
+      details: "Code: {{ combined_context.summary.has_code }}, Gotchas: {{ combined_context.summary.has_gotchas }}, Patterns: {{ combined_context.summary.has_patterns }}"
+    on_error: continue
+
+outputs:
+  - name: context
+    value: "{{ combined_context }}"
+
+  - name: report
+    value: |
+      ## 📚 Context Gathered
+
+      **Query:** {{ inputs.query[:80] }}
+      **Project:** {{ inputs.project }}
+
+      ### Summary
+      - **Code Results:** {{ combined_context.code.count if combined_context.code else 0 }}
+      - **Gotchas:** {{ combined_context.gotchas.count if combined_context.gotchas else 0 }}
+      - **Patterns:** {{ combined_context.patterns.count if combined_context.patterns else 0 }}
+      - **Known Issues:** {{ combined_context.known_issues.count if combined_context.known_issues else 0 }}
+
+      {% if combined_context.code and combined_context.code.found %}
+      ### 🔍 Related Code
+      {% for result in combined_context.code.results[:3] %}
+      - `{{ result }}`
+      {% endfor %}
+      {% endif %}
+
+      {% if combined_context.gotchas and combined_context.gotchas.found %}
+      ### ⚠️ Project Gotchas
+      {% for gotcha in combined_context.gotchas.items[:3] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if combined_context.patterns and combined_context.patterns.found %}
+      ### 📐 Coding Patterns
+      {% for pattern in combined_context.patterns.items[:3] %}
+      - {{ pattern }}
+      {% endfor %}
+      {% endif %}
+
+      {% if combined_context.known_issues and combined_context.known_issues.found %}
+      ### 💡 Known Issues
+      {% for issue in combined_context.known_issues.items %}
+      - {{ issue }}
+      {% endfor %}
+      {% endif %}
+
+      {% if combined_context.architecture and combined_context.architecture.found %}
+      ### 🏗️ Architecture
+      {{ combined_context.architecture.overview[:300] }}
+      {% endif %}
+
+  - name: has_context
+    value: "{{ combined_context.summary.total_items > 0 }}"

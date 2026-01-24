@@ -1,0 +1,128 @@
+# Skill: Backfill Missing Performance Data
+# Finds gaps in daily data and backfills them
+
+name: backfill_missing
+description: |
+  Find and backfill missing days in the current quarter.
+
+  Scans for weekdays without performance data and runs
+  collection for each missing date.
+
+version: "1.0"
+
+inputs:
+  - name: max_days
+    type: integer
+    required: false
+    default: 10
+    description: "Maximum number of days to backfill in one run"
+
+steps:
+  # Load developer persona
+  - name: load_persona
+    description: "Load developer persona"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # Find missing dates
+  - name: find_missing
+    description: "Find weekdays without data"
+    compute: |
+      import json
+      from datetime import date, timedelta
+      from pathlib import Path
+
+      today = date.today()
+      year = today.year
+      quarter = (today.month - 1) // 3 + 1
+
+      quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+      start_month, start_day = quarter_starts[quarter]
+      quarter_start = date(year, start_month, start_day)
+
+      # Get existing files
+      perf_dir = Path.home() / "src" / "redhat-quarterly-connection" / str(year) / f"q{quarter}" / "performance" / "daily"
+      existing = set()
+      if perf_dir.exists():
+          existing = {f.stem for f in perf_dir.glob("*.json")}
+
+      # Find missing weekdays
+      missing = []
+      current = quarter_start
+      while current <= today:
+          if current.weekday() < 5:  # Mon-Fri
+              if current.isoformat() not in existing:
+                  missing.append(current.isoformat())
+          current += timedelta(days=1)
+
+      # Limit to max_days
+      max_to_process = inputs.max_days if inputs.max_days else 10
+      to_process = missing[:max_to_process]
+
+      result = {
+          "year": year,
+          "quarter": quarter,
+          "total_missing": len(missing),
+          "to_process": to_process,
+          "remaining": len(missing) - len(to_process),
+      }
+    output: missing_info
+
+  # Process each missing date
+  - name: backfill_dates
+    description: "Backfill each missing date"
+    condition: "{{ missing_info.to_process | length > 0 }}"
+    loop: "{{ missing_info.to_process }}"
+    tool: skill_run
+    args:
+      skill_name: "performance/collect_daily"
+      inputs: '{"date": "{{ item }}"}'
+    output: backfill_results
+    on_error: continue
+
+  # Update summary
+  - name: update_summary
+    description: "Recalculate quarter summary"
+    tool: performance_status
+    args:
+      quarter: "Q{{ missing_info.quarter }} {{ missing_info.year }}"
+    output: final_summary
+    on_error: continue
+
+  # Log session
+  - name: log_session
+    description: "Log backfill to session"
+    tool: memory_session_log
+    args:
+      action: "Backfilled {{ missing_info.to_process | length }} missing days"
+      details: "{{ missing_info.remaining }} days still missing"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## 🔄 Backfill Complete
+
+      **Quarter:** Q{{ missing_info.quarter }} {{ missing_info.year }}
+
+      ### Results
+      - **Total missing days found:** {{ missing_info.total_missing }}
+      - **Days processed:** {{ missing_info.to_process | length }}
+      - **Days remaining:** {{ missing_info.remaining }}
+
+      {% if missing_info.to_process | length > 0 %}
+      ### Dates Backfilled
+      {% for dt in missing_info.to_process %}
+      - {{ dt }}
+      {% endfor %}
+      {% else %}
+      ✅ No missing days to backfill!
+      {% endif %}
+
+      {% if missing_info.remaining > 0 %}
+      ---
+
+      ⚠️ {{ missing_info.remaining }} days still need backfilling.
+      Run again to continue: `skill_run("performance/backfill_missing")`
+      {% endif %}

@@ -223,21 +223,22 @@ steps:
   # ==================== CREATE JIRA ISSUE ====================
   # Switch to developer persona for Jira tools
 
-  - name: load_developer_persona_for_jira
-    description: "Load developer persona for Jira tools"
-    tool: persona_load
-    args:
-      persona_name: "developer"
-
-  # Step 5: Create release Jira issue
+  # Step 5: Create release Jira issue (uses create_jira_issue skill)
   - name: create_jira_issue
-    description: "Create Jira story for tracking this release"
-    tool: jira_create_issue
+    description: "Create Jira story for tracking this release (uses create_jira_issue skill)"
+    tool: skill_run
     args:
-      issue_type: "story"
-      summary: "{{ inputs.release_date }} Analytics HCC Service Release"
+      skill_name: create_jira_issue
+      inputs: |
+        {
+          "summary": "{{ inputs.release_date }} Analytics HCC Service Release",
+          "issue_type": "Story",
+          "project": "AAP",
+          "description": "Production release tracking for {{ inputs.release_date }}\\n\\nCommit SHA: {{ inputs.commit_sha }}",
+          "labels": "release,production"
+        }
     output: jira_issue
-    on_error: auto_heal  # Jira API - may need auth refresh
+    on_error: continue
 
   # ==================== PREPARE APP-INTERFACE ====================
   # Switch back to release persona for git and app-interface tools

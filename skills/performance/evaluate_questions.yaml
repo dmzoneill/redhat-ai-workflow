@@ -1,0 +1,250 @@
+# Skill: Evaluate Quarterly Questions with AI
+# Uses LLM to generate summaries for quarterly questions based on evidence
+
+name: evaluate_questions
+description: |
+  Run AI evaluation on quarterly performance questions.
+
+  For each question (or a specific one):
+  1. Gathers auto-evidence from daily events
+  2. Includes manual notes
+  3. Builds a prompt with competency context
+  4. Generates a summary using Claude
+  5. Saves the summary to the question
+
+version: "1.0"
+
+inputs:
+  - name: question_id
+    type: string
+    required: false
+    default: ""
+    description: "Specific question ID to evaluate (empty for all)"
+
+steps:
+  # Get current quarter info
+  - name: get_quarter
+    description: "Determine current quarter"
+    compute: |
+      from datetime import date
+
+      today = date.today()
+      year = today.year
+      quarter = (today.month - 1) // 3 + 1
+
+      result = {
+          "year": year,
+          "quarter": quarter,
+          "quarter_str": f"Q{quarter} {year}",
+      }
+    output: quarter_info
+
+  # Load questions and evidence
+  - name: load_questions
+    description: "Load questions and gather evidence"
+    compute: |
+      import json
+      from pathlib import Path
+
+      year = quarter_info["year"]
+      quarter = quarter_info["quarter"]
+
+      perf_dir = Path.home() / "src" / "redhat-quarterly-connection" / str(year) / f"q{quarter}" / "performance"
+      questions_file = perf_dir / "questions.json"
+      daily_dir = perf_dir / "daily"
+      summary_file = perf_dir / "summary.json"
+
+      # Load questions
+      questions = []
+      if questions_file.exists():
+          with open(questions_file) as f:
+              data = json.load(f)
+              questions = data.get("questions", []) + data.get("custom_questions", [])
+
+      # Filter to specific question if provided
+      if inputs.question_id:
+          questions = [q for q in questions if q.get("id") == inputs.question_id]
+
+      # Load all events for evidence lookup
+      all_events = {}
+      if daily_dir.exists():
+          for daily_file in daily_dir.glob("*.json"):
+              try:
+                  with open(daily_file) as f:
+                      data = json.load(f)
+                      for event in data.get("events", []):
+                          all_events[event.get("id", "")] = event
+              except Exception:
+                  pass
+
+      # Load competency summary
+      comp_summary = {}
+      if summary_file.exists():
+          with open(summary_file) as f:
+              summary = json.load(f)
+              comp_summary = summary.get("cumulative_percentage", {})
+
+      # Build evaluation data for each question
+      to_evaluate = []
+      for q in questions:
+          evidence_ids = q.get("auto_evidence", [])
+          evidence_events = [all_events[eid] for eid in evidence_ids if eid in all_events]
+
+          to_evaluate.append({
+              "id": q.get("id"),
+              "text": q.get("text"),
+              "subtext": q.get("subtext"),
+              "evidence_count": len(evidence_events),
+              "evidence_events": evidence_events[:20],  # Limit for prompt
+              "manual_notes": q.get("manual_notes", []),
+          })
+
+      result = {
+          "questions": to_evaluate,
+          "comp_summary": comp_summary,
+          "questions_file": str(questions_file),
+      }
+    output: eval_data
+
+  # Evaluate each question with LLM
+  - name: evaluate_questions
+    description: "Run LLM evaluation for each question"
+    compute: |
+      import json
+      from pathlib import Path
+      from datetime import datetime
+
+      evaluations = []
+
+      for q in eval_data["questions"]:
+          # Build evidence text
+          evidence_lines = []
+          for e in q["evidence_events"]:
+              pts = sum(e.get("points", {}).values()) if isinstance(e.get("points"), dict) else 0
+              evidence_lines.append(f"- [{e.get('source', '')}] {e.get('title', '')} ({pts} pts)")
+
+          evidence_text = "\n".join(evidence_lines) if evidence_lines else "No automatic evidence collected"
+
+          # Build notes text
+          notes_text = "\n".join(f"- {n.get('text', '')}" for n in q["manual_notes"]) if q["manual_notes"] else "None"
+
+          # Build competency text
+          comp_text = "\n".join(f"- {k}: {v}%" for k, v in eval_data["comp_summary"].items())
+
+          # Build prompt
+          q_text = q['text']
+          q_subtext = q['subtext'] or ''
+          q_count = q['evidence_count']
+          prompt_lines = [
+              "You are helping prepare a quarterly performance review.",
+              "",
+              f"QUESTION: {q_text}",
+              q_subtext,
+              "",
+              f"EVIDENCE FROM THIS QUARTER ({q_count} items):",
+              evidence_text,
+              "",
+              "MANUAL NOTES:",
+              notes_text,
+              "",
+              "COMPETENCY SCORES:",
+              comp_text,
+              "",
+              "Based on this evidence, write a 2-3 paragraph response that:",
+              "1. Highlights the most significant accomplishments/points",
+              "2. Provides specific examples with metrics where available",
+              '3. Frames the response in first person ("I accomplished...")',
+              "",
+              'Focus on impact and the "how" not just the "what". Be specific and quantitative where possible.',
+          ]
+          prompt = "\n".join(prompt_lines)
+
+          evaluations.append({
+              "id": q["id"],
+              "text": q["text"],
+              "prompt": prompt,
+              "evidence_count": q["evidence_count"],
+          })
+
+      result = evaluations
+    output: prompts
+
+  # Call LLM for each question (using tool)
+  - name: generate_summaries
+    description: "Generate summaries using LLM"
+    loop: "{{ prompts }}"
+    tool: ollama_complete
+    args:
+      prompt: "{{ item.prompt }}"
+      model: "claude"
+    output: llm_responses
+    on_error: continue
+
+  # Save evaluations back to questions file
+  - name: save_evaluations
+    description: "Save LLM summaries to questions file"
+    compute: |
+      import json
+      from pathlib import Path
+      from datetime import datetime
+
+      questions_file = Path(eval_data["questions_file"])
+
+      if not questions_file.exists():
+          result = {"saved": 0, "error": "Questions file not found"}
+      else:
+          with open(questions_file) as f:
+              data = json.load(f)
+
+          # Map responses to question IDs
+          response_map = {}
+          if llm_responses:
+              for i, prompt_data in enumerate(prompts):
+                  if i < len(llm_responses):
+                      response_map[prompt_data["id"]] = str(llm_responses[i])
+
+          # Update questions with summaries
+          saved_count = 0
+          for q_list in [data.get("questions", []), data.get("custom_questions", [])]:
+              for q in q_list:
+                  q_id = q.get("id")
+                  if q_id in response_map:
+                      q["llm_summary"] = response_map[q_id]
+                      q["last_evaluated"] = datetime.now().isoformat()
+                      saved_count += 1
+
+          with open(questions_file, "w") as f:
+              json.dump(data, f, indent=2)
+
+          result = {"saved": saved_count, "total": len(prompts)}
+    output: save_result
+
+  # Log session
+  - name: log_session
+    description: "Log evaluation to session"
+    tool: memory_session_log
+    args:
+      action: "Evaluated {{ save_result.saved }} quarterly questions with AI"
+      details: "Quarter: {{ quarter_info.quarter_str }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## 🤖 Question Evaluation Complete
+
+      **Quarter:** {{ quarter_info.quarter_str }}
+
+      ### Results
+      - **Questions evaluated:** {{ save_result.saved }}
+      - **Total questions:** {{ save_result.total }}
+
+      {% for q in prompts %}
+      ### {{ q.text }}
+      - Evidence items: {{ q.evidence_count }}
+      - Status: ✅ Evaluated
+      {% endfor %}
+
+      ---
+
+      View results with `performance_questions()` or `performance_export()`.

@@ -160,6 +160,22 @@ steps:
       action: "Cloned {{ inputs.issue_key }} to {{ clone_result.new_key if clone_result else 'failed' }}"
     on_error: continue
 
+  # Run Jira hygiene on the cloned issue (uses jira_hygiene skill)
+  - name: run_jira_hygiene
+    description: "Ensure cloned issue has proper details (uses jira_hygiene skill)"
+    condition: "clone_result and clone_result.success"
+    tool: skill_run
+    args:
+      skill_name: jira_hygiene
+      inputs: |
+        {
+          "issue_key": "{{ clone_result.new_key }}",
+          "auto_fix": true,
+          "auto_transition": false
+        }
+    output: hygiene_result
+    on_error: continue
+
   - name: track_clones
     description: "Track issue clones for patterns"
     condition: "clone_result and clone_result.success"

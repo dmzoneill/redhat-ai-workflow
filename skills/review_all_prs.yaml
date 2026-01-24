@@ -454,6 +454,14 @@ steps:
     output: full_review_result
     on_error: continue
 
+  # Restore developer persona after review_pr (which ends with release persona)
+  - name: restore_developer_after_review
+    description: "Restore developer persona for GitLab approve/comment tools"
+    condition: "full_review_result"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
   # Step 8: Approve MR if author addressed feedback
   - name: auto_approve
     description: "Approve MR where author addressed feedback"

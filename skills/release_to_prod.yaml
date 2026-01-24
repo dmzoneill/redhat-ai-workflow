@@ -189,43 +189,55 @@ steps:
     output: staging_status
 
   # ==================== SECURITY SCAN ====================
+  # Uses scan_vulnerabilities skill for comprehensive vulnerability analysis
 
-  - name: scan_vulnerabilities
-    description: "Scan image for security vulnerabilities"
+  - name: run_vulnerability_scan
+    description: "Scan image for security vulnerabilities (uses scan_vulnerabilities skill)"
     condition: "staging_status.exists"
-    tool: quay_get_vulnerabilities
+    tool: skill_run
     args:
-      repository: "{{ inputs.namespace }}/{{ inputs.application }}/{{ inputs.component }}"
-      tag: "{{ validated_sha.sha }}"
-      namespace: "redhat-user-workloads"
-    output: vuln_scan_raw
+      skill_name: scan_vulnerabilities
+      inputs: |
+        {
+          "image_tag": "{{ validated_sha.sha }}",
+          "repository": "{{ inputs.namespace }}/{{ inputs.application }}/{{ inputs.component }}",
+          "namespace": "redhat-user-workloads",
+          "fail_on_critical": true,
+          "fail_on_high": false
+        }
+    output: vuln_scan_result
     on_error: continue
 
-  - name: parse_vulnerabilities
-    description: "Parse vulnerability scan results"
-    condition: "vuln_scan_raw"
+  - name: parse_scan_result
+    description: "Parse vulnerability scan skill result"
+    condition: "vuln_scan_result"
     compute: |
-      vuln_text = str(vuln_scan_raw) if vuln_scan_raw else ""
+      # Extract results from skill output
+      scan_result = vuln_scan_result if isinstance(vuln_scan_result, dict) else {}
+      scan_text = str(vuln_scan_result) if vuln_scan_result else ""
 
-      # Count vulnerabilities by severity
-      critical = vuln_text.lower().count("critical")
-      high = vuln_text.lower().count("high")
+      # Try to extract counts from skill output
+      critical = 0
+      high = 0
+      block_release = False
 
-      # Extract CVE IDs
-      import re
-      cves = re.findall(r'CVE-\d{4}-\d+', vuln_text)
-      unique_cves = list(set(cves))[:10]
-
-      # Determine if release should be blocked
-      block_release = critical > 0
+      if isinstance(scan_result, dict):
+          critical = scan_result.get("critical_count", 0)
+          high = scan_result.get("high_count", 0)
+          block_release = scan_result.get("should_block", False)
+      else:
+          # Fallback: parse from text output
+          critical = scan_text.lower().count("critical")
+          high = scan_text.lower().count("high")
+          block_release = critical > 0
 
       result = {
           "critical": critical,
           "high": high,
-          "cves": unique_cves,
+          "cves": [],
           "block_release": block_release,
           "safe": critical == 0,
-          "preview": vuln_text[:500] if vuln_text else "",
+          "preview": scan_text[:500] if scan_text else "",
       }
     output: security_status
     on_error: continue
@@ -410,23 +422,20 @@ steps:
     output: grafana_annotation_result
     on_error: continue
 
-  # Switch to slack persona for Slack announcement
-  - name: load_slack_persona_for_announcement
-    description: "Load slack persona for Slack announcement"
-    condition: "release_result and release_result.success"
-    tool: persona_load
-    args:
-      persona_name: "slack"
-
   - name: announce_release
-    description: "Announce release to team channel"
+    description: "Announce release to team channel (uses notify_team skill)"
     condition: "release_result and release_result.success"
-    tool: slack_post_message
+    tool: skill_run
     args:
-      channel: "team-automation-analytics"
-      message: "📦 **Production Release** - `{{ validated_sha.short }}` released to {{ inputs.component }}"
+      skill_name: notify_team
+      inputs: |
+        {
+          "message": "📦 Production Release - {{ validated_sha.short }} released to {{ inputs.component }}",
+          "type": "release",
+          "context": "Component: {{ inputs.component }}\nSHA: {{ validated_sha.sha }}"
+        }
     output: slack_release_notify
-    on_error: auto_heal  # Slack API - may need auth
+    on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================
 

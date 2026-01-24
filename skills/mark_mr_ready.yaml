@@ -348,23 +348,29 @@ steps:
       result = "\n".join(lines)
     output: slack_message
 
-  # Step 6: Post to Slack
-  # Switch to slack persona for Slack tools
-  - name: load_slack_persona_for_notification
-    description: "Load slack persona for Slack notification tools"
-    condition: "slack_message"
+  # Step 6: Post to Slack (uses notify_mr skill for better reusability)
+  - name: notify_team_slack
+    description: "Notify team about MR ready for review (uses notify_mr skill)"
+    condition: "mr_info and mr_info.mr_id"
+    tool: skill_run
+    args:
+      skill_name: notify_mr
+      inputs: |
+        {
+          "mr_id": "{{ mr_info.mr_id }}",
+          "project": "{{ mr_info.project }}",
+          "issue_key": "{{ mr_info.jira_key or '' }}"
+        }
+    output: slack_result
+    on_error: continue
+
+  # Restore developer persona after notify_mr (which loads slack persona)
+  - name: restore_developer_persona
+    description: "Restore developer persona for Jira tools"
+    condition: "inputs.update_jira and mr_info.jira_key"
     tool: persona_load
     args:
-      persona_name: "slack"
-
-  - name: notify_team_slack
-    description: "Post to team channel asking for review"
-    condition: "slack_message"
-    tool: slack_post_team
-    args:
-      text: "{{ slack_message }}"
-    output: slack_result
-    on_error: auto_heal  # Slack API - may need auth refresh
+      persona_name: "developer"
 
   # Step 7: Update Jira status
   - name: update_jira_status

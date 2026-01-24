@@ -1059,6 +1059,48 @@ steps:
       if new_files and not test_files:
         issues.append(f"📝 Tests: New code in {len(new_files)} files but no test updates")
 
+      # Check for documentation coverage
+      doc_files = re.findall(r'\+\+\+ b/(\S+\.(md|rst|txt))', diff_text)
+      doc_files += re.findall(r'\+\+\+ b/(docs/\S+)', diff_text)
+      doc_files += re.findall(r'\+\+\+ b/(README\S*)', diff_text)
+
+      # Detect significant code changes that likely need docs
+      has_new_api = bool(re.search(r'@(app|router)\.(get|post|put|delete|patch)\s*\(', diff_text))
+      has_new_class = bool(re.search(r'^\+class\s+\w+', diff_text, re.MULTILINE))
+      has_new_cli = bool(re.search(r'@click\.(command|group)|argparse\.ArgumentParser', diff_text))
+      has_config_change = bool(re.search(r'\+\+\+ b/.*config.*\.(yaml|yml|json|toml)', diff_text))
+      has_schema_change = bool(re.search(r'\+\+\+ b/.*schema.*\.py|class.*Schema.*:', diff_text))
+      has_migration = bool(re.search(r'\+\+\+ b/.*migrations?/', diff_text))
+
+      # Count significant additions (new functions/methods)
+      new_functions = len(re.findall(r'^\+\s*def\s+\w+', diff_text, re.MULTILINE))
+      new_classes = len(re.findall(r'^\+\s*class\s+\w+', diff_text, re.MULTILINE))
+
+      # Flag documentation issues
+      needs_docs = []
+      if has_new_api and not doc_files:
+          needs_docs.append("New API endpoints added without documentation")
+      if has_new_cli and not doc_files:
+          needs_docs.append("New CLI commands added without documentation")
+      if has_config_change and not doc_files:
+          needs_docs.append("Configuration changes without documentation update")
+      if has_schema_change and not doc_files:
+          needs_docs.append("Schema changes without documentation update")
+      if has_migration and not doc_files:
+          needs_docs.append("Database migration without documentation")
+      if new_functions >= 5 and not doc_files:
+          needs_docs.append(f"{new_functions} new functions added without documentation")
+      if new_classes >= 2 and not doc_files:
+          needs_docs.append(f"{new_classes} new classes added without documentation")
+
+      # Check for missing docstrings in new code
+      new_funcs_without_docstring = re.findall(r'^\+\s*def\s+(\w+)\([^)]*\):\s*\n\+\s*[^"\']', diff_text, re.MULTILINE)
+      if len(new_funcs_without_docstring) >= 3:
+          needs_docs.append(f"{len(new_funcs_without_docstring)} new functions missing docstrings")
+
+      for doc_issue in needs_docs:
+          issues.append(f"📚 Docs: {doc_issue}")
+
       # Add architecture alignment issues from knowledge check
       if 'architecture_alignment' in dir() and architecture_alignment and architecture_alignment.get('has_issues'):
           for arch_issue in architecture_alignment.get('issues', []):
@@ -1118,6 +1160,90 @@ steps:
       else:
           result = "No author or memory available"
     output: author_issues_tracking
+    on_error: continue
+
+  # ==================== CAPTURE DISCOVERED WORK ====================
+
+  # Capture significant issues as discovered work for later follow-up
+  # Uses safe add with deduplication to prevent duplicate Jira issues
+  - name: capture_discovered_work
+    description: "Capture tech debt, missing tests, and other discovered work (with deduplication)"
+    condition: "code_issues and len(code_issues) > 0"
+    compute: |
+      from scripts.common.memory import add_discovered_work_safe
+
+      discovered_count = 0
+      duplicate_count = 0
+      existing_jira_keys = []
+      mr_id_val = int(mr_id) if mr_id else 0
+
+      for issue in code_issues:
+          # Determine work type and priority based on issue category
+          if "Security" in issue:
+              work_type = "security"
+              priority = "high"
+          elif "Memory" in issue:
+              work_type = "tech_debt"
+              priority = "medium"
+          elif "Race" in issue:
+              work_type = "bug"
+              priority = "high"
+          elif "Tests" in issue:
+              work_type = "missing_test"
+              priority = "medium"
+          elif "Docs" in issue:
+              work_type = "missing_docs"
+              priority = "low"
+          elif "Architecture" in issue:
+              work_type = "tech_debt"
+              priority = "medium"
+          elif "Known Pattern" in issue:
+              work_type = "tech_debt"
+              priority = "low"
+          else:
+              # Skip generic issues
+              continue
+
+          # Extract file path if mentioned in the issue
+          file_path = ""
+          import re
+          file_match = re.search(r'`([^`]+\.py)`', issue)
+          if file_match:
+              file_path = file_match.group(1)
+
+          # Clean up the issue text for the task description
+          task = issue.replace("🔐 ", "").replace("💾 ", "").replace("🏃 ", "")
+          task = task.replace("📝 ", "").replace("🏗️ ", "").replace("⚠️ ", "")
+          task = task.replace("📚 ", "")  # Docs emoji
+          task = task.split(": ", 1)[-1] if ": " in task else task
+
+          # Add to discovered work with deduplication
+          add_result = add_discovered_work_safe(
+              task=task,
+              work_type=work_type,
+              priority=priority,
+              source_skill="review_pr",
+              source_issue=jira_key if jira_key != "NOT_FOUND" else "",
+              source_mr=mr_id_val,
+              file_path=file_path,
+              notes=f"Found during MR !{mr_id_val} review"
+          )
+
+          if add_result.get("added"):
+              discovered_count += 1
+          elif add_result.get("is_duplicate"):
+              duplicate_count += 1
+              # Track existing Jira keys for potential note addition
+              if add_result.get("jira_key"):
+                  existing_jira_keys.append(add_result["jira_key"])
+
+      result = {
+          "captured": discovered_count,
+          "duplicates_skipped": duplicate_count,
+          "existing_jira_keys": existing_jira_keys,
+          "total_issues": len(code_issues),
+      }
+    output: discovered_work_capture
     on_error: continue
 
   # Step 14: Prepare review summary
@@ -1705,6 +1831,30 @@ outputs:
       Or just say: "Also run the tests for this MR"
       {% endif %}
 
+      {% if discovered_work_capture and (discovered_work_capture.captured > 0 or discovered_work_capture.duplicates_skipped > 0) %}
+      ---
+
+      ## 📝 Discovered Work
+
+      {% if discovered_work_capture.captured > 0 %}
+      **{{ discovered_work_capture.captured }}** new items captured for follow-up (tech debt, missing tests, etc.)
+      {% endif %}
+
+      {% if discovered_work_capture.duplicates_skipped > 0 %}
+      **{{ discovered_work_capture.duplicates_skipped }}** duplicate items skipped (already tracked)
+      {% if discovered_work_capture.existing_jira_keys %}
+      - Existing Jira issues: {{ discovered_work_capture.existing_jira_keys | join(', ') }}
+      {% endif %}
+      {% endif %}
+
+      {% if discovered_work_capture.captured > 0 %}
+      To review and sync to Jira:
+      ```
+      skill_run("sync_discovered_work")
+      ```
+      {% endif %}
+      {% endif %}
+
   - name: context
     value:
       mr_id: "{{ mr_id }}"
@@ -1714,3 +1864,5 @@ outputs:
       format_ok: "{{ format_issues == ['Format OK'] }}"
       tests_ran: "{{ inputs.get('run_tests', False) }}"
       tests_passed: "{{ '✅' in str(test_result) if test_result else 'not_run' }}"
+      discovered_work_captured: "{{ discovered_work_capture.captured if discovered_work_capture else 0 }}"
+      discovered_work_duplicates: "{{ discovered_work_capture.duplicates_skipped if discovered_work_capture else 0 }}"

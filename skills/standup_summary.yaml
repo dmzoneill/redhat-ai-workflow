@@ -596,6 +596,91 @@ steps:
       result = "\n".join(lines)
     output: enhanced_standup
 
+  # ==================== DISCOVERED WORK SUMMARY ====================
+
+  - name: get_discovered_work_daily
+    description: "Get discovered work from the last day"
+    compute: |
+      from scripts.common.memory import get_discovered_work_for_period
+
+      # Get daily discovered work
+      daily_data = get_discovered_work_for_period(days=1)
+
+      result = {
+          "items": daily_data.get("items", []),
+          "created_count": daily_data.get("created_count", 0),
+          "synced_count": daily_data.get("synced_count", 0),
+          "jira_keys": daily_data.get("jira_keys", []),
+          "by_type": daily_data.get("by_type", {}),
+          "has_data": daily_data.get("created_count", 0) > 0,
+      }
+    output: discovered_work_daily
+    on_error: continue
+
+  - name: add_discovered_work_section
+    description: "Add discovered work section to standup"
+    condition: "discovered_work_daily and discovered_work_daily.has_data"
+    compute: |
+      from scripts.common.parsers import linkify_jira_keys
+
+      is_slack = inputs.get('slack_format', True)
+      lines = [enhanced_standup]
+
+      data = discovered_work_daily
+      lines.append("")
+      lines.append("### 📝 Discovered Work (Today)")
+
+      # Summary stats
+      lines.append(f"- **Discovered:** {data.get('created_count', 0)} items")
+      lines.append(f"- **Synced to Jira:** {data.get('synced_count', 0)}")
+
+      # Jira issues created
+      jira_keys = data.get("jira_keys", [])
+      if jira_keys:
+          lines.append("")
+          lines.append("**Issues Created:**")
+          for key in jira_keys[:5]:
+              key_str = linkify_jira_keys(key, slack_format=is_slack)
+              lines.append(f"- {key_str}")
+
+      # By type breakdown
+      by_type = data.get("by_type", {})
+      if by_type:
+          lines.append("")
+          lines.append("**By Type:**")
+          type_emoji = {
+              "tech_debt": "🔧",
+              "bug": "🐛",
+              "improvement": "✨",
+              "missing_test": "🧪",
+              "missing_docs": "📚",
+              "security": "🔐",
+              "discovered_work": "📝",
+          }
+          for work_type, count in by_type.items():
+              emoji = type_emoji.get(work_type, "📌")
+              lines.append(f"- {emoji} {work_type}: {count}")
+
+      # Pending items
+      pending = [i for i in data.get("items", []) if not i.get("jira_synced")]
+      if pending:
+          lines.append("")
+          lines.append(f"**Pending:** {len(pending)} items not yet in Jira")
+          lines.append("_Run `skill_run(\"sync_discovered_work\")` to review and sync._")
+
+      result = "\n".join(lines)
+    output: standup_with_discovered
+    on_error: continue
+
+  - name: finalize_standup
+    description: "Finalize standup output"
+    compute: |
+      if 'standup_with_discovered' in dir() and standup_with_discovered:
+          result = standup_with_discovered
+      else:
+          result = enhanced_standup
+    output: final_standup
+
   - name: log_standup
     description: "Log standup generation to session"
     tool: memory_session_log
@@ -812,7 +897,7 @@ steps:
 outputs:
   - name: summary
     value: |
-      {{ enhanced_standup }}
+      {{ final_standup }}
 
   - name: context
     value:

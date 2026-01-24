@@ -1,0 +1,596 @@
+# Skill: Sync Discovered Work to Jira
+# Reviews pending discovered work items and creates Jira issues for them
+
+name: sync_discovered_work
+description: |
+  Review and sync discovered work items to Jira.
+
+  During skill execution (review_pr, start_work, investigate_alert, etc.),
+  work items are discovered that need follow-up but aren't part of the
+  current task. This skill:
+
+  1. Lists all pending discovered work items
+  2. Groups them by type and priority
+  3. Creates Jira issues for selected items
+  4. Updates memory to mark items as synced
+
+  Work types:
+  - tech_debt: Technical debt to address
+  - bug: Bugs found during other work
+  - improvement: Enhancement opportunities
+  - missing_test: Test coverage gaps
+  - security: Security concerns
+  - discovered_work: General discovered items
+
+version: "1.0"
+
+inputs:
+  - name: auto_create
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically create Jira issues for all pending items (default: false, review first)"
+
+  - name: priority_filter
+    type: string
+    required: false
+    description: "Only sync items with this priority or higher (low, medium, high, critical)"
+
+  - name: type_filter
+    type: string
+    required: false
+    description: "Only sync items of this type (tech_debt, bug, improvement, etc.)"
+
+  - name: parent_epic
+    type: string
+    required: false
+    description: "Epic key to link all created issues to (e.g., AAP-50000)"
+
+  - name: dry_run
+    type: boolean
+    required: false
+    default: false
+    description: "Show what would be created without actually creating issues"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== LOAD DISCOVERED WORK ====================
+
+  - name: load_discovered_work
+    description: "Load all discovered work from memory"
+    compute: |
+      from scripts.common.memory import get_discovered_work, get_discovered_work_summary
+
+      # Get all items and summary
+      all_items = get_discovered_work()
+      pending = [item for item in all_items if not item.get("jira_synced", False)]
+      summary = get_discovered_work_summary()
+
+      result = {
+          "all_items": all_items,
+          "pending": pending,
+          "summary": summary,
+          "has_pending": len(pending) > 0,
+      }
+    output: discovered_work
+
+  - name: check_has_work
+    description: "Check if there's any pending work"
+    compute: |
+      if not discovered_work.get("has_pending"):
+          result = "No pending discovered work to sync."
+      else:
+          result = f"Found {len(discovered_work['pending'])} pending items."
+    output: work_check
+
+  # ==================== FILTER ITEMS ====================
+
+  - name: filter_items
+    description: "Apply priority and type filters"
+    condition: "discovered_work.has_pending"
+    compute: |
+      pending = discovered_work.get("pending", [])
+
+      # Priority order for filtering
+      priority_order = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+      # Apply priority filter
+      priority_filter = inputs.get("priority_filter", "")
+      if priority_filter:
+          min_priority = priority_order.get(priority_filter.lower(), 0)
+          pending = [
+              item for item in pending
+              if priority_order.get(item.get("priority", "medium"), 2) >= min_priority
+          ]
+
+      # Apply type filter
+      type_filter = inputs.get("type_filter", "")
+      if type_filter:
+          pending = [
+              item for item in pending
+              if item.get("work_type", "discovered_work") == type_filter
+          ]
+
+      # Group by type
+      by_type = {}
+      for item in pending:
+          work_type = item.get("work_type", "discovered_work")
+          if work_type not in by_type:
+              by_type[work_type] = []
+          by_type[work_type].append(item)
+
+      # Group by priority
+      by_priority = {}
+      for item in pending:
+          priority = item.get("priority", "medium")
+          if priority not in by_priority:
+              by_priority[priority] = []
+          by_priority[priority].append(item)
+
+      result = {
+          "filtered": pending,
+          "count": len(pending),
+          "by_type": by_type,
+          "by_priority": by_priority,
+      }
+    output: filtered_work
+
+  # ==================== BUILD REVIEW SUMMARY ====================
+
+  - name: build_review_summary
+    description: "Build summary for user review"
+    condition: "discovered_work.has_pending"
+    compute: |
+      lines = []
+      lines.append("## 📋 Discovered Work Summary")
+      lines.append("")
+
+      summary = discovered_work.get("summary", {})
+      lines.append(f"**Total items:** {summary.get('total', 0)}")
+      lines.append(f"**Pending sync:** {summary.get('pending_sync', 0)}")
+      lines.append(f"**Already synced:** {summary.get('synced', 0)}")
+      lines.append("")
+
+      # By type
+      if summary.get("by_type"):
+          lines.append("### By Type")
+          type_emoji = {
+              "tech_debt": "🔧",
+              "bug": "🐛",
+              "improvement": "✨",
+              "missing_test": "🧪",
+              "missing_docs": "📚",
+              "security": "🔐",
+              "discovered_work": "📝",
+          }
+          for work_type, count in summary.get("by_type", {}).items():
+              emoji = type_emoji.get(work_type, "📌")
+              lines.append(f"- {emoji} **{work_type}**: {count}")
+          lines.append("")
+
+      # By priority
+      if summary.get("by_priority"):
+          lines.append("### By Priority")
+          priority_emoji = {
+              "critical": "🔴",
+              "high": "🟠",
+              "medium": "🟡",
+              "low": "🟢",
+          }
+          for priority in ["critical", "high", "medium", "low"]:
+              count = summary.get("by_priority", {}).get(priority, 0)
+              if count > 0:
+                  emoji = priority_emoji.get(priority, "⚪")
+                  lines.append(f"- {emoji} **{priority}**: {count}")
+          lines.append("")
+
+      # By source skill
+      if summary.get("by_source_skill"):
+          lines.append("### By Source Skill")
+          for skill, count in summary.get("by_source_skill", {}).items():
+              lines.append(f"- `{skill}`: {count}")
+          lines.append("")
+
+      result = "\n".join(lines)
+    output: review_summary
+
+  # ==================== LIST PENDING ITEMS ====================
+
+  - name: list_pending_items
+    description: "List all pending items for review"
+    condition: "discovered_work.has_pending"
+    compute: |
+      lines = []
+      lines.append("## 📝 Pending Items")
+      lines.append("")
+
+      filtered = filtered_work.get("filtered", [])
+
+      type_emoji = {
+          "tech_debt": "🔧",
+          "bug": "🐛",
+          "improvement": "✨",
+          "missing_test": "🧪",
+          "missing_docs": "📚",
+          "security": "🔐",
+          "discovered_work": "📝",
+      }
+
+      priority_emoji = {
+          "critical": "🔴",
+          "high": "🟠",
+          "medium": "🟡",
+          "low": "🟢",
+      }
+
+      for i, item in enumerate(filtered, 1):
+          work_type = item.get("work_type", "discovered_work")
+          priority = item.get("priority", "medium")
+          t_emoji = type_emoji.get(work_type, "📌")
+          p_emoji = priority_emoji.get(priority, "⚪")
+
+          lines.append(f"### {i}. {t_emoji} {item.get('task', 'No description')}")
+          lines.append(f"**Type:** {work_type} | **Priority:** {p_emoji} {priority}")
+
+          if item.get("source_skill"):
+              lines.append(f"**Source:** `{item.get('source_skill')}`")
+          if item.get("source_issue"):
+              lines.append(f"**Related Issue:** {item.get('source_issue')}")
+          if item.get("source_mr"):
+              lines.append(f"**Related MR:** !{item.get('source_mr')}")
+          if item.get("file_path"):
+              file_info = item.get("file_path")
+              if item.get("line_number"):
+                  file_info += f":{item.get('line_number')}"
+              lines.append(f"**File:** `{file_info}`")
+          if item.get("notes"):
+              lines.append(f"**Notes:** {item.get('notes')}")
+          if item.get("created"):
+              lines.append(f"**Discovered:** {item.get('created')[:10]}")
+
+          lines.append("")
+
+      result = "\n".join(lines)
+    output: items_list
+
+  # ==================== CREATE JIRA ISSUES (if auto_create) ====================
+
+  - name: prepare_jira_issues
+    description: "Prepare Jira issue data for creation (with deduplication)"
+    condition: "inputs.auto_create and not inputs.dry_run and filtered_work.count > 0"
+    compute: |
+      from scripts.common.config_loader import load_config
+
+      config = load_config()
+      repos = config.get("repositories", {})
+
+      # Default to AAP project
+      default_project = "AAP"
+
+      issues_to_create = []
+      already_synced = []  # Items that already have Jira issues
+      add_notes_to = []    # Items where we should add notes to existing Jira
+
+      type_to_jira_type = {
+          "tech_debt": "Task",
+          "bug": "Bug",
+          "improvement": "Story",
+          "missing_test": "Task",
+          "missing_docs": "Task",
+          "security": "Bug",
+          "discovered_work": "Task",
+      }
+
+      type_to_labels = {
+          "tech_debt": ["tech-debt", "discovered-work"],
+          "bug": ["discovered-work"],
+          "improvement": ["improvement", "discovered-work"],
+          "missing_test": ["testing", "discovered-work"],
+          "missing_docs": ["documentation", "discovered-work"],
+          "security": ["security", "discovered-work"],
+          "discovered_work": ["discovered-work"],
+      }
+
+      for item in filtered_work.get("filtered", []):
+          # Skip items already synced to Jira
+          if item.get("jira_synced") and item.get("jira_key"):
+              already_synced.append({
+                  "task": item.get("task", "")[:60],
+                  "jira_key": item.get("jira_key"),
+              })
+              continue
+          work_type = item.get("work_type", "discovered_work")
+
+          # Build description
+          desc_lines = [
+              f"*Discovered during skill execution*",
+              "",
+              f"h2. Description",
+              item.get("task", "No description"),
+              "",
+          ]
+
+          if item.get("notes"):
+              desc_lines.extend([
+                  "h2. Additional Context",
+                  item.get("notes"),
+                  "",
+              ])
+
+          if item.get("file_path"):
+              file_info = item.get("file_path")
+              if item.get("line_number"):
+                  file_info += f":{item.get('line_number')}"
+              desc_lines.extend([
+                  "h2. Location",
+                  f"{{code}}{file_info}{{code}}",
+                  "",
+              ])
+
+          if item.get("source_issue"):
+              desc_lines.extend([
+                  "h2. Related",
+                  f"Discovered while working on: {item.get('source_issue')}",
+                  "",
+              ])
+
+          if item.get("source_mr"):
+              desc_lines.extend([
+                  f"Found during MR review: !{item.get('source_mr')}",
+                  "",
+              ])
+
+          desc_lines.extend([
+              "---",
+              f"_Auto-created by sync_discovered_work skill_",
+              f"_Source skill: {item.get('source_skill', 'unknown')}_",
+          ])
+
+          issue_data = {
+              "project": default_project,
+              "issue_type": type_to_jira_type.get(work_type, "Task"),
+              "summary": f"[Discovered] {item.get('task', 'No description')[:80]}",
+              "description": "\n".join(desc_lines),
+              "labels": type_to_labels.get(work_type, ["discovered-work"]),
+              "priority": item.get("priority", "medium").capitalize(),
+              "original_task": item.get("task", ""),
+          }
+
+          # Add epic if provided
+          if inputs.get("parent_epic"):
+              issue_data["epic_key"] = inputs.get("parent_epic")
+
+          issues_to_create.append(issue_data)
+
+      result = {
+          "issues": issues_to_create,
+          "count": len(issues_to_create),
+          "already_synced": already_synced,
+          "already_synced_count": len(already_synced),
+          "add_notes_to": add_notes_to,
+      }
+    output: jira_issues
+
+  # Create first issue (if any)
+  - name: create_jira_issue_1
+    description: "Create first Jira issue"
+    condition: "jira_issues and jira_issues.count > 0"
+    tool: jira_create_issue
+    args:
+      project: "{{ jira_issues.issues[0].project }}"
+      issue_type: "{{ jira_issues.issues[0].issue_type }}"
+      summary: "{{ jira_issues.issues[0].summary }}"
+      description: "{{ jira_issues.issues[0].description }}"
+    output: created_issue_1
+    on_error: continue
+
+  - name: mark_synced_1
+    description: "Mark first item as synced"
+    condition: "created_issue_1 and '✅' in str(created_issue_1)"
+    compute: |
+      from scripts.common.memory import mark_discovered_work_synced
+      import re
+
+      # Extract issue key from result
+      match = re.search(r'([A-Z]+-\d+)', str(created_issue_1))
+      if match:
+          jira_key = match.group(1)
+          original_task = jira_issues.get("issues", [{}])[0].get("original_task", "")
+          mark_discovered_work_synced(original_task, jira_key)
+          result = f"Synced: {jira_key}"
+      else:
+          result = "Could not extract issue key"
+    output: sync_result_1
+    on_error: continue
+
+  # Create second issue (if any)
+  - name: create_jira_issue_2
+    description: "Create second Jira issue"
+    condition: "jira_issues and jira_issues.count > 1"
+    tool: jira_create_issue
+    args:
+      project: "{{ jira_issues.issues[1].project }}"
+      issue_type: "{{ jira_issues.issues[1].issue_type }}"
+      summary: "{{ jira_issues.issues[1].summary }}"
+      description: "{{ jira_issues.issues[1].description }}"
+    output: created_issue_2
+    on_error: continue
+
+  - name: mark_synced_2
+    description: "Mark second item as synced"
+    condition: "created_issue_2 and '✅' in str(created_issue_2)"
+    compute: |
+      from scripts.common.memory import mark_discovered_work_synced
+      import re
+
+      match = re.search(r'([A-Z]+-\d+)', str(created_issue_2))
+      if match:
+          jira_key = match.group(1)
+          original_task = jira_issues.get("issues", [{}])[1].get("original_task", "")
+          mark_discovered_work_synced(original_task, jira_key)
+          result = f"Synced: {jira_key}"
+      else:
+          result = "Could not extract issue key"
+    output: sync_result_2
+    on_error: continue
+
+  # Create third issue (if any)
+  - name: create_jira_issue_3
+    description: "Create third Jira issue"
+    condition: "jira_issues and jira_issues.count > 2"
+    tool: jira_create_issue
+    args:
+      project: "{{ jira_issues.issues[2].project }}"
+      issue_type: "{{ jira_issues.issues[2].issue_type }}"
+      summary: "{{ jira_issues.issues[2].summary }}"
+      description: "{{ jira_issues.issues[2].description }}"
+    output: created_issue_3
+    on_error: continue
+
+  - name: mark_synced_3
+    description: "Mark third item as synced"
+    condition: "created_issue_3 and '✅' in str(created_issue_3)"
+    compute: |
+      from scripts.common.memory import mark_discovered_work_synced
+      import re
+
+      match = re.search(r'([A-Z]+-\d+)', str(created_issue_3))
+      if match:
+          jira_key = match.group(1)
+          original_task = jira_issues.get("issues", [{}])[2].get("original_task", "")
+          mark_discovered_work_synced(original_task, jira_key)
+          result = f"Synced: {jira_key}"
+      else:
+          result = "Could not extract issue key"
+    output: sync_result_3
+    on_error: continue
+
+  # ==================== COLLECT RESULTS ====================
+
+  - name: collect_creation_results
+    description: "Collect all creation results"
+    condition: "inputs.auto_create and not inputs.dry_run"
+    compute: |
+      created = []
+      failed = []
+
+      results = [
+          (created_issue_1 if 'created_issue_1' in dir() else None, sync_result_1 if 'sync_result_1' in dir() else None),
+          (created_issue_2 if 'created_issue_2' in dir() else None, sync_result_2 if 'sync_result_2' in dir() else None),
+          (created_issue_3 if 'created_issue_3' in dir() else None, sync_result_3 if 'sync_result_3' in dir() else None),
+      ]
+
+      for create_result, sync_result in results:
+          if create_result and "✅" in str(create_result):
+              created.append(sync_result or str(create_result)[:50])
+          elif create_result:
+              failed.append(str(create_result)[:50])
+
+      result = {
+          "created": created,
+          "failed": failed,
+          "created_count": len(created),
+          "failed_count": len(failed),
+      }
+    output: creation_results
+
+  # ==================== LOG SESSION ====================
+
+  - name: log_session
+    description: "Log sync action to session"
+    tool: memory_session_log
+    args:
+      action: "Reviewed discovered work"
+      details: "{{ filtered_work.count if filtered_work else 0 }} items pending"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {{ review_summary if review_summary else "No pending discovered work." }}
+
+      {% if items_list %}
+      {{ items_list }}
+      {% endif %}
+
+      {% if inputs.dry_run and filtered_work and filtered_work.count > 0 %}
+      ---
+
+      ## 🔍 Dry Run Mode
+
+      Would create **{{ filtered_work.count }}** Jira issues.
+
+      To actually create them, run:
+      ```
+      skill_run("sync_discovered_work", '{"auto_create": true}')
+      ```
+
+      Or to create with an epic:
+      ```
+      skill_run("sync_discovered_work", '{"auto_create": true, "parent_epic": "AAP-XXXXX"}')
+      ```
+      {% endif %}
+
+      {% if creation_results %}
+      ---
+
+      ## ✅ Created Issues
+
+      {% if creation_results.created %}
+      {% for item in creation_results.created %}
+      - {{ item }}
+      {% endfor %}
+      {% endif %}
+
+      {% if creation_results.failed %}
+      ### ❌ Failed
+
+      {% for item in creation_results.failed %}
+      - {{ item }}
+      {% endfor %}
+      {% endif %}
+
+      **Summary:** {{ creation_results.created_count }} created, {{ creation_results.failed_count }} failed
+      {% endif %}
+
+      {% if not inputs.auto_create and discovered_work and discovered_work.has_pending %}
+      ---
+
+      ## 🎯 Next Steps
+
+      To create Jira issues for these items:
+
+      **Create all:**
+      ```
+      skill_run("sync_discovered_work", '{"auto_create": true}')
+      ```
+
+      **Create high priority only:**
+      ```
+      skill_run("sync_discovered_work", '{"auto_create": true, "priority_filter": "high"}')
+      ```
+
+      **Create tech debt only:**
+      ```
+      skill_run("sync_discovered_work", '{"auto_create": true, "type_filter": "tech_debt"}')
+      ```
+
+      **Dry run first:**
+      ```
+      skill_run("sync_discovered_work", '{"dry_run": true}')
+      ```
+      {% endif %}
+
+  - name: context
+    value:
+      total_pending: "{{ discovered_work.summary.pending_sync if discovered_work else 0 }}"
+      filtered_count: "{{ filtered_work.count if filtered_work else 0 }}"
+      created_count: "{{ creation_results.created_count if creation_results else 0 }}"
+      was_dry_run: "{{ inputs.dry_run }}"

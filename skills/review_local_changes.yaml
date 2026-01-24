@@ -1,0 +1,418 @@
+# Skill: Review Local Changes
+# Multi-agent code review for local uncommitted/staged changes (no GitLab required)
+
+name: review_local_changes
+description: |
+  Multi-agent code review for LOCAL changes - no GitLab MR required.
+
+  Reviews uncommitted changes using Claude + Gemini agents.
+  Perfect for pre-commit or pre-push reviews.
+
+  **Review Agents:**
+  - 🏗️ **Architecture Agent** (Claude): Design patterns, SOLID principles
+  - 🔒 **Security Agent** (Gemini): Security vulnerabilities, auth issues
+  - ⚡ **Performance Agent** (Claude): Performance bottlenecks
+  - 🧪 **Testing Agent** (Gemini): Test coverage, edge cases
+
+  **Modes:**
+  - `staged` (default): Review only staged changes (git diff --cached)
+  - `unstaged`: Review only unstaged changes (git diff)
+  - `all`: Review all uncommitted changes (git diff HEAD)
+  - `commit`: Review specific commit (git show <sha>)
+  - `branch`: Review changes since branching from main (git diff main...HEAD)
+
+version: "1.0"
+
+inputs:
+  - name: mode
+    type: string
+    required: false
+    default: "staged"
+    description: "What to review: staged, unstaged, all, commit, branch"
+
+  - name: commit_sha
+    type: string
+    required: false
+    description: "Commit SHA to review (only for mode=commit)"
+
+  - name: base_branch
+    type: string
+    required: false
+    default: "main"
+    description: "Base branch for mode=branch"
+
+  - name: repo
+    type: string
+    required: false
+    default: "."
+    description: "Repository path"
+
+  - name: agents
+    type: string
+    required: false
+    default: "architecture,security,performance"
+    description: "Comma-separated agents to run"
+
+  - name: model
+    type: string
+    required: false
+    default: "sonnet"
+    description: "Model to use (sonnet, opus, haiku)"
+
+  - name: files
+    type: string
+    required: false
+    description: "Specific files to review (comma-separated, optional)"
+
+steps:
+  # ==================== GET LOCAL DIFF ====================
+
+  - name: get_diff
+    description: "Get diff based on mode"
+    compute: |
+      import subprocess
+      import os
+
+      repo = inputs.get("repo", ".")
+      mode = inputs.get("mode", "staged")
+      commit_sha = inputs.get("commit_sha", "")
+      base_branch = inputs.get("base_branch", "main")
+      files_filter = inputs.get("files", "")
+
+      # Build git diff command based on mode
+      if mode == "staged":
+          cmd = ["git", "diff", "--cached"]
+      elif mode == "unstaged":
+          cmd = ["git", "diff"]
+      elif mode == "all":
+          cmd = ["git", "diff", "HEAD"]
+      elif mode == "commit" and commit_sha:
+          cmd = ["git", "show", commit_sha, "--format="]
+      elif mode == "branch":
+          cmd = ["git", "diff", f"{base_branch}...HEAD"]
+      else:
+          cmd = ["git", "diff", "--cached"]  # Default to staged
+
+      # Add file filter if specified
+      if files_filter:
+          cmd.append("--")
+          cmd.extend(files_filter.split(","))
+
+      try:
+          proc = subprocess.run(
+              cmd,
+              capture_output=True,
+              text=True,
+              cwd=repo,
+              timeout=30
+          )
+          diff_content = proc.stdout
+          diff_error = proc.stderr if proc.returncode != 0 else None
+      except Exception as e:
+          diff_content = ""
+          diff_error = str(e)
+
+      # Get list of changed files
+      stat_cmd = cmd.copy()
+      stat_cmd.insert(2, "--stat")
+      try:
+          stat_proc = subprocess.run(
+              stat_cmd,
+              capture_output=True,
+              text=True,
+              cwd=repo,
+              timeout=10
+          )
+          diff_stat = stat_proc.stdout
+      except:
+          diff_stat = ""
+
+      result = {
+          "diff": diff_content[:15000],  # Limit for LLM context
+          "stat": diff_stat,
+          "mode": mode,
+          "error": diff_error,
+          "has_changes": len(diff_content.strip()) > 0,
+          "line_count": len(diff_content.split("\n")) if diff_content else 0,
+      }
+    output: local_diff
+
+  - name: check_has_changes
+    description: "Verify there are changes to review"
+    compute: |
+      if not local_diff.get("has_changes"):
+          result = {
+              "abort": True,
+              "message": f"No changes found for mode '{local_diff.get('mode')}'. Nothing to review."
+          }
+      else:
+          result = {
+              "abort": False,
+              "message": f"Found {local_diff.get('line_count')} lines of diff to review."
+          }
+    output: changes_check
+
+  # ==================== PARSE AGENTS ====================
+
+  - name: parse_agents
+    description: "Parse enabled agents"
+    condition: "not changes_check.abort"
+    compute: |
+      agents_str = inputs.get("agents", "architecture,security,performance")
+      enabled = [a.strip() for a in agents_str.split(",") if a.strip()]
+
+      configs = {
+          "architecture": {"name": "Architecture", "icon": "🏗️", "cli": "claude"},
+          "security": {"name": "Security", "icon": "🔒", "cli": "gemini"},
+          "performance": {"name": "Performance", "icon": "⚡", "cli": "claude"},
+          "testing": {"name": "Testing", "icon": "🧪", "cli": "gemini"},
+          "documentation": {"name": "Documentation", "icon": "📝", "cli": "claude"},
+          "style": {"name": "Style", "icon": "🎨", "cli": "gemini"}
+      }
+
+      result = {
+          "enabled": enabled,
+          "configs": {k: configs[k] for k in enabled if k in configs}
+      }
+    output: agents_config
+
+  # ==================== RUN AGENTS ====================
+
+  - name: run_agents
+    description: "Run all review agents in parallel"
+    condition: "not changes_check.abort"
+    compute: |
+      import subprocess
+      import threading
+
+      def run_agent(agent_name, config, diff_content, model):
+          """Run a single agent review"""
+          prompts = {
+              "architecture": "Review this code diff for architecture issues. Focus on: design patterns, SOLID principles, separation of concerns, modularity.",
+              "security": "Review this code diff for security issues. Focus on: input validation, authentication, authorization, data exposure, injection vulnerabilities.",
+              "performance": "Review this code diff for performance issues. Focus on: algorithmic complexity, resource usage, caching opportunities, database queries.",
+              "testing": "Review this code diff for testing issues. Focus on: test coverage, edge cases, error handling, test quality.",
+              "documentation": "Review this code diff for documentation issues. Focus on: code comments, docstrings, API documentation, README updates.",
+              "style": "Review this code diff for code style issues. Focus on: naming conventions, formatting, consistency, readability."
+          }
+
+          prompt_text = f"""{prompts.get(agent_name, 'Review this code diff.')}
+
+      Code Diff:
+      ```
+      {diff_content[:5000]}
+      ```
+
+      Provide findings as:
+      [CRITICAL] issue description
+      [WARNING] issue description
+      [SUGGESTION] issue description
+
+      Be concise. Only report genuine issues.
+      """
+
+          try:
+              proc = subprocess.run(
+                  [config["cli"], "--model", model, "-p", prompt_text],
+                  capture_output=True,
+                  text=True,
+                  timeout=120
+              )
+              return {
+                  "agent": agent_name,
+                  "cli": config["cli"],
+                  "review": proc.stdout,
+                  "stderr": proc.stderr,
+                  "returncode": proc.returncode
+              }
+          except Exception as e:
+              return {"agent": agent_name, "error": str(e)}
+
+      # Thread worker
+      def worker(results, agent_name, config, diff_content, model):
+          result = run_agent(agent_name, config, diff_content, model)
+          results[agent_name] = result
+
+      # Start all agents in parallel
+      results = {}
+      threads = []
+      model = inputs.get("model", "sonnet")
+
+      for agent_name in agents_config["enabled"]:
+          if agent_name in agents_config["configs"]:
+              config = agents_config["configs"][agent_name]
+              thread = threading.Thread(
+                  target=worker,
+                  args=(results, agent_name, config, local_diff["diff"], model)
+              )
+              thread.start()
+              threads.append(thread)
+
+      # Wait for all threads
+      for thread in threads:
+          thread.join()
+
+      # Collect results in order
+      reviews = []
+      for agent_name in agents_config["enabled"]:
+          if agent_name in results:
+              reviews.append(results[agent_name])
+
+      result = reviews
+    output: all_reviews
+
+  # ==================== SYNTHESIZE REVIEW ====================
+
+  - name: synthesize_review
+    description: "Synthesize final review"
+    condition: "not changes_check.abort"
+    compute: |
+      import subprocess
+
+      # Collect all review content
+      review_content = ""
+      has_critical = False
+      has_warnings = False
+
+      for r in all_reviews:
+          if r and not r.get("error") and r.get("review"):
+              review_text = r.get("review", "")
+              review_content += f"\n=== {r.get('agent', 'unknown').upper()} ===\n{review_text}\n"
+              if "[CRITICAL]" in review_text.upper():
+                  has_critical = True
+              if "[WARNING]" in review_text.upper():
+                  has_warnings = True
+
+      prompt_text = f"""You are reviewing local code changes before commit/push.
+
+      Changes Summary:
+      {local_diff.get('stat', 'No stat available')}
+
+      Agent Reviews:
+      {review_content}
+
+      Synthesize a brief, actionable review:
+
+      1. If CRITICAL issues: List them clearly with fix suggestions
+      2. If only WARNINGS: Summarize briefly
+      3. If clean: Say "LGTM" with a one-line summary
+
+      Format:
+      ## Review: [PASS/WARN/BLOCK]
+
+      [Your synthesis - be concise]
+
+      Requirements:
+      - Write as a single reviewer (use "I")
+      - NO emojis
+      - Be direct and actionable
+      - Max 10-15 lines for clean code, more for issues
+      """
+
+      try:
+          proc = subprocess.run(
+              ["claude", "--model", inputs.get("model", "sonnet"), "-p", prompt_text],
+              capture_output=True,
+              text=True,
+              timeout=120
+          )
+          result = {
+              "review": proc.stdout,
+              "has_critical": has_critical,
+              "has_warnings": has_warnings,
+              "verdict": "BLOCK" if has_critical else ("WARN" if has_warnings else "PASS")
+          }
+      except Exception as e:
+          result = {
+              "review": f"Error synthesizing review: {str(e)}",
+              "has_critical": has_critical,
+              "has_warnings": has_warnings,
+              "verdict": "ERROR"
+          }
+    output: final_review
+
+  # ==================== BUILD OUTPUT ====================
+
+  - name: build_stats
+    description: "Build review statistics"
+    compute: |
+      if changes_check.get("abort"):
+          result = {
+              "agent_count": 0,
+              "successful": 0,
+              "verdict": "NO_CHANGES",
+              "mode": local_diff.get("mode", "unknown")
+          }
+      else:
+          result = {
+              "agent_count": len(all_reviews) if 'all_reviews' in dir() else 0,
+              "successful": len([r for r in all_reviews if not r.get("error")]) if 'all_reviews' in dir() else 0,
+              "verdict": final_review.get("verdict", "UNKNOWN") if 'final_review' in dir() else "UNKNOWN",
+              "mode": local_diff.get("mode", "unknown"),
+              "lines_reviewed": local_diff.get("line_count", 0)
+          }
+    output: stats
+
+  - name: log_review
+    description: "Log review to session"
+    tool: memory_session_log
+    args:
+      action: "Local code review ({{ stats.mode }})"
+      details: "Verdict: {{ stats.verdict }}, Agents: {{ stats.agent_count }}, Lines: {{ stats.lines_reviewed }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      {% if changes_check.abort %}
+      ## No Changes to Review
+
+      {{ changes_check.message }}
+
+      **Mode:** `{{ local_diff.mode }}`
+
+      Try one of these modes:
+      - `staged` - Review staged changes (git diff --cached)
+      - `unstaged` - Review unstaged changes (git diff)
+      - `all` - Review all uncommitted changes (git diff HEAD)
+      - `branch` - Review changes since main (git diff main...HEAD)
+
+      {% else %}
+      ## Local Code Review
+
+      **Mode:** `{{ local_diff.mode }}`
+      **Lines:** {{ local_diff.line_count }}
+      **Verdict:** {{ stats.verdict }}
+
+      ### Changes
+      ```
+      {{ local_diff.stat }}
+      ```
+
+      ### Review
+      {{ final_review.review }}
+
+      ---
+
+      ### Agent Results
+      {% for r in all_reviews %}
+      - **{{ r.agent }}** ({{ r.cli }}): {{ 'OK' if not r.error else 'ERROR: ' + r.error }}
+      {% endfor %}
+
+      {% if stats.verdict == 'PASS' %}
+      ---
+      ✅ **Ready to commit/push**
+      {% elif stats.verdict == 'WARN' %}
+      ---
+      ⚠️ **Consider addressing warnings before push**
+      {% elif stats.verdict == 'BLOCK' %}
+      ---
+      ❌ **Fix critical issues before commit**
+      {% endif %}
+      {% endif %}
+
+  - name: verdict
+    value: "{{ stats.verdict }}"
+
+  - name: review
+    value: "{{ final_review.review if final_review else 'No review generated' }}"

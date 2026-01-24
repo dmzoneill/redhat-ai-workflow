@@ -1,0 +1,490 @@
+# Skill: Collect Daily Performance Data
+# Fetches work data from Jira, GitLab, GitHub, and local git
+# Maps to PSE competencies and saves to daily file
+
+name: collect_daily
+description: |
+  Collect daily performance data and map to PSE competencies.
+
+  Fetches:
+  - Jira: Issues resolved/created today
+  - GitLab: MRs merged, reviews given
+  - GitHub: PRs merged (upstream contributions)
+  - Git: Commits across configured repos
+
+  Then maps each item to competencies using keyword rules and AI fallback,
+  calculates points, and saves to the daily JSON file.
+
+version: "1.0"
+
+inputs:
+  - name: date
+    type: string
+    required: false
+    default: ""
+    description: "Date to collect data for (YYYY-MM-DD). Defaults to today."
+
+steps:
+  # Load developer persona for data fetching tools
+  - name: load_persona
+    description: "Load developer persona for Jira, GitLab, Git tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # Determine target date
+  - name: determine_date
+    description: "Parse target date or use today"
+    compute: |
+      from datetime import date, datetime
+
+      if inputs.date:
+          target = date.fromisoformat(inputs.date)
+      else:
+          target = date.today()
+
+      # Calculate quarter info
+      year = target.year
+      quarter = (target.month - 1) // 3 + 1
+      quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+      start_month, start_day = quarter_starts[quarter]
+      quarter_start = date(year, start_month, start_day)
+      day_of_quarter = (target - quarter_start).days + 1
+
+      result = {
+          "date": target.isoformat(),
+          "date_display": target.strftime("%A, %B %d, %Y"),
+          "year": year,
+          "quarter": quarter,
+          "day_of_quarter": day_of_quarter,
+          "jira_date_filter": target.strftime("%Y-%m-%d"),
+      }
+    output: target_date
+
+  # Fetch Jira issues resolved today
+  - name: fetch_jira_resolved
+    description: "Fetch Jira issues resolved on target date"
+    tool: jira_search
+    args:
+      jql: "resolved >= '{{ target_date.jira_date_filter }}' AND resolved < '{{ target_date.jira_date_filter }}' + 1d AND (assignee = currentUser() OR reporter = currentUser()) ORDER BY resolved DESC"
+      max_results: 50
+    output: jira_resolved_raw
+    on_error: continue
+
+  # Fetch Jira issues created today (shows initiative)
+  - name: fetch_jira_created
+    description: "Fetch Jira issues created by me on target date"
+    tool: jira_search
+    args:
+      jql: "reporter = currentUser() AND created >= '{{ target_date.jira_date_filter }}' AND created < '{{ target_date.jira_date_filter }}' + 1d ORDER BY created DESC"
+      max_results: 50
+    output: jira_created_raw
+    on_error: continue
+
+  # Fetch GitLab MRs merged today
+  - name: fetch_gitlab_mrs
+    description: "Fetch GitLab MRs merged on target date"
+    tool: gitlab_mr_list
+    args:
+      state: "merged"
+      author: "currentUser"
+    output: gitlab_mrs_raw
+    on_error: continue
+
+  # Fetch GitHub PRs (upstream contributions)
+  - name: fetch_github_prs
+    description: "Fetch GitHub PRs merged on target date"
+    tool: github_pr_list
+    args:
+      state: "closed"
+      author: "@me"
+    output: github_prs_raw
+    on_error: continue
+
+  # Fetch local git commits
+  - name: fetch_git_commits
+    description: "Fetch commits from configured repos"
+    compute: |
+      import subprocess
+      import json
+      from pathlib import Path
+
+      # Load repos from config
+      config_file = Path.home() / ".config" / "aa-workflow" / "config.json"
+      repos = []
+
+      if config_file.exists():
+          with open(config_file) as f:
+              config = json.load(f)
+              for name, repo_config in config.get("repositories", {}).items():
+                  path = repo_config.get("path", "")
+                  if path and Path(path).exists():
+                      repos.append({"name": name, "path": path})
+
+      # Fallback to common repos
+      if not repos:
+          common_paths = [
+              Path.home() / "src" / "automation-analytics-backend",
+              Path.home() / "src" / "app-interface",
+              Path.home() / "src" / "redhat-ai-workflow",
+          ]
+          for p in common_paths:
+              if p.exists():
+                  repos.append({"name": p.name, "path": str(p)})
+
+      commits = []
+      target = target_date["date"]
+
+      for repo in repos:
+          try:
+              cmd = [
+                  "git", "-C", repo["path"], "log",
+                  f"--since={target} 00:00:00",
+                  f"--until={target} 23:59:59",
+                  "--author=daoneill",
+                  "--format=%H|%s|%ad",
+                  "--date=iso"
+              ]
+              output = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+
+              for line in output.strip().split("\n"):
+                  if line:
+                      parts = line.split("|", 2)
+                      if len(parts) >= 2:
+                          commits.append({
+                              "repo": repo["name"],
+                              "sha": parts[0][:8],
+                              "message": parts[1],
+                              "date": parts[2] if len(parts) > 2 else target,
+                          })
+          except Exception:
+              pass
+
+      result = commits
+    output: git_commits
+
+  # Parse and map all events to competencies
+  - name: map_events
+    description: "Parse fetched data and map to competencies"
+    compute: |
+      import json
+      import re
+      from datetime import datetime
+
+      events = []
+      seen_ids = set()
+      target = target_date["date"]
+
+      # Helper to generate event ID
+      def make_id(source, item_id, event_type):
+          return f"{source}:{item_id}:{event_type}"
+
+      # Helper to map competencies based on keywords
+      def map_competencies(title, labels, source, event_type, metadata=None):
+          points = {}
+          title_lower = title.lower()
+          labels_lower = [l.lower() for l in labels]
+          all_text = f"{title_lower} {' '.join(labels_lower)}"
+
+          # Technical Contribution - base for most work
+          if event_type in ["mr_merged", "issue_resolved", "commit"]:
+              points["technical_contribution"] = 2
+              # Bonus for complexity
+              if metadata and metadata.get("lines_changed", 0) > 500:
+                  points["technical_contribution"] = 6
+              elif metadata and metadata.get("lines_changed", 0) > 100:
+                  points["technical_contribution"] = 4
+
+          # Planning & Execution
+          if event_type == "issue_created" or any(k in all_text for k in ["planning", "roadmap", "spike"]):
+              points["planning_execution"] = 2
+
+          # Collaboration
+          if event_type == "review_given" or any(k in all_text for k in ["review", "pair", "feedback"]):
+              points["collaboration"] = 2
+
+          # Mentorship
+          if any(k in all_text for k in ["mentor", "onboard", "training", "newcomer"]):
+              points["mentorship"] = 3
+
+          # Continuous Improvement
+          if any(k in all_text for k in ["ci/cd", "pipeline", "automation", "tooling", "refactor"]):
+              points["continuous_improvement"] = 3
+
+          # Creativity & Innovation
+          if any(k in all_text for k in ["poc", "prototype", "innovation", "experiment", "ai"]):
+              points["creativity_innovation"] = 4
+
+          # Leadership
+          if any(k in all_text for k in ["cross-team", "lead", "architecture", "design"]):
+              points["leadership"] = 3
+
+          # Portfolio Impact
+          if any(k in all_text for k in ["api", "schema", "interface", "app-interface"]):
+              points["portfolio_impact"] = 4
+
+          # End-to-End Delivery
+          if any(k in all_text for k in ["release", "deploy", "customer", "production"]):
+              points["end_to_end_delivery"] = 3
+
+          # Opportunity Recognition (upstream)
+          if source == "github":
+              points["opportunity_recognition"] = 4
+
+          # Technical Knowledge (docs)
+          if any(k in all_text for k in ["doc", "readme", "documentation"]):
+              points["technical_knowledge"] = 3
+
+          return points
+
+      # Parse Jira resolved issues
+      if jira_resolved_raw:
+          jira_text = str(jira_resolved_raw)
+          # Parse issue keys and summaries
+          for match in re.finditer(r'([A-Z]+-\d+)[:\s]+([^\n]+)', jira_text):
+              key = match.group(1)
+              summary = match.group(2).strip()[:100]
+              event_id = make_id("jira", key, "resolved")
+
+              if event_id not in seen_ids:
+                  seen_ids.add(event_id)
+                  labels = re.findall(r'labels?[:\s]+\[([^\]]+)\]', jira_text.lower()) or []
+                  points = map_competencies(summary, labels, "jira", "issue_resolved")
+
+                  events.append({
+                      "id": event_id,
+                      "source": "jira",
+                      "type": "issue_resolved",
+                      "item_id": key,
+                      "title": f"{key}: {summary}",
+                      "timestamp": datetime.now().isoformat(),
+                      "labels": labels,
+                      "points": points,
+                  })
+
+      # Parse Jira created issues
+      if jira_created_raw:
+          jira_text = str(jira_created_raw)
+          for match in re.finditer(r'([A-Z]+-\d+)[:\s]+([^\n]+)', jira_text):
+              key = match.group(1)
+              summary = match.group(2).strip()[:100]
+              event_id = make_id("jira", key, "created")
+
+              if event_id not in seen_ids:
+                  seen_ids.add(event_id)
+                  points = map_competencies(summary, [], "jira", "issue_created")
+
+                  events.append({
+                      "id": event_id,
+                      "source": "jira",
+                      "type": "issue_created",
+                      "item_id": key,
+                      "title": f"Created: {key}: {summary}",
+                      "timestamp": datetime.now().isoformat(),
+                      "points": points,
+                  })
+
+      # Parse GitLab MRs
+      if gitlab_mrs_raw:
+          mr_text = str(gitlab_mrs_raw)
+          for match in re.finditer(r'!(\d+)[:\s]+([^\n]+)', mr_text):
+              mr_id = match.group(1)
+              title = match.group(2).strip()[:100]
+              event_id = make_id("gitlab", f"mr:{mr_id}", "merged")
+
+              if event_id not in seen_ids:
+                  seen_ids.add(event_id)
+                  points = map_competencies(title, [], "gitlab", "mr_merged")
+
+                  events.append({
+                      "id": event_id,
+                      "source": "gitlab",
+                      "type": "mr_merged",
+                      "item_id": mr_id,
+                      "title": f"!{mr_id}: {title}",
+                      "timestamp": datetime.now().isoformat(),
+                      "points": points,
+                  })
+
+      # Parse GitHub PRs
+      if github_prs_raw:
+          pr_text = str(github_prs_raw)
+          for match in re.finditer(r'#(\d+)[:\s]+([^\n]+)', pr_text):
+              pr_id = match.group(1)
+              title = match.group(2).strip()[:100]
+              event_id = make_id("github", f"pr:{pr_id}", "merged")
+
+              if event_id not in seen_ids:
+                  seen_ids.add(event_id)
+                  points = map_competencies(title, [], "github", "pr_merged")
+
+                  events.append({
+                      "id": event_id,
+                      "source": "github",
+                      "type": "pr_merged",
+                      "item_id": pr_id,
+                      "title": f"#{pr_id}: {title}",
+                      "timestamp": datetime.now().isoformat(),
+                      "points": points,
+                  })
+
+      # Parse git commits
+      for commit in git_commits:
+          event_id = make_id("git", f"{commit['repo']}:{commit['sha']}", "commit")
+
+          if event_id not in seen_ids:
+              seen_ids.add(event_id)
+              points = map_competencies(commit["message"], [], "git", "commit")
+
+              events.append({
+                  "id": event_id,
+                  "source": "git",
+                  "type": "commit",
+                  "item_id": commit["sha"],
+                  "title": f"[{commit['repo']}] {commit['message']}",
+                  "timestamp": commit.get("date", datetime.now().isoformat()),
+                  "points": points,
+              })
+
+      result = events
+    output: mapped_events
+
+  # Calculate daily totals and save
+  - name: save_daily_data
+    description: "Calculate totals and save to daily file"
+    compute: |
+      import json
+      from pathlib import Path
+      from datetime import datetime
+
+      # Calculate daily points by competency
+      daily_points = {}
+      daily_cap = 15
+
+      for event in mapped_events:
+          for comp_id, pts in event.get("points", {}).items():
+              current = daily_points.get(comp_id, 0)
+              daily_points[comp_id] = min(current + pts, daily_cap)
+
+      daily_total = sum(daily_points.values())
+
+      # Prepare daily data
+      daily_data = {
+          "date": target_date["date"],
+          "day_of_quarter": target_date["day_of_quarter"],
+          "events": mapped_events,
+          "daily_points": daily_points,
+          "daily_total": daily_total,
+          "saved_at": datetime.now().isoformat(),
+      }
+
+      # Save to file
+      perf_dir = Path.home() / "src" / "redhat-quarterly-connection" / str(target_date["year"]) / f"q{target_date['quarter']}" / "performance" / "daily"
+      perf_dir.mkdir(parents=True, exist_ok=True)
+
+      daily_file = perf_dir / f"{target_date['date']}.json"
+      with open(daily_file, "w") as f:
+          json.dump(daily_data, f, indent=2)
+
+      result = {
+          "file": str(daily_file),
+          "event_count": len(mapped_events),
+          "daily_points": daily_points,
+          "daily_total": daily_total,
+      }
+    output: save_result
+
+  # Update summary
+  - name: update_summary
+    description: "Recalculate and update quarter summary"
+    tool: performance_status
+    args:
+      quarter: "Q{{ target_date.quarter }} {{ target_date.year }}"
+    output: summary_result
+    on_error: continue
+
+  # Update workspace state cache
+  - name: update_cache
+    description: "Update workspace state for UI refresh"
+    compute: |
+      import json
+      from pathlib import Path
+      from datetime import datetime
+
+      # Load summary
+      perf_dir = Path.home() / "src" / "redhat-quarterly-connection" / str(target_date["year"]) / f"q{target_date['quarter']}" / "performance"
+      summary_file = perf_dir / "summary.json"
+
+      summary = {}
+      if summary_file.exists():
+          with open(summary_file) as f:
+              summary = json.load(f)
+
+      # Build cache data for UI
+      cache_data = {
+          "last_updated": datetime.now().isoformat(),
+          "quarter": f"Q{target_date['quarter']} {target_date['year']}",
+          "day_of_quarter": target_date["day_of_quarter"],
+          "overall_percentage": summary.get("overall_percentage", 0),
+          "competencies": {
+              comp_id: {
+                  "points": summary.get("cumulative_points", {}).get(comp_id, 0),
+                  "percentage": summary.get("cumulative_percentage", {}).get(comp_id, 0),
+              }
+              for comp_id in summary.get("cumulative_points", {})
+          },
+          "highlights": summary.get("highlights", [])[:5],
+          "gaps": summary.get("gaps", []),
+      }
+
+      # Write to workspace state (ConfigManager will handle this in production)
+      state_file = Path.home() / ".mcp" / "workspace_states" / "workspace_states.json"
+      state_file.parent.mkdir(parents=True, exist_ok=True)
+
+      state = {}
+      if state_file.exists():
+          try:
+              with open(state_file) as f:
+                  state = json.load(f)
+          except Exception:
+              pass
+
+      state["performance"] = cache_data
+
+      with open(state_file, "w") as f:
+          json.dump(state, f, indent=2)
+
+      result = "Cache updated"
+    output: cache_result
+    on_error: continue
+
+  # Log to session
+  - name: log_session
+    description: "Log collection to session"
+    tool: memory_session_log
+    args:
+      action: "Collected daily performance data for {{ target_date.date }}"
+      details: "{{ save_result.event_count }} events, {{ save_result.daily_total }} total points"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## ✅ Daily Performance Collection Complete
+
+      **Date:** {{ target_date.date_display }}
+      **Quarter:** Q{{ target_date.quarter }} {{ target_date.year }} (Day {{ target_date.day_of_quarter }})
+
+      ### Results
+      - **Events collected:** {{ save_result.event_count }}
+      - **Daily total:** {{ save_result.daily_total }} points
+      - **File:** `{{ save_result.file }}`
+
+      ### Points by Competency
+      {% for comp_id, pts in save_result.daily_points.items() %}
+      - {{ comp_id }}: {{ pts }} pts
+      {% endfor %}
+
+      ---
+
+      Run `performance_status()` to see updated quarter progress.

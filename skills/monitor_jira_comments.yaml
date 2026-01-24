@@ -218,16 +218,18 @@ steps:
           comment: "{{ prepare_response.response }}"
 
       - name: notify_user_slack
+        description: "Notify user about question (uses notify_team skill)"
         condition: "{{ analyze_comments.has_questions and notify_user }}"
-        tool: slack_post_message
+        tool: skill_run
         args:
-          channel: "{{ slack_channel or '@me' }}"
-          text: |
-            :speech_balloon: New question on {{ issue_key }}
-
-            Someone asked a question on your sprint issue. {{ 'I responded automatically.' if not dry_run else 'Dry run - no response sent.' }}
-
-            View issue: https://issues.redhat.com/browse/{{ issue_key }}
+          skill_name: notify_team
+          inputs: |
+            {
+              "message": "New question on {{ issue_key }} - {{ 'responded automatically' if not dry_run else 'dry run' }}",
+              "channel": "{{ slack_channel or 'team-automation-analytics' }}",
+              "type": "info",
+              "context": "View issue: https://issues.redhat.com/browse/{{ issue_key }}"
+            }
 
       - name: log_interaction
         condition: "{{ analyze_comments.has_questions }}"

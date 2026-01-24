@@ -10,41 +10,41 @@ description: |
   5. Generates initial project knowledge
 
 inputs:
-  path:
+  - name: path
     type: string
     required: true
     description: Path to the project directory
-  name:
+  - name: name
     type: string
     required: false
     description: Project name (defaults to directory name)
-  gitlab:
+  - name: gitlab
     type: string
     required: false
     description: GitLab project path (auto-detected if not provided)
-  jira_project:
+  - name: jira_project
     type: string
     required: true
     description: Jira project key (e.g., AAP, KONFLUX)
-  jira_component:
+  - name: jira_component
     type: string
     required: false
     description: Jira component name
-  konflux_namespace:
+  - name: konflux_namespace
     type: string
     required: false
     description: Konflux tenant namespace (if using Konflux CI)
-  setup_quay:
+  - name: setup_quay
     type: boolean
     required: false
     default: false
     description: Configure Quay repository
-  setup_bonfire:
+  - name: setup_bonfire
     type: boolean
     required: false
     default: false
     description: Configure Bonfire/ephemeral deployment
-  generate_knowledge:
+  - name: generate_knowledge
     type: boolean
     required: false
     default: true

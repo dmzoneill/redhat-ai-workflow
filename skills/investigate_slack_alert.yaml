@@ -492,16 +492,20 @@ steps:
     output: jira_description
 
   - name: create_jira_issue
-    description: "Create a new Jira issue for this alert"
+    description: "Create a new Jira issue for this alert (uses create_jira_issue skill)"
     condition: "{{ not jira_analysis.has_existing }}"
-    tool: jira_create_issue
+    tool: skill_run
     args:
-      project: "AAP"
-      issue_type: "{{ 'Bug' if alert_info.is_billing else 'Story' }}"
-      summary: "{{ jira_summary }}"
-      description: "{{ jira_description }}"
-      labels: "{{ ['billing', 'prometheus-alert', 'auto-created'] if alert_info.is_billing else ['prometheus-alert', 'auto-created'] }}"
-      component: "Automation Analytics"
+      skill_name: create_jira_issue
+      inputs: |
+        {
+          "summary": "{{ jira_summary }}",
+          "description": "{{ jira_description }}",
+          "issue_type": "{{ 'Bug' if alert_info.is_billing else 'Story' }}",
+          "project": "AAP",
+          "component": "Automation Analytics",
+          "labels": "prometheus-alert,auto-created{{ ',billing' if alert_info.is_billing else '' }}"
+        }
     output: created_issue
     on_error: continue
 

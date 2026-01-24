@@ -1,0 +1,286 @@
+# Skill: Discovered Work Summary
+# Generates daily/weekly summaries of discovered work for reports
+
+name: discovered_work_summary
+description: |
+  Generate a summary of discovered work for daily standups or weekly reports.
+
+  This skill:
+  1. Retrieves discovered work from the specified time period
+  2. Groups by type, priority, and source
+  3. Lists Jira issues created
+  4. Provides statistics and trends
+
+  Can be called from standup_summary or weekly_summary skills.
+
+version: "1.0"
+
+inputs:
+  - name: period
+    type: string
+    required: false
+    default: "daily"
+    description: "Time period: 'daily' (1 day), 'weekly' (7 days), or number of days"
+
+  - name: include_pending
+    type: boolean
+    required: false
+    default: true
+    description: "Include items not yet synced to Jira"
+
+  - name: include_synced
+    type: boolean
+    required: false
+    default: true
+    description: "Include items already synced to Jira"
+
+  - name: format
+    type: string
+    required: false
+    default: "markdown"
+    description: "Output format: 'markdown', 'slack', 'brief'"
+
+steps:
+  # ==================== LOAD DATA ====================
+
+  - name: calculate_period
+    description: "Calculate the number of days to look back"
+    compute: |
+      period = inputs.get("period", "daily")
+
+      if period == "daily":
+          days = 1
+      elif period == "weekly":
+          days = 7
+      else:
+          try:
+              days = int(period)
+          except (ValueError, TypeError):
+              days = 7
+
+      result = {"days": days, "period_name": period}
+    output: period_config
+
+  - name: load_period_data
+    description: "Load discovered work for the period"
+    compute: |
+      from scripts.common.memory import get_discovered_work_for_period, get_discovered_work_summary
+
+      days = period_config.get("days", 7)
+
+      # Get period-specific data
+      period_data = get_discovered_work_for_period(days=days)
+
+      # Get overall summary for context
+      overall = get_discovered_work_summary()
+
+      result = {
+          "period": period_data,
+          "overall": overall,
+          "days": days,
+      }
+    output: work_data
+
+  # ==================== ANALYZE DATA ====================
+
+  - name: analyze_trends
+    description: "Analyze trends in discovered work"
+    compute: |
+      from datetime import datetime, timedelta
+
+      period = work_data.get("period", {})
+      overall = work_data.get("overall", {})
+
+      items = period.get("items", [])
+      by_day = period.get("by_day", {})
+      by_type = period.get("by_type", {})
+
+      # Calculate daily average
+      days = work_data.get("days", 7)
+      daily_avg = len(items) / max(days, 1)
+
+      # Find most common type
+      most_common_type = max(by_type.items(), key=lambda x: x[1])[0] if by_type else "none"
+
+      # Find busiest day
+      busiest_day = max(by_day.items(), key=lambda x: x[1])[0] if by_day else "none"
+
+      # Sync rate
+      synced = period.get("synced_count", 0)
+      total = period.get("created_count", 0)
+      sync_rate = (synced / total * 100) if total > 0 else 0
+
+      # Pending backlog
+      pending_backlog = overall.get("pending_sync", 0)
+
+      result = {
+          "daily_average": round(daily_avg, 1),
+          "most_common_type": most_common_type,
+          "busiest_day": busiest_day,
+          "sync_rate": round(sync_rate, 1),
+          "pending_backlog": pending_backlog,
+          "total_in_period": total,
+          "synced_in_period": synced,
+      }
+    output: trends
+
+  # ==================== BUILD SUMMARY ====================
+
+  - name: build_markdown_summary
+    description: "Build markdown formatted summary"
+    condition: "inputs.format in ['markdown', 'slack']"
+    compute: |
+      from datetime import datetime
+
+      period = work_data.get("period", {})
+      trends_data = trends
+      days = work_data.get("days", 7)
+      period_name = period_config.get("period_name", "weekly")
+
+      lines = []
+
+      # Header
+      if period_name == "daily":
+          lines.append("## 📋 Daily Discovered Work Summary")
+      else:
+          lines.append(f"## 📋 Discovered Work Summary ({days} days)")
+
+      lines.append(f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*")
+      lines.append("")
+
+      # Quick stats
+      lines.append("### 📊 Quick Stats")
+      lines.append(f"- **Discovered:** {trends_data.get('total_in_period', 0)} items")
+      lines.append(f"- **Synced to Jira:** {trends_data.get('synced_in_period', 0)} items ({trends_data.get('sync_rate', 0)}%)")
+      lines.append(f"- **Pending backlog:** {trends_data.get('pending_backlog', 0)} items")
+      if days > 1:
+          lines.append(f"- **Daily average:** {trends_data.get('daily_average', 0)} items/day")
+      lines.append("")
+
+      # Jira issues created
+      jira_keys = period.get("jira_keys", [])
+      if jira_keys:
+          lines.append("### 🎫 Jira Issues Created")
+          for key in jira_keys[:10]:
+              if inputs.get("format") == "slack":
+                  lines.append(f"- <https://issues.redhat.com/browse/{key}|{key}>")
+              else:
+                  lines.append(f"- [{key}](https://issues.redhat.com/browse/{key})")
+          if len(jira_keys) > 10:
+              lines.append(f"- *...and {len(jira_keys) - 10} more*")
+          lines.append("")
+
+      # By type breakdown
+      by_type = period.get("by_type", {})
+      if by_type:
+          lines.append("### 📁 By Type")
+          type_emoji = {
+              "tech_debt": "🔧",
+              "bug": "🐛",
+              "improvement": "✨",
+              "missing_test": "🧪",
+              "missing_docs": "📚",
+              "security": "🔐",
+              "discovered_work": "📝",
+          }
+          for work_type, count in sorted(by_type.items(), key=lambda x: x[1], reverse=True):
+              emoji = type_emoji.get(work_type, "📌")
+              lines.append(f"- {emoji} **{work_type}:** {count}")
+          lines.append("")
+
+      # By day breakdown (for weekly)
+      by_day = period.get("by_day", {})
+      if by_day and days > 1:
+          lines.append("### 📅 By Day")
+          for day in sorted(by_day.keys()):
+              count = by_day[day]
+              bar = "█" * min(count, 10)
+              lines.append(f"- `{day}`: {bar} ({count})")
+          lines.append("")
+
+      # Pending items (if requested)
+      if inputs.get("include_pending", True):
+          pending_items = [i for i in period.get("items", []) if not i.get("jira_synced")]
+          if pending_items:
+              lines.append("### ⏳ Pending (Not Yet in Jira)")
+              priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+              pending_sorted = sorted(pending_items, key=lambda x: priority_order.get(x.get("priority", "medium"), 2))
+              for item in pending_sorted[:5]:
+                  priority = item.get("priority", "medium")
+                  p_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(priority, "⚪")
+                  lines.append(f"- {p_emoji} {item.get('task', 'No description')[:60]}")
+              if len(pending_items) > 5:
+                  lines.append(f"- *...and {len(pending_items) - 5} more*")
+              lines.append("")
+              lines.append("*Run `skill_run(\"sync_discovered_work\", '{\"auto_create\": true}')` to create Jira issues.*")
+              lines.append("")
+
+      # Insights
+      if trends_data.get("most_common_type") and trends_data.get("most_common_type") != "none":
+          lines.append("### 💡 Insights")
+          lines.append(f"- Most common type: **{trends_data.get('most_common_type')}**")
+          if trends_data.get("busiest_day") and trends_data.get("busiest_day") != "none":
+              lines.append(f"- Busiest day: **{trends_data.get('busiest_day')}**")
+          if trends_data.get("pending_backlog", 0) > 10:
+              lines.append(f"- ⚠️ Backlog growing - consider syncing to Jira")
+          lines.append("")
+
+      result = "\n".join(lines)
+    output: markdown_summary
+
+  - name: build_brief_summary
+    description: "Build brief one-line summary"
+    condition: "inputs.format == 'brief'"
+    compute: |
+      period = work_data.get("period", {})
+      trends_data = trends
+
+      total = trends_data.get("total_in_period", 0)
+      synced = trends_data.get("synced_in_period", 0)
+      pending = trends_data.get("pending_backlog", 0)
+
+      if total == 0:
+          result = "No discovered work in this period."
+      else:
+          result = f"Discovered: {total} items | Synced: {synced} | Pending: {pending}"
+    output: brief_summary
+
+  # ==================== LOG SESSION ====================
+
+  - name: log_session
+    description: "Log summary generation"
+    tool: memory_session_log
+    args:
+      action: "Generated discovered work summary"
+      details: "Period: {{ period_config.period_name }}, Items: {{ trends.total_in_period }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {% if markdown_summary %}
+      {{ markdown_summary }}
+      {% elif brief_summary %}
+      {{ brief_summary }}
+      {% else %}
+      No discovered work data available.
+      {% endif %}
+
+  - name: context
+    value:
+      period_days: "{{ work_data.days }}"
+      total_discovered: "{{ trends.total_in_period }}"
+      total_synced: "{{ trends.synced_in_period }}"
+      pending_backlog: "{{ trends.pending_backlog }}"
+      sync_rate: "{{ trends.sync_rate }}"
+      jira_keys: "{{ work_data.period.jira_keys }}"
+      most_common_type: "{{ trends.most_common_type }}"
+
+  - name: stats
+    description: "Raw statistics for embedding in other reports"
+    value:
+      discovered: "{{ trends.total_in_period }}"
+      synced: "{{ trends.synced_in_period }}"
+      pending: "{{ trends.pending_backlog }}"
+      jira_keys: "{{ work_data.period.jira_keys }}"
+      by_type: "{{ work_data.period.by_type }}"
