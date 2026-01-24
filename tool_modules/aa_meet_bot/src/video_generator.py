@@ -293,11 +293,13 @@ class UltraLowCPURenderer:
     - Waveform generation (sin waves or audio-reactive)
     - Progress bar updates
     - Color conversion (BGR→YUYV)
+    - Optional horizontal flip for Google Meet (pre-mirror so viewers see correctly)
 
     Only the static base frame is rendered on CPU (once per attendee).
     """
 
     # OpenCL kernel with hardcoded constants for maximum performance
+    # MIRROR_OUTPUT: 1 = flip horizontally (for Google Meet), 0 = normal
     _KERNEL_TEMPLATE = """
     #define WIDTH {width}
     #define HEIGHT {height}
@@ -311,6 +313,7 @@ class UltraLowCPURenderer:
     #define BAR_TOTAL {bar_total}
     #define PROGRESS_Y {progress_y}
     #define PROGRESS_H {progress_h}
+    #define MIRROR_OUTPUT {mirror_output}
 
     __kernel void render_frame(
         __global const uchar* base_frame,
@@ -323,9 +326,22 @@ class UltraLowCPURenderer:
         int px = get_global_id(0) * 2;
         int py = get_global_id(1);
 
-        // Read base frame
-        int idx0 = (py * WIDTH + px) * 3;
-        int idx1 = idx0 + 3;
+        // For horizontal flip: read from mirrored position, write to normal position
+        // This pre-mirrors the output so Google Meet's mirror shows it correctly
+        int src_px, src_px1;
+        if (MIRROR_OUTPUT) {{
+            // Mirror: read pixel pair from opposite side of frame
+            // px=0,1 reads from WIDTH-2,WIDTH-1; px=2,3 reads from WIDTH-4,WIDTH-3; etc.
+            src_px = WIDTH - 2 - px;  // First pixel of mirrored pair
+            src_px1 = src_px + 1;     // Second pixel of mirrored pair
+        }} else {{
+            src_px = px;
+            src_px1 = px + 1;
+        }}
+
+        // Read base frame from source position (possibly mirrored)
+        int idx0 = (py * WIDTH + src_px) * 3;
+        int idx1 = (py * WIDTH + src_px1) * 3;
 
         uchar b0 = base_frame[idx0];
         uchar g0 = base_frame[idx0 + 1];
@@ -335,9 +351,14 @@ class UltraLowCPURenderer:
         uchar g1 = base_frame[idx1 + 1];
         uchar r1 = base_frame[idx1 + 2];
 
+        // For overlays, use source coordinates (same as base frame read position)
+        // This ensures overlays appear at the correct position relative to content
+        int overlay_px0 = src_px;
+        int overlay_px1 = src_px1;
+
         // Waveform overlay for pixel 0
-        if (py >= WAVE_Y && py < WAVE_Y + WAVE_H && px >= WAVE_X && px < WAVE_X + WAVE_W) {{
-            int wx = px - WAVE_X;
+        if (py >= WAVE_Y && py < WAVE_Y + WAVE_H && overlay_px0 >= WAVE_X && overlay_px0 < WAVE_X + WAVE_W) {{
+            int wx = overlay_px0 - WAVE_X;
             int wy = py - WAVE_Y;
             int bar_idx = wx / BAR_TOTAL;
             int bar_x = wx % BAR_TOTAL;
@@ -362,9 +383,8 @@ class UltraLowCPURenderer:
         }}
 
         // Waveform overlay for pixel 1
-        int px1 = px + 1;
-        if (py >= WAVE_Y && py < WAVE_Y + WAVE_H && px1 >= WAVE_X && px1 < WAVE_X + WAVE_W) {{
-            int wx = px1 - WAVE_X;
+        if (py >= WAVE_Y && py < WAVE_Y + WAVE_H && overlay_px1 >= WAVE_X && overlay_px1 < WAVE_X + WAVE_W) {{
+            int wx = overlay_px1 - WAVE_X;
             int wy = py - WAVE_Y;
             int bar_idx = wx / BAR_TOTAL;
             int bar_x = wx % BAR_TOTAL;
@@ -388,10 +408,10 @@ class UltraLowCPURenderer:
             }}
         }}
 
-        // Progress bar
+        // Progress bar (use source coordinates for consistent positioning)
         if (py >= PROGRESS_Y && py < PROGRESS_Y + PROGRESS_H) {{
-            if (px >= 16 && px < 16 + progress_pixels) g0 = 200;
-            if (px1 >= 16 && px1 < 16 + progress_pixels) g1 = 200;
+            if (overlay_px0 >= 16 && overlay_px0 < 16 + progress_pixels) g0 = 200;
+            if (overlay_px1 >= 16 && overlay_px1 < 16 + progress_pixels) g1 = 200;
         }}
 
         // BGR to YUYV

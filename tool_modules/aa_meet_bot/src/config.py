@@ -156,6 +156,12 @@ class VideoConfig:
     height: int = 480
     fps: int = 30
 
+    # Mirror output horizontally for Google Meet
+    # Google Meet mirrors the camera preview, so we pre-flip the video
+    # so that meeting participants see it correctly (un-mirrored)
+    # Set to True (default) so text/content appears correctly to viewers
+    mirror_for_meet: bool = True
+
 
 @dataclass
 class ModelPaths:
