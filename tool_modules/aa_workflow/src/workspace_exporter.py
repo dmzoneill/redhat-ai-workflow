@@ -13,13 +13,13 @@ Export format (v3):
 {
     "version": 3,
     "exported_at": "2024-01-18T12:00:00",
-    
+
     // Session data
     "workspace_count": 1,
     "session_count": 2,
     "workspaces": { ... },
     "sessions": [ ... ],
-    
+
     // Service status
     "services": {
         "slack": {"running": true, "uptime": "3.0d", ...},
@@ -27,14 +27,14 @@ Export format (v3):
         "meet": {"running": false},
         "mcp": {"running": true, "pid": 12345}
     },
-    
+
     // Ollama instances
     "ollama": {
         "npu": {"available": true, "port": 11434, "model": "qwen2.5:0.5b"},
         "igpu": {"available": false, "port": 11435, ...},
         ...
     },
-    
+
     // Cron configuration and history
     "cron": {
         "enabled": true,
@@ -44,10 +44,10 @@ Export format (v3):
         "history": [...],
         "total_history": 42
     },
-    
+
     // Slack channels
     "slack_channels": ["general", "random", ...],
-    
+
     // Sprint issues (cached)
     "sprint_issues": [...],
     "sprint_issues_updated": "2024-01-18T12:00:00"
@@ -103,6 +103,9 @@ def export_workspace_state_with_data(
     slack_channels: list | None = None,
     sprint_issues: list | None = None,
     sprint_issues_updated: str | None = None,
+    meet: dict | None = None,
+    sprint: dict | None = None,
+    sprint_history: list | None = None,
 ) -> dict:
     """Export unified UI state to JSON file.
 
@@ -116,8 +119,11 @@ def export_workspace_state_with_data(
         ollama: Ollama instance status dict
         cron: Cron config and history dict
         slack_channels: List of Slack channel names
-        sprint_issues: List of sprint issues
+        sprint_issues: List of sprint issues (legacy, use sprint instead)
         sprint_issues_updated: ISO timestamp of when sprint issues were last fetched
+        meet: Meet bot data (upcoming meetings, countdown, calendars)
+        sprint: Full sprint state (currentSprint, issues, botEnabled, etc.)
+        sprint_history: List of completed sprints
 
     Returns:
         Dictionary with export status.
@@ -149,34 +155,57 @@ def export_workspace_state_with_data(
     export_data = {
         "version": 3,
         "exported_at": datetime.now().isoformat(),
-        
         # Session data
         "workspace_count": len(all_states),
         "session_count": WorkspaceRegistry.total_session_count(),
         "workspaces": all_states,
         "sessions": all_sessions,
-        
         # Service status
         "services": services or {},
-        
         # Ollama instances
         "ollama": ollama or {},
-        
         # Cron configuration and history
         "cron": cron or {},
-        
         # Slack channels
         "slack_channels": slack_channels or [],
-        
-        # Sprint issues
+        # Sprint issues (legacy - kept for backward compatibility)
         "sprint_issues": sprint_issues or [],
         "sprint_issues_updated": sprint_issues_updated or "",
+        # Full sprint state (new format for Sprint Bot Autopilot)
+        "sprint": sprint
+        or {
+            "currentSprint": None,
+            "issues": [],
+            "botEnabled": False,
+            "lastUpdated": datetime.now().isoformat(),
+            "processingIssue": None,
+        },
+        "sprint_history": sprint_history or [],
+        # Meet bot data (upcoming meetings, countdown, calendars)
+        "meet": meet or {},
     }
 
-    # Write to file
+    # Write to file atomically (write to temp, then rename)
+    # This prevents race conditions between sync script and MCP server
     try:
-        with open(EXPORT_FILE, "w") as f:
-            json.dump(export_data, f, indent=2, default=str)
+        import os
+        import tempfile
+
+        # Write to temp file in same directory (ensures same filesystem for atomic rename)
+        temp_fd, temp_path = tempfile.mkstemp(suffix=".tmp", prefix="workspace_states_", dir=EXPORT_DIR)
+        try:
+            with os.fdopen(temp_fd, "w") as f:
+                json.dump(export_data, f, indent=2, default=str)
+            # Atomic rename (on POSIX systems)
+            os.replace(temp_path, EXPORT_FILE)
+        except Exception:
+            # Clean up temp file on error
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
+
         logger.debug(
             f"Exported v3: {len(all_states)} workspace(s), {len(all_sessions)} session(s), "
             f"{len(services or {})} services, {len(ollama or {})} ollama instances"

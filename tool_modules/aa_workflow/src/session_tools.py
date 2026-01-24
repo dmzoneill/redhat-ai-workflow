@@ -292,8 +292,14 @@ def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
     if not project:
         return None
 
-    # Determine persona
-    persona = agent or _get_current_persona() or "developer"
+    # Determine persona - use config default as fallback
+    if not agent and not _get_current_persona():
+        from server.utils import load_config
+
+        cfg = load_config()
+        persona = cfg.get("agent", {}).get("default_persona", "researcher")
+    else:
+        persona = agent or _get_current_persona()
 
     # Check if knowledge exists
     knowledge_path = KNOWLEDGE_DIR / persona / f"{project}.yaml"
@@ -382,9 +388,9 @@ def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
 def _load_chat_context(lines: list[str]) -> str:
     """Load and display chat context (project, issue, branch) - sync version."""
     try:
-        from .chat_context import get_chat_state, get_chat_project
+        from .chat_context import get_chat_project, get_chat_state
     except ImportError:
-        from chat_context import get_chat_state, get_chat_project
+        from chat_context import get_chat_project, get_chat_state
 
     state = get_chat_state()
     project = state["project"]
@@ -522,7 +528,21 @@ async def _session_start_impl(
     Creates a new ChatSession or resumes an existing one.
     """
     # #region agent log
-    import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "session_tools.py:_session_start_impl:entry", "message": "session_start called", "data": {"agent": agent, "project": project, "name": name, "resume_session_id": resume_session_id}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "C"}) + '\n')
+    import json as _json
+
+    open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+        _json.dumps(
+            {
+                "location": "session_tools.py:_session_start_impl:entry",
+                "message": "session_start called",
+                "data": {"agent": agent, "project": project, "name": name, "resume_session_id": resume_session_id},
+                "timestamp": __import__("time").time() * 1000,
+                "sessionId": "debug-session",
+                "hypothesisId": "C",
+            }
+        )
+        + "\n"
+    )
     # #endregion
     # Track session start in stats
     from tool_modules.aa_workflow.src.agent_stats import start_session
@@ -539,7 +559,26 @@ async def _session_start_impl(
         # Get workspace state
         workspace = await WorkspaceRegistry.get_for_ctx(ctx)
         # #region agent log
-        import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "session_tools.py:_session_start_impl:workspace", "message": "Got workspace from ctx", "data": {"workspace_uri": workspace.workspace_uri, "workspace_project": workspace.project, "is_auto_detected": workspace.is_auto_detected, "session_count": len(workspace.sessions)}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,C"}) + '\n')
+        import json as _json
+
+        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+            _json.dumps(
+                {
+                    "location": "session_tools.py:_session_start_impl:workspace",
+                    "message": "Got workspace from ctx",
+                    "data": {
+                        "workspace_uri": workspace.workspace_uri,
+                        "workspace_project": workspace.project,
+                        "is_auto_detected": workspace.is_auto_detected,
+                        "session_count": len(workspace.sessions),
+                    },
+                    "timestamp": __import__("time").time() * 1000,
+                    "sessionId": "debug-session",
+                    "hypothesisId": "A,C",
+                }
+            )
+            + "\n"
+        )
         # #endregion
 
         # Check if we're resuming an existing session
@@ -551,15 +590,15 @@ async def _session_start_impl(
                 chat_session = existing_session
                 session_id = resume_session_id
                 is_resumed = True
-                
+
                 # Update persona if provided
                 if agent:
                     chat_session.persona = agent
-                
+
                 # Update name if provided
                 if name:
                     chat_session.name = name
-                
+
                 chat_session.touch()
                 logger.info(f"Resumed session {session_id}")
             else:
@@ -577,34 +616,75 @@ async def _session_start_impl(
 
         if not is_resumed:
             lines = ["# 🚀 Session Started\n"]
-            
+
             # Determine project for this session
             # If explicitly provided, use that; otherwise auto-detect from workspace
             session_project = project if project else workspace.project
             is_auto_detected = not bool(project) and workspace.is_auto_detected
-            
+
             # Create a new chat session with its own project
-            persona = agent or "developer"
+            # Get default persona from config
+            from server.utils import load_config
+
+            cfg = load_config()
+            default_persona = cfg.get("agent", {}).get("default_persona", "researcher")
+            persona = agent or default_persona
             chat_session = workspace.create_session(
-                persona=persona, 
+                persona=persona,
                 name=name or None,
                 project=session_project,
                 is_project_auto_detected=is_auto_detected,
             )
             session_id = chat_session.session_id
-            
+
             # #region agent log
-            import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "session_tools.py:_session_start_impl:new_session", "message": "Created new session with project", "data": {"session_id": session_id, "project": session_project, "is_auto_detected": is_auto_detected, "explicit_project": project}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "per-session"}) + '\n')
+            import json as _json
+
+            open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+                _json.dumps(
+                    {
+                        "location": "session_tools.py:_session_start_impl:new_session",
+                        "message": "Created new session with project",
+                        "data": {
+                            "session_id": session_id,
+                            "project": session_project,
+                            "is_auto_detected": is_auto_detected,
+                            "explicit_project": project,
+                        },
+                        "timestamp": __import__("time").time() * 1000,
+                        "sessionId": "debug-session",
+                        "hypothesisId": "per-session",
+                    }
+                )
+                + "\n"
+            )
             # #endregion
         else:
             # For resumed sessions, update project if explicitly provided
             if project:
                 chat_session.project = project
                 chat_session.is_project_auto_detected = False
+                # Persist the project change to disk
+                WorkspaceRegistry.save_to_disk()
+                logger.info(f"Updated and persisted project '{project}' for resumed session {session_id}")
                 # #region agent log
-                import json as _json; open('/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log', 'a').write(_json.dumps({"location": "session_tools.py:_session_start_impl:resume_update_project", "message": "Updated resumed session project", "data": {"session_id": session_id, "project": project}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "per-session"}) + '\n')
+                import json as _json
+
+                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
+                    _json.dumps(
+                        {
+                            "location": "session_tools.py:_session_start_impl:resume_update_project",
+                            "message": "Updated resumed session project",
+                            "data": {"session_id": session_id, "project": project},
+                            "timestamp": __import__("time").time() * 1000,
+                            "sessionId": "debug-session",
+                            "hypothesisId": "per-session",
+                        }
+                    )
+                    + "\n"
+                )
                 # #endregion
-        
+
         # Use the session's project (not workspace's) for the rest of the function
         project = chat_session.project
 
@@ -618,11 +698,11 @@ async def _session_start_impl(
         # Add session ID and total session count to output
         total_sessions = workspace.session_count()
         session_name_info = f" - *{name or chat_session.name}*" if (name or chat_session.name) else ""
-        
+
         # Get project info for display
-        session_project = chat_session.project or workspace.project or 'default'
+        session_project = chat_session.project or workspace.project or "default"
         project_source = "(auto-detected)" if chat_session.is_project_auto_detected else "(explicit)"
-        
+
         if is_resumed:
             lines = [
                 "# 🔄 Session Resumed\n",
@@ -638,14 +718,16 @@ async def _session_start_impl(
         else:
             lines.insert(
                 1,
-                f"**Session ID:** `{session_id}`{session_name_info} *(1 of {total_sessions} sessions in this workspace)*\n"
+                f"**Session ID:** `{session_id}`{session_name_info} *(1 of {total_sessions} sessions in this workspace)*\n",
             )
             lines.insert(2, f"**Project:** {session_project} {project_source}\n")
-            lines.insert(3, "⚠️ **SAVE THIS SESSION ID** - Pass it to `session_info(session_id=\"...\")` to track YOUR session.\n")
+            lines.insert(
+                3, '⚠️ **SAVE THIS SESSION ID** - Pass it to `session_info(session_id="...")` to track YOUR session.\n'
+            )
     else:
         # Fallback to sync version for backward compatibility (no ctx available)
         lines = ["# 🚀 Session Started\n"]
-        
+
         # Detect project from MCP roots if not explicitly provided
         detected_from_roots = None
         if not project:
@@ -716,6 +798,7 @@ async def _session_start_impl(
     except Exception as e:
         logger.warning(f"Failed to export workspace state: {e}")
         import traceback
+
         logger.warning(f"Traceback: {traceback.format_exc()}")
 
     return [TextContent(type="text", text="\n".join(lines))]
@@ -842,6 +925,7 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
         except Exception as e:
             import traceback
+
             lines.append(f"**Error:** {e}")
             lines.append(f"```\n{traceback.format_exc()}\n```")
 

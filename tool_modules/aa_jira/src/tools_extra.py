@@ -163,15 +163,17 @@ Use `jira_view_issue({issue_key})` for full details including linked issues.
         return f"Unknown action: {action}. Use: summarize, next_steps, blockers"
 
 
-async def _jira_block_impl(issue_key: str, blocked_by: str, reason: str) -> str:
-    """Implementation of jira_block tool."""
-    args = ["block", issue_key, blocked_by]
-    if reason:
-        args.append(reason)
+async def _jira_block_impl(issue_key: str, reason: str) -> str:
+    """Implementation of jira_block tool.
+
+    Marks an issue as blocked with a reason. This sets the blocked flag
+    and blocked reason field in Jira.
+    """
+    args = ["block", issue_key, reason]
     success, output = await run_rh_issue(args)
     if not success:
         return f"❌ Failed to block: {output}"
-    return f"🚧 {issue_key} blocked by {blocked_by}\n\n{output}"
+    return f"🚧 {issue_key} marked as blocked\n**Reason:** {reason}\n\n{output}"
 
 
 async def _jira_lint_impl(issue_key: str) -> str:
@@ -376,12 +378,15 @@ async def _jira_unassign_impl(issue_key: str) -> str:
     return f"✅ {issue_key} unassigned\n\n{output}"
 
 
-async def _jira_unblock_impl(issue_key: str, blocked_by: str) -> str:
-    """Implementation of jira_unblock tool."""
-    success, output = await run_rh_issue(["unblock", issue_key, blocked_by])
+async def _jira_unblock_impl(issue_key: str) -> str:
+    """Implementation of jira_unblock tool.
+
+    Clears the blocked flag and blocked reason field in Jira.
+    """
+    success, output = await run_rh_issue(["unblock", issue_key])
     if not success:
         return f"❌ Failed to unblock: {output}"
-    return f"✅ {issue_key} unblocked from {blocked_by}\n\n{output}"
+    return f"✅ {issue_key} unblocked\n\n{output}"
 
 
 def register_tools(server: "FastMCP") -> int:
@@ -435,19 +440,22 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal()
     @registry.tool()
-    async def jira_block(issue_key: str, blocked_by: str, reason: str = "") -> str:
+    async def jira_block(issue_key: str, reason: str) -> str:
         """
-        Mark an issue as blocked by another issue.
+        Mark a Jira issue as blocked with a reason.
+
+        This sets the blocked flag and blocked reason field in Jira.
+        Use this when work cannot proceed due to missing information,
+        external dependencies, or other blockers.
 
         Args:
             issue_key: The issue to mark as blocked (e.g., AAP-12345)
-            blocked_by: The issue causing the block (e.g., AAP-12346)
-            reason: Optional reason for the block
+            reason: The reason for blocking (e.g., "Waiting for API spec from team X")
 
         Returns:
-            Confirmation of the block relationship.
+            Confirmation that the issue was marked as blocked.
         """
-        return await _jira_block_impl(issue_key, blocked_by, reason)
+        return await _jira_block_impl(issue_key, reason)
 
     @auto_heal()
     @registry.tool()
@@ -539,17 +547,19 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal()
     @registry.tool()
-    async def jira_unblock(issue_key: str, blocked_by: str) -> str:
+    async def jira_unblock(issue_key: str) -> str:
         """
         Remove the blocked status from a Jira issue.
 
+        Clears the blocked flag and blocked reason field in Jira.
+        Use this when a blocker has been resolved and work can continue.
+
         Args:
-            issue_key: The issue that was blocked (e.g., AAP-12345)
-            blocked_by: The issue that was blocking (e.g., AAP-12346)
+            issue_key: The issue to unblock (e.g., AAP-12345)
 
         Returns:
-            Confirmation of the unblock.
+            Confirmation that the issue was unblocked.
         """
-        return await _jira_unblock_impl(issue_key, blocked_by)
+        return await _jira_unblock_impl(issue_key)
 
     return registry.count

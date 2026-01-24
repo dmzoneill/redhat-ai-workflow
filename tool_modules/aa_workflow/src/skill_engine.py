@@ -48,6 +48,15 @@ except ImportError:
     LAYER5_AVAILABLE = False
     logger.warning("Layer 5 (Usage Pattern Learning) not available - errors won't be learned from")
 
+# WebSocket server for real-time updates
+try:
+    from server.websocket_server import get_websocket_server
+
+    WEBSOCKET_AVAILABLE = True
+except ImportError:
+    WEBSOCKET_AVAILABLE = False
+    logger.debug("WebSocket server not available - real-time updates disabled")
+
 
 # Agent stats helper - handles import in both package and direct load contexts
 def _get_agent_stats_module():
@@ -55,18 +64,20 @@ def _get_agent_stats_module():
     try:
         # Try relative import first (works when loaded as package)
         from . import agent_stats
+
         return agent_stats
     except ImportError:
         # Fall back to direct file loading (works when loaded dynamically)
         # Force fresh load by removing from sys.modules cache
         import importlib.util
         import sys
+
         agent_stats_path = Path(__file__).parent / "agent_stats.py"
-        
+
         # Remove cached version to force fresh load
         if "agent_stats" in sys.modules:
             del sys.modules["agent_stats"]
-        
+
         spec = importlib.util.spec_from_file_location("agent_stats", agent_stats_path)
         module = importlib.util.module_from_spec(spec)
         sys.modules["agent_stats"] = module  # Register before exec to handle circular imports
@@ -162,6 +173,258 @@ def _format_known_issues(matches: list) -> str:
     return "\n".join(lines)
 
 
+class SprintSafetyGuard:
+    """Safety guard for Sprint Bot to protect worktree from data loss.
+
+    Before the bot starts work on an issue, this guard:
+    1. Checks git_status for uncommitted changes
+    2. Auto-stashes with descriptive message via git_stash tool
+    3. Verifies not on main/master branch
+    4. Checks for rebase/merge in progress
+
+    Usage:
+        guard = SprintSafetyGuard(server, repo_path)
+        result = await guard.check_and_prepare(issue_key)
+        if not result["safe"]:
+            # Handle unsafe state
+            print(result["reason"])
+    """
+
+    # Branches that should never be worked on directly
+    PROTECTED_BRANCHES = {"main", "master", "develop", "production", "staging"}
+
+    def __init__(
+        self,
+        server: FastMCP | None = None,
+        repo_path: str = ".",
+        auto_stash: bool = True,
+    ):
+        """Initialize the safety guard.
+
+        Args:
+            server: FastMCP server for calling git tools
+            repo_path: Path to the repository
+            auto_stash: Whether to automatically stash uncommitted changes
+        """
+        self.server = server
+        self.repo_path = repo_path
+        self.auto_stash = auto_stash
+        self._stash_created = False
+        self._original_branch: str | None = None
+
+    async def check_git_status(self) -> dict[str, Any]:
+        """Check git status for uncommitted changes.
+
+        Returns:
+            Dict with status info:
+            - clean: bool - True if worktree is clean
+            - modified: list - Modified files
+            - staged: list - Staged files
+            - untracked: list - Untracked files
+            - branch: str - Current branch name
+            - in_progress: str | None - "rebase", "merge", or None
+        """
+        result = {
+            "clean": True,
+            "modified": [],
+            "staged": [],
+            "untracked": [],
+            "branch": "",
+            "in_progress": None,
+        }
+
+        if not self.server:
+            logger.warning("No server available for git_status check")
+            return result
+
+        try:
+            # Call git_status tool
+            status_result = await self.server.call_tool("git_status", {"repo": self.repo_path})
+
+            # Parse the result
+            if status_result and len(status_result) > 0:
+                text = status_result[0].text if hasattr(status_result[0], "text") else str(status_result[0])
+
+                # Check for modifications
+                if "modified:" in text.lower() or "changes not staged" in text.lower():
+                    result["clean"] = False
+                    # Extract modified files (simplified parsing)
+                    for line in text.split("\n"):
+                        if "modified:" in line.lower():
+                            result["modified"].append(line.strip())
+
+                if "changes to be committed" in text.lower():
+                    result["clean"] = False
+                    result["staged"].append("(staged changes present)")
+
+                if "untracked files" in text.lower():
+                    # Untracked files don't make it "dirty" for our purposes
+                    result["untracked"].append("(untracked files present)")
+
+                # Check for rebase/merge in progress
+                if "rebase in progress" in text.lower():
+                    result["in_progress"] = "rebase"
+                    result["clean"] = False
+                elif "merge in progress" in text.lower() or "you have unmerged paths" in text.lower():
+                    result["in_progress"] = "merge"
+                    result["clean"] = False
+
+                # Extract branch name
+                if "on branch" in text.lower():
+                    for line in text.split("\n"):
+                        if "on branch" in line.lower():
+                            parts = line.split()
+                            if len(parts) >= 3:
+                                result["branch"] = parts[-1]
+                                break
+
+        except Exception as e:
+            logger.error(f"Error checking git status: {e}")
+
+        self._original_branch = result["branch"]
+        return result
+
+    async def stash_changes(self, issue_key: str) -> dict[str, Any]:
+        """Stash uncommitted changes with a descriptive message.
+
+        Args:
+            issue_key: Jira issue key for the stash message
+
+        Returns:
+            Dict with stash result:
+            - success: bool
+            - message: str
+        """
+        if not self.server:
+            return {"success": False, "message": "No server available"}
+
+        try:
+            stash_message = f"Auto-stash before {issue_key} - Sprint Bot"
+            result = await self.server.call_tool(
+                "git_stash",
+                {
+                    "repo": self.repo_path,
+                    "action": "push",
+                    "message": stash_message,
+                },
+            )
+
+            text = result[0].text if result and hasattr(result[0], "text") else str(result)
+            self._stash_created = "saved" in text.lower() or "stash" in text.lower()
+
+            return {
+                "success": self._stash_created,
+                "message": f"Stashed changes: {stash_message}" if self._stash_created else "No changes to stash",
+            }
+
+        except Exception as e:
+            logger.error(f"Error stashing changes: {e}")
+            return {"success": False, "message": str(e)}
+
+    async def check_and_prepare(self, issue_key: str) -> dict[str, Any]:
+        """Check safety and prepare worktree for work.
+
+        This is the main entry point. It:
+        1. Checks git status
+        2. Validates we're not on a protected branch
+        3. Auto-stashes if needed and enabled
+        4. Returns safety status
+
+        Args:
+            issue_key: Jira issue key for context
+
+        Returns:
+            Dict with:
+            - safe: bool - True if safe to proceed
+            - reason: str - Explanation if not safe
+            - stashed: bool - True if changes were stashed
+            - branch: str - Current branch
+            - warnings: list - Non-blocking warnings
+        """
+        result = {
+            "safe": True,
+            "reason": "",
+            "stashed": False,
+            "branch": "",
+            "warnings": [],
+        }
+
+        # Check git status
+        status = await self.check_git_status()
+        result["branch"] = status["branch"]
+
+        # Check for rebase/merge in progress
+        if status["in_progress"]:
+            result["safe"] = False
+            result["reason"] = f"A {status['in_progress']} is in progress. Please complete or abort it first."
+            return result
+
+        # Check for protected branch
+        if status["branch"].lower() in self.PROTECTED_BRANCHES:
+            result["safe"] = False
+            result["reason"] = (
+                f"Currently on protected branch '{status['branch']}'. " "Please create a feature branch first."
+            )
+            return result
+
+        # Handle uncommitted changes
+        if not status["clean"]:
+            if self.auto_stash:
+                stash_result = await self.stash_changes(issue_key)
+                if stash_result["success"]:
+                    result["stashed"] = True
+                    result["warnings"].append(f"Stashed uncommitted changes: {stash_result['message']}")
+                else:
+                    result["safe"] = False
+                    result["reason"] = f"Failed to stash uncommitted changes: {stash_result['message']}"
+                    return result
+            else:
+                result["safe"] = False
+                result["reason"] = (
+                    "Uncommitted changes detected. Please commit or stash them first, " "or enable auto_stash."
+                )
+                return result
+
+        # Add warnings for untracked files
+        if status["untracked"]:
+            result["warnings"].append("Untracked files present (not stashed)")
+
+        return result
+
+    async def restore_stash(self) -> dict[str, Any]:
+        """Restore stashed changes after work is complete or aborted.
+
+        Returns:
+            Dict with restore result
+        """
+        if not self._stash_created:
+            return {"success": True, "message": "No stash to restore"}
+
+        if not self.server:
+            return {"success": False, "message": "No server available"}
+
+        try:
+            result = await self.server.call_tool(
+                "git_stash",
+                {
+                    "repo": self.repo_path,
+                    "action": "pop",
+                },
+            )
+
+            text = result[0].text if result and hasattr(result[0], "text") else str(result)
+            success = "dropped" in text.lower() or "applied" in text.lower()
+
+            return {
+                "success": success,
+                "message": "Restored stashed changes" if success else text,
+            }
+
+        except Exception as e:
+            logger.error(f"Error restoring stash: {e}")
+            return {"success": False, "message": str(e)}
+
+
 class SkillExecutor:
     """Full skill execution engine with debug support.
 
@@ -181,6 +444,11 @@ class SkillExecutor:
         emit_events: bool = True,
         workspace_uri: str = "default",
         ctx: Optional["Context"] = None,
+        # Session context for multi-execution tracking
+        session_id: str | None = None,
+        session_name: str | None = None,
+        source: str = "chat",  # "chat", "cron", "slack", "api"
+        source_details: str | None = None,  # e.g., cron job name
     ):
         self.skill = skill
         self.inputs = inputs
@@ -192,6 +460,10 @@ class SkillExecutor:
         self.emit_events = emit_events
         self.workspace_uri = workspace_uri
         self.ctx = ctx
+        self.session_id = session_id
+        self.session_name = session_name
+        self.source = source
+        self.source_details = source_details
         # Load config.json config for compute blocks
         self.config = load_config()
         self.context = {
@@ -204,7 +476,7 @@ class SkillExecutor:
         self.start_time: float | None = None
         self.error_recovery = None  # Initialized when needed
 
-        # Event emitter for VS Code extension (workspace-aware)
+        # Event emitter for VS Code extension (workspace-aware, multi-execution)
         self.event_emitter = None
         if emit_events:
             try:
@@ -215,9 +487,16 @@ class SkillExecutor:
                     skill.get("name", "unknown"),
                     skill.get("steps", []),
                     workspace_uri=workspace_uri,
+                    session_id=session_id,
+                    session_name=session_name,
+                    source=source,
+                    source_details=source_details,
                 )
                 set_emitter(self.event_emitter, workspace_uri)
-                logger.info(f"Event emitter initialized for skill: {skill.get('name', 'unknown')} (workspace: {workspace_uri})")
+                skill_name = skill.get("name", "unknown")
+                logger.info(
+                    f"Event emitter initialized for skill: {skill_name} (workspace: {workspace_uri}, source: {source})"
+                )
                 # Debug: write to a file to confirm emitter is created
                 from pathlib import Path
 
@@ -226,7 +505,9 @@ class SkillExecutor:
                 with open(debug_file, "a") as f:
                     from datetime import datetime
 
-                    f.write(f"{datetime.now().isoformat()} - Emitter created for {skill.get('name', 'unknown')}\n")
+                    f.write(
+                        f"{datetime.now().isoformat()} - Emitter created for {skill.get('name', 'unknown')} (source: {source})\n"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to initialize event emitter: {e}")
                 # Also write to debug file on failure
@@ -248,6 +529,19 @@ class SkillExecutor:
                 self.usage_learner = UsagePatternLearner()
             except Exception as e:
                 logger.warning(f"Failed to initialize Layer 5 learner: {e}")
+
+        # WebSocket server for real-time updates
+        self.ws_server = None
+        if WEBSOCKET_AVAILABLE:
+            try:
+                self.ws_server = get_websocket_server()
+            except Exception as e:
+                logger.debug(f"WebSocket server not available: {e}")
+
+        # Generate unique skill execution ID
+        import uuid
+
+        self.skill_id = str(uuid.uuid4())[:8]
 
     def _debug(self, msg: str):
         """Add debug message."""
@@ -899,6 +1193,73 @@ class SkillExecutor:
 
         return None
 
+    def _create_nested_skill_runner(self):
+        """Create a helper function that compute blocks can use to run nested skills.
+
+        Returns a function that can be called like:
+            run_skill("jira_hygiene", {"issue_key": "AAP-12345"})
+        """
+        import asyncio
+
+        def run_skill_sync(skill_name: str, inputs: dict = None) -> dict:
+            """Run a nested skill synchronously from within a compute block.
+
+            Args:
+                skill_name: Name of the skill to run (e.g., "jira_hygiene")
+                inputs: Input parameters for the skill
+
+            Returns:
+                dict with 'success', 'result', and optionally 'error' keys
+            """
+            inputs = inputs or {}
+
+            try:
+                # Load the skill definition
+                skill_file = SKILLS_DIR / f"{skill_name}.yaml"
+                if not skill_file.exists():
+                    return {"success": False, "error": f"Skill not found: {skill_name}"}
+
+                with open(skill_file) as f:
+                    nested_skill = yaml.safe_load(f)
+
+                # Create a new executor for the nested skill
+                nested_executor = SkillExecutor(
+                    skill=nested_skill,
+                    inputs=inputs,
+                    debug=self.debug,
+                    server=self.server,
+                    create_issue_fn=self.create_issue_fn,
+                    ask_question_fn=self.ask_question_fn,
+                    enable_interactive_recovery=False,  # Don't prompt in nested skills
+                    emit_events=False,  # Don't emit events for nested skills
+                    workspace_uri=self.workspace_uri,
+                    ctx=self.ctx,
+                )
+
+                # Run the nested skill - handle async properly
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+
+                if loop and loop.is_running():
+                    # We're already in an async context, need to run in thread
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(lambda: asyncio.run(nested_executor.execute()))
+                        outputs, _ = future.result(timeout=300)
+                else:
+                    # No running loop, can use asyncio.run directly
+                    outputs, _ = asyncio.run(nested_executor.execute())
+
+                return {"success": True, "result": outputs}
+
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        return run_skill_sync
+
     def _exec_compute_internal(self, code: str, output_name: str):
         """Internal compute execution without error recovery (used by recovery itself)."""
         # This is the actual compute logic extracted from _exec_compute
@@ -946,6 +1307,9 @@ class SkillExecutor:
         except ImportError:
             GoogleCredentials = None
             google_build = None
+
+        # Create the nested skill runner for compute blocks
+        run_skill = self._create_nested_skill_runner()
 
         safe_globals = {
             "__builtins__": {
@@ -1009,6 +1373,8 @@ class SkillExecutor:
             "lint_utils": lint_utils,
             "repo_utils": repo_utils,
             "slack_utils": slack_utils,
+            # Nested skill runner - allows compute blocks to run other skills
+            "run_skill": run_skill,
         }
 
         templated_code = self._template(code)
@@ -1445,6 +1811,22 @@ class SkillExecutor:
             if heal_type:
                 output_lines.append(f"   🩹 Detected {heal_type} error, attempting auto-heal...")
 
+                # Emit auto-heal triggered event (WebSocket)
+                if self.ws_server and self.ws_server.is_running:
+                    import asyncio
+
+                    # Get current step index from event_emitter or calculate it
+                    step_idx = self.event_emitter.current_step_index if self.event_emitter else 0
+                    asyncio.create_task(
+                        self.ws_server.auto_heal_triggered(
+                            skill_id=self.skill_id,
+                            step_index=step_idx,
+                            error_type=heal_type,
+                            fix_action=f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()",
+                            error_snippet=error_msg[:200],
+                        )
+                    )
+
                 retry_result = await self._attempt_auto_heal(heal_type, cluster, tool, step, output_lines)
 
                 if retry_result and retry_result.get("success"):
@@ -1456,6 +1838,20 @@ class SkillExecutor:
 
                     # Log success to memory
                     await self._log_auto_heal_to_memory(tool, heal_type, error_msg[:100], success=True)
+
+                    # Emit auto-heal completed event (WebSocket)
+                    if self.ws_server and self.ws_server.is_running:
+                        import asyncio
+
+                        step_idx = self.event_emitter.current_step_index if self.event_emitter else 0
+                        asyncio.create_task(
+                            self.ws_server.auto_heal_completed(
+                                skill_id=self.skill_id,
+                                step_index=step_idx,
+                                fix_action=heal_type,
+                                success=True,
+                            )
+                        )
 
                     self.step_results.append(
                         {
@@ -1471,6 +1867,20 @@ class SkillExecutor:
                     # Auto-heal failed, log and continue
                     output_lines.append("   ⚠️ Auto-heal failed, continuing anyway...")
                     await self._log_auto_heal_to_memory(tool, heal_type, error_msg[:100], success=False)
+
+                    # Emit auto-heal completed (failed) event (WebSocket)
+                    if self.ws_server and self.ws_server.is_running:
+                        import asyncio
+
+                        step_idx = self.event_emitter.current_step_index if self.event_emitter else 0
+                        asyncio.create_task(
+                            self.ws_server.auto_heal_completed(
+                                skill_id=self.skill_id,
+                                step_index=step_idx,
+                                fix_action=heal_type,
+                                success=False,
+                            )
+                        )
             else:
                 output_lines.append("   ℹ️ Error not auto-healable, continuing...")
 
@@ -1726,12 +2136,26 @@ class SkillExecutor:
         self.start_time = time.time()
 
         skill_name = self.skill.get("name", "unknown")
+        total_steps = len(self.skill.get("steps", []))
         self._debug(f"Starting skill: {skill_name}")
         self._debug(f"Inputs: {json.dumps(self.inputs)}")
 
-        # Emit skill start event
+        # Emit skill start event (file-based)
         if self.event_emitter:
             self.event_emitter.skill_start()
+
+        # Emit skill start event (WebSocket)
+        if self.ws_server and self.ws_server.is_running:
+            import asyncio
+
+            asyncio.create_task(
+                self.ws_server.skill_started(
+                    skill_id=self.skill_id,
+                    skill_name=skill_name,
+                    total_steps=total_steps,
+                    inputs=self.inputs,
+                )
+            )
 
         for inp in self.skill.get("inputs", []):
             name = inp["name"]
@@ -1770,9 +2194,23 @@ class SkillExecutor:
                         self.event_emitter.step_skipped(step_index, "condition false")
                     continue
 
-            # Emit step start event
+            # Emit step start event (file-based)
             if self.event_emitter:
                 self.event_emitter.step_start(step_index)
+
+            # Emit step start event (WebSocket)
+            if self.ws_server and self.ws_server.is_running:
+                import asyncio
+
+                description = step.get("description", "")
+                asyncio.create_task(
+                    self.ws_server.step_started(
+                        skill_id=self.skill_id,
+                        step_index=step_index,
+                        step_name=step_name,
+                        description=description[:200] if description else "",
+                    )
+                )
 
             if "then" in step:
                 early_return = self._process_then_block(step, output_lines)
@@ -1826,13 +2264,37 @@ class SkillExecutor:
                 output_lines.append(f"📝 **Step {step_num}: {step_name}** (manual)")
                 output_lines.append(f"   {self._template(step['description'])}\n")
 
-            # Emit step complete/failed event
+            # Emit step complete/failed event (file-based)
             if self.event_emitter:
                 duration_ms = int((time.time() - step_start_time) * 1000)
                 if step_success:
                     self.event_emitter.step_complete(step_index, duration_ms)
                 else:
                     self.event_emitter.step_failed(step_index, duration_ms, step_error or "Unknown error")
+
+            # Emit step complete/failed event (WebSocket)
+            if self.ws_server and self.ws_server.is_running:
+                import asyncio
+
+                duration_ms = int((time.time() - step_start_time) * 1000)
+                if step_success:
+                    asyncio.create_task(
+                        self.ws_server.step_completed(
+                            skill_id=self.skill_id,
+                            step_index=step_index,
+                            step_name=step_name,
+                            duration_ms=duration_ms,
+                        )
+                    )
+                else:
+                    asyncio.create_task(
+                        self.ws_server.step_failed(
+                            skill_id=self.skill_id,
+                            step_index=step_index,
+                            step_name=step_name,
+                            error=step_error or "Unknown error",
+                        )
+                    )
 
         self._format_skill_outputs(output_lines)
 
@@ -1844,7 +2306,7 @@ class SkillExecutor:
             f"\n---\n⏱️ *Completed in {total_time:.2f}s* | " f"✅ {success_count} succeeded | ❌ {fail_count} failed"
         )
 
-        # Emit skill complete event
+        # Emit skill complete event (file-based)
         if self.event_emitter:
             overall_success = fail_count == 0
             self.event_emitter.skill_complete(overall_success, int(total_time * 1000))
@@ -1855,6 +2317,33 @@ class SkillExecutor:
                 set_emitter(None)
             except Exception:
                 pass
+
+        # Emit skill complete event (WebSocket)
+        if self.ws_server and self.ws_server.is_running:
+            import asyncio
+
+            overall_success = fail_count == 0
+            if overall_success:
+                asyncio.create_task(
+                    self.ws_server.skill_completed(
+                        skill_id=self.skill_id,
+                        total_duration_ms=int(total_time * 1000),
+                    )
+                )
+            else:
+                # Get last error from step_results
+                last_error = "Skill failed"
+                for r in reversed(self.step_results):
+                    if not r.get("success") and r.get("error"):
+                        last_error = r["error"]
+                        break
+                asyncio.create_task(
+                    self.ws_server.skill_failed(
+                        skill_id=self.skill_id,
+                        error=last_error,
+                        total_duration_ms=int(total_time * 1000),
+                    )
+                )
 
         # Track skill execution in agent stats
         try:
@@ -2115,8 +2604,24 @@ async def _skill_run_impl(
     server: "FastMCP",
     create_issue_fn=None,
     ask_question_fn=None,
+    ctx: Optional["Context"] = None,
+    source: str = "chat",
+    source_details: str | None = None,
 ) -> list[TextContent]:
-    """Implementation of skill_run tool."""
+    """Implementation of skill_run tool.
+
+    Args:
+        skill_name: Name of the skill to run.
+        inputs: JSON string of input parameters.
+        execute: Whether to execute (True) or just preview (False).
+        debug: Whether to show debug output.
+        server: FastMCP server instance.
+        create_issue_fn: Function to create Jira issues.
+        ask_question_fn: Function to ask user questions.
+        ctx: MCP Context for workspace/session info.
+        source: Source of execution ("chat", "cron", "slack", "api").
+        source_details: Additional source info (e.g., cron job name).
+    """
     skill_file = SKILLS_DIR / f"{skill_name}.yaml"
     if not skill_file.exists():
         available = [f.stem for f in SKILLS_DIR.glob("*.yaml")] if SKILLS_DIR.exists() else []
@@ -2153,6 +2658,24 @@ async def _skill_run_impl(
         if not execute:
             return _format_skill_plan(skill, skill_name, input_data)
 
+        # Get session context from workspace if available
+        workspace_uri = "default"
+        session_id = None
+        session_name = None
+
+        if ctx:
+            try:
+                from server.workspace_state import WorkspaceRegistry
+
+                workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+                workspace_uri = workspace.workspace_uri
+                session = workspace.get_active_session()
+                if session:
+                    session_id = session.session_id
+                    session_name = session.name
+            except Exception as e:
+                logger.debug(f"Could not get session context: {e}")
+
         # Execute mode: run the skill
         executor = SkillExecutor(
             skill,
@@ -2163,6 +2686,12 @@ async def _skill_run_impl(
             ask_question_fn=ask_question_fn,
             enable_interactive_recovery=True,
             emit_events=True,  # Enable VS Code extension events
+            workspace_uri=workspace_uri,
+            ctx=ctx,
+            session_id=session_id,
+            session_name=session_name,
+            source=source,
+            source_details=source_details,
         )
         result = await executor.execute()
 
@@ -2200,6 +2729,7 @@ def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_f
 
     @registry.tool()
     async def skill_run(
+        ctx: "Context",
         skill_name: str,
         inputs: str = "{}",
         args: str = "",
@@ -2223,6 +2753,8 @@ def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_f
         """
         # Support both 'inputs' and 'args' parameter names
         actual_inputs = args if args else inputs
-        return await _skill_run_impl(skill_name, actual_inputs, execute, debug, server, create_issue_fn, ask_question_fn)
+        return await _skill_run_impl(
+            skill_name, actual_inputs, execute, debug, server, create_issue_fn, ask_question_fn, ctx=ctx, source="chat"
+        )
 
     return registry.count

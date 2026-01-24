@@ -11,8 +11,12 @@ Provides:
 - cron_run_now: Manually trigger a scheduled job
 - cron_status: Show scheduler status and recent executions
 - cron_scheduler_toggle: Enable/disable the entire scheduler at runtime
+
+Note: Job definitions (cron, skill, inputs) are in config.json.
+      Job/service enabled state is in state.json (managed by StateManager).
 """
 
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +26,7 @@ from croniter import croniter
 from mcp.types import TextContent
 
 from server.config_manager import config as config_manager
+from server.state_manager import state as state_manager
 from server.tool_registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -33,25 +38,13 @@ logger = logging.getLogger(__name__)
 PROJECT_DIR = Path(__file__).parent.parent.parent.parent
 
 
-def _load_config() -> dict:
-    """Load config using ConfigManager."""
-    return config_manager.get_all()
-
-
-def _save_config(config: dict):
-    """Save config using ConfigManager."""
-    for section, data in config.items():
-        config_manager.update_section(section, data, merge=False)
-    config_manager.flush()
-
-
 def _get_schedules_config() -> dict:
-    """Get the schedules section from config."""
+    """Get the schedules section from config (job definitions only)."""
     return config_manager.get("schedules", default={})
 
 
 def _update_schedules_config(schedules: dict):
-    """Update the schedules section in config."""
+    """Update the schedules section in config (job definitions only)."""
     config_manager.update_section("schedules", schedules, merge=False, flush=True)
 
 
@@ -72,11 +65,11 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         """
         schedules = _get_schedules_config()
 
-        if not schedules.get("enabled", False):
+        if not state_manager.is_service_enabled("scheduler"):
             return [
                 TextContent(
                     type="text",
-                    text="⚠️ Scheduler is disabled.\n\nEnable it by setting `schedules.enabled: true` in config.json",
+                    text="⚠️ Scheduler is disabled.\n\nEnable it with `cron_scheduler_toggle(enabled=True)`",
                 )
             ]
 
@@ -90,19 +83,33 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             ]
 
         lines = ["## 📅 Scheduled Jobs\n"]
-        lines.append(f"**Timezone:** {schedules.get('timezone', 'UTC')}\n")
+        lines.append(f"**Timezone:** {schedules.get('timezone', 'UTC')}")
+
+        # Show default retry config
+        default_retry = schedules.get("default_retry", {})
+        if default_retry:
+            lines.append(
+                f"**Default Retry:** {default_retry.get('max_attempts', 2)} attempts, {default_retry.get('backoff', 'exponential')} backoff"
+            )
+        lines.append("")
 
         now = datetime.now()
 
         for job in jobs:
             name = job.get("name", "unnamed")
             skill = job.get("skill", "")
-            enabled = job.get("enabled", True)
+            # Get enabled state from state.json
+            enabled = state_manager.is_job_enabled(name)
             notify = job.get("notify", [])
+            persona = job.get("persona", "")
+            retry = job.get("retry")
 
             status_emoji = "✅" if enabled else "⏸️"
             lines.append(f"### {status_emoji} {name}")
             lines.append(f"**Skill:** `{skill}`")
+
+            if persona:
+                lines.append(f"**Persona:** `{persona}`")
 
             if job.get("cron"):
                 cron_expr = job["cron"]
@@ -125,6 +132,17 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             if notify:
                 lines.append(f"**Notify:** {', '.join(notify)}")
 
+            # Show retry configuration
+            if retry is False:
+                lines.append("**Retry:** disabled")
+            elif isinstance(retry, dict):
+                retry_info = f"{retry.get('max_attempts', 2)} attempts"
+                if retry.get("retry_on"):
+                    retry_info += f" on {', '.join(retry['retry_on'])}"
+                lines.append(f"**Retry:** {retry_info}")
+            else:
+                lines.append("**Retry:** default")
+
             if job.get("inputs"):
                 lines.append(f"**Inputs:** `{json.dumps(job['inputs'])}`")
 
@@ -142,9 +160,11 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         inputs: str = "{}",
         notify: str = "memory",
         enabled: bool = True,
+        retry_max_attempts: int = -1,
+        retry_on: str = "",
     ) -> list[TextContent]:
         """
-        Add a new scheduled job.
+        Add a new scheduled job with optional retry configuration.
 
         Creates either a cron-based job (runs at specific times) or a
         poll-based job (checks conditions periodically).
@@ -158,6 +178,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             inputs: JSON string of inputs to pass to the skill
             notify: Comma-separated notification channels (slack,desktop,memory)
             enabled: Whether the job is enabled
+            retry_max_attempts: Max retry attempts (-1 for default, 0 to disable)
+            retry_on: Comma-separated failure types to retry on (auth,network,timeout)
 
         Returns:
             Confirmation of job creation.
@@ -169,8 +191,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             # Evening beer at 5:30 PM on weekdays
             cron_add("evening_beer", "beer", cron="30 17 * * 1-5", notify="slack")
 
-            # Check for stale PRs every hour
-            cron_add("stale_prs", "pr_reminder", poll_interval="1h", poll_condition="gitlab_stale_prs")
+            # Check for stale PRs every hour with custom retry
+            cron_add("stale_prs", "pr_reminder", poll_interval="1h", poll_condition="gitlab_stale_prs", retry_max_attempts=3, retry_on="auth,network")
         """
         # Validate inputs
         if not name:
@@ -216,7 +238,6 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         # Ensure schedules section exists
         if not schedules:
             schedules = {
-                "enabled": True,
                 "timezone": "UTC",
                 "jobs": [],
                 "poll_sources": {},
@@ -233,13 +254,15 @@ def register_scheduler_tools(server: "FastMCP") -> int:
                 )
             ]
 
-        # Build job config
+        # Build job config (no enabled flag - that goes in state.json)
         job: dict = {
             "name": name,
             "skill": skill,
-            "enabled": enabled,
             "notify": notify_channels,
         }
+
+        # Set job enabled state in state.json
+        state_manager.set_job_enabled(name, enabled)
 
         if job_inputs:
             job["inputs"] = job_inputs
@@ -251,6 +274,20 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             job["poll_interval"] = poll_interval
             if poll_condition:
                 job["condition"] = poll_condition
+
+        # Add retry configuration if specified
+        if retry_max_attempts == 0:
+            # Explicitly disable retry
+            job["retry"] = False
+        elif retry_max_attempts > 0 or retry_on:
+            # Custom retry config
+            retry_config = {}
+            if retry_max_attempts > 0:
+                retry_config["max_attempts"] = retry_max_attempts
+            if retry_on:
+                retry_config["retry_on"] = [t.strip() for t in retry_on.split(",") if t.strip()]
+            if retry_config:
+                job["retry"] = retry_config
 
         # Add to jobs list
         if "jobs" not in schedules:
@@ -278,6 +315,17 @@ def register_scheduler_tools(server: "FastMCP") -> int:
                 lines.append(f"**Condition:** `{poll_condition}`")
 
         lines.append(f"**Notify:** {', '.join(notify_channels)}")
+
+        # Show retry configuration
+        if job.get("retry") is False:
+            lines.append("**Retry:** disabled")
+        elif isinstance(job.get("retry"), dict):
+            retry_info = job["retry"]
+            lines.append(
+                f"**Retry:** {retry_info.get('max_attempts', 'default')} attempts on {', '.join(retry_info.get('retry_on', ['default']))}"
+            )
+        else:
+            lines.append("**Retry:** default (2 attempts on auth, network)")
 
         lines.append("\n💡 The scheduler will pick up this job on next restart.")
         lines.append("Use `cron_run_now` to test it immediately.")
@@ -336,15 +384,9 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         schedules = _get_schedules_config()
         jobs = schedules.get("jobs", [])
 
-        # Find and update the job
-        found = False
-        for job in jobs:
-            if job.get("name") == name:
-                job["enabled"] = enabled
-                found = True
-                break
-
-        if not found:
+        # Check if job exists in config
+        job_names = {j.get("name") for j in jobs}
+        if name not in job_names:
             return [
                 TextContent(
                     type="text",
@@ -352,8 +394,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:
                 )
             ]
 
-        schedules["jobs"] = jobs
-        _update_schedules_config(schedules)
+        # Update enabled state in state.json
+        state_manager.set_job_enabled(name, enabled, flush=True)
 
         status = "enabled" if enabled else "disabled"
         emoji = "✅" if enabled else "⏸️"
@@ -361,8 +403,7 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         return [
             TextContent(
                 type="text",
-                text=f"{emoji} Job **{name}** is now **{status}**\n\n"
-                "The change will take effect on next scheduler restart.",
+                text=f"{emoji} Job **{name}** is now **{status}**\n\n" "The change takes effect immediately.",
             )
         ]
 
@@ -466,13 +507,20 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         lines = ["## 🕐 Scheduler Status\n"]
 
         # Basic config status
-        enabled = schedules.get("enabled", False)
+        enabled = state_manager.is_service_enabled("scheduler")
         timezone = schedules.get("timezone", "UTC")
         total_jobs = len(schedules.get("jobs", []))
 
-        lines.append(f"**Enabled in config:** {'✅ Yes' if enabled else '❌ No'}")
+        lines.append(f"**Scheduler enabled:** {'✅ Yes' if enabled else '❌ No'}")
         lines.append(f"**Timezone:** {timezone}")
         lines.append(f"**Total jobs configured:** {total_jobs}")
+
+        # Show default retry config
+        default_retry = schedules.get("default_retry", {})
+        if default_retry:
+            lines.append(
+                f"**Default Retry:** {default_retry.get('max_attempts', 2)} attempts, {default_retry.get('backoff', 'exponential')} backoff"
+            )
 
         if scheduler:
             status = scheduler.get_status()
@@ -480,21 +528,49 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             lines.append(f"**Cron jobs active:** {status['cron_jobs']}")
             lines.append(f"**Poll jobs active:** {status['poll_jobs']}")
 
-            # Recent executions
+            # Recent executions with retry info
             recent = status.get("recent_executions", [])
             if recent:
                 lines.append("\n### 📜 Recent Executions\n")
+
+                # Count retry stats
+                total_with_retry = 0
+                successful_after_retry = 0
+
                 for entry in recent[-10:]:
                     timestamp = entry.get("timestamp", "")[:16]
                     job_name = entry.get("job_name", "")
                     success = entry.get("success", False)
                     duration = entry.get("duration_ms", 0)
+                    retry_info = entry.get("retry", {})
 
                     emoji = "✅" if success else "❌"
-                    lines.append(f"- {emoji} `{timestamp}` **{job_name}** ({duration}ms)")
+                    retry_badge = ""
+
+                    if retry_info and retry_info.get("retried"):
+                        total_with_retry += 1
+                        attempts = retry_info.get("attempts", 1)
+                        remediation = retry_info.get("remediation_applied", "")
+                        if success:
+                            successful_after_retry += 1
+                            retry_badge = (
+                                f" 🔄 (retry #{attempts}, fixed with {remediation})"
+                                if remediation
+                                else f" 🔄 (retry #{attempts})"
+                            )
+                        else:
+                            retry_badge = f" 🔄 (failed after {attempts} attempts)"
+
+                    lines.append(f"- {emoji} `{timestamp}` **{job_name}** ({duration}ms){retry_badge}")
 
                     if not success and entry.get("error"):
                         lines.append(f"  Error: {entry['error'][:100]}")
+
+                # Show retry summary if any retries occurred
+                if total_with_retry > 0:
+                    lines.append(
+                        f"\n**Retry Summary:** {successful_after_retry}/{total_with_retry} jobs recovered via auto-retry"
+                    )
         else:
             lines.append("**Scheduler running:** ❌ No (not started)")
             lines.append("\n💡 The scheduler starts automatically with the MCP server.")
@@ -565,7 +641,7 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         """
         Enable or disable the entire scheduler at runtime.
 
-        This updates the config and starts/stops the scheduler immediately,
+        This updates state.json and starts/stops the scheduler immediately,
         without requiring a server restart.
 
         Args:
@@ -579,10 +655,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         except ImportError:
             from .scheduler import get_scheduler, start_scheduler, stop_scheduler
 
-        # Update config file
-        schedules = _get_schedules_config()
-        schedules["enabled"] = enabled
-        _update_schedules_config(schedules)
+        # Update state file
+        state_manager.set_service_enabled("scheduler", enabled, flush=True)
 
         scheduler = get_scheduler()
 
@@ -635,11 +709,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:
                 return [
                     TextContent(
                         type="text",
-                        text="⏸️ Scheduler **disabled** in config.\n\n"
-                        "Scheduler was not running.",
+                        text="⏸️ Scheduler **disabled** in config.\n\n" "Scheduler was not running.",
                     )
                 ]
 
     return registry.count
-
-

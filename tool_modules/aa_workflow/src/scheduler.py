@@ -4,13 +4,15 @@ Provides:
 - CronScheduler: APScheduler-based scheduler for running skills on schedule
 - Hot-reload support for config changes
 - Integration with SkillExecutor for task execution
+- Auto-retry with exponential backoff and remediation for failed jobs
 """
 
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Literal
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -21,16 +23,120 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# Default retry configuration
+DEFAULT_RETRY_CONFIG = {
+    "max_attempts": 2,
+    "backoff": "exponential",
+    "initial_delay_seconds": 30,
+    "max_delay_seconds": 300,
+    "retry_on": ["auth", "network"],
+}
+
+
+@dataclass
+class RetryConfig:
+    """Configuration for job retry behavior with exponential backoff.
+
+    Attributes:
+        enabled: Whether retry is enabled for this job
+        max_attempts: Maximum number of retry attempts (not including initial attempt)
+        backoff: Backoff strategy - "exponential" or "linear"
+        initial_delay_seconds: Initial delay before first retry
+        max_delay_seconds: Maximum delay between retries
+        retry_on: List of failure types to retry on (auth, network, timeout)
+    """
+
+    enabled: bool = True
+    max_attempts: int = 2
+    backoff: Literal["exponential", "linear"] = "exponential"
+    initial_delay_seconds: int = 30
+    max_delay_seconds: int = 300
+    retry_on: list[str] = field(default_factory=lambda: ["auth", "network"])
+
+    @classmethod
+    def from_config(cls, job_config: dict, default_config: dict | None = None) -> "RetryConfig":
+        """Create RetryConfig from job configuration.
+
+        Args:
+            job_config: The job's configuration dict
+            default_config: Default retry config from schedules section
+
+        Returns:
+            RetryConfig instance
+        """
+        # Check if retry is explicitly disabled
+        retry_setting = job_config.get("retry")
+        if retry_setting is False:
+            return cls(enabled=False)
+
+        # Start with global defaults
+        defaults = default_config or DEFAULT_RETRY_CONFIG
+
+        # If retry is a dict, merge with defaults
+        if isinstance(retry_setting, dict):
+            config = {**defaults, **retry_setting}
+        else:
+            config = defaults
+
+        return cls(
+            enabled=True,
+            max_attempts=config.get("max_attempts", 2),
+            backoff=config.get("backoff", "exponential"),
+            initial_delay_seconds=config.get("initial_delay_seconds", 30),
+            max_delay_seconds=config.get("max_delay_seconds", 300),
+            retry_on=config.get("retry_on", ["auth", "network"]),
+        )
+
+    def calculate_delay(self, attempt: int) -> int:
+        """Calculate delay before retry based on backoff strategy.
+
+        Args:
+            attempt: Current attempt number (0-indexed)
+
+        Returns:
+            Delay in seconds
+        """
+        if self.backoff == "exponential":
+            # Exponential: initial * 2^attempt
+            delay = self.initial_delay_seconds * (2**attempt)
+        else:
+            # Linear: initial * (attempt + 1)
+            delay = self.initial_delay_seconds * (attempt + 1)
+
+        return min(delay, self.max_delay_seconds)
+
+    def should_retry(self, failure_type: str, attempt: int) -> bool:
+        """Determine if we should retry based on failure type and attempt count.
+
+        Args:
+            failure_type: Type of failure (auth, network, timeout, unknown)
+            attempt: Current attempt number (0-indexed)
+
+        Returns:
+            True if should retry
+        """
+        if not self.enabled:
+            return False
+        if attempt >= self.max_attempts:
+            return False
+        if failure_type not in self.retry_on:
+            return False
+        return True
+
+
 # Project paths
 PROJECT_DIR = Path(__file__).parent.parent.parent.parent
 SKILLS_DIR = PROJECT_DIR / "skills"
 
 # Import ConfigManager for thread-safe config access
+from server.config_manager import CONFIG_FILE
 from server.config_manager import config as config_manager
+from server.state_manager import state as state_manager
 
 
 class SchedulerConfig:
-    """Configuration for the scheduler loaded from config.json."""
+    """Configuration for the scheduler loaded from config.json and state.json."""
 
     def __init__(self, config_data: dict | None = None):
         """Initialize scheduler config from config data or load from file."""
@@ -38,24 +144,38 @@ class SchedulerConfig:
             config_data = self._load_config()
 
         schedules = config_data.get("schedules", {})
-        self.enabled = schedules.get("enabled", False)
+        # Enabled state comes from state.json
+        self.enabled = state_manager.is_service_enabled("scheduler")
         self.timezone = schedules.get("timezone", "UTC")
         self.jobs = schedules.get("jobs", [])
         self.poll_sources = schedules.get("poll_sources", {})
         # Execution mode: "claude_cli" (default) or "direct"
         self.execution_mode = schedules.get("execution_mode", "claude_cli")
+        # Default retry configuration for all jobs
+        self.default_retry = schedules.get("default_retry", DEFAULT_RETRY_CONFIG)
 
     def _load_config(self) -> dict:
         """Load config using ConfigManager (auto-reloads if file changed)."""
         return config_manager.get_all()
 
     def get_cron_jobs(self) -> list[dict]:
-        """Get jobs that use cron triggers (not poll triggers)."""
-        return [j for j in self.jobs if j.get("cron") and j.get("enabled", True)]
+        """Get jobs that use cron triggers (not poll triggers) and are enabled."""
+        return [j for j in self.jobs if j.get("cron") and state_manager.is_job_enabled(j.get("name", ""))]
 
     def get_poll_jobs(self) -> list[dict]:
-        """Get jobs that use poll triggers."""
-        return [j for j in self.jobs if j.get("trigger") == "poll" and j.get("enabled", True)]
+        """Get jobs that use poll triggers and are enabled."""
+        return [j for j in self.jobs if j.get("trigger") == "poll" and state_manager.is_job_enabled(j.get("name", ""))]
+
+    def get_retry_config(self, job_config: dict) -> RetryConfig:
+        """Get the retry configuration for a specific job.
+
+        Args:
+            job_config: The job's configuration dict
+
+        Returns:
+            RetryConfig instance with job-specific or default settings
+        """
+        return RetryConfig.from_config(job_config, self.default_retry)
 
 
 class JobExecutionLog:
@@ -99,8 +219,25 @@ class JobExecutionLog:
         error: str | None = None,
         output_preview: str | None = None,
         session_name: str | None = None,
+        retry_info: dict | None = None,
     ):
-        """Log a job execution."""
+        """Log a job execution.
+
+        Args:
+            job_name: Name of the cron job
+            skill: Skill that was executed
+            success: Whether the execution succeeded
+            duration_ms: Total execution duration in milliseconds
+            error: Error message if failed
+            output_preview: Preview of output (truncated to 200 chars)
+            session_name: Session name for logging
+            retry_info: Optional retry information dict with:
+                - attempts: Total attempts made (including initial)
+                - retried: Whether any retries occurred
+                - failure_type: Type of failure that triggered retry
+                - remediation_applied: What fix was applied (kube_login, vpn_connect)
+                - remediation_success: Whether the fix worked
+        """
         entry = {
             "job_name": job_name,
             "skill": skill,
@@ -111,6 +248,17 @@ class JobExecutionLog:
             "output_preview": output_preview[:200] if output_preview else None,
             "session_name": session_name,
         }
+
+        # Add retry information if present
+        if retry_info:
+            entry["retry"] = {
+                "attempts": retry_info.get("attempts", 1),
+                "retried": retry_info.get("retried", False),
+                "failure_type": retry_info.get("failure_type"),
+                "remediation_applied": retry_info.get("remediation_applied"),
+                "remediation_success": retry_info.get("remediation_success"),
+            }
+
         self.entries.append(entry)
 
         # Trim to max entries
@@ -176,13 +324,81 @@ class CronScheduler:
         except Exception:
             pass
 
-    async def start(self):
+    def _cleanup_skill_execution_state(self, skill_name: str, error: str):
+        """Clean up stale skill execution state after timeout or crash.
+
+        When a cron job times out or crashes, the skill_execution.json file
+        may be left in "running" state. This method resets it to "failed"
+        so the UI doesn't show a perpetually running skill.
+
+        Args:
+            skill_name: Name of the skill that failed
+            error: Error message to record
+        """
+        try:
+            execution_file = Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
+            if not execution_file.exists():
+                return
+
+            # Read current state to check if it's the same skill
+            with open(execution_file) as f:
+                current_state = json.load(f)
+
+            # Only clean up if it's the same skill and still "running"
+            if current_state.get("skillName") != skill_name:
+                self._log_to_file(
+                    f"Skill execution state is for different skill "
+                    f"({current_state.get('skillName')}), not cleaning up"
+                )
+                return
+
+            if current_state.get("status") != "running":
+                self._log_to_file(f"Skill execution state is already {current_state.get('status')}, not cleaning up")
+                return
+
+            # Update state to failed
+            current_state["status"] = "failed"
+            current_state["endTime"] = datetime.now().isoformat()
+
+            # Add a timeout event to the events list
+            if "events" not in current_state:
+                current_state["events"] = []
+            current_state["events"].append(
+                {
+                    "type": "skill_timeout",
+                    "timestamp": datetime.now().isoformat(),
+                    "skillName": skill_name,
+                    "workspaceUri": current_state.get("workspaceUri", "default"),
+                    "stepIndex": current_state.get("currentStepIndex"),
+                    "stepName": None,
+                    "data": {"error": error},
+                }
+            )
+
+            # Write atomically
+            tmp_file = execution_file.with_suffix(".tmp")
+            with open(tmp_file, "w") as f:
+                json.dump(current_state, f, indent=2)
+            tmp_file.rename(execution_file)
+
+            self._log_to_file(f"Cleaned up stale skill execution state for {skill_name}")
+            logger.info(f"Cleaned up stale skill execution state for {skill_name}")
+
+        except Exception as e:
+            self._log_to_file(f"Failed to cleanup skill execution state: {e}")
+            logger.warning(f"Failed to cleanup skill execution state: {e}")
+
+    async def start(self, add_cron_jobs: bool = True):
         """Start the scheduler.
 
         The scheduler always starts to enable config watching.
-        Jobs are only added if the scheduler is enabled in config.
+        Jobs are only added if the scheduler is enabled in config AND add_cron_jobs=True.
+
+        Args:
+            add_cron_jobs: If False, skip adding cron jobs (useful when cron daemon handles them).
+                          Default True for backward compatibility with cron_daemon.py.
         """
-        self._log_to_file(f"start() called, _running={self._running}")
+        self._log_to_file(f"start() called, _running={self._running}, add_cron_jobs={add_cron_jobs}")
 
         if self._running:
             logger.warning("Scheduler already running")
@@ -203,13 +419,17 @@ class CronScheduler:
         )
         self._log_to_file("Added config watcher job")
 
-        # Only add cron jobs if scheduler is enabled
-        if self.config.enabled:
+        # Only add cron jobs if scheduler is enabled AND add_cron_jobs is True
+        # The MCP server should pass add_cron_jobs=False since cron_daemon handles cron jobs
+        if self.config.enabled and add_cron_jobs:
             cron_jobs = self.config.get_cron_jobs()
             self._log_to_file(f"Adding {len(cron_jobs)} cron jobs: {[j.get('name') for j in cron_jobs]}")
             for job in cron_jobs:
                 self._add_cron_job(job)
             logger.info(f"Scheduler started with {len(cron_jobs)} cron jobs")
+        elif self.config.enabled and not add_cron_jobs:
+            logger.info("Scheduler started (cron jobs handled by cron_daemon)")
+            self._log_to_file("Scheduler started, cron jobs skipped (handled by cron_daemon)")
         else:
             logger.info("Scheduler started (disabled in config, watching for changes)")
             self._log_to_file("Scheduler disabled in config")
@@ -239,6 +459,10 @@ class CronScheduler:
         cron_expr = job_config.get("cron", "")
         inputs = job_config.get("inputs", {})
         notify = job_config.get("notify", [])
+        persona = job_config.get("persona", "")  # Optional persona to load
+
+        # Get retry configuration for this job
+        retry_config = self.config.get_retry_config(job_config)
 
         if not skill or not cron_expr:
             logger.warning(f"Job {job_name} missing skill or cron expression")
@@ -259,11 +483,15 @@ class CronScheduler:
                     "skill": skill,
                     "inputs": inputs,
                     "notify": notify,
+                    "persona": persona,
+                    "retry_config": retry_config,
                 },
                 replace_existing=True,
             )
 
-            logger.info(f"Added cron job: {job_name} ({cron_expr}) -> skill:{skill}")
+            persona_info = f" (persona: {persona})" if persona else ""
+            retry_info = f", retry: {retry_config.max_attempts}" if retry_config.enabled else ", retry: disabled"
+            logger.info(f"Added cron job: {job_name} ({cron_expr}) -> skill:{skill}{persona_info}{retry_info}")
 
         except Exception as e:
             logger.error(f"Failed to add job {job_name}: {e}")
@@ -294,51 +522,119 @@ class CronScheduler:
         skill: str,
         inputs: dict,
         notify: list[str],
+        persona: str = "",
+        retry_config: RetryConfig | None = None,
     ):
-        """Execute a scheduled job using Claude CLI for AI-powered execution."""
+        """Execute a scheduled job with retry and auto-remediation support.
+
+        Args:
+            job_name: Name of the cron job
+            skill: Skill to execute
+            inputs: Input parameters for the skill
+            notify: Notification channels
+            persona: Optional persona to load
+            retry_config: Retry configuration (defaults to global config)
+        """
+        import asyncio
         import shutil
         import time
 
         start_time = time.time()
         now = datetime.now()
-        session_name = f"cron-{skill}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
-        logger.info(f"Executing scheduled job: {job_name} (skill: {skill}) in session: {session_name}")
-        self._log_to_file(f"_execute_job called: job={job_name}, skill={skill}, session={session_name}")
+        # Replace / with - in skill name to avoid invalid file paths
+        safe_skill = skill.replace("/", "-")
+        session_name = f"cron-{safe_skill}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
+        persona_info = f", persona: {persona}" if persona else ""
+        logger.info(f"Executing scheduled job: {job_name} (skill: {skill}{persona_info}) in session: {session_name}")
+        self._log_to_file(
+            f"_execute_job called: job={job_name}, skill={skill}, persona={persona}, session={session_name}"
+        )
+
+        # Use default retry config if not provided
+        if retry_config is None:
+            retry_config = RetryConfig()
+
+        # Track retry information
+        retry_info = {
+            "attempts": 0,
+            "retried": False,
+            "failure_type": None,
+            "remediation_applied": None,
+            "remediation_success": None,
+        }
 
         success = False
         error_msg = None
         output = None
+        last_failure_type = None
 
         # Check execution mode from config
         use_claude_cli = self.config.execution_mode == "claude_cli"
         claude_path = shutil.which("claude") if use_claude_cli else None
 
-        if use_claude_cli and claude_path:
-            # Use Claude CLI for AI-powered execution
-            self._log_to_file(f"Using Claude CLI at {claude_path}")
-            success, output, error_msg = await self._run_with_claude_cli(
-                job_name=job_name,
-                skill=skill,
-                inputs=inputs,
-                session_name=session_name,
-            )
-        else:
-            # Direct skill execution (no AI reasoning)
-            if use_claude_cli and not claude_path:
-                self._log_to_file("Claude CLI not found, falling back to direct execution")
+        # Retry loop
+        max_attempts = retry_config.max_attempts + 1 if retry_config.enabled else 1
+        for attempt in range(max_attempts):
+            retry_info["attempts"] = attempt + 1
+
+            if attempt > 0:
+                retry_info["retried"] = True
+                # Calculate backoff delay
+                delay = retry_config.calculate_delay(attempt - 1)
+                logger.info(f"Job {job_name}: Retry attempt {attempt}/{retry_config.max_attempts} after {delay}s delay")
+                self._log_to_file(f"Retry {attempt}/{retry_config.max_attempts} for {job_name}, waiting {delay}s")
+                await asyncio.sleep(delay)
+
+            # Execute the job
+            if use_claude_cli and claude_path:
+                self._log_to_file(f"Using Claude CLI at {claude_path} (attempt {attempt + 1})")
+                success, output, error_msg = await self._run_with_claude_cli(
+                    job_name=job_name,
+                    skill=skill,
+                    inputs=inputs,
+                    session_name=f"{session_name}-attempt{attempt + 1}" if attempt > 0 else session_name,
+                    persona=persona,
+                )
             else:
-                self._log_to_file("Using direct execution mode (execution_mode=direct)")
-            try:
-                output = await self._run_skill(skill, inputs)
-                success = True
-                logger.info(f"Job {job_name} completed successfully (direct execution)")
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Job {job_name} failed: {e}")
+                if use_claude_cli and not claude_path:
+                    self._log_to_file("Claude CLI not found, falling back to direct execution")
+                else:
+                    self._log_to_file(f"Using direct execution mode (attempt {attempt + 1})")
+                try:
+                    output = await self._run_skill(skill, inputs, job_name=job_name)
+                    success = True
+                    logger.info(f"Job {job_name} completed successfully (direct execution)")
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"Job {job_name} failed: {e}")
+
+            # If successful, break out of retry loop
+            if success:
+                if attempt > 0:
+                    logger.info(f"Job {job_name} succeeded after {attempt + 1} attempts")
+                break
+
+            # Detect failure type for potential retry
+            failure_type = self._detect_failure_type(error_msg or output or "")
+            last_failure_type = failure_type
+            retry_info["failure_type"] = failure_type
+
+            # Check if we should retry
+            if not retry_config.should_retry(failure_type, attempt):
+                logger.info(f"Job {job_name}: Not retrying (type={failure_type}, attempt={attempt})")
+                break
+
+            # Apply remediation before retry
+            remediation_applied, remediation_success = await self._apply_remediation(failure_type, job_name)
+            retry_info["remediation_applied"] = remediation_applied
+            retry_info["remediation_success"] = remediation_success
+
+            if not remediation_success:
+                logger.warning(f"Job {job_name}: Remediation failed, but will still retry")
 
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Log execution with session name
+        # Log execution with retry info
         self.execution_log.log_execution(
             job_name=job_name,
             skill=skill,
@@ -347,6 +643,7 @@ class CronScheduler:
             error=error_msg,
             output_preview=output,
             session_name=session_name,
+            retry_info=retry_info if retry_info["attempts"] > 1 or retry_info["failure_type"] else None,
         )
 
         # Send notifications
@@ -360,12 +657,201 @@ class CronScheduler:
                 notify_channels=notify,
             )
 
+    def _detect_failure_type(self, error_text: str) -> str:
+        """Detect the type of failure from error text.
+
+        Args:
+            error_text: Error message or output to analyze
+
+        Returns:
+            Failure type: "auth", "network", "timeout", or "unknown"
+        """
+        if not error_text:
+            return "unknown"
+
+        error_lower = error_text.lower()
+
+        # Auth patterns
+        auth_patterns = [
+            "unauthorized",
+            "401",
+            "forbidden",
+            "403",
+            "token expired",
+            "authentication required",
+            "not authorized",
+            "permission denied",
+            "credentials",
+        ]
+        if any(p in error_lower for p in auth_patterns):
+            return "auth"
+
+        # Network patterns
+        network_patterns = [
+            "no route to host",
+            "connection refused",
+            "network unreachable",
+            "timeout",
+            "dial tcp",
+            "connection reset",
+            "eof",
+            "cannot connect",
+            "httpsconnectionpool",
+        ]
+        if any(p in error_lower for p in network_patterns):
+            return "network"
+
+        # Timeout patterns
+        timeout_patterns = [
+            "timed out",
+            "deadline exceeded",
+            "context deadline",
+        ]
+        if any(p in error_lower for p in timeout_patterns):
+            return "timeout"
+
+        return "unknown"
+
+    async def _apply_remediation(self, failure_type: str, job_name: str) -> tuple[str | None, bool]:
+        """Apply remediation based on failure type before retry.
+
+        Args:
+            failure_type: Type of failure (auth, network, timeout)
+            job_name: Name of the job for logging
+
+        Returns:
+            Tuple of (remediation_applied, success)
+        """
+        import asyncio
+
+        if failure_type == "auth":
+            logger.info(f"Job {job_name}: Applying auth remediation (kube_login)")
+            self._log_to_file(f"Applying kube_login remediation for {job_name}")
+            success = await self._run_kube_login()
+            return "kube_login", success
+
+        elif failure_type == "network":
+            logger.info(f"Job {job_name}: Applying network remediation (vpn_connect)")
+            self._log_to_file(f"Applying vpn_connect remediation for {job_name}")
+            success = await self._run_vpn_connect()
+            return "vpn_connect", success
+
+        elif failure_type == "timeout":
+            # For timeouts, just wait a bit longer (no specific fix)
+            logger.info(f"Job {job_name}: Timeout detected, will retry with delay")
+            return None, True
+
+        return None, False
+
+    async def _run_kube_login(self, cluster: str = "stage") -> bool:
+        """Run kube_login to refresh credentials.
+
+        Returns:
+            True if successful
+        """
+        import asyncio
+        import os
+
+        try:
+            # Map cluster names to short codes
+            cluster_map = {
+                "stage": "s",
+                "production": "p",
+                "prod": "p",
+                "ephemeral": "e",
+                "konflux": "k",
+            }
+            short = cluster_map.get(cluster, "s")
+
+            kubeconfig_suffix = {"s": ".s", "p": ".p", "e": ".e", "k": ".k"}
+            kubeconfig = os.path.expanduser(f"~/.kube/config{kubeconfig_suffix.get(short, '.s')}")
+
+            # Run kube command to refresh credentials
+            logger.info(f"Running kube {short} to refresh credentials")
+            process = await asyncio.create_subprocess_exec(
+                "kube",
+                short,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+                output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+
+                if process.returncode == 0 or "logged in" in output.lower():
+                    logger.info(f"kube_login({cluster}) successful")
+                    return True
+
+                logger.warning(f"kube_login({cluster}) failed: {output[:200]}")
+                return False
+
+            except asyncio.TimeoutError:
+                process.kill()
+                logger.warning(f"kube_login({cluster}) timed out")
+                return False
+
+        except FileNotFoundError:
+            logger.warning("kube command not found")
+            return False
+        except Exception as e:
+            logger.warning(f"kube_login error: {e}")
+            return False
+
+    async def _run_vpn_connect(self) -> bool:
+        """Run vpn_connect to establish VPN connection.
+
+        Returns:
+            True if successful
+        """
+        import asyncio
+        import os
+
+        try:
+            # Try to find VPN connect script
+            vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
+
+            if not os.path.exists(vpn_script):
+                logger.warning(f"VPN script not found: {vpn_script}")
+                return False
+
+            logger.info("Running vpn-connect")
+            process = await asyncio.create_subprocess_exec(
+                vpn_script,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+                output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+
+                if process.returncode == 0 or "successfully activated" in output.lower():
+                    logger.info("vpn_connect successful")
+                    return True
+
+                logger.warning(f"vpn_connect failed: {output[:200]}")
+                return False
+
+            except asyncio.TimeoutError:
+                process.kill()
+                logger.warning("vpn_connect timed out")
+                return False
+
+        except FileNotFoundError:
+            logger.warning("VPN script not found")
+            return False
+        except Exception as e:
+            logger.warning(f"vpn_connect error: {e}")
+            return False
+
     async def _run_with_claude_cli(
         self,
         job_name: str,
         skill: str,
         inputs: dict,
         session_name: str,
+        persona: str = "",
     ) -> tuple[bool, str | None, str | None]:
         """Run a skill using Claude CLI for AI-powered execution.
 
@@ -374,6 +860,7 @@ class CronScheduler:
             skill: Skill name to execute
             inputs: Input parameters for the skill
             session_name: Session name for logging
+            persona: Optional persona to load before executing
 
         Returns:
             Tuple of (success, output, error_message)
@@ -382,15 +869,27 @@ class CronScheduler:
 
         # Build the prompt for Claude
         inputs_str = json.dumps(inputs) if inputs else "{}"
+
+        # Include persona loading instruction if specified
+        persona_instruction = ""
+        if persona:
+            persona_instruction = f"""
+First, load the appropriate persona:
+- Call agent_load("{persona}") to load the {persona} persona with its tools and skills
+
+Then proceed with the skill execution.
+"""
+
         prompt = f"""You are running a scheduled cron job. Execute the following skill and report the results.
 
 Job: {job_name}
 Skill: {skill}
 Inputs: {inputs_str}
 Session: {session_name}
+Persona: {persona if persona else "default"}
 
 Instructions:
-1. Call skill_run("{skill}", inputs='{inputs_str}')
+{persona_instruction}1. Call skill_run("{skill}", inputs='{inputs_str}')
 2. If the skill fails, try to diagnose and fix the issue
 3. Log the result to memory using memory_session_log()
 4. Summarize what happened
@@ -417,16 +916,18 @@ Begin execution now."""
                 cwd=str(Path.home() / "src" / "redhat-ai-workflow"),
             )
 
-            # Wait for completion with timeout (5 minutes max)
+            # Wait for completion with timeout (10 minutes max)
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=300,  # 5 minute timeout
+                    timeout=600,  # 10 minute timeout
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                return False, None, "Claude CLI timed out after 5 minutes"
+                # Clean up stale skill execution state so UI doesn't show "running" forever
+                self._cleanup_skill_execution_state(skill, "Claude CLI timed out after 10 minutes")
+                return False, None, "Claude CLI timed out after 10 minutes"
 
             # Decode output
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
@@ -454,13 +955,21 @@ Begin execution now."""
                 return False, output[:200] if output else None, error_msg
 
         except FileNotFoundError:
+            self._cleanup_skill_execution_state(skill, "Claude CLI not found in PATH")
             return False, None, "Claude CLI not found in PATH"
         except Exception as e:
             self._log_to_file(f"Claude CLI error: {e}")
+            self._cleanup_skill_execution_state(skill, str(e))
             return False, None, str(e)
 
-    async def _run_skill(self, skill_name: str, inputs: dict) -> str:
-        """Run a skill and return its output."""
+    async def _run_skill(self, skill_name: str, inputs: dict, job_name: str | None = None) -> str:
+        """Run a skill and return its output.
+
+        Args:
+            skill_name: Name of the skill to run.
+            inputs: Input parameters for the skill.
+            job_name: Name of the cron job (for source tracking).
+        """
         import yaml
 
         from .skill_engine import SkillExecutor
@@ -478,7 +987,10 @@ Begin execution now."""
             debug=False,
             server=self.server,
             enable_interactive_recovery=False,  # No interactive recovery for scheduled jobs
-            emit_events=False,  # No VS Code events for background jobs
+            emit_events=True,  # Enable VS Code events for running skills viewer
+            workspace_uri="cron",
+            source="cron",
+            source_details=job_name or skill_name,
         )
 
         result = await executor.execute()
@@ -604,6 +1116,8 @@ Begin execution now."""
         skill = job_config.get("skill", "")
         inputs = job_config.get("inputs", {})
         notify = job_config.get("notify", [])
+        persona = job_config.get("persona", "")
+        retry_config = self.config.get_retry_config(job_config)
 
         try:
             await self._execute_job(
@@ -611,6 +1125,8 @@ Begin execution now."""
                 skill=skill,
                 inputs=inputs,
                 notify=notify,
+                persona=persona,
+                retry_config=retry_config,
             )
             return {"success": True, "message": f"Job {job_name} executed"}
         except Exception as e:
@@ -634,6 +1150,17 @@ Begin execution now."""
 
         next_run = job.next_run_time.isoformat() if job.next_run_time else None
 
+        # Get retry config
+        retry_config = self.config.get_retry_config(job_config) if job_config else None
+        retry_info = None
+        if retry_config:
+            retry_info = {
+                "enabled": retry_config.enabled,
+                "max_attempts": retry_config.max_attempts,
+                "backoff": retry_config.backoff,
+                "retry_on": retry_config.retry_on,
+            }
+
         return {
             "name": job_name,
             "skill": job_config.get("skill") if job_config else "unknown",
@@ -641,6 +1168,7 @@ Begin execution now."""
             "next_run": next_run,
             "enabled": job_config.get("enabled", True) if job_config else False,
             "notify": job_config.get("notify", []) if job_config else [],
+            "retry": retry_info,
             "recent_executions": self.execution_log.get_for_job(job_name),
         }
 
@@ -710,16 +1238,34 @@ def init_scheduler(
     server: "FastMCP | None" = None,
     notification_callback: Callable | None = None,
 ) -> CronScheduler:
-    """Initialize the global scheduler instance."""
+    """Initialize the global scheduler instance.
+
+    This is a singleton - if a scheduler already exists, it returns the existing
+    instance instead of creating a new one. This prevents duplicate job execution
+    when multiple MCP server instances start (e.g., multiple Cursor windows).
+    """
     global _scheduler
+
+    # Singleton guard - return existing instance if already initialized
+    if _scheduler is not None:
+        logger.warning(
+            "Scheduler already initialized, returning existing instance. "
+            "This prevents duplicate job execution from multiple MCP connections."
+        )
+        return _scheduler
+
     _scheduler = CronScheduler(server=server, notification_callback=notification_callback)
     return _scheduler
 
 
-async def start_scheduler():
-    """Start the global scheduler."""
+async def start_scheduler(add_cron_jobs: bool = True):
+    """Start the global scheduler.
+
+    Args:
+        add_cron_jobs: If False, skip adding cron jobs (cron_daemon handles them).
+    """
     if _scheduler:
-        await _scheduler.start()
+        await _scheduler.start(add_cron_jobs=add_cron_jobs)
 
 
 async def stop_scheduler():

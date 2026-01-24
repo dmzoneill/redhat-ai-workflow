@@ -263,6 +263,7 @@ except ImportError:
     from resources import register_resources
     from session_tools import register_prompts, register_session_tools
     from skill_engine import register_skill_tools
+    from sprint_tools import register_sprint_tools
 
 
 def register_tools(server: "FastMCP") -> int:
@@ -304,7 +305,7 @@ def register_tools(server: "FastMCP") -> int:
         logger.debug("Claude Code integration module not available")
         ask_question_fn = None
 
-    # Register CORE tools only (19 tools)
+    # Register CORE tools only (19 tools + 9 sprint tools)
     tool_count += register_chat_context_tools(server)
     tool_count += register_memory_tools(server)
     tool_count += register_persona_tools(server)
@@ -314,6 +315,7 @@ def register_tools(server: "FastMCP") -> int:
     tool_count += register_skill_tools(server, create_github_issue, ask_question_fn)
     tool_count += register_infra_tools(server)
     tool_count += register_meta_tools(server, create_github_issue)
+    tool_count += register_sprint_tools(server)
 
     logger.info(f"Registered {tool_count} core workflow tools")
     return tool_count

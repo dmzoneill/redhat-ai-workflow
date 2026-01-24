@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mcp.server.fastmcp import Context
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
@@ -71,7 +72,7 @@ def _list_personas_impl() -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _load_persona_impl(persona_name: str, ctx=None) -> list[TextContent]:
+async def _load_persona_impl(persona_name: str, ctx: Context) -> list[TextContent]:
     """Implementation of persona_load tool."""
     # Try dynamic loading first
     try:
@@ -160,7 +161,7 @@ def register_persona_tools(server: "FastMCP") -> int:
         return _list_personas_impl()
 
     @registry.tool()
-    async def persona_load(persona_name: str, ctx=None) -> list[TextContent]:
+    async def persona_load(ctx: Context, persona_name: str) -> list[TextContent]:
         """
         Load a persona with its full toolset and context.
 

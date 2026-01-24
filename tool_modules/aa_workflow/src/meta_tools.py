@@ -688,6 +688,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         except Exception as e:
             logger.error(f"Apply tool filter error: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             return [TextContent(type="text", text=f"❌ Error applying tool filter: {e}")]
 
@@ -703,9 +704,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             Export status and file path.
         """
         try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
+            from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
 
             result = await export_workspace_state_async(ctx)
 
@@ -788,9 +787,8 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
 
         # Auto-export to update VS Code extension
         try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
+            from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
+
             await export_workspace_state_async(ctx)
         except Exception:
             pass
@@ -819,6 +817,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             session_info()                      # Get workspace's active session (shared)
         """
         from datetime import datetime
+
         from server.workspace_state import WorkspaceRegistry
 
         workspace = await WorkspaceRegistry.get_for_ctx(ctx)
@@ -828,12 +827,14 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             session = workspace.get_session(session_id)
             if not session:
                 available = [f"`{sid}`" for sid in workspace.sessions.keys()]
-                return [TextContent(
-                    type="text",
-                    text=f"❌ Session `{session_id}` not found.\n\n"
-                    f"Available sessions: {', '.join(available) or 'none'}\n\n"
-                    "Use `session_start()` to create a new session."
-                )]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"❌ Session `{session_id}` not found.\n\n"
+                        f"Available sessions: {', '.join(available) or 'none'}\n\n"
+                        "Use `session_start()` to create a new session.",
+                    )
+                ]
             workspace.set_active_session(session_id)
         else:
             session = workspace.get_active_session()
@@ -841,7 +842,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         if not session:
             return [TextContent(type="text", text="❌ No active session. Call `session_start()` first.")]
 
-        session_project = session.project or workspace.project or 'default'
+        session_project = session.project or workspace.project or "default"
         project_source = "(auto-detected)" if session.is_project_auto_detected else "(explicit)"
 
         lines = [
@@ -884,9 +885,8 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
 
         # Auto-export
         try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
+            from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
+
             await export_workspace_state_async(ctx)
         except Exception:
             pass
@@ -934,6 +934,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         # Export for VS Code extension
         try:
             from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
+
             await export_workspace_state_async(ctx)
         except Exception:
             pass
@@ -952,6 +953,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             List of all sessions with their details.
         """
         from datetime import datetime
+
         from server.workspace_state import WorkspaceRegistry
 
         workspace = await WorkspaceRegistry.get_for_ctx(ctx)
@@ -964,9 +966,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
 
         # Sort by last activity (most recent first)
         sorted_sessions = sorted(
-            workspace.sessions.values(),
-            key=lambda s: s.last_activity or datetime.min,
-            reverse=True
+            workspace.sessions.values(), key=lambda s: s.last_activity or datetime.min, reverse=True
         )
 
         for session in sorted_sessions:
@@ -1025,13 +1025,13 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
 
         workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-        
+
         # Perform sync
         result = workspace.sync_with_cursor_db()
-        
+
         # Save changes
         WorkspaceRegistry.save_to_disk()
-        
+
         # Export for UI
         await export_workspace_state_async(ctx)
 
@@ -1046,7 +1046,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             lines.append(f"- **Removed:** {result['removed']} session(s)")
         if result["renamed"] > 0:
             lines.append(f"- **Renamed:** {result['renamed']} session(s)")
-        
+
         lines.append(f"\n*Total sessions: {len(workspace.sessions)}*")
 
         return [TextContent(type="text", text="\n".join(lines))]
@@ -1077,10 +1077,12 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         session = workspace.get_session(session_id)
         if not session:
             available = [f"`{sid}`" for sid in workspace.sessions.keys()]
-            return [TextContent(
-                type="text",
-                text=f"❌ Session `{session_id}` not found.\n\nAvailable sessions: {', '.join(available) or 'none'}"
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Session `{session_id}` not found.\n\nAvailable sessions: {', '.join(available) or 'none'}",
+                )
+            ]
 
         # Switch to the session
         workspace.set_active_session(session_id)
@@ -1111,5 +1113,94 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
         lines.append("\n*This session is now active for this chat.*")
 
         return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
+    async def tool_gaps_list(status: str = "open", limit: int = 10) -> list[TextContent]:
+        """
+        List requested tools that don't exist yet.
+
+        When skills need tools that don't exist, they log the gap using the
+        ToolGapDetector. This tool shows those requests, sorted by vote count.
+
+        Use this to see what tools users/skills have requested.
+        Most-voted tools should be prioritized for development.
+
+        Args:
+            status: Filter by status (open, in_progress, implemented, rejected)
+            limit: Maximum number of results (default 10)
+
+        Returns:
+            List of tool gap requests with vote counts and context.
+        """
+        try:
+            from tool_modules.aa_workflow.src.tool_gap_detector import tool_gap
+
+            gaps = tool_gap.get_gaps(status=status, limit=limit)
+
+            if not gaps:
+                return [TextContent(type="text", text=f"No tool gaps with status '{status}'.")]
+
+            lines = [f"## 🔧 Tool Gap Requests (status: {status})\n"]
+
+            for g in gaps:
+                lines.append(f"### `{g.get('suggested_tool_name', 'unknown')}`")
+                lines.append(f"**Votes:** {g.get('vote_count', 1)} | **Status:** {g.get('status', 'open')}")
+                lines.append(f"**Action:** {g.get('desired_action', 'N/A')}")
+
+                skills = g.get("requesting_skills", [])
+                if skills:
+                    lines.append(f"**Requested by:** {', '.join(skills)}")
+
+                if g.get("context"):
+                    lines.append(f"**Context:** {g.get('context')[:100]}")
+
+                if g.get("workaround_used"):
+                    lines.append(f"**Workaround:** {g.get('workaround_used')}")
+
+                if g.get("suggested_args"):
+                    lines.append(f"**Suggested args:** `{g.get('suggested_args')}`")
+
+                lines.append("")
+
+            lines.append(f"*Total: {len(gaps)} gap(s) shown*")
+            lines.append("\n*Use `tool_gap_update(gap_id, status)` to update status*")
+
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        except Exception as e:
+            return [TextContent(type="text", text=f"❌ Error loading tool gaps: {e}")]
+
+    @registry.tool()
+    async def tool_gap_update(gap_id: str, status: str) -> list[TextContent]:
+        """
+        Update the status of a tool gap request.
+
+        Use this after implementing a requested tool or to reject a request.
+
+        Args:
+            gap_id: The gap ID to update
+            status: New status (open, in_progress, implemented, rejected)
+
+        Returns:
+            Confirmation of the update.
+        """
+        try:
+            from tool_modules.aa_workflow.src.tool_gap_detector import tool_gap
+
+            valid_statuses = ["open", "in_progress", "implemented", "rejected"]
+            if status not in valid_statuses:
+                return [
+                    TextContent(
+                        type="text", text=f"❌ Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}"
+                    )
+                ]
+
+            if tool_gap.update_status(gap_id, status):
+                return [TextContent(type="text", text=f"✅ Updated gap `{gap_id}` status to `{status}`")]
+            else:
+                return [TextContent(type="text", text=f"❌ Gap `{gap_id}` not found")]
+
+        except Exception as e:
+            return [TextContent(type="text", text=f"❌ Error updating tool gap: {e}")]
 
     return registry.count
