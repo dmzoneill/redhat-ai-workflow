@@ -5,12 +5,17 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
+# Display environment for notifications (X11/Wayland)
+Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+# XDG runtime for D-Bus/notifications
+Environment=XDG_RUNTIME_DIR=/run/user/1000
 ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 scripts/extension_watcher.py --notify
 Restart=always
 RestartSec=10
-# Logs go to journald + file
-StandardOutput=append:/home/daoneill/.config/aa-workflow/extension_watcher.log
-StandardError=append:/home/daoneill/.config/aa-workflow/extension_watcher.log
+# Logs go to journald (view with: journalctl --user -u extension-watcher -f)
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=default.target
