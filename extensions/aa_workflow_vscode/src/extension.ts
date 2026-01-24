@@ -15,32 +15,43 @@ import { StatusBarManager } from "./statusBar";
 import { WorkflowDataProvider } from "./dataProvider";
 import { registerCommands } from "./commands";
 import { registerTreeView, WorkflowTreeProvider } from "./treeView";
+import { registerMemoryTab, MemoryTreeProvider } from "./memoryTab";
 import { registerNotifications, NotificationManager } from "./notifications";
 import { registerCommandCenter, registerCommandCenterSerializer, getCommandCenterPanel } from "./commandCenter";
 import { registerSkillExecutionWatcher } from "./skillExecutionWatcher";
 import { registerSkillFlowchartPanel } from "./skillFlowchartPanel";
 import { getWorkspaceStateProvider, disposeWorkspaceStateProvider, WorkspaceStateProvider } from "./workspaceStateProvider";
+import { registerTestCommand } from "./testChatRefresh";
+import { SkillToastManager, SkillToastWebview } from "./skillToast";
+import { disposeSkillWebSocketClient } from "./skillWebSocket";
+import { registerChatDbusService, unregisterChatDbusService } from "./chatDbusService";
+import { createLogger, disposeLogger } from "./logger";
+
+const logger = createLogger("Extension");
 
 let statusBarManager: StatusBarManager | undefined;
 let dataProvider: WorkflowDataProvider | undefined;
 let treeProvider: WorkflowTreeProvider | undefined;
+let memoryTreeProvider: MemoryTreeProvider | undefined;
 let notificationManager: NotificationManager | undefined;
 let workspaceStateProvider: WorkspaceStateProvider | undefined;
+let skillToastManager: SkillToastManager | undefined;
+let skillToastWebview: SkillToastWebview | undefined;
 let refreshInterval: NodeJS.Timeout | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log("AI Workflow extension activating...");
+  logger.log("AI Workflow extension activating...");
 
   // Initialize the data provider FIRST (needed by serializers)
   dataProvider = new WorkflowDataProvider();
 
   // Initialize workspace state provider (watches MCP server exports)
   workspaceStateProvider = getWorkspaceStateProvider();
-  console.log("[Extension] Workspace state provider initialized");
+  logger.log("Workspace state provider initialized");
 
   // Listen for workspace state changes
   workspaceStateProvider.onDidChange((state) => {
-    console.log(`[Extension] Workspace state changed: ${state?.workspace_count || 0} workspace(s)`);
+    logger.log(`Workspace state changed: ${state?.workspace_count || 0} workspace(s)`);
     // Refresh UI when workspace state changes
     treeProvider?.refresh();
     statusBarManager?.update();
@@ -49,7 +60,7 @@ export function activate(context: vscode.ExtensionContext) {
   // IMPORTANT: Register webview serializers IMMEDIATELY after data provider
   // This ensures VS Code can restore panels even if other init takes time
   // Both serializers must be registered before VS Code tries to restore any panels
-  console.log("[Extension] Registering webview serializers...");
+  logger.log("Registering webview serializers...");
   registerSkillFlowchartPanel(context);
   registerCommandCenterSerializer(context, dataProvider);
 
@@ -58,6 +69,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Initialize tree view
   treeProvider = registerTreeView(context, dataProvider);
+
+  // Initialize memory tab
+  memoryTreeProvider = registerMemoryTab(context);
+  logger.log("Memory tab initialized");
 
   // Initialize notifications
   notificationManager = registerNotifications(context, dataProvider);
@@ -68,31 +83,27 @@ export function activate(context: vscode.ExtensionContext) {
   // Initialize skill execution watcher (connects to MCP server and updates Command Center)
   registerSkillExecutionWatcher(context);
 
-  // Register "Open All Views" command (now just opens Command Center)
+  // Initialize skill toast manager (WebSocket-based real-time updates)
+  skillToastManager = new SkillToastManager(context);
+  logger.log("Skill toast manager initialized (WebSocket)");
+
+  // Register command to show detailed skill toast webview
+  skillToastWebview = new SkillToastWebview(context);
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.openAllViews", async () => {
-      await vscode.commands.executeCommand("aa-workflow.openCommandCenter");
-      await vscode.commands.executeCommand("aaWorkflowExplorer.focus");
+    vscode.commands.registerCommand("aa-workflow.showSkillToastWebview", () => {
+      skillToastWebview?.show();
     })
   );
 
-  // Legacy command aliases for backwards compatibility
-  context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.openDashboard", () => {
-      vscode.commands.executeCommand("aa-workflow.openCommandCenter", "overview");
-    })
-  );
-  context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.openAgentOverview", () => {
-      vscode.commands.executeCommand("aa-workflow.openCommandCenter", "overview");
-    })
-  );
+  // Register test commands for debugging
+  registerTestCommand(context);
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.openSkillVisualizer", () => {
-      vscode.commands.executeCommand("aa-workflow.openCommandCenter", "skills");
-    })
-  );
+  // Register Chat D-Bus service for background processes
+  registerChatDbusService().catch((e) => {
+    logger.warn("Failed to register Chat D-Bus service: " + e.message);
+  });
+
+  // Legacy command aliases removed - only openCommandCenter is exposed
 
   // Register commands
   registerCommands(context, dataProvider, statusBarManager);
@@ -105,6 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
     await dataProvider?.refresh();
     statusBarManager?.update();
     treeProvider?.refresh();
+    memoryTreeProvider?.refresh();
     await notificationManager?.checkAndNotify();
   }, intervalSeconds * 1000);
 
@@ -120,17 +132,50 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  console.log("AI Workflow extension activated!");
+  logger.log("AI Workflow extension activated!");
 }
 
-export function deactivate() {
+export async function deactivate() {
+  logger.log("AI Workflow extension deactivating...");
+
+  // Clear interval first to stop any pending refreshes
   if (refreshInterval) {
     clearInterval(refreshInterval);
+    refreshInterval = undefined;
   }
-  statusBarManager?.dispose();
-  notificationManager?.dispose();
-  dataProvider?.dispose();
-  disposeWorkspaceStateProvider();
+
+  // Dispose in reverse order of creation, with error handling
+  try {
+    // Unregister D-Bus service first (may have pending calls)
+    await unregisterChatDbusService();
+  } catch (e: any) {
+    logger.error("Error unregistering D-Bus service", e);
+  }
+
+  try {
+    disposeSkillWebSocketClient();
+  } catch (e: any) {
+    logger.error("Error disposing WebSocket client", e);
+  }
+
+  try {
+    disposeWorkspaceStateProvider();
+  } catch (e: any) {
+    logger.error("Error disposing workspace state provider", e);
+  }
+
+  try {
+    skillToastWebview?.dispose();
+    skillToastManager?.dispose();
+    dataProvider?.dispose();
+    notificationManager?.dispose();
+    statusBarManager?.dispose();
+  } catch (e: any) {
+    logger.error("Error disposing UI components", e);
+  }
+
+  // Dispose logger last
+  disposeLogger();
 }
 
 /**

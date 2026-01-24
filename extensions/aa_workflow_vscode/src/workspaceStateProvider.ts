@@ -9,6 +9,9 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { createLogger } from './logger';
+
+const logger = createLogger("WorkspaceState");
 
 /**
  * Session state from MCP server
@@ -300,5 +303,3 @@ export function disposeWorkspaceStateProvider(): void {
         instance = null;
     }
 }
-
-

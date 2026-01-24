@@ -17,6 +17,9 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { createLogger } from "./logger";
+
+const logger = createLogger("Flowchart");
 
 // ============================================================================
 // Types
@@ -45,6 +48,9 @@ export interface SkillStep {
   retryCount?: number;        // Number of retries attempted
   healingApplied?: boolean;   // Auto-heal was applied
   healingDetails?: string;    // What was healed
+  // Sub-skill call indicator
+  isSkillCall?: boolean;      // Step calls another skill via skill_run
+  calledSkillName?: string;   // Name of the skill being called
 }
 
 export interface SkillDefinition {
@@ -731,6 +737,15 @@ export class SkillFlowchartPanel {
     if (autoHealTools.some((t) => tool.startsWith(t))) {
       step.canRetry = true;
     }
+
+    // Detect skill_run calls (sub-skill invocations)
+    if (tool === "skill_run") {
+      step.isSkillCall = true;
+      // Extract the skill name from args
+      if (args.skill_name) {
+        step.calledSkillName = args.skill_name;
+      }
+    }
   }
 
   private async _runSkill(skillName: string, inputs: Record<string, unknown>): Promise<void> {
@@ -1167,6 +1182,7 @@ export class SkillFlowchartPanel {
 
       .step-type-h .tag.tool { background: rgba(59, 130, 246, 0.2); color: var(--info); }
       .step-type-h .tag.compute { background: rgba(139, 92, 246, 0.2); color: var(--running); }
+      .step-type-h .tag.skill-call { background: rgba(245, 158, 11, 0.3); color: var(--warning); font-weight: 600; }
 
       .step-duration-h {
         font-size: 9px;
@@ -1264,6 +1280,52 @@ export class SkillFlowchartPanel {
         border-left: 2px dashed var(--warning);
         background: none;
         width: 0;
+      }
+
+      /* Skill call step styling - makes sub-skill calls visually distinct */
+      .step-node-h.skill-call .step-icon-h {
+        border-width: 3px;
+        border-color: var(--warning);
+        background: rgba(245, 158, 11, 0.15);
+        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+      }
+
+      .step-node-h.skill-call.pending .step-icon-h {
+        border-color: var(--warning);
+        color: var(--warning);
+      }
+
+      .step-node-h.skill-call .step-name-h {
+        color: var(--warning);
+      }
+
+      .step-node-h.skill-call .skill-call-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 6px;
+        background: rgba(245, 158, 11, 0.25);
+        border: 1px solid var(--warning);
+        border-radius: 4px;
+        font-size: 10px;
+        color: var(--warning);
+        margin-top: 4px;
+        font-weight: 600;
+      }
+
+      .step-node-h.skill-call .skill-call-badge:hover {
+        background: rgba(245, 158, 11, 0.35);
+        cursor: pointer;
+      }
+
+      .step-node.skill-call .step-icon {
+        border-width: 3px;
+        border-color: var(--warning);
+        background: rgba(245, 158, 11, 0.15);
+      }
+
+      .step-node.skill-call .step-name {
+        color: var(--warning);
       }
 
       /* Summary Bar */
@@ -1462,6 +1524,16 @@ export class SkillFlowchartPanel {
       .step-tag.tool { background: rgba(59, 130, 246, 0.2); color: var(--info); }
       .step-tag.compute { background: rgba(139, 92, 246, 0.2); color: var(--running); }
       .step-tag.condition { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+      .step-tag.skill-call {
+        background: rgba(245, 158, 11, 0.3);
+        color: var(--warning);
+        font-weight: 600;
+        border: 1px solid var(--warning);
+        cursor: pointer;
+      }
+      .step-tag.skill-call:hover {
+        background: rgba(245, 158, 11, 0.4);
+      }
       .step-tag.memory-read { background: rgba(59, 130, 246, 0.15); color: var(--info); }
       .step-tag.memory-write { background: rgba(16, 185, 129, 0.15); color: var(--success); }
       .step-tag.auto-heal { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
@@ -1651,9 +1723,6 @@ export class SkillFlowchartPanel {
     return `
       <div class="header">
         <h1>⚡ Skill Flowchart</h1>
-        <div class="header-actions">
-          <button class="btn btn-secondary" id="refreshBtn">↻ Refresh</button>
-        </div>
       </div>
       <div class="skill-picker">
         <div class="skill-picker-header">
@@ -1746,6 +1815,7 @@ export class SkillFlowchartPanel {
         </div>
         ` : ""}
         <div class="summary-legend">
+          <span class="legend-item" title="Calls another skill">⚡</span>
           <span class="legend-item" title="Memory Read">📖</span>
           <span class="legend-item" title="Memory Write">💾</span>
           <span class="legend-item" title="Auto-remediation">🔄</span>
@@ -1777,12 +1847,17 @@ export class SkillFlowchartPanel {
 
   private _getHorizontalStepHtml(step: SkillStep, index: number, isLastInRow: boolean = false): string {
     const stepNumber = index + 1;
-    const icon = this._getStepIcon(step.status, stepNumber);
+    const icon = step.isSkillCall ? "⚡" : this._getStepIcon(step.status, stepNumber);
     const duration = step.duration ? this._formatDuration(step.duration) : "";
 
     // Build type tags
     const typeTags: string[] = [];
-    if (step.tool) typeTags.push(`<span class="tag tool" title="Tool: ${step.tool}">🔧</span>`);
+    // Show skill call badge prominently instead of generic tool icon
+    if (step.isSkillCall) {
+      // Don't add generic tool tag for skill calls - we show a special badge below
+    } else if (step.tool) {
+      typeTags.push(`<span class="tag tool" title="Tool: ${step.tool}">🔧</span>`);
+    }
     if (step.compute) typeTags.push(`<span class="tag compute" title="Python compute">🐍</span>`);
 
     // Build lifecycle indicators
@@ -1855,22 +1930,33 @@ export class SkillFlowchartPanel {
 
     // Build tooltip with full details
     const tooltipParts = [step.description || step.name];
-    if (step.tool) tooltipParts.push(`Tool: ${step.tool}`);
+    if (step.isSkillCall && step.calledSkillName) {
+      tooltipParts.push(`Calls skill: ${step.calledSkillName}`);
+    } else if (step.tool) {
+      tooltipParts.push(`Tool: ${step.tool}`);
+    }
     if (step.memoryRead?.length) tooltipParts.push(`Reads: ${step.memoryRead.join(", ")}`);
     if (step.memoryWrite?.length) tooltipParts.push(`Writes: ${step.memoryWrite.join(", ")}`);
     if (step.isAutoRemediation) tooltipParts.push("Auto-remediation step");
     const tooltip = tooltipParts.join("\n");
 
     const rowLastClass = isLastInRow ? "row-last" : "";
+    const skillCallClass = step.isSkillCall ? "skill-call" : "";
+
+    // Build skill call badge if this step calls another skill
+    const skillCallBadge = step.isSkillCall && step.calledSkillName
+      ? `<div class="skill-call-badge" data-skill="${this._escapeHtml(step.calledSkillName)}" title="Click to view ${step.calledSkillName} skill">⚡ ${this._escapeHtml(step.calledSkillName)}</div>`
+      : "";
 
     return `
-      <div class="step-node-h ${step.status} ${step.isAutoRemediation ? "remediation" : ""} ${rowLastClass}" title="${this._escapeHtml(tooltip)}">
+      <div class="step-node-h ${step.status} ${step.isAutoRemediation ? "remediation" : ""} ${skillCallClass} ${rowLastClass}" title="${this._escapeHtml(tooltip)}">
         <div class="step-connector-h"></div>
         ${lifecycleHtml}
         <div class="step-icon-h">${icon}</div>
         <div class="step-content-h">
           <div class="step-name-h">${this._escapeHtml(step.name)}</div>
           ${typeTagsHtml}
+          ${skillCallBadge}
           ${duration ? `<div class="step-duration-h">${duration}</div>` : ""}
         </div>
       </div>
@@ -1879,12 +1965,17 @@ export class SkillFlowchartPanel {
 
   private _getStepHtml(step: SkillStep, index: number): string {
     const stepNumber = index + 1;
-    const icon = this._getStepIcon(step.status, stepNumber);
+    const icon = step.isSkillCall ? "⚡" : this._getStepIcon(step.status, stepNumber);
     const duration = step.duration ? this._formatDuration(step.duration) : "";
 
     // Build tags
     const tags: string[] = [];
-    if (step.tool) tags.push(`<span class="step-tag tool">🔧 ${step.tool}</span>`);
+    // Show skill call prominently instead of generic tool
+    if (step.isSkillCall && step.calledSkillName) {
+      tags.push(`<span class="step-tag skill-call" data-skill="${this._escapeHtml(step.calledSkillName)}">⚡ calls: ${step.calledSkillName}</span>`);
+    } else if (step.tool) {
+      tags.push(`<span class="step-tag tool">🔧 ${step.tool}</span>`);
+    }
     if (step.compute) tags.push(`<span class="step-tag compute">🐍 compute</span>`);
     if (step.condition) tags.push(`<span class="step-tag condition">❓ conditional</span>`);
 
@@ -1911,8 +2002,10 @@ export class SkillFlowchartPanel {
       tags.push(`<span class="step-tag retry-count">🔁 retried ${step.retryCount}x</span>`);
     }
 
+    const skillCallClass = step.isSkillCall ? "skill-call" : "";
+
     return `
-      <div class="step-node ${step.status} ${step.isAutoRemediation ? "remediation" : ""}">
+      <div class="step-node ${step.status} ${step.isAutoRemediation ? "remediation" : ""} ${skillCallClass}">
         <div class="step-connector"></div>
         <div class="step-icon">${icon}</div>
         <div class="step-content">
@@ -2002,10 +2095,6 @@ export class SkillFlowchartPanel {
         vscode.postMessage({ command: 'runSkill', skillName, inputs: {} });
       }
 
-      function refresh() {
-        vscode.postMessage({ command: 'refresh' });
-      }
-
       function filterSkills(query) {
         const grid = document.getElementById('skillGrid');
         if (!grid) return;
@@ -2065,18 +2154,21 @@ export class SkillFlowchartPanel {
           });
         });
 
+        // Skill call badges - click to navigate to called skill
+        document.querySelectorAll('.skill-call-badge, .step-tag.skill-call').forEach(badge => {
+          badge.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const skillName = badge.getAttribute('data-skill');
+            if (skillName) loadSkill(skillName);
+          });
+        });
+
         // Search input
         const searchInput = document.getElementById('skillSearch');
         if (searchInput) {
           searchInput.addEventListener('input', (e) => {
             filterSkills(e.target.value);
           });
-        }
-
-        // Refresh button
-        const refreshBtn = document.getElementById('refreshBtn');
-        if (refreshBtn) {
-          refreshBtn.addEventListener('click', refresh);
         }
 
         // Back button
@@ -2160,47 +2252,6 @@ export function getSkillFlowchartPanel(): SkillFlowchartPanel | undefined {
 export function registerSkillFlowchartPanel(
   context: vscode.ExtensionContext
 ): void {
-  // Command to open flowchart panel
-  context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.openSkillFlowchart", () => {
-      SkillFlowchartPanel.createOrShow(context.extensionUri);
-    })
-  );
-
-  // Command to visualize a specific skill
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "aa-workflow.visualizeSkillFlowchart",
-      async (skillName?: string) => {
-        console.log("[SkillFlowchartPanel] ========================================");
-        console.log("[SkillFlowchartPanel] visualizeSkillFlowchart COMMAND called");
-        console.log("[SkillFlowchartPanel] skillName:", skillName);
-        console.log("[SkillFlowchartPanel] currentPanel before createOrShow:", !!SkillFlowchartPanel.currentPanel);
-        console.log("[SkillFlowchartPanel] ========================================");
-
-        const panel = SkillFlowchartPanel.createOrShow(context.extensionUri);
-
-        if (!skillName) {
-          // Show skill picker in panel
-          return;
-        }
-
-        await panel.loadSkill(skillName);
-      }
-    )
-  );
-
-  // Command to show execution progress
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "aa-workflow.showSkillExecution",
-      (skillName: string, inputs?: Record<string, unknown>) => {
-        const panel = SkillFlowchartPanel.createOrShow(context.extensionUri);
-        panel.startExecution(skillName, inputs);
-      }
-    )
-  );
-
   // Register serializer to revive panel after restart
   context.subscriptions.push(
     vscode.window.registerWebviewPanelSerializer("aaSkillFlowchart", {

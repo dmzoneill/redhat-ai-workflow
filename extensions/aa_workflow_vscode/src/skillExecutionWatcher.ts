@@ -8,6 +8,11 @@
  *   ~/.config/aa-workflow/skill_execution.json
  *
  * This file watches that file and dispatches events to the flowchart panel.
+ *
+ * Supports multiple concurrent skill executions:
+ * - Tracks all running executions from different sources (chat, cron, etc.)
+ * - Shows toast notifications when skills start (instead of auto-switching tabs)
+ * - Provides list of running executions for the Running Skills panel
  */
 
 import * as vscode from "vscode";
@@ -15,6 +20,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { getCommandCenterPanel } from "./commandCenter";
+import { createLogger } from "./logger";
+
+const logger = createLogger("SkillWatcher");
 
 // ============================================================================
 // Types
@@ -36,6 +44,7 @@ export interface SkillExecutionEvent {
     | "remediation_step";
   timestamp: string;
   skillName: string;
+  executionId?: string;
   stepIndex?: number;
   stepName?: string;
   data?: {
@@ -61,13 +70,40 @@ export interface SkillExecutionEvent {
 }
 
 export interface SkillExecutionState {
+  executionId: string;
   skillName: string;
+  workspaceUri: string;
+  sessionId?: string;
+  sessionName?: string;
+  source: string;  // "chat", "cron", "slack", "api"
+  sourceDetails?: string;
   status: "running" | "success" | "failed";
   currentStepIndex: number;
   totalSteps: number;
   startTime: string;
   endTime?: string;
   events: SkillExecutionEvent[];
+}
+
+// New multi-execution file format
+export interface MultiExecutionFile {
+  executions: { [executionId: string]: SkillExecutionState };
+  lastUpdated: string;
+  version?: number;
+}
+
+// Execution summary for UI
+export interface ExecutionSummary {
+  executionId: string;
+  skillName: string;
+  source: string;
+  sourceDetails?: string;
+  sessionName?: string;
+  status: "running" | "success" | "failed";
+  currentStepIndex: number;
+  totalSteps: number;
+  startTime: string;
+  elapsedMs: number;
 }
 
 // ============================================================================
@@ -80,7 +116,11 @@ export class SkillExecutionWatcher {
   private _lastModified: number = 0;
   private _disposables: vscode.Disposable[] = [];
   private _statusBarItem: vscode.StatusBarItem;
-  private _currentExecution: SkillExecutionState | undefined;
+
+  // Multi-execution tracking
+  private _executions: Map<string, SkillExecutionState> = new Map();
+  private _seenExecutionIds: Set<string> = new Set();  // Track which executions we've notified about
+  private _selectedExecutionId: string | undefined;  // Currently selected execution for viewing
 
   constructor() {
     this._executionFilePath = path.join(
@@ -95,7 +135,7 @@ export class SkillExecutionWatcher {
       vscode.StatusBarAlignment.Left,
       90
     );
-    this._statusBarItem.command = "aa-workflow.openSkillFlowchart";
+    this._statusBarItem.command = "aa-workflow.openCommandCenter";
     this._disposables.push(this._statusBarItem);
   }
 
@@ -160,63 +200,264 @@ export class SkillExecutionWatcher {
       this._lastModified = stat.mtimeMs;
 
       const content = fs.readFileSync(this._executionFilePath, "utf-8");
-      const state: SkillExecutionState = JSON.parse(content);
+      const data = JSON.parse(content);
 
-      console.log(`[SkillWatcher] File changed: ${state.skillName} - status: ${state.status}, step: ${state.currentStepIndex}/${state.totalSteps}`);
-
-      this._processExecutionState(state);
+      // Handle both old single-execution format and new multi-execution format
+      if (data.executions) {
+        // New multi-execution format
+        this._processMultiExecutionState(data as MultiExecutionFile);
+      } else if (data.skillName) {
+        // Old single-execution format (backward compatibility)
+        const state = data as SkillExecutionState;
+        // Generate a fake execution ID for old format
+        const execId = `legacy_${state.skillName}_${state.startTime}`;
+        state.executionId = execId;
+        state.source = state.source || "chat";
+        this._processMultiExecutionState({
+          executions: { [execId]: state },
+          lastUpdated: new Date().toISOString(),
+        });
+      }
     } catch (e) {
       console.error("[SkillWatcher] Error processing file:", e);
     }
   }
 
   /**
-   * Process execution state and update UI
+   * Process multi-execution state and update UI
    */
-  private _processExecutionState(state: SkillExecutionState): void {
-    const previousExecution = this._currentExecution;
-    this._currentExecution = state;
+  private _processMultiExecutionState(data: MultiExecutionFile): void {
+    const newExecutions = new Map<string, SkillExecutionState>();
+    const runningCount = { count: 0 };
 
-    // Update status bar
-    this._updateStatusBar(state);
+    for (const [execId, state] of Object.entries(data.executions)) {
+      newExecutions.set(execId, state);
 
-    // Check if this is a new skill (either starting or just completed that we haven't seen)
-    const isNewSkill = !previousExecution ||
-      previousExecution.skillName !== state.skillName ||
-      previousExecution.startTime !== state.startTime;
-
-    // Auto-open flowchart panel when a skill starts
-    // Don't auto-open for completed skills on initial load (stale state)
-    if (isNewSkill) {
-      console.log(`[SkillWatcher] New skill detected: ${state.skillName} (status: ${state.status})`);
-
-      // Only auto-open if skill is currently running
-      // Skip completed skills to avoid showing stale state on extension startup
       if (state.status === "running") {
-        this._autoOpenFlowchartPanel(state.skillName);
-        return; // Events will be processed after panel opens
-      } else {
-        // For completed skills, just update status bar but don't auto-open panel
-        console.log(`[SkillWatcher] Skipping auto-open for completed skill: ${state.skillName}`);
-        return;
+        runningCount.count++;
+      }
+
+      // Check if this is a new execution we haven't seen
+      if (!this._seenExecutionIds.has(execId)) {
+        this._seenExecutionIds.add(execId);
+
+        // Only show toast for running skills (not completed ones on startup)
+        if (state.status === "running") {
+          this._showSkillStartedToast(state);
+        }
+      }
+
+      // Check if execution just completed
+      const prevState = this._executions.get(execId);
+      if (prevState?.status === "running" && state.status !== "running") {
+        this._showSkillCompletedToast(state);
       }
     }
 
+    this._executions = newExecutions;
+
+    // Update status bar
+    this._updateStatusBar(runningCount.count);
+
     // Update Command Center if open
+    this._updateCommandCenter();
+  }
+
+  /**
+   * Show toast notification when a skill starts
+   */
+  private _showSkillStartedToast(state: SkillExecutionState): void {
+    const sourceLabel = this._getSourceLabel(state);
+    const message = `Skill "${state.skillName}" started${sourceLabel}`;
+
+    vscode.window.showInformationMessage(message, "View").then((selection) => {
+      if (selection === "View") {
+        this._selectedExecutionId = state.executionId;
+        vscode.commands.executeCommand("aa-workflow.openCommandCenter", "skills");
+      }
+    });
+
+    console.log(`[SkillWatcher] New skill started: ${state.skillName} (${state.source})`);
+  }
+
+  /**
+   * Show toast notification when a skill completes
+   */
+  private _showSkillCompletedToast(state: SkillExecutionState): void {
+    const sourceLabel = this._getSourceLabel(state);
+    const icon = state.status === "success" ? "$(check)" : "$(error)";
+    const statusText = state.status === "success" ? "completed" : "failed";
+    const message = `${icon} Skill "${state.skillName}" ${statusText}${sourceLabel}`;
+
+    if (state.status === "failed") {
+      vscode.window.showWarningMessage(message, "View Details").then((selection) => {
+        if (selection === "View Details") {
+          this._selectedExecutionId = state.executionId;
+          vscode.commands.executeCommand("aa-workflow.openCommandCenter", "skills");
+        }
+      });
+    }
+    // Don't show toast for successful completions (too noisy)
+  }
+
+  /**
+   * Get a human-readable source label
+   */
+  private _getSourceLabel(state: SkillExecutionState): string {
+    if (state.source === "cron") {
+      return state.sourceDetails ? ` (cron: ${state.sourceDetails})` : " (cron)";
+    } else if (state.source === "slack") {
+      return " (Slack)";
+    } else if (state.sessionName) {
+      return ` (${state.sessionName})`;
+    }
+    return "";
+  }
+
+  /**
+   * Update status bar with running execution count
+   */
+  private _updateStatusBar(runningCount: number): void {
+    if (runningCount === 0) {
+      this._statusBarItem.hide();
+      return;
+    }
+
+    if (runningCount === 1) {
+      // Show single skill name
+      const running = this.getRunningExecutions()[0];
+      if (running) {
+        const progress = `${running.currentStepIndex + 1}/${running.totalSteps}`;
+        this._statusBarItem.text = `$(sync~spin) ${running.skillName} [${progress}]`;
+        this._statusBarItem.tooltip = `Skill "${running.skillName}" running - click to view`;
+      }
+    } else {
+      // Show count for multiple skills
+      this._statusBarItem.text = `$(sync~spin) ${runningCount} skills running`;
+      this._statusBarItem.tooltip = `${runningCount} skills running - click to view`;
+    }
+
+    this._statusBarItem.backgroundColor = undefined;
+    this._statusBarItem.show();
+  }
+
+  /**
+   * Update Command Center with current execution state
+   */
+  private _updateCommandCenter(): void {
     const commandCenter = getCommandCenterPanel();
-    if (commandCenter) {
-      // Convert state to execution format for Command Center
+    if (!commandCenter) return;
+
+    // Get all running executions for the panel
+    const runningExecutions = this.getRunningExecutions();
+
+    // Send all running executions to Command Center
+    commandCenter.updateRunningSkills(runningExecutions);
+
+    // If there's a selected execution, send its detailed state
+    const selectedExec = this._selectedExecutionId
+      ? this._executions.get(this._selectedExecutionId)
+      : runningExecutions[0] ? this._executions.get(runningExecutions[0].executionId) : undefined;
+
+    if (selectedExec) {
       const execution = {
-        skillName: state.skillName,
-        status: state.status,
-        currentStepIndex: state.currentStepIndex,
-        totalSteps: state.totalSteps,
-        steps: this._buildStepsFromEvents(state),
-        startTime: state.startTime,
-        endTime: state.endTime,
+        executionId: selectedExec.executionId,
+        skillName: selectedExec.skillName,
+        status: selectedExec.status,
+        currentStepIndex: selectedExec.currentStepIndex,
+        totalSteps: selectedExec.totalSteps,
+        steps: this._buildStepsFromEvents(selectedExec),
+        startTime: selectedExec.startTime,
+        endTime: selectedExec.endTime,
+        source: selectedExec.source,
+        sourceDetails: selectedExec.sourceDetails,
+        sessionName: selectedExec.sessionName,
       };
       commandCenter.updateSkillExecution(execution);
     }
+  }
+
+  /**
+   * Get all running executions as summaries
+   */
+  public getRunningExecutions(): ExecutionSummary[] {
+    const now = Date.now();
+    const running: ExecutionSummary[] = [];
+
+    for (const [execId, state] of this._executions) {
+      if (state.status === "running") {
+        const startTime = new Date(state.startTime).getTime();
+        running.push({
+          executionId: execId,
+          skillName: state.skillName,
+          source: state.source,
+          sourceDetails: state.sourceDetails,
+          sessionName: state.sessionName,
+          status: state.status,
+          currentStepIndex: state.currentStepIndex,
+          totalSteps: state.totalSteps,
+          startTime: state.startTime,
+          elapsedMs: now - startTime,
+        });
+      }
+    }
+
+    // Sort by start time (newest first)
+    running.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+
+    return running;
+  }
+
+  /**
+   * Get all executions (running and recent completed)
+   */
+  public getAllExecutions(): ExecutionSummary[] {
+    const now = Date.now();
+    const all: ExecutionSummary[] = [];
+
+    for (const [execId, state] of this._executions) {
+      const startTime = new Date(state.startTime).getTime();
+      all.push({
+        executionId: execId,
+        skillName: state.skillName,
+        source: state.source,
+        sourceDetails: state.sourceDetails,
+        sessionName: state.sessionName,
+        status: state.status,
+        currentStepIndex: state.currentStepIndex,
+        totalSteps: state.totalSteps,
+        startTime: state.startTime,
+        elapsedMs: now - startTime,
+      });
+    }
+
+    // Sort by start time (newest first)
+    all.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+
+    return all;
+  }
+
+  /**
+   * Select an execution to view in detail
+   */
+  public selectExecution(executionId: string): void {
+    this._selectedExecutionId = executionId;
+    this._updateCommandCenter();
+  }
+
+  /**
+   * Get the currently selected execution
+   */
+  public getSelectedExecution(): SkillExecutionState | undefined {
+    if (this._selectedExecutionId) {
+      return this._executions.get(this._selectedExecutionId);
+    }
+    // Default to first running execution
+    const running = this.getRunningExecutions();
+    if (running.length > 0) {
+      return this._executions.get(running[0].executionId);
+    }
+    return undefined;
   }
 
   /**
@@ -318,76 +559,6 @@ export class SkillExecutionWatcher {
     }
 
     return steps;
-  }
-
-  /**
-   * Auto-open the Command Center Skills tab when a skill starts
-   */
-  private async _autoOpenFlowchartPanel(skillName: string): Promise<void> {
-    try {
-      // Open Command Center and switch to Skills tab
-      await vscode.commands.executeCommand("aa-workflow.openCommandCenter", "skills");
-
-      // Give the panel time to initialize
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Update with current execution state
-      const commandCenter = getCommandCenterPanel();
-      if (commandCenter && this._currentExecution) {
-        const execution = {
-          skillName: this._currentExecution.skillName,
-          status: this._currentExecution.status,
-          currentStepIndex: this._currentExecution.currentStepIndex,
-          totalSteps: this._currentExecution.totalSteps,
-          steps: this._buildStepsFromEvents(this._currentExecution),
-          startTime: this._currentExecution.startTime,
-          endTime: this._currentExecution.endTime,
-        };
-        commandCenter.updateSkillExecution(execution);
-      }
-    } catch (e) {
-      console.error("Failed to auto-open Command Center:", e);
-    }
-  }
-
-  /**
-   * Update status bar with current execution state
-   */
-  private _updateStatusBar(state: SkillExecutionState): void {
-    if (state.status === "running") {
-      const progress = `${state.currentStepIndex + 1}/${state.totalSteps}`;
-      this._statusBarItem.text = `$(sync~spin) ${state.skillName} [${progress}]`;
-      this._statusBarItem.tooltip = `Skill "${state.skillName}" running - click to view flowchart`;
-      this._statusBarItem.backgroundColor = undefined;
-      this._statusBarItem.show();
-    } else if (state.status === "success") {
-      this._statusBarItem.text = `$(check) ${state.skillName}`;
-      this._statusBarItem.tooltip = `Skill "${state.skillName}" completed successfully`;
-      this._statusBarItem.backgroundColor = new vscode.ThemeColor(
-        "statusBarItem.warningBackground"
-      );
-      this._statusBarItem.show();
-
-      // Hide after 5 seconds
-      setTimeout(() => this._hideStatusBar(), 5000);
-    } else if (state.status === "failed") {
-      this._statusBarItem.text = `$(error) ${state.skillName}`;
-      this._statusBarItem.tooltip = `Skill "${state.skillName}" failed - click to view details`;
-      this._statusBarItem.backgroundColor = new vscode.ThemeColor(
-        "statusBarItem.errorBackground"
-      );
-      this._statusBarItem.show();
-
-      // Hide after 10 seconds
-      setTimeout(() => this._hideStatusBar(), 10000);
-    }
-  }
-
-  /**
-   * Hide the status bar item
-   */
-  private _hideStatusBar(): void {
-    this._statusBarItem.hide();
   }
 
   /**

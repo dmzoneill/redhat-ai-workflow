@@ -12,10 +12,60 @@
 
 import * as vscode from "vscode";
 import { WorkflowDataProvider, WorkflowStatus } from "./dataProvider";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
+import { createLogger } from "./logger";
 
-const execAsync = promisify(exec);
+const logger = createLogger("Notifications");
+
+/**
+ * Execute a command using spawn with bash --norc --noprofile to avoid sourcing
+ * .bashrc.d scripts (which can trigger Bitwarden password prompts).
+ */
+async function execAsync(command: string, options?: { timeout?: number; cwd?: string }): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('/bin/bash', ['--norc', '--noprofile', '-c', command], {
+      cwd: options?.cwd,
+      env: {
+        ...process.env,
+        BASH_ENV: '',
+        ENV: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let killed = false;
+
+    const timeout = options?.timeout || 30000;
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill('SIGTERM');
+      reject(new Error(`Command timed out after ${timeout}ms`));
+    }, timeout);
+
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) return;
+
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const error = new Error(`Command failed with exit code ${code}: ${stderr}`);
+        (error as any).code = code;
+        reject(error);
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
 
 interface NotificationState {
   lastAlertCount: number;

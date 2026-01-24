@@ -33,6 +33,12 @@
           "name": "Workflow Explorer",
           "icon": "$(rocket)",
           "contextualTitle": "AI Workflow"
+        },
+        {
+          "id": "aaWorkflowMemory",
+          "name": "Memory",
+          "icon": "$(database)",
+          "contextualTitle": "AI Workflow Memory"
         }
       ]
     },
@@ -40,93 +46,13 @@
       {
         "view": "aaWorkflowExplorer",
         "contents": "No workflow data available.\n[Refresh](command:aa-workflow.refreshTree)\n\nMake sure the memory files exist in ~/.config/aa-workflow/memory/"
+      },
+      {
+        "view": "aaWorkflowMemory",
+        "contents": "Memory system not initialized.\n[Refresh](command:aa-workflow.refreshMemory)\n\nMemory files are stored in ~/src/redhat-ai-workflow/memory/"
       }
     ],
     "commands": [
-      {
-        "command": "aa-workflow.showStatus",
-        "title": "AI Workflow: Show Status",
-        "shortTitle": "Show Status",
-        "icon": "$(info)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.openJiraIssue",
-        "title": "AI Workflow: Open Current Jira Issue",
-        "shortTitle": "Open Jira Issue",
-        "icon": "$(issues)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.openMR",
-        "title": "AI Workflow: Open Current MR",
-        "shortTitle": "Open Merge Request",
-        "icon": "$(git-pull-request)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.investigateAlert",
-        "title": "AI Workflow: Investigate Alert",
-        "shortTitle": "Investigate Alert",
-        "icon": "$(search)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.refreshStatus",
-        "title": "AI Workflow: Refresh Status",
-        "shortTitle": "Refresh",
-        "icon": "$(refresh)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.refreshTree",
-        "title": "AI Workflow: Refresh Tree View",
-        "shortTitle": "Refresh Tree",
-        "icon": "$(refresh)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.runSkill",
-        "title": "AI Workflow: Run Skill...",
-        "shortTitle": "Run Skill...",
-        "icon": "$(play)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.startWork",
-        "title": "AI Workflow: Start Work on Issue",
-        "shortTitle": "Start Work on Issue",
-        "icon": "$(rocket)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.coffee",
-        "title": "AI Workflow: Morning Briefing",
-        "shortTitle": "Morning Briefing ☕",
-        "icon": "$(coffee)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.beer",
-        "title": "AI Workflow: End of Day Summary",
-        "shortTitle": "End of Day 🍺",
-        "icon": "$(beaker)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.workAnalysis",
-        "title": "AI Workflow: Work Analysis Report",
-        "shortTitle": "Work Analysis 📊",
-        "icon": "$(graph)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.checkNotifications",
-        "title": "AI Workflow: Check for Notifications",
-        "shortTitle": "Check Notifications",
-        "icon": "$(bell)",
-        "category": "AI Workflow"
-      },
       {
         "command": "aa-workflow.openCommandCenter",
         "title": "AI Workflow: Open Command Center",
@@ -135,280 +61,47 @@
         "category": "AI Workflow"
       },
       {
-        "command": "aa-workflow.openDashboard",
-        "title": "AI Workflow: Open Dashboard (Legacy)",
-        "shortTitle": "Dashboard",
-        "icon": "$(dashboard)",
+        "command": "aa-workflow.refreshMemory",
+        "title": "AI Workflow: Refresh Memory",
+        "shortTitle": "Refresh Memory",
+        "icon": "$(refresh)",
         "category": "AI Workflow"
       },
       {
-        "command": "aa-workflow.openSkillVisualizer",
-        "title": "AI Workflow: Open Skill Visualizer (Legacy)",
-        "shortTitle": "Skill Visualizer",
-        "icon": "$(circuit-board)",
+        "command": "aa-workflow.openMemoryFile",
+        "title": "AI Workflow: Open Memory File",
+        "shortTitle": "Open Memory File",
+        "icon": "$(go-to-file)",
         "category": "AI Workflow"
       },
       {
-        "command": "aa-workflow.visualizeSkill",
-        "title": "AI Workflow: Visualize Skill...",
-        "shortTitle": "Visualize Skill...",
-        "icon": "$(type-hierarchy)",
+        "command": "aa-workflow.memoryView",
+        "title": "AI Workflow: View Memory",
+        "shortTitle": "View Memory",
+        "icon": "$(eye)",
         "category": "AI Workflow"
       },
       {
-        "command": "aa-workflow.openSkillFlowchart",
-        "title": "AI Workflow: Open Skill Flowchart",
-        "shortTitle": "Skill Flowchart",
-        "icon": "$(type-hierarchy)",
+        "command": "aa-workflow.memoryEdit",
+        "title": "AI Workflow: Edit Memory",
+        "shortTitle": "Edit Memory",
+        "icon": "$(edit)",
         "category": "AI Workflow"
       },
       {
-        "command": "aa-workflow.visualizeSkillFlowchart",
-        "title": "AI Workflow: Visualize Skill Flowchart...",
-        "shortTitle": "Visualize Flowchart...",
-        "icon": "$(type-hierarchy)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.showSkillExecution",
-        "title": "AI Workflow: Show Skill Execution",
-        "shortTitle": "Skill Execution",
-        "icon": "$(debug-alt)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.switchAgent",
-        "title": "AI Workflow: Switch Agent/Persona",
-        "shortTitle": "Switch Agent",
-        "icon": "$(robot)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.showNamespace",
-        "title": "AI Workflow: Show Ephemeral Namespace",
-        "shortTitle": "Ephemeral Namespace",
-        "icon": "$(cloud-upload)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.runSkillByName",
-        "title": "AI Workflow: Run Skill by Name",
-        "shortTitle": "Run Skill",
-        "icon": "$(play)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.openAgentOverview",
-        "title": "AI Workflow: Open Agent Overview (Legacy)",
-        "shortTitle": "Agent Overview",
-        "icon": "$(robot)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.openAllViews",
-        "title": "AI Workflow: Open Command Center",
-        "shortTitle": "Open All Views",
-        "icon": "$(layout)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.openSkillsTab",
-        "title": "AI Workflow: Open Skills Tab",
-        "shortTitle": "Skills",
-        "icon": "$(zap)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.openServicesTab",
-        "title": "AI Workflow: Open Services Tab",
-        "shortTitle": "Services",
-        "icon": "$(plug)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.openMemoryTab",
-        "title": "AI Workflow: Open Memory Tab",
-        "shortTitle": "Memory",
-        "icon": "$(database)",
-        "category": "AI Workflow"
-      },
-      {
-        "command": "aa-workflow.openCronTab",
-        "title": "AI Workflow: Open Cron Tab",
-        "shortTitle": "Cron",
-        "icon": "$(clock)",
+        "command": "aa-workflow.memoryCleanup",
+        "title": "AI Workflow: Cleanup Memory",
+        "shortTitle": "Cleanup Memory",
+        "icon": "$(trash)",
         "category": "AI Workflow"
       }
     ],
-    "submenus": [
-      {
-        "id": "aa-workflow.submenu",
-        "label": "AI Workflow"
-      }
-    ],
-    "menus": {
-      "aa-workflow.submenu": [
-        {
-          "command": "aa-workflow.openCommandCenter",
-          "group": "1_panels@0"
-        },
-        {
-          "command": "aa-workflow.openSkillsTab",
-          "group": "1_panels@1"
-        },
-        {
-          "command": "aa-workflow.openServicesTab",
-          "group": "1_panels@2"
-        },
-        {
-          "command": "aa-workflow.openMemoryTab",
-          "group": "1_panels@3"
-        },
-        {
-          "command": "aa-workflow.openCronTab",
-          "group": "1_panels@4"
-        },
-        {
-          "command": "aa-workflow.openDashboard",
-          "group": "1_panels@2"
-        },
-        {
-          "command": "aa-workflow.openSkillFlowchart",
-          "group": "1_panels@3"
-        },
-        {
-          "command": "aa-workflow.openSkillVisualizer",
-          "group": "1_panels@4"
-        },
-        {
-          "command": "aa-workflow.showStatus",
-          "group": "1_panels@5"
-        },
-        {
-          "command": "aa-workflow.switchAgent",
-          "group": "2_agents@1"
-        },
-        {
-          "command": "aa-workflow.runSkill",
-          "group": "3_actions@1"
-        },
-        {
-          "command": "aa-workflow.startWork",
-          "group": "3_actions@2"
-        },
-        {
-          "command": "aa-workflow.coffee",
-          "group": "3_actions@3"
-        },
-        {
-          "command": "aa-workflow.beer",
-          "group": "3_actions@4"
-        },
-        {
-          "command": "aa-workflow.workAnalysis",
-          "group": "3_actions@5"
-        },
-        {
-          "command": "aa-workflow.openJiraIssue",
-          "group": "4_open@1"
-        },
-        {
-          "command": "aa-workflow.openMR",
-          "group": "4_open@2"
-        },
-        {
-          "command": "aa-workflow.showNamespace",
-          "group": "4_open@3"
-        },
-        {
-          "command": "aa-workflow.investigateAlert",
-          "group": "4_open@4"
-        },
-        {
-          "command": "aa-workflow.refreshStatus",
-          "group": "5_refresh@1"
-        }
-      ],
-      "view/title": [
-        {
-          "command": "aa-workflow.openDashboard",
-          "when": "view == aaWorkflowExplorer",
-          "group": "navigation@1"
-        },
-        {
-          "command": "aa-workflow.refreshTree",
-          "when": "view == aaWorkflowExplorer",
-          "group": "navigation@2"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "aa-workflow.openJiraIssue",
-          "when": "view == aaWorkflowExplorer && viewItem == issue",
-          "group": "inline"
-        },
-        {
-          "command": "aa-workflow.openMR",
-          "when": "view == aaWorkflowExplorer && viewItem == mr",
-          "group": "inline"
-        },
-        {
-          "command": "aa-workflow.investigateAlert",
-          "when": "view == aaWorkflowExplorer && viewItem == alert",
-          "group": "inline"
-        },
-        {
-          "command": "aa-workflow.showNamespace",
-          "when": "view == aaWorkflowExplorer && viewItem == namespace",
-          "group": "inline"
-        },
-        {
-          "command": "aa-workflow.runSkill",
-          "when": "view == aaWorkflowExplorer && viewItem == skill",
-          "group": "inline"
-        }
-      ]
-    },
+    "menus": {},
     "keybindings": [
       {
-        "command": "aa-workflow.openAgentOverview",
-        "key": "ctrl+alt+o",
-        "mac": "cmd+alt+o"
-      },
-      {
-        "command": "aa-workflow.openAllViews",
-        "key": "ctrl+alt+shift+o",
-        "mac": "cmd+alt+shift+o"
-      },
-      {
-        "command": "aa-workflow.openSkillFlowchart",
-        "key": "ctrl+alt+s",
-        "mac": "cmd+alt+s"
-      },
-      {
-        "command": "aa-workflow.openDashboard",
-        "key": "ctrl+alt+d",
-        "mac": "cmd+alt+d"
-      },
-      {
-        "command": "aa-workflow.runSkill",
-        "key": "ctrl+alt+r",
-        "mac": "cmd+alt+r"
-      },
-      {
-        "command": "aa-workflow.switchAgent",
-        "key": "ctrl+alt+a",
-        "mac": "cmd+alt+a"
-      },
-      {
-        "command": "aa-workflow.refreshStatus",
-        "key": "ctrl+alt+f5",
-        "mac": "cmd+alt+f5"
-      },
-      {
-        "command": "aa-workflow.openCronTab",
-        "key": "ctrl+alt+c",
-        "mac": "cmd+alt+c"
+        "command": "aa-workflow.openCommandCenter",
+        "key": "ctrl+shift+1",
+        "mac": "cmd+shift+1"
       }
     ],
     "configuration": {
@@ -479,14 +172,18 @@
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.0.0",
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "dbus-next": "^0.10.2"
+    "dbus-next": "^0.10.2",
+    "js-yaml": "^4.1.0",
+    "ws": "^8.16.0"
   }
 }

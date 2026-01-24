@@ -18,13 +18,73 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as http from "http";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
 import { WorkflowDataProvider } from "./dataProvider";
 import { getSkillsDir, getMemoryDir } from "./paths";
 import { loadMeetBotState, getMeetingsTabStyles, getMeetingsTabContent, getMeetingsTabScript, MeetBotState } from "./meetingsTab";
+import { loadSprintState, loadSprintHistory, loadToolGapRequests, getSprintTabContent, getSprintTabScript, SprintState } from "./sprintTab";
+import { loadPerformanceState, getPerformanceTabContent, PerformanceState } from "./performanceTab";
+import { createLogger } from "./logger";
 
-const execAsync = promisify(exec);
+const logger = createLogger("CommandCenter");
+
+/**
+ * Execute a command using spawn with bash --norc --noprofile to avoid sourcing
+ * .bashrc.d scripts (which can trigger Bitwarden password prompts).
+ *
+ * This replaces exec() which spawns an interactive shell by default.
+ */
+async function execAsync(command: string, options?: { timeout?: number; cwd?: string }): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    // Use bash with --norc --noprofile to prevent sourcing any startup files
+    // -c tells bash to execute the following command string
+    const proc = spawn('/bin/bash', ['--norc', '--noprofile', '-c', command], {
+      cwd: options?.cwd,
+      env: {
+        ...process.env,
+        // Extra safety: clear env vars that could trigger rc file sourcing
+        BASH_ENV: '',
+        ENV: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let killed = false;
+
+    // Handle timeout
+    const timeout = options?.timeout || 30000;
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill('SIGTERM');
+      reject(new Error(`Command timed out after ${timeout}ms`));
+    }, timeout);
+
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) return;
+
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const error = new Error(`Command failed with exit code ${code}: ${stderr}`);
+        (error as any).code = code;
+        (error as any).stdout = stdout;
+        (error as any).stderr = stderr;
+        reject(error);
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
 
 // Debug output channel - logs to output channel without auto-showing
 let debugChannel: vscode.OutputChannel | undefined;
@@ -226,6 +286,7 @@ interface SkillStep {
 }
 
 interface SkillExecution {
+  executionId?: string;
   skillName: string;
   status: "idle" | "running" | "success" | "failed";
   currentStepIndex: number;
@@ -233,6 +294,23 @@ interface SkillExecution {
   steps: SkillStep[];
   startTime?: string;
   endTime?: string;
+  source?: string;  // "chat", "cron", "slack", "api"
+  sourceDetails?: string;
+  sessionName?: string;
+}
+
+// Summary of a running skill for the Running Skills panel
+interface RunningSkillSummary {
+  executionId: string;
+  skillName: string;
+  source: string;
+  sourceDetails?: string;
+  sessionName?: string;
+  status: "running" | "success" | "failed";
+  currentStepIndex: number;
+  totalSteps: number;
+  startTime: string;
+  elapsedMs: number;
 }
 
 interface SkillDefinition {
@@ -286,7 +364,8 @@ interface Persona {
   name: string;
   fileName?: string;  // The actual filename (e.g., "developer-slim")
   description: string;
-  tools: string[];
+  tools: string[];      // Tool module names (e.g., ["workflow", "git_basic"])
+  toolCount: number;    // Actual count of tools across all modules
   skills: string[];
   personaFile?: string;
   isSlim?: boolean;    // Is this a slim variant?
@@ -308,13 +387,17 @@ export class CommandCenterPanel {
   private _executionWatcher: fs.FSWatcher | undefined;
   private _workspaceWatcher: fs.FSWatcher | undefined;
   private _currentExecution: SkillExecution | undefined;
+  private _runningSkills: RunningSkillSummary[] = [];  // All running skills
   private _currentTab: string = "overview";
   private _workspaceState: WorkspaceExportedState | null = null;
   private _workspaceCount: number = 0;
   private _sessionGroupBy: 'none' | 'project' | 'persona' = 'project';
   private _sessionViewMode: 'card' | 'table' = 'card';
   private _personaViewMode: 'card' | 'table' = 'card';
-  
+
+  // Cached personas for skill lookup
+  private _personasCache: Persona[] | null = null;
+
   // Unified state from workspace_states.json (v3)
   private _services: Record<string, any> = {};
   private _ollama: Record<string, any> = {};
@@ -322,6 +405,9 @@ export class CommandCenterPanel {
   private _slackChannels: string[] = [];
   private _sprintIssues: any[] = [];
   private _sprintIssuesUpdated: string = "";
+  private _meetData: any = {};
+  private _lastActiveMeetingCount: number = 0;
+  private _lastPerformanceOverall: number = 0;
 
   public static createOrShow(
     extensionUri: vscode.Uri,
@@ -340,6 +426,10 @@ export class CommandCenterPanel {
       return CommandCenterPanel.currentPanel;
     }
 
+    // Allow access to screenshot directory for meeting images
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    const screenshotDir = vscode.Uri.file(`${homeDir}/.local/share/meet_bot/screenshots`);
+
     const panel = vscode.window.createWebviewPanel(
       "aaCommandCenter",
       "AI Workflow Command Center",
@@ -347,7 +437,7 @@ export class CommandCenterPanel {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-        localResourceRoots: [extensionUri],
+        localResourceRoots: [extensionUri, screenshotDir],
       }
     );
 
@@ -376,6 +466,7 @@ export class CommandCenterPanel {
 
   /**
    * Update skill execution state (called by watcher)
+   * This updates the currently selected/viewed execution
    */
   public updateSkillExecution(execution: SkillExecution) {
     this._currentExecution = execution;
@@ -383,11 +474,19 @@ export class CommandCenterPanel {
       command: "skillExecutionUpdate",
       execution,
     });
+    // NOTE: Auto-switch to skills tab removed - now using toast notifications instead
+  }
 
-    // Auto-switch to skills tab when execution starts
-    if (execution.status === "running" && this._currentTab !== "skills") {
-      this.switchTab("skills");
-    }
+  /**
+   * Update the list of all running skills (called by watcher)
+   * This updates the Running Skills panel
+   */
+  public updateRunningSkills(runningSkills: RunningSkillSummary[]) {
+    this._runningSkills = runningSkills;
+    this._panel.webview.postMessage({
+      command: "runningSkillsUpdate",
+      runningSkills,
+    });
   }
 
   private constructor(
@@ -407,8 +506,10 @@ export class CommandCenterPanel {
     debugLog("Setting up onDidReceiveMessage handler FIRST");
     this._panel.webview.onDidReceiveMessage(
       async (message) => {
-        debugLog(`Received message: ${message.command} - ${JSON.stringify(message)}`);
-        switch (message.command) {
+        // Support both 'command' and 'type' message formats
+        const msgType = message.command || message.type;
+        debugLog(`Received message: ${msgType} - ${JSON.stringify(message)}`);
+        switch (msgType) {
           case "ping":
             // Respond to ping to confirm extension is connected
             this._panel.webview.postMessage({ command: "pong" });
@@ -416,10 +517,6 @@ export class CommandCenterPanel {
           case "refresh":
             // Sync with Cursor DB and refresh UI (same as refreshWorkspaces)
             await this._syncAndRefreshSessions();
-            break;
-          case "reloadUI":
-            // Force full HTML re-render - useful after extension recompilation
-            this.update(true);
             break;
           case "refreshWorkspaces":
             await this._syncAndRefreshSessions();
@@ -461,6 +558,12 @@ export class CommandCenterPanel {
             break;
           case "switchTab":
             this._currentTab = message.tab;
+            logger.log(`Switched to tab: ${message.tab}`);
+            // Auto-refresh sprint issues when switching to sprint tab
+            if (message.tab === "sprint") {
+              logger.log("Sprint tab selected - triggering refresh");
+              this.refreshSprintIssues();
+            }
             break;
           case "openJira":
             vscode.commands.executeCommand("aa-workflow.openJira");
@@ -503,11 +606,21 @@ export class CommandCenterPanel {
             // Handled by unified background sync - trigger manual sync
             this._backgroundSync();
             break;
+          case "searchSlackUsers":
+            await this.searchSlackUsers(message.query);
+            break;
+          case "refreshSlackTargets":
+            await this.refreshSlackTargets();
+            break;
           case "loadSkill":
             await this.loadSkillDefinition(message.skillName);
             break;
           case "openSkillFile":
             await this.openSkillFile(message.skillName);
+            break;
+          case "selectRunningSkill":
+            // User clicked on a running skill to view it
+            this._selectRunningSkill(message.executionId);
             break;
           case "openSkillFlowchart":
             console.log("[CommandCenter] Received openSkillFlowchart message:", message);
@@ -576,6 +689,85 @@ export class CommandCenterPanel {
           case "updateInferenceConfig":
             await this.updateInferenceConfig(message.key, message.value);
             break;
+          // Meeting bot controls
+          case "approveMeeting":
+            await this.handleMeetingApproval(message.meetingId, message.meetUrl, message.mode || "notes");
+            break;
+          case "rejectMeeting":
+            await this.handleMeetingRejection(message.meetingId);
+            break;
+          case "unapproveMeeting":
+            await this.handleMeetingUnapproval(message.meetingId);
+            break;
+          case "joinMeetingNow":
+            await this.handleJoinMeetingNow(message.meetUrl, message.title, message.mode || "notes");
+            break;
+          case "setMeetingMode":
+            await this.handleSetMeetingMode(message.meetingId, message.mode);
+            break;
+          case "startScheduler":
+            await this.handleStartScheduler();
+            break;
+          case "stopScheduler":
+            await this.handleStopScheduler();
+            break;
+          case "leaveMeeting":
+            await this.handleLeaveMeeting(message.sessionId);
+            break;
+          case "leaveAllMeetings":
+            await this.handleLeaveAllMeetings();
+            break;
+          case "muteAudio":
+            await this.handleMuteAudio(message.sessionId);
+            break;
+          case "unmuteAudio":
+            await this.handleUnmuteAudio(message.sessionId);
+            break;
+          case "testTTS":
+            await this.handleTestTTS(message.sessionId);
+            break;
+          case "testAvatar":
+            await this.handleTestAvatar(message.sessionId);
+            break;
+          case "preloadJira":
+            await this.handlePreloadJira(message.sessionId);
+            break;
+          case "setDefaultMode":
+            await this.handleSetDefaultMode(message.mode);
+            break;
+          case "refreshCalendar":
+            await this.handleRefreshCalendar();
+            break;
+          // Meeting history actions
+          case "viewNote":
+            await this.handleViewNote(message.noteId);
+            break;
+          case "viewTranscript":
+            await this.handleViewTranscript(message.noteId);
+            break;
+          case "viewBotLog":
+            await this.handleViewBotLog(message.noteId);
+            break;
+          case "viewLinkedIssues":
+            await this.handleViewLinkedIssues(message.noteId);
+            break;
+          case "searchNotes":
+            await this.handleSearchNotes(message.query);
+            break;
+          case "copyTranscript":
+            await this.handleCopyTranscript();
+            break;
+          case "clearCaptions":
+            await this.handleClearCaptions();
+            break;
+          // Sprint bot controls
+          case "sprintAction":
+            await this.handleSprintAction(message.action, message.issueKey, message.chatId, message.enabled);
+            break;
+          // Performance tracking actions
+          case "performanceAction":
+            await this.handlePerformanceAction(message.action, message.questionId, message.category, message.description);
+            break;
         }
       },
       null,
@@ -584,6 +776,26 @@ export class CommandCenterPanel {
 
     // Now set up the rest of the panel after message handler is ready
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+
+    // Handle panel visibility changes (e.g., after system wake or tab switch)
+    this._panel.onDidChangeViewState(
+      (e) => {
+        if (e.webviewPanel.visible) {
+          debugLog("Panel became visible - refreshing data");
+          // Clear cache and force fresh sync when panel becomes visible
+          // This handles system wake scenarios where data may be stale
+          this._clearSyncCache();
+          this._backgroundSync();
+          // Also do a delayed refresh in case the daemon needs time to respond
+          setTimeout(() => {
+            this._loadWorkspaceState();
+            this._dispatchAllUIUpdates();
+          }, 1000);
+        }
+      },
+      null,
+      this._disposables
+    );
 
     // Load workspace state before first render
     this._loadWorkspaceState();
@@ -607,6 +819,22 @@ export class CommandCenterPanel {
     }, 10000);
 
     debugLog("Constructor complete - panel ready");
+  }
+
+  /**
+   * Clear the sync cache file to force fresh data on next sync.
+   * Used after system wake or when data seems stale.
+   */
+  private _clearSyncCache(): void {
+    try {
+      const cacheFile = path.join(os.homedir(), '.mcp', 'workspace_states', 'sync_cache.json');
+      if (fs.existsSync(cacheFile)) {
+        fs.unlinkSync(cacheFile);
+        debugLog("Cleared sync cache");
+      }
+    } catch (e) {
+      debugLog(`Failed to clear sync cache: ${e}`);
+    }
   }
 
   private async refreshOllamaStatus(): Promise<void> {
@@ -1148,21 +1376,32 @@ except Exception as e:
 
   private async updateInferenceConfig(key: string, value: any): Promise<void> {
     try {
-      // Update config.json directly
-      const configPath = path.join(this._extensionUri.fsPath, "..", "..", "config.json");
-      if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      // Use D-Bus to update config (uses ConfigManager for thread-safe writes)
+      // The key format is "section.subkey" - we need to split into section and key
+      const parts = key.split(".");
+      const section = parts[0];
+      const subKey = parts.slice(1).join(".");
 
-        // Navigate to the key and update
-        const keys = key.split(".");
-        let obj = config;
-        for (let i = 0; i < keys.length - 1; i++) {
-          obj = obj[keys[i]] = obj[keys[i]] || {};
-        }
-        obj[keys[keys.length - 1]] = value;
+      console.log("[CommandCenter] updateInferenceConfig via D-Bus:", section, subKey, value);
 
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      const result = await this.queryDBus(
+        "com.aiworkflow.CronScheduler",
+        "/com/aiworkflow/CronScheduler",
+        "com.aiworkflow.CronScheduler",
+        "CallMethod",
+        [
+          { type: "string", value: "update_config" },
+          { type: "string", value: JSON.stringify({ section, key: subKey, value }) }
+        ]
+      );
+
+      if (result.success && result.data?.success) {
+        console.log("[CommandCenter] D-Bus update_config result:", result.data);
         vscode.window.showInformationMessage(`Updated inference config: ${key}`);
+      } else {
+        const errorMsg = result.data?.error || result.error || "Unknown error";
+        console.error("[CommandCenter] D-Bus update_config failed:", errorMsg);
+        vscode.window.showErrorMessage(`Failed to update config via D-Bus: ${errorMsg}`);
       }
     } catch (error) {
       console.error("[CommandCenter] Failed to update inference config:", error);
@@ -1630,42 +1869,65 @@ print(result[0].text if result else '[]')
   }
 
   /**
-   * Fetch sprint issues from Jira via MCP tool
+   * Fetch sprint issues from Jira via rh-issue CLI
    * Uses JQL: assignee = currentUser() AND sprint in openSprints()
    */
   private async fetchSprintIssues(): Promise<any[]> {
     try {
+      // Use rh-issue CLI directly - it's more reliable than Python imports
+      // The rh-issue script needs to run from its project directory
+      const homeDir = process.env.HOME || os.homedir();
+      const jiraCreatorDir = path.join(homeDir, "src", "jira-creator");
+      const rhIssuePath = path.join(homeDir, "bin", "rh-issue");
+
+      // Run with explicit working directory and required env vars
+      // The rh-issue CLI needs JIRA_* environment variables
+      // JIRA_AFFECTS_VERSION can be empty but the CLI requires it to be set to something
       const { stdout } = await execAsync(
-        `cd ~/src/redhat-ai-workflow && source .venv/bin/activate && python -c "
-import asyncio
-from tool_modules.aa_jira.src.tools_basic import _jira_search_impl
-# Search for issues assigned to current user in open sprints
-jql = 'assignee = currentUser() AND sprint in openSprints() ORDER BY priority DESC'
-result = asyncio.run(_jira_search_impl(jql, 20))
-print(result)
-" 2>/dev/null`,
+        `/bin/bash -c 'source ~/.bashrc 2>/dev/null; export JIRA_AFFECTS_VERSION="\${JIRA_AFFECTS_VERSION:-N/A}"; cd "${jiraCreatorDir}" && ${rhIssuePath} search "assignee = currentUser() AND sprint in openSprints()" --max-results 20'`,
         { timeout: 30000 }
       );
+
+      logger.log(`Jira search output (first 300 chars): ${stdout.substring(0, 300)}`);
+
       // Parse the output - it's markdown table format
-      // Format: Key | Issuetype | Status | Priority | Summary | ...
+      // Format: Key | Issuetype | Status | Priority | Summary | Assignee | Reporter | Sprint | Story Points | Blocked
       const lines = stdout.trim().split("\n");
       const issues: any[] = [];
       for (const line of lines) {
-        // Match: AAP-XXXXX | Type | Status | Priority | Summary | ...
-        const match = line.match(/^(AAP-\d+)\s*\|\s*(\w+)\s*\|\s*(\w+(?:\s+\w+)?)\s*\|\s*(\w+)\s*\|\s*([^|]+)/);
-        if (match) {
+        // Skip header and separator lines
+        if (line.startsWith("Key") || line.startsWith("-") || line.startsWith("📊") || line.trim() === "") {
+          continue;
+        }
+        // Split by | and parse all columns
+        const cols = line.split("|").map(c => c.trim());
+        if (cols.length >= 8 && cols[0].match(/^AAP-\d+$/)) {
           issues.push({
-            key: match[1],
-            type: match[2].trim(),
-            status: match[3].trim(),
-            priority: match[4].trim(),
-            summary: match[5].trim().substring(0, 60) + (match[5].trim().length > 60 ? '...' : '')
+            key: cols[0],
+            type: cols[1],
+            status: cols[2],
+            priority: cols[3],
+            summary: cols[4].substring(0, 60) + (cols[4].length > 60 ? '...' : ''),
+            assignee: cols[5] || '',
+            reporter: cols[6] || '',
+            sprint: cols[7] || '',  // Capture sprint name
+            storyPoints: parseInt(cols[8]) || 0,
+            blocked: cols[9] === 'Yes' || cols[9] === 'true'
           });
         }
       }
+
+      logger.log(`Parsed ${issues.length} issues from Jira`);
       return issues;
-    } catch (e) {
-      console.error("Failed to fetch sprint issues:", e);
+    } catch (e: any) {
+      logger.error("Failed to fetch sprint issues", e);
+      // Log the actual error message
+      if (e.stderr) {
+        logger.error(`stderr: ${e.stderr}`);
+      }
+      if (e.stdout) {
+        logger.log(`stdout was: ${e.stdout}`);
+      }
       return [];
     }
   }
@@ -1674,18 +1936,157 @@ print(result)
    * Refresh sprint issues and update the UI
    */
   private async refreshSprintIssues(): Promise<void> {
+    logger.log("refreshSprintIssues() called");
     try {
       // Show loading state
       this._panel.webview.postMessage({
         type: "sprintIssuesLoading",
       });
 
+      logger.log("Fetching sprint issues from Jira...");
       const issues = await this.fetchSprintIssues();
+      logger.log(`Fetched ${issues.length} issues from Jira`);
 
+      // Update the Overview tab's issue list
       this._panel.webview.postMessage({
         type: "sprintIssuesUpdate",
         issues,
       });
+
+      // Also update the Sprint tab by writing to workspace_states.json
+      // This keeps the Sprint Autopilot tab in sync
+      if (issues.length > 0) {
+        const workspaceStateFile = path.join(os.homedir(), ".mcp", "workspace_states", "workspace_states.json");
+        try {
+          let state: Record<string, any> = {};
+          if (fs.existsSync(workspaceStateFile)) {
+            state = JSON.parse(fs.readFileSync(workspaceStateFile, "utf-8"));
+          }
+
+          // Convert fetched issues to SprintIssue format
+          // Determine approvalStatus based on Jira status
+          const getApprovalStatus = (jiraStatus: string, existingTimeline: any[] = []): string => {
+            const status = (jiraStatus || "").toLowerCase();
+
+            // Statuses the bot should work on (pending approval)
+            const workableStatuses = ["new", "refinement", "to do", "open", "backlog"];
+
+            // Statuses that are "in progress" (bot or user working)
+            const inProgressStatuses = ["in progress", "in development", "coding"];
+
+            // Statuses that are in review (bot should follow up IF it created the PR)
+            const reviewStatuses = ["review", "in review", "code review", "peer review"];
+
+            // Statuses that are done (bot should ignore)
+            const doneStatuses = ["done", "closed", "resolved", "release pending", "released", "won't do", "won't fix", "duplicate"];
+
+            if (workableStatuses.some(s => status.includes(s))) {
+              return "pending";
+            } else if (inProgressStatuses.some(s => status.includes(s))) {
+              // Only show as in_progress if bot has timeline events
+              return existingTimeline.length > 0 ? "in_progress" : "completed";
+            } else if (reviewStatuses.some(s => status.includes(s))) {
+              // Only track review if bot moved it there (has timeline)
+              return existingTimeline.length > 0 ? "waiting" : "completed";
+            } else if (doneStatuses.some(s => status.includes(s))) {
+              return "completed";
+            }
+
+            // Default: if unknown status, mark as pending for manual review
+            return "pending";
+          };
+
+          // Get existing sprint state to preserve timeline data
+          const existingIssues: any[] = state.sprint?.issues || [];
+          const existingIssueMap = new Map<string, any>(existingIssues.map((i: any) => [i.key, i]));
+
+          const sprintIssues = issues.map((issue: any) => {
+            const existing: any = existingIssueMap.get(issue.key) || {};
+            const timeline: any[] = existing.timeline || [];
+            const jiraStatus = issue.status || "New";
+
+            return {
+              key: issue.key,
+              summary: issue.summary || "",
+              storyPoints: issue.storyPoints || 0,
+              priority: issue.priority || "Major",
+              jiraStatus: jiraStatus,
+              assignee: issue.assignee || "",
+              approvalStatus: getApprovalStatus(jiraStatus, timeline),
+              waitingReason: jiraStatus.toLowerCase().includes("review") && timeline.length > 0
+                ? "Awaiting code review"
+                : null,
+              priorityReasoning: existing.priorityReasoning || [],
+              estimatedActions: ["start_work", "implement", "create_mr"],
+              chatId: existing.chatId || null,
+              timeline: timeline,
+              issueType: issue.type || "Story",
+              created: issue.created || "",
+            };
+          });
+
+          // Extract sprint name from issues if available (they all share the same sprint)
+          const sprintName = issues[0]?.sprint || "Current Sprint";
+
+          // Calculate total points for actionable issues only
+          const actionableStatuses = ["new", "refinement", "to do", "open", "backlog"];
+          const actionableIssues = sprintIssues.filter((i: any) => {
+            const status = (i.jiraStatus || "").toLowerCase();
+            return actionableStatuses.some(s => status.includes(s));
+          });
+          const totalPoints = sprintIssues.reduce((sum: number, i: any) => sum + (i.storyPoints || 0), 0);
+          const completedPoints = sprintIssues
+            .filter((i: any) => {
+              const status = (i.jiraStatus || "").toLowerCase();
+              return status.includes("done") || status.includes("closed") || status.includes("resolved");
+            })
+            .reduce((sum: number, i: any) => sum + (i.storyPoints || 0), 0);
+
+          // Update sprint section
+          state.sprint = {
+            currentSprint: {
+              id: "active",
+              name: sprintName,
+              startDate: new Date().toISOString(),
+              endDate: "",
+              totalPoints: totalPoints,
+              completedPoints: completedPoints,
+            },
+            nextSprint: state.sprint?.nextSprint || null,  // Preserve next sprint if already set
+            issues: sprintIssues,
+            botEnabled: state.sprint?.botEnabled || false,
+            backgroundTasks: state.sprint?.backgroundTasks || false,
+            lastUpdated: new Date().toISOString(),
+            processingIssue: state.sprint?.processingIssue || null,
+          };
+
+          // Ensure directory exists
+          const stateDir = path.dirname(workspaceStateFile);
+          if (!fs.existsSync(stateDir)) {
+            fs.mkdirSync(stateDir, { recursive: true });
+          }
+
+          fs.writeFileSync(workspaceStateFile, JSON.stringify(state, null, 2));
+          logger.log(`Updated sprint state with ${sprintIssues.length} issues`);
+
+          // Also write to the source file that sync_workspace_state.py reads from
+          // This prevents the sync script from overwriting our data with empty state
+          const sprintStateFile = path.join(os.homedir(), ".config", "aa-workflow", "sprint_state.json");
+          const sprintStateDir = path.dirname(sprintStateFile);
+          if (!fs.existsSync(sprintStateDir)) {
+            fs.mkdirSync(sprintStateDir, { recursive: true });
+          }
+          fs.writeFileSync(sprintStateFile, JSON.stringify(state.sprint, null, 2));
+          logger.log(`Also updated source sprint_state.json`);
+
+          // Trigger a full refresh to update the Sprint tab UI
+          // Must use forceFullRender=true because the Sprint tab content is only
+          // rendered during full HTML render, not via postMessage updates
+          this.update(true);
+        } catch (writeErr) {
+          logger.error("Failed to update sprint state file", writeErr);
+        }
+      }
     } catch (e) {
       console.error("Failed to refresh sprint issues:", e);
       this._panel.webview.postMessage({
@@ -1816,6 +2217,18 @@ print(result)
       }
     } catch (e) {
       console.error("Failed to load skill definition:", e);
+    }
+  }
+
+  /**
+   * Select a running skill to view its execution details
+   */
+  private _selectRunningSkill(executionId: string) {
+    // Import the watcher to select the execution
+    const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
+    const watcher = getSkillExecutionWatcher();
+    if (watcher) {
+      watcher.selectExecution(executionId);
     }
   }
 
@@ -2166,11 +2579,16 @@ print(result)
       // Add arguments if provided
       if (args && args.length > 0) {
         for (const arg of args) {
-          cmd += ` ${arg.type}:"${arg.value}"`;
+          // Escape double quotes and backslashes for shell
+          const escapedValue = arg.value
+            .replace(/\\/g, '\\\\')  // Escape backslashes first
+            .replace(/"/g, '\\"');    // Escape double quotes
+          cmd += ` ${arg.type}:"${escapedValue}"`;
         }
       }
 
-      const { stdout } = await execAsync(cmd, { timeout: 5000 });
+      debugLog(`D-Bus command: ${cmd}`);
+      const { stdout } = await execAsync(cmd, { timeout: 30000 });  // 30s timeout for join operations
 
       // Parse D-Bus output
       const data = this.parseDBusOutput(stdout);
@@ -2347,6 +2765,1302 @@ print(result)
     }
   }
 
+  // ============================================================================
+  // Sprint Bot Control Methods
+  // ============================================================================
+
+  private async handleSprintAction(action: string, issueKey?: string, chatId?: string, enabled?: boolean) {
+    try {
+      const sprintStateFile = path.join(
+        os.homedir(),
+        ".config",
+        "aa-workflow",
+        "sprint_state.json"
+      );
+
+      // Load current state
+      let state: SprintState = {
+        currentSprint: null,
+        nextSprint: null,
+        issues: [],
+        automaticMode: false,
+        manuallyStarted: false,
+        backgroundTasks: false,
+        lastUpdated: new Date().toISOString(),
+        processingIssue: null,
+      };
+
+      if (fs.existsSync(sprintStateFile)) {
+        try {
+          state = JSON.parse(fs.readFileSync(sprintStateFile, "utf-8"));
+        } catch (e) {
+          console.error("Failed to parse sprint state:", e);
+        }
+      }
+
+      switch (action) {
+        case "approve":
+          if (issueKey) {
+            const issue = state.issues.find((i) => i.key === issueKey);
+            if (issue) {
+              issue.approvalStatus = "approved";
+              issue.timeline.push({
+                timestamp: new Date().toISOString(),
+                action: "approved",
+                description: "Issue approved for automated work",
+              });
+              vscode.window.showInformationMessage(`Approved ${issueKey} for sprint bot`);
+            }
+          }
+          break;
+
+        case "reject":
+          // Unapprove - set back to pending
+          if (issueKey) {
+            const issue = state.issues.find((i) => i.key === issueKey);
+            if (issue) {
+              issue.approvalStatus = "pending";
+              issue.timeline.push({
+                timestamp: new Date().toISOString(),
+                action: "unapproved",
+                description: "Issue unapproved - removed from bot queue",
+              });
+              vscode.window.showInformationMessage(`Unapproved ${issueKey}`);
+            }
+          }
+          break;
+
+        case "abort":
+          if (issueKey) {
+            const issue = state.issues.find((i) => i.key === issueKey);
+            if (issue) {
+              issue.approvalStatus = "blocked";
+              issue.timeline.push({
+                timestamp: new Date().toISOString(),
+                action: "aborted",
+                description: "User took control - automated work stopped",
+              });
+              if (state.processingIssue === issueKey) {
+                state.processingIssue = null;
+              }
+              vscode.window.showInformationMessage(`Aborted ${issueKey} - you can now work on it manually`);
+            }
+          }
+          break;
+
+        case "approveAll":
+          const pendingIssues = state.issues.filter(
+            (i) => i.approvalStatus === "pending" || i.approvalStatus === "waiting"
+          );
+          for (const issue of pendingIssues) {
+            issue.approvalStatus = "approved";
+            issue.timeline.push({
+              timestamp: new Date().toISOString(),
+              action: "approved",
+              description: "Issue approved (batch approval)",
+            });
+          }
+          vscode.window.showInformationMessage(`Approved ${pendingIssues.length} issues`);
+          break;
+
+        case "rejectAll":
+          // Unapprove all - set approved issues back to pending
+          const approvedIssues = state.issues.filter(
+            (i) => i.approvalStatus === "approved"
+          );
+          for (const issue of approvedIssues) {
+            issue.approvalStatus = "pending";
+            issue.timeline.push({
+              timestamp: new Date().toISOString(),
+              action: "unapproved",
+              description: "Issue unapproved (batch unapproval)",
+            });
+          }
+          vscode.window.showInformationMessage(`Unapproved ${approvedIssues.length} issues`);
+          break;
+
+        case "toggleAutomatic":
+          state.automaticMode = enabled ?? !state.automaticMode;
+          vscode.window.showInformationMessage(
+            `Sprint bot automatic mode ${state.automaticMode ? "enabled (Mon-Fri 9-5)" : "disabled"}`
+          );
+          break;
+
+        case "startBot":
+          state.manuallyStarted = true;
+          vscode.window.showInformationMessage(
+            "Sprint bot started manually - will process approved issues now"
+          );
+          break;
+
+        case "stopBot":
+          state.manuallyStarted = false;
+          state.processingIssue = null;
+          vscode.window.showInformationMessage(
+            "Sprint bot stopped"
+          );
+          break;
+
+        // Legacy support for toggleBot
+        case "toggleBot":
+          state.automaticMode = enabled ?? !state.automaticMode;
+          vscode.window.showInformationMessage(
+            `Sprint bot automatic mode ${state.automaticMode ? "enabled" : "disabled"}`
+          );
+          break;
+
+        case "openChat":
+          if (chatId) {
+            // Try to open the chat - this is experimental
+            try {
+              await vscode.commands.executeCommand("composer.showComposerHistory");
+              vscode.window.showInformationMessage(
+                `Looking for chat for ${issueKey}... Check the chat history panel.`
+              );
+            } catch (e) {
+              vscode.window.showWarningMessage(
+                `Could not open chat directly. Chat ID: ${chatId}`
+              );
+            }
+          }
+          break;
+
+        case "openInCursor":
+          // Open background work log in Cursor for interactive continuation
+          if (issueKey) {
+            logger.log(`Opening ${issueKey} in Cursor for interactive continuation`);
+            try {
+              const dbusResult = await this.queryDBus(
+                "com.aiworkflow.SprintBot",
+                "/com/aiworkflow/SprintBot",
+                "com.aiworkflow.SprintBot",
+                "CallMethod",
+                [
+                  { type: "string", value: "open_in_cursor" },
+                  { type: "string", value: JSON.stringify({ issue_key: issueKey }) },
+                ]
+              );
+
+              if (dbusResult.success && dbusResult.data) {
+                const parsed = typeof dbusResult.data === "string"
+                  ? JSON.parse(dbusResult.data)
+                  : dbusResult.data;
+                if (parsed.success) {
+                  vscode.window.showInformationMessage(
+                    `Opened ${issueKey} in Cursor. Review the context and continue working.`
+                  );
+                  // Update the issue with the new chat ID
+                  const issue = state.issues.find((i) => i.key === issueKey);
+                  if (issue && parsed.chat_id) {
+                    issue.chatId = parsed.chat_id;
+                  }
+                } else {
+                  vscode.window.showErrorMessage(
+                    `Failed to open ${issueKey}: ${parsed.error || "Unknown error"}`
+                  );
+                }
+              } else {
+                vscode.window.showErrorMessage(
+                  `Failed to open ${issueKey}: ${dbusResult.error || "D-Bus call failed"}`
+                );
+              }
+            } catch (e: any) {
+              logger.error(`Failed to open ${issueKey} in Cursor: ${e.message}`);
+              vscode.window.showErrorMessage(
+                `Failed to open ${issueKey} in Cursor: ${e.message}`
+              );
+            }
+          }
+          break;
+
+        // loadSprint removed - sprint data is auto-loaded by MCP server
+
+        case "viewTimeline":
+          if (issueKey) {
+            const issue = state.issues.find((i) => i.key === issueKey);
+            if (issue && issue.timeline.length > 0) {
+              const content = issue.timeline
+                .map((e) => `[${e.timestamp}] ${e.action}: ${e.description}`)
+                .join("\n");
+              const doc = await vscode.workspace.openTextDocument({
+                content: `Timeline for ${issueKey}\n${"=".repeat(40)}\n\n${content}`,
+                language: "markdown",
+              });
+              await vscode.window.showTextDocument(doc);
+            } else {
+              vscode.window.showInformationMessage(`No timeline events for ${issueKey}`);
+            }
+          }
+          break;
+
+        case "testChatLauncher":
+          logger.log("testChatLauncher action received, backgroundTasks: " + state.backgroundTasks);
+          await this.testChatLauncher(undefined, state.backgroundTasks || false);
+          return; // Don't save state for test action
+
+        case "toggleBackgroundTasks":
+          state.backgroundTasks = enabled ?? !state.backgroundTasks;
+          logger.log("Background tasks toggled: " + state.backgroundTasks);
+          break;
+
+        default:
+          logger.log("Unknown sprint action: " + action);
+      }
+
+      // Save updated state to source file (for MCP server)
+      state.lastUpdated = new Date().toISOString();
+      const stateDir = path.dirname(sprintStateFile);
+      if (!fs.existsSync(stateDir)) {
+        fs.mkdirSync(stateDir, { recursive: true });
+      }
+      fs.writeFileSync(sprintStateFile, JSON.stringify(state, null, 2));
+
+      // Also update the unified workspace_states.json for immediate UI feedback
+      const unifiedStateFile = path.join(
+        os.homedir(),
+        ".mcp",
+        "workspace_states",
+        "workspace_states.json"
+      );
+      try {
+        if (fs.existsSync(unifiedStateFile)) {
+          const unified = JSON.parse(fs.readFileSync(unifiedStateFile, "utf-8"));
+          unified.sprint = state;
+          unified.exported_at = new Date().toISOString();
+          fs.writeFileSync(unifiedStateFile, JSON.stringify(unified, null, 2));
+        }
+      } catch (e) {
+        console.error("Failed to update unified state:", e);
+      }
+
+      // Refresh the UI
+      this.update(true);
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Sprint action failed: ${e.message}`);
+    }
+  }
+
+  // ============================================================================
+  // Performance Tracking Control Methods
+  // ============================================================================
+
+  private async handlePerformanceAction(action: string, questionId?: string, category?: string, description?: string) {
+    try {
+      switch (action) {
+        case "collectDaily":
+          // Run the daily collection skill
+          vscode.window.showInformationMessage("Starting daily performance collection...");
+          await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+          await this.sleep(500);
+          await vscode.commands.executeCommand("composer.focusComposer");
+          await this.sleep(200);
+
+          const collectCommand = `Run the daily performance collection skill:
+
+skill_run("performance/collect_daily")
+
+This will fetch today's work from Jira, GitLab, and local git repos, map to competencies, and save the daily data.`;
+
+          await vscode.env.clipboard.writeText(collectCommand);
+          await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+          await this.sleep(200);
+          await vscode.commands.executeCommand("composer.submitChat");
+          break;
+
+        case "backfill":
+          // Run the backfill skill
+          vscode.window.showInformationMessage("Starting performance backfill...");
+          await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+          await this.sleep(500);
+          await vscode.commands.executeCommand("composer.focusComposer");
+          await this.sleep(200);
+
+          const backfillCommand = `Run the backfill skill to fill in missing days:
+
+skill_run("performance/backfill_missing")
+
+This will find any missing weekdays this quarter and collect data for them.`;
+
+          await vscode.env.clipboard.writeText(backfillCommand);
+          await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+          await this.sleep(200);
+          await vscode.commands.executeCommand("composer.submitChat");
+          break;
+
+        case "evaluateAll":
+        case "evaluate":
+          // Run the evaluation skill
+          const evalTarget = questionId ? `question "${questionId}"` : "all questions";
+          vscode.window.showInformationMessage(`Evaluating ${evalTarget} with AI...`);
+          await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+          await this.sleep(500);
+          await vscode.commands.executeCommand("composer.focusComposer");
+          await this.sleep(200);
+
+          const evalInput = questionId ? `'{"question_id": "${questionId}"}'` : "";
+          const evalCommand = `Run the question evaluation skill:
+
+skill_run("performance/evaluate_questions"${evalInput ? `, ${evalInput}` : ""})
+
+This will use AI to generate summaries for ${evalTarget} based on collected evidence.`;
+
+          await vscode.env.clipboard.writeText(evalCommand);
+          await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+          await this.sleep(200);
+          await vscode.commands.executeCommand("composer.submitChat");
+          break;
+
+        case "exportReport":
+          // Run the export skill
+          vscode.window.showInformationMessage("Generating performance report...");
+          await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+          await this.sleep(500);
+          await vscode.commands.executeCommand("composer.focusComposer");
+          await this.sleep(200);
+
+          const exportCommand = `Run the report export skill:
+
+skill_run("performance/export_report")
+
+This will generate a comprehensive quarterly report in markdown format.`;
+
+          await vscode.env.clipboard.writeText(exportCommand);
+          await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+          await this.sleep(200);
+          await vscode.commands.executeCommand("composer.submitChat");
+          break;
+
+        case "logActivity":
+          if (category && description) {
+            // Log manual activity via MCP tool
+            vscode.window.showInformationMessage(`Logging ${category} activity...`);
+            await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+            await this.sleep(500);
+            await vscode.commands.executeCommand("composer.focusComposer");
+            await this.sleep(200);
+
+            const logCommand = `Log this manual performance activity:
+
+performance_log_activity("${category}", "${description.replace(/"/g, '\\"')}")
+
+This will add the activity to today's performance data.`;
+
+            await vscode.env.clipboard.writeText(logCommand);
+            await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+            await this.sleep(200);
+            await vscode.commands.executeCommand("composer.submitChat");
+          }
+          break;
+
+        case "addNote":
+          if (questionId) {
+            // Prompt for note text
+            const noteText = await vscode.window.showInputBox({
+              prompt: `Add a note for question: ${questionId}`,
+              placeHolder: "Enter your note...",
+            });
+
+            if (noteText) {
+              vscode.window.showInformationMessage(`Adding note to ${questionId}...`);
+              await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+              await this.sleep(500);
+              await vscode.commands.executeCommand("composer.focusComposer");
+              await this.sleep(200);
+
+              const noteCommand = `Add this note to the quarterly question:
+
+performance_question_note("${questionId}", "${noteText.replace(/"/g, '\\"')}")
+
+This will add the note as evidence for the question.`;
+
+              await vscode.env.clipboard.writeText(noteCommand);
+              await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+              await this.sleep(200);
+              await vscode.commands.executeCommand("composer.submitChat");
+            }
+          }
+          break;
+
+        case "viewSummary":
+          if (questionId) {
+            // Show the question summary in a new document
+            vscode.window.showInformationMessage(`Loading summary for ${questionId}...`);
+            await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+            await this.sleep(500);
+            await vscode.commands.executeCommand("composer.focusComposer");
+            await this.sleep(200);
+
+            const viewCommand = `Show the summary for this quarterly question:
+
+performance_questions("${questionId}")
+
+Display the question text, evidence, notes, and AI-generated summary.`;
+
+            await vscode.env.clipboard.writeText(viewCommand);
+            await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+            await this.sleep(200);
+            await vscode.commands.executeCommand("composer.submitChat");
+          }
+          break;
+      }
+
+      // Refresh the UI after action
+      this.update(true);
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Performance action failed: ${e.message}`);
+    }
+  }
+
+  /**
+   * Test the chat launcher functionality.
+   * Creates a new Cursor chat and pastes a skill_run command.
+   */
+  /**
+   * Launch a new chat for a sprint issue.
+   * @param issueKey Optional issue key - if not provided, prompts user
+   * @param returnToCurrentChat If true, returns to the previously active chat after launching
+   */
+  private async testChatLauncher(issueKey?: string, returnToCurrentChat: boolean = false) {
+    logger.log("testChatLauncher() called, returnToCurrentChat: " + returnToCurrentChat);
+
+    try {
+      // Import chat utilities
+      const chatUtils = await import('./chatUtils');
+      const { launchIssueChat, sendEnter, getActiveChatId, getComposerData } = chatUtils;
+
+      // Debug: Show what we're getting from the database
+      const composerData = getComposerData();
+      const currentChatId = getActiveChatId();
+
+      logger.log("Debug - composerData: " + (composerData ? "found" : "null"));
+      logger.log("Debug - currentChatId: " + currentChatId);
+
+      // If no issue key provided, prompt for one
+      if (!issueKey) {
+        const issueKeyPromise = vscode.window.showInputBox({
+          prompt: "Enter a Jira issue key",
+          placeHolder: "AAP-12345",
+          value: "AAP-TEST-001",
+        });
+
+        // Auto-press Enter after a short delay to accept the default value
+        setTimeout(() => {
+          logger.log("Auto-pressing Enter for issue key input...");
+          sendEnter();
+        }, 250);
+
+        issueKey = await issueKeyPromise;
+      }
+
+      if (!issueKey) {
+        return;
+      }
+
+      // Launch the issue chat using the utility function
+      // Format: "AAP-12345 short description" - Cursor keeps the issue key this way
+      const chatId = await launchIssueChat(issueKey, {
+        returnToPrevious: true,  // Return to current chat after creating new one
+        autoApprove: false,
+        summary: "sprint work",  // Short description that follows the issue key
+      });
+
+      if (chatId) {
+        logger.log("Chat launched for " + issueKey + " chatId: " + chatId);
+
+        // Wait a moment for Cursor to auto-name the chat, then verify
+        logger.log("Waiting for Cursor to auto-name the chat...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Check what name Cursor gave the chat
+        const updatedData = getComposerData();
+        const newChat = updatedData?.allComposers?.find((c: any) => c.composerId === chatId);
+        const chatName = newChat?.name || "Unknown";
+
+        logger.log("========================================");
+        logger.log("VERIFICATION RESULTS");
+        logger.log("========================================");
+        logger.log("Expected pattern: '" + issueKey + " sprint work'");
+        logger.log("Actual chat name: '" + chatName + "'");
+
+        const hasIssueKey = chatName.includes(issueKey);
+        if (hasIssueKey) {
+          logger.log("SUCCESS: Chat name contains issue key!");
+          vscode.window.showInformationMessage(
+            `✅ Chat created: "${chatName}" - Issue key preserved!`
+          );
+        } else {
+          logger.log("WARNING: Chat name does NOT contain issue key");
+          vscode.window.showWarningMessage(
+            `⚠️ Chat created but name is "${chatName}" - issue key was stripped`
+          );
+        }
+      } else {
+        logger.log("Chat launched for " + issueKey + " (no chatId returned)");
+        vscode.window.showWarningMessage(`Chat created for ${issueKey} but no ID returned`);
+      }
+
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Chat launcher failed: ${e.message}`);
+      logger.error("Chat launcher error", e);
+    }
+  }
+
+  /**
+   * Helper to sleep for a given number of milliseconds
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // ============================================================================
+  // Meeting Bot Control Methods
+  // ============================================================================
+
+  private async handleMeetingApproval(meetingId: string, meetUrl: string, mode: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "approve_meeting" },
+          { type: "string", value: JSON.stringify([meetingId, mode]) }
+        ]
+      );
+
+      if (result.success) {
+        // Send success message to webview (UI already updated optimistically)
+        this._panel.webview.postMessage({
+          type: "meetingApproved",
+          meetingId,
+          success: true,
+          mode,
+        });
+        vscode.window.showInformationMessage(`Meeting approved (${mode} mode)`);
+        // Trigger refresh to update UI
+        this._backgroundSync();
+      } else {
+        // Send failure message to webview so it can revert optimistic update
+        this._panel.webview.postMessage({
+          type: "meetingApproved",
+          meetingId,
+          success: false,
+          error: result.error,
+        });
+        vscode.window.showErrorMessage(`Failed to approve meeting: ${result.error}`);
+      }
+    } catch (e: any) {
+      // Send failure message to webview so it can revert optimistic update
+      this._panel.webview.postMessage({
+        type: "meetingApproved",
+        meetingId,
+        success: false,
+        error: e.message,
+      });
+      vscode.window.showErrorMessage(`Failed to approve meeting: ${e.message}`);
+    }
+  }
+
+  private async handleMeetingRejection(meetingId: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "reject_meeting" },
+          { type: "string", value: JSON.stringify([meetingId]) }
+        ]
+      );
+
+      if (result.success) {
+        vscode.window.showInformationMessage("Meeting rejected");
+        this._backgroundSync();
+      } else {
+        vscode.window.showErrorMessage(`Failed to reject meeting: ${result.error}`);
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to reject meeting: ${e.message}`);
+    }
+  }
+
+  private async handleMeetingUnapproval(meetingId: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "unapprove_meeting" },
+          { type: "string", value: JSON.stringify([meetingId]) }
+        ]
+      );
+
+      if (result.success) {
+        // Send success message to webview
+        this._panel.webview.postMessage({
+          type: "meetingUnapproved",
+          meetingId,
+          success: true,
+        });
+        vscode.window.showInformationMessage("Meeting marked as skipped");
+        this._backgroundSync();
+      } else {
+        // Send failure message to webview so it can revert optimistic update
+        this._panel.webview.postMessage({
+          type: "meetingUnapproved",
+          meetingId,
+          success: false,
+          error: result.error,
+        });
+        vscode.window.showErrorMessage(`Failed to unapprove meeting: ${result.error}`);
+      }
+    } catch (e: any) {
+      this._panel.webview.postMessage({
+        type: "meetingUnapproved",
+        meetingId,
+        success: false,
+        error: e.message,
+      });
+      vscode.window.showErrorMessage(`Failed to unapprove meeting: ${e.message}`);
+    }
+  }
+
+  private async handleJoinMeetingNow(meetUrl: string, title: string, mode: string) {
+    debugLog(`handleJoinMeetingNow called: url=${meetUrl}, title=${title}, mode=${mode}`);
+
+    // Show immediate feedback - the join is async on the daemon side
+    vscode.window.showInformationMessage(`🎥 Joining meeting: ${title}...`);
+    this._panel.webview.postMessage({
+      type: "meetingJoining",
+      meetUrl,
+      title,
+      success: true,
+      status: "joining",
+      message: "Starting browser and logging in...",
+    });
+
+    try {
+      debugLog(`Calling D-Bus CallMethod for join_meeting...`);
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "join_meeting" },
+          { type: "string", value: JSON.stringify([meetUrl, title, mode]) }
+        ]
+      );
+      debugLog(`D-Bus result: ${JSON.stringify(result)}`);
+
+      if (result.success) {
+        // The daemon returns immediately with status="joining"
+        // The actual join happens in the background
+        const data = result.data as any;
+        if (data?.status === "joining") {
+          vscode.window.showInformationMessage(`🎥 Join started - browser is loading...`);
+        } else {
+          vscode.window.showInformationMessage(`✅ Joined meeting: ${title}`);
+        }
+        // Start polling for status updates
+        this._backgroundSync();
+        // Poll more frequently while joining
+        setTimeout(() => this._backgroundSync(), 5000);
+        setTimeout(() => this._backgroundSync(), 15000);
+        setTimeout(() => this._backgroundSync(), 30000);
+      } else {
+        // Send failure message to webview
+        this._panel.webview.postMessage({
+          type: "meetingJoining",
+          meetUrl,
+          title,
+          success: false,
+          error: result.error,
+        });
+        vscode.window.showErrorMessage(`Failed to join meeting: ${result.error}`);
+      }
+    } catch (e: any) {
+      // D-Bus timeout is expected for long operations - check if it's actually joining
+      debugLog(`D-Bus error (may be timeout): ${e.message}`);
+      if (e.message.includes("NoReply") || e.message.includes("timeout")) {
+        // This is likely a timeout - the daemon is probably still joining
+        vscode.window.showInformationMessage(`🎥 Join in progress - please wait...`);
+        // Poll for status
+        setTimeout(() => this._backgroundSync(), 5000);
+        setTimeout(() => this._backgroundSync(), 15000);
+      } else {
+        // Actual error
+        this._panel.webview.postMessage({
+          type: "meetingJoining",
+          meetUrl,
+          title,
+          success: false,
+          error: e.message,
+        });
+        vscode.window.showErrorMessage(`Failed to join meeting: ${e.message}`);
+      }
+    }
+  }
+
+  private async handleSetMeetingMode(meetingId: string, mode: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "set_meeting_mode" },
+          { type: "string", value: JSON.stringify([meetingId, mode]) }
+        ]
+      );
+
+      if (result.success) {
+        // Silent success - UI already updated optimistically
+        this._backgroundSync();
+      }
+    } catch (e: any) {
+      console.error(`Failed to set meeting mode: ${e.message}`);
+    }
+  }
+
+  private async handleStartScheduler() {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "start_scheduler" },
+          { type: "string", value: "[]" }
+        ]
+      );
+
+      if (result.success) {
+        vscode.window.showInformationMessage("Meeting scheduler started");
+        this._backgroundSync();
+      } else {
+        vscode.window.showErrorMessage(`Failed to start scheduler: ${result.error}`);
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to start scheduler: ${e.message}`);
+    }
+  }
+
+  private async handleStopScheduler() {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "stop_scheduler" },
+          { type: "string", value: "[]" }
+        ]
+      );
+
+      if (result.success) {
+        vscode.window.showInformationMessage("Meeting scheduler stopped");
+        this._backgroundSync();
+      } else {
+        vscode.window.showErrorMessage(`Failed to stop scheduler: ${result.error}`);
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to stop scheduler: ${e.message}`);
+    }
+  }
+
+  private async handleLeaveMeeting(sessionId: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "leave_meeting" },
+          { type: "string", value: JSON.stringify([sessionId]) }
+        ]
+      );
+
+      if (result.success) {
+        vscode.window.showInformationMessage("Left meeting");
+        // Clear the cached meet data to force fresh fetch
+        this._meetData = {};
+        this._lastActiveMeetingCount = 0;
+        // Delete the sync cache file to force fresh data
+        this._clearSyncCache();
+        // Run sync and force full UI update
+        this._backgroundSync();
+        // Also trigger immediate full re-render after sync completes
+        setTimeout(() => {
+          this._loadWorkspaceState();
+          this.update(true);
+        }, 2000);
+        setTimeout(() => {
+          this._loadWorkspaceState();
+          this.update(true);
+        }, 5000);
+      } else {
+        vscode.window.showErrorMessage(`Failed to leave meeting: ${result.error}`);
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to leave meeting: ${e.message}`);
+    }
+  }
+
+  private async handleLeaveAllMeetings() {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "leave_all_meetings" },
+          { type: "string", value: "[]" }
+        ]
+      );
+
+      if (result.success) {
+        vscode.window.showInformationMessage("Left all meetings");
+        this._backgroundSync();
+      } else {
+        vscode.window.showErrorMessage(`Failed to leave meetings: ${result.error}`);
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to leave meetings: ${e.message}`);
+    }
+  }
+
+  private async handleMuteAudio(sessionId: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "mute_audio" },
+          { type: "string", value: JSON.stringify([sessionId]) }
+        ]
+      );
+
+      if (result.success) {
+        // Send confirmation to webview
+        this._panel.webview.postMessage({
+          type: "audioStateChanged",
+          muted: true,
+          sessionId,
+        });
+      } else {
+        vscode.window.showErrorMessage(`Failed to mute audio: ${result.error}`);
+        // Revert UI state
+        this._panel.webview.postMessage({
+          type: "audioStateChanged",
+          muted: false,
+          sessionId,
+          error: result.error,
+        });
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to mute audio: ${e.message}`);
+    }
+  }
+
+  private async handleUnmuteAudio(sessionId: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "unmute_audio" },
+          { type: "string", value: JSON.stringify([sessionId]) }
+        ]
+      );
+
+      if (result.success) {
+        // Send confirmation to webview
+        this._panel.webview.postMessage({
+          type: "audioStateChanged",
+          muted: false,
+          sessionId,
+        });
+      } else {
+        vscode.window.showErrorMessage(`Failed to unmute audio: ${result.error}`);
+        // Revert UI state
+        this._panel.webview.postMessage({
+          type: "audioStateChanged",
+          muted: true,
+          sessionId,
+          error: result.error,
+        });
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to unmute audio: ${e.message}`);
+    }
+  }
+
+  private async handleTestTTS(sessionId?: string) {
+    try {
+      const args = sessionId ? JSON.stringify([sessionId]) : "[]";
+      await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "test_tts" },
+          { type: "string", value: args }
+        ]
+      );
+      vscode.window.showInformationMessage(
+        sessionId ? `TTS test sent to meeting ${sessionId}` : "TTS test sent"
+      );
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`TTS test failed: ${e.message}`);
+    }
+  }
+
+  private async handleTestAvatar(sessionId?: string) {
+    try {
+      const args = sessionId ? JSON.stringify([sessionId]) : "[]";
+      await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "test_avatar" },
+          { type: "string", value: args }
+        ]
+      );
+      vscode.window.showInformationMessage(
+        sessionId ? `Avatar test sent to meeting ${sessionId}` : "Avatar test sent"
+      );
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Avatar test failed: ${e.message}`);
+    }
+  }
+
+  private async handlePreloadJira(sessionId?: string) {
+    try {
+      const args = sessionId ? JSON.stringify([sessionId]) : "[]";
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "preload_jira" },
+          { type: "string", value: args }
+        ]
+      );
+
+      if (result.success) {
+        vscode.window.showInformationMessage("Jira context preloaded");
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to preload Jira: ${e.message}`);
+    }
+  }
+
+  private async handleSetDefaultMode(mode: string) {
+    try {
+      await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "set_default_mode" },
+          { type: "string", value: JSON.stringify([mode]) }
+        ]
+      );
+    } catch (e: any) {
+      console.error(`Failed to set default mode: ${e.message}`);
+    }
+  }
+
+  private async handleRefreshCalendar() {
+    try {
+      await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "refresh_calendars" },
+          { type: "string", value: "[]" }
+        ]
+      );
+      this._backgroundSync();
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to refresh calendars: ${e.message}`);
+    }
+  }
+
+  // Meeting history handlers
+  private async handleViewNote(noteId: number) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "get_meeting_note" },
+          { type: "string", value: JSON.stringify([noteId]) }
+        ]
+      );
+
+      if (result.success && result.data) {
+        const note = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
+        // Open in a new editor tab
+        const doc = await vscode.workspace.openTextDocument({
+          content: this.formatMeetingNote(note),
+          language: 'markdown'
+        });
+        await vscode.window.showTextDocument(doc, { preview: false });
+      } else {
+        vscode.window.showWarningMessage(`Meeting note ${noteId} not found`);
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to load meeting note: ${e.message}`);
+    }
+  }
+
+  private async handleViewTranscript(noteId: number) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "get_transcript" },
+          { type: "string", value: JSON.stringify([noteId]) }
+        ]
+      );
+
+      if (result.success && result.data) {
+        const transcript = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
+        // Format transcript entries
+        const content = this.formatTranscript(transcript);
+        const doc = await vscode.workspace.openTextDocument({
+          content: content,
+          language: 'markdown'
+        });
+        await vscode.window.showTextDocument(doc, { preview: false });
+      } else {
+        vscode.window.showWarningMessage(`Transcript for meeting ${noteId} not found`);
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to load transcript: ${e.message}`);
+    }
+  }
+
+  private async handleViewBotLog(noteId: number) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "get_bot_log" },
+          { type: "string", value: JSON.stringify([noteId]) }
+        ]
+      );
+
+      if (result.success && result.data) {
+        const log = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
+        const content = this.formatBotLog(log);
+        const doc = await vscode.workspace.openTextDocument({
+          content: content,
+          language: 'log'
+        });
+        await vscode.window.showTextDocument(doc, { preview: false });
+      } else {
+        vscode.window.showWarningMessage(`Bot log for meeting ${noteId} not found`);
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to load bot log: ${e.message}`);
+    }
+  }
+
+  private async handleViewLinkedIssues(noteId: number) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "get_linked_issues" },
+          { type: "string", value: JSON.stringify([noteId]) }
+        ]
+      );
+
+      if (result.success && result.data) {
+        const issues = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
+        if (Array.isArray(issues) && issues.length > 0) {
+          // Show quick pick to select an issue to open
+          const items = issues.map((issue: any) => ({
+            label: issue.key || issue.id,
+            description: issue.summary || issue.title,
+            url: issue.url || `https://issues.redhat.com/browse/${issue.key || issue.id}`
+          }));
+          const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Select an issue to open'
+          });
+          if (selected) {
+            vscode.env.openExternal(vscode.Uri.parse(selected.url));
+          }
+        } else {
+          vscode.window.showInformationMessage('No linked issues found for this meeting');
+        }
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to load linked issues: ${e.message}`);
+    }
+  }
+
+  private async handleSearchNotes(query: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "search_notes" },
+          { type: "string", value: JSON.stringify([query]) }
+        ]
+      );
+
+      if (result.success && result.data) {
+        const notes = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
+        // Update the UI with search results
+        this._panel.webview.postMessage({
+          type: 'searchResults',
+          notes: notes
+        });
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Search failed: ${e.message}`);
+    }
+  }
+
+  private async handleCopyTranscript() {
+    try {
+      // Get current meeting's captions from the state
+      const stateFile = path.join(os.homedir(), '.mcp', 'workspace_states', 'workspace_states.json');
+      if (fs.existsSync(stateFile)) {
+        const content = fs.readFileSync(stateFile, 'utf-8');
+        const state = JSON.parse(content);
+        const meetData = state.meetBot || {};
+        const captions = meetData.captions || [];
+
+        if (captions.length > 0) {
+          const text = captions.map((c: any) => `[${c.speaker}] ${c.text}`).join('\n');
+          await vscode.env.clipboard.writeText(text);
+          vscode.window.showInformationMessage(`Copied ${captions.length} captions to clipboard`);
+        } else {
+          vscode.window.showInformationMessage('No captions to copy');
+        }
+      }
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to copy transcript: ${e.message}`);
+    }
+  }
+
+  private async handleClearCaptions() {
+    try {
+      await this.queryDBus(
+        "com.aiworkflow.MeetBot",
+        "/com/aiworkflow/MeetBot",
+        "com.aiworkflow.MeetBot",
+        "CallMethod",
+        [
+          { type: "string", value: "clear_captions" },
+          { type: "string", value: "[]" }
+        ]
+      );
+      this._backgroundSync();
+      vscode.window.showInformationMessage('Captions cleared');
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to clear captions: ${e.message}`);
+    }
+  }
+
+  // Formatting helpers for meeting data
+  private formatMeetingNote(note: any): string {
+    const lines = [
+      `# ${note.title || 'Meeting Notes'}`,
+      '',
+      `**Date:** ${note.date || 'Unknown'}`,
+      `**Duration:** ${note.duration || 0} minutes`,
+      `**Participants:** ${note.participants?.join(', ') || 'Unknown'}`,
+      '',
+      '## Summary',
+      note.summary || '_No summary available_',
+      '',
+      '## Action Items',
+      ...(note.actionItems?.map((item: string) => `- [ ] ${item}`) || ['_No action items_']),
+      '',
+      '## Key Points',
+      ...(note.keyPoints?.map((point: string) => `- ${point}`) || ['_No key points_']),
+      '',
+    ];
+    return lines.join('\n');
+  }
+
+  private formatTranscript(transcript: any): string {
+    const entries = Array.isArray(transcript) ? transcript : (transcript.entries || []);
+    const lines = [
+      '# Meeting Transcript',
+      '',
+      `_${entries.length} entries_`,
+      '',
+      '---',
+      '',
+    ];
+
+    for (const entry of entries) {
+      const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
+      lines.push(`**${entry.speaker || 'Unknown'}** ${time ? `(${time})` : ''}`);
+      lines.push(entry.text || '');
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
+  private formatBotLog(log: any): string {
+    const entries = Array.isArray(log) ? log : (log.entries || []);
+    const lines = [
+      '=== Meeting Bot Log ===',
+      '',
+    ];
+
+    for (const entry of entries) {
+      const time = entry.timestamp ? new Date(entry.timestamp).toISOString() : '';
+      const level = entry.level || 'INFO';
+      lines.push(`[${time}] [${level}] ${entry.message || entry.text || ''}`);
+    }
+
+    return lines.join('\n');
+  }
+
   private async loadSlackHistory() {
     try {
       const result = await this.queryDBus(
@@ -2397,10 +4111,11 @@ print(result)
   private async sendSlackMessage(channel: string, text: string) {
     try {
       if (!channel || !text) {
-        vscode.window.showWarningMessage("Please select a channel and enter a message");
+        vscode.window.showWarningMessage("Please select a channel/user and enter a message");
         return;
       }
 
+      // Send via D-Bus (Slack daemon)
       const result = await this.queryDBus(
         "com.aiworkflow.SlackAgent",
         "/com/aiworkflow/SlackAgent",
@@ -2408,29 +4123,46 @@ print(result)
         "SendMessage",
         [
           { type: "string", value: channel },
-          { type: "string", value: text }
+          { type: "string", value: text },
+          { type: "string", value: "" }  // thread_ts
         ]
       );
 
       if (result.success) {
         vscode.window.showInformationMessage("Message sent successfully");
+        this._panel.webview.postMessage({
+          type: "slackMessageSent",
+          success: true,
+        });
         // Refresh history to show the new message
         await this.loadSlackHistory();
       } else {
         vscode.window.showErrorMessage(`Failed to send message: ${result.error || "Unknown error"}`);
+        this._panel.webview.postMessage({
+          type: "slackMessageSent",
+          success: false,
+          error: result.error,
+        });
       }
     } catch (e) {
       vscode.window.showErrorMessage(`Failed to send message: ${e}`);
+      this._panel.webview.postMessage({
+        type: "slackMessageSent",
+        success: false,
+        error: String(e),
+      });
     }
   }
 
+
   private async refreshSlackChannels() {
     try {
+      // Query via D-Bus (Slack daemon)
       const result = await this.queryDBus(
         "com.aiworkflow.SlackAgent",
         "/com/aiworkflow/SlackAgent",
         "com.aiworkflow.SlackAgent",
-        "GetChannels",
+        "GetMyChannels",
         []
       );
 
@@ -2454,27 +4186,116 @@ print(result)
     }
   }
 
+  private async searchSlackUsers(query: string) {
+    try {
+      // Query via D-Bus (Slack daemon)
+      const result = await this.queryDBus(
+        "com.aiworkflow.SlackAgent",
+        "/com/aiworkflow/SlackAgent",
+        "com.aiworkflow.SlackAgent",
+        "FindUser",
+        [{ type: "string", value: query }]
+      );
+
+      if (result.success && result.data) {
+        const users = result.data.results || result.data.users || [];
+        this._panel.webview.postMessage({
+          type: "slackUsers",
+          users: users,
+        });
+      } else {
+        this._panel.webview.postMessage({
+          type: "slackUsers",
+          users: [],
+        });
+      }
+    } catch (e) {
+      this._panel.webview.postMessage({
+        type: "slackUsers",
+        users: [],
+      });
+    }
+  }
+
+  private async refreshSlackTargets() {
+    try {
+      // Refresh channels via D-Bus (Slack daemon)
+      const result = await this.queryDBus(
+        "com.aiworkflow.SlackAgent",
+        "/com/aiworkflow/SlackAgent",
+        "com.aiworkflow.SlackAgent",
+        "GetMyChannels",
+        []
+      );
+      if (result.success && result.data) {
+        const channels = Array.isArray(result.data) ? result.data : (result.data.channels || []);
+        this._panel.webview.postMessage({
+          type: "slackChannels",
+          channels: channels,
+        });
+      }
+    } catch (e) {
+      console.error("Failed to refresh Slack targets:", e);
+    }
+  }
+
+
   // ============================================================================
   // Cron Management
   // ============================================================================
 
-  private loadCronConfig(): { enabled: boolean; timezone: string; jobs: CronJob[]; execution_mode: string } {
+  private async loadCronConfigAsync(): Promise<{ enabled: boolean; timezone: string; jobs: CronJob[]; execution_mode: string }> {
     try {
-      if (fs.existsSync(CONFIG_FILE)) {
-        const config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
-        const schedules = config.schedules || {};
-        return {
-          enabled: schedules.enabled || false,
-          timezone: schedules.timezone || "UTC",
-          jobs: schedules.jobs || [],
-          execution_mode: schedules.execution_mode || "claude_cli",
-        };
+      // Read all config via D-Bus (uses ConfigManager for thread-safe access)
+      const configResult = await this.queryDBus(
+        "com.aiworkflow.CronScheduler",
+        "/com/aiworkflow/CronScheduler",
+        "com.aiworkflow.CronScheduler",
+        "CallMethod",
+        [
+          { type: "string", value: "get_config" },
+          { type: "string", value: JSON.stringify({ section: "schedules", key: "" }) }
+        ]
+      );
+
+      let schedules: any = {};
+      if (configResult.success && configResult.data?.success) {
+        schedules = configResult.data.value || {};
       }
+
+      // Get enabled state from D-Bus (uses StateManager)
+      const statsResult = await this.queryDBus(
+        "com.aiworkflow.CronScheduler",
+        "/com/aiworkflow/CronScheduler",
+        "com.aiworkflow.CronScheduler",
+        "GetStats"
+      );
+
+      let enabled = false;
+      if (statsResult.success && statsResult.data) {
+        enabled = statsResult.data.enabled || false;
+      }
+
+      return {
+        enabled: enabled,
+        timezone: schedules.timezone || "UTC",
+        jobs: schedules.jobs || [],
+        execution_mode: schedules.execution_mode || "claude_cli",
+      };
     } catch (e) {
-      console.error("Failed to load cron config:", e);
+      console.error("Failed to load cron config via D-Bus:", e);
     }
     return { enabled: false, timezone: "UTC", jobs: [], execution_mode: "claude_cli" };
   }
+
+  // Synchronous wrapper that returns cached data (for backward compatibility)
+  private loadCronConfig(): { enabled: boolean; timezone: string; jobs: CronJob[]; execution_mode: string } {
+    // Return cached data if available, otherwise return defaults
+    // The async version should be called to refresh the cache
+    return this._cachedCronConfig || { enabled: false, timezone: "UTC", jobs: [], execution_mode: "claude_cli" };
+  }
+
+  private _cachedCronConfig: { enabled: boolean; timezone: string; jobs: CronJob[]; execution_mode: string } | null = null;
 
   private loadCronHistory(limit: number = 10): CronExecution[] {
     try {
@@ -2505,7 +4326,10 @@ print(result)
   }
 
   private async refreshCronData(historyLimit: number = 10) {
-    const cronConfig = this.loadCronConfig();
+    // Load config via D-Bus (thread-safe) and update cache
+    const cronConfig = await this.loadCronConfigAsync();
+    this._cachedCronConfig = cronConfig;
+
     const cronHistory = this.loadCronHistory(historyLimit);
     const totalHistory = this.getCronHistoryTotal();
 
@@ -2521,33 +4345,43 @@ print(result)
   private async toggleScheduler() {
     console.log("[CommandCenter] toggleScheduler called");
     try {
-      if (fs.existsSync(CONFIG_FILE)) {
-        const config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
-        console.log("[CommandCenter] Current schedules.enabled:", config.schedules?.enabled);
-        if (config.schedules) {
-          const currentState = config.schedules.enabled !== false;
-          config.schedules.enabled = !currentState;
-          fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-          console.log("[CommandCenter] Updated schedules.enabled to:", config.schedules.enabled);
+      // Get current state from D-Bus (thread-safe)
+      const cronConfig = await this.loadCronConfigAsync();
+      const currentState = cronConfig.enabled;
+      const newState = !currentState;
 
-          const newState = config.schedules.enabled;
-          vscode.window.showInformationMessage(
-            `Scheduler ${newState ? "enabled ✅" : "disabled ⏸️"}. ${newState ? "Jobs will start running within 30 seconds." : "Jobs are paused."}`
-          );
+      console.log("[CommandCenter] Current schedules.enabled:", currentState, "-> toggling to:", newState);
 
-          // Update the UI
-          console.log("[CommandCenter] Sending schedulerToggled message with enabled:", newState);
-          this._panel.webview.postMessage({
-            type: "schedulerToggled",
-            enabled: newState,
-          });
+      // Use D-Bus to toggle scheduler state (uses StateManager for thread-safe writes)
+      const result = await this.queryDBus(
+        "com.aiworkflow.CronScheduler",
+        "/com/aiworkflow/CronScheduler",
+        "com.aiworkflow.CronScheduler",
+        "CallMethod",
+        [
+          { type: "string", value: "toggle_scheduler" },
+          { type: "string", value: JSON.stringify({ enabled: newState }) }
+        ]
+      );
 
-          await this.refreshCronData();
-        } else {
-          console.log("[CommandCenter] No schedules section in config");
-        }
+      if (result.success) {
+        console.log("[CommandCenter] D-Bus toggle_scheduler result:", result.data);
+
+        vscode.window.showInformationMessage(
+          `Scheduler ${newState ? "enabled ✅" : "disabled ⏸️"}. ${newState ? "Jobs will start running within 30 seconds." : "Jobs are paused."}`
+        );
+
+        // Update the UI
+        console.log("[CommandCenter] Sending schedulerToggled message with enabled:", newState);
+        this._panel.webview.postMessage({
+          type: "schedulerToggled",
+          enabled: newState,
+        });
+
+        await this.refreshCronData();
       } else {
-        console.log("[CommandCenter] Config file does not exist:", CONFIG_FILE);
+        console.error("[CommandCenter] D-Bus toggle_scheduler failed:", result.error);
+        vscode.window.showErrorMessage(`Failed to toggle scheduler via D-Bus: ${result.error}`);
       }
     } catch (e) {
       console.error("[CommandCenter] toggleScheduler error:", e);
@@ -2557,21 +4391,32 @@ print(result)
 
   private async toggleCronJob(jobName: string, enabled: boolean) {
     try {
-      if (fs.existsSync(CONFIG_FILE)) {
-        const config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
-        if (config.schedules && config.schedules.jobs) {
-          const job = config.schedules.jobs.find((j: CronJob) => j.name === jobName);
-          if (job) {
-            job.enabled = enabled;
-            fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-            vscode.window.showInformationMessage(
-              `Cron job "${jobName}" ${enabled ? "enabled" : "disabled"}`
-            );
-            await this.refreshCronData();
-          }
-        }
+      console.log("[CommandCenter] toggleCronJob called:", jobName, "->", enabled);
+
+      // Use D-Bus to toggle job state (uses StateManager for thread-safe writes)
+      const result = await this.queryDBus(
+        "com.aiworkflow.CronScheduler",
+        "/com/aiworkflow/CronScheduler",
+        "com.aiworkflow.CronScheduler",
+        "CallMethod",
+        [
+          { type: "string", value: "toggle_job" },
+          { type: "string", value: JSON.stringify({ job_name: jobName, enabled: enabled }) }
+        ]
+      );
+
+      if (result.success) {
+        console.log("[CommandCenter] D-Bus toggle_job result:", result.data);
+        vscode.window.showInformationMessage(
+          `Cron job "${jobName}" ${enabled ? "enabled" : "disabled"}`
+        );
+        await this.refreshCronData();
+      } else {
+        console.error("[CommandCenter] D-Bus toggle_job failed:", result.error);
+        vscode.window.showErrorMessage(`Failed to toggle cron job via D-Bus: ${result.error}`);
       }
     } catch (e) {
+      console.error("[CommandCenter] toggleCronJob error:", e);
       vscode.window.showErrorMessage(`Failed to toggle cron job: ${e}`);
     }
   }
@@ -2579,7 +4424,7 @@ print(result)
   private async runCronJobNow(jobName: string) {
     try {
       // Send command to Cursor chat to run the skill
-      const cronConfig = this.loadCronConfig();
+      const cronConfig = await this.loadCronConfigAsync();
       const job = cronConfig.jobs.find(j => j.name === jobName);
 
       if (job) {
@@ -2752,6 +4597,69 @@ print(result)
     return iconMap[name] || "🔧";
   }
 
+  /**
+   * Get cached personas or load them if not cached.
+   */
+  private getPersonas(): Persona[] {
+    if (!this._personasCache) {
+      this._personasCache = this.loadPersonas();
+    }
+    return this._personasCache;
+  }
+
+  /**
+   * Get skills for a specific persona name.
+   */
+  private getSkillsForPersona(personaName: string): string[] {
+    const personas = this.getPersonas();
+    const persona = personas.find(p =>
+      p.name === personaName ||
+      p.fileName === personaName
+    );
+    return persona?.skills || [];
+  }
+
+  /**
+   * Count actual tools in a tool module by scanning for @tool decorators.
+   */
+  private countToolsInModule(moduleName: string): number {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
+      path.join(os.homedir(), "src", "redhat-ai-workflow");
+
+    // Handle _basic and _extra suffixes
+    const baseName = moduleName.replace("_basic", "").replace("_extra", "");
+    const moduleDir = path.join(workspaceRoot, "tool_modules", `aa_${baseName}`, "src");
+
+    if (!fs.existsSync(moduleDir)) {
+      return 0;
+    }
+
+    // Determine which file to check
+    let filesToCheck: string[];
+    if (moduleName.endsWith("_basic")) {
+      filesToCheck = ["tools_basic.py"];
+    } else if (moduleName.endsWith("_extra")) {
+      filesToCheck = ["tools_extra.py"];
+    } else {
+      filesToCheck = ["tools_basic.py", "tools.py"];
+    }
+
+    for (const filename of filesToCheck) {
+      const toolsFile = path.join(moduleDir, filename);
+      if (fs.existsSync(toolsFile)) {
+        try {
+          const content = fs.readFileSync(toolsFile, "utf-8");
+          // Count @server.tool, @registry.tool, or @mcp.tool decorators
+          const matches = content.match(/@(?:server|registry|mcp)\.tool\s*\(/g);
+          return matches ? matches.length : 0;
+        } catch {
+          // Ignore read errors
+        }
+      }
+    }
+    return 0;
+  }
+
   private loadPersonas(): Persona[] {
     const personas: Persona[] = [];
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
@@ -2809,11 +4717,17 @@ print(result)
           // Get the display name (use filename if no name field)
           const displayName = nameMatch ? nameMatch[1] : fileName;
 
+          // Calculate actual tool count by summing tools in each module
+          const toolCount = tools.reduce((sum, moduleName) => {
+            return sum + this.countToolsInModule(moduleName);
+          }, 0);
+
           personas.push({
             name: displayName,
             fileName: fileName,
             description: descMatch ? descMatch[1].trim() : "",
             tools,
+            toolCount,
             skills,
             personaFile: personaFileMatch ? personaFileMatch[1].trim() : undefined,
             isSlim,
@@ -2850,6 +4764,12 @@ print(result)
       slack: "💬",
       core: "⚙️",
       universal: "🌐",
+      researcher: "🔍",
+      meetings: "📅",
+      observability: "📈",
+      project: "📁",
+      workspace: "🏠",
+      code: "💻",
     };
     return iconMap[name] || "🤖";
   }
@@ -2864,6 +4784,12 @@ print(result)
       slack: "blue",
       core: "gray",
       universal: "gray",
+      researcher: "yellow",
+      meetings: "teal",
+      observability: "indigo",
+      project: "amber",
+      workspace: "slate",
+      code: "violet",
     };
     return colorMap[name] || "purple";
   }
@@ -2898,7 +4824,7 @@ print(result)
         </div>
         <div class="persona-body">
           <div class="persona-section">
-            <div class="persona-section-title">🔧 Tool Modules (${persona.tools.length})</div>
+            <div class="persona-section-title">🔧 Tools (${persona.toolCount}) from ${persona.tools.length} modules</div>
             <div class="persona-tags">
               ${toolTags}${moreTools}${noTools}
             </div>
@@ -2951,7 +4877,7 @@ print(result)
       if (fs.existsSync(WORKSPACE_STATES_FILE)) {
         const content = fs.readFileSync(WORKSPACE_STATES_FILE, "utf8");
         const parsed = JSON.parse(content);
-        
+
         // Handle both direct workspace map and wrapped format with "workspaces" key
         if (parsed.workspaces) {
           this._workspaceState = parsed.workspaces as WorkspaceExportedState;
@@ -2960,7 +4886,7 @@ print(result)
           this._workspaceState = parsed as WorkspaceExportedState;
           this._workspaceCount = Object.keys(this._workspaceState || {}).length;
         }
-        
+
         // Load unified state (v3 format)
         this._services = parsed.services || {};
         this._ollama = parsed.ollama || {};
@@ -2968,8 +4894,9 @@ print(result)
         this._slackChannels = parsed.slack_channels || [];
         this._sprintIssues = parsed.sprint_issues || [];
         this._sprintIssuesUpdated = parsed.sprint_issues_updated || "";
-        
-        debugLog(`Loaded unified state: ${this._workspaceCount} workspaces, ${Object.keys(this._services).length} services, ${Object.keys(this._ollama).length} ollama`);
+        this._meetData = parsed.meet || {};
+
+        debugLog(`Loaded unified state: ${this._workspaceCount} workspaces, ${Object.keys(this._services).length} services, ${Object.keys(this._ollama).length} ollama, meet: ${this._meetData.upcomingMeetings?.length || 0} upcoming`);
       } else {
         this._workspaceState = null;
         this._workspaceCount = 0;
@@ -2979,6 +4906,7 @@ print(result)
         this._slackChannels = [];
         this._sprintIssues = [];
         this._sprintIssuesUpdated = "";
+        this._meetData = {};
         debugLog("No workspace states file found");
       }
     } catch (error) {
@@ -2991,6 +4919,7 @@ print(result)
       this._slackChannels = [];
       this._sprintIssues = [];
       this._sprintIssuesUpdated = "";
+      this._meetData = {};
     }
   }
 
@@ -3029,20 +4958,20 @@ print(result)
   private _dispatchAllUIUpdates(): void {
     // Update sessions tab
     this._updateWorkspacesTab();
-    
+
     // Update services status
     this._panel.webview.postMessage({
       type: "serviceStatus",
       services: this._formatServicesForUI(),
       mcp: this._services.mcp || { running: false },
     });
-    
+
     // Update Ollama status
     this._panel.webview.postMessage({
       command: "ollamaStatusUpdate",
       data: this._ollama,
     });
-    
+
     // Update cron data
     this._panel.webview.postMessage({
       type: "cronData",
@@ -3056,19 +4985,50 @@ print(result)
       totalHistory: this._cronData.total_history || 0,
       currentLimit: 10,
     });
-    
+
     // Update Slack channels
     this._panel.webview.postMessage({
       type: "slackChannels",
       channels: this._slackChannels,
     });
-    
+
     // Update sprint issues
     if (this._sprintIssues.length > 0) {
       this._panel.webview.postMessage({
         type: "sprintIssuesUpdate",
         issues: this._sprintIssues,
       });
+    }
+
+    // Update meetings tab - check if active meeting count changed
+    const meetBotState = loadMeetBotState(this._meetData);
+    const newActiveMeetingCount = meetBotState.currentMeetings?.length || 0;
+    const oldActiveMeetingCount = this._lastActiveMeetingCount || 0;
+
+    if (newActiveMeetingCount !== oldActiveMeetingCount) {
+      debugLog(`Active meeting count changed: ${oldActiveMeetingCount} -> ${newActiveMeetingCount}`);
+      this._lastActiveMeetingCount = newActiveMeetingCount;
+      // Force full re-render when meeting status changes
+      this.update(true);
+    } else {
+      // Just send the update message for incremental updates
+      this._panel.webview.postMessage({
+        type: "meetingsUpdate",
+        state: meetBotState,
+      });
+    }
+
+    // Update Performance tab - requires full re-render since it doesn't have
+    // incremental update support yet. Check if performance data changed.
+    const performanceState = loadPerformanceState();
+    const newOverallPct = performanceState.overall_percentage || 0;
+    const oldOverallPct = this._lastPerformanceOverall || 0;
+
+    if (newOverallPct !== oldOverallPct) {
+      debugLog(`Performance data changed: ${oldOverallPct}% -> ${newOverallPct}%`);
+      this._lastPerformanceOverall = newOverallPct;
+      // Force full re-render to update Performance tab
+      this.update(true);
     }
   }
 
@@ -3080,7 +5040,7 @@ print(result)
     return serviceNames.map(name => {
       const svc = this._services[name] || {};
       return {
-        name: name === "slack" ? "Slack Agent" : 
+        name: name === "slack" ? "Slack Agent" :
               name === "cron" ? "Cron Scheduler" : "Meet Bot",
         ...svc,
       };
@@ -3093,29 +5053,52 @@ print(result)
    * The file watcher will trigger UI update when workspace_states.json changes.
    */
   private _backgroundSync(): void {
-    const { exec } = require('child_process');
+    const { spawn } = require('child_process');
     const projectRoot = this._getProjectRoot();
-    
+
     if (!projectRoot) {
       return;
     }
 
-    // Run sync script in background (non-blocking)
-    exec(
-      `python3 "${path.join(projectRoot, 'scripts', 'sync_workspace_state.py')}"`,
-      { cwd: projectRoot, timeout: 30000 },
-      (error: any, stdout: string, stderr: string) => {
-        if (error) {
-          debugLog(`Background sync error: ${error.message}`);
-        } else {
-          debugLog(`Background sync: ${stdout.trim()}`);
-        }
-        // File watcher will handle UI update when workspace_states.json changes
-        // Also do incremental UI update for stats
-        this.update(false);
-        this.getInferenceStats();
+    // Clear personas cache to ensure fresh data on next access
+    this._personasCache = null;
+
+    // Run sync script in background using spawn (avoids shell/bashrc)
+    const python = spawn('python3', [path.join(projectRoot, 'scripts', 'sync_workspace_state.py')], {
+      cwd: projectRoot,
+      env: process.env,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    python.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+
+    python.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    python.on('close', (code: number) => {
+      if (code !== 0) {
+        debugLog(`Background sync error (exit ${code}): ${stderr}`);
+      } else {
+        debugLog(`Background sync: ${stdout.trim()}`);
       }
-    );
+      // File watcher will handle UI update when workspace_states.json changes
+      // Also do incremental UI update for stats
+      this.update(false);
+      this.getInferenceStats();
+    });
+
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      if (python.exitCode === null) {
+        python.kill();
+        debugLog('Background sync timed out');
+      }
+    }, 30000);
   }
 
   /**
@@ -3123,24 +5106,24 @@ print(result)
    */
   private _getProjectRoot(): string | null {
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    
+
     // Check current workspace first
     if (fs.existsSync(path.join(workspacePath, 'scripts', 'sync_workspace_state.py'))) {
       return workspacePath;
     }
-    
+
     // Try common locations
     const possibleRoots = [
       path.join(os.homedir(), 'src', 'redhat-ai-workflow'),
       '/home/daoneill/src/redhat-ai-workflow',
     ];
-    
+
     for (const root of possibleRoots) {
       if (fs.existsSync(path.join(root, 'scripts', 'sync_workspace_state.py'))) {
         return root;
       }
     }
-    
+
     return null;
   }
 
@@ -3155,21 +5138,32 @@ print(result)
     });
 
     try {
-      const { execSync } = require('child_process');
+      const { spawnSync } = require('child_process');
       const projectRoot = this._getProjectRoot();
-      
+
       if (!projectRoot) {
         throw new Error('Project root not found');
       }
 
       debugLog('Running manual session sync');
-      const result = execSync(
-        `python3 "${path.join(projectRoot, 'scripts', 'sync_workspace_state.py')}"`,
-        { encoding: 'utf8', timeout: 30000, cwd: projectRoot }
-      );
-      
+      // Use spawnSync to avoid shell/bashrc sourcing
+      const syncResult = spawnSync('python3', [path.join(projectRoot, 'scripts', 'sync_workspace_state.py')], {
+        encoding: 'utf8',
+        timeout: 30000,
+        cwd: projectRoot,
+        env: process.env,
+      });
+
+      if (syncResult.error) {
+        throw syncResult.error;
+      }
+      if (syncResult.status !== 0) {
+        throw new Error(syncResult.stderr || `Exit code ${syncResult.status}`);
+      }
+
+      const result = syncResult.stdout;
       debugLog(`Session sync result: ${result.trim()}`);
-      
+
       // Parse result and show message
       const match = result.match(/Sync: \+(\d+) -(\d+) ~(\d+) ↻(\d+)/);
       if (match) {
@@ -3316,17 +5310,18 @@ print(result)
 
     return `
       <div class="sessions-table-container">
-        <table class="data-table">
+        <table class="data-table sessions-data-table">
           <thead>
             <tr>
-              <th></th>
-              <th style="text-align: left;">Name</th>
-              <th>Project</th>
-              <th>Persona</th>
-              <th>Issue</th>
-              <th>Last Active</th>
-              <th>Tools</th>
-              <th>Actions</th>
+              <th style="width: 3%;"></th>
+              <th style="text-align: left; width: 22%;">Name</th>
+              <th style="width: 14%;">Project</th>
+              <th style="width: 12%;">Persona</th>
+              <th style="width: 12%;">Issue</th>
+              <th style="width: 8%;">Last Active</th>
+              <th style="width: 5%;">Tools</th>
+              <th style="width: 5%;">Skills</th>
+              <th style="width: 14%;">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -3340,9 +5335,15 @@ print(result)
               const isDynamic = (session.dynamic_tool_count ?? 0) > 0;
               const toolCount = session.tool_count ?? session.static_tool_count ?? (session as any).active_tools?.length ?? 0;
               const toolLabel = isDynamic ? `${toolCount} ⚡` : `${toolCount}`;
-              const toolTitle = isDynamic 
-                ? `${toolCount} tools (filtered for context)` 
+              const toolTitle = isDynamic
+                ? `${toolCount} tools (filtered for context)`
                 : `${toolCount} tools available for ${persona}`;
+              // Get skills for this persona
+              const skills = this.getSkillsForPersona(persona);
+              const skillsCount = skills.length > 0 ? skills.length : 'all';
+              const skillsTitle = skills.length > 0
+                ? `${skills.length} skills: ${skills.join(', ')}`
+                : 'All skills available';
               const lastActivity = session.last_activity ? this._formatRelativeTime(session.last_activity) : "Unknown";
               const sessionName = session.name || `Session ${sessionId.substring(0, 6)}`;
               const sessionProject = (session as any).project || item.workspaceProject || '-';
@@ -3359,11 +5360,13 @@ print(result)
                 </td>
                 <td>${sessionProject}</td>
                 <td><span class="persona-badge-small ${personaColor}">${persona}</span></td>
-                <td>${issueKeys.length > 0 ? issueKeys.map(k => `<a href="https://issues.redhat.com/browse/${k}" class="issue-badge-small issue-link" title="Open ${k} in Jira">${k}</a>`).join(' ') : '-'}</td>
+                <td class="issue-cell">${issueKeys.length > 0 ? `<div class="issue-badges-container">${issueKeys.map(k => `<a href="https://issues.redhat.com/browse/${k}" class="issue-badge-small issue-link" title="Open ${k} in Jira">${k}</a>`).join('')}</div>` : '-'}</td>
                 <td>${lastActivity}</td>
                 <td title="${toolTitle}">${toolLabel}</td>
+                <td title="${skillsTitle}">${skillsCount}</td>
                 <td>
                   <button class="btn btn-ghost btn-small" data-action="copySessionId" data-session-id="${sessionId}" title="Copy Session ID">📋</button>
+                  <button class="btn btn-ghost btn-small" data-action="viewSessionTools" data-session-id="${sessionId}" title="View Tools">🔧</button>
                   ${session.meeting_references && session.meeting_references.length > 0 ? `<button class="btn btn-ghost btn-small meeting-notes-btn" data-action="viewMeetingNotes" data-session-id="${sessionId}" title="View ${session.meeting_references.length} meeting(s) where issues were discussed">📝</button>` : ''}
                 </td>
               </tr>
@@ -3582,6 +5585,15 @@ print(result)
     const lastToolTime = session.last_tool_time ? this._formatRelativeTime(session.last_tool_time) : null;
     const toolCallCount = session.tool_call_count || 0;
 
+    // Get skills for this persona
+    const skills = this.getSkillsForPersona(persona);
+    const skillsLabel = skills.length > 0
+      ? `${skills.length} available`
+      : "all skills";
+    const skillsPreview = skills.length > 0
+      ? skills.slice(0, 3).join(", ") + (skills.length > 3 ? ` +${skills.length - 3} more` : "")
+      : "";
+
     return `
       <div class="session-card ${activeClass}" data-session-id="${sessionId}">
         <div class="session-header clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, '&quot;')}" title="Click to find this chat session">
@@ -3618,6 +5630,10 @@ print(result)
           <div class="session-row">
             <span class="session-label">Tools</span>
             <span class="session-value">${toolLabel}</span>
+          </div>
+          <div class="session-row">
+            <span class="session-label">Skills</span>
+            <span class="session-value" title="${skills.join(', ') || 'All skills available'}">${skillsLabel}${skillsPreview ? ` (${skillsPreview})` : ''}</span>
           </div>
           <div class="session-row">
             <span class="session-label">Last Active</span>
@@ -3725,19 +5741,21 @@ print(result)
       // Open the meeting notes - for now, show info about how to access them
       // In the future, this could open a webview with the transcript
       const dbPath = path.join(os.homedir(), '.local/share/meet_bot/meetings.db');
-      
+
       if (fs.existsSync(dbPath)) {
         // Query the transcript for this meeting
         try {
-          const { execSync } = require('child_process');
+          const { spawnSync } = require('child_process');
           const query = `SELECT speaker, text, timestamp FROM transcripts WHERE meeting_id = ${selected.meetingId} ORDER BY timestamp LIMIT 50`;
-          const result = execSync(`sqlite3 -separator '|||' "${dbPath}" "${query}"`, { encoding: 'utf8', timeout: 5000 });
-          
+          // Use spawnSync to avoid shell/bashrc sourcing
+          const sqlResult = spawnSync('sqlite3', ['-separator', '|||', dbPath, query], { encoding: 'utf8', timeout: 5000 });
+          const result = sqlResult.stdout || '';
+
           if (result.trim()) {
             // Create a markdown preview of the transcript
             const lines = result.trim().split('\n');
             let markdown = `# ${selected.label.replace('📝 ', '')}\n\n**Date:** ${selected.description}\n\n## Transcript (first 50 entries)\n\n`;
-            
+
             for (const line of lines) {
               const parts = line.split('|||');
               if (parts.length >= 3) {
@@ -3746,7 +5764,7 @@ print(result)
                 markdown += `**${speaker}** (${time}): ${text}\n\n`;
               }
             }
-            
+
             // Show in a new untitled document
             const doc = await vscode.workspace.openTextDocument({
               content: markdown,
@@ -3802,65 +5820,26 @@ print(result)
 
   private async _openChatSession(sessionId: string, sessionName?: string): Promise<void> {
     try {
-      // Session ID is now the Cursor chat UUID (full UUID from Cursor's database)
-      // We can look up the chat name directly from Cursor's database using the UUID
+      // Import chat utilities
+      const { openChatById, getChatNameById, sendEnter, sleep } = await import('./chatUtils');
 
-      let chatName: string | null = null;
-
-      try {
-        const workspaceStorageDir = path.join(os.homedir(), '.config', 'Cursor', 'User', 'workspaceStorage');
-        const currentWorkspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri.toString();
-
-        if (fs.existsSync(workspaceStorageDir) && currentWorkspaceUri) {
-          const storageDirs = fs.readdirSync(workspaceStorageDir);
-
-          for (const dir of storageDirs) {
-            const workspaceJsonPath = path.join(workspaceStorageDir, dir, 'workspace.json');
-            if (fs.existsSync(workspaceJsonPath)) {
-              try {
-                const workspaceJson = JSON.parse(fs.readFileSync(workspaceJsonPath, 'utf8'));
-                if (workspaceJson.folder === currentWorkspaceUri) {
-                  const dbPath = path.join(workspaceStorageDir, dir, 'state.vscdb');
-                  if (fs.existsSync(dbPath)) {
-                    const { execSync } = require('child_process');
-                    const query = `SELECT value FROM ItemTable WHERE key = 'composer.composerData'`;
-                    const result = execSync(`sqlite3 "${dbPath}" "${query}"`, { encoding: 'utf8', timeout: 5000 });
-
-                    if (result.trim()) {
-                      const composerData = JSON.parse(result.trim());
-                      // Find the chat by its UUID (sessionId IS the Cursor chat UUID now)
-                      const chat = (composerData.allComposers || []).find(
-                        (c: any) => c.composerId === sessionId
-                      );
-                      if (chat) {
-                        chatName = chat.name;
-                      }
-                    }
-                  }
-                  break;
-                }
-              } catch {
-                // Skip invalid workspace.json
-              }
-            }
-          }
-        }
-      } catch (dbError) {
-        console.log('[AA-WORKFLOW] Could not read Cursor database:', dbError);
-      }
+      // Get chat name from database
+      const chatName = getChatNameById(sessionId) || sessionName;
 
       // Open Quick Open with the chat name
       const searchQuery = chatName ? `chat:${chatName}` : 'chat:';
       await vscode.commands.executeCommand('workbench.action.quickOpen', searchQuery);
 
+      // Auto-press Enter after a short delay to select the first result
+      await sleep(250);
+      sendEnter();
+
       if (chatName) {
-        vscode.window.showInformationMessage(`🔍 Opening "${chatName}"...`);
-      } else {
-        vscode.window.showInformationMessage(`💬 Select your chat from the list`);
+        console.log(`[CommandCenter] Opening chat: "${chatName}"`);
       }
 
     } catch (error) {
-      vscode.window.showErrorMessage(`Failed to open chat picker: ${error}`);
+      vscode.window.showErrorMessage(`Failed to open chat: ${error}`);
     }
   }
 
@@ -3974,7 +5953,10 @@ print(result)
   // Update / Render
   // ============================================================================
 
-  public update(forceFullRender: boolean = false) {
+  public async update(forceFullRender: boolean = false) {
+    // Clear personas cache to ensure fresh data
+    this._personasCache = null;
+
     const stats = this.loadStats();
     const workflowStatus = this._dataProvider.getStatus();
     const currentWork = this.loadCurrentWork();
@@ -3982,12 +5964,18 @@ print(result)
     const memoryHealth = this.getMemoryHealth();
     const memoryFiles = this.loadMemoryFiles();
     const vectorStats = this.loadVectorStats();
-    const cronConfig = this.loadCronConfig();
+    // Load cron config via D-Bus (thread-safe) and update cache
+    const cronConfig = await this.loadCronConfigAsync();
+    this._cachedCronConfig = cronConfig;
     const cronHistory = this.loadCronHistory();
     const toolModules = this.loadToolModules();
     const activeAgent = this.getActiveAgent();
     const personas = this.loadPersonas();
-    const meetBotState = loadMeetBotState();
+    const meetBotState = loadMeetBotState(this._meetData);
+    const sprintState = loadSprintState();
+    const sprintHistory = loadSprintHistory();
+    const toolGapRequests = loadToolGapRequests();
+    const performanceState = loadPerformanceState();
 
     // On first render or forced, do full HTML render
     if (forceFullRender || !this._panel.webview.html) {
@@ -4004,7 +5992,11 @@ print(result)
         toolModules,
         activeAgent,
         personas,
-        meetBotState
+        meetBotState,
+        sprintState,
+        sprintHistory,
+        toolGapRequests,
+        performanceState
       );
       // Debug: Check if template literals are being evaluated
       if (html.includes('${JSON.stringify')) {
@@ -4155,7 +6147,11 @@ print(result)
     toolModules: ToolModule[],
     activeAgent: { name: string; tools: string[] },
     personas: Persona[],
-    meetBotState: MeetBotState
+    meetBotState: MeetBotState,
+    sprintState: SprintState,
+    sprintHistory: any[],
+    toolGapRequests: any[],
+    performanceState: PerformanceState
   ): string {
     const nonce = getNonce();
 
@@ -4223,7 +6219,7 @@ print(result)
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${this._panel.webview.cspSource} https: data:;">
       <title>AI Workflow Command Center</title>
       <style>
         :root {
@@ -4264,8 +6260,6 @@ print(result)
 
         .main-content {
           flex: 1;
-          display: flex;
-          flex-direction: column;
         }
 
         /* ============================================ */
@@ -4281,6 +6275,7 @@ print(result)
             rgba(6, 182, 212, 0.1) 50%,
             rgba(236, 72, 153, 0.05) 100%);
           border-bottom: 1px solid var(--border);
+          flex-shrink: 0; /* Don't shrink the header */
         }
 
         .agent-avatar {
@@ -4380,25 +6375,6 @@ print(result)
           text-transform: uppercase;
         }
 
-        .header-reload-btn {
-          background: transparent;
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          padding: 8px 12px;
-          cursor: pointer;
-          font-size: 1rem;
-          opacity: 0.5;
-          transition: all 0.2s;
-          margin-right: 16px;
-        }
-
-        .header-reload-btn:hover {
-          opacity: 1;
-          background: rgba(255, 255, 255, 0.1);
-          border-color: var(--accent);
-          transform: rotate(180deg);
-        }
-
         /* ============================================ */
         /* Tabs */
         /* ============================================ */
@@ -4408,6 +6384,7 @@ print(result)
           background: var(--bg-secondary);
           border-bottom: 1px solid var(--border);
           padding: 0 16px;
+          flex-shrink: 0; /* Don't shrink the tab bar */
         }
 
         .tab {
@@ -4460,7 +6437,6 @@ print(result)
         .tab-content {
           display: none;
           padding: 20px 24px;
-          min-height: calc(100vh - 200px);
         }
 
         .tab-content.active {
@@ -4708,6 +6684,8 @@ print(result)
         .stat-card.pink { border-top-color: var(--pink); }
         .stat-card.orange { border-top-color: var(--orange); }
         .stat-card.green { border-top-color: var(--success); }
+        .stat-card.blue { border-top-color: #3b82f6; }
+        .stat-card.red { border-top-color: var(--error); }
 
         .stat-card.clickable {
           cursor: pointer;
@@ -4861,6 +6839,159 @@ print(result)
         /* ============================================ */
         /* Skills Tab */
         /* ============================================ */
+
+        /* Running Skills Panel */
+        .running-skills-panel {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          margin-bottom: 16px;
+          overflow: hidden;
+        }
+
+        .running-skills-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 16px;
+          background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.1));
+          border-bottom: 1px solid var(--border);
+        }
+
+        .running-skills-title {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-weight: 600;
+          font-size: 0.9rem;
+        }
+
+        .running-indicator {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: var(--purple);
+          animation: pulse-glow 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse-glow {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4); }
+          50% { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0); }
+        }
+
+        .running-skills-list {
+          padding: 8px;
+          max-height: 200px;
+          overflow-y: auto;
+        }
+
+        .running-skills-list.collapsed {
+          display: none;
+        }
+
+        .running-skill-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 12px;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: background 0.2s;
+          margin-bottom: 4px;
+        }
+
+        .running-skill-item:hover {
+          background: var(--bg-secondary);
+        }
+
+        .running-skill-item.selected {
+          background: rgba(139, 92, 246, 0.15);
+          border-left: 3px solid var(--purple);
+        }
+
+        .running-skill-progress {
+          flex-shrink: 0;
+          width: 80px;
+        }
+
+        .running-skill-progress-bar {
+          height: 6px;
+          background: var(--border);
+          border-radius: 3px;
+          overflow: hidden;
+        }
+
+        .running-skill-progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, var(--purple), var(--cyan));
+          border-radius: 3px;
+          transition: width 0.3s ease;
+          animation: progress-shimmer 1.5s ease-in-out infinite;
+        }
+
+        @keyframes progress-shimmer {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.7; }
+        }
+
+        .running-skill-progress-text {
+          font-size: 0.7rem;
+          color: var(--text-secondary);
+          text-align: center;
+          margin-top: 2px;
+        }
+
+        .running-skill-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .running-skill-name {
+          font-weight: 600;
+          font-size: 0.85rem;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .running-skill-source {
+          font-size: 0.75rem;
+          color: var(--text-secondary);
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .running-skill-source .source-badge {
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 0.65rem;
+          font-weight: 600;
+          text-transform: uppercase;
+        }
+
+        .running-skill-source .source-badge.chat {
+          background: rgba(59, 130, 246, 0.2);
+          color: var(--cyan);
+        }
+
+        .running-skill-source .source-badge.cron {
+          background: rgba(245, 158, 11, 0.2);
+          color: var(--warning);
+        }
+
+        .running-skill-source .source-badge.slack {
+          background: rgba(139, 92, 246, 0.2);
+          color: var(--purple);
+        }
+
+        .running-skill-elapsed {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          font-family: var(--font-mono);
+          flex-shrink: 0;
+        }
+
         .skills-layout {
           display: grid;
           grid-template-columns: 280px 1fr;
@@ -5000,6 +7131,63 @@ print(result)
         .toggle-btn.active {
           background: var(--accent);
           color: white;
+        }
+
+        /* Slack User Dropdown */
+        .slack-user-dropdown {
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .slack-user-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 12px;
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+
+        .slack-user-item:hover {
+          background: var(--bg-tertiary);
+        }
+
+        .slack-user-avatar {
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          background: var(--accent);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 600;
+          font-size: 0.9rem;
+          color: white;
+        }
+
+        .slack-user-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .slack-user-name {
+          font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .slack-user-email {
+          font-size: 0.8rem;
+          color: var(--text-muted);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .slack-no-results {
+          padding: 16px;
+          text-align: center;
+          color: var(--text-muted);
         }
 
         /* Skill YAML View */
@@ -5797,6 +7985,10 @@ print(result)
           color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground, #cccccc));
         }
 
+        .dbus-controls .btn {
+          flex-shrink: 0;
+        }
+
         .dbus-result {
           background: var(--bg-secondary);
           border-radius: 6px;
@@ -6110,12 +8302,12 @@ print(result)
         }
 
         .btn-primary {
-          background: var(--accent);
-          color: var(--vscode-button-foreground);
+          background: var(--vscode-button-background, #0e639c) !important;
+          color: var(--vscode-button-foreground, white) !important;
         }
 
         .btn-primary:hover {
-          background: var(--accent-hover);
+          background: var(--vscode-button-hoverBackground, #1177bb) !important;
         }
 
         .btn-secondary {
@@ -6163,7 +8355,7 @@ print(result)
         /* Footer */
         /* ============================================ */
         .footer {
-          margin-top: auto;
+          flex-shrink: 0; /* Don't shrink the footer */
           padding: 12px 24px;
           border-top: 1px solid var(--border);
           display: flex;
@@ -6451,6 +8643,12 @@ print(result)
         .persona-icon.orange { background: linear-gradient(135deg, rgba(251, 146, 60, 0.3), rgba(251, 146, 60, 0.1)); }
         .persona-icon.blue { background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(59, 130, 246, 0.1)); }
         .persona-icon.gray { background: linear-gradient(135deg, rgba(107, 114, 128, 0.3), rgba(107, 114, 128, 0.1)); }
+        .persona-icon.yellow { background: linear-gradient(135deg, rgba(234, 179, 8, 0.3), rgba(234, 179, 8, 0.1)); }
+        .persona-icon.teal { background: linear-gradient(135deg, rgba(20, 184, 166, 0.3), rgba(20, 184, 166, 0.1)); }
+        .persona-icon.indigo { background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(99, 102, 241, 0.1)); }
+        .persona-icon.amber { background: linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(245, 158, 11, 0.1)); }
+        .persona-icon.slate { background: linear-gradient(135deg, rgba(100, 116, 139, 0.3), rgba(100, 116, 139, 0.1)); }
+        .persona-icon.violet { background: linear-gradient(135deg, rgba(167, 139, 250, 0.3), rgba(167, 139, 250, 0.1)); }
 
         .persona-info {
           flex: 1;
@@ -6743,6 +8941,12 @@ print(result)
         .persona-badge.orange { background: rgba(249, 115, 22, 0.2); color: #fb923c; }
         .persona-badge.blue { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
         .persona-badge.gray { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
+        .persona-badge.yellow { background: rgba(234, 179, 8, 0.2); color: #facc15; }
+        .persona-badge.teal { background: rgba(20, 184, 166, 0.2); color: #2dd4bf; }
+        .persona-badge.indigo { background: rgba(99, 102, 241, 0.2); color: #818cf8; }
+        .persona-badge.amber { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+        .persona-badge.slate { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+        .persona-badge.violet { background: rgba(167, 139, 250, 0.2); color: #a78bfa; }
 
         .issue-badges {
           display: flex;
@@ -6932,6 +9136,12 @@ print(result)
         .session-icon.orange { background: rgba(249, 115, 22, 0.2); }
         .session-icon.blue { background: rgba(59, 130, 246, 0.2); }
         .session-icon.gray { background: rgba(107, 114, 128, 0.2); }
+        .session-icon.yellow { background: rgba(234, 179, 8, 0.2); }
+        .session-icon.teal { background: rgba(20, 184, 166, 0.2); }
+        .session-icon.indigo { background: rgba(99, 102, 241, 0.2); }
+        .session-icon.amber { background: rgba(245, 158, 11, 0.2); }
+        .session-icon.slate { background: rgba(100, 116, 139, 0.2); }
+        .session-icon.violet { background: rgba(167, 139, 250, 0.2); }
 
         .session-info {
           flex: 1;
@@ -6942,6 +9152,9 @@ print(result)
           font-weight: 500;
           font-size: 0.95rem;
           color: var(--text-primary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .session-id {
@@ -6979,12 +9192,17 @@ print(result)
         .session-label {
           font-size: 0.8rem;
           color: var(--text-muted);
+          flex-shrink: 0;
         }
 
         .session-value {
           font-size: 0.8rem;
           color: var(--text-primary);
           font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 200px;
         }
 
         .session-footer {
@@ -7719,6 +9937,14 @@ print(result)
         .persona-icon-small.purple { background: rgba(139, 92, 246, 0.2); }
         .persona-icon-small.orange { background: rgba(249, 115, 22, 0.2); }
         .persona-icon-small.pink { background: rgba(236, 72, 153, 0.2); }
+        .persona-icon-small.yellow { background: rgba(234, 179, 8, 0.2); }
+        .persona-icon-small.teal { background: rgba(20, 184, 166, 0.2); }
+        .persona-icon-small.indigo { background: rgba(99, 102, 241, 0.2); }
+        .persona-icon-small.amber { background: rgba(245, 158, 11, 0.2); }
+        .persona-icon-small.slate { background: rgba(100, 116, 139, 0.2); }
+        .persona-icon-small.violet { background: rgba(167, 139, 250, 0.2); }
+        .persona-icon-small.blue { background: rgba(59, 130, 246, 0.2); }
+        .persona-icon-small.gray { background: rgba(107, 114, 128, 0.2); }
 
         .persona-badge-small {
           display: inline-block;
@@ -7727,12 +9953,20 @@ print(result)
           font-size: 0.75rem;
           font-weight: 500;
         }
-        .persona-badge-small.cyan { background: rgba(6, 182, 212, 0.2); color: var(--cyan); }
-        .persona-badge-small.green { background: rgba(16, 185, 129, 0.2); color: var(--green); }
-        .persona-badge-small.red { background: rgba(239, 68, 68, 0.2); color: var(--red); }
-        .persona-badge-small.purple { background: rgba(139, 92, 246, 0.2); color: var(--purple); }
-        .persona-badge-small.orange { background: rgba(249, 115, 22, 0.2); color: var(--orange); }
-        .persona-badge-small.pink { background: rgba(236, 72, 153, 0.2); color: var(--pink); }
+        .persona-badge-small.cyan { background: rgba(6, 182, 212, 0.2); color: #22d3ee; }
+        .persona-badge-small.green { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+        .persona-badge-small.red { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+        .persona-badge-small.purple { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
+        .persona-badge-small.orange { background: rgba(249, 115, 22, 0.2); color: #fb923c; }
+        .persona-badge-small.pink { background: rgba(236, 72, 153, 0.2); color: #f472b6; }
+        .persona-badge-small.yellow { background: rgba(234, 179, 8, 0.2); color: #facc15; }
+        .persona-badge-small.teal { background: rgba(20, 184, 166, 0.2); color: #2dd4bf; }
+        .persona-badge-small.indigo { background: rgba(99, 102, 241, 0.2); color: #818cf8; }
+        .persona-badge-small.amber { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+        .persona-badge-small.slate { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+        .persona-badge-small.violet { background: rgba(167, 139, 250, 0.2); color: #a78bfa; }
+        .persona-badge-small.blue { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+        .persona-badge-small.gray { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
 
         .active-badge-small {
           display: inline-block;
@@ -7752,8 +9986,21 @@ print(result)
           font-size: 0.75rem;
           background: rgba(249, 115, 22, 0.15);
           color: var(--orange);
-          margin-right: 2px;
-          margin-bottom: 2px;
+          margin: 1px;
+          white-space: nowrap;
+        }
+
+        /* Issue cell and container for table view */
+        .issue-cell {
+          max-width: 250px;
+        }
+
+        .issue-badges-container {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 2px;
+          max-width: 250px;
+          justify-content: center;
         }
 
         .meeting-notes-btn {
@@ -7778,6 +10025,11 @@ print(result)
           width: 100%;
           min-width: 800px; /* Ensure minimum width for all columns */
           table-layout: auto;
+        }
+
+        /* Sessions table specific - fixed layout for column control */
+        .sessions-data-table {
+          table-layout: fixed;
         }
 
         /* When table view is active, make grid a single column */
@@ -7910,9 +10162,6 @@ print(result)
           <h1 class="header-title">AI Workflow Command Center</h1>
           <p class="header-subtitle">Your intelligent development assistant • Session active</p>
         </div>
-        <button class="header-reload-btn" id="reloadUIBtn" title="Reload UI (Ctrl+Shift+R) - Use after extension recompilation">
-          🔄
-        </button>
         <div class="header-stats">
           <div class="header-stat">
             <div class="header-stat-value" id="statToolCalls">${this._formatNumber(lifetime.tool_calls)}</div>
@@ -7933,6 +10182,10 @@ print(result)
       <div class="tabs">
         <button class="tab ${this._currentTab === "overview" ? "active" : ""}" data-tab="overview" id="tab-overview">
           📊 Overview
+        </button>
+        <button class="tab ${this._currentTab === "sprint" ? "active" : ""}" data-tab="sprint" id="tab-sprint">
+          🏃 Sprint
+          ${sprintState.issues.length > 0 ? `<span class="tab-badge">${sprintState.issues.filter(i => i.approvalStatus === "pending" || i.approvalStatus === "waiting").length}</span>` : ""}
         </button>
         <button class="tab ${this._currentTab === "workspaces" ? "active" : ""}" data-tab="workspaces" id="tab-workspaces">
           💬 Sessions
@@ -7963,10 +10216,14 @@ print(result)
         </button>
         <button class="tab ${this._currentTab === "cron" ? "active" : ""}" data-tab="cron" id="tab-cron">
           🕐 Cron
-          ${cronConfig.enabled ? `<span class="tab-badge">${cronConfig.jobs.filter(j => j.enabled).length}</span>` : ""}
+          <span class="tab-badge" id="cronTabBadge" style="${cronConfig.enabled && cronConfig.jobs.filter(j => j.enabled).length > 0 ? '' : 'display: none;'}">${cronConfig.jobs.filter(j => j.enabled).length}</span>
         </button>
         <button class="tab ${this._currentTab === "services" ? "active" : ""}" data-tab="services" id="tab-services">
           🔌 Services
+        </button>
+        <button class="tab ${this._currentTab === "performance" ? "active" : ""}" data-tab="performance" id="tab-performance">
+          📊 QC
+          ${performanceState.overall_percentage > 0 ? `<span class="tab-badge">${performanceState.overall_percentage}%</span>` : ''}
         </button>
       </div>
 
@@ -8195,6 +10452,20 @@ print(result)
 
       <!-- Skills Tab -->
       <div class="tab-content ${this._currentTab === "skills" ? "active" : ""}" id="skills">
+        <!-- Running Skills Panel -->
+        <div class="running-skills-panel" id="runningSkillsPanel" style="display: none;">
+          <div class="running-skills-header">
+            <div class="running-skills-title">
+              <span class="running-indicator"></span>
+              <span id="runningSkillsCount">0</span> Running Skills
+            </div>
+            <button class="btn btn-ghost btn-small" id="toggleRunningSkills" title="Collapse">▼</button>
+          </div>
+          <div class="running-skills-list" id="runningSkillsList">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
         <div class="skills-layout">
           <div class="skills-sidebar">
             <div class="skills-search">
@@ -8264,7 +10535,7 @@ print(result)
                 <div class="service-row"><span>Latency</span><span id="npuLatency">--</span></div>
               </div>
               <div class="service-actions">
-                <button class="btn btn-sm" data-instance="npu">Test</button>
+                <button class="btn btn-primary btn-small" data-instance="npu">Test</button>
               </div>
             </div>
             <div class="service-card">
@@ -8281,7 +10552,7 @@ print(result)
                 <div class="service-row"><span>Latency</span><span id="igpuLatency">--</span></div>
               </div>
               <div class="service-actions">
-                <button class="btn btn-sm" data-instance="igpu">Test</button>
+                <button class="btn btn-primary btn-small" data-instance="igpu">Test</button>
               </div>
             </div>
             <div class="service-card">
@@ -8298,7 +10569,7 @@ print(result)
                 <div class="service-row"><span>Latency</span><span id="nvidiaLatency">--</span></div>
               </div>
               <div class="service-actions">
-                <button class="btn btn-sm" data-instance="nvidia">Test</button>
+                <button class="btn btn-primary btn-small" data-instance="nvidia">Test</button>
               </div>
             </div>
             <div class="service-card">
@@ -8315,7 +10586,7 @@ print(result)
                 <div class="service-row"><span>Latency</span><span id="cpuLatency">--</span></div>
               </div>
               <div class="service-actions">
-                <button class="btn btn-sm" data-instance="cpu">Test</button>
+                <button class="btn btn-primary btn-small" data-instance="cpu">Test</button>
               </div>
             </div>
           </div>
@@ -8612,11 +10883,11 @@ print(result)
             </div>
             <div class="quick-tests" style="margin-top: 16px;">
               <span style="font-size: 12px; color: var(--text-muted);">Quick Tests:</span>
-              <button class="btn btn-sm btn-ghost" data-test="hello">hello</button>
-              <button class="btn btn-sm btn-ghost" data-test="MR 1459">MR 1459</button>
-              <button class="btn btn-sm btn-ghost" data-test="AAP-12345">AAP-12345</button>
-              <button class="btn btn-sm btn-ghost" data-test="deploy MR 1459">deploy MR</button>
-              <button class="btn btn-sm btn-ghost" data-test="debug error">debug error</button>
+              <button class="btn btn-small btn-ghost" data-test="hello">hello</button>
+              <button class="btn btn-small btn-ghost" data-test="MR 1459">MR 1459</button>
+              <button class="btn btn-small btn-ghost" data-test="AAP-12345">AAP-12345</button>
+              <button class="btn btn-small btn-ghost" data-test="deploy MR 1459">deploy MR</button>
+              <button class="btn btn-small btn-ghost" data-test="debug error">debug error</button>
             </div>
           </div>
         </div>
@@ -8624,7 +10895,12 @@ print(result)
 
       <!-- Meetings Tab -->
       <div class="tab-content ${this._currentTab === "meetings" ? "active" : ""}" id="meetings">
-        ${getMeetingsTabContent(meetBotState)}
+        ${getMeetingsTabContent(meetBotState, this._panel.webview)}
+      </div>
+
+      <!-- Performance Tab -->
+      <div class="tab-content ${this._currentTab === "performance" ? "active" : ""}" id="performance">
+        ${getPerformanceTabContent(performanceState)}
       </div>
 
       <!-- Slack Tab -->
@@ -8661,6 +10937,28 @@ print(result)
               <div class="stat-label">Pending</div>
             </div>
           </div>
+          <div class="grid-4" style="margin-top: 12px;">
+            <div class="stat-card blue">
+              <div class="stat-icon">🔄</div>
+              <div class="stat-value" id="slackPolls">0</div>
+              <div class="stat-label">Polls</div>
+            </div>
+            <div class="stat-card green">
+              <div class="stat-icon">💬</div>
+              <div class="stat-value" id="slackResponded">0</div>
+              <div class="stat-label">Responded</div>
+            </div>
+            <div class="stat-card orange">
+              <div class="stat-icon">👀</div>
+              <div class="stat-value" id="slackSeen">0</div>
+              <div class="stat-label">Seen</div>
+            </div>
+            <div class="stat-card" id="slackErrorsCard">
+              <div class="stat-icon">❌</div>
+              <div class="stat-value" id="slackErrors">0</div>
+              <div class="stat-label">Errors</div>
+            </div>
+          </div>
         </div>
 
         <!-- Message Composer -->
@@ -8668,11 +10966,33 @@ print(result)
           <h2 class="section-title">✍️ Send Message</h2>
           <div class="service-card">
             <div class="service-content">
-              <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+              <!-- Target Type Toggle -->
+              <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                <div class="view-toggle" id="slackTargetToggle">
+                  <button class="toggle-btn active" data-action="setSlackTarget" data-value="channel" title="Send to Channel">#️⃣ Channel</button>
+                  <button class="toggle-btn" data-action="setSlackTarget" data-value="user" title="Direct Message">👤 User</button>
+                </div>
+                <button class="btn btn-ghost btn-small" data-action="refreshSlackTargets" title="Refresh channels and users">🔄</button>
+              </div>
+              <!-- Channel Select (shown by default) -->
+              <div id="slackChannelContainer" style="display: flex; gap: 12px; margin-bottom: 12px;">
                 <select id="slackChannel" style="flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
                   <option value="">Select Channel...</option>
                 </select>
               </div>
+              <!-- User Select (hidden by default) -->
+              <div id="slackUserContainer" style="display: none; gap: 12px; margin-bottom: 12px;">
+                <div style="flex: 1; position: relative;">
+                  <input type="text" id="slackUserSearch" placeholder="Search users..." style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
+                  <div id="slackUserResults" class="slack-user-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; max-height: 200px; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; margin-top: 4px; z-index: 100;"></div>
+                </div>
+                <input type="hidden" id="slackSelectedUser" value="">
+                <div id="slackSelectedUserDisplay" style="display: none; padding: 8px 12px; background: var(--bg-tertiary); border-radius: 6px; align-items: center; gap: 8px;">
+                  <span id="slackSelectedUserName"></span>
+                  <button class="btn btn-ghost btn-small" data-action="clearSlackUser" style="padding: 2px 6px;">✕</button>
+                </div>
+              </div>
+              <!-- Message Input -->
               <div style="display: flex; gap: 12px;">
                 <input type="text" id="slackMessageInput" placeholder="Type a message..." style="flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
                 <button class="btn btn-primary" data-action="sendSlackMessage">Send</button>
@@ -8794,7 +11114,7 @@ print(result)
                     <td><span class="persona-icon-small ${this._getPersonaColor(persona.name)}">${this._getPersonaIcon(persona.name)}</span></td>
                     <td style="text-align: left;"><strong>${persona.name}</strong>${typeBadge}${isActive ? ' <span class="active-badge-small">Active</span>' : ''}</td>
                     <td style="text-align: left;">${persona.description || displayFileName}</td>
-                    <td>${persona.tools.length}</td>
+                    <td title="${persona.tools.length} modules: ${persona.tools.join(', ')}">${persona.toolCount}</td>
                     <td>${persona.skills.length || 'all'}</td>
                     <td>
                       <button class="btn btn-${isActive ? "ghost" : "primary"} btn-small" data-action="loadPersona" data-persona="${displayFileName}" ${isActive ? "disabled" : ""} title="${isActive ? "Currently active" : "Load this persona"}">
@@ -9140,10 +11460,7 @@ print(result)
                 <div class="card-icon purple">📋</div>
                 <div class="card-title">Cron Jobs</div>
               </div>
-              <div style="display: flex; align-items: center; gap: 12px;">
-                <span style="font-size: 0.85rem; color: var(--text-muted);">Auto-refresh 10s</span>
-                <button class="btn btn-ghost btn-small" data-action="openConfigFile">⚙️ Edit Config</button>
-              </div>
+              <button class="btn btn-ghost btn-small" data-action="openConfigFile">⚙️ Edit Config</button>
             </div>
             <div class="cron-jobs-list">
               ${cronConfig.jobs.length === 0 ? `
@@ -9251,6 +11568,11 @@ print(result)
         </div>
       </div>
 
+      <!-- Sprint Tab -->
+      <div class="tab-content ${this._currentTab === "sprint" ? "active" : ""}" id="sprint">
+        ${getSprintTabContent(sprintState, sprintHistory, toolGapRequests, this._dataProvider.getJiraUrl())}
+      </div>
+
       </div><!-- end main-content -->
 
       <!-- Footer -->
@@ -9311,24 +11633,6 @@ print(result)
 
         // Run connection check on load
         checkExtensionConnection();
-
-        // Keyboard shortcut: Ctrl+Shift+R to reload UI (after extension recompilation)
-        document.addEventListener('keydown', function(e) {
-          if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'R') {
-            e.preventDefault();
-            console.log('[CommandCenter-Webview] Ctrl+Shift+R pressed - requesting UI reload');
-            vscode.postMessage({ command: 'reloadUI' });
-          }
-        });
-
-        // Reload UI button click handler
-        const reloadBtn = document.getElementById('reloadUIBtn');
-        if (reloadBtn) {
-          reloadBtn.addEventListener('click', function() {
-            console.log('[CommandCenter-Webview] Reload button clicked - requesting UI reload');
-            vscode.postMessage({ command: 'reloadUI' });
-          });
-        }
 
         // Simple YAML parser for skill files
         function parseSkillYaml(yaml) {
@@ -9866,15 +12170,101 @@ print(result)
         function coffee() { vscode.postMessage({ command: 'coffee' }); }
         function beer() { vscode.postMessage({ command: 'beer' }); }
         function loadSlackHistory() { vscode.postMessage({ command: 'loadSlackHistory' }); }
-        function sendSlackMessage() {
-          const channel = document.getElementById('slackChannel')?.value;
-          const text = document.getElementById('slackMessageInput')?.value;
-          if (channel && text) {
-            vscode.postMessage({ command: 'sendSlackMessage', channel: channel, text: text });
-            document.getElementById('slackMessageInput').value = '';
+
+        // Slack target type state
+        let slackTargetType = 'channel';
+        let slackUsers = [];
+        let slackUserSearchTimeout = null;
+
+        function setSlackTarget(type) {
+          slackTargetType = type;
+          const channelContainer = document.getElementById('slackChannelContainer');
+          const userContainer = document.getElementById('slackUserContainer');
+          const toggleBtns = document.querySelectorAll('#slackTargetToggle .toggle-btn');
+
+          toggleBtns.forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('data-value') === type);
+          });
+
+          if (type === 'channel') {
+            channelContainer.style.display = 'flex';
+            userContainer.style.display = 'none';
+          } else {
+            channelContainer.style.display = 'none';
+            userContainer.style.display = 'flex';
           }
         }
+
+        function searchSlackUsers(query) {
+          if (slackUserSearchTimeout) clearTimeout(slackUserSearchTimeout);
+          slackUserSearchTimeout = setTimeout(() => {
+            vscode.postMessage({ command: 'searchSlackUsers', query: query });
+          }, 300);
+        }
+
+        function selectSlackUser(userId, userName, realName) {
+          document.getElementById('slackSelectedUser').value = userId;
+          document.getElementById('slackUserSearch').style.display = 'none';
+          document.getElementById('slackUserResults').style.display = 'none';
+          const display = document.getElementById('slackSelectedUserDisplay');
+          display.style.display = 'flex';
+          document.getElementById('slackSelectedUserName').textContent = realName || userName;
+        }
+
+        function clearSlackUser() {
+          document.getElementById('slackSelectedUser').value = '';
+          document.getElementById('slackUserSearch').value = '';
+          document.getElementById('slackUserSearch').style.display = 'block';
+          document.getElementById('slackSelectedUserDisplay').style.display = 'none';
+          document.getElementById('slackUserResults').style.display = 'none';
+        }
+
+        function renderSlackUserResults(users) {
+          const container = document.getElementById('slackUserResults');
+          if (!users || users.length === 0) {
+            container.innerHTML = '<div class="slack-no-results">No users found</div>';
+            container.style.display = 'block';
+            return;
+          }
+          container.innerHTML = users.map(u => \`
+            <div class="slack-user-item" onclick="selectSlackUser('\${u.user_id || u.id}', '\${(u.name || '').replace(/'/g, "\\\\'")}', '\${(u.real_name || u.name || '').replace(/'/g, "\\\\'")}')">
+              <div class="slack-user-avatar">\${(u.real_name || u.name || '?').charAt(0).toUpperCase()}</div>
+              <div class="slack-user-info">
+                <div class="slack-user-name">\${u.real_name || u.name}</div>
+                <div class="slack-user-email">\${u.email || '@' + u.name}</div>
+              </div>
+            </div>
+          \`).join('');
+          container.style.display = 'block';
+        }
+
+        function sendSlackMessage() {
+          let target = '';
+          if (slackTargetType === 'channel') {
+            target = document.getElementById('slackChannel')?.value;
+          } else {
+            target = document.getElementById('slackSelectedUser')?.value;
+          }
+          const text = document.getElementById('slackMessageInput')?.value;
+          if (target && text) {
+            vscode.postMessage({ command: 'sendSlackMessage', channel: target, text: text, targetType: slackTargetType });
+            document.getElementById('slackMessageInput').value = '';
+          } else if (!target) {
+            // Show feedback
+            const msg = slackTargetType === 'channel' ? 'Please select a channel' : 'Please select a user';
+            console.log('[Slack] ' + msg);
+          }
+        }
+
+        function refreshSlackTargets() {
+          vscode.postMessage({ command: 'refreshSlackTargets' });
+        }
+
         function refreshSlackChannels() { vscode.postMessage({ command: 'refreshSlackChannels' }); }
+
+        // Make slack functions globally available
+        window.selectSlackUser = selectSlackUser;
+        window.clearSlackUser = clearSlackUser;
 
         // Services
         function refreshServices() { vscode.postMessage({ command: 'refreshServices' }); }
@@ -10100,7 +12490,7 @@ print(result)
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                 <div>
                   <h4 style="margin: 0 0 12px 0; color: var(--text-primary); font-size: 0.95rem;">
-                    🔧 Tool Modules (\${persona.tools.length})
+                    🔧 Tools (\${persona.toolCount}) from \${persona.tools.length} modules
                   </h4>
                   <div class="persona-tags" style="flex-wrap: wrap;">
                     \${toolsHtml}
@@ -10320,6 +12710,104 @@ print(result)
           }
 
           return step;
+        }
+
+        // Running Skills Panel state
+        let runningSkillsCollapsed = false;
+        let selectedRunningSkillId = null;
+
+        function updateRunningSkillsPanel(runningSkills) {
+          const panel = document.getElementById('runningSkillsPanel');
+          const list = document.getElementById('runningSkillsList');
+          const countEl = document.getElementById('runningSkillsCount');
+          const badge = document.getElementById('skillsBadge');
+
+          if (!runningSkills || runningSkills.length === 0) {
+            // Hide panel when no skills running
+            if (panel) panel.style.display = 'none';
+            if (badge) {
+              badge.style.display = 'none';
+              badge.classList.remove('running');
+            }
+            return;
+          }
+
+          // Show panel
+          if (panel) panel.style.display = 'block';
+          if (countEl) countEl.textContent = runningSkills.length;
+          if (badge) {
+            badge.style.display = '';
+            badge.classList.add('running');
+            badge.textContent = runningSkills.length > 1 ? runningSkills.length + ' Running' : 'Running';
+          }
+
+          // Render running skills list
+          if (list && !runningSkillsCollapsed) {
+            list.innerHTML = runningSkills.map(skill => {
+              const progress = Math.round(((skill.currentStepIndex + 1) / skill.totalSteps) * 100);
+              const elapsed = formatElapsed(skill.elapsedMs);
+              const sourceClass = skill.source || 'chat';
+              const sourceLabel = skill.source === 'cron' ? (skill.sourceDetails || 'Cron') :
+                                  skill.source === 'slack' ? 'Slack' :
+                                  (skill.sessionName || 'Chat');
+              const isSelected = skill.executionId === selectedRunningSkillId;
+
+              return '<div class="running-skill-item' + (isSelected ? ' selected' : '') + '" data-execution-id="' + skill.executionId + '">' +
+                '<div class="running-skill-progress">' +
+                  '<div class="running-skill-progress-bar">' +
+                    '<div class="running-skill-progress-fill" style="width: ' + progress + '%;"></div>' +
+                  '</div>' +
+                  '<div class="running-skill-progress-text">' + (skill.currentStepIndex + 1) + '/' + skill.totalSteps + '</div>' +
+                '</div>' +
+                '<div class="running-skill-info">' +
+                  '<div class="running-skill-name">' + escapeHtml(skill.skillName) + '</div>' +
+                  '<div class="running-skill-source">' +
+                    '<span class="source-badge ' + sourceClass + '">' + sourceClass + '</span>' +
+                    '<span>' + escapeHtml(sourceLabel) + '</span>' +
+                  '</div>' +
+                '</div>' +
+                '<div class="running-skill-elapsed">' + elapsed + '</div>' +
+              '</div>';
+            }).join('');
+
+            // Add click handlers
+            list.querySelectorAll('.running-skill-item').forEach(item => {
+              item.addEventListener('click', () => {
+                const execId = item.getAttribute('data-execution-id');
+                selectedRunningSkillId = execId;
+                // Update selection UI
+                list.querySelectorAll('.running-skill-item').forEach(i => i.classList.remove('selected'));
+                item.classList.add('selected');
+                // Tell extension to select this execution
+                vscode.postMessage({ command: 'selectRunningSkill', executionId: execId });
+              });
+            });
+          }
+        }
+
+        function formatElapsed(ms) {
+          if (!ms || ms < 0) return '--';
+          const seconds = Math.floor(ms / 1000);
+          if (seconds < 60) return seconds + 's';
+          const minutes = Math.floor(seconds / 60);
+          const secs = seconds % 60;
+          if (minutes < 60) return minutes + 'm ' + secs + 's';
+          const hours = Math.floor(minutes / 60);
+          const mins = minutes % 60;
+          return hours + 'h ' + mins + 'm';
+        }
+
+        // Toggle running skills panel collapse
+        const toggleBtn = document.getElementById('toggleRunningSkills');
+        if (toggleBtn) {
+          toggleBtn.addEventListener('click', () => {
+            runningSkillsCollapsed = !runningSkillsCollapsed;
+            const list = document.getElementById('runningSkillsList');
+            if (list) {
+              list.classList.toggle('collapsed', runningSkillsCollapsed);
+            }
+            toggleBtn.textContent = runningSkillsCollapsed ? '▶' : '▼';
+          });
         }
 
         function renderFlowchart(steps) {
@@ -10574,6 +13062,10 @@ print(result)
             }
           }
 
+          if (message.command === 'runningSkillsUpdate') {
+            updateRunningSkillsPanel(message.runningSkills);
+          }
+
           if (message.command === 'skillDefinition') {
             // Store the raw content and parsed data
             currentSkillYaml = message.content;
@@ -10606,10 +13098,23 @@ print(result)
               select.innerHTML = '<option value="">Select Channel...</option>';
               (message.channels || []).forEach(ch => {
                 const opt = document.createElement('option');
-                opt.value = ch.id || ch.name;
+                opt.value = ch.id || ch.channel_id || ch.name;
                 opt.textContent = '#' + (ch.name || ch.id);
                 select.appendChild(opt);
               });
+            }
+          }
+
+          if (message.type === 'slackUsers') {
+            renderSlackUserResults(message.users || []);
+          }
+
+          if (message.type === 'slackMessageSent') {
+            if (message.success) {
+              console.log('[Slack] Message sent successfully');
+              // Optionally show a toast
+            } else {
+              console.error('[Slack] Failed to send message:', message.error);
             }
           }
 
@@ -10630,6 +13135,12 @@ print(result)
               updateText('cronJobCount', (message.config.jobs || []).length);
               const enabledJobs = (message.config.jobs || []).filter(j => j.enabled).length;
               updateText('cronEnabledCount', enabledJobs);
+              // Update the tab badge
+              const cronTabBadge = document.getElementById('cronTabBadge');
+              if (cronTabBadge) {
+                cronTabBadge.textContent = enabledJobs.toString();
+                cronTabBadge.style.display = message.config.enabled && enabledJobs > 0 ? '' : 'none';
+              }
               // Update the jobs list dynamically
               updateCronJobs(message.config.jobs || []);
             }
@@ -11551,6 +14062,12 @@ print(result)
             updateText('cronJobCount', (data.cronConfig.jobs || []).length);
             const enabledJobs = (data.cronConfig.jobs || []).filter(j => j.enabled).length;
             updateText('cronEnabledCount', enabledJobs);
+            // Update the tab badge
+            const cronTabBadge = document.getElementById('cronTabBadge');
+            if (cronTabBadge) {
+              cronTabBadge.textContent = enabledJobs.toString();
+              cronTabBadge.style.display = data.cronConfig.enabled && enabledJobs > 0 ? '' : 'none';
+            }
           }
 
           // Update last updated timestamp
@@ -11616,6 +14133,9 @@ print(result)
           console.log('[CommandCenter] updateSchedulerUI completed');
         }
 
+        // Cache for detecting actual changes to avoid unnecessary DOM updates
+        let _lastCronHistoryHash = '';
+
         function updateCronHistory(history, totalHistory, currentLimit) {
           console.log('[CommandCenter] updateCronHistory called with', history?.length || 0, 'entries, total:', totalHistory, 'limit:', currentLimit);
           const container = document.querySelector('.cron-history-list');
@@ -11624,8 +14144,18 @@ print(result)
             return;
           }
 
+          // Create a hash to detect changes (avoids unnecessary DOM thrashing)
+          const newHash = JSON.stringify({ history: history || [], totalHistory, currentLimit });
+          if (newHash === _lastCronHistoryHash) {
+            console.log('[CommandCenter] updateCronHistory: No changes detected, skipping DOM update');
+            return;
+          }
+          _lastCronHistoryHash = newHash;
+
+          // Build the new HTML content
+          let newHtml;
           if (!history || history.length === 0) {
-            container.innerHTML = \`
+            newHtml = \`
               <div class="empty-state">
                 <div class="empty-state-icon">📜</div>
                 <div>No execution history</div>
@@ -11633,7 +14163,7 @@ print(result)
               </div>
             \`;
           } else {
-            container.innerHTML = history.map(exec => \`
+            newHtml = history.map(exec => \`
               <div class="cron-history-item \${exec.success ? 'success' : 'failed'}">
                 <div class="cron-history-status">\${exec.success ? '✅' : '❌'}</div>
                 <div class="cron-history-info">
@@ -11650,6 +14180,9 @@ print(result)
               </div>
             \`).join('');
           }
+
+          // Update the DOM
+          container.innerHTML = newHtml;
 
           // Update or create the "Load More" button
           let loadMoreContainer = document.querySelector('.cron-history-load-more');
@@ -11673,6 +14206,9 @@ print(result)
           console.log('[CommandCenter] updateCronHistory completed');
         }
 
+        // Cache for detecting actual changes to avoid unnecessary DOM updates
+        let _lastCronJobsHash = '';
+
         function updateCronJobs(jobs) {
           console.log('[CommandCenter] updateCronJobs called with', jobs?.length || 0, 'jobs');
           const container = document.querySelector('.cron-jobs-list');
@@ -11681,8 +14217,10 @@ print(result)
             return;
           }
 
+          // Build the new HTML content
+          let newHtml;
           if (!jobs || jobs.length === 0) {
-            container.innerHTML = \`
+            newHtml = \`
               <div class="empty-state">
                 <div class="empty-state-icon">🕐</div>
                 <div>No cron jobs configured</div>
@@ -11691,7 +14229,7 @@ print(result)
               </div>
             \`;
           } else {
-            container.innerHTML = jobs.map(job => \`
+            newHtml = jobs.map(job => \`
               <div class="cron-job-item \${job.enabled ? '' : 'disabled'}" data-job="\${job.name}">
                 <div class="cron-job-toggle">
                   <label class="toggle-switch">
@@ -11715,13 +14253,26 @@ print(result)
                 </div>
               </div>
             \`).join('');
+          }
 
-            // Re-attach event listeners for toggle switches and run buttons
+          // Create a simple hash to detect changes (avoids unnecessary DOM thrashing)
+          const newHash = JSON.stringify(jobs || []);
+          if (newHash === _lastCronJobsHash) {
+            console.log('[CommandCenter] updateCronJobs: No changes detected, skipping DOM update');
+            return;
+          }
+          _lastCronJobsHash = newHash;
+
+          // Update the DOM
+          container.innerHTML = newHtml;
+
+          // Re-attach event listeners for toggle switches and run buttons
+          if (jobs && jobs.length > 0) {
             container.querySelectorAll('.cron-job-item').forEach(item => {
               const jobName = item.getAttribute('data-job');
               const toggle = item.querySelector('input[type="checkbox"]');
               const runBtn = item.querySelector('[data-run-job]');
-              
+
               if (toggle) {
                 toggle.addEventListener('change', (e) => {
                   vscode.postMessage({ command: 'toggleCronJob', jobName: jobName, enabled: e.target.checked });
@@ -11745,7 +14296,27 @@ print(result)
           return (seconds / 86400).toFixed(1) + 'd';
         }
 
+        // Cache for detecting service status changes to avoid unnecessary DOM updates
+        let _lastServiceStatusHash = '';
+
+        // Helper to update innerHTML only if content changed
+        function updateInnerHTMLIfChanged(element, newContent) {
+          if (element && element.innerHTML !== newContent) {
+            element.innerHTML = newContent;
+            return true;
+          }
+          return false;
+        }
+
         function updateServiceStatus(message) {
+          // Create a hash to detect changes (avoids unnecessary DOM thrashing)
+          const newHash = JSON.stringify(message);
+          if (newHash === _lastServiceStatusHash) {
+            // No changes, skip DOM updates entirely
+            return;
+          }
+          _lastServiceStatusHash = newHash;
+
           // Slack Agent
           const slackService = message.services.find(s => s.name === 'Slack Agent');
           if (slackService) {
@@ -11759,35 +14330,61 @@ print(result)
             const slackUptime = document.getElementById('slackUptime');
             const slackProcessed = document.getElementById('slackProcessed');
             const slackPending = document.getElementById('slackPending');
+            const slackPolls = document.getElementById('slackPolls');
+            const slackResponded = document.getElementById('slackResponded');
+            const slackSeen = document.getElementById('slackSeen');
+            const slackErrors = document.getElementById('slackErrors');
+            const slackErrorsCard = document.getElementById('slackErrorsCard');
 
             if (slackService.running) {
-              slackStatus.innerHTML = '<span class="status-dot online"></span> Online';
+              updateInnerHTMLIfChanged(slackStatus, '<span class="status-dot online"></span> Online');
               slackCard?.classList.remove('service-offline');
               const status = slackService.status || {};
-              slackDetails.innerHTML = \`
+              updateInnerHTMLIfChanged(slackDetails, \`
                 <div class="service-row"><span>Uptime</span><span>\${formatUptime(status.uptime)}</span></div>
                 <div class="service-row"><span>Polls</span><span>\${status.polls || 0}</span></div>
                 <div class="service-row"><span>Processed</span><span>\${status.messages_processed || 0}</span></div>
                 <div class="service-row"><span>Pending</span><span>\${status.pending_approvals || 0}</span></div>
-              \`;
+              \`);
 
-              // Update Slack Tab
+              // Update Slack Tab - Row 1
               if (slackAgentStatus) slackAgentStatus.textContent = 'Online';
               if (slackStatusCard) slackStatusCard.classList.add('green');
               if (slackUptime) slackUptime.textContent = formatUptime(status.uptime);
               if (slackProcessed) slackProcessed.textContent = status.messages_processed || 0;
               if (slackPending) slackPending.textContent = status.pending_approvals || 0;
-            } else {
-              slackStatus.innerHTML = '<span class="status-dot offline"></span> Offline';
-              slackCard?.classList.add('service-offline');
-              slackDetails.innerHTML = '<div class="service-row"><span>Status</span><span>Not running</span></div>';
 
-              // Update Slack Tab
+              // Update Slack Tab - Row 2
+              if (slackPolls) slackPolls.textContent = status.polls || 0;
+              if (slackResponded) slackResponded.textContent = status.messages_responded || 0;
+              if (slackSeen) slackSeen.textContent = status.messages_seen || 0;
+              if (slackErrors) slackErrors.textContent = status.errors || 0;
+              // Highlight errors card if there are errors
+              if (slackErrorsCard) {
+                if ((status.errors || 0) > 0) {
+                  slackErrorsCard.classList.add('red');
+                } else {
+                  slackErrorsCard.classList.remove('red');
+                }
+              }
+            } else {
+              updateInnerHTMLIfChanged(slackStatus, '<span class="status-dot offline"></span> Offline');
+              slackCard?.classList.add('service-offline');
+              updateInnerHTMLIfChanged(slackDetails, '<div class="service-row"><span>Status</span><span>Not running</span></div>');
+
+              // Update Slack Tab - Row 1
               if (slackAgentStatus) slackAgentStatus.textContent = 'Offline';
               if (slackStatusCard) slackStatusCard.classList.remove('green');
               if (slackUptime) slackUptime.textContent = '--';
               if (slackProcessed) slackProcessed.textContent = '0';
               if (slackPending) slackPending.textContent = '0';
+
+              // Update Slack Tab - Row 2
+              if (slackPolls) slackPolls.textContent = '0';
+              if (slackResponded) slackResponded.textContent = '0';
+              if (slackSeen) slackSeen.textContent = '0';
+              if (slackErrors) slackErrors.textContent = '0';
+              if (slackErrorsCard) slackErrorsCard.classList.remove('red');
             }
           }
 
@@ -11799,19 +14396,19 @@ print(result)
             const cronCard = document.getElementById('cronServiceCard');
 
             if (cronService.running) {
-              cronStatus.innerHTML = '<span class="status-dot online"></span> Online';
+              updateInnerHTMLIfChanged(cronStatus, '<span class="status-dot online"></span> Online');
               cronCard?.classList.remove('service-offline');
               const status = cronService.status || {};
-              cronDetails.innerHTML = \`
+              updateInnerHTMLIfChanged(cronDetails, \`
                 <div class="service-row"><span>Uptime</span><span>\${formatUptime(status.uptime)}</span></div>
                 <div class="service-row"><span>Jobs</span><span>\${status.job_count || 0}</span></div>
                 <div class="service-row"><span>Executed</span><span>\${status.jobs_executed || 0}</span></div>
                 <div class="service-row"><span>Mode</span><span>\${status.execution_mode || 'direct'}</span></div>
-              \`;
+              \`);
             } else {
-              cronStatus.innerHTML = '<span class="status-dot offline"></span> Offline';
+              updateInnerHTMLIfChanged(cronStatus, '<span class="status-dot offline"></span> Offline');
               cronCard?.classList.add('service-offline');
-              cronDetails.innerHTML = '<div class="service-row"><span>Status</span><span>Not running</span></div>';
+              updateInnerHTMLIfChanged(cronDetails, '<div class="service-row"><span>Status</span><span>Not running</span></div>');
             }
           }
 
@@ -11823,19 +14420,19 @@ print(result)
             const meetCard = document.getElementById('meetServiceCard');
 
             if (meetService.running) {
-              meetStatus.innerHTML = '<span class="status-dot online"></span> Online';
+              updateInnerHTMLIfChanged(meetStatus, '<span class="status-dot online"></span> Online');
               meetCard?.classList.remove('service-offline');
               const status = meetService.status || {};
-              meetDetails.innerHTML = \`
+              updateInnerHTMLIfChanged(meetDetails, \`
                 <div class="service-row"><span>Uptime</span><span>\${formatUptime(status.uptime)}</span></div>
                 <div class="service-row"><span>Current</span><span>\${status.current_meeting || 'None'}</span></div>
                 <div class="service-row"><span>Upcoming</span><span>\${status.upcoming_count || 0}</span></div>
                 <div class="service-row"><span>Completed</span><span>\${status.completed_today || 0}</span></div>
-              \`;
+              \`);
             } else {
-              meetStatus.innerHTML = '<span class="status-dot offline"></span> Offline';
+              updateInnerHTMLIfChanged(meetStatus, '<span class="status-dot offline"></span> Offline');
               meetCard?.classList.add('service-offline');
-              meetDetails.innerHTML = '<div class="service-row"><span>Status</span><span>Not running</span></div>';
+              updateInnerHTMLIfChanged(meetDetails, '<div class="service-row"><span>Status</span><span>Not running</span></div>');
             }
           }
 
@@ -11845,13 +14442,13 @@ print(result)
           const mcpCard = document.getElementById('mcpServiceCard');
 
           if (message.mcp && message.mcp.running) {
-            mcpStatus.innerHTML = '<span class="status-dot online"></span> Running';
+            updateInnerHTMLIfChanged(mcpStatus, '<span class="status-dot online"></span> Running');
             mcpCard?.classList.remove('service-offline');
-            mcpDetails.innerHTML = '<div class="service-row"><span>PID</span><span>' + (message.mcp.pid || '-') + '</span></div>';
+            updateInnerHTMLIfChanged(mcpDetails, '<div class="service-row"><span>PID</span><span>' + (message.mcp.pid || '-') + '</span></div>');
           } else {
-            mcpStatus.innerHTML = '<span class="status-dot offline"></span> Stopped';
+            updateInnerHTMLIfChanged(mcpStatus, '<span class="status-dot offline"></span> Stopped');
             mcpCard?.classList.add('service-offline');
-            mcpDetails.innerHTML = '<div class="service-row"><span>Status</span><span>Not running</span></div>';
+            updateInnerHTMLIfChanged(mcpDetails, '<div class="service-row"><span>Status</span><span>Not running</span></div>');
           }
         }
 
@@ -11925,7 +14522,44 @@ print(result)
             case 'changePersonaViewMode':
               vscode.postMessage({ command: 'changePersonaViewMode', value: btn.getAttribute('data-value') });
               break;
+            case 'setSlackTarget':
+              setSlackTarget(btn.getAttribute('data-value'));
+              break;
+            case 'refreshSlackTargets':
+              refreshSlackTargets();
+              break;
+            case 'clearSlackUser':
+              clearSlackUser();
+              break;
             default: break; // Unknown action
+          }
+        });
+
+        // Slack user search input
+        const slackUserSearchInput = document.getElementById('slackUserSearch');
+        if (slackUserSearchInput) {
+          slackUserSearchInput.addEventListener('input', (e) => {
+            const query = e.target.value;
+            if (query.length >= 2) {
+              searchSlackUsers(query);
+            } else {
+              document.getElementById('slackUserResults').style.display = 'none';
+            }
+          });
+          slackUserSearchInput.addEventListener('focus', () => {
+            const query = slackUserSearchInput.value;
+            if (query.length >= 2) {
+              searchSlackUsers(query);
+            }
+          });
+        }
+
+        // Hide user dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+          const userContainer = document.getElementById('slackUserContainer');
+          const userResults = document.getElementById('slackUserResults');
+          if (userContainer && userResults && !userContainer.contains(e.target)) {
+            userResults.style.display = 'none';
           }
         });
 
@@ -12143,6 +14777,9 @@ print(result)
 
         // Meetings Tab Functions
         ${getMeetingsTabScript()}
+
+        // Sprint Tab Functions
+        ${getSprintTabScript()}
 
       </script>
     </body>

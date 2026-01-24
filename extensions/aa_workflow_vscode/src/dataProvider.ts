@@ -13,11 +13,69 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { spawn, SpawnOptions } from "child_process";
 import { getConfigPath, getMemoryDir } from "./paths";
+import { createLogger } from "./logger";
 
-const execAsync = promisify(exec);
+const logger = createLogger("DataProvider");
+
+/**
+ * Execute a command using spawn with bash --norc --noprofile to avoid sourcing
+ * .bashrc.d scripts (which can trigger Bitwarden password prompts).
+ *
+ * This replaces exec() which spawns an interactive shell by default.
+ */
+async function execAsync(command: string, options?: { timeout?: number; cwd?: string }): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    // Use bash with --norc --noprofile to prevent sourcing any startup files
+    // -c tells bash to execute the following command string
+    const proc = spawn('/bin/bash', ['--norc', '--noprofile', '-c', command], {
+      cwd: options?.cwd,
+      env: {
+        ...process.env,
+        // Extra safety: clear env vars that could trigger rc file sourcing
+        BASH_ENV: '',
+        ENV: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let killed = false;
+
+    // Handle timeout
+    const timeout = options?.timeout || 30000;
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill('SIGTERM');
+      reject(new Error(`Command timed out after ${timeout}ms`));
+    }, timeout);
+
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) return;
+
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const error = new Error(`Command failed with exit code ${code}: ${stderr}`);
+        (error as any).code = code;
+        (error as any).stdout = stdout;
+        (error as any).stderr = stderr;
+        reject(error);
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
 
 export interface SlackStatus {
   online: boolean;
@@ -115,23 +173,48 @@ export class WorkflowDataProvider {
       "workspace_states.json"
     );
 
-    // Load config for URLs
-    this.loadConfig();
+    // Load config for URLs via D-Bus (async, will update when ready)
+    this.loadConfigAsync();
 
     // Load workspace info
     this.loadWorkspaceInfo();
   }
 
-  private loadConfig() {
+  private async loadConfigAsync() {
     try {
-      if (fs.existsSync(this.configPath)) {
-        const config = JSON.parse(fs.readFileSync(this.configPath, "utf-8"));
-        this.jiraUrl = config.jira?.url || this.jiraUrl;
-        this.gitlabUrl = config.gitlab?.url || this.gitlabUrl;
+      // Query config via D-Bus (uses ConfigManager for thread-safe access)
+      const jiraResult = await this.queryDBusConfig("jira", "url");
+      if (jiraResult) {
+        this.jiraUrl = jiraResult;
       }
-    } catch (e) {
-      console.error("Failed to load config:", e);
+
+      const gitlabResult = await this.queryDBusConfig("gitlab", "url");
+      if (gitlabResult) {
+        this.gitlabUrl = gitlabResult;
+      }
+    } catch (e: any) {
+      logger.log(`Failed to load config via D-Bus, using defaults: ${e?.message || e}`);
     }
+  }
+
+  private async queryDBusConfig(section: string, key: string): Promise<string | null> {
+    try {
+      const cmd = `dbus-send --session --print-reply --dest=com.aiworkflow.CronScheduler /com/aiworkflow/CronScheduler com.aiworkflow.CronScheduler.CallMethod string:"get_config" string:'${JSON.stringify({ section, key })}'`;
+      const { stdout } = await execAsync(cmd, { timeout: 5000 });
+
+      // Parse D-Bus output to extract JSON result
+      const jsonMatch = stdout.match(/string\s+"(\{[\s\S]*\})"/);
+      if (jsonMatch) {
+        const result = JSON.parse(jsonMatch[1]);
+        if (result.success && result.value !== null) {
+          return result.value;
+        }
+      }
+    } catch (e: any) {
+      // D-Bus not available or cron daemon not running - this is OK
+      logger.log(`D-Bus config query failed for ${section}.${key}: ${e?.message || e}`);
+    }
+    return null;
   }
 
   public getStatus(): WorkflowStatus {
@@ -160,7 +243,7 @@ export class WorkflowDataProvider {
 
           // Find matching workspace state
           let workspaceState = workspaces[currentUri] || workspaces[fileUri];
-          
+
           if (!workspaceState) {
             // Try to find by path match
             for (const [uri, state] of Object.entries(workspaces)) {
@@ -184,8 +267,8 @@ export class WorkflowDataProvider {
               workspace_uri: (workspaceState as any).workspace_uri,
               // Use session's project if available, fall back to workspace project
               project: activeSession?.project || (workspaceState as any).project,
-              auto_detected_project: activeSession?.is_project_auto_detected 
-                ? activeSession.project 
+              auto_detected_project: activeSession?.is_project_auto_detected
+                ? activeSession.project
                 : ((workspaceState as any).is_auto_detected ? (workspaceState as any).project : undefined),
               issue_key: activeSession?.issue_key || (workspaceState as any).issue_key,
               branch: activeSession?.branch || (workspaceState as any).branch,
