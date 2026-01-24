@@ -334,7 +334,7 @@ class CaptionCapture {
     this.lastText = '';
     this.observer = null;
   }
-  
+
   start() {
     // Google Meet caption container selector (may change - needs monitoring)
     const captionSelectors = [
@@ -342,7 +342,7 @@ class CaptionCapture {
       '[data-message-text]', // Alternative selector
       '.iTTPOb'           // Caption text spans
     ];
-    
+
     this.observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         if (mutation.type === 'childList' || mutation.type === 'characterData') {
@@ -350,36 +350,36 @@ class CaptionCapture {
         }
       }
     });
-    
+
     // Observe the entire body for caption changes
     this.observer.observe(document.body, {
       childList: true,
       subtree: true,
       characterData: true
     });
-    
+
     console.log('[CaptionCapture] Started monitoring captions');
   }
-  
+
   extractCaption() {
     // Try multiple selectors (Google changes these periodically)
-    const captionEl = document.querySelector('.a4cQT') || 
+    const captionEl = document.querySelector('.a4cQT') ||
                       document.querySelector('[data-message-text]');
-    
+
     if (captionEl) {
       const speakerEl = captionEl.querySelector('.zs7s8d'); // Speaker name
       const textEl = captionEl.querySelector('.iTTPOb');    // Caption text
-      
+
       const speaker = speakerEl?.textContent?.trim() || 'Unknown';
       const text = textEl?.textContent?.trim() || '';
-      
+
       if (text && text !== this.lastText) {
         this.lastText = text;
         this.onCaption({ speaker, text, timestamp: Date.now() });
       }
     }
   }
-  
+
   stop() {
     if (this.observer) {
       this.observer.disconnect();
@@ -429,13 +429,13 @@ class TranscriptionManager:
         self.last_caption_time = 0
         self.fallback_threshold_ms = 5000  # 5 seconds without captions
         self.whisper_model = None  # Lazy load
-        
+
     async def on_caption(self, caption: dict):
         """Called when caption is captured from DOM"""
         self.caption_active = True
         self.last_caption_time = time.time() * 1000
         await self.process_transcription(caption['text'], caption['speaker'], source='caption')
-        
+
     async def check_fallback(self):
         """Check if we need to fall back to local STT"""
         now = time.time() * 1000
@@ -443,7 +443,7 @@ class TranscriptionManager:
             print("[TranscriptionManager] Captions stopped, switching to Whisper fallback")
             self.caption_active = False
             await self.start_whisper_fallback()
-            
+
     async def start_whisper_fallback(self):
         """Initialize and start local Whisper STT on NPU"""
         if self.whisper_model is None:
@@ -490,10 +490,10 @@ class WakeWordDetector:
         self.listening = False
         self.last_text_time = 0
         self.pause_threshold_ms = 2500  # 2.5 seconds of silence = end of query
-        
+
     def process_caption(self, text: str, timestamp: int) -> dict | None:
         """Process caption text, return context when query complete"""
-        
+
         # Check for wake word
         if self.pattern.search(text):
             self.listening = True
@@ -504,15 +504,15 @@ class WakeWordDetector:
                 self.context_buffer.append(parts[1].strip())
             self.last_text_time = timestamp
             return None
-            
+
         # If listening, accumulate context
         if self.listening:
             self.context_buffer.append(text)
             self.last_text_time = timestamp
             return None
-            
+
         return None
-        
+
     def check_pause(self, current_time: int) -> str | None:
         """Check if speaker has paused (query complete)"""
         if self.listening and self.context_buffer:
@@ -529,7 +529,7 @@ detector = WakeWordDetector("david")
 # From caption stream
 for caption in caption_stream:
     detector.process_caption(caption['text'], caption['timestamp'])
-    
+
     # Check for pause every 500ms
     query = detector.check_pause(time.time() * 1000)
     if query:
@@ -561,7 +561,7 @@ class AudioWakeWordFallback:
             keyword_paths=[keyword_path],
             sensitivities=[0.7]
         )
-        
+
     def process_audio(self, pcm_frame) -> bool:
         """Returns True if wake word detected"""
         keyword_index = self.porcupine.process(pcm_frame)
@@ -609,7 +609,7 @@ async def preload_jira_context():
 - Status update focused
 
 ```python
-SYSTEM_PROMPT = """You are David's meeting assistant. You have access to his Jira 
+SYSTEM_PROMPT = """You are David's meeting assistant. You have access to his Jira
 sprint data and can provide brief status updates.
 
 RULES:
@@ -642,7 +642,7 @@ clips:
       text: "Good morning"
       duration_ms: 1000
       emotion: cheerful
-      
+
   transitions:
     let_me_check:
       path: "transitions/let_me_check.mp4"
@@ -654,7 +654,7 @@ clips:
       text: "One moment please"
       duration_ms: 1200
       emotion: neutral
-      
+
   status_templates:
     in_progress:
       path: "status/in_progress.mp4"
@@ -671,7 +671,7 @@ clips:
       text: "It's blocked at the moment"
       duration_ms: 1500
       emotion: concerned
-      
+
   fillers:
     thinking:
       path: "fillers/thinking.mp4"
@@ -708,7 +708,7 @@ class RealTimeAvatar:
     def __init__(self):
         self.wav2lip = load_wav2lip_model()  # ~1.5GB VRAM
         self.face_image = load_face("avatar/headshot.png")
-        
+
     async def generate_frame(self, audio_chunk):
         # 256×256 @ 25 FPS, ~3-4GB total VRAM
         mel = audio_to_mel(audio_chunk)
@@ -724,37 +724,37 @@ class HybridVideoOutput:
         self.clips = clip_library
         self.realtime = realtime_avatar
         self.gpu_monitor = GPUMonitor()
-        
+
     async def generate_response(self, text: str, audio: bytes):
         # 1. Check for exact/fuzzy match in clip library
         clip = self.clips.find_match(text, threshold=0.85)
-        
+
         if clip:
             # Use pre-generated clip (higher quality)
             return await self.play_clip(clip)
-            
+
         # 2. Check GPU availability
         if self.gpu_monitor.vram_available < 4.0:  # GB
             # GPU overloaded, use filler + queue
             await self.play_clip(self.clips.get("thinking"))
             # Queue real-time generation
-            
+
         # 3. Real-time generation
         return await self.realtime.generate(audio)
-        
+
     def find_match(self, text: str, threshold: float):
         """Fuzzy match against clip library"""
         from rapidfuzz import fuzz
-        
+
         best_match = None
         best_score = 0
-        
+
         for clip in self.clips.all():
             score = fuzz.ratio(text.lower(), clip.text.lower()) / 100
             if score > best_score and score >= threshold:
                 best_match = clip
                 best_score = score
-                
+
         return best_match
 ```
 
@@ -856,12 +856,12 @@ VS Code webviews **fully support** embedded video playback with interactive cont
   // Playlist management
   const playlist = ['greeting.mp4', 'idle.mp4', 'thinking.mp4'];
   let currentClip = 0;
-  
+
   document.getElementById('avatarVideo').addEventListener('ended', () => {
     currentClip = (currentClip + 1) % playlist.length;
     loadClip(playlist[currentClip]);
   });
-  
+
   function loadClip(clipName) {
     const video = document.getElementById('avatarVideo');
     video.src = clipPaths[clipName];
@@ -894,7 +894,7 @@ class HybridVideoPlayer {
     this.canvas = canvasEl;
     this.mode = 'clip'; // 'clip' or 'realtime'
   }
-  
+
   playClip(clipPath) {
     this.mode = 'clip';
     this.canvas.style.display = 'none';
@@ -902,14 +902,14 @@ class HybridVideoPlayer {
     this.video.src = clipPath;
     this.video.play();
   }
-  
+
   startRealtime() {
     this.mode = 'realtime';
     this.video.style.display = 'none';
     this.canvas.style.display = 'block';
     // Backend will send frames via postMessage
   }
-  
+
   renderFrame(base64Frame) {
     if (this.mode !== 'realtime') return;
     const ctx = this.canvas.getContext('2d');
@@ -962,7 +962,7 @@ interface ResponseItem {
 }
 
 // Message types for webview communication
-type MeetingMessage = 
+type MeetingMessage =
   | { command: 'avatarFrame'; frame: string }  // base64 JPEG
   | { command: 'transcription'; entry: TranscriptionEntry }
   | { command: 'meetingState'; state: ActiveMeeting }
@@ -982,22 +982,22 @@ class WebviewFrameStreamer:
     def __init__(self, websocket_url: str):
         self.ws = None
         self.frame_queue = asyncio.Queue()
-        
+
     async def connect(self):
         # Connect to VS Code extension's WebSocket server
         self.ws = await websockets.connect(self.websocket_url)
-        
+
     async def stream_frame(self, frame: np.ndarray):
         """Send a frame to the VS Code webview"""
         # Encode as JPEG for efficiency
         _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         base64_frame = base64.b64encode(buffer).decode('utf-8')
-        
+
         await self.ws.send(json.dumps({
             'command': 'avatarFrame',
             'frame': base64_frame
         }))
-        
+
     async def send_transcription(self, entry: dict):
         await self.ws.send(json.dumps({
             'command': 'transcription',
@@ -1245,5 +1245,14 @@ ffmpeg
 | Generated Audio | `~/.local/share/meet_bot/audio/` |
 | Generated Video | `~/.local/share/meet_bot/clips/` |
 | VS Code Extension | `extensions/aa_workflow_vscode/aa-workflow-0.1.0.vsix` |
+| **GPU Optimization Guide** | `docs/meet-bot-gpu-optimization.md` |
 
+## Related Documentation
 
+- **[GPU/NPU Optimization Guide](meet-bot-gpu-optimization.md)** - Deep technical details on:
+  - OpenGL text rendering pipeline
+  - OpenCL video processing and color conversion
+  - v4l2loopback virtual camera setup
+  - NPU Whisper STT integration
+  - Performance tuning and troubleshooting
+  - Why zero-copy NPU audio is not currently possible
