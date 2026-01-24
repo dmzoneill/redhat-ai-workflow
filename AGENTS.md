@@ -1,11 +1,11 @@
 <!--
-  ╔═══════════════════════════════════════════════════════════════════════════╗
-  ║  AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY                               ║
-  ║                                                                           ║
-  ║  Source: docs/ai-rules/                                                   ║
-  ║  Sync:   make sync-ai-rules                                               ║
-  ║  Generated: 2026-01-23 16:57:18                                            ║
-  ╚═══════════════════════════════════════════════════════════════════════════╝
+  AGENTS.md - Cross-tool AI assistant configuration
+
+  This file follows the agents.md standard for AI coding assistants.
+  Compatible with: Claude Code, Cursor, Codex, Amp, and others.
+
+  Source: docs/ai-rules/
+  Generated: 2026-01-23 16:57:18
 -->
 
 

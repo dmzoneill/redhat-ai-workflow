@@ -63,6 +63,10 @@ config.*-*
 # Copy config.json.example to config.json and customize
 config.json
 
+# Runtime state (service/job enabled flags)
+# Copy state.json.example to state.json and customize
+state.json
+
 # Session logs (personal work history)
 memory/sessions/*.yaml
 !memory/sessions/.gitkeep

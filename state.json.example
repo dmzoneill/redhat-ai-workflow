@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "services": {
+    "scheduler": {
+      "enabled": false
+    },
+    "sprint_bot": {
+      "enabled": false
+    },
+    "google_calendar": {
+      "enabled": false
+    },
+    "gmail": {
+      "enabled": false
+    }
+  },
+  "jobs": {
+    "morning_coffee": {
+      "enabled": false
+    },
+    "evening_beer": {
+      "enabled": false
+    },
+    "stale_pr_reminder": {
+      "enabled": false
+    },
+    "monthly_expense": {
+      "enabled": true
+    },
+    "morning_pr_review": {
+      "enabled": false
+    },
+    "daily_comment_monitor": {
+      "enabled": false
+    },
+    "sprint_bot_check": {
+      "enabled": false
+    }
+  },
+  "meetings": {
+    "overrides": {}
+  },
+  "last_updated": null
+}

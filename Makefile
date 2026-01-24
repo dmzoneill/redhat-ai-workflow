@@ -21,6 +21,7 @@
         integration-test integration-test-agent integration-test-fix integration-test-dry \
         skill-test skill-test-list skill-test-dry \
         docs-serve docs-check list-skills list-tools \
+        sync-ai-rules sync-ai-rules-dry sync-ai-rules-verbose \
         sync-commands sync-commands-dry sync-commands-reverse \
         sync-config-example sync-config-example-fix \
         ext-build ext-install ext-watch ext-clean ext-package \
@@ -104,6 +105,8 @@ help:
 	@printf "  \033[32mmake docs-check\033[0m         Check for missing skill docs\n"
 	@printf "\n"
 	@printf "\033[1mProject Tools (ptools):\033[0m\n"
+	@printf "  \033[32mmake sync-ai-rules\033[0m      Sync AI rules to .cursorrules, CLAUDE.md, AGENTS.md + commands\n"
+	@printf "  \033[32mmake sync-ai-rules-dry\033[0m  Preview AI rules sync without making changes\n"
 	@printf "  \033[32mmake sync-commands\033[0m      Sync Cursor commands to Claude Code format\n"
 	@printf "  \033[32mmake sync-commands-dry\033[0m  Preview sync without making changes\n"
 	@printf "  \033[32mmake sync-commands-reverse\033[0m  Sync Claude Code to Cursor format\n"
@@ -454,6 +457,19 @@ clean:
 # =============================================================================
 # PROJECT TOOLS (ptools)
 # =============================================================================
+
+# Sync AI rules from single source (docs/ai-rules/) to all targets
+sync-ai-rules:
+	@printf "\033[36mSyncing AI rules to all targets...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_ai_rules.py
+
+sync-ai-rules-dry:
+	@printf "\033[36mPreviewing AI rules sync (dry-run)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_ai_rules.py --dry-run
+
+sync-ai-rules-verbose:
+	@printf "\033[36mSyncing AI rules (verbose)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_ai_rules.py --verbose
 
 sync-commands:
 	@printf "\033[36mSyncing Cursor commands to Claude Code format...\033[0m\n"

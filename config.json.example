@@ -384,6 +384,7 @@
   },
   "agent": {
     "description": "Claude-powered agent configuration",
+    "default_persona": "researcher",
     "provider": "vertex",
     "model": "claude-sonnet-4-20250514",
     "vertex_model": "claude-sonnet-4-5@20250929",
@@ -537,13 +538,39 @@
         "id": "C_YOUR_TEAM_CHANNEL",
         "name": "your-team-channel",
         "description": "Team channel for notifications and updates",
-        "group_id": "S_YOUR_TEAM_GROUP_ID",
-        "group_handle": "your-team-handle"
+        "purpose": "Team discussions and notifications"
       },
       "standup": {
         "id": "C_YOUR_STANDUP_CHANNEL",
         "name": "your-standup-channel",
         "description": "Daily standup summaries"
+      },
+      "alerts_stage": {
+        "id": "C_YOUR_STAGE_ALERTS",
+        "name": "your-stage-alerts",
+        "description": "Stage environment alerts"
+      },
+      "alerts_prod": {
+        "id": "C_YOUR_PROD_ALERTS",
+        "name": "your-prod-alerts",
+        "description": "Production environment alerts"
+      }
+    },
+    "groups": {
+      "description": "User groups for @team mentions - maps group handles to IDs and members",
+      "your_team": {
+        "id": "S_YOUR_TEAM_GROUP_ID",
+        "handle": "your-team-handle",
+        "name": "Your Team",
+        "description": "Main team group for mentions",
+        "members": ["your_username", "teammate1"]
+      },
+      "oncall": {
+        "id": "S_YOUR_ONCALL_GROUP_ID",
+        "handle": "your-oncall",
+        "name": "On-Call Team",
+        "description": "Current on-call rotation",
+        "members": []
       }
     },
     "user_mapping": {
@@ -552,16 +579,34 @@
       "users": {
         "your_username": {
           "slack_id": "U_YOUR_USER_ID",
-          "name": "Your Name"
+          "name": "Your Name",
+          "email": "you@example.com",
+          "gitlab_username": "your_username"
         },
         "teammate1": {
           "slack_id": "U_TEAMMATE1_ID",
-          "name": "Teammate One"
+          "name": "Teammate One",
+          "email": "teammate1@example.com",
+          "gitlab_username": "teammate1"
         }
       },
       "bthomass": "U015ZKVG5T2",
       "akarve": "U018P2L0C6P",
       "daoneill": "U023CKSHHS4"
+    },
+    "interfaces": {
+      "description": "Configuration for D-Bus interface (primary IPC mechanism)",
+      "dbus": {
+        "enabled": true,
+        "service_name": "com.aiworkflow.SlackAgent",
+        "object_path": "/com/aiworkflow/SlackAgent"
+      }
+    },
+    "knowledge_cache": {
+      "description": "Settings for the channel/user/group knowledge cache",
+      "auto_refresh": true,
+      "refresh_interval_minutes": 60,
+      "cache_ttl_hours": 24
     },
     "state_db_path": "./slack_state.db",
     "debug": false
@@ -707,9 +752,288 @@
       "description": "When enabled, all notifications go to self_user_id"
     }
   },
+  "sprint": {
+    "description": "Sprint Bot Autopilot configuration - defines workflow, status mappings, and bot behavior. NOTE: enabled state is in state.json",
+    "auto_approve": false,
+    "max_concurrent_issues": 1,
+    "default_persona": "researcher",
+
+    "working_hours": {
+      "enabled": true,
+      "timezone": "America/New_York",
+      "start_hour": 9,
+      "start_minute": 0,
+      "end_hour": 17,
+      "end_minute": 0,
+      "weekdays_only": true,
+      "randomize_start": true,
+      "randomize_minutes": 15,
+      "description": "External actions only during Mon-Fri 9-5 to appear human"
+    },
+
+    "safety": {
+      "require_clean_worktree": true,
+      "auto_stash": true,
+      "skip_main_branch": true,
+      "never_run_shell_commands": true,
+      "description": "Safety guards to prevent data loss"
+    },
+
+    "scheduling": {
+      "issue_processing": {
+        "description": "Process approved issues",
+        "interval_seconds": 300,
+        "working_hours_only": true
+      },
+      "jira_refresh": {
+        "description": "Refresh sprint issues from Jira",
+        "interval_seconds": 1800
+      },
+      "review_check": {
+        "description": "Check issues in Review for merge readiness",
+        "interval_hours": 8
+      }
+    },
+
+    "notifications": {
+      "channel": "your-team-channel",
+      "dm_on_clarification": true,
+      "dm_on_question_response": true,
+      "dm_on_mr_created": true,
+      "on_work_started": {
+        "enabled": false,
+        "skill": "notify_team",
+        "message": "Started work on {{ issue.key }}"
+      },
+      "on_mr_created": {
+        "enabled": true,
+        "skill": "notify_mr"
+      },
+      "on_issue_closed": {
+        "enabled": true,
+        "skill": "notify_team",
+        "message": "Issue {{ issue.key }} completed",
+        "type": "success"
+      },
+      "on_blocked": {
+        "enabled": true,
+        "skill": "notify_team",
+        "message": "Issue {{ issue.key }} blocked: {{ blocker.reason }}",
+        "type": "warning"
+      },
+      "on_mr_merged": {
+        "enabled": true,
+        "skill": "notify_team",
+        "message": "MR merged for {{ issue.key }}",
+        "type": "success"
+      }
+    },
+
+    "jira": {
+      "project": "PROJ",
+      "comment_style": "natural",
+      "never_mention_bot": true,
+      "description": "Jira integration - all comments written naturally, never mention automation"
+    },
+
+    "prioritization": {
+      "points_weight": 0.3,
+      "priority_weight": 0.4,
+      "age_weight": 0.2,
+      "type_weight": 0.1,
+      "description": "Weights for issue prioritization scoring"
+    },
+
+    "status_mappings": {
+      "not_ready": {
+        "display_name": "Not Ready",
+        "icon": "⚠️",
+        "color": "yellow",
+        "description": "Need refinement before bot can work",
+        "jira_statuses": ["new", "refinement", "triage", "backlog refinement"],
+        "bot_can_work": false,
+        "ui_order": 1
+      },
+      "ready": {
+        "display_name": "Ready",
+        "icon": "📋",
+        "color": "blue",
+        "description": "Refined and ready for bot to implement",
+        "jira_statuses": ["to do", "open", "backlog", "ready", "selected for development", "ready for development"],
+        "bot_can_work": true,
+        "ui_order": 2,
+        "show_approve_buttons": true
+      },
+      "in_progress": {
+        "display_name": "In Progress",
+        "icon": "🔄",
+        "color": "blue",
+        "description": "Currently being worked on",
+        "jira_statuses": ["in progress", "in development", "development", "coding", "implementing"],
+        "bot_can_work": false,
+        "ui_order": 3
+      },
+      "review": {
+        "display_name": "Review",
+        "icon": "👀",
+        "color": "purple",
+        "description": "Awaiting code review",
+        "jira_statuses": ["review", "code review", "peer review", "in review", "awaiting review", "ready for review"],
+        "bot_can_work": false,
+        "bot_monitors": true,
+        "ui_order": 4
+      },
+      "done": {
+        "display_name": "Done",
+        "icon": "✅",
+        "color": "green",
+        "description": "Completed",
+        "jira_statuses": ["done", "closed", "resolved", "released", "won't do", "won't fix", "duplicate", "release pending", "verified", "complete"],
+        "bot_can_work": false,
+        "ui_order": 5
+      }
+    },
+
+    "jira_transitions": {
+      "in_progress": "In Progress",
+      "in_review": "In Review",
+      "done": "Done",
+      "blocked": "Blocked"
+    },
+
+    "issue_classification": {
+      "spike": {
+        "name": "Spike/Research",
+        "description": "Research task - no code changes, document findings",
+        "issue_types": ["spike", "research", "investigation", "technical task", "tech debt"],
+        "keywords": ["research", "investigate", "spike", "poc", "proof of concept", "exploration", "feasibility", "analysis", "evaluate", "assess", "study"],
+        "workflow": {
+          "persona": "researcher",
+          "creates_mr": false,
+          "final_status": "done"
+        }
+      },
+      "code_change": {
+        "name": "Code Change",
+        "description": "Implementation task - requires code changes and MR",
+        "default": true,
+        "issue_types": ["story", "task", "bug", "feature", "improvement", "sub-task", "enhancement", "defect"],
+        "workflow": {
+          "persona": "developer",
+          "creates_mr": true,
+          "final_status": "review"
+        }
+      }
+    },
+
+    "commit_format": {
+      "pattern": "{issue_key} - {type}({scope}): {description}",
+      "types": ["feat", "fix", "refactor", "docs", "test", "chore", "perf", "style"],
+      "example": "PROJ-12345 - feat(api): add new endpoint for user preferences"
+    },
+
+    "blocker_detection": {
+      "missing_info": {
+        "name": "Missing Information",
+        "description": "Required information is missing from the issue",
+        "indicators": ["acceptance criteria is empty", "description is empty", "no clear requirements", "requirements unclear", "need more details"],
+        "action": "ask_for_clarification"
+      },
+      "unclear_requirements": {
+        "name": "Unclear Requirements",
+        "description": "Requirements are ambiguous or conflicting",
+        "indicators": ["multiple interpretations possible", "conflicting requirements", "ambiguous acceptance criteria"],
+        "action": "ask_for_clarification"
+      },
+      "external_dependency": {
+        "name": "External Dependency",
+        "description": "Waiting on external team or system",
+        "indicators": ["waiting for api", "blocked by another team", "dependency not ready", "waiting for design", "waiting for approval"],
+        "action": "mark_blocked"
+      },
+      "technical_blocker": {
+        "name": "Technical Blocker",
+        "description": "Technical issue preventing progress",
+        "indicators": ["cannot find relevant code", "tests failing unexpectedly", "environment issue", "build failing", "cannot reproduce"],
+        "action": "mark_blocked"
+      }
+    },
+
+    "merge_hold_patterns": [
+      "don't merge", "do not merge", "dont merge", "hold off", "hold merge",
+      "wait until", "don't merge until", "do not merge until", "needs more work",
+      "wip", "work in progress", "not ready", "hold for", "pending", "blocked",
+      "needs changes", "request changes"
+    ],
+
+    "project_detection": {
+      "my-backend": {
+        "display_name": "Backend",
+        "gitlab_project": "your-org/my-backend",
+        "keywords": ["backend", "api", "database", "migration", "endpoint"],
+        "default": true
+      },
+      "my-frontend": {
+        "display_name": "Frontend",
+        "gitlab_project": "your-org/my-frontend",
+        "keywords": ["frontend", "ui", "dashboard", "react", "component", "page", "view"]
+      }
+    },
+
+    "state_machine": {
+      "states": {
+        "idle": {"description": "Not started", "icon": "⏸️", "type": "initial"},
+        "loading": {"description": "Loading issue from Jira", "icon": "📥", "type": "processing"},
+        "analyzing": {"description": "Analyzing issue details", "icon": "🔍", "type": "processing"},
+        "classifying": {"description": "Determining work type (spike vs code)", "icon": "🏷️", "type": "decision"},
+        "checking_actionable": {"description": "Checking if bot can work on this", "icon": "✅", "type": "decision"},
+        "transitioning_jira": {"description": "Updating Jira status", "icon": "🔄", "type": "processing"},
+        "starting_work": {"description": "Creating feature branch", "icon": "🌿", "type": "processing"},
+        "researching": {"description": "Searching codebase for context", "icon": "🔬", "type": "processing"},
+        "building_prompt": {"description": "Preparing work instructions", "icon": "📝", "type": "processing"},
+        "launching_chat": {"description": "Opening Cursor chat", "icon": "💬", "type": "processing"},
+        "implementing": {"description": "Making code changes", "icon": "⚙️", "type": "processing"},
+        "documenting": {"description": "Documenting research findings", "icon": "📄", "type": "processing"},
+        "creating_mr": {"description": "Creating merge request", "icon": "🔀", "type": "processing"},
+        "awaiting_review": {"description": "Waiting for code review", "icon": "👀", "type": "waiting"},
+        "merging": {"description": "Merging approved MR", "icon": "🔗", "type": "processing"},
+        "closing": {"description": "Closing Jira issue", "icon": "🏁", "type": "processing"},
+        "blocked": {"description": "Blocked - waiting for input", "icon": "🚧", "type": "waiting"},
+        "completed": {"description": "Successfully completed", "icon": "✅", "type": "terminal"},
+        "failed": {"description": "Failed with error", "icon": "❌", "type": "terminal"}
+      },
+      "transitions": {
+        "idle": [{"to": "loading", "trigger": "start_processing"}],
+        "loading": [{"to": "analyzing", "trigger": "issue_loaded"}, {"to": "failed", "trigger": "load_error"}],
+        "analyzing": [{"to": "classifying", "trigger": "analysis_complete"}, {"to": "blocked", "trigger": "missing_info"}, {"to": "failed", "trigger": "analysis_error"}],
+        "classifying": [{"to": "checking_actionable", "trigger": "classified"}, {"to": "failed", "trigger": "classification_error"}],
+        "checking_actionable": [{"to": "transitioning_jira", "trigger": "is_actionable"}, {"to": "blocked", "trigger": "not_actionable"}, {"to": "failed", "trigger": "check_error"}],
+        "transitioning_jira": [{"to": "starting_work", "trigger": "transitioned_code_change"}, {"to": "researching", "trigger": "transitioned_spike"}, {"to": "failed", "trigger": "transition_error"}],
+        "starting_work": [{"to": "building_prompt", "trigger": "branch_created"}, {"to": "blocked", "trigger": "branch_error"}, {"to": "failed", "trigger": "start_error"}],
+        "researching": [{"to": "documenting", "trigger": "research_complete_spike"}, {"to": "building_prompt", "trigger": "research_complete_code"}, {"to": "blocked", "trigger": "research_blocked"}, {"to": "failed", "trigger": "research_error"}],
+        "building_prompt": [{"to": "launching_chat", "trigger": "prompt_ready_foreground"}, {"to": "implementing", "trigger": "prompt_ready_background"}, {"to": "failed", "trigger": "prompt_error"}],
+        "launching_chat": [{"to": "implementing", "trigger": "chat_launched"}, {"to": "failed", "trigger": "launch_error"}],
+        "implementing": [{"to": "creating_mr", "trigger": "implementation_complete"}, {"to": "blocked", "trigger": "implementation_blocked"}, {"to": "completed", "trigger": "spike_documented"}, {"to": "failed", "trigger": "implementation_error"}],
+        "documenting": [{"to": "closing", "trigger": "documentation_complete"}, {"to": "blocked", "trigger": "documentation_blocked"}, {"to": "failed", "trigger": "documentation_error"}],
+        "creating_mr": [{"to": "awaiting_review", "trigger": "mr_created"}, {"to": "blocked", "trigger": "mr_creation_blocked"}, {"to": "failed", "trigger": "mr_error"}],
+        "awaiting_review": [{"to": "merging", "trigger": "approved_and_ready"}, {"to": "blocked", "trigger": "review_blocked"}, {"to": "implementing", "trigger": "changes_requested"}],
+        "merging": [{"to": "closing", "trigger": "merged"}, {"to": "failed", "trigger": "merge_error"}],
+        "closing": [{"to": "completed", "trigger": "closed"}, {"to": "failed", "trigger": "close_error"}],
+        "blocked": [{"to": "analyzing", "trigger": "unblocked_retry"}, {"to": "implementing", "trigger": "unblocked_continue"}, {"to": "completed", "trigger": "manually_completed"}],
+        "failed": [{"to": "idle", "trigger": "retry"}]
+      }
+    },
+
+    "bot_behavior": {
+      "forbidden_phrases": ["bot", "automated", "automatically", "sprint bot", "ai assistant"],
+      "max_work_time_minutes": 30,
+      "blocked_retry_hours": 24,
+      "auto_approve_labels": ["auto-approve", "bot-approved"],
+      "skip_labels": ["do-not-automate", "manual-only", "blocked"]
+    }
+  },
   "google_calendar": {
-    "enabled": false,
-    "description": "Google Calendar integration for meetings",
+    "description": "Google Calendar integration for meetings. NOTE: enabled state is in state.json",
     "config_dir": "~/.config/google_calendar",
     "credentials_file": "credentials.json",
     "token_file": "token.json",
@@ -752,8 +1076,7 @@
     ]
   },
   "gmail": {
-    "enabled": false,
-    "description": "Gmail integration for /coffee morning briefing",
+    "description": "Gmail integration for /coffee morning briefing. NOTE: enabled state is in state.json",
     "uses_same_oauth": true,
     "oauth_note": "Uses same token as google_calendar - add Gmail API scopes",
     "required_scopes": [
@@ -830,6 +1153,64 @@
       "/home/YOUR_USER/src",
       "/home/YOUR_USER/repos",
       "/home/YOUR_USER/projects"
+    ]
+  },
+  "schedules": {
+    "description": "Cron-based task scheduling for automated workflows. NOTE: enabled state is in state.json",
+    "timezone": "America/New_York",
+    "execution_mode": "claude_cli",
+    "default_retry": {
+      "max_attempts": 2,
+      "backoff": "exponential",
+      "initial_delay_seconds": 30,
+      "max_delay_seconds": 300,
+      "retry_on": ["auth", "network"]
+    },
+    "jobs": [
+      {
+        "name": "morning_coffee",
+        "description": "Morning briefing at 8:30 AM on weekdays",
+        "skill": "coffee",
+        "cron": "30 8 * * 1-5",
+        "persona": "developer",
+        "inputs": {},
+        "notify": ["slack", "desktop"]
+      },
+      {
+        "name": "evening_beer",
+        "description": "End of day wrap-up at 5:30 PM on weekdays",
+        "skill": "beer",
+        "cron": "30 17 * * 1-5",
+        "persona": "developer",
+        "inputs": {
+          "generate_standup": true,
+          "cleanup_prompts": true
+        },
+        "notify": ["slack"]
+      },
+      {
+        "name": "daily_comment_monitor",
+        "description": "Check Jira comments for questions at 9 AM on weekdays",
+        "skill": "monitor_jira_comments",
+        "cron": "0 9 * * 1-5",
+        "persona": "developer",
+        "inputs": {
+          "jira_project": "AAP",
+          "hours_lookback": 24,
+          "notify_user": true
+        },
+        "notify": ["slack"]
+      },
+      {
+        "name": "sprint_bot_check",
+        "description": "Sprint bot check every 30 minutes during working hours",
+        "skill": "sprint_autopilot",
+        "cron": "*/30 9-17 * * 1-5",
+        "persona": "developer",
+        "inputs": {},
+        "notify": [],
+        "condition": "sprint.enabled && sprint.bot_enabled"
+      }
     ]
   }
 }

@@ -60,6 +60,9 @@ dependencies = [
     # Scheduler
     "apscheduler>=3.10.0",
     "croniter>=2.0.0",
+
+    # WebSocket server for real-time skill updates
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
