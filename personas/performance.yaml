@@ -1,0 +1,27 @@
+# Performance Persona Configuration
+# Focused on PSE competency tracking and quarterly performance reviews
+
+name: performance
+description: PSE competency tracking, quarterly reviews, and performance reporting
+persona: personas/performance.md
+
+# Tool modules to load (from tool_modules/aa_*)
+tools:
+  - workflow        # Core (memory, persona, session, skill)
+  - performance     # PSE competency tracking and quarterly performance
+  - jira_basic      # For fetching resolved issues (read-only)
+  - gitlab_basic    # For fetching merged MRs (read-only)
+  - git_basic       # For fetching commits (read-only)
+
+skills:
+  # Daily collection
+  - performance/collect_daily    # Collect daily performance data from all sources
+  - performance/backfill_missing # Backfill missing weekdays
+
+  # Quarterly review
+  - performance/evaluate_questions # AI evaluation of quarterly questions
+  - performance/export_report      # Export quarterly report for manager review
+
+  # Analysis
+  - coffee              # Morning briefing includes performance summary
+  - weekly_summary      # Weekly work summary
