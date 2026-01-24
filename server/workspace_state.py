@@ -49,6 +49,22 @@ DEFAULT_WORKSPACE = "default"
 # Default project when none detected
 DEFAULT_PROJECT = "redhat-ai-workflow"
 
+
+def get_default_persona() -> str:
+    """Get the default persona from config, with fallback to 'researcher'.
+
+    This centralizes the default persona logic so it can be changed in one place.
+    Reads from config.json agent.default_persona setting.
+    """
+    try:
+        from server.utils import load_config
+
+        cfg = load_config()
+        return cfg.get("agent", {}).get("default_persona", "researcher")
+    except Exception:
+        return "researcher"
+
+
 # Session stale timeout (hours) - sessions inactive for longer are cleaned up
 SESSION_STALE_HOURS = 24
 
@@ -230,6 +246,7 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
 
                     # Return relevant fields for active chats, sorted by lastUpdatedAt
                     # Keep name as None if Cursor hasn't set one yet (don't default to "unnamed")
+                    # Filter out "ghost" chats: no name AND no lastUpdatedAt (never used)
                     chats = [
                         {
                             "composerId": c.get("composerId"),
@@ -241,6 +258,8 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
                         }
                         for c in all_composers
                         if not c.get("isArchived") and not c.get("isDraft")
+                        # Exclude ghost chats: no name AND no lastUpdatedAt (never actually used)
+                        and not (c.get("name") is None and c.get("lastUpdatedAt") is None)
                     ]
                     return sorted(chats, key=lambda x: x["lastUpdatedAt"], reverse=True), active_chat_id
 
@@ -300,7 +319,7 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
             ["sqlite3", str(global_db), query],
             capture_output=True,
             text=True,
-            timeout=30  # Longer timeout for large DB
+            timeout=30,  # Longer timeout for large DB
         )
 
         if result.returncode != 0:
@@ -309,19 +328,19 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
 
         # Parse results and collect all unique issue keys per chat
         chat_issue_sets: dict[str, set[str]] = {}
-        issue_pattern = re.compile(r'AAP-\d{4,7}', re.IGNORECASE)
+        issue_pattern = re.compile(r"AAP-\d{4,7}", re.IGNORECASE)
 
-        for line in result.stdout.strip().split('\n'):
-            if not line or '|' not in line:
+        for line in result.stdout.strip().split("\n"):
+            if not line or "|" not in line:
                 continue
             try:
-                key, value = line.split('|', 1)
+                key, value = line.split("|", 1)
                 # Extract chat ID from key: bubbleId:<chatId>:<bubbleId>
-                parts = key.split(':')
+                parts = key.split(":")
                 if len(parts) >= 2:
                     chat_id = parts[1]
                     data = json.loads(value)
-                    text = data.get('text', '')
+                    text = data.get("text", "")
                     if text:
                         matches = issue_pattern.findall(text)
                         if matches:
@@ -337,7 +356,7 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
         for chat_id, issues in chat_issue_sets.items():
             if issues:
                 # Sort by the numeric part of the issue key
-                sorted_issues = sorted(issues, key=lambda x: int(x.split('-')[1]))
+                sorted_issues = sorted(issues, key=lambda x: int(x.split("-")[1]))
                 result_map[chat_id] = ", ".join(sorted_issues)
 
         if result_map:
@@ -350,6 +369,139 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
         return {}
     except Exception as e:
         logger.warning(f"Error scanning Cursor chats for issue keys: {e}")
+        return {}
+
+
+def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str]:
+    """Scan Cursor chat content to detect the last persona loaded in each chat.
+
+    Looks for patterns like:
+    - persona_load("developer") or persona_load('developer')
+    - session_start(agent="devops") or session_start(agent='devops')
+    - "Loaded persona: developer" (tool output)
+    - "Persona:** `developer`" (session_start output)
+
+    Args:
+        chat_ids: Optional list of chat IDs to scan. If None, scans all chats.
+
+    Returns:
+        Dict mapping chat ID to the last detected persona name.
+    """
+    import re
+    import subprocess
+
+    # Valid persona names (from personas/ directory)
+    VALID_PERSONAS = {
+        "admin",
+        "code",
+        "developer",
+        "devops",
+        "incident",
+        "meetings",
+        "observability",
+        "performance",
+        "project",
+        "release",
+        "researcher",
+        "workspace",
+        "slack",
+        "core",
+        "universal",
+    }
+
+    try:
+        global_db = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "state.vscdb"
+        if not global_db.exists():
+            logger.debug("Cursor global storage not found")
+            return {}
+
+        # Build query - look for persona-related content
+        if chat_ids:
+            like_clauses = " OR ".join(f"key LIKE 'bubbleId:{cid}:%'" for cid in chat_ids)
+            query = f"""SELECT key, value FROM cursorDiskKV
+                       WHERE ({like_clauses})
+                       AND (value LIKE '%persona%' OR value LIKE '%agent=%' OR value LIKE '%Persona%')"""
+        else:
+            query = """SELECT key, value FROM cursorDiskKV
+                      WHERE key LIKE 'bubbleId:%'
+                      AND (value LIKE '%persona%' OR value LIKE '%agent=%' OR value LIKE '%Persona%')"""
+
+        result = subprocess.run(["sqlite3", str(global_db), query], capture_output=True, text=True, timeout=30)
+
+        if result.returncode != 0:
+            logger.debug(f"Failed to query Cursor global DB for personas: {result.stderr}")
+            return {}
+
+        # Patterns to detect persona loads (ordered by specificity)
+        patterns = [
+            # persona_load("developer") or persona_load('developer')
+            re.compile(r'persona_load\s*\(\s*["\'](\w+)["\']', re.IGNORECASE),
+            # session_start(agent="devops") or agent='devops'
+            re.compile(r'agent\s*=\s*["\'](\w+)["\']', re.IGNORECASE),
+            # "Loaded persona: developer" or "Switched to persona: developer"
+            re.compile(r'(?:Loaded|Switched to)\s+persona[:\s]+[`"\']?(\w+)[`"\']?', re.IGNORECASE),
+            # "**Persona:** `developer`" (markdown output from session_start)
+            re.compile(r"\*\*Persona:\*\*\s*`(\w+)`", re.IGNORECASE),
+            # "Persona: developer" (plain text)
+            re.compile(r'Persona:\s*[`"\']?(\w+)[`"\']?', re.IGNORECASE),
+        ]
+
+        # Collect all persona mentions per chat with their position (to find last one)
+        # Structure: {chat_id: [(position, persona), ...]}
+        chat_personas: dict[str, list[tuple[int, str]]] = {}
+
+        for line in result.stdout.strip().split("\n"):
+            if not line or "|" not in line:
+                continue
+            try:
+                key, value = line.split("|", 1)
+                # Extract chat ID and bubble ID from key: bubbleId:<chatId>:<bubbleId>
+                parts = key.split(":")
+                if len(parts) >= 3:
+                    chat_id = parts[1]
+                    try:
+                        # Use bubble ID as position indicator (higher = later in chat)
+                        bubble_id = int(parts[2]) if parts[2].isdigit() else 0
+                    except (ValueError, IndexError):
+                        bubble_id = 0
+
+                    data = json.loads(value)
+                    text = data.get("text", "")
+                    if not text:
+                        continue
+
+                    # Try each pattern to find persona mentions
+                    for pattern in patterns:
+                        matches = pattern.findall(text)
+                        for match in matches:
+                            persona = match.lower()
+                            if persona in VALID_PERSONAS:
+                                if chat_id not in chat_personas:
+                                    chat_personas[chat_id] = []
+                                chat_personas[chat_id].append((bubble_id, persona))
+
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+        # Return the last (highest bubble_id) persona for each chat
+        result_map = {}
+        for chat_id, persona_list in chat_personas.items():
+            if persona_list:
+                # Sort by bubble_id (position) and take the last one
+                persona_list.sort(key=lambda x: x[0])
+                last_persona = persona_list[-1][1]
+                result_map[chat_id] = last_persona
+
+        if result_map:
+            logger.info(f"Detected personas in {len(result_map)} chat(s) from content")
+
+        return result_map
+
+    except subprocess.TimeoutExpired:
+        logger.warning("Timeout scanning Cursor DB for personas")
+        return {}
+    except Exception as e:
+        logger.warning(f"Error scanning Cursor chats for personas: {e}")
         return {}
 
 
@@ -389,7 +541,7 @@ def get_meeting_transcript_issue_keys(issue_keys: list[str] | None = None) -> di
         # Pattern 1: Standard AAP-XXXXX (with or without hyphen)
         # Pattern 2: "issue" or "ticket" followed by number
         # Pattern 3: Just "AAP" followed by number (spoken without hyphen)
-        
+
         # Query all transcript text with meeting info
         query = """
             SELECT t.meeting_id, t.text, m.title, m.scheduled_start
@@ -397,12 +549,9 @@ def get_meeting_transcript_issue_keys(issue_keys: list[str] | None = None) -> di
             JOIN meetings m ON t.meeting_id = m.id
             WHERE m.status = 'completed'
         """
-        
+
         result = subprocess.run(
-            ["sqlite3", "-separator", "|||", str(db_path), query],
-            capture_output=True,
-            text=True,
-            timeout=30
+            ["sqlite3", "-separator", "|||", str(db_path), query], capture_output=True, text=True, timeout=30
         )
 
         if result.returncode != 0:
@@ -412,24 +561,26 @@ def get_meeting_transcript_issue_keys(issue_keys: list[str] | None = None) -> di
         # Flexible patterns for spoken issue references
         patterns = [
             # Standard: AAP-12345 or AAP12345 or AAP 12345
-            re.compile(r'\bAAP[-\s]?(\d{4,7})\b', re.IGNORECASE),
+            re.compile(r"\bAAP[-\s]?(\d{4,7})\b", re.IGNORECASE),
             # Spoken: "issue 12345" or "issue number 12345"
-            re.compile(r'\bissue\s+(?:number\s+)?(\d{4,7})\b', re.IGNORECASE),
+            re.compile(r"\bissue\s+(?:number\s+)?(\d{4,7})\b", re.IGNORECASE),
             # Spoken: "ticket 12345"
-            re.compile(r'\bticket\s+(?:number\s+)?(\d{4,7})\b', re.IGNORECASE),
+            re.compile(r"\bticket\s+(?:number\s+)?(\d{4,7})\b", re.IGNORECASE),
             # Spoken: "jira 12345"
-            re.compile(r'\bjira\s+(?:issue\s+)?(?:number\s+)?(\d{4,7})\b', re.IGNORECASE),
+            re.compile(r"\bjira\s+(?:issue\s+)?(?:number\s+)?(\d{4,7})\b", re.IGNORECASE),
         ]
 
         # Track matches per meeting per issue
         # Structure: {issue_key: {meeting_id: {"title": ..., "date": ..., "count": N}}}
-        issue_meetings: dict[str, dict[int, dict]] = defaultdict(lambda: defaultdict(lambda: {"title": "", "date": "", "count": 0}))
+        issue_meetings: dict[str, dict[int, dict]] = defaultdict(
+            lambda: defaultdict(lambda: {"title": "", "date": "", "count": 0})
+        )
 
-        for line in result.stdout.strip().split('\n'):
-            if not line or '|||' not in line:
+        for line in result.stdout.strip().split("\n"):
+            if not line or "|||" not in line:
                 continue
             try:
-                parts = line.split('|||')
+                parts = line.split("|||")
                 if len(parts) < 4:
                     continue
                 meeting_id = int(parts[0])
@@ -448,11 +599,11 @@ def get_meeting_transcript_issue_keys(issue_keys: list[str] | None = None) -> di
                 # Convert to standard AAP-XXXXX format and record
                 for number in found_numbers:
                     issue_key = f"AAP-{number}"
-                    
+
                     # If we're filtering to specific keys, check if this matches
                     if issue_keys and issue_key not in issue_keys:
                         continue
-                    
+
                     issue_meetings[issue_key][meeting_id]["title"] = title
                     issue_meetings[issue_key][meeting_id]["date"] = date
                     issue_meetings[issue_key][meeting_id]["count"] += 1
@@ -509,7 +660,7 @@ class ChatSession:
     - Persona (developer, devops, incident, release)
     - Active issue and branch
     - Tool filter cache (for NPU results)
-    
+
     Tool Counts:
     - static_tool_count: Baseline count from persona YAML (all tools available)
     - dynamic_tool_count: Context-aware count from NPU filter (tools for current message)
@@ -518,18 +669,18 @@ class ChatSession:
 
     session_id: str
     workspace_uri: str
-    persona: str = "developer"
+    persona: str = field(default_factory=get_default_persona)
     project: str | None = None  # Per-session project (can differ from workspace default)
     is_project_auto_detected: bool = False  # True if project was auto-detected from workspace path
     issue_key: str | None = None
     branch: str | None = None
-    
+
     # Dual tool count system
     static_tool_count: int = 0  # Baseline from persona YAML (calculated from tool modules)
     dynamic_tool_count: int = 0  # Context-aware from NPU filter (updated on each filter call)
     last_filter_message: str | None = None  # Message that triggered last NPU filter
     last_filter_time: datetime | None = None  # When last NPU filter was run
-    
+
     started_at: datetime = field(default_factory=datetime.now)
     last_activity: datetime = field(default_factory=datetime.now)
 
@@ -543,7 +694,7 @@ class ChatSession:
     last_tool: str | None = None  # Last tool called in this session
     last_tool_time: datetime | None = None  # When the last tool was called
     tool_call_count: int = 0  # Total tool calls in this session
-    
+
     # Meeting transcript references (meetings where session's issues were discussed)
     # Format: [{"meeting_id": 1, "title": "Sprint Planning", "date": "2025-01-20", "matches": 3}, ...]
     meeting_references: list[dict] = field(default_factory=list)
@@ -551,7 +702,7 @@ class ChatSession:
     @property
     def tool_count(self) -> int:
         """Computed tool count: dynamic if available, else static.
-        
+
         Returns dynamic_tool_count if > 0 (context-aware from NPU filter),
         otherwise returns static_tool_count (baseline from persona YAML).
         """
@@ -661,7 +812,7 @@ class WorkspaceState:
 
     def create_session(
         self,
-        persona: str = "developer",
+        persona: str | None = None,
         name: str | None = None,
         project: str | None = None,
         is_project_auto_detected: bool = False,
@@ -702,13 +853,16 @@ class WorkspaceState:
         session_project = project if project is not None else self.project
         session_auto_detected = is_project_auto_detected if project is not None else self.is_auto_detected
 
+        # Use default persona from config if not specified
+        session_persona = persona if persona is not None else get_default_persona()
+
         session = ChatSession(
             session_id=session_id,
             workspace_uri=self.workspace_uri,
-            persona=persona,
+            persona=session_persona,
             project=session_project,
             is_project_auto_detected=session_auto_detected,
-            tool_count=tool_count,
+            static_tool_count=tool_count,
             name=name,
         )
 
@@ -775,7 +929,7 @@ class WorkspaceState:
             return session
         return None
 
-    def get_or_create_session(self, persona: str = "developer") -> ChatSession:
+    def get_or_create_session(self, persona: str | None = None) -> ChatSession:
         """Get active session or create a new one.
 
         Args:
@@ -900,8 +1054,9 @@ class WorkspaceState:
         # Extract all issue keys from chat names and content
         # Pattern: AAP-XXXXX (4-7 digits, case insensitive)
         import re
-        issue_pattern = re.compile(r'AAP-\d{4,7}', re.IGNORECASE)
-        
+
+        issue_pattern = re.compile(r"AAP-\d{4,7}", re.IGNORECASE)
+
         # First pass: extract all issue keys from chat names
         issue_keys_from_names: dict[str, set[str]] = {}
         for sid, chat in cursor_chat_map.items():
@@ -909,11 +1064,14 @@ class WorkspaceState:
             matches = issue_pattern.findall(name)
             if matches:
                 issue_keys_from_names[sid] = {m.upper() for m in matches}
-        
+
         # Second pass: scan chat content for all chats to get additional issue keys
         # Always scan to find any new issue keys mentioned in content
         issue_keys_from_content = get_cursor_chat_issue_keys(list(cursor_ids))
-        
+
+        # Third pass: scan chat content for persona loads (backup detection)
+        personas_from_content = get_cursor_chat_personas(list(cursor_ids))
+
         # Merge: combine keys from name and content, deduplicate and sort
         issue_keys: dict[str, str] = {}
         for sid in cursor_ids:
@@ -925,10 +1083,10 @@ class WorkspaceState:
             if sid in issue_keys_from_content:
                 content_keys = [k.strip() for k in issue_keys_from_content[sid].split(",")]
                 all_keys.update(content_keys)
-            
+
             if all_keys:
                 # Sort by numeric part and join
-                sorted_keys = sorted(all_keys, key=lambda x: int(x.split('-')[1]))
+                sorted_keys = sorted(all_keys, key=lambda x: int(x.split("-")[1]))
                 issue_keys[sid] = ", ".join(sorted_keys)
 
         # 1. Remove sessions that no longer exist in Cursor
@@ -948,20 +1106,26 @@ class WorkspaceState:
         for sid in added_ids:
             cursor_chat = cursor_chat_map[sid]
             logger.info(f"Adding session {sid} from Cursor DB: {cursor_chat.get('name')}")
-            
+
             # Convert Cursor's lastUpdatedAt (ms timestamp) to datetime
             last_updated = None
             if cursor_chat.get("lastUpdatedAt"):
                 last_updated = datetime.fromtimestamp(cursor_chat["lastUpdatedAt"] / 1000)
-            
+
+            # Use detected persona from chat content if available, otherwise default
+            detected_persona = personas_from_content.get(sid)
+            session_persona = detected_persona or get_default_persona()
+            if detected_persona:
+                logger.info(f"Detected persona '{detected_persona}' from chat content for {sid}")
+
             session = ChatSession(
                 session_id=sid,
                 workspace_uri=self.workspace_uri,
-                persona="developer",  # Default persona
+                persona=session_persona,
                 project=self.project,
                 is_project_auto_detected=self.is_auto_detected,
                 name=cursor_chat.get("name"),
-                static_tool_count=get_persona_tool_count("developer"),  # Use cached persona count
+                static_tool_count=get_persona_tool_count(session_persona),
                 issue_key=issue_keys.get(sid),  # Set issue key if found in chat
             )
             if last_updated:
@@ -999,7 +1163,7 @@ class WorkspaceState:
             # Update static_tool_count
             # - For active session: use currently loaded tools
             # - For inactive sessions: use cached persona tool count if current is 0
-            is_active = (sid == self.active_session_id)
+            is_active = sid == self.active_session_id
             if is_active and current_tool_count > 0:
                 if session.static_tool_count != current_tool_count:
                     session.static_tool_count = current_tool_count
@@ -1017,6 +1181,26 @@ class WorkspaceState:
                 logger.info(f"Found issue key {issue_keys[sid]} in chat {sid}")
                 updated = True
 
+            # Update persona from chat content if session has a generic/default persona
+            # This is a backup detection for sessions that didn't persist their persona
+            # We update if the session has:
+            # - The default persona (e.g., "researcher")
+            # - The "workspace" persona (generic fallback)
+            default_persona = get_default_persona()
+            generic_personas = {default_persona, "workspace"}
+            if session.persona in generic_personas and sid in personas_from_content:
+                detected_persona = personas_from_content[sid]
+                if detected_persona not in generic_personas:
+                    logger.info(
+                        f"Updating persona for {sid} from chat content: " f"'{session.persona}' -> '{detected_persona}'"
+                    )
+                    session.persona = detected_persona
+                    # Update tool count for new persona
+                    new_tool_count = get_persona_tool_count(detected_persona)
+                    if new_tool_count > 0:
+                        session.static_tool_count = new_tool_count
+                    updated = True
+
             if updated:
                 result["updated"] += 1
 
@@ -1027,11 +1211,11 @@ class WorkspaceState:
             if session.issue_key:
                 for key in session.issue_key.split(", "):
                     all_issue_keys.add(key.strip())
-        
+
         if all_issue_keys:
             # Get meeting references for all issue keys
             meeting_refs = get_meeting_transcript_issue_keys(list(all_issue_keys))
-            
+
             # Update each session's meeting_references based on its issue keys
             for session in self.sessions.values():
                 if session.issue_key:
@@ -1047,7 +1231,7 @@ class WorkspaceState:
                                 else:
                                     # Aggregate match counts
                                     all_meetings[mid]["matches"] += meeting["matches"]
-                    
+
                     # Sort by date (most recent first) and update
                     new_refs = sorted(all_meetings.values(), key=lambda x: x.get("date", ""), reverse=True)
                     if new_refs != session.meeting_references:
@@ -1105,7 +1289,7 @@ class WorkspaceState:
     def persona(self) -> str:
         """Get persona from active session (backward compat)."""
         session = self.get_active_session()
-        return session.persona if session else "developer"
+        return session.persona if session else get_default_persona()
 
     @persona.setter
     def persona(self, value: str) -> None:
@@ -1336,7 +1520,7 @@ class WorkspaceRegistry:
         # Auto-create session if none exists and ensure_session is True
         if ensure_session and not workspace.get_active_session():
             logger.info(f"No active session in workspace {workspace_uri}, auto-creating one")
-            session = workspace.create_session(persona="developer", name="Auto-created")
+            session = workspace.create_session(name="Auto-created")
             logger.info(f"Auto-created session {session.session_id} for workspace {workspace_uri}")
 
         return workspace
@@ -1563,7 +1747,7 @@ class WorkspaceRegistry:
                 session = ChatSession(
                     session_id=session_id,
                     workspace_uri=workspace_uri,
-                    persona=sess_data.get("persona", "developer"),
+                    persona=sess_data.get("persona", get_default_persona()),
                     project=session_project,
                     is_project_auto_detected=session_auto_detected,
                     issue_key=sess_data.get("issue_key"),
@@ -1592,7 +1776,7 @@ class WorkspaceRegistry:
                     session.static_tool_count = sess_data["tool_count"]
                 elif sess_data.get("active_tools"):
                     session.static_tool_count = len(sess_data["active_tools"])
-                
+
                 session.dynamic_tool_count = sess_data.get("dynamic_tool_count", 0)
                 session.last_filter_message = sess_data.get("last_filter_message")
                 if sess_data.get("last_filter_time"):
@@ -1658,7 +1842,7 @@ class WorkspaceRegistry:
         # Auto-create session if none exists and ensure_session is True
         if ensure_session and not workspace.get_active_session():
             logger.info(f"No active session in workspace {workspace_uri}, auto-creating one")
-            session = workspace.create_session(persona="developer", name="Auto-created")
+            session = workspace.create_session(name="Auto-created")
             logger.info(f"Auto-created session {session.session_id} for workspace {workspace_uri}")
 
         return workspace
@@ -1718,7 +1902,7 @@ class WorkspaceRegistry:
             Dict with total counts: {"added": N, "removed": N, "renamed": N, "updated": N}
         """
         totals = {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
-        
+
         for workspace in cls._workspaces.values():
             result = workspace.sync_with_cursor_db()
             totals["added"] += result["added"]
@@ -2013,7 +2197,7 @@ class WorkspaceRegistry:
                 session = ChatSession(
                     session_id=session_id,
                     workspace_uri=workspace_uri,
-                    persona=sess_data.get("persona", "developer"),
+                    persona=sess_data.get("persona", get_default_persona()),
                     project=session_project,
                     is_project_auto_detected=session_auto_detected,
                     issue_key=sess_data.get("issue_key"),
@@ -2042,7 +2226,7 @@ class WorkspaceRegistry:
                     session.static_tool_count = sess_data["tool_count"]
                 elif sess_data.get("active_tools"):
                     session.static_tool_count = len(sess_data["active_tools"])
-                
+
                 session.dynamic_tool_count = sess_data.get("dynamic_tool_count", 0)
                 session.last_filter_message = sess_data.get("last_filter_message")
                 if sess_data.get("last_filter_time"):
@@ -2067,7 +2251,7 @@ class WorkspaceRegistry:
             # Update session names from Cursor's database (sync names if changed)
             cursor_chats, cursor_active_id = list_cursor_chats(workspace_uri)
             cursor_chat_map = {c["composerId"]: c for c in cursor_chats}
-            
+
             # Update active session from Cursor
             if cursor_active_id and cursor_active_id in workspace.sessions:
                 workspace.active_session_id = cursor_active_id

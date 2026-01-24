@@ -103,24 +103,18 @@ def get_tool_module(name: str):
 
 
 def setup_logging(web_mode: bool = False) -> logging.Logger:
-    """Configure logging based on mode."""
+    """Configure logging based on mode.
+
+    Logs go to journalctl when running under systemd.
+    Format excludes timestamp since journald adds its own.
+    """
     # In web mode, log to stdout; in MCP mode, log to stderr (stdout is for JSON-RPC)
-    handlers = []
-
-    # Stream handler
     stream_handler = logging.StreamHandler(sys.stdout if web_mode else sys.stderr)
-    handlers.append(stream_handler)
-
-    # File handler for debugging (always enabled)
-    log_dir = Path.home() / ".mcp" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    file_handler = logging.FileHandler(log_dir / "aa-workflow.log")
-    handlers.append(file_handler)
 
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=handlers,
+        format="%(name)s - %(levelname)s - %(message)s",
+        handlers=[stream_handler],
     )
     return logging.getLogger(__name__)
 
@@ -354,14 +348,15 @@ async def init_scheduler(server: FastMCP) -> bool:
         from tool_modules.aa_workflow.src.scheduler import init_scheduler as init_cron_scheduler
         from tool_modules.aa_workflow.src.scheduler import start_scheduler
 
+        from .state_manager import state as state_manager
         from .utils import load_config
 
         config = load_config()
         schedules_config = config.get("schedules", {})
 
-        scheduler_enabled = schedules_config.get("enabled", False)
+        scheduler_enabled = state_manager.is_service_enabled("scheduler")
         if not scheduler_enabled:
-            logger.info("Scheduler disabled in config (will start config watcher only)")
+            logger.info("Scheduler disabled in state.json (will start config watcher only)")
 
         # Initialize notification engine
         init_notification_engine(server=server, config=config)
@@ -417,8 +412,10 @@ async def init_scheduler(server: FastMCP) -> bool:
             )
 
         # Start scheduler (always starts for config watching)
-        _log("Calling start_scheduler()")
-        await start_scheduler()
+        # Pass add_cron_jobs=False because cron_daemon.py handles cron job execution
+        # The MCP server scheduler only does config watching and poll jobs
+        _log("Calling start_scheduler(add_cron_jobs=False)")
+        await start_scheduler(add_cron_jobs=False)
         _log("start_scheduler() completed")
 
         # Start poll engine only if scheduler is enabled
@@ -480,9 +477,31 @@ async def run_mcp_server(server: FastMCP, enable_scheduler: bool = True):
     if enable_scheduler:
         scheduler_started = await init_scheduler(server)
 
+    # Start WebSocket server for real-time skill updates
+    ws_server = None
+    try:
+        from .websocket_server import start_websocket_server
+
+        ws_server = await start_websocket_server()
+        logger.info("WebSocket server started for real-time updates")
+    except ImportError:
+        logger.debug("WebSocket server not available (websockets package not installed)")
+    except Exception as e:
+        logger.warning(f"Failed to start WebSocket server: {e}")
+
     try:
         await server.run_stdio_async()
     finally:
+        # Cleanup WebSocket server on shutdown
+        if ws_server:
+            try:
+                from .websocket_server import stop_websocket_server as _stop_ws
+
+                await _stop_ws()
+                logger.info("WebSocket server stopped")
+            except Exception as e:
+                logger.warning(f"Error stopping WebSocket server: {e}")
+
         # Cleanup scheduler on shutdown
         if scheduler_started:
             await stop_scheduler()
@@ -599,9 +618,12 @@ Examples:
         tools = [t.strip() for t in args.tools.split(",") if t.strip()]
         server_name = args.name or "aa_workflow"
     else:
-        # Default: load developer persona (most common use case)
-        # This provides git, gitlab, jira + workflow tools
-        default_agent = "developer"
+        # Default: load persona from config (fallback to developer)
+        # This provides the configured default toolset
+        from server.utils import load_config
+
+        cfg = load_config()
+        default_agent = cfg.get("agent", {}).get("default_persona", "researcher")
         tools = load_agent_config(default_agent)
         if tools is None:
             # Fallback to workflow only if developer persona missing

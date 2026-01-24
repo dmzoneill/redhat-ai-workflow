@@ -23,12 +23,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from mcp.server.fastmcp import Context
 
-from .workspace_state import (
-    DEFAULT_PROJECT,
-    ChatSession,
-    WorkspaceRegistry,
-    WorkspaceState,
-)
+from .workspace_state import DEFAULT_PROJECT, ChatSession, WorkspaceRegistry, WorkspaceState
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +137,7 @@ async def set_workspace_project(ctx: "Context", project: str) -> bool:
         True if project is valid, False otherwise
     """
     from .utils import load_config
+    from .workspace_state import WorkspaceRegistry
 
     # Validate project exists in config
     config = load_config()
@@ -163,6 +159,9 @@ async def set_workspace_project(ctx: "Context", project: str) -> bool:
         state.is_auto_detected = False
         state.clear_filter_cache()
         logger.info(f"Set project to '{project}' for workspace {state.workspace_uri} (no active session)")
+
+    # Persist the change to disk
+    WorkspaceRegistry.save_to_disk()
     return True
 
 
@@ -234,7 +233,7 @@ async def get_workspace_state_dict(ctx: "Context") -> dict:
 
 async def is_tool_active_for_workspace(ctx: "Context", tool_module: str) -> bool:
     """Check if a tool module is active for the current workspace.
-    
+
     Note: This now always returns True since we no longer track individual tools.
     Tool availability is determined by the loaded persona's modules.
 
@@ -270,14 +269,12 @@ async def ensure_session_exists(ctx: "Context", export: bool = True) -> ChatSess
 
     if not session:
         logger.info(f"No active session, auto-creating for workspace {state.workspace_uri}")
-        session = state.create_session(persona="developer", name="Auto-created")
+        session = state.create_session(name="Auto-created")
 
         # Export state so VS Code extension can see the new session
         if export:
             try:
-                from tool_modules.aa_workflow.src.workspace_exporter import (
-                    export_workspace_state,
-                )
+                from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state
 
                 export_workspace_state()
                 logger.debug("Exported workspace state after auto-creating session")
@@ -350,5 +347,3 @@ def get_persona_sync() -> str:
     """
     state = get_default_workspace()
     return state.persona
-
-

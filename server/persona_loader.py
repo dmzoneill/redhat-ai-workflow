@@ -291,24 +291,44 @@ class PersonaLoader:
             from .workspace_state import WorkspaceRegistry, update_persona_tool_count
 
             workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
-            workspace_state.persona = persona_name
-            
-            # Update tool count (not the full list)
+
+            # Get or create active session and update it directly
             session = workspace_state.get_active_session()
             if session:
-                session.tool_count = len(loaded_tools)
-            
+                # Update session directly (not via workspace property)
+                old_persona = session.persona
+                session.persona = persona_name
+                session.static_tool_count = len(loaded_tools)
+                logger.info(
+                    f"Updated session {session.session_id[:8]}: "
+                    f"persona '{old_persona}' -> '{persona_name}', tools: {len(loaded_tools)}"
+                )
+            else:
+                # No active session - create one with the new persona
+                session = workspace_state.create_session(persona=persona_name)
+                session.static_tool_count = len(loaded_tools)
+                logger.info(
+                    f"Created session {session.session_id[:8]} with "
+                    f"persona '{persona_name}', tools: {len(loaded_tools)}"
+                )
+
             workspace_state.clear_filter_cache()  # Clear NPU cache when persona changes
-            
+
             # Update the global persona tool count cache
             update_persona_tool_count(persona_name, len(loaded_tools))
-            
-            logger.info(f"Set persona '{persona_name}' for workspace {workspace_state.workspace_uri} with {len(loaded_tools)} tools")
-            
+
+            logger.info(
+                f"Set persona '{persona_name}' for workspace "
+                f"{workspace_state.workspace_uri} with {len(loaded_tools)} tools"
+            )
+
             # Persist to disk so UI can see the change
             WorkspaceRegistry.save_to_disk()
         except Exception as e:
             logger.warning(f"Failed to update workspace state: {e}")
+            import traceback
+
+            logger.warning(traceback.format_exc())
 
         # Notify client that tools changed
         try:
@@ -348,7 +368,16 @@ class PersonaLoader:
             workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
             return workspace_state.persona
         except Exception:
-            return self.current_persona or "developer"
+            if self.current_persona:
+                return self.current_persona
+            # Fall back to config default
+            try:
+                from server.utils import load_config
+
+                cfg = load_config()
+                return cfg.get("agent", {}).get("default_persona", "researcher")
+            except Exception:
+                return "researcher"
 
     async def set_workspace_persona(self, ctx: "Context", persona_name: str) -> None:
         """Set the persona for the current workspace without loading tools.
