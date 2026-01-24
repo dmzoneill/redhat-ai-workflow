@@ -22,32 +22,36 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 def load_config() -> Dict[str, Any]:
     """
-    Load config.json using canonical implementation.
+    Load config.json using ConfigManager for thread-safe access.
 
-    Delegates to server/utils.py:load_config()
-    for consistent behavior across skills and MCP tools.
+    Uses server/config_manager.py singleton for consistent,
+    thread-safe behavior across skills and MCP tools.
 
     Returns:
         Config dict, or empty dict if not found
     """
     try:
-        from server.utils import load_config as utils_load_config
+        from server.config_manager import config as config_manager
 
-        result: Dict[str, Any] = utils_load_config()
+        # Return a copy of all config sections
+        result: Dict[str, Any] = {}
+        for section in config_manager.sections():
+            result[section] = config_manager.get(section, default={})
         return result
     except ImportError:
-        # Fallback if utils not available
-        config_path = Path(__file__).parent.parent.parent / "config.json"
-        if config_path.exists():
-            with open(config_path) as f:
-                loaded: Dict[str, Any] = json.load(f)
-                return loaded
-        return {}
+        # Fallback to utils if config_manager not available
+        try:
+            from server.utils import load_config as utils_load_config
+
+            result: Dict[str, Any] = utils_load_config()
+            return result
+        except ImportError:
+            return {}
 
 
 def get_config_section(section: str, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Get a specific section from config.json.
+    Get a specific section from config.json using ConfigManager.
 
     Args:
         section: Top-level key in config (e.g., 'jira', 'gitlab', 'repositories')
@@ -57,12 +61,18 @@ def get_config_section(section: str, default: Optional[Dict[str, Any]] = None) -
         Section dict or default
 
     Note:
-        This is an alias for utils.get_section_config() for naming consistency.
-        Both names work - use whichever reads better in context.
+        Uses ConfigManager for thread-safe access.
     """
-    config = load_config()
-    result: Dict[str, Any] = config.get(section, default or {})
-    return result
+    try:
+        from server.config_manager import config as config_manager
+
+        result: Dict[str, Any] = config_manager.get(section, default=default or {})
+        return result
+    except ImportError:
+        # Fallback to full load
+        config = load_config()
+        result: Dict[str, Any] = config.get(section, default or {})
+        return result
 
 
 # Alias for compatibility with utils.py naming convention

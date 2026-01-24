@@ -18,7 +18,6 @@ Both credentials are extracted directly from Chrome's storage:
 """
 
 import argparse
-import json
 import re
 import subprocess
 import sys
@@ -165,36 +164,34 @@ def _format_mtime(path: Path) -> str:
     return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
 
 
-def save_config(config: dict):
-    """Save config.json with proper formatting."""
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
-
-
 def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = False):
-    """Update config.json with the new credentials."""
-    from config_loader import load_config
+    """Update config.json with the new credentials.
 
-    config = load_config()
+    Uses ConfigManager for thread-safe, debounced writes with file locking.
+    """
+    # Import ConfigManager for thread-safe config access
+    from server.config_manager import config as config_manager
 
-    # Ensure slack.auth section exists (daemon reads from slack.auth.*)
-    if "slack" not in config:
-        config["slack"] = {}
-    if "auth" not in config["slack"]:
-        config["slack"]["auth"] = {}
+    # Get current slack config
+    slack_config = config_manager.get("slack", default={})
+    if not isinstance(slack_config, dict):
+        slack_config = {}
+
+    auth_config = slack_config.get("auth", {})
+    if not isinstance(auth_config, dict):
+        auth_config = {}
 
     updated = False
 
     if d_cookie:
-        if config["slack"]["auth"].get("d_cookie") != d_cookie:
-            config["slack"]["auth"]["d_cookie"] = d_cookie
+        if auth_config.get("d_cookie") != d_cookie:
+            auth_config["d_cookie"] = d_cookie
             updated = True
             print("✅ Updated slack.auth.d_cookie in config.json")
 
     if xoxc_token:
-        if config["slack"]["auth"].get("xoxc_token") != xoxc_token:
-            config["slack"]["auth"]["xoxc_token"] = xoxc_token
+        if auth_config.get("xoxc_token") != xoxc_token:
+            auth_config["xoxc_token"] = xoxc_token
             updated = True
             print("✅ Updated slack.auth.xoxc_token in config.json")
 
@@ -204,7 +201,9 @@ def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = 
             print(f"   d_cookie: {d_cookie[:30] if d_cookie else 'None'}...")
             print(f"   xoxc_token: {xoxc_token[:30] if xoxc_token else 'None'}...")
         else:
-            save_config(config)
+            # Update the auth section within slack config
+            slack_config["auth"] = auth_config
+            config_manager.update_section("slack", slack_config, merge=True, flush=True)
             print(f"\n💾 Saved to {CONFIG_FILE}")
     else:
         print("\n✓ Config already up to date")

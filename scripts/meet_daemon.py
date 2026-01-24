@@ -45,22 +45,26 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.common.dbus_base import DaemonDBusBase, get_client  # noqa: E402
+from scripts.common.sleep_wake import SleepWakeAwareDaemon  # noqa: E402
 
 LOCK_FILE = Path("/tmp/meet-daemon.lock")
 PID_FILE = Path("/tmp/meet-daemon.pid")
-LOG_FILE = Path.home() / ".config" / "aa-workflow" / "meet_daemon.log"
 
-# Configure logging
-LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+# Configure logging for journalctl
+# When running under systemd, stdout/stderr automatically go to journald
+# Use stderr for logs (stdout may be used for structured output)
+# Format without timestamp - journald adds its own timestamps
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stderr),
     ],
 )
 logger = logging.getLogger(__name__)
+
+# Suppress noisy Google API cache warning
+logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 
 
 class SingleInstance:
@@ -110,7 +114,7 @@ class SingleInstance:
         return None
 
 
-class MeetDaemon(DaemonDBusBase):
+class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
     """Main Google Meet bot daemon with D-Bus support."""
 
     # D-Bus configuration
@@ -130,8 +134,19 @@ class MeetDaemon(DaemonDBusBase):
         # Register custom D-Bus method handlers
         self.register_handler("list_meetings", self._handle_list_meetings)
         self.register_handler("skip_meeting", self._handle_skip_meeting)
+        self.register_handler("approve_meeting", self._handle_approve_meeting)
+        self.register_handler("unapprove_meeting", self._handle_unapprove_meeting)
         self.register_handler("force_join", self._handle_force_join)
+        self.register_handler("join_meeting", self._handle_join_meeting)
+        self.register_handler("leave_meeting", self._handle_leave_meeting)
         self.register_handler("list_calendars", self._handle_list_calendars)
+        self.register_handler("set_meeting_mode", self._handle_set_meeting_mode)
+        self.register_handler("get_captions", self._handle_get_captions)
+        self.register_handler("get_participants", self._handle_get_participants)
+        self.register_handler("get_meeting_history", self._handle_get_meeting_history)
+        self.register_handler("mute_audio", self._handle_mute_audio)
+        self.register_handler("unmute_audio", self._handle_unmute_audio)
+        self.register_handler("get_audio_state", self._handle_get_audio_state)
 
     # ==================== D-Bus Interface Methods ====================
 
@@ -156,13 +171,92 @@ class MeetDaemon(DaemonDBusBase):
         base = self.get_base_stats()
         service = await self.get_service_stats()
 
-        # Add upcoming meetings
+        # Add upcoming meetings and current meetings
         if self._scheduler:
             scheduler_status = await self._scheduler.get_status()
             service["upcoming_meetings"] = scheduler_status.get("upcoming_meetings", [])
+            service["current_meetings"] = scheduler_status.get("current_meetings", [])
             service["errors"] = scheduler_status.get("errors", [])
 
         return {**base, **service}
+
+    async def health_check(self) -> dict:
+        """
+        Perform a comprehensive health check on the meet daemon.
+
+        Checks:
+        - Service is running
+        - Scheduler is initialized
+        - Calendar API is accessible
+        - No excessive errors
+        """
+        import time
+
+        self._last_health_check = time.time()
+        now = time.time()
+
+        checks = {
+            "running": self.is_running,
+            "scheduler_initialized": self._scheduler is not None,
+        }
+
+        # Check scheduler health
+        if self._scheduler:
+            try:
+                scheduler_status = await self._scheduler.get_status()
+                checks["scheduler_polling"] = scheduler_status.get("last_poll") is not None
+
+                # Check if we've had recent polls (within last 5 minutes)
+                last_poll = scheduler_status.get("last_poll")
+                if last_poll:
+                    try:
+                        from datetime import datetime
+
+                        poll_time = datetime.fromisoformat(last_poll.replace("Z", "+00:00"))
+                        poll_age = (datetime.now(poll_time.tzinfo) - poll_time).total_seconds()
+                        checks["recent_poll"] = poll_age < 300  # Within 5 minutes
+                    except Exception:
+                        checks["recent_poll"] = False
+                else:
+                    checks["recent_poll"] = False
+
+                # Check for excessive errors
+                errors = scheduler_status.get("errors", [])
+                checks["no_excessive_errors"] = len(errors) < 10
+            except Exception as e:
+                logger.warning(f"Health check scheduler status failed: {e}")
+                checks["scheduler_polling"] = False
+                checks["recent_poll"] = False
+                checks["no_excessive_errors"] = True
+        else:
+            checks["scheduler_polling"] = False
+            checks["recent_poll"] = False
+            checks["no_excessive_errors"] = True
+
+        # Check uptime (at least 10 seconds)
+        if self.start_time:
+            checks["uptime_ok"] = (now - self.start_time) > 10
+        else:
+            checks["uptime_ok"] = False
+
+        # Overall health
+        healthy = all(checks.values())
+
+        # Build message
+        if healthy:
+            message = "Meet daemon is healthy"
+        else:
+            failed = [k for k, v in checks.items() if not v]
+            message = f"Unhealthy: {', '.join(failed)}"
+
+        return {
+            "healthy": healthy,
+            "checks": checks,
+            "message": message,
+            "timestamp": self._last_health_check,
+            "meetings_joined": self._meetings_joined,
+            "meetings_completed": self._meetings_completed,
+        }
 
     async def _handle_list_meetings(self) -> dict:
         """Handle D-Bus request to list upcoming meetings."""
@@ -180,6 +274,36 @@ class MeetDaemon(DaemonDBusBase):
         success = await self._scheduler.skip_meeting(event_id)
         return {"success": success, "event_id": event_id}
 
+    async def _handle_approve_meeting(self, event_id: str, mode: str = "notes") -> dict:
+        """Handle D-Bus request to pre-approve a meeting for auto-join."""
+        logger.info(f"D-Bus: approve_meeting request - event_id={event_id}, mode={mode}")
+        if not self._scheduler:
+            logger.error("D-Bus: approve_meeting failed - scheduler not running")
+            return {"success": False, "error": "Scheduler not running"}
+
+        success = await self._scheduler.approve_meeting(event_id, mode)
+        logger.info(f"D-Bus: approve_meeting result - success={success}")
+        return {"success": success, "event_id": event_id, "mode": mode}
+
+    async def _handle_unapprove_meeting(self, event_id: str) -> dict:
+        """Handle D-Bus request to un-approve a meeting (change to skipped)."""
+        logger.info(f"D-Bus: unapprove_meeting request - event_id={event_id}")
+        if not self._scheduler:
+            logger.error("D-Bus: unapprove_meeting failed - scheduler not running")
+            return {"success": False, "error": "Scheduler not running"}
+
+        success = await self._scheduler.unapprove_meeting(event_id)
+        logger.info(f"D-Bus: unapprove_meeting result - success={success}")
+        return {"success": success, "event_id": event_id}
+
+    async def _handle_set_meeting_mode(self, event_id: str, mode: str) -> dict:
+        """Handle D-Bus request to set meeting mode (notes or interactive)."""
+        if not self._scheduler:
+            return {"success": False, "error": "Scheduler not running"}
+
+        success = await self._scheduler.set_meeting_mode(event_id, mode)
+        return {"success": success, "event_id": event_id, "mode": mode}
+
     async def _handle_force_join(self, event_id: str) -> dict:
         """Handle D-Bus request to force join a meeting."""
         if not self._scheduler:
@@ -187,6 +311,54 @@ class MeetDaemon(DaemonDBusBase):
 
         success = await self._scheduler.force_join(event_id)
         return {"success": success, "event_id": event_id}
+
+    async def _handle_join_meeting(self, meet_url: str, title: str = "Manual Join", mode: str = "notes") -> dict:
+        """Handle D-Bus request to join a meeting by URL (quick join).
+
+        This returns immediately with status="joining" and spawns the actual
+        join operation in the background. The UI should poll GetStatus to
+        see when the meeting appears in currentMeetings.
+        """
+        logger.info(f"D-Bus: join_meeting request - URL: {meet_url}, title: {title}, mode: {mode}")
+        if not self._scheduler:
+            logger.error("D-Bus: join_meeting failed - scheduler not running")
+            return {"success": False, "error": "Scheduler not running"}
+
+        # Spawn the join operation in the background so we can return immediately
+        async def _do_join():
+            try:
+                success = await self._scheduler.join_meeting_url(meet_url, title, mode)
+                logger.info(f"D-Bus: join_meeting completed - success: {success}")
+            except Exception as e:
+                logger.error(f"D-Bus: join_meeting failed - {e}")
+
+        # Start the background task
+        asyncio.create_task(_do_join())
+
+        # Return immediately - the UI should poll GetStatus to see the meeting
+        return {
+            "success": True,
+            "status": "joining",
+            "message": "Join operation started. Check status for progress.",
+            "meet_url": meet_url,
+            "title": title,
+            "mode": mode,
+        }
+
+    async def _handle_leave_meeting(self, session_id: str = "") -> dict:
+        """Handle D-Bus request to leave the current meeting."""
+        logger.info(f"D-Bus: leave_meeting request (session_id={session_id})")
+
+        if not self._scheduler or not self._scheduler.notes_bot:
+            return {"success": False, "error": "No active meeting"}
+
+        try:
+            result = await self._scheduler.notes_bot.leave_meeting()
+            logger.info(f"D-Bus: leave_meeting completed - success: True")
+            return {"success": True, "result": result}
+        except Exception as e:
+            logger.error(f"D-Bus: leave_meeting failed - {e}")
+            return {"success": False, "error": str(e)}
 
     async def _handle_list_calendars(self) -> dict:
         """Handle D-Bus request to list monitored calendars."""
@@ -206,6 +378,205 @@ class MeetDaemon(DaemonDBusBase):
                 for c in calendars
             ]
         }
+
+    async def _handle_get_captions(self, limit: int = 50) -> dict:
+        """Handle D-Bus request to get recent captions from active meeting."""
+        if not self._scheduler or not self._scheduler.notes_bot:
+            return {"captions": [], "count": 0}
+
+        bot = self._scheduler.notes_bot
+        captions = []
+
+        # Get captions from the transcript buffer (not yet flushed to DB)
+        if bot.state and bot.state.transcript_buffer:
+            for entry in bot.state.transcript_buffer[-limit:]:
+                captions.append(
+                    {
+                        "speaker": entry.speaker,
+                        "text": entry.text,
+                        "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
+                    }
+                )
+
+        # Also get recent captions from DB if we have a meeting ID
+        if bot.db and bot.state and bot.state.meeting_id:
+            try:
+                db_entries = await bot.db.get_transcript_entries(bot.state.meeting_id, limit=limit)
+                # Prepend DB entries (older) before buffer entries (newer)
+                db_captions = [
+                    {
+                        "speaker": e.speaker,
+                        "text": e.text,
+                        "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+                    }
+                    for e in db_entries
+                ]
+                # Combine: DB entries first, then buffer (avoid duplicates by timestamp)
+                seen_timestamps = {c["timestamp"] for c in captions}
+                for c in db_captions:
+                    if c["timestamp"] not in seen_timestamps:
+                        captions.insert(0, c)
+            except Exception as e:
+                logger.warning(f"Failed to get DB captions: {e}")
+
+        # Sort by timestamp and limit
+        captions.sort(key=lambda x: x.get("timestamp") or "")
+        captions = captions[-limit:]
+
+        return {
+            "captions": captions,
+            "count": len(captions),
+            "meeting_id": bot.state.meeting_id if bot.state else None,
+            "meeting_title": bot.state.title if bot.state else None,
+            "total_captured": bot.state.captions_captured if bot.state else 0,
+        }
+
+    async def _handle_get_participants(self) -> dict:
+        """Handle D-Bus request to get current meeting participants."""
+        if not self._scheduler or not self._scheduler.notes_bot:
+            return {"participants": [], "count": 0}
+
+        bot = self._scheduler.notes_bot
+        participants = []
+
+        # Get participants from browser controller if available
+        if bot._controller and bot._controller.state:
+            participants = bot._controller.state.participants or []
+
+        return {
+            "participants": participants,
+            "count": len(participants),
+        }
+
+    async def _handle_get_meeting_history(self, limit: int = 20) -> dict:
+        """Handle D-Bus request to get meeting history from database."""
+        if not self._scheduler or not self._scheduler.notes_bot:
+            return {"meetings": [], "count": 0}
+
+        bot = self._scheduler.notes_bot
+        meetings = []
+
+        try:
+            if bot.db:
+                # Query completed meetings from database
+                rows = await bot.db.get_recent_meetings(limit=limit)
+                for row in rows:
+                    meetings.append(
+                        {
+                            "id": row.get("id"),
+                            "title": row.get("title", "Untitled"),
+                            "date": row.get("actual_start", row.get("scheduled_start", "")),
+                            "duration": self._calculate_duration(row.get("actual_start"), row.get("actual_end")),
+                            "transcriptCount": row.get("transcript_count", 0),
+                            "status": row.get("status", "completed"),
+                            "botMode": row.get("bot_mode", "notes"),
+                            "meetUrl": row.get("meet_url", ""),
+                            "organizer": row.get("organizer", ""),
+                        }
+                    )
+        except Exception as e:
+            logger.error(f"Failed to get meeting history: {e}")
+
+        return {
+            "meetings": meetings,
+            "count": len(meetings),
+        }
+
+    def _calculate_duration(self, start: str, end: str) -> float:
+        """Calculate duration in minutes between two ISO timestamps."""
+        if not start or not end:
+            return 0.0
+        try:
+            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
+            return (end_dt - start_dt).total_seconds() / 60.0
+        except Exception:
+            return 0.0
+
+    async def _handle_mute_audio(self, session_id: str = "") -> dict:
+        """Handle D-Bus request to mute meeting audio (route to null sink)."""
+        logger.info(f"D-Bus: mute_audio request (session_id={session_id})")
+
+        if not self._scheduler or not self._scheduler.notes_bot:
+            return {"success": False, "error": "No active meeting"}
+
+        bot = self._scheduler.notes_bot
+        if not bot._controller:
+            return {"success": False, "error": "No browser controller"}
+
+        try:
+            success = bot._controller.mute_audio()
+            return {"success": success, "muted": success}
+        except Exception as e:
+            logger.error(f"Failed to mute audio: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _handle_unmute_audio(self, session_id: str = "") -> dict:
+        """Handle D-Bus request to unmute meeting audio (route to default output)."""
+        logger.info(f"D-Bus: unmute_audio request (session_id={session_id})")
+
+        if not self._scheduler or not self._scheduler.notes_bot:
+            return {"success": False, "error": "No active meeting"}
+
+        bot = self._scheduler.notes_bot
+        if not bot._controller:
+            return {"success": False, "error": "No browser controller"}
+
+        try:
+            success = bot._controller.unmute_audio()
+            return {"success": success, "muted": not success}
+        except Exception as e:
+            logger.error(f"Failed to unmute audio: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _handle_get_audio_state(self, session_id: str = "") -> dict:
+        """Handle D-Bus request to get current audio mute state."""
+        if not self._scheduler or not self._scheduler.notes_bot:
+            return {"muted": True, "has_meeting": False}
+
+        bot = self._scheduler.notes_bot
+        if not bot._controller:
+            return {"muted": True, "has_meeting": False}
+
+        try:
+            is_muted = bot._controller.is_audio_muted()
+            return {"muted": is_muted, "has_meeting": True}
+        except Exception as e:
+            logger.debug(f"Failed to get audio state: {e}")
+            return {"muted": True, "has_meeting": True, "error": str(e)}
+
+    # ==================== Sleep/Wake Handling ====================
+
+    async def on_system_wake(self):
+        """Handle system wake from sleep (SleepWakeAwareDaemon interface).
+
+        This refreshes all state to ensure the daemon is responsive after sleep.
+        """
+        print("\n🌅 System wake detected - refreshing...")
+
+        try:
+            # 1. Re-poll calendars to get fresh meeting data
+            if self._scheduler:
+                logger.info("Re-polling calendars after wake...")
+                await self._scheduler._poll_calendars()
+
+                status = await self._scheduler.get_status()
+                logger.info(f"After wake: {status.get('upcoming_count', 0)} upcoming meetings")
+                print(f"   📅 Refreshed: {status.get('upcoming_count', 0)} upcoming meetings")
+
+            # 2. Check if we were in a meeting that may have ended during sleep
+            if self._scheduler and self._scheduler.notes_bot:
+                bot = self._scheduler.notes_bot
+                if bot._controller and bot._controller.is_browser_closed():
+                    logger.info("Browser was closed during sleep, cleaning up...")
+                    await bot._cleanup_stale_meeting()
+                    print("   🧹 Cleaned up stale meeting state")
+
+            print("   ✅ Wake handling complete\n")
+
+        except Exception as e:
+            logger.error(f"Error handling system wake: {e}")
+            print(f"   ⚠️  Wake handling error: {e}\n")
 
     # ==================== Daemon Lifecycle ====================
 
@@ -252,23 +623,27 @@ class MeetDaemon(DaemonDBusBase):
         print()
         print("Starting scheduler...")
 
-        # Start the scheduler
+        # Start the scheduler (does initial poll before starting background loop)
         await self._scheduler.start()
         self.is_running = True
 
         print("✅ Scheduler started")
         print()
 
-        # Show status
+        # Show status (meetings are already loaded from initial poll)
         status = await self._scheduler.get_status()
         print(f"📅 Upcoming meetings: {status['upcoming_count']}")
         for meeting in status.get("upcoming_meetings", [])[:5]:
             print(f"   - {meeting['title']} at {meeting['start']}")
 
+        # Start sleep/wake monitor (from SleepWakeAwareDaemon mixin)
+        await self.start_sleep_monitor()
+        print("✅ Sleep/wake monitor started")
+
         print()
         print("-" * 60)
         print("Daemon running. Press Ctrl+C to stop.")
-        print(f"Log file: {LOG_FILE}")
+        print("Logs: journalctl --user -u meet-bot -f")
         if self.enable_dbus:
             print(f"D-Bus: {self.service_name}")
         print("-" * 60)
@@ -282,24 +657,49 @@ class MeetDaemon(DaemonDBusBase):
             return
 
         print()
+        print("Stopping daemon...")
+
+        # Stop sleep monitor first (from SleepWakeAwareDaemon mixin)
+        try:
+            await asyncio.wait_for(self.stop_sleep_monitor(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Sleep monitor stop timed out")
+
         print("Stopping scheduler...")
 
         if self._scheduler:
-            await self._scheduler.stop()
+            try:
+                # Give scheduler 30 seconds to stop gracefully
+                await asyncio.wait_for(self._scheduler.stop(), timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.warning("Scheduler stop timed out, forcing shutdown...")
+                print("⚠️  Scheduler stop timed out")
 
         # Stop D-Bus
-        await self.stop_dbus()
+        try:
+            await asyncio.wait_for(self.stop_dbus(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("D-Bus stop timed out")
 
         self.is_running = False
         print("✅ Meet Bot Daemon stopped")
 
     def setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
+        self._signal_count = 0
 
         def signal_handler(sig, frame):
-            logger.info(f"Received signal {sig}, shutting down...")
-            self._shutdown_event.set()
-            self.request_shutdown()
+            self._signal_count += 1
+            if self._signal_count == 1:
+                logger.info(f"Received signal {sig}, shutting down gracefully...")
+                self._shutdown_event.set()
+                self.request_shutdown()
+            elif self._signal_count >= 2:
+                logger.warning(f"Received signal {sig} again, forcing exit...")
+                print("\n⚠️  Forced exit (received multiple signals)")
+                import os
+
+                os._exit(1)
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -428,7 +828,7 @@ D-Bus Control:
             print(f"✅ Meet bot daemon is running (PID: {pid})")
             print(f"   Lock file: {LOCK_FILE}")
             print(f"   PID file: {PID_FILE}")
-            print(f"   Log file: {LOG_FILE}")
+            print("   Logs: journalctl --user -u meet-bot -f")
             print("   (D-Bus not available - run with --dbus for IPC)")
         else:
             print("❌ Meet bot daemon is not running")

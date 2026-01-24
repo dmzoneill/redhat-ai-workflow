@@ -14,6 +14,7 @@ Services:
     - slack: Slack Agent (com.aiworkflow.SlackAgent)
     - cron: Cron Scheduler (com.aiworkflow.CronScheduler)
     - meet: Meet Bot (com.aiworkflow.MeetBot)
+    - sprint: Sprint Bot (com.aiworkflow.SprintBot)
 """
 
 import argparse
@@ -27,9 +28,9 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Local imports after path setup
-from scripts.common.dbus_base import DBUS_AVAILABLE, check_daemon_status, get_client  # noqa: E402
+from scripts.common.dbus_base import DBUS_AVAILABLE, check_daemon_health, check_daemon_status, get_client  # noqa: E402
 
-SERVICES = ["slack", "cron", "meet"]
+SERVICES = ["slack", "cron", "meet", "sprint"]
 
 
 def format_uptime(seconds: float) -> str:
@@ -71,6 +72,10 @@ async def cmd_status(args):
             elif service == "slack":
                 print(f"   Messages: {status.get('messages_processed', 0)}")
                 print(f"   Pending: {status.get('pending_approvals', 0)}")
+            elif service == "sprint":
+                print(f"   Issues: {status.get('total_issues', 0)}")
+                print(f"   Processed: {status.get('issues_processed', 0)}")
+                print(f"   Working Hours: {'Yes' if status.get('within_working_hours') else 'No'}")
         else:
             error = status.get("error", "Not running")
             print(f"❌ {service.upper()}: {error}")
@@ -176,6 +181,106 @@ async def cmd_json(args):
     print(json.dumps(result, indent=2, default=str))
 
 
+async def cmd_health(args):
+    """Perform health checks on services."""
+    services = [args.service] if args.service else SERVICES
+
+    print("=" * 60)
+    print("AI Workflow Services Health Check")
+    print("=" * 60)
+    print()
+
+    all_healthy = True
+    for service in services:
+        health = await check_daemon_health(service)
+
+        if health.get("healthy", False):
+            print(f"✅ {service.upper()}: {health.get('message', 'Healthy')}")
+        else:
+            all_healthy = False
+            print(f"❌ {service.upper()}: {health.get('message', 'Unhealthy')}")
+
+            # Show failed checks
+            checks = health.get("checks", {})
+            failed = [k for k, v in checks.items() if not v]
+            if failed:
+                print(f"   Failed checks: {', '.join(failed)}")
+
+        # Show additional health info
+        if args.verbose:
+            checks = health.get("checks", {})
+            for check, passed in checks.items():
+                status = "✓" if passed else "✗"
+                print(f"   {status} {check}")
+
+        print()
+
+    # Summary
+    if all_healthy:
+        print("✅ All services healthy")
+    else:
+        print("❌ Some services unhealthy")
+        if not args.no_fix:
+            print("\nTip: Run with --fix to attempt automatic recovery")
+
+
+async def cmd_fix(args):
+    """Attempt to fix unhealthy services."""
+    import subprocess
+    import time
+
+    services = [args.service] if args.service else SERVICES
+
+    print("Checking services and attempting fixes...")
+    print()
+
+    systemd_units = {
+        "slack": "slack-agent.service",
+        "cron": "cron-scheduler.service",
+        "meet": "meet-bot.service",
+        "sprint": "sprint-bot.service",
+    }
+
+    for service in services:
+        health = await check_daemon_health(service)
+
+        if health.get("healthy", False):
+            print(f"✅ {service.upper()}: Already healthy")
+            continue
+
+        print(f"❌ {service.upper()}: Unhealthy - {health.get('message')}")
+        print(f"   Attempting restart...")
+
+        unit = systemd_units.get(service)
+        if not unit:
+            print(f"   ⚠️  No systemd unit configured for {service}")
+            continue
+
+        try:
+            # Restart the service
+            subprocess.run(
+                ["systemctl", "--user", "restart", unit],
+                capture_output=True,
+                timeout=30,
+            )
+
+            # Wait for service to start
+            time.sleep(5)
+
+            # Re-check health
+            new_health = await check_daemon_health(service)
+            if new_health.get("healthy", False):
+                print(f"   ✅ {service.upper()}: Recovered!")
+            else:
+                print(f"   ❌ {service.upper()}: Still unhealthy - {new_health.get('message')}")
+        except subprocess.TimeoutExpired:
+            print(f"   ⚠️  Restart timed out")
+        except Exception as e:
+            print(f"   ⚠️  Restart failed: {e}")
+
+        print()
+
+
 async def main():
     parser = argparse.ArgumentParser(
         description="AI Workflow Service Control",
@@ -206,6 +311,16 @@ async def main():
     json_parser = subparsers.add_parser("json", help="Output raw JSON status")
     json_parser.add_argument("service", nargs="?", choices=SERVICES, help="Service name")
 
+    # health command
+    health_parser = subparsers.add_parser("health", help="Perform health checks")
+    health_parser.add_argument("service", nargs="?", choices=SERVICES, help="Service name")
+    health_parser.add_argument("-v", "--verbose", action="store_true", help="Show all checks")
+    health_parser.add_argument("--no-fix", action="store_true", help="Don't show fix tip")
+
+    # fix command
+    fix_parser = subparsers.add_parser("fix", help="Attempt to fix unhealthy services")
+    fix_parser.add_argument("service", nargs="?", choices=SERVICES, help="Service name")
+
     args = parser.parse_args()
 
     if not DBUS_AVAILABLE:
@@ -225,6 +340,8 @@ async def main():
         "list-jobs": cmd_list_jobs,
         "list-meetings": cmd_list_meetings,
         "json": cmd_json,
+        "health": cmd_health,
+        "fix": cmd_fix,
     }
 
     if args.command in commands:

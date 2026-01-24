@@ -103,6 +103,7 @@ class DaemonDBusBase(ABC):
     And implement:
     - get_service_stats(): Return service-specific stats as dict
     - get_service_status(): Return detailed status as dict
+    - health_check(): Return health status dict (optional, defaults to basic check)
     """
 
     # Subclasses must override these
@@ -119,6 +120,12 @@ class DaemonDBusBase(ABC):
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         self._shutdown_requested = False
 
+        # Health tracking
+        self._last_health_check: float = 0
+        self._health_check_interval: float = 30.0  # seconds
+        self._consecutive_failures: int = 0
+        self._last_successful_operation: float = 0
+
         # Custom method handlers (for service-specific methods)
         self._custom_handlers: dict[str, Callable] = {}
 
@@ -131,6 +138,47 @@ class DaemonDBusBase(ABC):
     async def get_service_status(self) -> dict:
         """Return detailed service status."""
         pass
+
+    async def health_check(self) -> dict:
+        """
+        Perform a health check on the service.
+
+        Override this in subclasses to implement service-specific health checks.
+        Should verify that the service can actually perform its function, not just
+        that it's running.
+
+        Returns:
+            dict with:
+                - healthy: bool - overall health status
+                - checks: dict - individual check results
+                - message: str - human-readable status
+                - timestamp: float - when check was performed
+        """
+        self._last_health_check = time.time()
+
+        checks = {
+            "running": self.is_running,
+            "uptime_ok": (time.time() - self.start_time) > 10 if self.start_time else False,
+        }
+
+        healthy = all(checks.values())
+
+        return {
+            "healthy": healthy,
+            "checks": checks,
+            "message": "Service is healthy" if healthy else "Service is unhealthy",
+            "timestamp": self._last_health_check,
+            "consecutive_failures": self._consecutive_failures,
+        }
+
+    def record_successful_operation(self):
+        """Record that an operation completed successfully (for health tracking)."""
+        self._last_successful_operation = time.time()
+        self._consecutive_failures = 0
+
+    def record_failed_operation(self):
+        """Record that an operation failed (for health tracking)."""
+        self._consecutive_failures += 1
 
     def get_base_stats(self) -> dict:
         """Get common daemon statistics."""
@@ -290,6 +338,23 @@ def create_daemon_interface(daemon: DaemonDBusBase) -> "ServiceInterface":
                 logger.error(f"CallMethod error: {e}")
                 return json.dumps({"error": str(e)})
 
+        @method()
+        async def HealthCheck(self) -> "s":
+            """Perform a health check on the daemon."""
+            try:
+                result = await self._daemon.health_check()
+                return json.dumps(result)
+            except Exception as e:
+                logger.error(f"HealthCheck error: {e}")
+                return json.dumps(
+                    {
+                        "healthy": False,
+                        "checks": {"exception": False},
+                        "message": f"Health check failed: {e}",
+                        "timestamp": time.time(),
+                    }
+                )
+
         # ==================== Signals ====================
 
         @dbus_signal()
@@ -394,6 +459,12 @@ class DaemonClient:
         result = await interface.call_call_method(method_name, args_json)
         return json.loads(result)
 
+    async def health_check(self) -> dict:
+        """Perform a health check on the daemon."""
+        interface = self._get_interface()
+        result = await interface.call_health_check()
+        return json.loads(result)
+
     @property
     def is_running(self) -> bool:
         """Check if connected to a running daemon."""
@@ -431,6 +502,11 @@ def get_client(service: str) -> DaemonClient:
             object_path="/com/aiworkflow/SlackAgent",
             interface_name="com.aiworkflow.SlackAgent",
         ),
+        "sprint": ServiceConfig(
+            service_name="com.aiworkflow.SprintBot",
+            object_path="/com/aiworkflow/SprintBot",
+            interface_name="com.aiworkflow.SprintBot",
+        ),
     }
 
     if service not in services:
@@ -464,3 +540,38 @@ async def check_daemon_status(service: str) -> dict:
         return {"running": False, "error": str(e)}
 
     return {"running": False, "error": "Could not connect"}
+
+
+async def check_daemon_health(service: str) -> dict:
+    """
+    Perform a health check on a daemon.
+
+    Unlike check_daemon_status, this verifies the daemon can actually
+    perform its function, not just that it's running.
+
+    Args:
+        service: Service name - "cron", "meet", or "slack"
+
+    Returns:
+        Health check result dict with 'healthy' bool and details
+    """
+    client = get_client(service)
+    try:
+        if await client.connect():
+            health = await client.health_check()
+            await client.disconnect()
+            return health
+    except Exception as e:
+        return {
+            "healthy": False,
+            "checks": {"connection": False},
+            "message": f"Could not connect: {e}",
+            "timestamp": time.time(),
+        }
+
+    return {
+        "healthy": False,
+        "checks": {"connection": False},
+        "message": "Could not connect to daemon",
+        "timestamp": time.time(),
+    }

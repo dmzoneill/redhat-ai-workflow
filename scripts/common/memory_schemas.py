@@ -72,21 +72,52 @@ class OpenMR(BaseModel):
     needs_review: Optional[bool] = Field(None, description="Whether review is needed")
 
 
+class DiscoveredWork(BaseModel):
+    """Work discovered during skill execution that needs follow-up.
+
+    This captures technical debt, bugs, improvements, or other work items
+    identified while working on something else. These can be synced to Jira.
+    """
+
+    task: str = Field(..., description="Task/work description")
+    work_type: str = Field(
+        "discovered_work",
+        description="Type: discovered_work, tech_debt, bug, improvement, missing_test, missing_docs, security",
+    )
+    priority: str = Field("medium", description="Priority: low, medium, high, critical")
+    source_skill: Optional[str] = Field(None, description="Skill that discovered this work")
+    source_issue: Optional[str] = Field(None, description="Issue being worked on when discovered")
+    source_mr: Optional[int] = Field(None, description="MR being reviewed when discovered")
+    file_path: Optional[str] = Field(None, description="File where issue was found")
+    line_number: Optional[int] = Field(None, description="Line number if applicable")
+    created: str = Field(..., description="ISO timestamp when discovered")
+    jira_synced: bool = Field(False, description="Whether synced to Jira")
+    jira_key: Optional[str] = Field(None, description="Created Jira issue key")
+    notes: Optional[str] = Field(None, description="Additional context or notes")
+
+
 class FollowUp(BaseModel):
-    """A follow-up task or reminder."""
+    """A follow-up task or reminder (legacy, use DiscoveredWork for new items)."""
 
     task: str = Field(..., description="Task description")
     priority: Optional[str] = Field(None, description="Priority level (high/medium/low)")
     issue_key: Optional[str] = Field(None, description="Related Jira issue key")
+    # New fields for compatibility with DiscoveredWork
+    work_type: Optional[str] = Field(None, description="Type if migrated from DiscoveredWork")
+    source_skill: Optional[str] = Field(None, description="Skill that created this")
+    jira_synced: Optional[bool] = Field(None, description="Whether synced to Jira")
 
 
 class CurrentWork(BaseModel):
-    """State of current work - active issues, MRs, follow-ups."""
+    """State of current work - active issues, MRs, follow-ups, discovered work."""
 
     active_issue: Optional[str] = Field("", description="Primary active issue key")
     active_issues: List[ActiveIssue] = Field(default_factory=list, description="All active issues")
     open_mrs: List[OpenMR] = Field(default_factory=list, description="Open merge requests")
-    follow_ups: List[FollowUp] = Field(default_factory=list, description="Follow-up tasks")
+    follow_ups: List[FollowUp] = Field(default_factory=list, description="Follow-up tasks (legacy)")
+    discovered_work: List[DiscoveredWork] = Field(
+        default_factory=list, description="Work discovered during other tasks"
+    )
     last_updated: str = Field(..., description="ISO timestamp of last update")
 
     @validator("last_updated")

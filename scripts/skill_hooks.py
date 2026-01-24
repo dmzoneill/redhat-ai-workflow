@@ -103,14 +103,22 @@ class SkillHooks:
 
     @classmethod
     def from_config(cls, config_path: Optional[Path] = None) -> "SkillHooks":
-        """Load from config.json."""
-        if config_path is None:
-            config_path = Path(__file__).parent.parent / "config.json"
+        """Load from config.json using ConfigManager for thread-safe access."""
+        try:
+            from server.config_manager import config as config_manager
 
-        with open(config_path) as f:
-            config = json.load(f)
-
-        return cls(config)
+            # Build config dict from ConfigManager sections
+            config = {}
+            for section in config_manager.sections():
+                config[section] = config_manager.get(section, default={})
+            return cls(config)
+        except ImportError:
+            # Fallback to direct file read if ConfigManager not available
+            if config_path is None:
+                config_path = Path(__file__).parent.parent / "config.json"
+            with open(config_path) as f:
+                config = json.load(f)
+            return cls(config)
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""

@@ -45,19 +45,20 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.common.dbus_base import DaemonDBusBase, get_client  # noqa: E402
+from scripts.common.sleep_wake import SleepWakeAwareDaemon  # noqa: E402
 
 LOCK_FILE = Path("/tmp/cron-daemon.lock")
 PID_FILE = Path("/tmp/cron-daemon.pid")
-LOG_FILE = Path.home() / ".config" / "aa-workflow" / "cron_daemon.log"
 
-# Configure logging
-LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+# Configure logging for journalctl
+# When running under systemd, stdout/stderr automatically go to journald
+# Use stderr for logs (stdout may be used for structured output)
+# Format without timestamp - journald adds its own timestamps
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stderr),
     ],
 )
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ class SingleInstance:
         return None
 
 
-class CronDaemon(DaemonDBusBase):
+class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
     """Main cron scheduler daemon with D-Bus support."""
 
     # D-Bus configuration
@@ -131,6 +132,10 @@ class CronDaemon(DaemonDBusBase):
         self.register_handler("run_job", self._handle_run_job)
         self.register_handler("list_jobs", self._handle_list_jobs)
         self.register_handler("get_history", self._handle_get_history)
+        self.register_handler("toggle_scheduler", self._handle_toggle_scheduler)
+        self.register_handler("toggle_job", self._handle_toggle_job)
+        self.register_handler("update_config", self._handle_update_config)
+        self.register_handler("get_config", self._handle_get_config)
 
     # ==================== D-Bus Interface Methods ====================
 
@@ -171,6 +176,72 @@ class CronDaemon(DaemonDBusBase):
 
         return {**base, **service}
 
+    async def health_check(self) -> dict:
+        """
+        Perform a comprehensive health check on the cron daemon.
+
+        Checks:
+        - Service is running
+        - Scheduler is initialized and running
+        - Jobs are scheduled
+        - No excessive job failures
+        """
+        import time
+
+        self._last_health_check = time.time()
+        now = time.time()
+
+        checks = {
+            "running": self.is_running,
+            "scheduler_initialized": self._scheduler is not None,
+        }
+
+        # Check if scheduler is actually running
+        if self._scheduler:
+            checks["scheduler_running"] = self._scheduler.scheduler.running
+
+            # Check if jobs are scheduled
+            jobs = self._scheduler.scheduler.get_jobs()
+            active_jobs = [j for j in jobs if j.id != "_config_watcher"]
+            checks["jobs_scheduled"] = len(active_jobs) > 0
+
+            # Check job failure rate (if we've executed jobs)
+            total_executed = self._jobs_executed + self._jobs_failed
+            if total_executed > 0:
+                failure_rate = self._jobs_failed / total_executed
+                checks["acceptable_failure_rate"] = failure_rate < 0.5  # Less than 50% failures
+            else:
+                checks["acceptable_failure_rate"] = True  # No jobs run yet is OK
+        else:
+            checks["scheduler_running"] = False
+            checks["jobs_scheduled"] = False
+            checks["acceptable_failure_rate"] = True
+
+        # Check uptime (at least 10 seconds)
+        if self.start_time:
+            checks["uptime_ok"] = (now - self.start_time) > 10
+        else:
+            checks["uptime_ok"] = False
+
+        # Overall health
+        healthy = all(checks.values())
+
+        # Build message
+        if healthy:
+            message = "Cron daemon is healthy"
+        else:
+            failed = [k for k, v in checks.items() if not v]
+            message = f"Unhealthy: {', '.join(failed)}"
+
+        return {
+            "healthy": healthy,
+            "checks": checks,
+            "message": message,
+            "timestamp": self._last_health_check,
+            "jobs_executed": self._jobs_executed,
+            "jobs_failed": self._jobs_failed,
+        }
+
     async def _handle_run_job(self, job_name: str) -> dict:
         """Handle D-Bus request to run a job immediately."""
         if not self._scheduler:
@@ -182,7 +253,8 @@ class CronDaemon(DaemonDBusBase):
                 if job_config.get("name") == job_name:
                     skill = job_config.get("skill")
                     inputs = job_config.get("inputs", {})
-                    await self._scheduler._execute_job(job_name, skill, inputs)
+                    notify = job_config.get("notify", ["memory"])
+                    await self._scheduler._execute_job(job_name, skill, inputs, notify)
                     return {"success": True, "job": job_name}
 
             return {"success": False, "error": f"Job not found: {job_name}"}
@@ -212,6 +284,154 @@ class CronDaemon(DaemonDBusBase):
 
         history = self._scheduler.execution_log.get_recent(limit=limit)
         return {"history": history}
+
+    async def _handle_toggle_scheduler(self, enabled: bool) -> dict:
+        """Handle D-Bus request to toggle scheduler enabled state.
+
+        Uses StateManager for thread-safe state persistence.
+        """
+        try:
+            from server.state_manager import state as state_manager
+
+            state_manager.set_service_enabled("scheduler", enabled, flush=True)
+
+            # Reload config to pick up the change
+            if self._scheduler:
+                self._scheduler.config.reload()
+
+            return {"success": True, "enabled": enabled, "message": f"Scheduler {'enabled' if enabled else 'disabled'}"}
+        except Exception as e:
+            logger.error(f"Failed to toggle scheduler: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _handle_toggle_job(self, job_name: str, enabled: bool) -> dict:
+        """Handle D-Bus request to toggle a specific job's enabled state.
+
+        Uses StateManager for thread-safe state persistence.
+        """
+        try:
+            from server.state_manager import state as state_manager
+
+            state_manager.set_job_enabled(job_name, enabled, flush=True)
+
+            # Reload config to pick up the change
+            if self._scheduler:
+                self._scheduler.config.reload()
+
+            return {
+                "success": True,
+                "job": job_name,
+                "enabled": enabled,
+                "message": f"Job '{job_name}' {'enabled' if enabled else 'disabled'}",
+            }
+        except Exception as e:
+            logger.error(f"Failed to toggle job {job_name}: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _handle_update_config(self, section: str, key: str, value: any) -> dict:
+        """Handle D-Bus request to update a config value.
+
+        Uses ConfigManager for thread-safe config persistence.
+
+        Args:
+            section: Top-level config section (e.g., "inference", "slack")
+            key: Dot-separated key path within section (e.g., "default_model")
+            value: Value to set
+        """
+        try:
+            from server.config_manager import config as config_manager
+
+            # Get current section
+            section_data = config_manager.get(section, default={})
+            if not isinstance(section_data, dict):
+                section_data = {}
+
+            # Navigate to nested key and set value
+            if key:
+                keys = key.split(".")
+                obj = section_data
+                for k in keys[:-1]:
+                    if k not in obj or not isinstance(obj[k], dict):
+                        obj[k] = {}
+                    obj = obj[k]
+                obj[keys[-1]] = value
+            else:
+                # No key means replace entire section
+                section_data = value
+
+            # Update section with merge
+            config_manager.update_section(section, section_data, merge=True, flush=True)
+
+            return {
+                "success": True,
+                "section": section,
+                "key": key,
+                "value": value,
+                "message": f"Updated config: {section}.{key}" if key else f"Updated config: {section}",
+            }
+        except Exception as e:
+            logger.error(f"Failed to update config {section}.{key}: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _handle_get_config(self, section: str, key: str = None) -> dict:
+        """Handle D-Bus request to get a config value.
+
+        Uses ConfigManager for thread-safe config access.
+
+        Args:
+            section: Top-level config section (e.g., "inference", "slack")
+            key: Optional dot-separated key path within section
+        """
+        try:
+            from server.config_manager import config as config_manager
+
+            section_data = config_manager.get(section, default={})
+
+            if key:
+                # Navigate to nested key
+                keys = key.split(".")
+                value = section_data
+                for k in keys:
+                    if isinstance(value, dict) and k in value:
+                        value = value[k]
+                    else:
+                        return {"success": True, "value": None}
+                return {"success": True, "value": value}
+            else:
+                return {"success": True, "value": section_data}
+        except Exception as e:
+            logger.error(f"Failed to get config {section}.{key}: {e}")
+            return {"success": False, "error": str(e)}
+
+    # ==================== Sleep/Wake Handling ====================
+
+    async def on_system_wake(self):
+        """Handle system wake from sleep (SleepWakeAwareDaemon interface).
+
+        After wake, we need to check if any jobs were missed and potentially
+        run them. APScheduler handles missed jobs based on misfire_grace_time,
+        but we log the wake event for visibility.
+        """
+        print("\n🌅 System wake detected - checking scheduled jobs...")
+
+        try:
+            if self._scheduler:
+                # Get current jobs and their next run times
+                jobs = self._scheduler.scheduler.get_jobs()
+                active_jobs = [j for j in jobs if j.id != "_config_watcher"]
+
+                logger.info(f"After wake: {len(active_jobs)} scheduled jobs")
+                print(f"   📅 Active jobs: {len(active_jobs)}")
+
+                # Log next run times
+                for job in active_jobs[:5]:  # Show first 5
+                    print(f"      - {job.id}: next at {job.next_run_time}")
+
+            print("   ✅ Wake handling complete\n")
+
+        except Exception as e:
+            logger.error(f"Error handling system wake: {e}")
+            print(f"   ⚠️  Wake handling error: {e}\n")
 
     # ==================== Daemon Lifecycle ====================
 
@@ -272,10 +492,14 @@ class CronDaemon(DaemonDBusBase):
             if job.id != "_config_watcher":
                 print(f"   {job.id}: {job.next_run_time}")
 
+        # Start sleep/wake monitor (from SleepWakeAwareDaemon mixin)
+        await self.start_sleep_monitor()
+        print("✅ Sleep/wake monitor started")
+
         print()
         print("-" * 60)
         print("Daemon running. Press Ctrl+C to stop.")
-        print(f"Log file: {LOG_FILE}")
+        print("Logs: journalctl --user -u cron-scheduler -f")
         if self.enable_dbus:
             print(f"D-Bus: {self.service_name}")
         print("-" * 60)
@@ -289,6 +513,14 @@ class CronDaemon(DaemonDBusBase):
             return
 
         print()
+        print("Stopping daemon...")
+
+        # Stop sleep monitor first (from SleepWakeAwareDaemon mixin)
+        try:
+            await asyncio.wait_for(self.stop_sleep_monitor(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Sleep monitor stop timed out")
+
         print("Stopping scheduler...")
 
         from tool_modules.aa_workflow.src.scheduler import stop_scheduler
@@ -336,6 +568,9 @@ def list_jobs():
         print(f"{enabled} {job.get('name')}")
         print(f"   Schedule: {job.get('cron')}")
         print(f"   Skill: {job.get('skill')}")
+        persona = job.get("persona", "")
+        if persona:
+            print(f"   Persona: {persona}")
         print(f"   Notify: {', '.join(job.get('notify', []))}")
         print()
 
@@ -424,7 +659,7 @@ D-Bus Control:
             print(f"✅ Cron daemon is running (PID: {pid})")
             print(f"   Lock file: {LOCK_FILE}")
             print(f"   PID file: {PID_FILE}")
-            print(f"   Log file: {LOG_FILE}")
+            print("   Logs: journalctl --user -u cron-scheduler -f")
             print("   (D-Bus not available - run with --dbus for IPC)")
         else:
             print("❌ Cron daemon is not running")

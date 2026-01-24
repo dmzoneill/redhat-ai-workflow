@@ -287,6 +287,269 @@ if DBUS_AVAILABLE:
             self.daemon._event_loop.call_soon(self.daemon.request_shutdown)
             return json.dumps({"success": True, "message": "Shutdown initiated"})
 
+        @method()
+        def HealthCheck(self) -> "s":
+            """Perform a comprehensive health check."""
+            try:
+                # Use synchronous health check to avoid event loop issues
+                result = self.daemon.health_check_sync()
+                return json.dumps(result)
+            except Exception as e:
+                return json.dumps(
+                    {
+                        "healthy": False,
+                        "checks": {"health_check_execution": False},
+                        "message": f"Health check failed: {e}",
+                        "timestamp": time.time(),
+                    }
+                )
+
+        # ==================== Knowledge Cache Methods ====================
+
+        @method()
+        def FindChannel(self, query: "s") -> "s":
+            """
+            Find channels by name, purpose, or topic.
+
+            Args:
+                query: Search string to match against channel name/purpose/topic
+
+            Returns:
+                JSON array of matching channels with id, name, purpose, etc.
+            """
+            loop = self.daemon._event_loop
+            if not loop or not self.daemon.state_db:
+                return json.dumps({"success": False, "error": "State DB not available", "channels": []})
+
+            async def do_find():
+                try:
+                    channels = await self.daemon.state_db.find_channels(query=query, limit=50)
+                    return {
+                        "success": True,
+                        "query": query,
+                        "count": len(channels),
+                        "channels": [c.to_dict() for c in channels],
+                    }
+                except Exception as e:
+                    logger.error(f"FindChannel error: {e}")
+                    return {"success": False, "error": str(e), "channels": []}
+
+            future = asyncio.run_coroutine_threadsafe(do_find(), loop)
+            result = future.result(timeout=10)
+            return json.dumps(result)
+
+        @method()
+        def FindUser(self, query: "s") -> "s":
+            """
+            Find users by name, email, or GitLab username.
+
+            Args:
+                query: Search string to match against user fields
+
+            Returns:
+                JSON array of matching users with id, name, email, etc.
+            """
+            loop = self.daemon._event_loop
+            if not loop or not self.daemon.state_db:
+                return json.dumps({"success": False, "error": "State DB not available", "users": []})
+
+            async def do_find():
+                try:
+                    users = await self.daemon.state_db.find_users(query=query, limit=50)
+                    return {
+                        "success": True,
+                        "query": query,
+                        "count": len(users),
+                        "users": users,
+                    }
+                except Exception as e:
+                    logger.error(f"FindUser error: {e}")
+                    return {"success": False, "error": str(e), "users": []}
+
+            future = asyncio.run_coroutine_threadsafe(do_find(), loop)
+            result = future.result(timeout=10)
+            return json.dumps(result)
+
+        @method()
+        def GetMyChannels(self) -> "s":
+            """
+            Get channels the bot is a member of.
+
+            Returns:
+                JSON array of channels with id, name, purpose, etc.
+            """
+            loop = self.daemon._event_loop
+            if not loop or not self.daemon.state_db:
+                return json.dumps({"success": False, "error": "State DB not available", "channels": []})
+
+            async def do_get():
+                try:
+                    channels = await self.daemon.state_db.get_my_channels(limit=100)
+                    return {
+                        "success": True,
+                        "count": len(channels),
+                        "channels": [c.to_dict() for c in channels],
+                    }
+                except Exception as e:
+                    logger.error(f"GetMyChannels error: {e}")
+                    return {"success": False, "error": str(e), "channels": []}
+
+            future = asyncio.run_coroutine_threadsafe(do_get(), loop)
+            result = future.result(timeout=10)
+            return json.dumps(result)
+
+        @method()
+        def GetUserGroups(self) -> "s":
+            """
+            Get all cached user groups (for @team mentions).
+
+            Returns:
+                JSON array of groups with id, handle, name, members.
+            """
+            loop = self.daemon._event_loop
+            if not loop or not self.daemon.state_db:
+                return json.dumps({"success": False, "error": "State DB not available", "groups": []})
+
+            async def do_get():
+                try:
+                    groups = await self.daemon.state_db.get_all_groups()
+                    return {
+                        "success": True,
+                        "count": len(groups),
+                        "groups": [g.to_dict() for g in groups],
+                    }
+                except Exception as e:
+                    logger.error(f"GetUserGroups error: {e}")
+                    return {"success": False, "error": str(e), "groups": []}
+
+            future = asyncio.run_coroutine_threadsafe(do_get(), loop)
+            result = future.result(timeout=10)
+            return json.dumps(result)
+
+        @method()
+        def ResolveTarget(self, target: "s") -> "s":
+            """
+            Resolve a Slack target to its ID.
+
+            Args:
+                target: Can be #channel, @user, @group, or raw ID
+
+            Returns:
+                JSON with type, id, name, and found status.
+            """
+            loop = self.daemon._event_loop
+            if not loop or not self.daemon.state_db:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "State DB not available",
+                        "type": "unknown",
+                        "id": None,
+                        "name": target,
+                        "found": False,
+                    }
+                )
+
+            async def do_resolve():
+                try:
+                    result = await self.daemon.state_db.resolve_target(target)
+                    result["success"] = True
+                    return result
+                except Exception as e:
+                    logger.error(f"ResolveTarget error: {e}")
+                    return {
+                        "success": False,
+                        "error": str(e),
+                        "type": "unknown",
+                        "id": None,
+                        "name": target,
+                        "found": False,
+                    }
+
+            future = asyncio.run_coroutine_threadsafe(do_resolve(), loop)
+            result = future.result(timeout=10)
+            return json.dumps(result)
+
+        @method()
+        def GetChannelCacheStats(self) -> "s":
+            """
+            Get statistics about the knowledge cache.
+
+            Returns:
+                JSON with cache stats (total channels, member channels, age, etc.)
+            """
+            loop = self.daemon._event_loop
+            if not loop or not self.daemon.state_db:
+                return json.dumps({"success": False, "error": "State DB not available"})
+
+            async def do_get():
+                try:
+                    stats = await self.daemon.state_db.get_channel_cache_stats()
+                    stats["success"] = True
+                    return stats
+                except Exception as e:
+                    logger.error(f"GetChannelCacheStats error: {e}")
+                    return {"success": False, "error": str(e)}
+
+            future = asyncio.run_coroutine_threadsafe(do_get(), loop)
+            result = future.result(timeout=10)
+            return json.dumps(result)
+
+        @method()
+        def RefreshChannelCache(self) -> "s":
+            """
+            Trigger a refresh of the channel cache from Slack API.
+
+            Returns:
+                JSON with refresh status and count of channels cached.
+            """
+            loop = self.daemon._event_loop
+            if not loop or not self.daemon.session or not self.daemon.state_db:
+                return json.dumps({"success": False, "error": "Session or State DB not available"})
+
+            async def do_refresh():
+                try:
+                    # Import here to avoid circular imports
+                    from tool_modules.aa_slack.src.persistence import CachedChannel
+
+                    # Fetch channels from Slack API
+                    channels_data = await self.daemon.session.get_conversations_list(
+                        types="public_channel,private_channel",
+                        limit=1000,
+                    )
+
+                    # Convert to CachedChannel objects
+                    channels = [
+                        CachedChannel(
+                            channel_id=c.get("id", ""),
+                            name=c.get("name", ""),
+                            display_name=c.get("name_normalized", c.get("name", "")),
+                            is_private=c.get("is_private", False),
+                            is_member=c.get("is_member", False),
+                            purpose=c.get("purpose", {}).get("value", ""),
+                            topic=c.get("topic", {}).get("value", ""),
+                            num_members=c.get("num_members", 0),
+                        )
+                        for c in channels_data
+                        if c.get("id")
+                    ]
+
+                    # Bulk cache
+                    await self.daemon.state_db.cache_channels_bulk(channels)
+
+                    return {
+                        "success": True,
+                        "message": "Channel cache refreshed",
+                        "channels_cached": len(channels),
+                    }
+                except Exception as e:
+                    logger.error(f"RefreshChannelCache error: {e}")
+                    return {"success": False, "error": str(e)}
+
+            future = asyncio.run_coroutine_threadsafe(do_refresh(), loop)
+            result = future.result(timeout=60)
+            return json.dumps(result)
+
         # ==================== Signals ====================
 
         @dbus_signal()
@@ -313,6 +576,7 @@ class SlackDaemonWithDBus:
     - D-Bus interface for external control
     - Message history tracking
     - Approval queue management
+    - Health checking
     """
 
     def __init__(self):
@@ -325,6 +589,12 @@ class SlackDaemonWithDBus:
         self._bus: MessageBus | None = None
         self._dbus_interface: SlackPersonaDBusInterface | None = None
         self._shutdown_requested = False
+
+        # Health tracking
+        self._last_successful_poll: float = 0
+        self._last_successful_api_call: float = 0
+        self._consecutive_api_failures: int = 0
+        self._last_health_check: float = 0
 
         # Will be set when daemon starts
         self.session = None
@@ -447,6 +717,93 @@ class SlackDaemonWithDBus:
         """Request graceful shutdown."""
         self._shutdown_requested = True
 
+    def record_successful_poll(self):
+        """Record a successful poll (for health tracking)."""
+        self._last_successful_poll = time.time()
+        self._consecutive_api_failures = 0
+
+    def record_successful_api_call(self):
+        """Record a successful API call (for health tracking)."""
+        self._last_successful_api_call = time.time()
+        self._consecutive_api_failures = 0
+
+    def record_api_failure(self):
+        """Record an API failure (for health tracking)."""
+        self._consecutive_api_failures += 1
+
+    def health_check_sync(self) -> dict:
+        """
+        Perform a synchronous health check on the Slack daemon.
+
+        This is a lightweight check that doesn't make API calls.
+        For API reachability, rely on the listener's polling stats.
+
+        Checks:
+        - Service is running
+        - Listener is active and polling
+        - No excessive consecutive failures
+        """
+        self._last_health_check = time.time()
+        now = time.time()
+
+        # Core checks (required for health)
+        checks = {
+            "running": self.is_running,
+            "session_valid": self.session is not None,
+            "listener_active": self.listener is not None,
+        }
+
+        # Check if polling is happening (should poll at least every 60s)
+        if self._last_successful_poll > 0:
+            poll_age = now - self._last_successful_poll
+            checks["polling_recent"] = poll_age < 120  # Last poll within 2 minutes
+        else:
+            # If we just started, don't fail this check
+            if self.start_time and (now - self.start_time) < 60:
+                checks["polling_recent"] = True  # Grace period
+            else:
+                checks["polling_recent"] = False
+
+        # Check consecutive failures
+        checks["no_excessive_failures"] = self._consecutive_api_failures < 10
+
+        # Check uptime (at least 10 seconds)
+        if self.start_time:
+            checks["uptime_ok"] = (now - self.start_time) > 10
+        else:
+            checks["uptime_ok"] = False
+
+        # Get listener stats for additional info
+        listener_stats = {}
+        if self.listener:
+            listener_stats = getattr(self.listener, "stats", {})
+
+        # Overall health based on core checks only
+        healthy = all(checks.values())
+
+        # Build message
+        if healthy:
+            message = "Slack daemon is healthy"
+        else:
+            failed = [k for k, v in checks.items() if not v]
+            message = f"Unhealthy: {', '.join(failed)}"
+
+        return {
+            "healthy": healthy,
+            "checks": checks,
+            "message": message,
+            "timestamp": self._last_health_check,
+            "consecutive_failures": self._consecutive_api_failures,
+            "last_successful_poll": self._last_successful_poll,
+            "last_successful_api_call": self._last_successful_api_call,
+            "polls": listener_stats.get("polls", 0),
+            "errors": listener_stats.get("errors", 0),
+        }
+
+    async def health_check(self) -> dict:
+        """Async wrapper for health_check_sync (for compatibility)."""
+        return self.health_check_sync()
+
 
 # =============================================================================
 # D-Bus CLIENT
@@ -549,4 +906,54 @@ class SlackAgentClient:
         """Shutdown the daemon."""
         interface = self._get_interface()
         result = await interface.call_shutdown()
+        return json.loads(result)
+
+    async def health_check(self) -> dict:
+        """Perform a comprehensive health check."""
+        interface = self._get_interface()
+        result = await interface.call_health_check()
+        return json.loads(result)
+
+    # ==================== Knowledge Cache Methods ====================
+
+    async def find_channel(self, query: str) -> dict:
+        """Find channels by name, purpose, or topic."""
+        interface = self._get_interface()
+        result = await interface.call_find_channel(query)
+        return json.loads(result)
+
+    async def find_user(self, query: str) -> dict:
+        """Find users by name, email, or GitLab username."""
+        interface = self._get_interface()
+        result = await interface.call_find_user(query)
+        return json.loads(result)
+
+    async def get_my_channels(self) -> dict:
+        """Get channels the bot is a member of."""
+        interface = self._get_interface()
+        result = await interface.call_get_my_channels()
+        return json.loads(result)
+
+    async def get_user_groups(self) -> dict:
+        """Get all cached user groups."""
+        interface = self._get_interface()
+        result = await interface.call_get_user_groups()
+        return json.loads(result)
+
+    async def resolve_target(self, target: str) -> dict:
+        """Resolve #channel, @user, or @group to ID."""
+        interface = self._get_interface()
+        result = await interface.call_resolve_target(target)
+        return json.loads(result)
+
+    async def get_channel_cache_stats(self) -> dict:
+        """Get knowledge cache statistics."""
+        interface = self._get_interface()
+        result = await interface.call_get_channel_cache_stats()
+        return json.loads(result)
+
+    async def refresh_channel_cache(self) -> dict:
+        """Trigger a refresh of the channel cache."""
+        interface = self._get_interface()
+        result = await interface.call_refresh_channel_cache()
         return json.loads(result)

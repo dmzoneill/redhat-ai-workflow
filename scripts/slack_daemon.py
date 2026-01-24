@@ -49,6 +49,7 @@ from scripts.common.command_registry import CommandRegistry, CommandType, get_re
 from scripts.common.config_loader import load_config
 from scripts.common.context_extractor import ContextExtractor, ConversationContext
 from scripts.common.response_router import CommandContext, ResponseFormatter, ResponseMode, ResponseRouter, get_router
+from scripts.common.sleep_wake import SleepWakeMonitor
 
 # Import PROJECT_ROOT after path setup
 PROJECT_ROOT = Path(slack_path_setup.PROJECT_ROOT)
@@ -588,12 +589,19 @@ class DesktopNotifier:
     - ✅ Response sent
     - 🚫 Message ignored (channel not allowed)
     - ⏸️ Awaiting approval (concerned user)
+
+    Includes rate limiting to prevent notification spam during restart cycles.
     """
 
     # Notification urgency levels
     URGENCY_LOW = 0
     URGENCY_NORMAL = 1
     URGENCY_CRITICAL = 2
+
+    # Rate limiting settings
+    RATE_LIMIT_WINDOW = 60.0  # seconds
+    RATE_LIMIT_MAX = 10  # max notifications per window
+    STOP_NOTIFICATION_COOLDOWN = 120.0  # seconds between "stopped" notifications
 
     def __init__(self, enabled: bool = True):
         self.enabled = enabled and NOTIFY_AVAILABLE
@@ -605,6 +613,22 @@ class DesktopNotifier:
             "approval": "dialog-question",
             "error": "dialog-error",
         }
+        # Rate limiting state
+        self._notification_times: list[float] = []
+        self._last_stop_notification: float = 0
+        self._last_start_notification: float = 0
+
+    def _check_rate_limit(self) -> bool:
+        """Check if we're within rate limits. Returns True if OK to send."""
+        now = time.time()
+        # Remove old entries outside the window
+        self._notification_times = [t for t in self._notification_times if now - t < self.RATE_LIMIT_WINDOW]
+        # Check if we're at the limit
+        if len(self._notification_times) >= self.RATE_LIMIT_MAX:
+            return False
+        # Record this notification
+        self._notification_times.append(now)
+        return True
 
     def _send(
         self,
@@ -613,9 +637,15 @@ class DesktopNotifier:
         icon: str = "dialog-information",
         urgency: int = 1,
         timeout: int = 5000,
+        bypass_rate_limit: bool = False,
     ):
         """Send a desktop notification."""
         if not self.enabled:
+            return
+
+        # Check rate limit (unless bypassed for critical notifications)
+        if not bypass_rate_limit and not self._check_rate_limit():
+            logger.debug(f"Notification rate limited: {title}")
             return
 
         try:
@@ -705,12 +735,26 @@ class DesktopNotifier:
 
     def started(self):
         """Notify when daemon starts."""
+        now = time.time()
+        # Don't spam start notifications during restart cycles
+        if now - self._last_start_notification < self.STOP_NOTIFICATION_COOLDOWN:
+            logger.debug("Skipping start notification (cooldown)")
+            return
+        self._last_start_notification = now
+
         title = "🤖 Slack Persona Started"
         body = "Monitoring channels for messages..."
         self._send(title, body, "emblem-default", self.URGENCY_LOW, timeout=3000)
 
     def stopped(self):
         """Notify when daemon stops."""
+        now = time.time()
+        # Don't spam stop notifications during restart cycles
+        if now - self._last_stop_notification < self.STOP_NOTIFICATION_COOLDOWN:
+            logger.debug("Skipping stop notification (cooldown)")
+            return
+        self._last_stop_notification = now
+
         title = "🛑 Slack Persona Stopped"
         body = "No longer monitoring Slack"
         self._send(title, body, "emblem-important", self.URGENCY_LOW, timeout=3000)
@@ -1373,6 +1417,32 @@ class SlackDaemon:
             except ImportError as e:
                 logger.warning(f"D-Bus not available: {e}")
 
+        # Sleep/wake monitor
+        self._sleep_monitor: SleepWakeMonitor | None = None
+
+    async def _on_system_wake(self):
+        """Handle system wake from sleep."""
+        logger.info("System wake detected - refreshing Slack connection...")
+        print("\n🌅 System wake detected - refreshing...")
+
+        try:
+            # Re-validate Slack session (may have expired during sleep)
+            if self.session:
+                try:
+                    auth = await self.session.validate_session()
+                    logger.info(f"Slack session still valid: {auth.get('user', 'unknown')}")
+                    print("   ✅ Slack session valid")
+                except Exception as e:
+                    logger.warning(f"Slack session invalid after wake: {e}")
+                    print(f"   ⚠️  Slack session needs refresh: {e}")
+                    # Could trigger re-auth here if needed
+
+            print("   ✅ Wake handling complete\n")
+
+        except Exception as e:
+            logger.error(f"Error handling system wake: {e}")
+            print(f"   ⚠️  Wake handling error: {e}\n")
+
     async def start(self):
         """Initialize and start the daemon."""
         from src.listener import SlackListener
@@ -1387,6 +1457,11 @@ class SlackDaemon:
             self._dbus_handler.is_running = True
             self._dbus_handler.start_time = self._start_time
             print("✅ D-Bus IPC enabled (com.aiworkflow.SlackAgent)")
+
+        # Start sleep/wake monitor
+        self._sleep_monitor = SleepWakeMonitor(on_wake_callback=self._on_system_wake)
+        await self._sleep_monitor.start()
+        print("✅ Sleep/wake monitor started")
 
         # Initialize Slack session with automatic credential refresh
         if not await self._init_slack_auth():
@@ -1417,6 +1492,11 @@ class SlackDaemon:
         await self.listener.start()
         self._running = True
 
+        # Update D-Bus handler with listener reference for health checks
+        if self._dbus_handler:
+            self._dbus_handler.listener = self.listener
+            self._dbus_handler.state_db = self.state_db
+
         # Desktop notification
         self.notifier.started()
 
@@ -1426,6 +1506,7 @@ class SlackDaemon:
     async def _main_loop(self):
         """Main processing loop."""
         loop_count = 0
+        last_poll_count = 0
         while self._running:
             try:
                 loop_count += 1
@@ -1440,6 +1521,12 @@ class SlackDaemon:
                 # Update status display
                 self.ui.print_status(stats)
 
+                # Track successful polls for health monitoring
+                current_poll_count = stats.get("polls", 0)
+                if self._dbus_handler and current_poll_count > last_poll_count:
+                    self._dbus_handler.record_successful_poll()
+                    last_poll_count = current_poll_count
+
                 # Check for pending messages
                 pending = await self.state_db.get_pending_messages(limit=10)
 
@@ -1453,6 +1540,9 @@ class SlackDaemon:
                 break
             except Exception as e:
                 self.ui.print_error(str(e))
+                # Track failures for health monitoring
+                if self._dbus_handler:
+                    self._dbus_handler.record_api_failure()
                 await asyncio.sleep(5)
 
     async def _handle_alert_message(self, msg: PendingMessage, alert_info: Any):
@@ -1613,13 +1703,20 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
         self.ui.print_message(msg, "claude", classification, channel_allowed=can_respond)
         self.ui.messages_processed += 1
 
-        # Desktop notification - message received
-        self.notifier.message_received(
-            user_name=msg.user_name,
-            channel_name=msg.channel_name,
-            text=msg.text,
-            classification=classification.category.value,
-        )
+        # Desktop notification - message received (with deduplication to prevent spam on restart)
+        # Check if we already notified about this message (survives daemon restarts)
+        already_notified = await self.state_db.was_notified(msg.ts)
+        if not already_notified:
+            self.notifier.message_received(
+                user_name=msg.user_name,
+                channel_name=msg.channel_name,
+                text=msg.text,
+                classification=classification.category.value,
+            )
+            # Mark as notified so we don't spam on restart
+            await self.state_db.mark_notified(msg.ts, msg.channel_id)
+        else:
+            logger.debug(f"Skipping notification for {msg.ts} - already notified")
 
         # Generate response using Claude (handles intent, tool calls, everything)
         response, should_send = await self.response_generator.generate(msg, classification)
@@ -1863,6 +1960,13 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
 
         # Desktop notification
         self.notifier.stopped()
+
+        # Stop sleep/wake monitor
+        if self._sleep_monitor:
+            try:
+                await asyncio.wait_for(self._sleep_monitor.stop(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Sleep monitor stop timed out")
 
         if self._dbus_handler:
             self._dbus_handler.is_running = False
@@ -2165,11 +2269,13 @@ Single Instance:
         print("  python scripts/slack_control.py status")
         return
 
-    # Setup logging
+    # Setup logging for journalctl
+    # When running under systemd, stderr automatically goes to journald
+    # Format without timestamp - journald adds its own timestamps
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        format="%(name)s - %(levelname)s - %(message)s",
         handlers=[logging.StreamHandler(sys.stderr)],
     )
 

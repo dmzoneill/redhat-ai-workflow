@@ -13,7 +13,6 @@ Supports:
 - Configurable per-command defaults
 """
 
-import json
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -140,15 +139,14 @@ class ResponseRouter:
             self._load_config()
 
     def _load_config(self) -> None:
-        """Load configuration from config.json."""
-        config_path = PROJECT_ROOT / "config.json"
-        if config_path.exists():
-            try:
-                with open(config_path) as f:
-                    full_config = json.load(f)
-                    self.config = full_config.get("slack", {}).get("commands", {})
-            except Exception as e:
-                logger.warning(f"Failed to load config: {e}")
+        """Load configuration using ConfigManager for thread-safe access."""
+        try:
+            from server.config_manager import config as config_manager
+
+            slack_config = config_manager.get("slack", default={})
+            self.config = slack_config.get("commands", {})
+        except Exception as e:
+            logger.warning(f"Failed to load config: {e}")
 
     def route(self, context: CommandContext) -> ResponseConfig:
         """

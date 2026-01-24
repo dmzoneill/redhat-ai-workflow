@@ -54,23 +54,19 @@ def _get_current_project() -> str:
     if project:
         return project
 
-    # Try to detect from cwd
+    # Try to detect from cwd using ConfigManager
     try:
-        import json
+        from server.config_manager import config as config_manager
 
-        config_path = MEMORY_DIR.parent / "config.json"
-        if config_path.exists():
-            with open(config_path) as f:
-                config = json.load(f)
-
-            cwd = Path.cwd().resolve()
-            for project_name, project_config in config.get("repositories", {}).items():
-                project_path = Path(project_config.get("path", "")).expanduser().resolve()
-                try:
-                    cwd.relative_to(project_path)
-                    return project_name
-                except ValueError:
-                    continue
+        cwd = Path.cwd().resolve()
+        repositories = config_manager.get("repositories", default={})
+        for project_name, project_config in repositories.items():
+            project_path = Path(project_config.get("path", "")).expanduser().resolve()
+            try:
+                cwd.relative_to(project_path)
+                return project_name
+            except ValueError:
+                continue
     except Exception:
         pass
 
@@ -477,7 +473,7 @@ def add_open_mr(
 
 def add_follow_up(task: str, priority: str = "normal", issue_key: str = "", mr_id: int = 0) -> bool:
     """
-    Add a follow-up task.
+    Add a follow-up task (legacy - prefer add_discovered_work for new items).
 
     Args:
         task: Task description
@@ -499,6 +495,520 @@ def add_follow_up(task: str, priority: str = "normal", issue_key: str = "", mr_i
         item["mr_id"] = mr_id
 
     return append_to_list("state/current_work", "follow_ups", item)
+
+
+# =============================================================================
+# DISCOVERED WORK FUNCTIONS - Track work found during other tasks
+# =============================================================================
+
+
+def add_discovered_work(
+    task: str,
+    work_type: str = "discovered_work",
+    priority: str = "medium",
+    source_skill: str = "",
+    source_issue: str = "",
+    source_mr: int = 0,
+    file_path: str = "",
+    line_number: int = 0,
+    notes: str = "",
+) -> bool:
+    """
+    Add discovered work item found during skill execution.
+
+    Use this when a skill discovers work that needs to be done but isn't
+    part of the current task. These items can later be synced to Jira.
+
+    Args:
+        task: Description of the work needed
+        work_type: Type of work:
+            - "discovered_work" (default) - general discovered item
+            - "tech_debt" - technical debt to address
+            - "bug" - bug found during other work
+            - "improvement" - enhancement opportunity
+            - "missing_test" - test coverage gap
+            - "missing_docs" - documentation gap
+            - "security" - security concern
+        priority: Priority level (low, medium, high, critical)
+        source_skill: Name of skill that discovered this (e.g., "review_pr")
+        source_issue: Jira issue being worked on when discovered
+        source_mr: MR ID being reviewed when discovered
+        file_path: File where issue was found
+        line_number: Line number if applicable
+        notes: Additional context
+
+    Returns:
+        True if successfully added
+
+    Example:
+        # In review_pr skill when finding tech debt:
+        add_discovered_work(
+            task="Refactor duplicate validation logic in api/validators.py",
+            work_type="tech_debt",
+            priority="medium",
+            source_skill="review_pr",
+            source_mr=1459,
+            file_path="api/validators.py",
+            notes="Same validation repeated in 3 places"
+        )
+    """
+    item: Dict[str, Any] = {
+        "task": task,
+        "work_type": work_type,
+        "priority": priority,
+        "created": get_timestamp(),
+        "jira_synced": False,
+        "jira_key": None,
+    }
+
+    if source_skill:
+        item["source_skill"] = source_skill
+    if source_issue:
+        item["source_issue"] = source_issue
+    if source_mr:
+        item["source_mr"] = source_mr
+    if file_path:
+        item["file_path"] = file_path
+    if line_number:
+        item["line_number"] = line_number
+    if notes:
+        item["notes"] = notes
+
+    return append_to_list("state/current_work", "discovered_work", item)
+
+
+def get_discovered_work(pending_only: bool = False) -> List[Dict[str, Any]]:
+    """
+    Get list of discovered work items.
+
+    Args:
+        pending_only: If True, only return items not yet synced to Jira
+
+    Returns:
+        List of discovered work dicts
+    """
+    data = read_memory("state/current_work")
+    items = data.get("discovered_work", [])
+
+    if not isinstance(items, list):
+        return []
+
+    if pending_only:
+        return [item for item in items if not item.get("jira_synced", False)]
+
+    return items
+
+
+def get_pending_discovered_work() -> List[Dict[str, Any]]:
+    """
+    Get discovered work items not yet synced to Jira.
+
+    Convenience wrapper for get_discovered_work(pending_only=True).
+
+    Returns:
+        List of pending discovered work dicts
+    """
+    return get_discovered_work(pending_only=True)
+
+
+def mark_discovered_work_synced(task: str, jira_key: str) -> bool:
+    """
+    Mark a discovered work item as synced to Jira.
+
+    Args:
+        task: Task description to match (or partial match)
+        jira_key: The created Jira issue key
+
+    Returns:
+        True if item was found and updated
+    """
+    path = get_memory_path("state/current_work")
+
+    if not path.exists():
+        return False
+
+    try:
+        with open(path, "r+") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+            try:
+                f.seek(0)
+                content = f.read()
+                data = yaml.safe_load(content) if content else {}
+
+                items = data.get("discovered_work", [])
+                if not isinstance(items, list):
+                    return False
+
+                # Find and update matching item
+                updated = False
+                for item in items:
+                    if task in item.get("task", "") or item.get("task", "") in task:
+                        item["jira_synced"] = True
+                        item["jira_key"] = jira_key
+                        item["synced_at"] = get_timestamp()
+                        updated = True
+                        break
+
+                if updated:
+                    data["last_updated"] = get_timestamp()
+                    f.seek(0)
+                    f.truncate()
+                    yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+                return updated
+
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    except Exception as e:
+        logger.warning(f"Error marking discovered work synced: {e}")
+        return False
+
+
+def remove_discovered_work(task: str) -> bool:
+    """
+    Remove a discovered work item.
+
+    Args:
+        task: Task description to match
+
+    Returns:
+        True if item was removed
+    """
+    return remove_from_list("state/current_work", "discovered_work", "task", task) > 0
+
+
+def get_discovered_work_summary() -> Dict[str, Any]:
+    """
+    Get summary statistics of discovered work.
+
+    Returns:
+        Dict with counts by type, priority, and sync status
+    """
+    items = get_discovered_work()
+
+    summary: Dict[str, Any] = {
+        "total": len(items),
+        "pending_sync": 0,
+        "synced": 0,
+        "by_type": {},
+        "by_priority": {},
+        "by_source_skill": {},
+    }
+
+    for item in items:
+        # Sync status
+        if item.get("jira_synced"):
+            summary["synced"] += 1
+        else:
+            summary["pending_sync"] += 1
+
+        # By type
+        work_type = item.get("work_type", "discovered_work")
+        summary["by_type"][work_type] = summary["by_type"].get(work_type, 0) + 1
+
+        # By priority
+        priority = item.get("priority", "medium")
+        summary["by_priority"][priority] = summary["by_priority"].get(priority, 0) + 1
+
+        # By source skill
+        source = item.get("source_skill", "unknown")
+        summary["by_source_skill"][source] = summary["by_source_skill"].get(source, 0) + 1
+
+    return summary
+
+
+def find_similar_discovered_work(task: str, threshold: float = 0.8) -> Optional[Dict[str, Any]]:
+    """
+    Find existing discovered work that is similar to the given task.
+
+    Uses word overlap similarity to find potential duplicates.
+    Returns the most similar item if similarity >= threshold.
+
+    Args:
+        task: Task description to match
+        threshold: Minimum similarity score (0.0-1.0, default 0.8 = 80%)
+
+    Returns:
+        Most similar discovered work item, or None if no match >= threshold
+    """
+    items = get_discovered_work()
+    if not items:
+        return None
+
+    # Normalize and tokenize the input task
+    def tokenize(text: str) -> set:
+        """Convert text to lowercase word tokens."""
+        import re
+
+        words = re.findall(r"\b\w+\b", text.lower())
+        # Remove common stop words
+        stop_words = {"the", "a", "an", "in", "on", "at", "to", "for", "of", "and", "or", "is", "are", "was", "were"}
+        return {w for w in words if w not in stop_words and len(w) > 2}
+
+    task_tokens = tokenize(task)
+    if not task_tokens:
+        return None
+
+    best_match = None
+    best_score = 0.0
+
+    for item in items:
+        item_task = item.get("task", "")
+        item_tokens = tokenize(item_task)
+
+        if not item_tokens:
+            continue
+
+        # Jaccard similarity: intersection / union
+        intersection = len(task_tokens & item_tokens)
+        union = len(task_tokens | item_tokens)
+        similarity = intersection / union if union > 0 else 0.0
+
+        if similarity >= threshold and similarity > best_score:
+            best_score = similarity
+            best_match = item.copy()
+            best_match["_similarity_score"] = similarity
+
+    return best_match
+
+
+def is_duplicate_discovered_work(task: str, work_type: str = "", source_mr: int = 0) -> Dict[str, Any]:
+    """
+    Check if a discovered work item is a duplicate of an existing one.
+
+    Checks for:
+    1. Exact task match (already exists)
+    2. Same task from same MR (duplicate detection during same review)
+    3. High similarity match (potential duplicate)
+    4. Already synced to Jira (should not create again)
+
+    Args:
+        task: Task description
+        work_type: Type of work (for stricter matching)
+        source_mr: Source MR ID (same MR = likely duplicate)
+
+    Returns:
+        Dict with:
+            - is_duplicate: bool
+            - reason: str (why it's a duplicate)
+            - existing_item: dict (the matching item, if any)
+            - jira_key: str (if already synced to Jira)
+    """
+    items = get_discovered_work()
+
+    result: Dict[str, Any] = {
+        "is_duplicate": False,
+        "reason": None,
+        "existing_item": None,
+        "jira_key": None,
+    }
+
+    task_lower = task.lower().strip()
+
+    for item in items:
+        item_task = item.get("task", "").lower().strip()
+
+        # Check 1: Exact match
+        if task_lower == item_task:
+            result["is_duplicate"] = True
+            result["reason"] = "exact_match"
+            result["existing_item"] = item
+            if item.get("jira_synced"):
+                result["jira_key"] = item.get("jira_key")
+            return result
+
+        # Check 2: Same MR and similar task
+        if source_mr and item.get("source_mr") == source_mr:
+            # Same MR - check for high similarity
+            similar = find_similar_discovered_work(task, threshold=0.7)
+            if similar and similar.get("source_mr") == source_mr:
+                result["is_duplicate"] = True
+                result["reason"] = "same_mr_similar_task"
+                result["existing_item"] = item
+                if item.get("jira_synced"):
+                    result["jira_key"] = item.get("jira_key")
+                return result
+
+        # Check 3: Already synced with similar task
+        if item.get("jira_synced"):
+            similar = find_similar_discovered_work(task, threshold=0.85)
+            if similar and similar.get("jira_synced"):
+                result["is_duplicate"] = True
+                result["reason"] = "already_synced_similar"
+                result["existing_item"] = similar
+                result["jira_key"] = similar.get("jira_key")
+                return result
+
+    # Check 4: High similarity match (even if not synced)
+    similar = find_similar_discovered_work(task, threshold=0.9)
+    if similar:
+        result["is_duplicate"] = True
+        result["reason"] = "high_similarity"
+        result["existing_item"] = similar
+        if similar.get("jira_synced"):
+            result["jira_key"] = similar.get("jira_key")
+        return result
+
+    return result
+
+
+def add_discovered_work_safe(
+    task: str,
+    work_type: str = "discovered_work",
+    priority: str = "medium",
+    source_skill: str = "",
+    source_issue: str = "",
+    source_mr: int = 0,
+    file_path: str = "",
+    line_number: int = 0,
+    notes: str = "",
+) -> Dict[str, Any]:
+    """
+    Safely add discovered work with deduplication.
+
+    This is the preferred method for adding discovered work as it:
+    1. Checks for duplicates before adding
+    2. Returns info about existing items if duplicate
+    3. Can be used to decide whether to add notes to existing Jira
+
+    Args:
+        (same as add_discovered_work)
+
+    Returns:
+        Dict with:
+            - added: bool (True if new item was added)
+            - is_duplicate: bool
+            - reason: str (if duplicate)
+            - existing_item: dict (if duplicate)
+            - jira_key: str (if already synced)
+
+    Example:
+        result = add_discovered_work_safe(
+            task="Missing API documentation",
+            work_type="missing_docs",
+            source_skill="review_pr",
+            source_mr=1459
+        )
+
+        if result["is_duplicate"]:
+            if result["jira_key"]:
+                # Add note to existing Jira issue instead
+                jira_add_comment(result["jira_key"], "Also found in MR !1459")
+            else:
+                print(f"Duplicate of: {result['existing_item']['task']}")
+        else:
+            print("New item added")
+    """
+    # Check for duplicates first
+    dup_check = is_duplicate_discovered_work(task, work_type, source_mr)
+
+    if dup_check["is_duplicate"]:
+        return {
+            "added": False,
+            "is_duplicate": True,
+            "reason": dup_check["reason"],
+            "existing_item": dup_check["existing_item"],
+            "jira_key": dup_check.get("jira_key"),
+        }
+
+    # Not a duplicate - add it
+    success = add_discovered_work(
+        task=task,
+        work_type=work_type,
+        priority=priority,
+        source_skill=source_skill,
+        source_issue=source_issue,
+        source_mr=source_mr,
+        file_path=file_path,
+        line_number=line_number,
+        notes=notes,
+    )
+
+    return {
+        "added": success,
+        "is_duplicate": False,
+        "reason": None,
+        "existing_item": None,
+        "jira_key": None,
+    }
+
+
+def get_discovered_work_for_period(
+    days: int = 7,
+    synced_only: bool = False,
+) -> Dict[str, Any]:
+    """
+    Get discovered work items from a specific time period.
+
+    Useful for daily/weekly summaries.
+
+    Args:
+        days: Number of days to look back (default: 7)
+        synced_only: If True, only return items that were synced to Jira
+
+    Returns:
+        Dict with:
+            - items: List of items in the period
+            - created_count: Number of items discovered in period
+            - synced_count: Number synced to Jira in period
+            - by_type: Counts by work type
+            - by_day: Counts by day
+            - jira_keys: List of created Jira keys
+    """
+    from datetime import datetime, timedelta
+
+    items = get_discovered_work()
+    cutoff = datetime.now() - timedelta(days=days)
+
+    period_items = []
+    synced_in_period = []
+    by_type: Dict[str, int] = {}
+    by_day: Dict[str, int] = {}
+    jira_keys: List[str] = []
+
+    for item in items:
+        # Check created date
+        created_str = item.get("created", "")
+        try:
+            created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+            created = created.replace(tzinfo=None)  # Make naive for comparison
+        except (ValueError, AttributeError):
+            continue
+
+        if created < cutoff:
+            continue
+
+        # Item is in period
+        if synced_only and not item.get("jira_synced"):
+            continue
+
+        period_items.append(item)
+
+        # Track by type
+        work_type = item.get("work_type", "discovered_work")
+        by_type[work_type] = by_type.get(work_type, 0) + 1
+
+        # Track by day
+        day_str = created.strftime("%Y-%m-%d")
+        by_day[day_str] = by_day.get(day_str, 0) + 1
+
+        # Track synced items
+        if item.get("jira_synced"):
+            synced_in_period.append(item)
+            if item.get("jira_key"):
+                jira_keys.append(item["jira_key"])
+
+    return {
+        "items": period_items,
+        "created_count": len(period_items),
+        "synced_count": len(synced_in_period),
+        "by_type": by_type,
+        "by_day": by_day,
+        "jira_keys": jira_keys,
+        "period_days": days,
+    }
 
 
 def remove_active_issue(issue_key: str) -> bool:
