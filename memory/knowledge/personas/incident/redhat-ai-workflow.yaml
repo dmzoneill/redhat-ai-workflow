@@ -1,8 +1,8 @@
 metadata:
   project: redhat-ai-workflow
-  persona: developer
-  last_updated: '2026-01-20T18:46:18.714583'
-  last_scanned: '2026-01-20T18:46:18.714554'
+  persona: incident
+  last_updated: '2026-01-20T18:46:18.717554'
+  last_scanned: '2026-01-20T18:46:18.717527'
   confidence: 0.3
   auto_generated: true
 architecture:

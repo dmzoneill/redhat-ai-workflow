@@ -1,15 +1,8 @@
 notifications:
-- job_name: hello_world_test
-  message: "\u274C Skill `hello_world` failed.\n\nError: Claude CLI timed out after\
-    \ 5 minutes"
-  skill: hello_world
+- job_name: nightly_jira_hygiene
+  message: "\u274C Skill `jira_hygiene_all` failed.\n\nError: Claude CLI timed out\
+    \ after 5 minutes"
+  skill: jira_hygiene_all
   success: false
-  timestamp: '2026-01-20T10:25:00.029188'
-  title: 'Scheduled Job: hello_world_test'
-- job_name: hello_world_test
-  message: "\u274C Skill `hello_world` failed.\n\nError: Claude CLI timed out after\
-    \ 5 minutes"
-  skill: hello_world
-  success: false
-  timestamp: '2026-01-20T10:35:00.033151'
-  title: 'Scheduled Job: hello_world_test'
+  timestamp: '2026-01-22T21:05:00.180970'
+  title: 'Scheduled Job: nightly_jira_hygiene'

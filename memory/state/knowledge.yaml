@@ -1,0 +1,87 @@
+last_full_bootstrap:
+  error_count: 0
+  personas:
+  - developer
+  - devops
+  - incident
+  - release
+  projects:
+  - automation-analytics-backend
+  - pdf-generator
+  - app-interface
+  - konflux-release-data
+  - redhat-ai-workflow
+  success_count: 20
+  timestamp: '2026-01-20T18:46:18.981298'
+last_updated: '2026-01-20T18:46:18.981355'
+projects:
+  app-interface:
+    personas:
+      developer:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981317'
+      devops:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981318'
+      incident:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981318'
+      release:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981319'
+  automation-analytics-backend:
+    personas:
+      developer:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981306'
+      devops:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981309'
+      incident:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981310'
+      release:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981312'
+  konflux-release-data:
+    personas:
+      developer:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981320'
+      devops:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981321'
+      incident:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981322'
+      release:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981323'
+  pdf-generator:
+    personas:
+      developer:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981313'
+      devops:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981314'
+      incident:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981315'
+      release:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981316'
+  redhat-ai-workflow:
+    personas:
+      developer:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981324'
+      devops:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981325'
+      incident:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981325'
+      release:
+        action: missing
+        last_generated: '2026-01-20T18:46:18.981326'

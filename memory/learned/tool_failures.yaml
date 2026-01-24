@@ -212,8 +212,65 @@ failures:
   success: true
   timestamp: '2026-01-20T21:04:02.478201'
   tool: jira_my_issues
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-01-21T14:41:00.274820'
+  tool: gitlab_mr_list
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-01-21T21:00:41.176528'
+  tool: jira_my_issues
+- error_snippet: "\u274C Failed to add comment: ERROR: Request exception: HTTPSConnectionPool(host='issues.redhat.com',\
+    \ por"
+  error_type: network
+  fix_applied: vpn_connect
+  success: true
+  timestamp: '2026-01-22T15:33:35.294224'
+  tool: _jira_add_comment_impl
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-01-22T21:01:31.653123'
+  tool: jira_my_issues
+learned_fixes:
+- error_pattern: name 'skill_engine' is not defined
+  fix: Added run_skill = self._create_nested_skill_runner() to safe_globals in _exec_compute_internal().
+    Skills should use run_skill('skill_name', {...}) instead of skill_engine.run_skill(...)
+  learned_at: '2026-01-20T21:00:00'
+  root_cause: Compute blocks in skills could not call nested skills because run_skill()
+    was not injected into the compute namespace
+  tool: skill_engine
+  verified: true
+- error_pattern: unrecognized arguments
+  fix: Changed run_rh_issue call from ['add-comment', issue_key, comment] to ['add-comment',
+    issue_key, '-t', comment, '--no-ai']
+  learned_at: '2026-01-21T11:00:00'
+  root_cause: rh-issue add-comment CLI requires -t flag for comment text and --no-ai
+    to skip AI improvement, but tool was passing comment as positional argument
+  tool: jira_add_comment
+  verified: true
+- error_pattern: Expected the "[HOST/]OWNER/[NAMESPACE/]REPO" format
+  fix: Updated _resolve_gitlab_to_local to also match on repo_name key in addition
+    to gitlab path field
+  learned_at: '2026-01-21T11:00:00'
+  root_cause: _resolve_gitlab_to_local only matched on gitlab path field, not on repo
+    name key. When passing short name like 'app-interface', it didn't resolve to local
+    directory and glab --repo flag got invalid format
+  tool: gitlab_mr_create
+  verified: true
 stats:
-  auto_fixed: 21
+  auto_fixed: 25
   daily:
     '2026-01-18':
       auto_fixed: 1
@@ -221,13 +278,16 @@ stats:
     '2026-01-19':
       auto_fixed: 1
       total: 1
+    '2026-01-22':
+      auto_fixed: 1
+      total: 1
   last_updated: null
   manual_required: 0
-  total_failures: 21
+  total_failures: 25
   weekly:
     2026-W03:
-      auto_fixed: 2
-      total: 2
+      auto_fixed: 3
+      total: 3
 tool_failures:
   bonfire_deploy:
   - error: timeout waiting for
@@ -280,23 +340,3 @@ tool_failures:
   - error: not found
     fix: Image not built yet - wait for Konflux
     not_an_error: true
-
-learned_fixes:
-- tool: skill_engine
-  error_pattern: "name 'skill_engine' is not defined"
-  root_cause: "Compute blocks in skills could not call nested skills because run_skill() was not injected into the compute namespace"
-  fix: "Added run_skill = self._create_nested_skill_runner() to safe_globals in _exec_compute_internal(). Skills should use run_skill('skill_name', {...}) instead of skill_engine.run_skill(...)"
-  learned_at: "2026-01-20T21:00:00"
-  verified: true
-- tool: jira_add_comment
-  error_pattern: "unrecognized arguments"
-  root_cause: "rh-issue add-comment CLI requires -t flag for comment text and --no-ai to skip AI improvement, but tool was passing comment as positional argument"
-  fix: "Changed run_rh_issue call from ['add-comment', issue_key, comment] to ['add-comment', issue_key, '-t', comment, '--no-ai']"
-  learned_at: "2026-01-21T11:00:00"
-  verified: true
-- tool: gitlab_mr_create
-  error_pattern: "Expected the \"[HOST/]OWNER/[NAMESPACE/]REPO\" format"
-  root_cause: "_resolve_gitlab_to_local only matched on gitlab path field, not on repo name key. When passing short name like 'app-interface', it didn't resolve to local directory and glab --repo flag got invalid format"
-  fix: "Updated _resolve_gitlab_to_local to also match on repo_name key in addition to gitlab path field"
-  learned_at: "2026-01-21T11:00:00"
-  verified: true

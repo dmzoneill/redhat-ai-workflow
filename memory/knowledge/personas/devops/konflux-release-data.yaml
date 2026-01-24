@@ -1,17 +1,15 @@
 metadata:
-  project: automation-analytics-backend
-  persona: developer
-  last_updated: '2026-01-20T18:46:18.698260'
-  last_scanned: '2026-01-20T18:46:18.698167'
+  project: konflux-release-data
+  persona: devops
+  last_updated: '2026-01-20T18:46:18.711213'
+  last_scanned: '2026-01-20T18:46:18.711181'
   confidence: 0.3
   auto_generated: true
 architecture:
-  overview: 'Tower Analytics Backend
-
-    ======================='
+  overview: '[![pipeline status](https://gitlab.cee.redhat.com/releng/konflux-release-data/badges/main/pipeline.svg)](https://gitlab.cee.redhat.com/releng/konflux-release-data/-/commits/main)'
   key_modules:
-  - path: test/
-    purpose: Test module
+  - path: tests/
+    purpose: Tests module
     notes: Auto-detected from project structure
   data_flow: ''
   dependencies: []
@@ -25,7 +23,5 @@ patterns:
   deployment:
   - pattern: GitLab CI/CD
     notes: Pipeline defined in .gitlab-ci.yml
-  - pattern: Docker containerization
-    notes: Dockerfile present
 gotchas: []
 learned_from_tasks: []

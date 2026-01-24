@@ -1,8 +1,8 @@
 metadata:
   project: automation-analytics-backend
-  persona: developer
-  last_updated: '2026-01-20T18:46:18.698260'
-  last_scanned: '2026-01-20T18:46:18.698167'
+  persona: incident
+  last_updated: '2026-01-20T18:46:18.701385'
+  last_scanned: '2026-01-20T18:46:18.701331'
   confidence: 0.3
   auto_generated: true
 architecture:
