@@ -20,6 +20,6 @@ skills:
   # Project management
   - memory_view         # View/manage persistent memory
   - learn_pattern       # Save learned pattern
-  
+
   # Code navigation
   - start_work          # Start working on an issue (sets project context)

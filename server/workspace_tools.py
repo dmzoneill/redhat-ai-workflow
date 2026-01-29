@@ -191,8 +191,7 @@ async def check_workspace_access(
 
     suggested = _suggest_persona(missing[0])
     error = (
-        f"❌ Required module(s) not loaded: {', '.join(missing)}\n\n"
-        f"Run `persona_load('{suggested}')` to enable."
+        f"❌ Required module(s) not loaded: {', '.join(missing)}\n\n" f"Run `persona_load('{suggested}')` to enable."
     )
     return False, error
 
@@ -237,5 +236,3 @@ async def get_workspace_context(ctx: "Context") -> dict:
             "branch": None,
             "active_tools": [],
         }
-
-

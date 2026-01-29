@@ -38,20 +38,20 @@ environments:
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.p
-    last_check: '2026-01-28T17:07:42.596Z'
+    last_check: '2026-01-29T14:47:37.374Z'
     namespace: tower-analytics-prod
     notes: ''
-    status: degraded
+    status: healthy
   stage:
     alerts: []
     cluster: crcs02ue1
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.s
-    last_check: '2026-01-28T17:07:42.596Z'
+    last_check: '2026-01-29T14:47:37.374Z'
     namespace: tower-analytics-stage
     notes: ''
-    status: degraded
+    status: healthy
 known_issues: []
 last_checked: null
 last_updated: '2026-01-20T15:41:38.208109'

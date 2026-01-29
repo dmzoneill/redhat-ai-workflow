@@ -478,8 +478,14 @@ async def _docker_network_inspect_impl(
     Returns:
         Network details including connected containers.
     """
-    cmd = ["docker", "network", "inspect", network, "--format",
-           "Name: {{.Name}}\nDriver: {{.Driver}}\nScope: {{.Scope}}\nSubnet: {{range .IPAM.Config}}{{.Subnet}}{{end}}\nGateway: {{range .IPAM.Config}}{{.Gateway}}{{end}}\n\nContainers:\n{{range $id, $container := .Containers}}  - {{$container.Name}} ({{$container.IPv4Address}})\n{{end}}"]
+    cmd = [
+        "docker",
+        "network",
+        "inspect",
+        network,
+        "--format",
+        "Name: {{.Name}}\nDriver: {{.Driver}}\nScope: {{.Scope}}\nSubnet: {{range .IPAM.Config}}{{.Subnet}}{{end}}\nGateway: {{range .IPAM.Config}}{{.Gateway}}{{end}}\n\nContainers:\n{{range $id, $container := .Containers}}  - {{$container.Name}} ({{$container.IPv4Address}})\n{{end}}",
+    ]
 
     success, output = await run_cmd(cmd, timeout=30)
 
@@ -1234,5 +1240,3 @@ def register_tools(server: FastMCP) -> int:
         return await _docker_inspect_impl(target, format_str)
 
     return registry.count
-
-

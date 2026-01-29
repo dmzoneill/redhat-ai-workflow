@@ -486,6 +486,14 @@ failures:
   success: false
   timestamp: '2026-01-29T00:00:00.008178'
   tool: alertmanager_alerts
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-01-29T15:13:22.734966'
+  tool: alertmanager_alerts
 learned_fixes:
 - error_pattern: name 'skill_engine' is not defined
   fix: Added run_skill = self._create_nested_skill_runner() to safe_globals in _exec_compute_internal().
@@ -534,8 +542,8 @@ stats:
       auto_fixed: 1
       total: 1
   last_updated: null
-  manual_required: 10
-  total_failures: 56
+  manual_required: 11
+  total_failures: 57
   weekly:
     2026-W03:
       auto_fixed: 3

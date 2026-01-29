@@ -337,5 +337,3 @@ def format_categories_for_prompt(exclude: set[str] | None = None) -> str:
         if name not in exclude:
             lines.append(f"- {name}: {info['description']}")
     return "\n".join(lines)
-
-

@@ -784,9 +784,7 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Run result with container ID.
         """
-        return await _podman_run_impl(
-            image, name, command, detach, rm, ports, volumes, env_vars, network, timeout
-        )
+        return await _podman_run_impl(image, name, command, detach, rm, ports, volumes, env_vars, network, timeout)
 
     @auto_heal()
     @registry.tool()
@@ -827,5 +825,3 @@ def register_tools(server: FastMCP) -> int:
         return await _podman_rm_impl(container, force, volumes)
 
     return registry.count
-
-

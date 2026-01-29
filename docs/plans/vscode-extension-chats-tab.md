@@ -360,5 +360,3 @@ When switching Cursor windows, the status bar should update to reflect that work
 │ $(gear) Custom...            │
 └──────────────────────────────┘
 ```
-
-

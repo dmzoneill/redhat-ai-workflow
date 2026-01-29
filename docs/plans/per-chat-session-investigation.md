@@ -1,6 +1,6 @@
 # Per-Chat Session Investigation Report
 
-**Date:** 2026-01-19  
+**Date:** 2026-01-19
 **Issue:** Multiple Cursor chats share the same session ID instead of each having unique sessions
 
 ## Executive Summary
@@ -63,7 +63,7 @@ async def session_start(ctx: Context, session_id: str = "") -> list[TextContent]
         if session:
             workspace.set_active_session(session_id)
             return [TextContent(text=f"Resumed session {session_id}")]
-    
+
     # Create new session
     session = workspace.create_session()
     return [TextContent(text=f"Created session {session.session_id}")]
@@ -104,7 +104,7 @@ async def memory_read(ctx: Context, key: str, session_id: str = "") -> list[Text
       "args": ["-c", "... --session-id=chat_1"]
     },
     "aa_workflow_chat_2": {
-      "command": "bash", 
+      "command": "bash",
       "args": ["-c", "... --session-id=chat_2"]
     }
   }
@@ -135,7 +135,7 @@ class ConversationTracker:
     def __init__(self):
         self.conversations = {}  # conversation_id -> last_request_time
         self.request_to_conv = {}  # Maps request patterns to conversations
-    
+
     def get_conversation_id(self, ctx) -> str:
         # Heuristic: requests within 30 seconds are same conversation
         # Use request patterns, tool sequences, etc.
@@ -244,24 +244,24 @@ const state = sessionStore.get(sessionId);
 **Changes needed:**
 ```python
 # session_tools.py
-async def session_start(ctx: Context, agent: str = "", project: str = "", 
+async def session_start(ctx: Context, agent: str = "", project: str = "",
                         name: str = "", session_id: str = "") -> list[TextContent]:
     """
     Start or resume a session.
-    
-    IMPORTANT: Save the returned session_id and pass it to subsequent 
+
+    IMPORTANT: Save the returned session_id and pass it to subsequent
     session_info() calls to maintain your session identity.
-    
+
     Args:
         session_id: If provided, resume this session instead of creating new one
         ...
     """
 
-# meta_tools.py  
+# meta_tools.py
 async def session_info(ctx: Context, session_id: str = "") -> list[TextContent]:
     """
     Show session info.
-    
+
     Args:
         session_id: Your session ID (from session_start). If not provided,
                     shows the workspace's most recent active session.
@@ -307,7 +307,7 @@ session = workspace.get_session(session_id) if session_id else workspace.get_act
 ## Action Items
 
 1. **Immediate:** Add `session_id` parameter to `session_info` tool
-2. **Short term:** Add `session_id` to `session_start` for resume capability  
+2. **Short term:** Add `session_id` to `session_start` for resume capability
 3. **Short term:** Update CLAUDE.md/cursorrules to instruct AI to track session IDs
 4. **Medium term:** Evaluate HTTP transport once Cursor fixes bugs
 5. **Long term:** Request Cursor add chat identifier to MCP context

@@ -215,5 +215,3 @@ systemctl --user enable --now podman.socket
 - [Docker Module](./docker.md) - Docker equivalent tools
 - [Quay Module](./quay.md) - Container registry operations
 - [Bonfire Module](./bonfire.md) - Ephemeral deployments
-
-

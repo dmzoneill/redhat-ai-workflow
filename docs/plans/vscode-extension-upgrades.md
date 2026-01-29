@@ -69,18 +69,18 @@ export class WorkspaceStateProvider {
   private _states: Map<string, WorkspaceState> = new Map();
   private _watcher: fs.FSWatcher | undefined;
   private _onDidChange = new vscode.EventEmitter<void>();
-  
+
   readonly onDidChange = this._onDidChange.event;
-  
+
   constructor() {
     this.startWatching();
   }
-  
+
   getCurrentWorkspaceState(): WorkspaceState | undefined {
     const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri.toString();
     return workspaceUri ? this._states.get(workspaceUri) : undefined;
   }
-  
+
   getAllWorkspaceStates(): WorkspaceState[] {
     return Array.from(this._states.values());
   }
@@ -103,7 +103,7 @@ private updateAgentItem() {
   // Get persona from workspace state instead of local variable
   const workspaceState = this.workspaceStateProvider.getCurrentWorkspaceState();
   const agent = workspaceState?.persona || this.currentAgent || "";
-  
+
   // ... rest of update logic
 }
 ```
@@ -128,10 +128,10 @@ private updateAgentItem() {
 private updateAgentItem() {
   const workspaceState = this.workspaceStateProvider.getCurrentWorkspaceState();
   const toolCount = workspaceState?.tool_count || 0;
-  
+
   // Show: "$(code) Developer (78)"
   this.agentItem.text = `${icon} ${displayName} (${toolCount})`;
-  
+
   // Enhanced tooltip with tool breakdown
   this.agentItem.tooltip = new vscode.MarkdownString(
     `### $(robot) AI Workflow Agent\n\n` +
@@ -164,31 +164,31 @@ private updateAgentItem() {
 private getQuickActionItems(): WorkflowTreeItem[] {
   const workspaceState = this.workspaceStateProvider.getCurrentWorkspaceState();
   const actions: QuickAction[] = [];
-  
+
   // Always show morning/evening
   actions.push({ label: "Morning Briefing", icon: "coffee", command: "aa-workflow.coffee" });
-  
+
   // Show "Start Work" only if no active issue
   if (!workspaceState?.issue_key) {
     actions.push({ label: "Start Work on Issue", icon: "rocket", command: "aa-workflow.startWork" });
   }
-  
+
   // Show "Create MR" only if we have an issue and branch
   if (workspaceState?.issue_key && workspaceState?.branch) {
     actions.push({ label: "Create MR", icon: "git-pull-request-create", command: "aa-workflow.createMR" });
   }
-  
+
   // Show persona-specific actions
   if (workspaceState?.persona === "devops") {
     actions.push({ label: "Deploy to Ephemeral", icon: "cloud-upload", command: "aa-workflow.deployEphemeral" });
     actions.push({ label: "Check Alerts", icon: "bell", command: "aa-workflow.investigateAlert" });
   }
-  
+
   if (workspaceState?.persona === "incident") {
     actions.push({ label: "Investigate Alert", icon: "search", command: "aa-workflow.investigateAlert" });
     actions.push({ label: "Check Logs", icon: "output", command: "aa-workflow.checkLogs" });
   }
-  
+
   // ... etc
 }
 ```
@@ -208,7 +208,7 @@ private getQuickActionItems(): WorkflowTreeItem[] {
 private getRootItems(): WorkflowTreeItem[] {
   const items: WorkflowTreeItem[] = [];
   const workspaceState = this.workspaceStateProvider.getCurrentWorkspaceState();
-  
+
   // NEW: Current Workspace section
   if (workspaceState) {
     const wsItem = new WorkflowTreeItem(
@@ -220,7 +220,7 @@ private getRootItems(): WorkflowTreeItem[] {
     wsItem.description = workspaceState.project || "Unknown";
     items.push(wsItem);
   }
-  
+
   // ... existing items (Quick Actions, Active Work, etc.)
 }
 
@@ -228,7 +228,7 @@ private getRootItems(): WorkflowTreeItem[] {
 private getWorkspaceChildren(): WorkflowTreeItem[] {
   const ws = this.workspaceStateProvider.getCurrentWorkspaceState();
   if (!ws) return [];
-  
+
   return [
     this.createDetailItem("Project", ws.project || "Not detected", "folder"),
     this.createDetailItem("Persona", ws.persona || "Default", this.getPersonaIcon(ws.persona)),
@@ -302,7 +302,7 @@ private async checkPipeline(status: WorkflowStatus): Promise<void> {
   const workspaceState = this.workspaceStateProvider.getCurrentWorkspaceState();
   const mr = status.activeMR;
   if (!mr) return;
-  
+
   // Include workspace context in notification
   if (mr.pipelineStatus === "failed") {
     const projectName = workspaceState?.project || "Unknown";
@@ -312,7 +312,7 @@ private async checkPipeline(status: WorkflowStatus): Promise<void> {
       "View Logs",
       "Retry Pipeline"
     );
-    
+
     switch (action) {
       case "View MR":
         vscode.commands.executeCommand("aa-workflow.openMR");
@@ -346,60 +346,60 @@ context.subscriptions.push(
   vscode.commands.registerCommand("aa-workflow.runSkill", async () => {
     const workspaceState = this.workspaceStateProvider.getCurrentWorkspaceState();
     const allSkills = loadSkillsFromDisk();
-    
+
     // Score skills by relevance to current context
     const scoredSkills = allSkills.map(skill => ({
       ...skill,
       score: calculateSkillRelevance(skill, workspaceState)
     }));
-    
+
     // Sort by score (highest first)
     scoredSkills.sort((a, b) => b.score - a.score);
-    
+
     // Add "Suggested" section for high-scoring skills
     const suggested = scoredSkills.filter(s => s.score > 0.7);
     const other = scoredSkills.filter(s => s.score <= 0.7);
-    
+
     const quickPickItems = [
       { label: "Suggested", kind: vscode.QuickPickItemKind.Separator },
       ...suggested.map(s => createSkillQuickPickItem(s)),
       { label: "All Skills", kind: vscode.QuickPickItemKind.Separator },
       ...other.map(s => createSkillQuickPickItem(s)),
     ];
-    
+
     // ... show quick pick
   })
 );
 
 function calculateSkillRelevance(skill: Skill, ws: WorkspaceState | undefined): number {
   let score = 0;
-  
+
   // Persona match
   if (ws?.persona && skill.personas?.includes(ws.persona)) {
     score += 0.5;
   }
-  
+
   // Has active issue - suggest issue-related skills
   if (ws?.issue_key) {
     if (skill.name.includes("mr") || skill.name.includes("review")) {
       score += 0.3;
     }
   }
-  
+
   // Has active MR - suggest MR-related skills
   if (ws?.branch && ws.branch !== "main") {
     if (skill.name.includes("create_mr") || skill.name.includes("push")) {
       score += 0.3;
     }
   }
-  
+
   // DevOps persona - suggest deployment skills
   if (ws?.persona === "devops") {
     if (skill.name.includes("deploy") || skill.name.includes("ephemeral")) {
       score += 0.4;
     }
   }
-  
+
   return Math.min(score, 1.0);
 }
 ```
@@ -419,19 +419,19 @@ function calculateSkillRelevance(skill: Skill, ws: WorkspaceState | undefined): 
 context.subscriptions.push(
   vscode.commands.registerCommand("aa-workflow.switchWorkspace", async () => {
     const allWorkspaces = this.workspaceStateProvider.getAllWorkspaceStates();
-    
+
     const items = allWorkspaces.map(ws => ({
       label: `$(folder) ${ws.project || path.basename(ws.workspace_uri)}`,
       description: ws.persona ? `$(${getPersonaIcon(ws.persona)}) ${ws.persona}` : "",
       detail: ws.issue_key ? `$(issues) ${ws.issue_key}` : "No active issue",
       workspace: ws,
     }));
-    
+
     const selected = await vscode.window.showQuickPick(items, {
       placeHolder: "Select workspace to focus",
       matchOnDescription: true,
     });
-    
+
     if (selected) {
       // Open the workspace folder
       const uri = vscode.Uri.parse(selected.workspace.workspace_uri);
@@ -712,5 +712,3 @@ WORKFLOW EXPLORER
 │ [Clear Cache] [View History] [Configure]                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
-
-

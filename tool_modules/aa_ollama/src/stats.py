@@ -269,5 +269,3 @@ def save_stats() -> None:
     """Save the current stats."""
     if _stats is not None:
         _stats.save()
-
-

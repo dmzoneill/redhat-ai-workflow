@@ -18,6 +18,6 @@ tools:
 skills:
   # Monitoring
   - environment_overview    # Full environment health check
-  
+
   # Investigation (read-only)
   - investigate_alert       # Investigate alerts (no remediation)

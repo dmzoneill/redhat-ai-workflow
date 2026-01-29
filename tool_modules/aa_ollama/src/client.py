@@ -395,5 +395,3 @@ def warmup_model(instance: str = "npu") -> bool:
     except Exception as e:
         logger.error(f"Warmup failed: {e}")
         return False
-
-

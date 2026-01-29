@@ -1,3 +1,1 @@
 """Podman tool module."""
-
-

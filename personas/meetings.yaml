@@ -19,7 +19,7 @@ skills:
   # Daily workflow
   - coffee              # Morning briefing including calendar
   - schedule_meeting    # Schedule Google Calendar meetings
-  
+
   # Meeting management
   - standup_summary     # Generate standup summary
   - weekly_summary      # Weekly work summary

@@ -16,10 +16,10 @@ steps:
     compute: |
       from datetime import datetime
       from zoneinfo import ZoneInfo
-      
+
       tz = ZoneInfo("Europe/Dublin")
       now = datetime.now(tz)
-      
+
       result = f"🌍 Hello World!\n\nTimestamp: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\nThe cron scheduler is working!"
     output: greeting
 

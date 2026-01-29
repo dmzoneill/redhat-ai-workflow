@@ -1141,5 +1141,3 @@ def register_knowledge_tools(server: "FastMCP") -> int:
         return await _knowledge_list_impl()
 
     return registry.count
-
-

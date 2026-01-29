@@ -185,5 +185,3 @@ class FilterCache:
     def reset_stats(self) -> None:
         """Reset statistics counters."""
         self._stats = {"hits": 0, "misses": 0, "evictions": 0}
-
-

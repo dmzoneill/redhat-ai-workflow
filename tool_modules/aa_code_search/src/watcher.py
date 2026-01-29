@@ -293,5 +293,3 @@ async def stop_all_watchers() -> int:
         await stop_watcher(project)
         count += 1
     return count
-
-

@@ -488,6 +488,35 @@ steps:
     output: fetch_result
     on_error: auto_heal
 
+  - name: verify_clean_state
+    description: "Verify working directory is clean before creating branch"
+    condition: "work_check.has_work and not inputs.dry_run"
+    compute: |
+      import subprocess
+
+      repo_path = resolved_repo["path"]
+
+      # Check for uncommitted changes
+      status_result = subprocess.run(
+          ["git", "-C", repo_path, "status", "--porcelain"],
+          capture_output=True,
+          text=True,
+          timeout=30,
+      )
+
+      uncommitted = status_result.stdout.strip()
+      if uncommitted:
+          # List the files that have changes
+          changed_files = [line.split()[-1] for line in uncommitted.split("\n") if line]
+          raise ValueError(
+              f"Working directory has uncommitted changes. Please commit or stash before running CVE fix.\n"
+              f"Changed files: {', '.join(changed_files[:5])}"
+              f"{'...' if len(changed_files) > 5 else ''}"
+          )
+
+      result = "Working directory is clean"
+    output: clean_state_check
+
   - name: checkout_main
     description: "Checkout main branch"
     condition: "work_check.has_work and not inputs.dry_run"
@@ -498,18 +527,32 @@ steps:
     output: checkout_main_result
     on_error: continue
 
-  - name: pull_main
-    description: "Pull latest main"
+  - name: reset_to_origin_main
+    description: "Reset local main to origin/main to ensure clean base (CRITICAL for branch isolation)"
     condition: "work_check.has_work and not inputs.dry_run"
-    tool: git_pull
-    args:
-      repo: "{{ resolved_repo.path }}"
-      rebase: true
-    output: pull_result
-    on_error: auto_heal
+    compute: |
+      import subprocess
+
+      repo_path = resolved_repo["path"]
+      default_branch = resolved_repo.get("default_branch", "main")
+
+      # Hard reset to origin/main to ensure we're starting from the latest upstream
+      # This prevents cross-contamination from local commits on main
+      reset_result = subprocess.run(
+          ["git", "-C", repo_path, "reset", "--hard", f"origin/{default_branch}"],
+          capture_output=True,
+          text=True,
+          timeout=30,
+      )
+
+      if reset_result.returncode != 0:
+          raise ValueError(f"Failed to reset to origin/{default_branch}: {reset_result.stderr}")
+
+      result = f"Reset to origin/{default_branch}"
+    output: reset_result
 
   - name: create_branch
-    description: "Create feature branch for CVE fix"
+    description: "Create feature branch for CVE fix FROM origin/main"
     condition: "work_check.has_work and not inputs.dry_run"
     tool: git_branch_create
     args:
@@ -518,6 +561,44 @@ steps:
       checkout: true
     output: branch_result
     on_error: continue
+
+  - name: verify_branch_base
+    description: "Verify the new branch is based on origin/main (not another feature branch)"
+    condition: "work_check.has_work and not inputs.dry_run"
+    compute: |
+      import subprocess
+
+      repo_path = resolved_repo["path"]
+      default_branch = resolved_repo.get("default_branch", "main")
+
+      # Get the merge base between current branch and origin/main
+      merge_base_result = subprocess.run(
+          ["git", "-C", repo_path, "merge-base", "HEAD", f"origin/{default_branch}"],
+          capture_output=True,
+          text=True,
+          timeout=30,
+      )
+
+      # Get the commit hash of origin/main
+      origin_main_result = subprocess.run(
+          ["git", "-C", repo_path, "rev-parse", f"origin/{default_branch}"],
+          capture_output=True,
+          text=True,
+          timeout=30,
+      )
+
+      merge_base = merge_base_result.stdout.strip()
+      origin_main = origin_main_result.stdout.strip()
+
+      if merge_base != origin_main:
+          raise ValueError(
+              f"Branch is not based on origin/{default_branch}! "
+              f"Merge base: {merge_base[:8]}, origin/{default_branch}: {origin_main[:8]}. "
+              "This could cause cross-contamination with other feature branches."
+          )
+
+      result = f"Branch correctly based on origin/{default_branch} ({origin_main[:8]})"
+    output: branch_base_verified
 
   # ==================== UPDATE PIPFILE AND PIPFILE.LOCK ====================
 
@@ -917,47 +998,45 @@ steps:
       # Build compatibility notes section if present
       compat_section = ""
       if compatibility_notes:
-          compat_section = f"""
-## Compatibility Notes
+          compat_section = f"\n## Compatibility Notes\n\n{compatibility_notes}\n"
 
-{compatibility_notes}
-"""
+      description_parts = [
+          "## Summary",
+          "",
+          f"Security fix for {cve_id} in {package}.",
+          "",
+          summary,
+          "",
+          "## CVE Details",
+          "",
+          f"- **CVE ID:** [{cve_id}](https://nvd.nist.gov/vuln/detail/{cve_id})",
+          f"- **Package:** {package}",
+          f"- **Severity:** {severity}",
+          f"- **CVSS Score:** {cvss_score}",
+          "",
+          "## Changes",
+          "",
+          changes_section,
+          compat_section,
+          "## Jira",
+          "",
+          f"[{issue_key}](https://issues.redhat.com/browse/{issue_key})",
+          "",
+          "## Testing",
+          "",
+          "- [ ] CI pipeline passes",
+          "- [ ] No breaking changes to existing functionality",
+          "- [ ] Local test collection passes (`pytest --collect-only`)",
+          "",
+          "## Checklist",
+          "",
+          "- [x] Pipfile updated with version constraint and CVE comment",
+          "- [x] Pipfile.lock updated with new version and hashes",
+          "- [x] Companion packages updated if needed for compatibility",
+          "- [ ] Verified package version addresses CVE",
+      ]
 
-      description = textwrap.dedent(f"""
-          ## Summary
-
-          Security fix for {cve_id} in {package}.
-
-          {summary}
-
-          ## CVE Details
-
-          - **CVE ID:** [{cve_id}](https://nvd.nist.gov/vuln/detail/{cve_id})
-          - **Package:** {package}
-          - **Severity:** {severity}
-          - **CVSS Score:** {cvss_score}
-
-          ## Changes
-
-          {changes_section}
-          {compat_section}
-          ## Jira
-
-          [{issue_key}](https://issues.redhat.com/browse/{issue_key})
-
-          ## Testing
-
-          - [ ] CI pipeline passes
-          - [ ] No breaking changes to existing functionality
-          - [ ] Local test collection passes (`pytest --collect-only`)
-
-          ## Checklist
-
-          - [x] Pipfile updated with version constraint and CVE comment
-          - [x] Pipfile.lock updated with new version and hashes
-          - [x] Companion packages updated if needed for compatibility
-          - [ ] Verified package version addresses CVE
-      """).strip()
+      description = "\n".join(description_parts)
 
       result = description
     output: mr_description
@@ -1132,6 +1211,22 @@ outputs:
       - **Pipfile:** Added `{{ cve_info.affected_package }} = "{{ pipfile_update.version_constraint | default('>=latest') }}"`
       - **Pipfile.lock:** `{{ pipfile_update.old_version | default('?') }}` → `{{ pipfile_update.new_version | default('?') }}`
       - **Hashes Updated:** {{ pipfile_update.hashes_count | default(0) }}
+
+      {% if pipfile_update.companion_packages_updated %}
+      ### Companion Package Updates
+
+      These packages were also updated for compatibility:
+
+      | Package | Old Version | New Version | Reason |
+      |---------|-------------|-------------|--------|
+      {% for comp in pipfile_update.companion_packages_updated %}
+      | {{ comp.package }} | {{ comp.old_version }} | {{ comp.new_version }} | {{ comp.reason }} |
+      {% endfor %}
+
+      {% if pipfile_update.compatibility_notes %}
+      **Note:** {{ pipfile_update.compatibility_notes }}
+      {% endif %}
+      {% endif %}
 
       {% if mr is mapping %}
       ### Merge Request

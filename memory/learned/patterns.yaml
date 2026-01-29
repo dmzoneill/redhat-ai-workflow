@@ -676,7 +676,7 @@ knowledge_bootstraps_all:
   skipped: 0
   timestamp: '2026-01-20T18:46:18.963182'
   total_combinations: 20
-last_updated: '2026-01-29T12:01:41.560321'
+last_updated: '2026-01-29T15:01:41.170294'
 performance_patterns: []
 pipeline_failures: []
 pipeline_patterns:
@@ -794,12 +794,6 @@ slack_notifications:
   timestamp: '2026-01-28T13:46:54.096464'
   type: security
 vector_reindexes:
-- errors: 0
-  force: false
-  projects_indexed: 5
-  timestamp: '2026-01-22T16:02:08.707385'
-  total_chunks: 185
-  total_files: 13
 - errors: 0
   force: false
   projects_indexed: 5
@@ -1094,6 +1088,12 @@ vector_reindexes:
   timestamp: '2026-01-29T12:01:41.529300'
   total_chunks: 26
   total_files: 2
+- errors: 0
+  force: false
+  projects_indexed: 5
+  timestamp: '2026-01-29T15:01:41.156567'
+  total_chunks: 3203
+  total_files: 129
 work_analyses:
 - end_date: '2026-01-19'
   jira_completed: 0

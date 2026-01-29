@@ -34,7 +34,7 @@ clone_wav2lip() {
         echo -e "${YELLOW}Wav2Lip already exists at $WAV2LIP_DIR${NC}"
         return 0
     fi
-    
+
     echo "Cloning Wav2Lip..."
     git clone https://github.com/Rudrabha/Wav2Lip.git "$WAV2LIP_DIR"
     echo -e "${GREEN}✓ Wav2Lip cloned${NC}"
@@ -43,7 +43,7 @@ clone_wav2lip() {
 # Download models
 download_models() {
     mkdir -p "$CHECKPOINT_DIR"
-    
+
     # wav2lip_gan.pth - Best quality
     if [ ! -f "$CHECKPOINT_DIR/wav2lip_gan.pth" ]; then
         echo "Downloading wav2lip_gan.pth (best quality)..."
@@ -59,7 +59,7 @@ download_models() {
     else
         echo -e "${GREEN}✓ wav2lip_gan.pth already exists${NC}"
     fi
-    
+
     # Face detection model
     if [ ! -f "$WAV2LIP_DIR/face_detection/detection/sfd/s3fd.pth" ]; then
         echo "Downloading face detection model..."
@@ -75,20 +75,20 @@ download_models() {
 install_deps() {
     echo "Installing Wav2Lip dependencies..."
     cd "$WAV2LIP_DIR"
-    
+
     # Create venv if not exists
     if [ ! -d "venv" ]; then
         python3 -m venv venv
     fi
-    
+
     source venv/bin/activate
-    
+
     pip install --upgrade pip
     pip install -r requirements.txt
-    
+
     # Additional dependencies for our use case
     pip install opencv-python-headless librosa
-    
+
     echo -e "${GREEN}✓ Dependencies installed${NC}"
 }
 
@@ -97,7 +97,7 @@ test_installation() {
     echo "Testing Wav2Lip installation..."
     cd "$WAV2LIP_DIR"
     source venv/bin/activate
-    
+
     python -c "
 import torch
 print(f'PyTorch: {torch.__version__}')
@@ -106,7 +106,7 @@ if torch.cuda.is_available():
     print(f'GPU: {torch.cuda.get_device_name(0)}')
     print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB')
 "
-    
+
     if [ -f "$CHECKPOINT_DIR/wav2lip_gan.pth" ]; then
         echo -e "${GREEN}✓ Wav2Lip ready for use${NC}"
     else
@@ -122,7 +122,7 @@ main() {
     install_deps
     download_models
     test_installation
-    
+
     echo ""
     echo "=== Setup Complete ==="
     echo ""
@@ -134,5 +134,3 @@ main() {
 }
 
 main "$@"
-
-

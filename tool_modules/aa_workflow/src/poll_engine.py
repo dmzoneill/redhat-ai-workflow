@@ -521,5 +521,3 @@ def init_poll_engine(
     global _poll_engine
     _poll_engine = PollEngine(server=server, job_callback=job_callback)
     return _poll_engine
-
-

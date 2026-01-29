@@ -4,9 +4,10 @@ Tests workspace and session isolation to ensure different Cursor chats maintain
 independent state (project, persona, issue, branch).
 """
 
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from server.workspace_state import (
     DEFAULT_PROJECT,
@@ -67,6 +68,7 @@ class TestChatSession:
 
         # Small delay to ensure time difference
         import time
+
         time.sleep(0.01)
 
         session.touch()
@@ -788,13 +790,13 @@ class TestWorkspaceRegistryPersistence:
     def test_save_and_load_sessions(self, tmp_path):
         """Test that sessions can be saved and loaded from disk."""
         import json
+
         import server.workspace_state as ws_module
 
         # Use temp path for persistence
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), \
-             patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
 
             # Create workspaces with sessions (ensure_session=False to avoid auto-create)
             ws1 = WorkspaceRegistry.get_or_create("file:///workspace1", ensure_session=False)
@@ -852,8 +854,7 @@ class TestWorkspaceRegistryPersistence:
 
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), \
-             patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
 
             # Create a workspace (ensure_session=False to avoid auto-create)
             ws = WorkspaceRegistry.get_or_create("file:///workspace1", ensure_session=False)
@@ -875,8 +876,7 @@ class TestWorkspaceRegistryPersistence:
 
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), \
-             patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
 
             # File doesn't exist
             assert not persist_file.exists()
@@ -890,8 +890,7 @@ class TestWorkspaceRegistryPersistence:
 
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), \
-             patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
 
             # Write invalid JSON
             with open(persist_file, "w") as f:
@@ -903,12 +902,12 @@ class TestWorkspaceRegistryPersistence:
     def test_load_handles_old_version(self, tmp_path):
         """Test that load_from_disk skips old format versions."""
         import json
+
         import server.workspace_state as ws_module
 
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), \
-             patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
 
             # Write old version format
             with open(persist_file, "w") as f:
@@ -916,4 +915,3 @@ class TestWorkspaceRegistryPersistence:
 
             restored = WorkspaceRegistry.load_from_disk()
             assert restored == 0
-

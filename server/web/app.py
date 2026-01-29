@@ -208,7 +208,7 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
     @app.post("/api/sessions/sync")
     async def sync_sessions():
         """Sync sessions with Cursor's database and export workspace state.
-        
+
         This endpoint:
         1. Syncs all workspaces with Cursor's database (add/remove/rename sessions)
         2. Exports the updated state to workspace_states.json
@@ -222,7 +222,7 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
         try:
             # Perform full sync with Cursor
             sync_result = WorkspaceRegistry.sync_all_with_cursor()
-            
+
             # Export for UI
             export_result = export_workspace_state()
 
@@ -230,7 +230,7 @@ def create_app(mcp_server: FastMCP) -> FastAPI:
             log_activity(
                 "Session Sync",
                 f"+{sync_result['added']} -{sync_result['removed']} ~{sync_result['renamed']}",
-                "success"
+                "success",
             )
 
             return {

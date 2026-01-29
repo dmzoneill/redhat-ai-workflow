@@ -364,5 +364,3 @@ def get_skill_discovery() -> SkillToolDiscovery:
 def discover_skill_tools(skill_name: str) -> set[str]:
     """Convenience function to discover tools for a skill."""
     return get_skill_discovery().discover_tools(skill_name)
-
-

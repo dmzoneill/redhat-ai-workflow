@@ -89,7 +89,7 @@ class WorkspaceState:
     branch: str | None = None
     active_tools: set[str] = field(default_factory=set)
     started_at: datetime | None = None
-    
+
     # NPU filtering cache (per-workspace)
     tool_filter_cache: dict[str, list[str]] = field(default_factory=dict)
 ```
@@ -98,7 +98,7 @@ class WorkspaceState:
 ```python
 class WorkspaceRegistry:
     _workspaces: dict[str, WorkspaceState] = {}
-    
+
     @classmethod
     async def get_for_ctx(cls, ctx: Context) -> WorkspaceState:
         """Get or create workspace state from MCP context."""
@@ -108,7 +108,7 @@ class WorkspaceRegistry:
             # Auto-detect project
             cls._workspaces[workspace_uri].project = _detect_project(workspace_uri)
         return cls._workspaces[workspace_uri]
-    
+
     @classmethod
     async def _get_workspace_uri(cls, ctx: Context) -> str:
         """Extract workspace URI from MCP context."""
@@ -158,16 +158,16 @@ async def get_chat_project(ctx: Context) -> str:
 async def _session_start_impl(ctx, agent: str = "", project: str = "") -> list[TextContent]:
     # Get workspace-specific state
     state = await WorkspaceRegistry.get_for_ctx(ctx)
-    
+
     # Set project if provided
     if project:
         state.project = project
-    
+
     # Load persona if provided (per-workspace!)
     if agent:
         state.persona = agent
         state.active_tools = _get_persona_tools(agent)
-    
+
     # ... rest of implementation
 ```
 
@@ -183,11 +183,11 @@ async def _session_start_impl(ctx, agent: str = "", project: str = "") -> list[T
 async def switch_persona(self, persona_name: str, ctx: Context) -> dict:
     # Get workspace state
     state = await WorkspaceRegistry.get_for_ctx(ctx)
-    
+
     # Update workspace-specific persona
     state.persona = persona_name
     state.active_tools = set(config.get("tools", []))
-    
+
     # Note: We still load all tools globally, but track which are "active"
     # per workspace for access control
 ```
@@ -205,13 +205,13 @@ def workspace_tool(required_modules: list[str] | None = None):
         @functools.wraps(func)
         async def wrapper(ctx: Context, *args, **kwargs):
             state = await WorkspaceRegistry.get_for_ctx(ctx)
-            
+
             # Check if tool's module is active for this workspace
             if required_modules:
                 for module in required_modules:
                     if module not in state.active_tools:
                         return f"❌ {module} tools not loaded for this workspace.\n\nRun `persona_load('{_suggest_persona(module)}')` to enable."
-            
+
             return await func(ctx, *args, **kwargs)
         return wrapper
     return decorator
@@ -238,22 +238,22 @@ async def kubectl_get_pods(ctx: Context, namespace: str) -> str:
 class UsageContextInjector:
     async def get_filtered_tools(self, ctx: Context, message: str) -> list[str]:
         state = await WorkspaceRegistry.get_for_ctx(ctx)
-        
+
         # Check cache (keyed by workspace + message hash)
         cache_key = f"{state.workspace_uri}:{hash(message)}"
         if cache_key in state.tool_filter_cache:
             return state.tool_filter_cache[cache_key]
-        
+
         # Get persona baseline
         baseline_tools = _get_persona_baseline(state.persona)
-        
+
         # Run NPU classification
         npu_tools = await self._npu_classify(message, state.persona)
-        
+
         # Combine and cache
         result = baseline_tools | npu_tools
         state.tool_filter_cache[cache_key] = list(result)
-        
+
         return result
 ```
 
@@ -262,7 +262,7 @@ class UsageContextInjector:
 **Files that need ctx passed through:**
 
 - `tool_modules/aa_workflow/src/chat_context.py` - All functions
-- `tool_modules/aa_workflow/src/session_tools.py` - All functions  
+- `tool_modules/aa_workflow/src/session_tools.py` - All functions
 - `tool_modules/aa_workflow/src/knowledge_tools.py` - `_detect_project_from_path()`
 - `tool_modules/aa_workflow/src/skill_engine.py` - Skill execution
 - `server/persona_loader.py` - `switch_persona()`
@@ -718,11 +718,11 @@ class WorkspaceState:
     active_tools: set[str] = field(default_factory=set)
     started_at: datetime | None = None
     tool_filter_cache: dict[str, list[str]] = field(default_factory=dict)
-    
+
 class WorkspaceRegistry:
     """Registry of workspace states."""
     _workspaces: dict[str, WorkspaceState] = {}
-    
+
     @classmethod
     async def get_for_ctx(cls, ctx: "Context") -> WorkspaceState:
         """Get or create workspace state from MCP context."""
@@ -735,7 +735,7 @@ class WorkspaceRegistry:
             # Auto-detect project from workspace path
             cls._workspaces[workspace_uri].project = cls._detect_project(workspace_uri)
         return cls._workspaces[workspace_uri]
-    
+
     @classmethod
     async def _get_workspace_uri(cls, ctx: "Context") -> str:
         """Extract workspace URI from MCP context."""
@@ -746,23 +746,23 @@ class WorkspaceRegistry:
         except Exception:
             pass
         return "default"
-    
+
     @classmethod
     def _detect_project(cls, workspace_uri: str) -> str | None:
         """Detect project from workspace URI."""
         from server.utils import load_config
         from pathlib import Path
-        
+
         config = load_config()
         if not config:
             return None
-            
+
         # Convert file:// URI to path
         if workspace_uri.startswith("file://"):
             workspace_path = Path(workspace_uri[7:])
         else:
             workspace_path = Path(workspace_uri)
-            
+
         repositories = config.get("repositories", {})
         for project_name, project_config in repositories.items():
             project_path = Path(project_config.get("path", "")).expanduser().resolve()
@@ -772,12 +772,12 @@ class WorkspaceRegistry:
             except ValueError:
                 continue
         return None
-    
+
     @classmethod
     def get_all(cls) -> dict[str, WorkspaceState]:
         """Get all workspace states (for VS Code extension export)."""
         return cls._workspaces.copy()
-    
+
     @classmethod
     def clear(cls) -> None:
         """Clear all workspace states (for testing)."""
@@ -826,10 +826,10 @@ async def filter(
         state = await get_workspace_from_ctx(ctx)
         workspace_uri = state.workspace_uri
         persona = state.persona  # Use workspace persona
-    
+
     # Update cache key to include workspace
     cache_key = f"{workspace_uri}:{persona}:{hash(message)}"
-    
+
     # ... rest of implementation
 ```
 
@@ -837,7 +837,7 @@ async def filter(
 ```python
 def load_memory_state(workspace_uri: str | None = None, project: str | None = None) -> dict:
     """Load current work state from memory.
-    
+
     Args:
         workspace_uri: Workspace URI for context
         project: Project name (uses workspace project if not provided)
@@ -847,7 +847,7 @@ def load_memory_state(workspace_uri: str | None = None, project: str | None = No
         current_work_path = memory_dir / "state" / "projects" / project / "current_work.yaml"
     else:
         current_work_path = memory_dir / "state" / "current_work.yaml"
-    
+
     # ... rest of implementation
 ```
 
@@ -856,5 +856,3 @@ def load_memory_state(workspace_uri: str | None = None, project: str | None = No
 - [MCP Protocol - Roots](https://modelcontextprotocol.io/docs/concepts/roots)
 - [FastMCP Context](https://github.com/jlowin/fastmcp)
 - Current implementation: `tool_modules/aa_workflow/src/session_tools.py:_detect_project_from_mcp_roots()`
-
-

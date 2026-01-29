@@ -55,7 +55,7 @@ def _load_config() -> dict:
 
 def _save_config(config: dict) -> bool:
     """Save config.json using ConfigManager.
-    
+
     Note: This replaces the entire config. For partial updates,
     use config_manager.update_section() instead.
     """

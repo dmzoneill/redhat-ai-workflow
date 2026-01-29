@@ -125,5 +125,3 @@ def reload_instances() -> None:
 def get_instance_names() -> list[str]:
     """Get list of all instance names."""
     return list(get_instances().keys())
-
-

@@ -1,3 +1,1 @@
 """Scheduler tool module."""
-
-

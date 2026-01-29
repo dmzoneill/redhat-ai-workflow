@@ -89,9 +89,7 @@ class TestConfigManager:
 
     def test_update_section_merge(self, config_manager, temp_config):
         """Test updating a section with merge=True."""
-        config_manager.update_section(
-            "test_section", {"key3": "value3"}, merge=True, flush=True
-        )
+        config_manager.update_section("test_section", {"key3": "value3"}, merge=True, flush=True)
 
         # Original keys should still exist
         assert config_manager.get("test_section", "key1") == "value1"
@@ -100,9 +98,7 @@ class TestConfigManager:
 
     def test_update_section_replace(self, config_manager, temp_config):
         """Test updating a section with merge=False."""
-        config_manager.update_section(
-            "test_section", {"only_key": "only_value"}, merge=False, flush=True
-        )
+        config_manager.update_section("test_section", {"only_key": "only_value"}, merge=False, flush=True)
 
         # Original keys should be gone
         assert config_manager.get("test_section", "key1") is None

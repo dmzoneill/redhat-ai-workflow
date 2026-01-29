@@ -21,6 +21,6 @@ skills:
   - sync_branch         # Quick sync with main
   - cleanup_branches    # Delete merged/stale branches
   - rebase_pr           # Rebase PR onto main
-  
+
   # Code quality
   - check_ci_health     # Diagnose CI issues

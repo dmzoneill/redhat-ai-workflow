@@ -1,3 +1,1 @@
 """Knowledge tool module."""
-
-
