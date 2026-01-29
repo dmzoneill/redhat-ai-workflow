@@ -14,10 +14,10 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 import yaml
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
@@ -34,10 +34,30 @@ except ImportError:
     PROJECT_DIR = TOOL_MODULES_DIR.parent
     SKILLS_DIR = PROJECT_DIR / "skills"
 
-if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context
-
 logger = logging.getLogger(__name__)
+
+
+class AttrDict(dict):
+    """Dictionary that allows attribute-style access to keys.
+
+    This allows skill YAML compute blocks to use `inputs.repo` instead of `inputs["repo"]`.
+    """
+
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(f"'AttrDict' object has no attribute '{key}'")
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
+    def __delattr__(self, key):
+        try:
+            del self[key]
+        except KeyError:
+            raise AttributeError(f"'AttrDict' object has no attribute '{key}'")
+
 
 # Layer 5: Usage Pattern Learning integration
 try:
@@ -505,9 +525,8 @@ class SkillExecutor:
                 with open(debug_file, "a") as f:
                     from datetime import datetime
 
-                    f.write(
-                        f"{datetime.now().isoformat()} - Emitter created for {skill.get('name', 'unknown')} (source: {source})\n"
-                    )
+                    skill_name = skill.get("name", "unknown")
+                    f.write(f"{datetime.now().isoformat()} - Emitter created for {skill_name} (source: {source})\n")
             except Exception as e:
                 logger.warning(f"Failed to initialize event emitter: {e}")
                 # Also write to debug file on failure
@@ -645,19 +664,61 @@ class SkillExecutor:
         return None
 
     async def _apply_network_fix(self) -> bool:
-        """Apply VPN connect fix."""
+        """Apply VPN connect fix using the configured VPN script or nmcli fallback."""
         import asyncio
+        import os
 
         try:
-            proc = await asyncio.create_subprocess_shell(
-                "nmcli connection up 'Red Hat Global VPN' 2>/dev/null || true",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc.wait(), timeout=30)
-            self._debug(f"  → VPN connect result: {proc.returncode}")
-            await asyncio.sleep(2)  # Wait for VPN to establish
-            return True
+            # Try to use the configured VPN script first (same as vpn_connect tool)
+            from server.utils import load_config
+
+            config = load_config()
+            paths = config.get("paths", {})
+            vpn_script = paths.get("vpn_connect_script")
+
+            if not vpn_script:
+                vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
+            else:
+                vpn_script = os.path.expanduser(vpn_script)
+
+            if os.path.exists(vpn_script):
+                self._debug(f"  → Using VPN script: {vpn_script}")
+                proc = await asyncio.create_subprocess_exec(
+                    vpn_script,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(proc.wait(), timeout=120)
+                self._debug(f"  → VPN connect result: {proc.returncode}")
+                await asyncio.sleep(2)  # Wait for VPN to establish
+                return proc.returncode == 0
+            else:
+                # Fallback to nmcli with common VPN connection names
+                self._debug("  → VPN script not found, trying nmcli fallback")
+                vpn_names = [
+                    "Red Hat Global VPN",
+                    "Red Hat VPN",
+                    "redhat-vpn",
+                    "RH-VPN",
+                ]
+                for vpn_name in vpn_names:
+                    proc = await asyncio.create_subprocess_shell(
+                        f"nmcli connection up '{vpn_name}' 2>/dev/null",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=30)
+                        if proc.returncode == 0:
+                            self._debug(f"  → VPN connect result: success with {vpn_name}")
+                            await asyncio.sleep(2)
+                            return True
+                    except asyncio.TimeoutError:
+                        continue
+
+                self._debug("  → All VPN connection attempts failed")
+                return False
+
         except Exception as e:
             self._debug(f"  → Auto-fix failed: {e}")
             return False
@@ -947,7 +1008,9 @@ class SkillExecutor:
         try:
             from jinja2 import Environment
 
-            env = Environment(autoescape=True)
+            # autoescape=False to preserve Slack link format <url|text>
+            # Skills don't generate HTML, they generate plain text and Slack markdown
+            env = Environment(autoescape=False)
             env.filters.update(self._create_jinja_filters())
 
             template = env.from_string(text)
@@ -979,7 +1042,8 @@ class SkillExecutor:
         try:
             from jinja2 import Environment
 
-            env = Environment(autoescape=True)
+            # autoescape=False - conditions don't need HTML escaping
+            env = Environment(autoescape=False)
             # Wrap condition in {{ }} if not already there for Jinja evaluation
             if "{{" not in condition:
                 expr = "{{ " + condition + " }}"
@@ -987,10 +1051,11 @@ class SkillExecutor:
                 expr = condition
 
             result_str = env.from_string(expr).render(**self.context).strip()
+            self._debug(f"  → Rendered condition: '{condition}' = '{result_str}'")
             # If it's a boolean-like string, convert it
             if result_str.lower() in ("true", "1", "yes"):
                 return True
-            if result_str.lower() in ("false", "0", "no", ""):
+            if result_str.lower() in ("false", "0", "no", "", "none"):
                 return False
             # Otherwise check if it's non-empty
             return bool(result_str)
@@ -1265,7 +1330,8 @@ class SkillExecutor:
         # This is the actual compute logic extracted from _exec_compute
         # to avoid infinite recursion during auto-fix retries
         local_vars = dict(self.context)
-        local_vars["inputs"] = self.inputs
+        # Wrap inputs in AttrDict to allow attribute-style access (inputs.repo vs inputs["repo"])
+        local_vars["inputs"] = AttrDict(self.inputs)
         local_vars["config"] = self.config
 
         import os
@@ -1430,13 +1496,31 @@ class SkillExecutor:
         return get_module_for_tool(tool_name)
 
     def _format_tool_result(self, result, duration: float) -> dict:
-        """Format tool execution result into standard dict."""
+        """Format tool execution result into standard dict.
+
+        Detects error indicators in the result text to properly set success=False
+        for tools that return error messages instead of raising exceptions.
+        """
         if isinstance(result, tuple):
             result = result[0]
         if isinstance(result, list) and result:
             text = result[0].text if hasattr(result[0], "text") else str(result[0])
-            return {"success": True, "result": text, "duration": duration}
-        return {"success": True, "result": str(result), "duration": duration}
+        else:
+            text = str(result)
+
+        # Check for error indicators in the result text
+        # Tools often return error messages with these prefixes instead of raising
+        text_lower = text.lower()
+        is_error = (
+            text.startswith("❌")
+            or text_lower.startswith("error:")
+            or "❌ error" in text_lower
+            or "❌ failed" in text_lower
+            or "connection may have failed" in text_lower
+            or "script not found" in text_lower
+        )
+
+        return {"success": not is_error, "result": text, "duration": duration}
 
     async def _execute_workflow_tool(self, tool_name: str, args: dict, start_time: float) -> dict:
         """Execute a tool from the workflow module."""
@@ -1547,7 +1631,8 @@ class SkillExecutor:
 
         # If there was an error, try auto-fix and retry
         if not result.get("success"):
-            error_msg = result["error"]
+            # Error message can be in 'error' key or 'result' key (for tools that return error text)
+            error_msg = result.get("error") or result.get("result", "Unknown error")
             temp_server = result.get("_temp_server")
 
             if temp_server:
@@ -1680,7 +1765,12 @@ class SkillExecutor:
                 # Call kube_login tool
                 heal_result = await self._exec_tool("kube_login", {"cluster": cluster})
                 if not heal_result.get("success"):
-                    output_lines.append(f"   ⚠️ kube_login failed: {heal_result.get('error', 'unknown')}")
+                    # Get error from either 'error' key or 'result' key (for tools that return error text)
+                    error_msg = heal_result.get("error") or heal_result.get("result", "unknown")
+                    # Truncate long error messages
+                    if len(error_msg) > 200:
+                        error_msg = error_msg[:200] + "..."
+                    output_lines.append(f"   ⚠️ kube_login failed: {error_msg}")
                     return None
                 output_lines.append("   ✅ kube_login successful")
 
@@ -1699,7 +1789,12 @@ class SkillExecutor:
                 # Call vpn_connect tool
                 heal_result = await self._exec_tool("vpn_connect", {})
                 if not heal_result.get("success"):
-                    output_lines.append(f"   ⚠️ vpn_connect failed: {heal_result.get('error', 'unknown')}")
+                    # Get error from either 'error' key or 'result' key (for tools that return error text)
+                    error_msg = heal_result.get("error") or heal_result.get("result", "unknown")
+                    # Truncate long error messages
+                    if len(error_msg) > 200:
+                        error_msg = error_msg[:200] + "..."
+                    output_lines.append(f"   ⚠️ vpn_connect failed: {error_msg}")
                     return None
                 output_lines.append("   ✅ vpn_connect successful")
 
@@ -1827,6 +1922,15 @@ class SkillExecutor:
                         )
                     )
 
+                # Emit toast notification for auto-heal triggered
+                try:
+                    from tool_modules.aa_workflow.src.notification_emitter import notify_auto_heal_triggered
+
+                    fix_action = f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()"
+                    notify_auto_heal_triggered(step_name, heal_type, fix_action)
+                except Exception:
+                    pass
+
                 retry_result = await self._attempt_auto_heal(heal_type, cluster, tool, step, output_lines)
 
                 if retry_result and retry_result.get("success"):
@@ -1852,6 +1956,14 @@ class SkillExecutor:
                                 success=True,
                             )
                         )
+
+                    # Emit toast notification for auto-heal success
+                    try:
+                        from tool_modules.aa_workflow.src.notification_emitter import notify_auto_heal_succeeded
+
+                        notify_auto_heal_succeeded(step_name, heal_type)
+                    except Exception:
+                        pass
 
                     self.step_results.append(
                         {
@@ -1881,6 +1993,14 @@ class SkillExecutor:
                                 success=False,
                             )
                         )
+
+                    # Emit toast notification for auto-heal failure
+                    try:
+                        from tool_modules.aa_workflow.src.notification_emitter import notify_auto_heal_failed
+
+                        notify_auto_heal_failed(step_name, error_msg[:100])
+                    except Exception:
+                        pass
             else:
                 output_lines.append("   ℹ️ Error not auto-healable, continuing...")
 
@@ -1930,6 +2050,13 @@ class SkillExecutor:
         if on_error == "continue":
             output_lines.append("   *Continuing despite error (on_error: continue)*\n")
 
+            # Log to Python logger for journalctl visibility
+            skill_name = self.skill.get("name", "unknown")
+            logger.warning(
+                f"Skill '{skill_name}' step '{step_name}' failed with on_error=continue: "
+                f"tool={tool}, error={error_msg[:200]}"
+            )
+
             # Layer 5: Learn from this error
             tool_params = {}
             if "args" in step:
@@ -1938,6 +2065,14 @@ class SkillExecutor:
                     tool_params = {k: self._template(str(v)) for k, v in args_data.items()}
 
             await self._learn_from_error(tool_name=tool, params=tool_params, error_msg=error_msg)
+
+            # Emit toast notification for continue-mode failures (helps visibility)
+            try:
+                from tool_modules.aa_workflow.src.notification_emitter import notify_step_failed
+
+                notify_step_failed(skill_name, step_name, error_msg[:150])
+            except Exception:
+                pass
 
             self.step_results.append(
                 {
@@ -2068,8 +2203,9 @@ class SkillExecutor:
             self.step_results.append({"step": step_name, "tool": tool, "success": True, "duration": duration})
             return True
 
-        # Handle error
-        should_continue = await self._handle_tool_error(tool, step, step_name, result["error"], output_lines)
+        # Handle error - error message can be in 'error' key or 'result' key
+        error_msg = result.get("error") or result.get("result", "Unknown error")
+        should_continue = await self._handle_tool_error(tool, step, step_name, error_msg, output_lines)
         if not should_continue:
             output_lines.append(f"\n⛔ **Skill failed at step {step_num}**")
         return should_continue

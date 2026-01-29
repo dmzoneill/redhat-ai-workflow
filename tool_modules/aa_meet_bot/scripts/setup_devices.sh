@@ -23,13 +23,13 @@ check_root_for_video() {
 # Setup PulseAudio virtual sink
 setup_audio_sink() {
     echo "Setting up virtual audio sink..."
-    
+
     # Check if PulseAudio is running
     if ! pactl info > /dev/null 2>&1; then
         echo -e "${RED}Error: PulseAudio is not running${NC}"
         return 1
     fi
-    
+
     # Check if sink already exists
     if pactl list short sinks | grep -q "meet_bot_sink"; then
         echo -e "${GREEN}✓ Virtual sink 'meet_bot_sink' already exists${NC}"
@@ -45,11 +45,11 @@ setup_audio_sink() {
 # Setup PulseAudio virtual source
 setup_audio_source() {
     echo "Setting up virtual audio source..."
-    
+
     # Create pipe directory
-    PIPE_DIR="$HOME/.local/share/meet_bot"
+    PIPE_DIR="$HOME/.config/aa-workflow/meet_bot/pipes"
     mkdir -p "$PIPE_DIR"
-    
+
     # Check if source already exists
     if pactl list short sources | grep -q "meet_bot_source"; then
         echo -e "${GREEN}✓ Virtual source 'meet_bot_source' already exists${NC}"
@@ -69,7 +69,7 @@ setup_audio_source() {
 # Setup v4l2loopback virtual camera
 setup_video() {
     echo "Setting up virtual camera..."
-    
+
     # Check if v4l2loopback is loaded
     if lsmod | grep -q v4l2loopback; then
         echo -e "${GREEN}✓ v4l2loopback module already loaded${NC}"
@@ -82,7 +82,7 @@ setup_video() {
             exclusive_caps=1
         echo -e "${GREEN}✓ Loaded v4l2loopback module${NC}"
     fi
-    
+
     # Check device exists
     if [ -e /dev/video10 ]; then
         echo -e "${GREEN}✓ Virtual camera available at /dev/video10${NC}"
@@ -95,16 +95,16 @@ setup_video() {
 # Create data directories
 setup_directories() {
     echo "Creating data directories..."
-    
+
     DIRS=(
-        "$HOME/.local/share/meet_bot"
-        "$HOME/.local/share/meet_bot/logs"
-        "$HOME/.local/share/meet_bot/recordings"
-        "$HOME/.local/share/meet_bot/clips"
-        "$HOME/.local/share/meet_bot/models"
-        "$HOME/.local/share/meet_bot/voice_samples"
+        "$HOME/.config/aa-workflow/meet_bot"
+        "$HOME/.config/aa-workflow/meet_bot/logs"
+        "$HOME/.config/aa-workflow/meet_bot/recordings"
+        "$HOME/.config/aa-workflow/meet_bot/clips"
+        "$HOME/.config/aa-workflow/meet_bot/models"
+        "$HOME/.config/aa-workflow/meet_bot/voice_samples"
     )
-    
+
     for dir in "${DIRS[@]}"; do
         mkdir -p "$dir"
         echo -e "${GREEN}✓ Created $dir${NC}"
@@ -114,31 +114,29 @@ setup_directories() {
 # Main
 main() {
     check_root_for_video
-    
+
     echo ""
     echo "1. Setting up directories..."
     setup_directories
-    
+
     echo ""
     echo "2. Setting up audio devices..."
     setup_audio_sink
     setup_audio_source
-    
+
     echo ""
     echo "3. Setting up video device..."
     setup_video
-    
+
     echo ""
     echo "=== Setup Complete ==="
     echo ""
     echo "Next steps:"
     echo "1. Record 10 minutes of voice samples for GPT-SoVITS training"
-    echo "2. Place samples in ~/.local/share/meet_bot/voice_samples/"
-    echo "3. Download Wav2Lip checkpoint to ~/.local/share/meet_bot/models/"
+    echo "2. Place samples in ~/.config/aa-workflow/meet_bot/voice_samples/"
+    echo "3. Download Wav2Lip checkpoint to ~/.config/aa-workflow/meet_bot/models/"
     echo "4. Use meet_bot_status() to verify everything is ready"
     echo ""
 }
 
 main "$@"
-
-

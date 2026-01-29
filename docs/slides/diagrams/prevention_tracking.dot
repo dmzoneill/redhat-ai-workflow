@@ -1,0 +1,21 @@
+
+digraph PreventionTracking {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    action [label="Tool\nCall", fillcolor="#E3F2FD"];
+
+    tracker [label="Prevention\nTracker", fillcolor="#FFCC80"];
+
+    check [label="Known\nBad Pattern?", fillcolor="#FFF9C4", shape=diamond];
+
+    prevent [label="Block +\nSuggest Fix", fillcolor="#FFCDD2"];
+    allow [label="Allow\nExecution", fillcolor="#C8E6C9"];
+
+    action -> tracker;
+    tracker -> check;
+    check -> prevent [label="yes"];
+    check -> allow [label="no"];
+}

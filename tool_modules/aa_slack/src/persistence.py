@@ -12,13 +12,118 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
 logger = logging.getLogger(__name__)
+
+
+def parse_slack_sidebar_html(html_content: str) -> list[dict[str, str]]:
+    """
+    Parse Slack sidebar HTML to extract channel/DM information.
+
+    This is a fallback for when the Slack API's conversations.list is blocked
+    by enterprise restrictions. Users can copy the sidebar HTML from the
+    Slack web client and import it.
+
+    Args:
+        html_content: Raw HTML from the Slack sidebar
+
+    Returns:
+        List of dicts with channel_id, name, and type (channel/dm/group)
+    """
+    channels = []
+
+    # Pattern to find channel IDs and their names
+    # The sidebar HTML has patterns like:
+    # data-qa-channel-sidebar-channel-id="C01CPSKFG0P"
+    # data-qa="channel_sidebar_name_team-clouddot-automation-analytics"
+
+    # Find all channel IDs
+    channel_ids = re.findall(r'data-qa-channel-sidebar-channel-id="([^"]+)"', html_content)
+
+    # Find all channel names (they follow a specific pattern)
+    name_pattern = r'data-qa="channel_sidebar_name_([^"]+)"'
+    names = re.findall(name_pattern, html_content)
+
+    # Build a mapping - names appear after their IDs in the HTML
+    # We need to correlate them by position in the HTML
+    id_positions = [
+        (m.start(), m.group(1)) for m in re.finditer(r'data-qa-channel-sidebar-channel-id="([^"]+)"', html_content)
+    ]
+    name_positions = [
+        (m.start(), m.group(1)) for m in re.finditer(r'data-qa="channel_sidebar_name_([^"]+)"', html_content)
+    ]
+
+    # For each channel ID, find the next name that appears after it
+    for id_pos, channel_id in id_positions:
+        # Find the first name that appears after this ID
+        channel_name = None
+        for name_pos, name in name_positions:
+            if name_pos > id_pos:
+                # Skip special entries
+                if name.startswith("sidebar_add_more") or name in ("you", "all_thread_link"):
+                    continue
+                if name.startswith("page_"):
+                    continue
+                channel_name = name
+                break
+
+        if channel_name:
+            # Determine type based on ID prefix
+            if channel_id.startswith("D"):
+                channel_type = "dm"
+            elif channel_id.startswith("G"):
+                channel_type = "group_dm"
+            elif channel_id.startswith("C"):
+                channel_type = "channel"
+            else:
+                channel_type = "unknown"
+
+            # Clean up the name (replace dashes with spaces for display)
+            display_name = channel_name.replace("-", " ").title() if channel_type == "dm" else channel_name
+
+            channels.append(
+                {
+                    "channel_id": channel_id,
+                    "name": channel_name,
+                    "display_name": display_name,
+                    "type": channel_type,
+                }
+            )
+
+    # Deduplicate by channel_id
+    seen = set()
+    unique_channels = []
+    for ch in channels:
+        if ch["channel_id"] not in seen:
+            seen.add(ch["channel_id"])
+            unique_channels.append(ch)
+
+    return unique_channels
+
+
+def parse_sidebar_file(file_path: str | Path) -> list[dict[str, str]]:
+    """
+    Parse a sidebar HTML file saved from Slack.
+
+    Args:
+        file_path: Path to the HTML file
+
+    Returns:
+        List of channel dicts
+    """
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Sidebar file not found: {file_path}")
+
+    html_content = path.read_text(encoding="utf-8")
+    return parse_slack_sidebar_html(html_content)
 
 
 @dataclass
@@ -117,6 +222,47 @@ class CachedChannel:
             purpose=data.get("purpose", ""),
             topic=data.get("topic", ""),
             num_members=data.get("num_members", 0),
+            updated_at=data.get("updated_at", 0.0),
+        )
+
+
+@dataclass
+class CachedUser:
+    """Represents a cached Slack user for discovery."""
+
+    user_id: str
+    user_name: str
+    display_name: str = ""
+    real_name: str = ""
+    email: str = ""
+    gitlab_username: str = ""
+    avatar_url: str = ""
+    updated_at: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return {
+            "user_id": self.user_id,
+            "user_name": self.user_name,
+            "display_name": self.display_name,
+            "real_name": self.real_name,
+            "email": self.email,
+            "gitlab_username": self.gitlab_username,
+            "avatar_url": self.avatar_url,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CachedUser":
+        """Deserialize from dict."""
+        return cls(
+            user_id=data["user_id"],
+            user_name=data.get("user_name", ""),
+            display_name=data.get("display_name", ""),
+            real_name=data.get("real_name", ""),
+            email=data.get("email", ""),
+            gitlab_username=data.get("gitlab_username", ""),
+            avatar_url=data.get("avatar_url", ""),
             updated_at=data.get("updated_at", 0.0),
         )
 
@@ -231,6 +377,7 @@ class SlackStateDB:
                 real_name TEXT,
                 email TEXT,
                 gitlab_username TEXT,
+                avatar_url TEXT,
                 updated_at REAL NOT NULL
             );
 
@@ -297,6 +444,17 @@ class SlackStateDB:
             await self._db.commit()
         except Exception:
             pass  # Table might not exist yet on first run
+
+        # Migration: Add avatar_url column to user_cache if it doesn't exist
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(user_cache)")
+            columns = [row[1] for row in await cursor.fetchall()]
+            if "avatar_url" not in columns:
+                await self._db.execute("ALTER TABLE user_cache ADD COLUMN avatar_url TEXT")
+                await self._db.commit()
+                logger.info("Migrated user_cache: added avatar_url column")
+        except Exception as e:
+            logger.debug(f"Migration check for avatar_url: {e}")
 
     # ==================== Channel State ====================
 
@@ -480,15 +638,80 @@ class SlackStateDB:
         """Get all cached users."""
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute("SELECT user_id, user_name, display_name, real_name FROM user_cache")
+            cursor = await self._db.execute(
+                "SELECT user_id, user_name, display_name, real_name, avatar_url FROM user_cache"
+            )
             rows = await cursor.fetchall()
             return {
                 row[0]: {
                     "user_name": row[1],
                     "display_name": row[2] or row[1],
                     "real_name": row[3] or "",
+                    "avatar_url": row[4] or "",
                 }
                 for row in rows
+            }
+
+    async def cache_users_bulk(self, users: list[CachedUser]):
+        """Cache multiple users at once (more efficient for bulk refresh)."""
+        async with self._lock:
+            await self._connect_unlocked()
+            await self._db.executemany(
+                """
+                INSERT OR REPLACE INTO user_cache
+                (user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        u.user_id,
+                        u.user_name,
+                        u.display_name,
+                        u.real_name,
+                        u.email,
+                        u.gitlab_username,
+                        u.avatar_url,
+                        time.time(),
+                    )
+                    for u in users
+                ],
+            )
+            await self._db.commit()
+
+    async def get_user_cache_stats(self) -> dict[str, Any]:
+        """Get statistics about the user cache."""
+        async with self._lock:
+            await self._connect_unlocked()
+
+            cursor = await self._db.execute("SELECT COUNT(*) FROM user_cache")
+            total = (await cursor.fetchone())[0]
+
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM user_cache WHERE avatar_url IS NOT NULL AND avatar_url != ''"
+            )
+            with_avatar = (await cursor.fetchone())[0]
+
+            cursor = await self._db.execute("SELECT COUNT(*) FROM user_cache WHERE email IS NOT NULL AND email != ''")
+            with_email = (await cursor.fetchone())[0]
+
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM user_cache WHERE gitlab_username IS NOT NULL AND gitlab_username != ''"
+            )
+            with_gitlab = (await cursor.fetchone())[0]
+
+            cursor = await self._db.execute("SELECT MIN(updated_at), MAX(updated_at) FROM user_cache")
+            row = await cursor.fetchone()
+            oldest = row[0] if row[0] else 0
+            newest = row[1] if row[1] else 0
+
+            return {
+                "total_users": total,
+                "with_avatar": with_avatar,
+                "with_email": with_email,
+                "with_gitlab": with_gitlab,
+                "oldest_entry": oldest,
+                "newest_entry": newest,
+                "cache_age_seconds": time.time() - newest if newest else None,
             }
 
     # ==================== Metadata ====================
@@ -736,6 +959,81 @@ class SlackStateDB:
                 "cache_age_seconds": time.time() - newest if newest else None,
             }
 
+    async def import_channels_from_sidebar(self, file_path: str | Path) -> dict[str, Any]:
+        """
+        Import channels from a Slack sidebar HTML file.
+
+        This is a fallback for when the Slack API's conversations.list is blocked
+        by enterprise restrictions. Users can copy the sidebar HTML from the
+        Slack web client (Inspect Element on sidebar -> Copy outer HTML).
+
+        Args:
+            file_path: Path to the HTML file containing sidebar content
+
+        Returns:
+            Dict with import stats (channels_imported, dms_imported, etc.)
+        """
+        try:
+            parsed = parse_sidebar_file(file_path)
+        except FileNotFoundError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Failed to parse sidebar: {e}"}
+
+        if not parsed:
+            return {"success": False, "error": "No channels found in sidebar HTML"}
+
+        # Convert to CachedChannel objects
+        channels = []
+        dms = []
+        for item in parsed:
+            if item["type"] == "channel":
+                channels.append(
+                    CachedChannel(
+                        channel_id=item["channel_id"],
+                        name=item["name"],
+                        display_name=item["display_name"],
+                        is_private=False,  # Can't determine from sidebar
+                        is_member=True,  # If it's in sidebar, user is a member
+                        purpose="",
+                        topic="",
+                        num_members=0,
+                    )
+                )
+            elif item["type"] in ("dm", "group_dm"):
+                dms.append(
+                    {
+                        "channel_id": item["channel_id"],
+                        "name": item["name"],
+                        "display_name": item["display_name"],
+                        "type": item["type"],
+                    }
+                )
+
+        # Cache the channels
+        if channels:
+            await self.cache_channels_bulk(channels)
+
+        # Store DMs in a separate metadata entry for reference
+        if dms:
+            await self.set_meta("sidebar_dms", json.dumps(dms))
+
+        return {
+            "success": True,
+            "channels_imported": len(channels),
+            "dms_found": len(dms),
+            "total_items": len(parsed),
+            "source_file": str(file_path),
+        }
+
+    async def get_sidebar_dms(self) -> list[dict[str, str]]:
+        """Get DMs that were imported from the sidebar."""
+        dms_json = await self.get_meta("sidebar_dms", "[]")
+        try:
+            return json.loads(dms_json)
+        except json.JSONDecodeError:
+            return []
+
     # ==================== Group Cache (Knowledge) ====================
 
     async def cache_group(self, group: CachedGroup):
@@ -899,17 +1197,18 @@ class SlackStateDB:
         real_name: str = "",
         email: str = "",
         gitlab_username: str = "",
+        avatar_url: str = "",
     ):
-        """Cache extended user information including email and gitlab username."""
+        """Cache extended user information including email, gitlab username, and avatar."""
         async with self._lock:
             await self._connect_unlocked()
             await self._db.execute(
                 """
                 INSERT OR REPLACE INTO user_cache
-                (user_id, user_name, display_name, real_name, email, gitlab_username, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, user_name, display_name, real_name, email, gitlab_username, time.time()),
+                (user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, time.time()),
             )
             await self._db.commit()
 
@@ -935,7 +1234,7 @@ class SlackStateDB:
                 search_pattern = f"%{query}%"
                 cursor = await self._db.execute(
                     """
-                    SELECT user_id, user_name, display_name, real_name, email, gitlab_username, updated_at
+                    SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
                     FROM user_cache
                     WHERE user_name LIKE ? OR display_name LIKE ? OR real_name LIKE ?
                           OR email LIKE ? OR gitlab_username LIKE ?
@@ -947,7 +1246,7 @@ class SlackStateDB:
             else:
                 cursor = await self._db.execute(
                     """
-                    SELECT user_id, user_name, display_name, real_name, email, gitlab_username, updated_at
+                    SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
                     FROM user_cache
                     ORDER BY user_name ASC
                     LIMIT ?
@@ -964,7 +1263,8 @@ class SlackStateDB:
                     "real_name": row[3] or "",
                     "email": row[4] or "",
                     "gitlab_username": row[5] or "",
-                    "updated_at": row[6],
+                    "avatar_url": row[6] or "",
+                    "updated_at": row[7],
                 }
                 for row in rows
             ]
@@ -975,7 +1275,7 @@ class SlackStateDB:
             await self._connect_unlocked()
             cursor = await self._db.execute(
                 """
-                SELECT user_id, user_name, display_name, real_name, email, gitlab_username, updated_at
+                SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
                 FROM user_cache
                 WHERE gitlab_username = ? OR gitlab_username = ? COLLATE NOCASE
                 LIMIT 1
@@ -991,9 +1291,122 @@ class SlackStateDB:
                     "real_name": row[3] or "",
                     "email": row[4] or "",
                     "gitlab_username": row[5] or "",
-                    "updated_at": row[6],
+                    "avatar_url": row[6] or "",
+                    "updated_at": row[7],
                 }
             return None
+
+    async def find_user_by_email(self, email: str) -> dict[str, Any] | None:
+        """
+        Find a user by their email address.
+
+        Args:
+            email: Email address to search for (case-insensitive)
+
+        Returns:
+            User dict with all cached fields, or None if not found
+        """
+        if not email:
+            return None
+
+        async with self._lock:
+            await self._connect_unlocked()
+            cursor = await self._db.execute(
+                """
+                SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
+                FROM user_cache
+                WHERE email = ? COLLATE NOCASE
+                LIMIT 1
+                """,
+                (email,),
+            )
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    "user_id": row[0],
+                    "user_name": row[1],
+                    "display_name": row[2] or row[1],
+                    "real_name": row[3] or "",
+                    "email": row[4] or "",
+                    "gitlab_username": row[5] or "",
+                    "avatar_url": row[6] or "",
+                    "updated_at": row[7],
+                }
+            return None
+
+    async def find_user_by_name_fuzzy(
+        self,
+        name: str,
+        threshold: float = 0.7,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """
+        Find users by fuzzy name matching.
+
+        Compares the input name against real_name, display_name, and user_name
+        using SequenceMatcher for fuzzy matching.
+
+        Args:
+            name: Name to search for
+            threshold: Minimum similarity ratio (0-1, default 0.7)
+            limit: Maximum number of results to return
+
+        Returns:
+            List of user dicts sorted by match score (best first)
+        """
+        from difflib import SequenceMatcher
+
+        if not name:
+            return []
+
+        name_lower = name.lower().strip()
+
+        async with self._lock:
+            await self._connect_unlocked()
+            cursor = await self._db.execute(
+                """
+                SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
+                FROM user_cache
+                """
+            )
+            rows = await cursor.fetchall()
+
+        # Score each user
+        scored_users = []
+        for row in rows:
+            user_name = (row[1] or "").lower()
+            display_name = (row[2] or "").lower()
+            real_name = (row[3] or "").lower()
+
+            # Calculate best match score across all name fields
+            scores = [
+                SequenceMatcher(None, name_lower, real_name).ratio() if real_name else 0,
+                SequenceMatcher(None, name_lower, display_name).ratio() if display_name else 0,
+                SequenceMatcher(None, name_lower, user_name).ratio() if user_name else 0,
+            ]
+            best_score = max(scores)
+
+            if best_score >= threshold:
+                scored_users.append(
+                    (
+                        best_score,
+                        {
+                            "user_id": row[0],
+                            "user_name": row[1],
+                            "display_name": row[2] or row[1],
+                            "real_name": row[3] or "",
+                            "email": row[4] or "",
+                            "gitlab_username": row[5] or "",
+                            "avatar_url": row[6] or "",
+                            "updated_at": row[7],
+                            "match_score": best_score,
+                        },
+                    )
+                )
+
+        # Sort by score (descending) and return top matches
+        scored_users.sort(key=lambda x: x[0], reverse=True)
+        return [user for _, user in scored_users[:limit]]
 
     # ==================== Target Resolution ====================
 

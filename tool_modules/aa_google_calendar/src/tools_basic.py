@@ -54,13 +54,15 @@ CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 TOKEN_FILE = CONFIG_DIR / "token.json"
 SERVICE_ACCOUNT_FILE = CONFIG_DIR / "service_account.json"
 
-# Scopes required for calendar and gmail access
+# Scopes required for calendar, gmail, slides, and drive access
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/presentations",
+    "https://www.googleapis.com/auth/drive.file",
 ]
 
 # CONSTRAINTS
@@ -102,9 +104,7 @@ def _try_service_account(service_account, scopes):
     """Try to load service account credentials."""
     if SERVICE_ACCOUNT_FILE.exists():
         try:
-            return service_account.Credentials.from_service_account_file(
-                str(SERVICE_ACCOUNT_FILE), scopes=scopes
-            )
+            return service_account.Credentials.from_service_account_file(str(SERVICE_ACCOUNT_FILE), scopes=scopes)
         except Exception:
             pass
     return None
@@ -1138,7 +1138,7 @@ async def _google_calendar_list_calendars_impl() -> str:
         lines.append("")
         lines.append("**To list events from a specific calendar:**")
         lines.append("```")
-        lines.append("google_calendar_list_events_from(calendar_id=\"calendar@group.calendar.google.com\")")
+        lines.append('google_calendar_list_events_from(calendar_id="calendar@group.calendar.google.com")')
         lines.append("```")
 
         return "\n".join(lines)
@@ -1234,14 +1234,16 @@ async def _google_calendar_list_events_from_impl(
             if day_key not in events_by_day:
                 events_by_day[day_key] = []
 
-            events_by_day[day_key].append({
-                "time": time_str,
-                "summary": summary,
-                "meet_link": meet_link,
-                "meet_url": meet_url,
-                "event_id": event.get("id", ""),
-                "organizer": event.get("organizer", {}).get("email", ""),
-            })
+            events_by_day[day_key].append(
+                {
+                    "time": time_str,
+                    "summary": summary,
+                    "meet_link": meet_link,
+                    "meet_url": meet_url,
+                    "event_id": event.get("id", ""),
+                    "organizer": event.get("organizer", {}).get("email", ""),
+                }
+            )
 
         for day, day_events in events_by_day.items():
             lines.append(f"## {day}")
@@ -1320,16 +1322,18 @@ async def _google_calendar_get_events_with_meet_impl(
                 except (ValueError, TypeError):
                     continue
 
-                meet_events.append({
-                    "event_id": event.get("id", ""),
-                    "title": event.get("summary", "No title"),
-                    "start": start_dt,
-                    "end": end_dt,
-                    "meet_url": meet_url,
-                    "organizer": event.get("organizer", {}).get("email", ""),
-                    "attendees": [a.get("email", "") for a in event.get("attendees", [])],
-                    "description": event.get("description", ""),
-                })
+                meet_events.append(
+                    {
+                        "event_id": event.get("id", ""),
+                        "title": event.get("summary", "No title"),
+                        "start": start_dt,
+                        "end": end_dt,
+                        "meet_url": meet_url,
+                        "organizer": event.get("organizer", {}).get("email", ""),
+                        "attendees": [a.get("email", "") for a in event.get("attendees", [])],
+                        "description": event.get("description", ""),
+                    }
+                )
 
         if not meet_events:
             return f"📅 No meetings with Google Meet links in the next {days} day(s)."
@@ -1345,9 +1349,9 @@ async def _google_calendar_get_events_with_meet_impl(
             lines.append(f"- **When:** {evt['start'].strftime('%A %H:%M')} - {evt['end'].strftime('%H:%M')}")
             lines.append(f"- **Meet URL:** {evt['meet_url']}")
             lines.append(f"- **Organizer:** {evt['organizer']}")
-            if evt['attendees']:
+            if evt["attendees"]:
                 lines.append(f"- **Attendees:** {', '.join(evt['attendees'][:5])}")
-                if len(evt['attendees']) > 5:
+                if len(evt["attendees"]) > 5:
                     lines.append(f"  ... and {len(evt['attendees']) - 5} more")
             lines.append("")
 
@@ -1403,9 +1407,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Available time slots that work for both parties
         """
-        return await _google_calendar_check_mutual_availability_impl(
-            attendee_email, date, days_ahead, duration_minutes
-        )
+        return await _google_calendar_check_mutual_availability_impl(attendee_email, date, days_ahead, duration_minutes)
 
     @registry.tool()
     async def google_calendar_find_meeting(

@@ -32,9 +32,10 @@ install_service() {
 }
 
 # Install services
-install_service "slack-agent" || true
-install_service "cron-scheduler" || true
-install_service "meet-bot" || true
+install_service "bot-slack" || true
+install_service "bot-cron" || true
+install_service "bot-meet" || true
+install_service "bot-sprint" || true
 
 # Reload systemd
 echo
@@ -45,23 +46,29 @@ echo "   ✅ Daemon reloaded"
 echo
 echo "Services installed! Available commands:"
 echo
-echo "  Slack Agent:"
-echo "    systemctl --user start slack-agent"
-echo "    systemctl --user status slack-agent"
-echo "    systemctl --user enable slack-agent  # Auto-start on login"
+echo "  Slack Bot:"
+echo "    systemctl --user start bot-slack"
+echo "    systemctl --user status bot-slack"
+echo "    systemctl --user enable bot-slack  # Auto-start on login"
 echo
-echo "  Cron Scheduler:"
-echo "    systemctl --user start cron-scheduler"
-echo "    systemctl --user status cron-scheduler"
-echo "    systemctl --user enable cron-scheduler  # Auto-start on login"
+echo "  Cron Bot:"
+echo "    systemctl --user start bot-cron"
+echo "    systemctl --user status bot-cron"
+echo "    systemctl --user enable bot-cron  # Auto-start on login"
 echo
 echo "  Meet Bot:"
-echo "    systemctl --user start meet-bot"
-echo "    systemctl --user status meet-bot"
-echo "    systemctl --user enable meet-bot  # Auto-start on login"
+echo "    systemctl --user start bot-meet"
+echo "    systemctl --user status bot-meet"
+echo "    systemctl --user enable bot-meet  # Auto-start on login"
+echo
+echo "  Sprint Bot:"
+echo "    systemctl --user start bot-sprint"
+echo "    systemctl --user status bot-sprint"
+echo "    systemctl --user enable bot-sprint  # Auto-start on login"
 echo
 echo "View logs:"
-echo "    journalctl --user -u slack-agent -f"
-echo "    journalctl --user -u cron-scheduler -f"
-echo "    journalctl --user -u meet-bot -f"
+echo "    journalctl --user -u bot-slack -f"
+echo "    journalctl --user -u bot-cron -f"
+echo "    journalctl --user -u bot-meet -f"
+echo "    journalctl --user -u bot-sprint -f"
 echo

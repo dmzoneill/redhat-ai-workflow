@@ -397,27 +397,6 @@ steps:
           }
     output: kibana_results
 
-  # ==================== GET GRAFANA LINK ====================
-
-  - name: get_grafana_link
-    description: "Get Grafana dashboard link for namespace"
-    tool: prometheus_grafana_link
-    args:
-      environment: "{{ target.environment }}"
-      namespace: "{{ target.namespace }}"
-    output: grafana_link_raw
-    on_error: continue
-
-  - name: parse_grafana_link
-    description: "Extract Grafana URL"
-    compute: |
-      link_text = str(grafana_link_raw) if grafana_link_raw else ""
-      import re
-      urls = re.findall(r'https?://[^\s\)]+grafana[^\s\)]*', link_text)
-      result = urls[0] if urls else None
-    output: grafana_url
-    on_error: continue
-
   # ==================== CHECK KNOWN PATTERNS ====================
 
   - name: check_patterns
@@ -693,9 +672,14 @@ steps:
       skill_name: notify_team
       inputs: |
         {
-          "message": "🚨 Critical alert in {{ target.get('environment', 'unknown') }}",
-          "type": "error",
-          "context": "Alert: {{ alert_info.get('alerts', [{}])[0].get('name', inputs.alert_name or 'unknown') }}\nNamespace: {{ target.get('namespace', 'unknown') }}\nEnvironment: {{ target.get('environment', 'unknown') }}"
+          "message": "",
+          "template": "alert",
+          "template_data": {
+            "alert_name": "{{ alert_info.get('alerts', [{}])[0].get('name', inputs.alert_name or 'unknown') }}",
+            "severity": "critical",
+            "environment": "{{ target.get('environment', 'unknown') }}",
+            "description": "Critical alert firing in {{ target.get('namespace', 'unknown') }}"
+          }
         }
       execute: true
     output: slack_critical_alert_notification
@@ -710,9 +694,14 @@ steps:
       skill_name: notify_team
       inputs: |
         {
-          "message": "Alert escalated - investigation in progress",
-          "type": "warning",
-          "context": "Alert: {{ inputs.alert_name or 'unknown' }}\nNamespace: {{ target.get('namespace', 'unknown') }}\nSeverity: {{ assessment.get('severity', 'unknown') }}"
+          "message": "",
+          "template": "alert",
+          "template_data": {
+            "alert_name": "{{ inputs.alert_name or 'unknown' }}",
+            "severity": "{{ assessment.get('severity', 'warning') }}",
+            "environment": "{{ target.get('environment', 'unknown') }}",
+            "description": "Alert escalated - investigation in progress in {{ target.get('namespace', 'unknown') }}"
+          }
         }
       execute: true
     output: slack_escalated_alert_notification
@@ -822,16 +811,6 @@ steps:
               "pattern": "unauthorized",
               "cause": "Kibana authentication failed",
               "fix": "Open Kibana in browser first to authenticate"
-          })
-
-      # Check Grafana failures
-      grafana_text = str(grafana_link_raw) if 'grafana_link_raw' in dir() and grafana_link_raw else ""
-      if "unauthorized" in grafana_text.lower():
-          errors_detected.append({
-              "tool": "grafana_get_dashboard_link",
-              "pattern": "unauthorized",
-              "cause": "Grafana authentication failed",
-              "fix": "Check Grafana credentials in config.json"
           })
 
       result = errors_detected
@@ -988,11 +967,8 @@ outputs:
 
       ---
 
-      ### 📊 Dashboards
-      {% if grafana_url %}
-      - 📈 [Grafana Dashboard]({{ grafana_url }})
-      {% endif %}
       {% if kibana_results.kibana_url %}
+      ### 📊 Dashboards
       - 📋 [Kibana Logs]({{ kibana_results.kibana_url }})
       {% endif %}
 

@@ -21,13 +21,13 @@ Usage:
     python scripts/cron_daemon.py --dbus         # Enable D-Bus IPC
 
 Systemd:
-    systemctl --user start cron-scheduler
-    systemctl --user status cron-scheduler
-    systemctl --user stop cron-scheduler
+    systemctl --user start bot-cron
+    systemctl --user status bot-cron
+    systemctl --user stop bot-cron
 
 D-Bus:
-    Service: com.aiworkflow.CronScheduler
-    Path: /com/aiworkflow/CronScheduler
+    Service: com.aiworkflow.BotCron
+    Path: /com/aiworkflow/BotCron
 """
 
 import argparse
@@ -49,6 +49,9 @@ from scripts.common.sleep_wake import SleepWakeAwareDaemon  # noqa: E402
 
 LOCK_FILE = Path("/tmp/cron-daemon.lock")
 PID_FILE = Path("/tmp/cron-daemon.pid")
+
+# Import centralized paths - cron daemon owns its own state file
+from server.paths import CRON_STATE_FILE
 
 # Configure logging for journalctl
 # When running under systemd, stdout/stderr automatically go to journald
@@ -115,9 +118,9 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
     """Main cron scheduler daemon with D-Bus support."""
 
     # D-Bus configuration
-    service_name = "com.aiworkflow.CronScheduler"
-    object_path = "/com/aiworkflow/CronScheduler"
-    interface_name = "com.aiworkflow.CronScheduler"
+    service_name = "com.aiworkflow.BotCron"
+    object_path = "/com/aiworkflow/BotCron"
+    interface_name = "com.aiworkflow.BotCron"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = False):
         super().__init__()
@@ -136,6 +139,7 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
         self.register_handler("toggle_job", self._handle_toggle_job)
         self.register_handler("update_config", self._handle_update_config)
         self.register_handler("get_config", self._handle_get_config)
+        self.register_handler("write_state", self._handle_write_state)
 
     # ==================== D-Bus Interface Methods ====================
 
@@ -403,6 +407,14 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
             logger.error(f"Failed to get config {section}.{key}: {e}")
             return {"success": False, "error": str(e)}
 
+    async def _handle_write_state(self) -> dict:
+        """Write state to file immediately (for UI refresh requests)."""
+        try:
+            await self._write_state()
+            return {"success": True, "file": str(CRON_STATE_FILE)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     # ==================== Sleep/Wake Handling ====================
 
     async def on_system_wake(self):
@@ -496,16 +508,117 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
         await self.start_sleep_monitor()
         print("✅ Sleep/wake monitor started")
 
+        # Start state writer task (writes cron_state.json periodically)
+        self._state_writer_task = asyncio.create_task(self._state_writer_loop())
+        print("✅ State writer started")
+
         print()
         print("-" * 60)
         print("Daemon running. Press Ctrl+C to stop.")
-        print("Logs: journalctl --user -u cron-scheduler -f")
+        print("Logs: journalctl --user -u bot-cron -f")
         if self.enable_dbus:
             print(f"D-Bus: {self.service_name}")
         print("-" * 60)
 
         # Wait for shutdown signal
         await self._shutdown_event.wait()
+
+    async def _state_writer_loop(self):
+        """Periodically write cron state to cron_state.json.
+
+        Each service owns its own state file. The VS Code extension reads
+        all state files on refresh. No shared file = no race conditions.
+        """
+        while not self._shutdown_event.is_set():
+            try:
+                await self._write_state()
+                await asyncio.sleep(30)  # Write every 30 seconds (cron changes less frequently)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"State writer error: {e}")
+                await asyncio.sleep(30)
+
+    async def _write_state(self):
+        """Write current cron state to cron_state.json."""
+        import json
+        import tempfile
+
+        if not self._scheduler:
+            return
+
+        try:
+            # Get scheduled jobs from APScheduler (for next_run times)
+            scheduled_jobs = {}
+            for job in self._scheduler.scheduler.get_jobs():
+                if job.id != "_config_watcher":
+                    scheduled_jobs[job.id] = {
+                        "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
+                    }
+
+            # Get ALL jobs from config (including disabled ones and poll jobs)
+            # This is what the UI needs to display
+            jobs = []
+            for job_config in self._scheduler.config.jobs:
+                job_name = job_config.get("name", "")
+                scheduled = scheduled_jobs.get(job_name, {})
+
+                # Check if job is enabled:
+                # 1. Config default (from config.json)
+                # 2. Runtime override (from state.json via state_manager)
+                from server.state_manager import state as state_manager
+
+                config_enabled = job_config.get("enabled", True)
+                runtime_state = state_manager.get("jobs", job_name, {})
+                if isinstance(runtime_state, dict) and "enabled" in runtime_state:
+                    is_enabled = runtime_state["enabled"]
+                else:
+                    is_enabled = config_enabled
+
+                jobs.append(
+                    {
+                        "name": job_name,
+                        "description": job_config.get("description", ""),
+                        "skill": job_config.get("skill", ""),
+                        "cron": job_config.get("cron", ""),
+                        "trigger": job_config.get("trigger", "cron"),
+                        "persona": job_config.get("persona", ""),
+                        "enabled": is_enabled,
+                        "notify": job_config.get("notify", []),
+                        "next_run": scheduled.get("next_run"),
+                    }
+                )
+
+            # Get execution history
+            history = self._scheduler.execution_log.get_recent(20)
+
+            # Build cron state
+            cron_state = {
+                "enabled": self._scheduler.config.enabled if self._scheduler.config else True,
+                "timezone": str(self._scheduler.config.timezone) if self._scheduler.config else "UTC",
+                "execution_mode": self._scheduler.config.execution_mode if self._scheduler.config else "claude_cli",
+                "jobs": jobs,
+                "history": history,
+                "total_history": len(history),
+                "updated_at": datetime.now().isoformat(),
+            }
+
+            # Write atomically
+            CRON_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            temp_fd, temp_path = tempfile.mkstemp(suffix=".tmp", prefix="cron_state_", dir=CRON_STATE_FILE.parent)
+            try:
+                with os.fdopen(temp_fd, "w") as f:
+                    json.dump(cron_state, f, indent=2, default=str)
+                Path(temp_path).replace(CRON_STATE_FILE)
+            except Exception:
+                try:
+                    Path(temp_path).unlink()
+                except OSError:
+                    pass
+                raise
+
+        except Exception as e:
+            logger.debug(f"Failed to write cron state: {e}")
 
     async def stop(self):
         """Stop the daemon gracefully."""
@@ -514,6 +627,14 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
 
         print()
         print("Stopping daemon...")
+
+        # Stop state writer task
+        if hasattr(self, "_state_writer_task") and self._state_writer_task:
+            self._state_writer_task.cancel()
+            try:
+                await self._state_writer_task
+            except asyncio.CancelledError:
+                pass
 
         # Stop sleep monitor first (from SleepWakeAwareDaemon mixin)
         try:
@@ -589,8 +710,8 @@ Examples:
     python scripts/cron_daemon.py --list-jobs  # List jobs
 
 Systemd:
-    systemctl --user start cron-scheduler
-    systemctl --user status cron-scheduler
+    systemctl --user start bot-cron
+    systemctl --user status bot-cron
 
 D-Bus Control:
     python -c "import asyncio; from scripts.common.dbus_base import get_client; \\
@@ -659,7 +780,7 @@ D-Bus Control:
             print(f"✅ Cron daemon is running (PID: {pid})")
             print(f"   Lock file: {LOCK_FILE}")
             print(f"   PID file: {PID_FILE}")
-            print("   Logs: journalctl --user -u cron-scheduler -f")
+            print("   Logs: journalctl --user -u bot-cron -f")
             print("   (D-Bus not available - run with --dbus for IPC)")
         else:
             print("❌ Cron daemon is not running")

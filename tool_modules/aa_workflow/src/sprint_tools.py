@@ -15,26 +15,49 @@ from typing import Any
 
 from mcp.server.fastmcp import Context
 
-from .sprint_bot import (
-    SprintBotConfig,
-    WorkingHours,
-    approve_issue,
-    disable_sprint_bot,
-    enable_sprint_bot,
-    get_sprint_status,
-    is_within_working_hours,
-    refresh_sprint_state,
-    skip_issue,
-)
-from .sprint_history import (
-    SprintIssue,
-    TimelineEvent,
-    add_timeline_event,
-    load_sprint_history,
-    load_sprint_state,
-    save_sprint_state,
-)
-from .sprint_prioritizer import get_priority_summary, prioritize_issues
+# Support both package import and direct loading
+try:
+    from .sprint_bot import (
+        SprintBotConfig,
+        WorkingHours,
+        approve_issue,
+        disable_sprint_bot,
+        enable_sprint_bot,
+        get_sprint_status,
+        is_within_working_hours,
+        refresh_sprint_state,
+        skip_issue,
+    )
+    from .sprint_history import (
+        SprintIssue,
+        TimelineEvent,
+        add_timeline_event,
+        load_sprint_history,
+        load_sprint_state,
+        save_sprint_state,
+    )
+    from .sprint_prioritizer import get_priority_summary, prioritize_issues
+except ImportError:
+    from sprint_bot import (
+        SprintBotConfig,
+        WorkingHours,
+        approve_issue,
+        disable_sprint_bot,
+        enable_sprint_bot,
+        get_sprint_status,
+        is_within_working_hours,
+        refresh_sprint_state,
+        skip_issue,
+    )
+    from sprint_history import (
+        SprintIssue,
+        TimelineEvent,
+        add_timeline_event,
+        load_sprint_history,
+        load_sprint_state,
+        save_sprint_state,
+    )
+    from sprint_prioritizer import get_priority_summary, prioritize_issues
 
 logger = logging.getLogger(__name__)
 

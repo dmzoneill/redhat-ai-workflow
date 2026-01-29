@@ -1,0 +1,24 @@
+
+digraph DataFlow {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    user [label="User", fillcolor="#E3F2FD", shape=ellipse];
+    cursor [label="Cursor", fillcolor="#BBDEFB"];
+    mcp [label="MCP\nServer", fillcolor="#C8E6C9"];
+    tools [label="Tool\nModules", fillcolor="#A5D6A7"];
+
+    user -> cursor [label="1. Request"];
+    cursor -> mcp [label="2. MCP Call"];
+    mcp -> tools [label="3. Execute"];
+
+    autoheal [label="Auto-Heal\nDecorator", fillcolor="#FFECB3"];
+    tools -> autoheal [label="4. Fail?", style=dashed];
+    autoheal -> tools [label="5. Retry", color="#4CAF50"];
+
+    tools -> mcp [label="6. Result"];
+    mcp -> cursor [label="7. Response"];
+    cursor -> user [label="8. Display"];
+}

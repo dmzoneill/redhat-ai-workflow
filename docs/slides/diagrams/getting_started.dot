@@ -1,0 +1,14 @@
+
+digraph GettingStarted {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    step1 [label="1. Clone\nRepo", fillcolor="#BBDEFB"];
+    step2 [label="2. Configure\nconfig.json", fillcolor="#90CAF9"];
+    step3 [label="3. Install\nServices", fillcolor="#64B5F6"];
+    step4 [label="4. Start\nUsing!", fillcolor="#42A5F5"];
+
+    step1 -> step2 -> step3 -> step4;
+}

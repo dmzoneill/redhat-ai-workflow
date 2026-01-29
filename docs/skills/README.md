@@ -1,96 +1,230 @@
-# ⚡ Skills Reference
+# Skills Reference
 
-Skills are **reusable multi-step workflows** that chain MCP tools together with logic, conditions, and templating. All 55 production skills include **auto-healing** for VPN and authentication issues.
+Skills are **reusable multi-step workflows** that chain MCP tools together with logic, conditions, and templating. All production skills include **auto-healing** for VPN and authentication issues.
 
-> **Tool Usage:** Skills drive the tool organization - the 188 "basic" tools are those used in at least one skill. See [Tool Organization](../tool-organization.md) for details.
+## Quick Statistics
 
-## Quick Reference
+| Metric | Count |
+|--------|-------|
+| **Total Skills** | 82 |
+| **Root Skills** | 78 |
+| **Performance Skills** | 4 |
+| **With Auto-Heal** | 55+ |
 
-| Skill | Description | Agent | Auto-Heal |
-|-------|-------------|-------|-----------|
-| ☕ [coffee](./coffee.md) | Morning briefing - email, PRs, Jira, calendar | developer | ✅ |
-| 🍺 [beer](./beer.md) | End-of-day wrap-up and standup prep | developer | ✅ |
-| ⚡ [start_work](./start_work.md) | Begin working on a Jira issue | developer | ✅ VPN+Auth |
-| 🚀 [create_mr](./create_mr.md) | Create MR with validation and linting | developer | ✅ VPN |
-| ✅ [mark_mr_ready](./mark_mr_ready.md) | Mark draft MR as ready for review | developer | ✅ |
-| ✅ [close_issue](./close_issue.md) | Close issue with commit summary | developer | ✅ VPN |
-| 👀 [review_pr](./review_pr.md) | Review MR with auto-approve/feedback | developer | ✅ VPN+Auth |
-| 📋 [review_all_prs](./review_all_prs.md) | Batch review open PRs | developer | ✅ VPN |
-| 📝 [check_my_prs](./check_my_prs.md) | Check your PRs for feedback | developer | ✅ VPN |
-| 💬 [check_mr_feedback](./check_mr_feedback.md) | Find comments needing response | developer | ✅ VPN |
-| 🔄 [rebase_pr](./rebase_pr.md) | Rebase with auto-conflict resolution | developer | ✅ VPN |
-| 🔁 [sync_branch](./sync_branch.md) | Quick sync with main | developer | ✅ VPN |
-| 📊 [standup_summary](./standup_summary.md) | Generate standup from activity | developer | ✅ |
-| 📋 [jira_hygiene](./jira_hygiene.md) | Validate and fix issue quality | developer | ✅ VPN |
-| 📋 [create_jira_issue](./create_jira_issue.md) | Create issue with Markdown support | developer | ✅ |
-| 📋 [clone_jira_issue](./clone_jira_issue.md) | Clone existing Jira issue | developer | ✅ |
-| 📋 [sprint_planning](./sprint_planning.md) | Sprint planning assistance | developer | ✅ |
-| 🧪 [test_mr_ephemeral](./test_mr_ephemeral.md) | Deploy MR to ephemeral environment | devops | ✅ VPN+Auth |
-| 🚀 [deploy_to_ephemeral](./deploy_to_ephemeral.md) | Full ephemeral deployment | devops | ✅ VPN+Auth |
-| ⏰ [extend_ephemeral](./extend_ephemeral.md) | Extend ephemeral namespace TTL | devops | ✅ VPN+Auth |
-| 🔄 [rollout_restart](./rollout_restart.md) | Restart deployment with rollout | devops | ✅ VPN+Auth |
-| 📈 [scale_deployment](./scale_deployment.md) | Scale deployment replicas | devops | ✅ VPN+Auth |
-| 🔐 [check_secrets](./check_secrets.md) | Check Kubernetes secrets | devops | ✅ VPN+Auth |
-| 🚨 [investigate_alert](./investigate_alert.md) | Quick alert triage | devops, incident | ✅ VPN+Auth |
-| 🐛 [debug_prod](./debug_prod.md) | Deep production debugging | devops, incident | ✅ VPN+Auth |
-| 🔇 [silence_alert](./silence_alert.md) | Silence Prometheus alert | devops, incident | ✅ VPN+Auth |
-| 🌍 [environment_overview](./environment_overview.md) | Environment health overview | devops | ✅ VPN+Auth |
-| 📊 [check_ci_health](./check_ci_health.md) | CI pipeline health check | developer | ✅ VPN |
-| 🔄 [ci_retry](./ci_retry.md) | Retry failed CI pipeline | developer | ✅ VPN |
-| ❌ [cancel_pipeline](./cancel_pipeline.md) | Cancel running pipeline | developer | ✅ VPN+Auth |
-| 🧪 [check_integration_tests](./check_integration_tests.md) | Check Konflux integration tests | devops | ✅ VPN+Auth |
-| 🔍 [scan_vulnerabilities](./scan_vulnerabilities.md) | Scan container for CVEs | devops | ✅ VPN |
-| 🚨 [investigate_slack_alert](./investigate_slack_alert.md) | Handle alerts from Slack | slack | ✅ |
-| 🤖 [slack_daemon_control](./slack_daemon_control.md) | Control Slack daemon | slack | - |
-| 💬 [notify_team](./notify_team.md) | Post to team Slack channel | developer | ✅ |
-| 💬 [notify_mr](./notify_mr.md) | Notify team about MR | developer | ✅ |
-| 📆 [schedule_meeting](./schedule_meeting.md) | Create calendar meeting | developer | ✅ |
-| 📦 [release_aa_backend_prod](./release_aa_backend_prod.md) | Release to production | release | ✅ VPN+Auth |
-| 📦 [release_to_prod](./release_to_prod.md) | Generic production release | release | ✅ VPN+Auth |
-| 🔍 [appinterface_check](./appinterface_check.md) | Check app-interface state | release | ✅ VPN+Auth |
-| ⚙️ [konflux_status](./konflux_status.md) | Konflux platform status | release | ✅ VPN+Auth |
-| 📊 [weekly_summary](./weekly_summary.md) | Weekly activity summary | developer | ✅ |
-| 🧹 [cleanup_branches](./cleanup_branches.md) | Clean up stale branches | developer | ✅ |
-| 🔥 [hotfix](./hotfix.md) | Create emergency hotfix | developer | ✅ |
-| ❌ [close_mr](./close_mr.md) | Close merge request | developer | ✅ VPN |
+> **Tool Usage:** Skills drive the tool organization - the 294 "basic" tools are those commonly used in skills. See [Tool Organization](../tool-organization.md) for details.
 
-### Utility/Internal Skills (no auto-heal needed)
+## Skill Categories
+
+### Daily Rituals (6 skills)
 
 | Skill | Description |
 |-------|-------------|
-| 📖 learn_pattern | Save learned pattern to memory |
-| 🧹 memory_cleanup | Clean up old memory entries |
-| ✏️ memory_edit | Edit memory entries |
-| 🗄️ memory_init | Initialize memory structure |
-| 👁️ memory_view | View memory contents |
-| 🧪 test_error_recovery | Test skill error recovery |
-| 🤖 review_pr_multiagent | Multi-agent code review |
-| 🤖 review_pr_multiagent_test | Test multi-agent review |
+| [coffee](./coffee.md) | Morning briefing - calendar, email, PRs, Jira, ephemeral, alerts |
+| [beer](./beer.md) | End-of-day wrap-up and standup prep |
+| [standup_summary](./standup_summary.md) | Generate standup notes from activity |
+| [weekly_summary](./weekly_summary.md) | Weekly activity report |
+| [work_analysis](./work_analysis.md) | Analyze work across repositories |
+| [discovered_work_summary](./discovered_work_summary.md) | Summarize discovered work items |
 
-## 🔄 Auto-Heal Feature
+### Development Flow (12 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [start_work](./start_work.md) | Begin work on a Jira issue - branch, context, knowledge |
+| [sync_branch](./sync_branch.md) | Quick sync with main branch |
+| [create_mr](./create_mr.md) | Create MR with validation and linting |
+| [mark_mr_ready](./mark_mr_ready.md) | Mark draft MR as ready for review |
+| [close_issue](./close_issue.md) | Close issue with commit summary |
+| [close_mr](./close_mr.md) | Close merge request |
+| [hotfix](./hotfix.md) | Create emergency hotfix |
+| [rebase_pr](./rebase_pr.md) | Rebase with auto-conflict hints |
+| [cleanup_branches](./cleanup_branches.md) | Clean up stale branches |
+| [pr_jira_audit](./pr_jira_audit.md) | Audit PRs for missing Jira refs |
+| [sync_discovered_work](./sync_discovered_work.md) | Sync discovered work items |
+| [update_docs](./update_docs.md) | Check and update documentation |
+
+### Code Review (7 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [review_pr](./review_pr.md) | Review MR with detailed analysis |
+| [review_all_prs](./review_all_prs.md) | Batch review open PRs |
+| [review_local_changes](./review_local_changes.md) | Review uncommitted local changes |
+| [review_pr_multiagent](./review_pr_multiagent.md) | Multi-agent coordinated code review |
+| [review_pr_multiagent_test](./review_pr_multiagent_test.md) | Test multi-agent review |
+| [check_my_prs](./check_my_prs.md) | Check your PR status and feedback |
+| [check_mr_feedback](./check_mr_feedback.md) | Find comments needing response |
+
+### Testing & Deployment (10 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [test_mr_ephemeral](./test_mr_ephemeral.md) | Deploy MR to ephemeral environment |
+| [deploy_to_ephemeral](./deploy_to_ephemeral.md) | Full ephemeral deployment |
+| [extend_ephemeral](./extend_ephemeral.md) | Extend ephemeral namespace TTL |
+| [check_ci_health](./check_ci_health.md) | CI pipeline health check |
+| [ci_retry](./ci_retry.md) | Retry failed CI pipeline |
+| [cancel_pipeline](./cancel_pipeline.md) | Cancel running pipeline |
+| [check_integration_tests](./check_integration_tests.md) | Check Konflux integration tests |
+| [scan_vulnerabilities](./scan_vulnerabilities.md) | Scan container for CVEs |
+| [rollout_restart](./rollout_restart.md) | Restart deployment with rollout |
+| [scale_deployment](./scale_deployment.md) | Scale deployment replicas |
+
+### Incident Response (6 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [investigate_alert](./investigate_alert.md) | Quick alert triage |
+| [debug_prod](./debug_prod.md) | Deep production debugging |
+| [investigate_slack_alert](./investigate_slack_alert.md) | Handle alerts from Slack |
+| [silence_alert](./silence_alert.md) | Silence Prometheus alert |
+| [environment_overview](./environment_overview.md) | Environment health overview |
+| [check_secrets](./check_secrets.md) | Check Kubernetes secrets |
+
+### Jira Management (7 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [create_jira_issue](./create_jira_issue.md) | Create issue with Markdown support |
+| [clone_jira_issue](./clone_jira_issue.md) | Clone existing Jira issue |
+| [jira_hygiene](./jira_hygiene.md) | Validate and fix issue quality |
+| [jira_hygiene_all](./jira_hygiene_all.md) | Hygiene check all assigned issues |
+| [sprint_planning](./sprint_planning.md) | Sprint planning assistance |
+| [sprint_autopilot](./sprint_autopilot.md) | Autonomous sprint issue processing |
+| [monitor_jira_comments](./monitor_jira_comments.md) | Monitor Jira comments for questions |
+
+### Release & Infrastructure (5 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [release_aa_backend_prod](./release_aa_backend_prod.md) | Release aa-backend to production |
+| [release_to_prod](./release_to_prod.md) | Generic production release |
+| [appinterface_check](./appinterface_check.md) | Check app-interface GitOps state |
+| [konflux_status](./konflux_status.md) | Konflux platform status |
+| [submit_expense](./submit_expense.md) | Submit SAP Concur expense |
+
+### Communication (5 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [notify_team](./notify_team.md) | Post to team Slack channel |
+| [notify_mr](./notify_mr.md) | Notify team about MR |
+| [schedule_meeting](./schedule_meeting.md) | Create calendar meeting |
+| [slack_daemon_control](./slack_daemon_control.md) | Control Slack daemon |
+| [compare_options](./compare_options.md) | Compare approaches/libraries |
+
+### Knowledge & Research (10 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [gather_context](./gather_context.md) | Gather context using semantic search |
+| [explain_code](./explain_code.md) | Explain code with project knowledge |
+| [find_similar_code](./find_similar_code.md) | Find similar code patterns |
+| [research_topic](./research_topic.md) | Deep dive on a topic |
+| [summarize_findings](./summarize_findings.md) | Summarize research findings |
+| [plan_implementation](./plan_implementation.md) | Create implementation plan |
+| [bootstrap_knowledge](./bootstrap_knowledge.md) | Generate project knowledge |
+| [bootstrap_all_knowledge](./bootstrap_all_knowledge.md) | Bootstrap all project knowledge |
+| [knowledge_refresh](./knowledge_refresh.md) | Refresh project knowledge |
+| [learn_architecture](./learn_architecture.md) | Deep scan project architecture |
+
+### Memory & Patterns (7 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [memory_view](./memory_view.md) | View memory contents |
+| [memory_edit](./memory_edit.md) | Edit memory entries |
+| [memory_init](./memory_init.md) | Initialize memory structure |
+| [memory_cleanup](./memory_cleanup.md) | Clean up old memory entries |
+| [learn_pattern](./learn_pattern.md) | Save learned pattern to memory |
+| [suggest_patterns](./suggest_patterns.md) | Auto-discover error patterns |
+| [reindex_all_vectors](./reindex_all_vectors.md) | Reindex vector databases |
+
+### Project Management (2 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [add_project](./add_project.md) | Add project to config.json |
+| [hello_world](./hello_world.md) | Test skill to verify engine |
+
+### Performance Tracking (4 skills)
+
+Located in `skills/performance/`:
+
+| Skill | Description |
+|-------|-------------|
+| [backfill_missing](./performance-backfill-missing.md) | Backfill missing performance data |
+| [collect_daily](./performance-collect-daily.md) | Collect daily performance evidence |
+| [evaluate_questions](./performance-evaluate-questions.md) | Evaluate quarterly questions with AI |
+| [export_report](./performance-export-report.md) | Export quarterly performance report |
+
+### Testing & Internal (2 skills)
+
+| Skill | Description |
+|-------|-------------|
+| [test_error_recovery](./test_error_recovery.md) | Test interactive error recovery |
+| [test_mr_ephemeral](./test_mr_ephemeral.md) | Test MR in ephemeral |
+
+## Daily Workflow
+
+```mermaid
+graph LR
+    MORNING["Morning"] --> COFFEE["/coffee"]
+    COFFEE --> PICK["Pick Issue"]
+    PICK --> START["/start-work AAP-xxx"]
+    START --> CODE["Write Code"]
+    CODE --> MR["/create-mr"]
+    MR --> REVIEW["/review-pr"]
+    REVIEW --> DEPLOY["/deploy"]
+    DEPLOY --> EVENING["Evening"]
+    EVENING --> BEER["/beer"]
+
+    style COFFEE fill:#6366f1,stroke:#4f46e5,color:#fff
+    style START fill:#10b981,stroke:#059669,color:#fff
+    style BEER fill:#f59e0b,stroke:#d97706,color:#fff
+```
+
+## Auto-Heal Feature
 
 All production skills include automatic remediation for common failures via **Python decorators** applied to MCP tools.
 
 ### How It Works
 
-Auto-healing is now implemented at the **tool level** using decorators in `server/auto_heal_decorator.py`:
-
 ```mermaid
-graph LR
-    A[Tool Call] --> B{Success?}
-    B -->|Yes| C[Return Result]
-    B -->|No| D[@auto_heal Decorator]
-    D --> E{VPN Issue?}
-    E -->|Yes| F[vpn_connect]
-    E -->|No| G{Auth Issue?}
-    G -->|Yes| H[kube_login]
-    G -->|No| I[Return Error]
-    F --> J[Retry Tool]
-    H --> J
-    J --> C
+flowchart TD
+    A[Tool Call] --> B{Execute}
+    B --> C{Success?}
+    C -->|Yes| D[Return Result]
+    C -->|No| E{Error Type?}
+
+    E -->|Network| F[vpn_connect]
+    E -->|Auth| G[kube_login]
+    E -->|Unknown| H[Return Error]
+
+    F --> I[Retry Tool]
+    G --> I
+    I --> J{Success?}
+    J -->|Yes| K[Log Fix to Memory]
+    K --> D
+    J -->|No| L[Escalate or Return Error]
+
+    style F fill:#10b981,stroke:#059669,color:#fff
+    style G fill:#10b981,stroke:#059669,color:#fff
 ```
 
-### Auto-Heal Patterns
+### Auto-Heal Decorators
+
+| Decorator | Environment | Use Case |
+|-----------|-------------|----------|
+| `@auto_heal()` | Auto-detect | General tools |
+| `@auto_heal_ephemeral()` | Ephemeral | Bonfire namespace tools |
+| `@auto_heal_konflux()` | Konflux | Tekton pipeline tools |
+| `@auto_heal_k8s()` | Stage/Prod | Kubectl tools |
+| `@auto_heal_stage()` | Stage | Prometheus, Alertmanager |
+| `@auto_heal_jira()` | - | Jira tools (auth only) |
+| `@auto_heal_git()` | - | Git/GitLab tools (VPN only) |
+
+### Error Patterns
 
 | Error Pattern | Detection | Auto-Fix |
 |---------------|-----------|----------|
@@ -100,200 +234,124 @@ graph LR
 | "Forbidden" / "403" | Auth issue | `kube_login(cluster)` |
 | "Token expired" | Auth expired | `kube_login(cluster)` |
 
-### Auto-Heal Decorators
-
-| Decorator | Environment | Use Case |
-|-----------|-------------|----------|
-| `@auto_heal_ephemeral()` | Ephemeral | Bonfire namespace tools |
-| `@auto_heal_konflux()` | Konflux | Tekton pipeline tools |
-| `@auto_heal_k8s()` | Stage/Prod | Kubectl tools |
-| `@auto_heal_stage()` | Stage | Prometheus, Alertmanager, Kibana |
-| `@auto_heal_jira()` | - | Jira tools (auth only) |
-| `@auto_heal_git()` | - | Git/GitLab tools (VPN only) |
-
-### Example Tool with Auto-Heal
-
-```python
-from server.auto_heal_decorator import auto_heal_k8s
-
-@registry.tool()
-@auto_heal_k8s()
-async def kubectl_get_pods(namespace: str, environment: str = "stage") -> str:
-    """Get pods in a namespace with auto-healing."""
-    # If this fails with auth/VPN issues, the decorator
-    # automatically runs kube_login or vpn_connect and retries
-    ...
-```
-
-Skills no longer need to include manual auto-heal YAML blocks - the decorator handles it automatically.
-
-## Daily Workflow
-
-```mermaid
-graph LR
-    MORNING["☕ Morning"] --> COFFEE["coffee"]
-    COFFEE --> WORK["💻 Work"]
-    WORK --> START["start_work"]
-    START --> CODE["Write Code"]
-    CODE --> MR["create_mr"]
-    MR --> REVIEW["review_pr"]
-    REVIEW --> EVENING["🌙 Evening"]
-    EVENING --> BEER["beer"]
-
-    style COFFEE fill:#6366f1,stroke:#4f46e5,color:#fff
-    style BEER fill:#f59e0b,stroke:#d97706,color:#fff
-```text
-
-## Skill Categories
-
-### 📅 Daily Rituals
-
-| Skill | When to Use |
-|-------|-------------|
-| [coffee](./coffee.md) | Start of day - get briefed |
-| [beer](./beer.md) | End of day - wrap up |
-| [standup_summary](./standup_summary.md) | Generate standup notes |
-| [weekly_summary](./weekly_summary.md) | Weekly activity report |
-
-### 💻 Development Flow
-
-| Skill | When to Use |
-|-------|-------------|
-| [start_work](./start_work.md) | Pick up a Jira issue |
-| [sync_branch](./sync_branch.md) | Stay up to date with main |
-| [create_mr](./create_mr.md) | Ready to submit code |
-| [mark_mr_ready](./mark_mr_ready.md) | Mark draft as ready |
-| [close_issue](./close_issue.md) | Work is merged |
-| [hotfix](./hotfix.md) | Emergency fix needed |
-
-### 👀 Code Review
-
-| Skill | When to Use |
-|-------|-------------|
-| [review_pr](./review_pr.md) | Review a specific MR |
-| [review_all_prs](./review_all_prs.md) | Batch review session |
-| [check_my_prs](./check_my_prs.md) | Check your PR status |
-| [check_mr_feedback](./check_mr_feedback.md) | Find feedback to address |
-| [rebase_pr](./rebase_pr.md) | Fix merge conflicts |
-| [close_mr](./close_mr.md) | Close abandoned MR |
-
-### 🧪 Testing & Deployment
-
-| Skill | When to Use |
-|-------|-------------|
-| [test_mr_ephemeral](./test_mr_ephemeral.md) | Test in ephemeral namespace |
-| [deploy_to_ephemeral](./deploy_to_ephemeral.md) | Full ephemeral deploy |
-| [extend_ephemeral](./extend_ephemeral.md) | Need more time testing |
-| [release_aa_backend_prod](./release_aa_backend_prod.md) | Release to production |
-| [release_to_prod](./release_to_prod.md) | Generic prod release |
-| [check_ci_health](./check_ci_health.md) | CI pipeline issues |
-| [check_integration_tests](./check_integration_tests.md) | Integration test status |
-| [scan_vulnerabilities](./scan_vulnerabilities.md) | Security scanning |
-
-### 🚨 Incident Response
-
-| Skill | When to Use |
-|-------|-------------|
-| [investigate_alert](./investigate_alert.md) | Quick alert triage |
-| [debug_prod](./debug_prod.md) | Deep debugging |
-| [investigate_slack_alert](./investigate_slack_alert.md) | Slack alert handling |
-| [silence_alert](./silence_alert.md) | Silence noisy alert |
-| [environment_overview](./environment_overview.md) | Environment health check |
-| [rollout_restart](./rollout_restart.md) | Restart stuck pods |
-| [scale_deployment](./scale_deployment.md) | Scale for load |
-
-### 📋 Jira Management
-
-| Skill | When to Use |
-|-------|-------------|
-| [create_jira_issue](./create_jira_issue.md) | Create new issue |
-| [clone_jira_issue](./clone_jira_issue.md) | Clone existing issue |
-| [jira_hygiene](./jira_hygiene.md) | Validate issue quality |
-| [sprint_planning](./sprint_planning.md) | Sprint planning |
-
-### 📦 Release & Infrastructure
-
-| Skill | When to Use |
-|-------|-------------|
-| [appinterface_check](./appinterface_check.md) | Check GitOps config |
-| [konflux_status](./konflux_status.md) | Konflux platform status |
-| [check_secrets](./check_secrets.md) | Verify secrets |
-| [cancel_pipeline](./cancel_pipeline.md) | Cancel stuck pipeline |
-
 ## Running Skills
 
-**Via Chat:**
-```text
+### Via Chat
+```
 Run the start_work skill for AAP-12345
-```text
+```
 
-**Via Tool:**
-```text
+### Via Tool
+```python
 skill_run("start_work", '{"issue_key": "AAP-12345"}')
-```text
+```
 
-**Via Cursor Command:**
-```text
-/deploy
+### Via Cursor Command
+```
+/start-work AAP-12345
 /coffee
-/standup
+/deploy
 ```
 
 ## Skill YAML Format
 
 ```yaml
 name: skill_name
-description: What this skill does
+description: |
+  Multi-line description of what this skill does.
+
 version: "1.0"
 
 inputs:
-  - name: input_name
+  - name: issue_key
     type: string
     required: true
-    description: "What this input is for"
+    description: "Jira issue key"
+
+  - name: repo
+    type: string
+    required: false
+    default: ""
+    description: "Repository name (auto-detected if empty)"
 
 steps:
-  - name: step_one
-    tool: tool_name
+  - name: get_issue
+    tool: jira_view_issue
     args:
-      param: "{{ inputs.input_name }}"
-    output: step1_result
-    on_error: continue
+      issue_key: "{{ inputs.issue_key }}"
+    output: issue_data
+    on_error: fail
 
-  # Auto-heal pattern
-  - name: detect_failure_step_one
-    condition: "step1_result and 'error' in str(step1_result).lower()"
+  - name: check_success
+    condition: "issue_data and not issue_data.get('error')"
     compute: |
-      result = {"needs_vpn": 'no route' in str(step1_result).lower()}
-    output: failure_step_one
+      result = {
+        "success": True,
+        "summary": issue_data.get("summary")
+      }
+    output: check_result
 
-  - name: quick_fix_vpn
-    condition: "failure_step_one and failure_step_one.get('needs_vpn')"
-    tool: vpn_connect
-    on_error: continue
-
-  - name: retry_step_one
-    condition: "failure_step_one"
-    tool: tool_name
+  - name: create_branch
+    condition: "check_result.success"
+    tool: git_checkout
     args:
-      param: "{{ inputs.input_name }}"
-    output: step1_retry_result
-
-  - name: step_two
-    condition: "{{ step1_result.success or step1_retry_result.success }}"
-    compute: |
-      # Python code here
-      result = {"processed": step1_result.data}
-    output: step2_result
+      repo: "{{ inputs.repo or resolved_repo }}"
+      branch: "{{ inputs.issue_key | lower }}"
+      create: true
+    output: branch_result
 
 outputs:
   - name: summary
-    value: "{{ step2_result | json }}"
+    value: "{{ branch_result | json }}"
+```
+
+### Skill Features
+
+| Feature | Syntax | Example |
+|---------|--------|---------|
+| **Jinja2 Templates** | `{{ variable }}` | `{{ inputs.issue_key }}` |
+| **Filters** | `{{ var \| filter }}` | `{{ data \| json }}` |
+| **Conditions** | `condition: "expr"` | `condition: "result.success"` |
+| **Compute Blocks** | `compute: \| python` | Python code execution |
+| **Error Handling** | `on_error: continue/fail` | Continue or stop on error |
+| **Output Capture** | `output: var_name` | Store step result |
+
+## Skill Execution Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Cursor
+    participant MCP as MCP Server
+    participant Engine as Skill Engine
+    participant Tools as Tool Modules
+
+    User->>Cursor: /start-work AAP-12345
+    Cursor->>MCP: skill_run("start_work", {...})
+    MCP->>Engine: Load skill YAML
+    Engine->>Engine: Parse inputs, validate
+
+    loop For each step
+        Engine->>Engine: Evaluate condition
+        alt Condition true
+            Engine->>Tools: Execute tool
+            Tools-->>Engine: Result
+            Engine->>Engine: Store output
+        else Condition false
+            Engine->>Engine: Skip step
+        end
+    end
+
+    Engine->>Engine: Render outputs
+    Engine-->>MCP: Skill result
+    MCP-->>Cursor: Display to user
+    Cursor-->>User: Show result
 ```
 
 ## See Also
 
-- [Architecture Overview](../architecture/README.md)
-- [Learning Loop](../learning-loop.md) - Tool-level auto-remediation
-- [Auto-Heal Implementation](../plans/skill-auto-heal.md) - Skill auto-heal details
+- [Architecture Overview](../architecture/README.md) - System design
+- [Tool Modules](../tool-modules/README.md) - Available tools
 - [Commands Reference](../commands/README.md) - Cursor slash commands
+- [Personas Reference](../personas/README.md) - Tool loading profiles
+- [Skill Engine](../architecture/skill-engine.md) - Engine implementation

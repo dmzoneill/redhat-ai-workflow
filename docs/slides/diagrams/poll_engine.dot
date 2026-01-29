@@ -1,0 +1,27 @@
+
+digraph PollEngine {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    sources [label="External\nSources", fillcolor="#E3F2FD"];
+
+    subgraph cluster_poll {
+        label="Poll Engine";
+        style=filled;
+        fillcolor="#FFF3E0";
+
+        poll [label="Poll\nLoop", fillcolor="#FFCC80"];
+        condition [label="Evaluate\nCondition", fillcolor="#FFB74D"];
+        dedup [label="Dedup\nCheck", fillcolor="#FFA726"];
+    }
+
+    trigger [label="Trigger\nSkill", fillcolor="#C8E6C9"];
+
+    sources -> poll [label="GitLab/Jira"];
+    poll -> condition [label="results"];
+    condition -> dedup [label="age > 3d"];
+    dedup -> trigger [label="new"];
+    dedup -> poll [label="seen", style=dashed];
+}

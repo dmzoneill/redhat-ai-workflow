@@ -10,21 +10,102 @@ This module supports multiple concurrent skill executions:
 - Each execution is keyed by execution_id (workspace_uri + skill_name + timestamp)
 - Includes session_id and source (chat/cron) for identification
 - Completed executions are cleaned up after CLEANUP_TIMEOUT_SECONDS
+
+File Locking:
+- Uses a lockfile (.lock) to prevent race conditions with VS Code extension
+- Lock acquisition uses atomic O_CREAT|O_EXCL for cross-process safety
 """
 
 import json
 import logging
+import os
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 logger = logging.getLogger(__name__)
 
-# Event file path
-EXECUTION_FILE = Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
+# Event file path - centralized in server.paths
+try:
+    from server.paths import SKILL_EXECUTION_FILE
+
+    EXECUTION_FILE = SKILL_EXECUTION_FILE
+except ImportError:
+    EXECUTION_FILE = Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
 
 # Cleanup completed executions after this many seconds
 CLEANUP_TIMEOUT_SECONDS = 300  # 5 minutes
+
+# File locking constants
+LOCK_TIMEOUT_SECONDS = 5.0  # Max time to wait for lock
+LOCK_RETRY_INTERVAL_SECONDS = 0.05  # How often to retry acquiring lock
+LOCK_STALE_SECONDS = 10.0  # Consider lock stale if older than this
+
+
+@contextmanager
+def file_lock(file_path: Path) -> Generator[bool, None, None]:
+    """
+    Context manager for file locking using a lockfile.
+
+    Uses atomic O_CREAT|O_EXCL to create lockfile, ensuring only one process
+    can hold the lock at a time. Compatible with the TypeScript implementation
+    in the VS Code extension.
+
+    Yields True if lock acquired, False if timeout.
+    """
+    lock_path = Path(str(file_path) + ".lock")
+    start_time = time.time()
+    fd = None
+    acquired = False
+
+    while time.time() - start_time < LOCK_TIMEOUT_SECONDS:
+        try:
+            # Check if lock exists and is stale
+            if lock_path.exists():
+                try:
+                    lock_age = time.time() - lock_path.stat().st_mtime
+                    if lock_age > LOCK_STALE_SECONDS:
+                        # Lock is stale, remove it
+                        try:
+                            lock_path.unlink()
+                            logger.debug(f"Removed stale lock file (age: {lock_age:.1f}s)")
+                        except OSError:
+                            # Another process may have removed it
+                            pass
+                except OSError:
+                    pass
+
+            # Try to create lock file exclusively
+            # O_CREAT | O_EXCL ensures atomic create-if-not-exists
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            # Write our PID for debugging
+            os.write(fd, f"{os.getpid()}\n{time.time()}".encode())
+            os.close(fd)
+            fd = None
+            acquired = True
+            break
+        except FileExistsError:
+            # Lock exists, wait and retry
+            time.sleep(LOCK_RETRY_INTERVAL_SECONDS)
+        except OSError as e:
+            logger.warning(f"Error acquiring lock: {e}")
+            break
+
+    if not acquired:
+        logger.warning("Timeout waiting for file lock")
+
+    try:
+        yield acquired
+    finally:
+        # Release lock
+        if acquired:
+            try:
+                lock_path.unlink()
+            except OSError as e:
+                if e.errno != 2:  # ENOENT - file doesn't exist
+                    logger.warning(f"Error releasing lock: {e}")
 
 
 def _generate_execution_id(workspace_uri: str, skill_name: str) -> str:
@@ -35,8 +116,11 @@ def _generate_execution_id(workspace_uri: str, skill_name: str) -> str:
     return f"{safe_workspace}_{skill_name}_{timestamp}"
 
 
-def _load_all_executions() -> dict:
-    """Load all executions from file, handling both old and new formats."""
+def _load_all_executions_unlocked() -> dict:
+    """Load all executions from file, handling both old and new formats.
+
+    NOTE: This does NOT acquire a lock. Caller must hold the lock if needed.
+    """
     try:
         if EXECUTION_FILE.exists():
             with open(EXECUTION_FILE) as f:
@@ -62,8 +146,20 @@ def _load_all_executions() -> dict:
     return {"executions": {}, "lastUpdated": datetime.now().isoformat(), "version": 2}
 
 
-def _save_all_executions(data: dict) -> None:
-    """Save all executions to file atomically."""
+def _load_all_executions() -> dict:
+    """Load all executions from file with lock protection."""
+    with file_lock(EXECUTION_FILE) as acquired:
+        if not acquired:
+            logger.warning("Failed to acquire lock for loading executions")
+            return {"executions": {}, "lastUpdated": datetime.now().isoformat(), "version": 2}
+        return _load_all_executions_unlocked()
+
+
+def _save_all_executions_unlocked(data: dict) -> None:
+    """Save all executions to file atomically.
+
+    NOTE: This does NOT acquire a lock. Caller must hold the lock.
+    """
     try:
         data["lastUpdated"] = datetime.now().isoformat()
         tmp_file = EXECUTION_FILE.with_suffix(".tmp")
@@ -72,6 +168,15 @@ def _save_all_executions(data: dict) -> None:
         tmp_file.rename(EXECUTION_FILE)
     except Exception as e:
         logger.warning(f"Failed to save executions: {e}")
+
+
+def _save_all_executions(data: dict) -> None:
+    """Save all executions to file atomically with lock protection."""
+    with file_lock(EXECUTION_FILE) as acquired:
+        if not acquired:
+            logger.warning("Failed to acquire lock for saving executions, skipping")
+            return
+        _save_all_executions_unlocked(data)
 
 
 def _cleanup_old_executions(data: dict) -> dict:
@@ -157,44 +262,53 @@ class SkillExecutionEmitter:
         self._write_state()
 
     def _write_state(self) -> None:
-        """Write current state to multi-execution file."""
-        try:
-            # Load existing executions
-            all_data = _load_all_executions()
+        """Write current state to multi-execution file.
 
-            # Clean up old completed executions
-            all_data = _cleanup_old_executions(all_data)
+        Uses file locking to ensure atomic read-modify-write and prevent
+        race conditions with the VS Code extension.
+        """
+        with file_lock(EXECUTION_FILE) as acquired:
+            if not acquired:
+                logger.warning("Failed to acquire lock for writing skill state, skipping")
+                return
 
-            # Build this execution's state
-            state = {
-                "executionId": self.execution_id,
-                "skillName": self.skill_name,
-                "workspaceUri": self.workspace_uri,
-                "sessionId": self.session_id,
-                "sessionName": self.session_name,
-                "source": self.source,
-                "sourceDetails": self.source_details,
-                "status": self.status,
-                "currentStepIndex": self.current_step_index,
-                "totalSteps": len(self.steps),
-                "startTime": self.start_time,
-                "endTime": self.end_time,
-                "events": self.events,
-            }
+            try:
+                # Load existing executions (without lock - we already hold it)
+                all_data = _load_all_executions_unlocked()
 
-            # Update this execution in the multi-execution store
-            all_data["executions"][self.execution_id] = state
+                # Clean up old completed executions
+                all_data = _cleanup_old_executions(all_data)
 
-            # Save all executions
-            _save_all_executions(all_data)
+                # Build this execution's state
+                state = {
+                    "executionId": self.execution_id,
+                    "skillName": self.skill_name,
+                    "workspaceUri": self.workspace_uri,
+                    "sessionId": self.session_id,
+                    "sessionName": self.session_name,
+                    "source": self.source,
+                    "sourceDetails": self.source_details,
+                    "status": self.status,
+                    "currentStepIndex": self.current_step_index,
+                    "totalSteps": len(self.steps),
+                    "startTime": self.start_time,
+                    "endTime": self.end_time,
+                    "events": self.events,
+                }
 
-            logger.debug(
-                f"Wrote skill state: {self.skill_name} step={self.current_step_index}, "
-                f"events={len(self.events)}, source={self.source}, "
-                f"total_executions={len(all_data['executions'])}"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to write skill execution state: {e}")
+                # Update this execution in the multi-execution store
+                all_data["executions"][self.execution_id] = state
+
+                # Save all executions (without lock - we already hold it)
+                _save_all_executions_unlocked(all_data)
+
+                logger.debug(
+                    f"Wrote skill state: {self.skill_name} step={self.current_step_index}, "
+                    f"events={len(self.events)}, source={self.source}, "
+                    f"total_executions={len(all_data['executions'])}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to write skill execution state: {e}")
 
     def skill_start(self) -> None:
         """Emit skill start event."""

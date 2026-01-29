@@ -254,6 +254,7 @@ try:
     from .resources import register_resources
     from .session_tools import register_prompts, register_session_tools
     from .skill_engine import register_skill_tools
+    from .sprint_tools import register_sprint_tools
 except ImportError:
     from chat_context import register_chat_context_tools
     from infra_tools import register_infra_tools

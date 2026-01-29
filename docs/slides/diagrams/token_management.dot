@@ -1,0 +1,29 @@
+
+digraph TokenManagement {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    total [label="200K\nTokens", fillcolor="#E3F2FD"];
+
+    subgraph cluster_budget {
+        label="Token Budget";
+        style=filled;
+        fillcolor="#FFF3E0";
+
+        system [label="System\n~10K", fillcolor="#FFCC80"];
+        persona [label="Persona\n~5K", fillcolor="#FFB74D"];
+        skills [label="Skills\n~15K", fillcolor="#FFA726"];
+        memory [label="Memory\n~20K", fillcolor="#FF9800"];
+        context [label="Context\n~50K", fillcolor="#F57C00"];
+        response [label="Response\n~100K", fillcolor="#EF6C00", fontcolor=white];
+    }
+
+    total -> system;
+    system -> persona;
+    persona -> skills;
+    skills -> memory;
+    memory -> context;
+    context -> response;
+}

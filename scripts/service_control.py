@@ -11,10 +11,10 @@ Usage:
     python scripts/service_control.py run-job hello_world # Run a cron job
 
 Services:
-    - slack: Slack Agent (com.aiworkflow.SlackAgent)
-    - cron: Cron Scheduler (com.aiworkflow.CronScheduler)
-    - meet: Meet Bot (com.aiworkflow.MeetBot)
-    - sprint: Sprint Bot (com.aiworkflow.SprintBot)
+    - slack: Slack Bot (com.aiworkflow.BotSlack)
+    - cron: Cron Bot (com.aiworkflow.BotCron)
+    - meet: Meet Bot (com.aiworkflow.BotMeet)
+    - sprint: Sprint Bot (com.aiworkflow.BotSprint)
 """
 
 import argparse
@@ -235,10 +235,10 @@ async def cmd_fix(args):
     print()
 
     systemd_units = {
-        "slack": "slack-agent.service",
-        "cron": "cron-scheduler.service",
-        "meet": "meet-bot.service",
-        "sprint": "sprint-bot.service",
+        "slack": "bot-slack.service",
+        "cron": "bot-cron.service",
+        "meet": "bot-meet.service",
+        "sprint": "bot-sprint.service",
     }
 
     for service in services:

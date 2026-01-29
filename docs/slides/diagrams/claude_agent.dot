@@ -1,0 +1,29 @@
+
+digraph ClaudeAgent {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    msg [label="Slack Message", fillcolor="#E3F2FD"];
+
+    subgraph cluster_agent {
+        label="Claude Agent";
+        style=filled;
+        fillcolor="#FFF3E0";
+
+        intent [label="Intent\nUnderstanding", fillcolor="#FFCC80"];
+        filter [label="NPU Tool\nFilter", fillcolor="#FFB74D"];
+        claude [label="Claude API", fillcolor="#FFA726"];
+        tools [label="MCP Tools", fillcolor="#FF9800"];
+    }
+
+    response [label="Response", fillcolor="#C8E6C9"];
+
+    msg -> intent;
+    intent -> filter [label="message"];
+    filter -> claude [label="top N tools"];
+    claude -> tools [label="tool calls"];
+    tools -> claude [label="results"];
+    claude -> response;
+}

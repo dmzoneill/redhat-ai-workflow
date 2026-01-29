@@ -23,6 +23,15 @@ from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
 
+# Import centralized paths
+try:
+    from server.paths import MEETBOT_SCREENSHOTS_DIR
+except ImportError:
+    # Fallback for standalone usage
+    from pathlib import Path
+
+    MEETBOT_SCREENSHOTS_DIR = Path.home() / ".config" / "aa-workflow" / "meet_bot" / "screenshots"
+
 from server.state_manager import state as state_manager
 from tool_modules.aa_meet_bot.src.config import get_config
 from tool_modules.aa_meet_bot.src.notes_bot import NotesBot, init_notes_bot
@@ -828,8 +837,7 @@ class MeetingScheduler:
 
     def _get_screenshot_path(self, meeting_id: str) -> Optional[Path]:
         """Get the screenshot path for a meeting if it exists."""
-        screenshot_dir = Path.home() / ".local" / "share" / "meet_bot" / "screenshots"
-        screenshot_path = screenshot_dir / f"{meeting_id}.png"
+        screenshot_path = MEETBOT_SCREENSHOTS_DIR / f"{meeting_id}.png"
         return screenshot_path if screenshot_path.exists() else None
 
     def _extract_meeting_id_from_url(self, meet_url: str) -> Optional[str]:

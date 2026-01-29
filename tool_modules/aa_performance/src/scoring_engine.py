@@ -5,18 +5,37 @@ Handles:
 - Event deduplication
 - Cumulative score tracking
 - Quarter progress calculation
+
+Performance data is stored in: ~/.config/aa-workflow/performance/
 """
 
 import json
 import logging
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Default storage location
-QUARTERLY_DATA_DIR = Path.home() / "src" / "redhat-quarterly-connection"
+# Performance data directory - centralized in server.paths
+try:
+    from server.paths import PERFORMANCE_DIR, get_performance_quarter_dir
+
+    _DEFAULT_DATA_DIR = PERFORMANCE_DIR
+except ImportError:
+    # Fallback for standalone usage
+    _DEFAULT_DATA_DIR = Path.home() / ".config" / "aa-workflow" / "performance"
+
+
+def get_performance_data_dir() -> Path:
+    """Get the performance data directory.
+
+    Returns the centralized performance directory from server.paths.
+    """
+    return _DEFAULT_DATA_DIR
+
+
+# For backward compatibility
+QUARTERLY_DATA_DIR = get_performance_data_dir()
 
 
 def get_quarter_info(dt: date | None = None) -> tuple[int, int, date, date, int]:
@@ -46,10 +65,18 @@ def get_quarter_info(dt: date | None = None) -> tuple[int, int, date, date, int]
 
 
 def get_performance_dir(year: int, quarter: int) -> Path:
-    """Get the performance data directory for a quarter."""
-    perf_dir = QUARTERLY_DATA_DIR / str(year) / f"q{quarter}" / "performance"
-    perf_dir.mkdir(parents=True, exist_ok=True)
-    return perf_dir
+    """Get the performance data directory for a quarter.
+
+    Uses centralized path from server.paths.
+    """
+    try:
+        return get_performance_quarter_dir(year, quarter)
+    except NameError:
+        # Fallback for standalone usage
+        base_dir = get_performance_data_dir()
+        perf_dir = base_dir / str(year) / f"q{quarter}" / "performance"
+        perf_dir.mkdir(parents=True, exist_ok=True)
+        return perf_dir
 
 
 class ScoringEngine:

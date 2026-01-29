@@ -11,8 +11,8 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Claude](https://img.shields.io/badge/Claude-Anthropic-FF6B6B?style=for-the-badge&logo=anthropic&logoColor=white)](https://anthropic.com/)
 [![Cursor](https://img.shields.io/badge/Cursor-IDE-000000?style=for-the-badge&logo=cursor&logoColor=white)](https://cursor.sh/)
-![Tools](https://img.shields.io/badge/Tools-263-10b981?style=for-the-badge&logo=toolbox&logoColor=white)
-![Skills](https://img.shields.io/badge/Skills-55-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)
+![Tools](https://img.shields.io/badge/Tools-435-10b981?style=for-the-badge&logo=toolbox&logoColor=white)
+![Skills](https://img.shields.io/badge/Skills-82-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)
 [![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 **Transform Claude into your personal DevOps engineer, developer assistant, and incident responder.**
@@ -461,6 +461,34 @@ Claude: 📋 Session Started
 
 ---
 
+## 🤖 Background Daemons
+
+6 background services provide autonomous functionality:
+
+| Daemon | Purpose | Service |
+|--------|---------|---------|
+| **Slack** | Real-time message monitoring & AI response | `bot-slack.service` |
+| **Sprint** | Automated Jira issue processing | `bot-sprint.service` |
+| **Meet** | Google Meet auto-join & note-taking | `bot-meet.service` |
+| **Video** | Virtual camera for meeting overlays | `bot-video.service` |
+| **Session** | Cursor chat synchronization | `bot-session.service` |
+| **Cron** | Scheduled job execution | `bot-cron.service` |
+
+All daemons use D-Bus IPC for control. See [Daemons Guide](docs/daemons/README.md) for details.
+
+```bash
+# Quick start
+systemctl --user start bot-slack bot-cron
+
+# Check status
+python scripts/health_check.py
+
+# Control via CLI
+python scripts/service_control.py status
+```
+
+---
+
 ## 📁 Project Structure
 
 ```text
@@ -468,43 +496,73 @@ ai-workflow/
 ├── server/              # MCP server infrastructure
 │   ├── main.py          # Server entry point
 │   ├── persona_loader.py # Dynamic persona loading
+│   ├── workspace_state.py # Multi-session management
+│   ├── state_manager.py  # Runtime state persistence
+│   ├── websocket_server.py # Real-time skill updates
 │   ├── auto_heal_decorator.py  # Auto-heal decorators
+│   ├── usage_pattern_*.py # Layer 5 learning (7 files)
 │   └── utils.py         # Shared utilities
-├── tool_modules/        # Tool plugins (aa_git/, aa_jira/, etc.)
+├── tool_modules/        # 20+ tool plugins (aa_git/, aa_jira/, etc.)
 ├── personas/            # Persona configs (developer.yaml, devops.yaml)
-├── skills/              # 55 workflow definitions (start_work.yaml, etc.)
+├── skills/              # 95+ workflow definitions
 ├── memory/              # Persistent context
 │   ├── state/           # Active issues, MRs, environments
-│   └── learned/         # Patterns, tool fixes, runbooks
+│   ├── learned/         # Patterns, tool fixes, usage patterns
+│   └── knowledge/       # Per-persona project knowledge
 ├── extensions/          # IDE integrations
-│   └── aa_workflow-vscode/  # VSCode/Cursor extension
-├── docs/                # Documentation
-├── scripts/             # Python utilities
-│   └── common/
-│       ├── auto_heal.py   # Skill auto-healing utilities
-│       ├── config_loader.py # Config helpers (commit format, repos)
-│       └── parsers.py     # 44 shared parser functions
-├── config.json          # Configuration (commit format, repos, Slack, etc.)
-├── .cursor/commands/    # 64 slash commands (Cursor)
-└── .claude/commands/    # 64 slash commands (Claude Code)
+│   └── aa_workflow_vscode/ # VSCode/Cursor extension (TypeScript)
+├── scripts/             # Daemons and utilities
+│   ├── slack_daemon.py  # Slack monitoring daemon
+│   ├── sprint_daemon.py # Sprint automation daemon
+│   ├── meet_daemon.py   # Meet bot daemon
+│   ├── cron_daemon.py   # Scheduled jobs daemon
+│   ├── session_daemon.py # Session sync daemon
+│   ├── health_check.py  # Service health monitoring
+│   ├── service_control.py # Unified CLI control
+│   └── common/          # Shared utilities
+│       ├── dbus_base.py   # D-Bus daemon base class
+│       ├── parsers.py     # 45+ shared parser functions
+│       └── config_loader.py # Config helpers
+├── systemd/             # Systemd service files
+├── docs/                # Documentation (140+ files)
+├── tests/               # Test suite (25 files)
+├── config.json          # Main configuration
+├── .cursor/commands/    # 66+ slash commands (Cursor)
+└── .claude/commands/    # 66+ slash commands (Claude Code)
 ```
 
 ---
 
 ## 📚 Documentation
 
+### Quick Reference
+
 | Document | Description |
 |----------|-------------|
-| [Commands Reference](docs/commands/README.md) | 64 slash commands (Claude/Cursor) |
-| [Skills Reference](docs/skills/README.md) | All 55 available skills |
+| [Commands Reference](docs/commands/README.md) | 66+ slash commands (Claude/Cursor) |
+| [Skills Reference](docs/skills/README.md) | 95+ workflow skills |
 | [Personas Reference](docs/personas/README.md) | 5 tool configuration profiles |
-| [Tool Modules Reference](docs/tool-modules/README.md) | 16 tool plugins with 263 tools (188 basic, 75 extra) |
-| [Tool Organization](docs/tool-organization.md) | Basic vs Extra split strategy |
+| [Tool Modules Reference](docs/tool-modules/README.md) | 20+ tool plugins with 263 tools |
+
+### Architecture
+
+| Document | Description |
+|----------|-------------|
+| [Architecture Overview](docs/architecture/README.md) | System architecture with diagrams |
+| [MCP Implementation](docs/architecture/mcp-implementation.md) | Server code, persona switching, skills |
+| [Daemon Architecture](docs/architecture/daemons.md) | 6 background services with D-Bus IPC |
+| [VSCode Extension](docs/architecture/vscode-extension.md) | IDE integration details |
+| [Session Management](docs/architecture/session-management.md) | Multi-chat session handling |
+| [State Management](docs/architecture/state-management.md) | Persistence patterns |
+| [Usage Pattern Learning](docs/architecture/usage-pattern-learning.md) | Layer 5 auto-heal system |
+
+### Operations
+
+| Document | Description |
+|----------|-------------|
+| [Daemons Guide](docs/daemons/README.md) | Background daemon operations |
 | [Learning Loop](docs/learning-loop.md) | Auto-remediation + memory |
-| [Skill Auto-Heal](docs/plans/skill-auto-heal.md) | Auto-healing implementation |
-| [IDE Extension](docs/ide-extension.md) | VSCode/Cursor extension |
-| [Architecture Overview](docs/architecture/README.md) | High-level design |
-| [MCP Server Implementation](docs/architecture/mcp-implementation.md) | Server code details |
+| [IDE Extension](docs/ide-extension.md) | VSCode/Cursor extension setup |
 | [Development Guide](docs/DEVELOPMENT.md) | Contributing and development setup |
 
 ---

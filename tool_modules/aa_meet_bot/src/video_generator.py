@@ -26,9 +26,11 @@ import os
 os.environ.setdefault("PYOPENGL_PLATFORM", "glx")
 
 import asyncio
+import gc
 import logging
 import math
 import random
+import resource
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -40,6 +42,27 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
+
+
+def get_memory_mb() -> float:
+    """Get current process memory usage in MB."""
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    return usage.ru_maxrss / 1024  # Convert KB to MB on Linux
+
+
+_last_gc_time = 0.0
+
+
+def maybe_gc(force: bool = False) -> None:
+    """Run garbage collection periodically (every 30s) or if forced."""
+    global _last_gc_time
+    import time
+
+    now = time.time()
+    if force or (now - _last_gc_time > 30.0):
+        gc.collect()
+        _last_gc_time = now
+
 
 # Live meeting data integration
 _attendee_client_available = False
@@ -293,9 +316,13 @@ class UltraLowCPURenderer:
     - Waveform generation (sin waves or audio-reactive)
     - Progress bar updates
     - Color conversion (BGR→YUYV)
-    - Optional horizontal flip for Google Meet (pre-mirror so viewers see correctly)
+    - Optional horizontal flip for Google Meet (set FLIP=1 env var)
 
     Only the static base frame is rendered on CPU (once per attendee).
+
+    Environment Variables:
+        FLIP=1  - Enable horizontal flip (pre-mirror for Google Meet)
+        FLIP=0  - Disable flip (default, normal output)
     """
 
     # OpenCL kernel with hardcoded constants for maximum performance
@@ -435,6 +462,10 @@ class UltraLowCPURenderer:
         Args:
             config: VideoConfig with native pixel coordinates (no scaling)
             use_intel: If True, prefer Intel iGPU. If False, use NVIDIA.
+
+        Environment Variables:
+            FLIP=1 or FLIP=true - Enable horizontal flip (for Google Meet)
+            FLIP=0 or FLIP=false or unset - Normal output (default)
         """
         try:
             import pyopencl as cl
@@ -444,6 +475,10 @@ class UltraLowCPURenderer:
         self.width = config.width
         self.height = config.height
         self._cl = cl
+
+        # Check FLIP environment variable (default: False/no flip)
+        flip_env = os.environ.get("FLIP", "").lower()
+        self.mirror_output = flip_env in ("1", "true", "yes", "on")
 
         # Layout constants from config - native pixels, NO SCALING
         self.wave_x = config.wave_x
@@ -469,7 +504,8 @@ class UltraLowCPURenderer:
         self.ctx = cl.Context([device])
         self.queue = cl.CommandQueue(self.ctx)
 
-        logger.info(f"UltraLowCPU renderer using: {device.name}")
+        flip_str = "FLIPPED (for Google Meet)" if self.mirror_output else "normal"
+        logger.info(f"UltraLowCPU renderer using: {device.name} ({flip_str})")
 
         # Compile kernel with hardcoded constants
         kernel_src = self._KERNEL_TEMPLATE.format(
@@ -485,6 +521,7 @@ class UltraLowCPURenderer:
             bar_total=self.bar_w + self.bar_gap,
             progress_y=self.progress_y,
             progress_h=self.progress_h,
+            mirror_output=1 if self.mirror_output else 0,
         )
         prg = cl.Program(self.ctx, kernel_src).build(options=["-cl-fast-relaxed-math"])
         self.kernel = cl.Kernel(prg, "render_frame")
@@ -539,6 +576,255 @@ class UltraLowCPURenderer:
         self.queue.finish()
 
         return self.yuyv_host
+
+
+class StreamingRenderer(UltraLowCPURenderer):
+    """
+    Streaming-optimized renderer that outputs BGRA for hardware encoding.
+
+    Extends UltraLowCPURenderer to support:
+    - BGRA output (for VA-API/GStreamer pipeline)
+    - YUYV output (for v4l2loopback, backward compatible)
+    - Integrated WebRTC streaming via IntelStreamingPipeline
+
+    The BGRA output is more efficient for hardware encoding because:
+    - VA-API postproc handles color conversion on GPU
+    - No CPU-side YUYV packing needed
+    - Zero-copy path to encoder possible
+    """
+
+    # Additional kernel for BGRA output (no color conversion)
+    _BGRA_KERNEL_TEMPLATE = """
+    #define WIDTH {width}
+    #define HEIGHT {height}
+    #define WAVE_X {wave_x}
+    #define WAVE_Y {wave_y}
+    #define WAVE_W {wave_w}
+    #define WAVE_H {wave_h}
+    #define NUM_BARS {num_bars}
+    #define BAR_W {bar_w}
+    #define BAR_GAP {bar_gap}
+    #define BAR_TOTAL {bar_total}
+    #define PROGRESS_Y {progress_y}
+    #define PROGRESS_H {progress_h}
+    #define MIRROR_OUTPUT {mirror_output}
+
+    __kernel void render_frame_bgra(
+        __global const uchar* base_frame,
+        __global uchar* bgra_out,
+        __global const float* audio_bars,
+        const float time,
+        const int progress_pixels,
+        const int use_audio
+    ) {{
+        int px = get_global_id(0);
+        int py = get_global_id(1);
+
+        if (px >= WIDTH || py >= HEIGHT) return;
+
+        // For horizontal flip: read from mirrored position
+        int src_px;
+        if (MIRROR_OUTPUT) {{
+            src_px = WIDTH - 1 - px;
+        }} else {{
+            src_px = px;
+        }}
+
+        // Read base frame (BGR format)
+        int idx = (py * WIDTH + src_px) * 3;
+        uchar b = base_frame[idx];
+        uchar g = base_frame[idx + 1];
+        uchar r = base_frame[idx + 2];
+
+        // Waveform overlay
+        if (py >= WAVE_Y && py < WAVE_Y + WAVE_H && src_px >= WAVE_X && src_px < WAVE_X + WAVE_W) {{
+            int wx = src_px - WAVE_X;
+            int wy = py - WAVE_Y;
+            int bar_idx = wx / BAR_TOTAL;
+            int bar_x = wx % BAR_TOTAL;
+
+            if (bar_x < BAR_W && bar_idx < NUM_BARS) {{
+                float h;
+                if (use_audio) {{
+                    h = audio_bars[bar_idx];
+                }} else {{
+                    float t = time * 8.0f;
+                    float wave1 = native_sin(t + bar_idx * 0.15f);
+                    float wave2 = native_sin(t * 1.7f + bar_idx * 0.08f) * 0.5f;
+                    float wave3 = native_sin(t * 0.5f + bar_idx * 0.3f) * 0.3f;
+                    h = 0.15f + 0.85f * fabs(wave1 + wave2 + wave3) / 1.8f;
+                }}
+                int bar_pixels = (int)(h * WAVE_H);
+                if (WAVE_H - 1 - wy < bar_pixels) {{
+                    g = 200;
+                }}
+            }}
+        }}
+
+        // Progress bar
+        if (py >= PROGRESS_Y && py < PROGRESS_Y + PROGRESS_H) {{
+            if (src_px >= 16 && src_px < 16 + progress_pixels) {{
+                g = 200;
+            }}
+        }}
+
+        // Output BGRA (note: GStreamer expects BGRA, not RGBA)
+        int out_idx = (py * WIDTH + px) * 4;
+        bgra_out[out_idx] = b;
+        bgra_out[out_idx + 1] = g;
+        bgra_out[out_idx + 2] = r;
+        bgra_out[out_idx + 3] = 255;  // Alpha
+    }}
+    """
+
+    def __init__(self, config: "VideoConfig", use_intel: bool = True, enable_streaming: bool = False):
+        """
+        Initialize streaming renderer.
+
+        Args:
+            config: VideoConfig with native pixel coordinates
+            use_intel: If True, prefer Intel iGPU
+            enable_streaming: If True, initialize WebRTC streaming pipeline
+        """
+        # Initialize parent (YUYV renderer)
+        super().__init__(config, use_intel)
+
+        self.enable_streaming = enable_streaming
+        self._streaming_pipeline = None
+
+        # Compile BGRA kernel
+        cl = self._cl
+        bgra_kernel_src = self._BGRA_KERNEL_TEMPLATE.format(
+            width=self.width,
+            height=self.height,
+            wave_x=self.wave_x,
+            wave_y=self.wave_y,
+            wave_w=self.wave_w,
+            wave_h=self.wave_h,
+            num_bars=self.num_bars,
+            bar_w=self.bar_w,
+            bar_gap=self.bar_gap,
+            bar_total=self.bar_w + self.bar_gap,
+            progress_y=self.progress_y,
+            progress_h=self.progress_h,
+            mirror_output=1 if self.mirror_output else 0,
+        )
+        prg_bgra = cl.Program(self.ctx, bgra_kernel_src).build(options=["-cl-fast-relaxed-math"])
+        self.kernel_bgra = cl.Kernel(prg_bgra, "render_frame_bgra")
+
+        # Allocate BGRA buffer
+        mf = cl.mem_flags
+        self.bgra_gpu = cl.Buffer(self.ctx, mf.WRITE_ONLY, self.width * self.height * 4)
+        self.bgra_host = np.empty((self.height, self.width, 4), dtype=np.uint8)
+
+        self.global_size_bgra = (self.width, self.height)
+
+        logger.info(f"StreamingRenderer initialized (streaming={'enabled' if enable_streaming else 'disabled'})")
+
+    def start_streaming(self, signaling_port: int = 8765, v4l2_device: str = None):
+        """
+        Start the WebRTC streaming pipeline.
+
+        Args:
+            signaling_port: WebSocket port for WebRTC signaling
+            v4l2_device: Optional v4l2 device for Google Meet output
+        """
+        if self._streaming_pipeline:
+            logger.warning("Streaming already started")
+            return
+
+        try:
+            from .intel_streaming import IntelStreamingPipeline, StreamConfig
+
+            config = StreamConfig(
+                width=self.width,
+                height=self.height,
+                framerate=30,
+                bitrate=4000,
+                encoder="va",
+                codec="h264",
+                signaling_port=signaling_port,
+                flip=False,  # Already handled in our kernel
+                v4l2_device=v4l2_device,
+            )
+
+            self._streaming_pipeline = IntelStreamingPipeline(config)
+            self._streaming_pipeline.start(mode="webrtc")
+
+            logger.info(f"WebRTC streaming started on port {signaling_port}")
+
+        except ImportError as e:
+            logger.error(f"Failed to import streaming module: {e}")
+        except Exception as e:
+            logger.error(f"Failed to start streaming: {e}")
+
+    def stop_streaming(self):
+        """Stop the WebRTC streaming pipeline."""
+        if self._streaming_pipeline:
+            self._streaming_pipeline.stop()
+            self._streaming_pipeline = None
+            logger.info("Streaming stopped")
+
+    def render_frame_bgra(self, t: float, progress_fraction: float, audio_bars: np.ndarray = None) -> np.ndarray:
+        """
+        Render a frame on GPU and return BGRA data.
+
+        This is more efficient for hardware encoding pipelines.
+
+        Args:
+            t: Time in seconds (for simulated waveform)
+            progress_fraction: Progress bar fill (0-1)
+            audio_bars: Optional audio bar heights (0-1)
+
+        Returns:
+            BGRA frame as numpy array (height, width, 4)
+        """
+        cl = self._cl
+        progress_pixels = int(progress_fraction * self.progress_width)
+
+        # Upload audio bars if provided
+        use_audio = 0
+        if audio_bars is not None:
+            np.copyto(self.audio_host[: len(audio_bars)], audio_bars[: self.num_bars])
+            cl.enqueue_copy(self.queue, self.audio_gpu, self.audio_host)
+            use_audio = 1
+
+        self.kernel_bgra.set_args(
+            self.base_gpu, self.bgra_gpu, self.audio_gpu, np.float32(t), np.int32(progress_pixels), np.int32(use_audio)
+        )
+        cl.enqueue_nd_range_kernel(self.queue, self.kernel_bgra, self.global_size_bgra, None)
+        cl.enqueue_copy(self.queue, self.bgra_host, self.bgra_gpu)
+        self.queue.finish()
+
+        return self.bgra_host
+
+    def render_and_stream(self, t: float, progress_fraction: float, audio_bars: np.ndarray = None) -> np.ndarray:
+        """
+        Render frame and push to streaming pipeline.
+
+        Returns YUYV for v4l2 compatibility while also streaming BGRA via WebRTC.
+
+        Args:
+            t: Time in seconds
+            progress_fraction: Progress bar fill (0-1)
+            audio_bars: Optional audio bar heights
+
+        Returns:
+            YUYV frame (for v4l2 backward compatibility)
+        """
+        # Render BGRA for streaming
+        if self._streaming_pipeline and self._streaming_pipeline.is_running:
+            bgra = self.render_frame_bgra(t, progress_fraction, audio_bars)
+            self._streaming_pipeline.push_frame(bgra)
+
+        # Also render YUYV for v4l2 output
+        return self.render_frame(t, progress_fraction, audio_bars)
+
+    def get_streaming_stats(self) -> dict:
+        """Get streaming statistics."""
+        if self._streaming_pipeline:
+            return self._streaming_pipeline.get_stats()
+        return {"running": False}
 
 
 def get_npu_stats() -> list[str]:
@@ -601,36 +887,20 @@ def get_npu_stats() -> list[str]:
     return stats
 
 
-# Fake tool names (mix of real-sounding and Kali-style)
+# Work-related data sources for attendee lookup
 RESEARCH_TOOLS = [
-    # Corporate tools
-    "workday://employee_lookup",
-    "source.redhat.com/profile",
-    "slack://user_history",
-    "google://workspace_audit",
-    "gitlab://commit_scanner",
-    "jira://activity_tracker",
-    "confluence://page_history",
-    "outlook://calendar_sync",
-    "teams://presence_api",
-    "ldap://directory_query",
-    # Kali-style tools
-    "nmap -sV --script=social",
-    "theHarvester -d redhat.com",
-    "maltego://entity_graph",
-    "recon-ng/modules/people",
-    "sherlock --username",
-    "osintgram://profile_scan",
-    "spiderfoot -s target",
-    "metagoofil -d domain",
-    "linkedin2username",
-    "social-analyzer --scan",
-    # AI/ML tools
-    "deepface://recognition",
-    "gpt-4://profile_summary",
-    "claude://background_check",
-    "whisper://voice_analysis",
-    "stable-diffusion://avatar",
+    # Primary work integrations
+    "slack://user_activity",
+    "gmail://inbox_summary",
+    "gdrive://shared_docs",
+    "gitlab://merge_requests",
+    "github://pull_requests",
+    "memory://context_history",
+    # Secondary sources
+    "jira://assigned_issues",
+    "confluence://recent_pages",
+    "calendar://meetings_today",
+    "rover://employee_profile",
 ]
 
 # Fake data categories
@@ -652,23 +922,16 @@ FAKE_CATEGORIES = [
     "Team Memberships",
 ]
 
-# Fake findings (obviously fake/humorous)
+# Work context findings
 FAKE_FINDINGS = [
-    "Commits 47% more on Fridays",
-    "Prefers dark mode (confirmed)",
-    "Coffee consumption: EXTREME",
-    "Meeting attendance: 94.2%",
-    "Keyboard: mechanical (loud)",
-    "Favorite emoji: 🚀",
-    "Code style: tabs (controversial)",
-    "Lunch: usually 12:30-13:00",
-    "Slack status: often 'focusing'",
-    "PR approval time: 2.3 hours avg",
-    "Jira velocity: above average",
-    "Documentation: needs improvement",
-    "Vim vs Emacs: VS Code",
-    "Git blame frequency: low",
-    "Stack Overflow visits: 12/day",
+    "Active on 3 projects this sprint",
+    "Last commit: 2 hours ago",
+    "Open MRs: 2 pending review",
+    "Jira tickets: 5 in progress",
+    "Slack: online in #platform",
+    "Calendar: 3 meetings today",
+    "Recent docs: API design spec",
+    "Team: Platform Engineering",
     "sudo usage: responsible",
     "Container preference: podman",
     "Cloud: hybrid enthusiast",
@@ -713,8 +976,8 @@ class VideoConfig:
     duration_per_person: float = 15.0
     tool_display_time: float = 1.0
     finding_display_time: float = 1.5
-    num_tools: int = 8
-    num_findings: int = 4
+    num_tools: int = 6  # Reduced - work integrations
+    num_findings: int = 0  # Disabled - removed per user request
 
     # === NATIVE LAYOUT COORDINATES (1080p defaults) ===
     # All values are absolute pixels - no scaling
@@ -726,7 +989,7 @@ class VideoConfig:
     name_y: int = 72  # moved up 10px more
     name_font_scale: float = 0.9
     tools_start_y: int = 117  # moved up 10px more
-    tools_line_height: int = 32
+    tools_line_height: int = 40  # +8px per user request
     tools_font_scale: float = 0.5
     findings_start_y: int = 397  # moved up 10px more
     findings_line_height: int = 32
@@ -736,9 +999,9 @@ class VideoConfig:
 
     # Waveform box (GPU renders bars inside) - shifted up 8px
     wave_x: int = 35
-    wave_y: int = 592  # moved up 10px more
+    wave_y: int = 417  # moved up another 75px per user request
     wave_w: int = 1000  # Exact match: 200 bars * 5px = 1000px
-    wave_h: int = 100
+    wave_h: int = 200  # box +50px bigger (was 150)
     wave_label_y: int = 569  # moved up 10px more
     wave_font_scale: float = 0.55
     num_bars: int = 200
@@ -751,25 +1014,29 @@ class VideoConfig:
     voice_stats_font_scale: float = 0.45
     voice_stats_line_height: int = 22
 
-    # Facial recognition box (center-right) - shifted up 8px
-    face_x: int = 1200
-    face_y: int = 57  # moved up 10px more
-    face_w: int = 280
-    face_h: int = 340
+    # Facial recognition box - TOP RIGHT (75% of doubled size)
+    face_x: int = 1455  # Moved 15px left
+    face_y: int = 30  # Top of screen
+    face_w: int = 450  # 600 * 0.75
+    face_h: int = 570  # 760 * 0.75
     face_font_scale: float = 0.55
-    face_head_radius: int = 65
-    face_body_width: int = 80
+    face_head_radius: int = 105  # 140 * 0.75
+    face_body_width: int = 135  # 180 * 0.75
 
-    # Right column - context sections - shifted up 8px
+    # Voice profile - LEFT of facial recognition (adjusted for larger face)
+    voice_profile_x: int = 920  # Left of face box
+    voice_profile_y: int = 30  # Same height as face
+
+    # Right column - REMOVED (no longer used)
     right_col_x: int = 1560
-    right_col_title_y: int = 97  # moved up 10px more
+    right_col_title_y: int = 97
     right_col_font_scale: float = 0.55
     right_col_section_height: int = 230
     right_col_item_font_scale: float = 0.42
     right_col_item_height: int = 24
 
-    # NPU stats line - shifted up 8px
-    npu_y: int = 877  # moved up 10px more
+    # NPU stats - moved up significantly for larger text
+    npu_y: int = 870  # Moved down another 50px per user request
     npu_font_scale: float = 0.55
 
     # Progress bar - stays at bottom
@@ -1536,7 +1803,9 @@ class RealtimeVideoRenderer:
         audio levels from the meeting in real-time.
     """
 
-    def __init__(self, config: Optional[VideoConfig] = None, audio_source: Optional[str] = None):
+    def __init__(
+        self, config: Optional[VideoConfig] = None, audio_source: Optional[str] = None, enable_webrtc: bool = False
+    ):
         """
         Initialize the real-time video renderer.
 
@@ -1544,9 +1813,14 @@ class RealtimeVideoRenderer:
             config: Video configuration
             audio_source: Optional PulseAudio source name for audio-reactive waveform
                          (e.g., "meet_bot_abc123.monitor")
+            enable_webrtc: Enable WebRTC streaming for preview (port 8765)
         """
         self.config = config or VideoConfig()
         self._running = False
+
+        # WebRTC streaming for preview
+        self._enable_webrtc = enable_webrtc
+        self._webrtc_pipeline = None
 
         # Audio capture for reactive waveform
         self._audio_source = audio_source
@@ -1559,7 +1833,10 @@ class RealtimeVideoRenderer:
         self._stt_engine = None
         self._stt_text: str = ""  # Current transcription text
         self._stt_text_lock: Optional[asyncio.Lock] = None
-        self._stt_buffer: list = []  # Audio buffer for STT
+        # Pre-allocated contiguous buffer for STT audio (15 seconds max at 16kHz)
+        self._stt_buffer_size = 16000 * 15  # 15 seconds = 240000 samples
+        self._stt_buffer: np.ndarray = np.zeros(self._stt_buffer_size, dtype=np.float32)
+        self._stt_write_pos: int = 0  # Write position (also = number of valid samples)
         self._stt_last_process: float = 0.0
         self._stt_enabled: bool = audio_source is not None  # Enable STT if audio source provided
         self._stt_history: list = []  # History of transcriptions (most recent first)
@@ -1624,9 +1901,9 @@ class RealtimeVideoRenderer:
                 # 1080p: larger fonts for readability at higher res
                 # 720p: smaller fonts to fit the layout
                 if self.config.height >= 1080:
-                    font_sizes = {"large": 26, "normal": 18, "small": 14, "tiny": 12}
+                    font_sizes = {"xlarge": 36, "large": 26, "medium": 24, "normal": 18, "small": 14, "tiny": 12}
                 else:
-                    font_sizes = {"large": 24, "normal": 16, "small": 12, "tiny": 10}
+                    font_sizes = {"xlarge": 34, "large": 24, "medium": 22, "normal": 16, "small": 12, "tiny": 10}
 
                 self._gpu_text_renderer = VideoTextRenderer(
                     self.config.width, self.config.height, font_sizes=font_sizes
@@ -1790,6 +2067,11 @@ class RealtimeVideoRenderer:
         self._wave_buffer = np.zeros((self.wave_height, self.wave_width, 3), dtype=np.uint8)
         self._npu_buffer = np.zeros((self.npu_height, self.npu_width, 3), dtype=np.uint8)
 
+        # Pre-allocate FFT computation buffers to avoid per-frame allocations
+        self._fft_bar_heights = np.zeros(self.wave_bars, dtype=np.float32)
+        self._fft_silence_bars = np.full(self.wave_bars, 0.12, dtype=np.float32)
+        self._fft_hanning = None  # Will be created on first use with correct size
+
         logger.debug("Static element cache initialized (OpenCV)")
 
     async def _start_audio_capture(self) -> bool:
@@ -1865,13 +2147,21 @@ class RealtimeVideoRenderer:
 
                 chunk_count += 1
 
-                # Shift buffer and add new samples
-                audio_buffer = np.roll(audio_buffer, -len(chunk.data))
-                audio_buffer[-len(chunk.data) :] = chunk.data
+                # Shift buffer and add new samples (in-place to avoid allocation)
+                chunk_len = len(chunk.data)
+                audio_buffer[:-chunk_len] = audio_buffer[chunk_len:]  # Shift left in-place
+                audio_buffer[-chunk_len:] = chunk.data  # Add new samples
 
-                # Feed STT buffer (copy to avoid race conditions)
+                # Feed STT buffer (zero-copy write into pre-allocated array)
                 if self._stt_enabled and self._stt_engine:
-                    self._stt_buffer.append(chunk.data.copy())
+                    chunk_len = len(chunk.data)
+                    end_pos = self._stt_write_pos + chunk_len
+                    if end_pos <= self._stt_buffer_size:
+                        # Direct write, no copy - numpy slice assignment
+                        self._stt_buffer[self._stt_write_pos : end_pos] = chunk.data
+                        self._stt_write_pos = end_pos
+                    elif chunk_count % 100 == 0:  # Log occasionally
+                        logger.warning(f"STT buffer full ({self._stt_write_pos} samples), dropping audio")
 
                 # Compute FFT at video frame rate, not audio chunk rate
                 now = asyncio.get_event_loop().time()
@@ -1932,43 +2222,44 @@ class RealtimeVideoRenderer:
         while self._running:
             try:
                 # Check if we have enough audio in the STT buffer
-                if not self._stt_buffer:
+                if self._stt_write_pos < 1600:  # Less than 100ms
                     await asyncio.sleep(0.05)
                     continue
 
                 # Calculate buffer duration
-                total_samples = sum(len(chunk) for chunk in self._stt_buffer)
-                buffer_duration = total_samples / 16000
+                buffer_duration = self._stt_write_pos / 16000
 
-                # Check for silence at the end
-                if self._stt_buffer:
-                    last_chunk = self._stt_buffer[-1]
-                    rms = np.sqrt(np.mean(last_chunk**2))
-                    is_silence = rms < 0.01
-                else:
-                    is_silence = True
+                # Check for silence at the end (last 1600 samples = 100ms) - NO COPY, just a view
+                check_start = max(0, self._stt_write_pos - 1600)
+                rms = np.sqrt(np.mean(self._stt_buffer[check_start : self._stt_write_pos] ** 2))
+                is_silence = rms < 0.01
 
                 # Decide when to transcribe:
-                # 1. After silence with at least 1s of audio (reduced frequency)
-                # 2. After 5s of audio (max buffer, reduced from 3s)
-                # This reduces CPU overhead from frequent Whisper calls
+                # 1. After silence with at least 1s of audio
+                # 2. After 5s of audio (max buffer)
+                # 3. HARD CAP at 10s
                 should_transcribe = False
 
                 if buffer_duration >= 1.0 and is_silence:
                     should_transcribe = True
                 elif buffer_duration >= 5.0:
                     should_transcribe = True
+                elif buffer_duration >= 10.0:
+                    should_transcribe = True
+                    logger.warning(f"STT buffer hit 10s cap ({self._stt_write_pos} samples), forcing transcribe")
 
-                if should_transcribe and self._stt_buffer:
-                    # Concatenate buffer
-                    audio = np.concatenate(self._stt_buffer)
+                if should_transcribe and self._stt_write_pos > 0:
+                    # Pass a VIEW to transcribe - NO COPY
+                    # The STT engine must not hold a reference after returning
+                    audio_view = self._stt_buffer[: self._stt_write_pos]
+                    num_samples = self._stt_write_pos
 
-                    # Clear buffer before transcription (so new audio can accumulate)
-                    self._stt_buffer = []
+                    # Reset write position BEFORE transcribe (so new audio writes to start)
+                    self._stt_write_pos = 0
 
-                    # Transcribe
+                    # Transcribe using the view
                     start = time.time()
-                    result = await self._stt_engine.transcribe(audio, 16000)
+                    result = await self._stt_engine.transcribe(audio_view, 16000)
                     proc_time = time.time() - start
 
                     if result.text and len(result.text.strip()) > 3:
@@ -2066,34 +2357,37 @@ class RealtimeVideoRenderer:
         Includes noise gate: when audio RMS is below threshold, returns
         minimal bars to indicate silence/muted mic.
         """
-        import numpy as np
-
         # Noise gate: check if audio is essentially silent
         rms = np.sqrt(np.mean(audio**2))
         noise_threshold = 0.005  # Below this RMS, consider it silence/muted
 
         if rms < noise_threshold:
-            # Return minimal flat bars for silence
-            # Small random variation to show it's "listening" but no signal
-            bar_heights = np.full(self.wave_bars, 0.12, dtype=np.float32)
-            bar_heights += np.random.uniform(-0.02, 0.02, self.wave_bars).astype(np.float32)
-            bar_heights = np.clip(bar_heights, 0.1, 0.15)
-            self._prev_fft_bars = bar_heights.copy()
-            return bar_heights
+            # Return minimal flat bars for silence (reuse pre-allocated buffer)
+            np.copyto(self._fft_bar_heights, self._fft_silence_bars)
+            # Add small random variation in-place
+            self._fft_bar_heights += np.random.uniform(-0.02, 0.02, self.wave_bars)
+            np.clip(self._fft_bar_heights, 0.1, 0.15, out=self._fft_bar_heights)
+            if self._prev_fft_bars is None:
+                self._prev_fft_bars = self._fft_bar_heights.copy()
+            else:
+                np.copyto(self._prev_fft_bars, self._fft_bar_heights)
+            return self._fft_bar_heights
 
-        # Apply window function to reduce spectral leakage
-        windowed = audio * np.hanning(len(audio))
+        # Create/reuse hanning window (only allocate once per audio size)
+        if self._fft_hanning is None or len(self._fft_hanning) != len(audio):
+            self._fft_hanning = np.hanning(len(audio)).astype(np.float32)
+
+        # Apply window function to reduce spectral leakage (in-place multiply)
+        windowed = audio * self._fft_hanning
 
         # Compute FFT
         fft = np.abs(np.fft.rfft(windowed))
 
         # We only care about frequencies up to ~8kHz (half of 16kHz sample rate)
-        # Map FFT bins to our visualization bars
         n_fft_bins = len(fft)
 
-        # Use logarithmic frequency scaling for more musical visualization
-        # Low frequencies get more bars, high frequencies get fewer
-        bar_heights = np.zeros(self.wave_bars, dtype=np.float32)
+        # Use logarithmic frequency scaling - write directly to pre-allocated buffer
+        self._fft_bar_heights.fill(0)
 
         for i in range(self.wave_bars):
             # Logarithmic mapping: more resolution at low frequencies
@@ -2103,28 +2397,33 @@ class RealtimeVideoRenderer:
 
             # Average the FFT bins for this bar
             if high_freq <= n_fft_bins:
-                bar_heights[i] = np.mean(fft[low_freq:high_freq])
+                self._fft_bar_heights[i] = np.mean(fft[low_freq:high_freq])
 
-        # Normalize to 0-1 range with some headroom
-        max_val = np.max(bar_heights) if np.max(bar_heights) > 0 else 1.0
-        bar_heights = bar_heights / max_val
+        # Normalize to 0-1 range with some headroom (in-place)
+        max_val = np.max(self._fft_bar_heights)
+        if max_val > 0:
+            self._fft_bar_heights /= max_val
 
-        # Scale by RMS to make quiet sounds show smaller bars
-        # This makes the visualization more responsive to actual volume
-        rms_scale = min(1.0, rms / 0.05)  # Full scale at RMS 0.05
-        bar_heights = bar_heights * rms_scale
+        # Scale by RMS (in-place)
+        rms_scale = min(1.0, (rms / 0.02) * 3.0)
+        self._fft_bar_heights *= rms_scale
 
-        # Apply smoothing with previous frame
+        # Apply smoothing with previous frame (in-place)
         if self._prev_fft_bars is not None:
-            bar_heights = self._fft_smoothing * self._prev_fft_bars + (1 - self._fft_smoothing) * bar_heights
+            self._fft_bar_heights *= 0.7
+            self._fft_bar_heights += 0.3 * self._prev_fft_bars
 
-        self._prev_fft_bars = bar_heights.copy()
+        # Update prev_fft_bars
+        if self._prev_fft_bars is None:
+            self._prev_fft_bars = self._fft_bar_heights.copy()
+        else:
+            np.copyto(self._prev_fft_bars, self._fft_bar_heights)
 
-        # Return normalized 0-1 values for GPU kernel
-        # Add minimum height so bars are always visible
-        bar_heights = 0.1 + bar_heights * 0.9  # Range: 0.1 to 1.0
+        # Apply final scaling (in-place)
+        self._fft_bar_heights *= 0.64
+        self._fft_bar_heights += 0.15
 
-        return bar_heights.astype(np.float32)
+        return self._fft_bar_heights
 
     def _generate_waveform_frame_from_audio(self, bar_heights: np.ndarray, out: np.ndarray = None) -> np.ndarray:
         """Generate waveform frame from audio-derived bar heights.
@@ -2449,6 +2748,33 @@ class RealtimeVideoRenderer:
         os.write(v4l2_fd, test_frame.tobytes())
         logger.info(f"v4l2 output initialized")
 
+        # Initialize WebRTC streaming if enabled
+        if self._enable_webrtc:
+            try:
+                from .intel_streaming import IntelStreamingPipeline
+                from .intel_streaming import StreamConfig as StreamingConfig
+
+                logger.info("Starting WebRTC preview server on ws://localhost:8765")
+                logger.info("Using YUYV input format (zero-copy to VA-API encoder)")
+                stream_config = StreamingConfig(
+                    width=config.width,
+                    height=config.height,
+                    framerate=config.fps,
+                    bitrate=4000,
+                    encoder="va",
+                    codec="h264",
+                    signaling_port=8765,
+                    flip=False,
+                    v4l2_device=None,  # We push frames via appsrc, not v4l2
+                    input_format="yuyv",  # Direct YUYV input - VA-API converts in hardware
+                )
+                self._webrtc_pipeline = IntelStreamingPipeline(stream_config)
+                self._webrtc_pipeline.start(mode="webrtc")
+                logger.info("WebRTC streaming initialized")
+            except Exception as e:
+                logger.warning(f"Failed to start WebRTC streaming: {e}")
+                self._webrtc_pipeline = None
+
         try:
             while self._running:
                 for attendee_idx, attendee in enumerate(attendees):
@@ -2545,6 +2871,8 @@ class RealtimeVideoRenderer:
             if need_update:
                 last_npu_update = current_second
                 last_history_len = len(current_history)
+                # Delete old base_frame before creating new one to help GC
+                del base_frame
                 # Re-render base frame with updated content
                 base_frame = self._create_base_frame(
                     attendee,
@@ -2559,15 +2887,36 @@ class RealtimeVideoRenderer:
                     transcript_history=current_history,
                 )
                 self._ulc_renderer.upload_base_frame(base_frame)
+                # Force GC after frame update to prevent memory buildup
+                gc.collect()
 
             # Get audio bars if available
             audio_bars = None
             if frame_num % 60 == 0:
+                # Log memory and state every ~5 seconds
+                stt_buf_samples = self._stt_write_pos
+                stt_history_len = len(self._stt_history) if self._stt_history else 0
+                mem_mb = get_memory_mb()
                 logger.info(
-                    f"Audio state: capture={self._audio_capture is not None}, buffer={self._audio_buffer is not None}"
+                    f"MEM: {mem_mb:.0f}MB | stt_buf: {stt_buf_samples}/{self._stt_buffer_size} samples | "
+                    f"stt_history: {stt_history_len} | frame: {frame_num}"
                 )
+                # Warn if memory is growing dangerously
+                if mem_mb > 3000:
+                    logger.warning(f"HIGH MEMORY: {mem_mb:.0f}MB - running GC...")
+                    gc.collect()
+                if mem_mb > 4000:
+                    logger.error(f"CRITICAL MEMORY: {mem_mb:.0f}MB - forcing cleanup")
+                    self._stt_write_pos = 0  # Reset STT buffer
+                    # Force full GC with all generations
+                    gc.collect(0)
+                    gc.collect(1)
+                    gc.collect(2)
+                else:
+                    # Periodic GC every 5 seconds
+                    gc.collect()
             if self._audio_capture and self._audio_buffer is not None:
-                audio_bars = self._audio_buffer.copy()
+                audio_bars = self._audio_buffer  # No copy needed - GPU upload copies it
                 if audio_bars.max() <= audio_bars.min():
                     audio_bars = None
                 elif frame_num % 60 == 0:
@@ -2584,6 +2933,15 @@ class RealtimeVideoRenderer:
             except OSError as e:
                 logger.warning(f"v4l2 write error: {e}")
                 return False
+
+            # Push to WebRTC if enabled (direct YUYV - zero CPU conversion)
+            if self._webrtc_pipeline and self._webrtc_pipeline.is_running:
+                try:
+                    # Push YUYV directly - VA-API handles YUY2→NV12→H.264 in hardware
+                    self._webrtc_pipeline.push_frame_yuyv(yuyv)
+                except Exception as e:
+                    if frame_num % 60 == 0:  # Log every ~5 seconds at 12fps
+                        logger.warning(f"WebRTC push error: {e}")
 
             # Pace output to real-time
             elapsed = asyncio.get_event_loop().time() - start_time
@@ -2629,45 +2987,32 @@ class RealtimeVideoRenderer:
         # === LEFT SIDE: Target info and tools ===
         text_items.append(("[ AI WORKFLOW COMMAND CENTER ]", c.left_margin, c.title_y, "green", "large"))
 
-        # Name with animated dots (cycles through 1-3 dots)
+        # Name with animated dots (cycles through 1-3 dots) - XLARGE font (+10pt)
         dot_count = (int(t * 2) % 3) + 1  # 1, 2, 3 dots cycling
         name_with_dots = f"{attendee.name} {'.' * dot_count}"
-        text_items.append((name_with_dots, c.left_margin, c.name_y, "green", "large"))
+        text_items.append((name_with_dots, c.left_margin, c.name_y, "green", "xlarge"))
 
-        # Tools list - appear one at a time (1 per second)
+        # Tools list - appear one at a time (1 per second) - MEDIUM font (+6pt)
         visible_tools = min(int(t) + 1, 8)  # Show 1 more tool each second, max 8
         for i, tool in enumerate(tools[:visible_tools]):
             y = c.tools_start_y + i * c.tools_line_height
-            text_items.append((f"> {tool}", c.left_margin, y, "green", "normal"))
+            text_items.append((f"> {tool}", c.left_margin, y, "green", "medium"))
 
         # Findings
         for i, finding in enumerate(findings[:4]):
             y = c.findings_start_y + i * c.findings_line_height
             text_items.append((f"[+] {finding}", c.left_margin, y, "cyan", "normal"))
 
-        # Assessment
-        text_items.append((assessment, c.left_margin, c.assessment_y, "yellow", "normal"))
+        # Assessment - REMOVED per user request
+        # text_items.append((assessment, c.left_margin, c.assessment_y, "yellow", "normal"))
 
-        # === WAVEFORM LABEL - to the right of the box, same Y as assessment ===
-        text_items.append(("ANALYZING SPEECH PATTERNS", c.wave_x + c.wave_w - 280, c.assessment_y, "cyan", "normal"))
-
-        # === VOICE STATS (below waveform, to the right under "ANALYZING SPEECH PATTERNS") ===
-        voice_stats_x = c.wave_x + c.wave_w - 280  # Align with "ANALYZING SPEECH PATTERNS"
-        voice_stats_start_y = c.wave_y + c.wave_h + 20
-        text_items.append(("VOICE PROFILE ANALYSIS", voice_stats_x, voice_stats_start_y, "green", "normal"))
-
-        stats = [
-            f"Voice Print ID: {attendee_data['voice_print_id']:05d}",
-            f"Freq: 125-4000 Hz | Pitch: {random.randint(150, 220)} Hz",
-            f"Cadence: {random.randint(120, 160)} wpm | Conf: {random.uniform(90, 99):.1f}%",
-        ]
-        for i, stat in enumerate(stats):
-            text_items.append((stat, voice_stats_x, voice_stats_start_y + 26 + i * 24, "orange", "small"))
+        # === WAVEFORM LABEL - above the waveform box, left aligned ===
+        text_items.append(("ANALYZING SPEECH PATTERNS", c.wave_x, c.wave_y - 15, "cyan", "medium"))  # +6pt
 
         # === LIVE TRANSCRIPTION STACK (below waveform box) ===
         # Show most recent transcriptions, newest at top
         transcript_start_y = c.wave_y + c.wave_h + 20
-        transcript_line_height = 26  # Increased for larger font
+        transcript_line_height = 34  # +8px line height per user request
         max_chars = 90  # Max characters per line
 
         if transcript_history:
@@ -2683,52 +3028,49 @@ class RealtimeVideoRenderer:
                     color = "dark_green"  # Older - faded
 
                 y = transcript_start_y + i * transcript_line_height
-                text_items.append((f"> {display_text}", c.wave_x, y, color, "normal"))
+                text_items.append((f"> {display_text}", c.wave_x, y, color, "medium"))  # +6pt
 
-        # === FACIAL RECOGNITION ===
-        text_items.append(("FACIAL RECOGNITION", c.face_x, c.face_y - 10, "red", "normal"))
+        # === VOICE PROFILE ANALYSIS - LEFT of facial recognition (top right area) ===
+        voice_x = c.voice_profile_x
+        voice_y = c.voice_profile_y
+        text_items.append(("VOICE PROFILE ANALYSIS", voice_x, voice_y, "green", "large"))  # doubled size
 
-        # === RIGHT COLUMN ===
-        text_items.append(("BUILDING CONTEXT", c.right_col_x, c.right_col_title_y, "red", "normal"))
-
-        sections = [
-            ("JIRA ISSUES", "[ JIRA ]"),
-            ("SLACK INTEGRATION", "[ SLACK ]"),
-            ("SEMANTIC SEARCH", "[ SEMANTIC ]"),
-            ("COMMS ANALYSIS", "[ COMMS ]"),
+        stats = [
+            f"Voice Print ID: {attendee_data['voice_print_id']:05d}",
+            "",
+            f"Freq: 125-4000 Hz | Pitch: {random.randint(150, 220)} Hz",
+            f"Cadence: {random.randint(120, 160)} wpm | Conf: {random.uniform(90, 99):.1f}%",
         ]
-
-        for i, (label, tag) in enumerate(sections):
-            y = c.right_col_title_y + 30 + i * c.right_col_section_height
-            text_items.append((tag, c.right_col_x, y, "cyan", "normal"))
-            text_items.append((label, c.right_col_x, y + 22, "green", "small"))
-            for j in range(5):
+        for i, stat in enumerate(stats):
+            if stat:  # Skip empty lines
                 text_items.append(
-                    (
-                        f"  Item {j+1}: data...",
-                        c.right_col_x,
-                        y + 45 + j * c.right_col_item_height,
-                        "dark_green",
-                        "tiny",
-                    )
-                )
+                    (stat, voice_x, voice_y + 45 + i * 40, "orange", "medium")
+                )  # doubled size + line height
+
+        # === FACIAL RECOGNITION - TOP RIGHT === (+10pt bigger text)
+        text_items.append(("FACIAL RECOGNITION", c.face_x, c.face_y - 10, "red", "large"))
+
+        # === RIGHT COLUMN REMOVED - no more "BUILDING CONTEXT" ===
 
         # === NPU STATS (all GPU-rendered for consistent quality) ===
+        # LARGER FONT - moved up to give more vertical space
         npu_header_y = c.npu_y + 18
-        text_items.append(("[ INTEL NPU - METEOR LAKE ]", c.left_margin, npu_header_y, "cyan", "small"))
+        text_items.append(("[ INTEL NPU - METEOR LAKE ]", c.left_margin, npu_header_y, "cyan", "normal"))
 
-        # NPU stats layout - use "small" size for 1080p readability
-        npu_stats_y = c.npu_y + (44 if c.height >= 1080 else 32)  # Moved up 3px
-        npu_line_h = 22 if c.height >= 1080 else 18  # Increased for larger font
-        npu_size = "normal"  # GPU text size for NPU stats (18pt for 1080p, was 14pt)
+        # NPU stats layout - LARGE font for readability
+        npu_stats_y = c.npu_y + 55  # More space after header
+        npu_line_h = 38 if c.height >= 1080 else 28  # EVEN LARGER line height
+        npu_size = "large"  # GPU text size for NPU stats - DOUBLED from normal
 
-        # Column positions (proportional to width) - 5 columns
+        # Column positions (proportional to width) - 6 columns spread across full width
+        # Adjusted: col 1 +50px wider, all others shifted right
         col_x = [
-            int(c.width * 0.02),  # Column 1
-            int(c.width * 0.14),  # Column 2
-            int(c.width * 0.26),  # Column 3
-            int(c.width * 0.38),  # Column 4
-            int(c.width * 0.50),  # Column 5
+            int(c.width * 0.02),  # Column 1 - FREQ/BUSY/MEM
+            int(c.width * 0.17),  # Column 2 - UTIL/POWER/RUNTIME (+50px / ~0.03)
+            int(c.width * 0.33),  # Column 3 - MODEL
+            int(c.width * 0.53),  # Column 4 - SAMPLES/INFERENCES/FRAMES
+            int(c.width * 0.69),  # Column 5 - CPU/GPU/STT
+            int(c.width * 0.84),  # Column 6 - RATE/LATENCY/STATUS
         ]
 
         # Get real NPU stats from cached values (updated every 0.5s by background task)
@@ -2740,69 +3082,68 @@ class RealtimeVideoRenderer:
         active_sec = npu["active_ms"] / 1000
         runtime_status = npu["runtime_status"].upper()
 
-        # Column 1 - NPU core stats (REAL from sysfs)
+        # Distribute stats across 6 columns (fewer items per column = larger text fits)
+        # Column 1 - NPU core stats
         col1_stats = [
             f"FREQ: {npu['freq_mhz']}/{npu['max_freq_mhz']} MHz",
             f"BUSY: {busy_sec:.2f}s",
             f"MEM: {mem_mb:.1f} MB",
-            f"UTIL: {util_pct}%",
-            f"POWER: {npu['power_state']}",
         ]
         for i, stat in enumerate(col1_stats):
             text_items.append((stat, col_x[0], npu_stats_y + i * npu_line_h, "green", npu_size))
 
-        # Column 2 - Model info (mostly static)
+        # Column 2 - NPU utilization
         col2_stats = [
-            "MODEL: whisper-int8",
-            "PRECISION: INT8",
-            "INPUT: 16kHz PCM",
-            "TILES: 2/2",
+            f"UTIL: {util_pct}%",
+            f"POWER: {npu['power_state']}",
             f"RUNTIME: {runtime_status}",
         ]
         for i, stat in enumerate(col2_stats):
             color = "cyan" if "ACTIVE" in stat else "green"
             text_items.append((stat, col_x[1], npu_stats_y + i * npu_line_h, color, npu_size))
 
-        # Column 3 - Counters (dynamic, based on real time)
+        # Column 3 - Model info
         col3_stats = [
-            f"SAMPLES: {int(t * 16000)}",
-            f"INFERENCES: {int(t * 2)}",  # ~2 per second for Whisper
-            f"ACTIVE: {active_sec:.1f}s",
-            f"FRAMES: {frame_num}",
-            f"TIME: {int(t)//60:02d}:{int(t)%60:02d}.{int((t%1)*100):02d}",
+            "MODEL: whisper-int8",
+            "PRECISION: INT8",
+            "INPUT: 16kHz PCM",
         ]
         for i, stat in enumerate(col3_stats):
             text_items.append((stat, col_x[2], npu_stats_y + i * npu_line_h, "green", npu_size))
 
-        # Column 4 - System stats
+        # Column 4 - Counters
         col4_stats = [
-            f"CPU: ~1%",  # We know this is low
-            f"GPU: Intel Arc",
-            f"QUEUE: {len(self._stt_buffer) if hasattr(self, '_stt_buffer') else 0}",
-            f"STT: {'ON' if self._stt_enabled else 'OFF'}",
-            "STATUS: ACTIVE",
+            f"SAMPLES: {int(t * 16000)}",
+            f"INFERENCES: {int(t * 2)}",
+            f"FRAMES: {frame_num}",
         ]
         for i, stat in enumerate(col4_stats):
-            color = "cyan" if "ACTIVE" in stat or "ON" in stat else "green"
-            text_items.append((stat, col_x[3], npu_stats_y + i * npu_line_h, color, npu_size))
+            text_items.append((stat, col_x[3], npu_stats_y + i * npu_line_h, "green", npu_size))
 
-        # Column 5 - Telemetry (estimated from real data)
-        # Estimate throughput based on utilization
-        throughput = 0.5 + (util_pct / 100) * 1.0  # 0.5-1.5 TOPS based on util
+        # Column 5 - System stats
         col5_stats = [
-            f"RATE: {max(1, int(util_pct / 5))} req/s",
-            f"THROUGHPUT: {throughput:.2f} TOPS",
-            f"LATENCY: ~{50 + util_pct}ms",
-            "DMA: ACTIVE",
-            f"DELTA: {npu['busy_delta_us']}us",
+            f"CPU: ~1%",
+            f"GPU: Intel Arc",
+            f"STT: {'ON' if self._stt_enabled else 'OFF'}",
         ]
         for i, stat in enumerate(col5_stats):
-            color = "cyan" if "ACTIVE" in stat else "green"
+            color = "cyan" if "ON" in stat else "green"
             text_items.append((stat, col_x[4], npu_stats_y + i * npu_line_h, color, npu_size))
+
+        # Column 6 - Telemetry
+        throughput = 0.5 + (util_pct / 100) * 1.0
+        col6_stats = [
+            f"RATE: {max(1, int(util_pct / 5))} req/s",
+            f"LATENCY: ~{50 + util_pct}ms",
+            "STATUS: ACTIVE",
+        ]
+        for i, stat in enumerate(col6_stats):
+            color = "cyan" if "ACTIVE" in stat else "green"
+            text_items.append((stat, col_x[5], npu_stats_y + i * npu_line_h, color, npu_size))
 
         # Build shapes list for GPU rendering
         center_x = c.face_x + c.face_w // 2
-        center_y = c.face_y + c.face_head_radius + 30
+        center_y = c.face_y + c.face_head_radius + 32  # +2px down
 
         shapes = [
             # Waveform box border
@@ -3352,6 +3693,33 @@ class RealtimeVideoRenderer:
         test_frame = np.zeros((height, width * 2), dtype=np.uint8)
         os.write(v4l2_fd, test_frame.tobytes())
 
+        # Initialize WebRTC streaming if enabled
+        if self._enable_webrtc:
+            try:
+                from .intel_streaming import IntelStreamingPipeline
+                from .intel_streaming import StreamConfig as StreamingConfig
+
+                logger.info("Starting WebRTC preview server on ws://localhost:8765")
+                logger.info("Using YUYV input format (zero-copy to VA-API encoder)")
+                stream_config = StreamingConfig(
+                    width=config.width,
+                    height=config.height,
+                    framerate=config.fps,
+                    bitrate=4000,
+                    encoder="va",
+                    codec="h264",
+                    signaling_port=8765,
+                    flip=False,
+                    v4l2_device=None,
+                    input_format="yuyv",
+                )
+                self._webrtc_pipeline = IntelStreamingPipeline(stream_config)
+                self._webrtc_pipeline.start(mode="webrtc")
+                logger.info("WebRTC streaming initialized")
+            except Exception as e:
+                logger.warning(f"Failed to start WebRTC streaming: {e}")
+                self._webrtc_pipeline = None
+
         frame_time = 1.0 / config.fps
         reconnect_interval = 5.0
         last_reconnect_attempt = 0.0
@@ -3423,22 +3791,29 @@ class RealtimeVideoRenderer:
                     time_in_attendee = loop_start - last_rotation_time
                     progress = time_in_attendee / rotation_interval
 
-                    # Create base frame
-                    base_frame = self._create_base_frame(
-                        simple_attendee,
-                        current_index,
-                        len(current_attendees),
-                        tools,
-                        findings,
-                        assessment,
-                        attendee_data,
-                        t=loop_start,
-                        frame_num=int(loop_start * config.fps),
-                        transcript_history=current_history,
-                    )
-
-                    # Upload and render
-                    self._ulc_renderer.upload_base_frame(base_frame)
+                    # Only update base frame once per second (not every frame!)
+                    current_second = int(loop_start)
+                    if not hasattr(self, "_last_base_frame_second") or self._last_base_frame_second != current_second:
+                        self._last_base_frame_second = current_second
+                        # Delete old frame if exists
+                        if hasattr(self, "_cached_base_frame"):
+                            del self._cached_base_frame
+                        # Create base frame
+                        self._cached_base_frame = self._create_base_frame(
+                            simple_attendee,
+                            current_index,
+                            len(current_attendees),
+                            tools,
+                            findings,
+                            assessment,
+                            attendee_data,
+                            t=loop_start,
+                            frame_num=int(loop_start * config.fps),
+                            transcript_history=current_history,
+                        )
+                        # Upload and force GC
+                        self._ulc_renderer.upload_base_frame(self._cached_base_frame)
+                        gc.collect()
 
                     # Get audio bars
                     audio_bars = self._audio_buffer if self._audio_buffer is not None else None
@@ -3448,6 +3823,13 @@ class RealtimeVideoRenderer:
 
                 # Write frame
                 os.write(v4l2_fd, memoryview(yuyv))
+
+                # Push to WebRTC if enabled (direct YUYV - zero CPU conversion)
+                if self._webrtc_pipeline and self._webrtc_pipeline.is_running:
+                    try:
+                        self._webrtc_pipeline.push_frame_yuyv(yuyv)
+                    except Exception:
+                        pass  # Don't spam logs
 
                 # Maintain frame rate
                 elapsed = asyncio.get_event_loop().time() - loop_start
@@ -3472,6 +3854,14 @@ class RealtimeVideoRenderer:
             await self._audio_capture.stop()
             self._audio_capture = None
 
+        # Stop WebRTC streaming
+        if self._webrtc_pipeline:
+            try:
+                self._webrtc_pipeline.stop()
+            except Exception:
+                pass
+            self._webrtc_pipeline = None
+
         # Reset state for clean restart
         self._audio_buffer = None
         if hasattr(self, "_ulc_renderer"):
@@ -3480,6 +3870,14 @@ class RealtimeVideoRenderer:
     def stop(self):
         """Stop the real-time stream."""
         self._running = False
+
+        # Stop WebRTC streaming
+        if self._webrtc_pipeline:
+            try:
+                self._webrtc_pipeline.stop()
+            except Exception:
+                pass
+            self._webrtc_pipeline = None
 
         # Reset state for clean restart
         self._audio_buffer = None
@@ -3595,191 +3993,15 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    # Device configuration
-    DEVICE_LABEL = "AI_Workflow"  # Our device label
-    PREFERRED_DEVICE_NUMBERS = [10, 11, 12, 13, 14, 15]  # Avoid 0-9 which may be real cameras
+    # Import shared video device module
+    # Add project root to path for imports
+    _project_root = Path(__file__).parent.parent.parent.parent.parent
+    sys.path.insert(0, str(_project_root))
 
-    # Global state for cleanup
+    from scripts.common.video_device import cleanup_device, get_active_device, set_active_fd, setup_v4l2_device
+
+    # Global state for cleanup (uses shared module now)
     _active_device_path = None
-    _active_v4l2_fd = None
-
-    def find_existing_device() -> Optional[tuple[str, int]]:
-        """Find an existing AI_Workflow device. Returns (path, device_number) or None."""
-        import re
-        import subprocess
-
-        result = subprocess.run(["v4l2-ctl", "--list-devices"], capture_output=True, text=True)
-        if result.returncode != 0:
-            return None
-
-        lines = result.stdout.split("\n")
-        for i, line in enumerate(lines):
-            if DEVICE_LABEL in line or "AI_Research" in line:
-                # Next line should have the device path
-                if i + 1 < len(lines):
-                    device_line = lines[i + 1].strip()
-                    if device_line.startswith("/dev/video"):
-                        match = re.search(r"/dev/video(\d+)", device_line)
-                        if match:
-                            return (device_line, int(match.group(1)))
-        return None
-
-    def find_free_device_number() -> int:
-        """Find a free video device number."""
-        import os
-
-        for num in PREFERRED_DEVICE_NUMBERS:
-            if not os.path.exists(f"/dev/video{num}"):
-                return num
-        # Fallback to higher numbers
-        for num in range(20, 30):
-            if not os.path.exists(f"/dev/video{num}"):
-                return num
-        raise RuntimeError("No free video device numbers available")
-
-    def get_device_format(device_path: str) -> tuple[int, int]:
-        """Get current width/height of a v4l2 device."""
-        import re
-        import subprocess
-
-        result = subprocess.run(["v4l2-ctl", "-d", device_path, "--get-fmt-video"], capture_output=True, text=True)
-
-        width, height = 0, 0
-        for line in result.stdout.split("\n"):
-            if "Width/Height" in line:
-                match = re.search(r"(\d+)/(\d+)", line)
-                if match:
-                    width, height = int(match.group(1)), int(match.group(2))
-                    break
-        return width, height
-
-    def setup_v4l2_device(width: int, height: int) -> str:
-        """
-        Set up a v4l2loopback device for streaming.
-
-        ALWAYS reloads the module to ensure correct resolution.
-        v4l2loopback format is set at module load time, not via v4l2-ctl.
-
-        Returns the device path.
-        """
-        import os
-        import subprocess
-        import time
-
-        print(f"Setting up video device for {width}x{height}...", file=sys.stderr)
-
-        # Check if v4l2loopback module is loaded
-        result = subprocess.run(["lsmod"], capture_output=True, text=True)
-        module_loaded = "v4l2loopback" in result.stdout
-
-        # Try to find existing device and check its format
-        existing = find_existing_device()
-        need_reload = True
-        device_num = PREFERRED_DEVICE_NUMBERS[0]  # Default to first preferred
-
-        if existing:
-            device_path, device_num = existing
-            current_w, current_h = get_device_format(device_path)
-            print(f"Found existing device: {device_path} ({current_w}x{current_h})", file=sys.stderr)
-
-            # Check if format matches what we need
-            if current_w == width and current_h == height:
-                print(f"Format already correct, reusing device", file=sys.stderr)
-                need_reload = False
-            else:
-                print(
-                    f"Format mismatch ({current_w}x{current_h} vs {width}x{height}), reloading module...",
-                    file=sys.stderr,
-                )
-        else:
-            device_num = find_free_device_number()
-            print(f"No existing device, creating /dev/video{device_num}...", file=sys.stderr)
-
-        device_path = f"/dev/video{device_num}"
-
-        if need_reload:
-            # Kill any processes using the device
-            if os.path.exists(device_path):
-                subprocess.run(["sudo", "fuser", "-k", device_path], capture_output=True, timeout=5)
-                time.sleep(0.3)
-
-            # Unload module
-            if module_loaded:
-                print("Unloading v4l2loopback module...", file=sys.stderr)
-                result = subprocess.run(
-                    ["sudo", "modprobe", "-r", "v4l2loopback"], capture_output=True, text=True, timeout=10
-                )
-                if result.returncode != 0:
-                    # Force kill anything holding it
-                    subprocess.run(["sudo", "fuser", "-k", "/dev/video*"], capture_output=True, shell=True)
-                    time.sleep(0.5)
-                    subprocess.run(["sudo", "modprobe", "-r", "v4l2loopback"], capture_output=True, timeout=10)
-                time.sleep(0.5)
-
-            # Load with our configuration - max_width/max_height are CRITICAL
-            print(f"Loading v4l2loopback: video_nr={device_num}, {width}x{height}...", file=sys.stderr)
-            result = subprocess.run(
-                [
-                    "sudo",
-                    "modprobe",
-                    "v4l2loopback",
-                    "devices=1",
-                    f"video_nr={device_num}",
-                    f"card_label={DEVICE_LABEL}",
-                    "exclusive_caps=1",
-                    f"max_width={width}",
-                    f"max_height={height}",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(f"Failed to load v4l2loopback: {result.stderr}")
-
-            # Wait for device to appear
-            for _ in range(30):
-                if os.path.exists(device_path):
-                    break
-                time.sleep(0.1)
-            else:
-                raise RuntimeError(f"Device {device_path} did not appear after loading module")
-
-            # Small delay for device to stabilize
-            time.sleep(0.3)
-
-        # Verify device exists and is accessible
-        if not os.path.exists(device_path):
-            raise RuntimeError(f"Device {device_path} does not exist")
-
-        # Check we can open it
-        try:
-            fd = os.open(device_path, os.O_RDWR | os.O_NONBLOCK)
-            os.close(fd)
-        except OSError as e:
-            raise RuntimeError(f"Cannot open {device_path}: {e}")
-
-        # Verify the format
-        actual_w, actual_h = get_device_format(device_path)
-        if actual_w > 0 and actual_h > 0 and (actual_w != width or actual_h != height):
-            print(f"WARNING: Device format is {actual_w}x{actual_h}, expected {width}x{height}", file=sys.stderr)
-
-        print(f"✓ Device ready: {device_path} ({width}x{height})", file=sys.stderr)
-        return device_path
-
-    def cleanup_device():
-        """Clean up device resources on exit."""
-        global _active_v4l2_fd, _active_device_path
-
-        if _active_v4l2_fd is not None:
-            try:
-                os.close(_active_v4l2_fd)
-                print(f"\n✓ Released device: {_active_device_path}", file=sys.stderr)
-            except:
-                pass
-            _active_v4l2_fd = None
-        _active_device_path = None
 
     def signal_handler(signum, frame):
         """Handle Ctrl+C gracefully."""
@@ -3810,11 +4032,17 @@ if __name__ == "__main__":
         print("                  Use 'pactl list sources short' to find available sources")
         print("  --720p          Use 1280x720 resolution (default: 1920x1080)")
         print("  --nvidia        Use NVIDIA GPU instead of Intel iGPU")
+        print("  --flip          Flip video horizontally (for Google Meet mirror compensation)")
+        print("  --webrtc        Enable WebRTC streaming for preview (ws://localhost:8765)")
         print("")
         print("Live Mode:")
         print("  Connects to AttendeeDataService socket (~/.config/aa-workflow/meetbot.sock)")
         print("  Shows Matrix-style 'INITIALIZING...' until participants are detected")
         print("  Receives real participant names from Google Meet via the meeting bot")
+        print("")
+        print("WebRTC Preview:")
+        print("  With --webrtc, frames are pushed to a WebRTC server on port 8765")
+        print("  Connect from the Meetings tab Video Preview (select WebRTC mode)")
         print("")
         print("The device is automatically created/configured. Press Ctrl+C to stop and release.")
         print("")
@@ -3823,6 +4051,8 @@ if __name__ == "__main__":
         print("  Target: ~1% CPU utilization at 1080p")
 
     async def main():
+        global _active_device_path
+
         # Check for command line args
         if len(sys.argv) > 1:
             if sys.argv[1] == "--stream" and len(sys.argv) > 2:
@@ -3859,6 +4089,9 @@ if __name__ == "__main__":
                 # Check for resolution option (1080p is now default)
                 use_720p = "--720p" in sys.argv
 
+                # Check for --flip option (horizontal mirror for Google Meet)
+                use_flip = "--flip" in sys.argv
+
                 # Determine resolution
                 if use_720p:
                     width, height = 1280, 720
@@ -3873,7 +4106,6 @@ if __name__ == "__main__":
                     print(f"Using specified device: {video_device}", file=sys.stderr)
                     setup_v4l2_device(width, height)  # This will configure it
 
-                global _active_device_path
                 _active_device_path = video_device
 
                 # Check for GPU options
@@ -3892,6 +4124,11 @@ if __name__ == "__main__":
                 gpu_name = "NVIDIA" if use_nvidia else "Intel iGPU"
                 print(f"Using full GPU pipeline on {gpu_name}", file=sys.stderr)
 
+                # Set flip mode
+                if use_flip:
+                    os.environ["FLIP"] = "1"
+                    print("Horizontal flip ENABLED (for Google Meet)", file=sys.stderr)
+
                 attendees = load_attendees_from_file(DEFAULT_ATTENDEES_FILE)
                 if not attendees:
                     print(f"No attendees found in {DEFAULT_ATTENDEES_FILE}", file=sys.stderr)
@@ -3902,7 +4139,13 @@ if __name__ == "__main__":
                 else:
                     print("Using simulated waveform (no audio source)", file=sys.stderr)
                 print("Press Ctrl+C to stop", file=sys.stderr)
-                renderer = RealtimeVideoRenderer(config=config, audio_source=audio_source)
+
+                # Check for WebRTC streaming option
+                use_webrtc = "--webrtc" in sys.argv
+                if use_webrtc:
+                    print("WebRTC preview enabled on ws://localhost:8765", file=sys.stderr)
+
+                renderer = RealtimeVideoRenderer(config=config, audio_source=audio_source, enable_webrtc=use_webrtc)
                 try:
                     await renderer.stream_realtime(attendees, video_device, loop=True)
                 finally:
@@ -3929,6 +4172,9 @@ if __name__ == "__main__":
                 use_720p = "--720p" in sys.argv
                 use_nvidia = "--nvidia" in sys.argv
 
+                # Check for --flip option (horizontal mirror for Google Meet)
+                use_flip = "--flip" in sys.argv
+
                 if use_720p:
                     width, height = 1280, 720
                     config = VideoConfig.hd_720p()
@@ -3945,12 +4191,16 @@ if __name__ == "__main__":
                     print(f"Using specified device: {video_device}", file=sys.stderr)
                     setup_v4l2_device(width, height)
 
-                global _active_device_path
                 _active_device_path = video_device
 
                 config.prefer_intel_gpu = not use_nvidia
                 gpu_name = "NVIDIA" if use_nvidia else "Intel iGPU"
                 print(f"Using full GPU pipeline on {gpu_name}", file=sys.stderr)
+
+                # Set flip mode
+                if use_flip:
+                    os.environ["FLIP"] = "1"
+                    print("Horizontal flip ENABLED (for Google Meet)", file=sys.stderr)
 
                 print(f"LIVE streaming to {video_device}...", file=sys.stderr)
                 print("Connecting to AttendeeDataService for live participant data...", file=sys.stderr)
@@ -3959,7 +4209,12 @@ if __name__ == "__main__":
                     print(f"Audio-reactive waveform from: {audio_source}", file=sys.stderr)
                 print("Press Ctrl+C to stop", file=sys.stderr)
 
-                renderer = RealtimeVideoRenderer(config=config, audio_source=audio_source)
+                # Check for WebRTC streaming option
+                use_webrtc = "--webrtc" in sys.argv
+                if use_webrtc:
+                    print("WebRTC preview enabled on ws://localhost:8765", file=sys.stderr)
+
+                renderer = RealtimeVideoRenderer(config=config, audio_source=audio_source, enable_webrtc=use_webrtc)
                 try:
                     await renderer.stream_live(video_device)
                 finally:

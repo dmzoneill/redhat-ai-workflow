@@ -6,16 +6,24 @@
  * - Pipeline failed
  * - Alert firing
  * - Namespace expiring
+ * - Slack messages received/processed
+ * - Pending approvals
  *
- * Can subscribe to D-Bus signals for real-time updates.
+ * Subscribes to D-Bus signals for real-time updates using dbus-monitor.
  */
 
 import * as vscode from "vscode";
 import { WorkflowDataProvider, WorkflowStatus } from "./dataProvider";
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import { createLogger } from "./logger";
 
 const logger = createLogger("Notifications");
+
+// D-Bus signal types we listen for
+interface SlackMessageSignal {
+  type: "MessageReceived" | "MessageProcessed" | "PendingApproval";
+  data: any;
+}
 
 /**
  * Execute a command using spawn with bash --norc --noprofile to avoid sourcing
@@ -78,6 +86,9 @@ export class NotificationManager {
   private dataProvider: WorkflowDataProvider;
   private state: NotificationState;
   private dbusWatcher: ReturnType<typeof setInterval> | undefined;
+  private dbusMonitor: ChildProcess | null = null;
+  private signalBuffer: string = "";
+  private onSlackSignal: ((signal: SlackMessageSignal) => void) | null = null;
 
   constructor(dataProvider: WorkflowDataProvider) {
     this.dataProvider = dataProvider;
@@ -87,6 +98,13 @@ export class NotificationManager {
       lastMrId: 0,
       shownNotifications: new Set(),
     };
+  }
+
+  /**
+   * Set callback for Slack signal events (used by CommandCenter for real-time updates)
+   */
+  public setSlackSignalCallback(callback: (signal: SlackMessageSignal) => void): void {
+    this.onSlackSignal = callback;
   }
 
   /**
@@ -209,7 +227,7 @@ export class NotificationManager {
    * Start watching D-Bus for real-time events
    */
   public startDbusWatcher(): void {
-    // Poll D-Bus for Slack events every 30 seconds
+    // Poll D-Bus for Slack events every 30 seconds (fallback)
     this.dbusWatcher = setInterval(async () => {
       try {
         await this.checkSlackEvents();
@@ -217,14 +235,188 @@ export class NotificationManager {
         // D-Bus not available, skip
       }
     }, 30000);
+
+    // Start real-time D-Bus signal monitoring
+    this.startDbusSignalMonitor();
+  }
+
+  /**
+   * Start dbus-monitor to listen for real-time signals from Slack daemon
+   */
+  private startDbusSignalMonitor(): void {
+    try {
+      // Use dbus-monitor to watch for signals from our services
+      this.dbusMonitor = spawn('/bin/bash', ['--norc', '--noprofile', '-c',
+        `dbus-monitor --session "type='signal',interface='com.aiworkflow.BotSlack'"`
+      ], {
+        env: {
+          ...process.env,
+          BASH_ENV: '',
+          ENV: '',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      this.dbusMonitor.stdout?.on('data', (data: Buffer) => {
+        this.handleDbusMonitorOutput(data.toString());
+      });
+
+      this.dbusMonitor.stderr?.on('data', (data: Buffer) => {
+        logger.debug(`dbus-monitor stderr: ${data.toString()}`);
+      });
+
+      this.dbusMonitor.on('close', (code) => {
+        logger.debug(`dbus-monitor exited with code ${code}`);
+        this.dbusMonitor = null;
+        // Restart after a delay if it wasn't intentionally stopped
+        setTimeout(() => {
+          if (!this.dbusMonitor) {
+            this.startDbusSignalMonitor();
+          }
+        }, 5000);
+      });
+
+      this.dbusMonitor.on('error', (err) => {
+        logger.error(`dbus-monitor error: ${err.message}`);
+        this.dbusMonitor = null;
+      });
+
+      logger.info("D-Bus signal monitor started");
+    } catch (err) {
+      logger.error(`Failed to start dbus-monitor: ${err}`);
+    }
+  }
+
+  /**
+   * Parse dbus-monitor output and handle signals
+   */
+  private handleDbusMonitorOutput(output: string): void {
+    this.signalBuffer += output;
+
+    // dbus-monitor output format:
+    // signal time=... sender=... -> destination=... serial=... path=/... interface=... member=MessageReceived
+    //    string "json_data"
+
+    // Split by signal boundaries
+    const signalPattern = /signal\s+time=[\d.]+\s+sender=[^\s]+\s+->\s+destination=[^\s]+\s+serial=\d+\s+path=([^\s]+)\s+interface=([^\s]+)\s+member=(\w+)/g;
+
+    let match;
+    while ((match = signalPattern.exec(this.signalBuffer)) !== null) {
+      const [fullMatch, path, iface, member] = match;
+      const startIndex = match.index + fullMatch.length;
+
+      // Find the string argument that follows
+      const stringPattern = /\s+string\s+"([^"]*)"/;
+      const remaining = this.signalBuffer.substring(startIndex);
+      const stringMatch = stringPattern.exec(remaining);
+
+      if (stringMatch && iface === "com.aiworkflow.BotSlack") {
+        const jsonData = stringMatch[1];
+        this.handleSlackSignal(member, jsonData);
+
+        // Clear processed part of buffer
+        const endIndex = startIndex + stringMatch.index + stringMatch[0].length;
+        this.signalBuffer = this.signalBuffer.substring(match.index + endIndex);
+        signalPattern.lastIndex = 0; // Reset regex
+      }
+    }
+
+    // Prevent buffer from growing too large
+    if (this.signalBuffer.length > 10000) {
+      this.signalBuffer = this.signalBuffer.substring(this.signalBuffer.length - 5000);
+    }
+  }
+
+  /**
+   * Handle a Slack D-Bus signal
+   */
+  private handleSlackSignal(signalName: string, jsonData: string): void {
+    try {
+      const data = JSON.parse(jsonData);
+      logger.debug(`Received Slack signal: ${signalName}`);
+
+      // Notify callback if set (for CommandCenter real-time updates)
+      if (this.onSlackSignal) {
+        this.onSlackSignal({
+          type: signalName as SlackMessageSignal["type"],
+          data
+        });
+      }
+
+      // Handle specific signals
+      switch (signalName) {
+        case "MessageReceived":
+          this.handleMessageReceived(data);
+          break;
+        case "MessageProcessed":
+          this.handleMessageProcessed(data);
+          break;
+        case "PendingApproval":
+          this.handlePendingApproval(data);
+          break;
+      }
+    } catch (err) {
+      logger.error(`Failed to parse signal data: ${err}`);
+    }
+  }
+
+  /**
+   * Handle MessageReceived signal - new message from Slack
+   */
+  private handleMessageReceived(data: any): void {
+    // Only show notification for important messages (mentions, DMs)
+    if (data.is_mention || data.is_dm) {
+      const userName = data.user_name || "Someone";
+      const channelName = data.channel_name || "a channel";
+      const preview = (data.text || "").substring(0, 50);
+
+      vscode.window.showInformationMessage(
+        `💬 ${userName} in ${channelName}: ${preview}...`
+      );
+    }
+  }
+
+  /**
+   * Handle MessageProcessed signal - bot processed a message
+   */
+  private handleMessageProcessed(data: any): void {
+    // Could update UI to show processing status
+    logger.debug(`Message processed: ${data.message_id} - ${data.status}`);
+  }
+
+  /**
+   * Handle PendingApproval signal - message needs approval
+   */
+  private handlePendingApproval(data: any): void {
+    const userName = data.user_name || "Someone";
+    const preview = (data.response_text || "").substring(0, 80);
+
+    vscode.window.showWarningMessage(
+      `⏳ Pending approval for ${userName}: ${preview}...`,
+      "View Pending"
+    ).then(action => {
+      if (action === "View Pending") {
+        vscode.commands.executeCommand("aa-workflow.openCommandCenter", "slack");
+      }
+    });
+  }
+
+  /**
+   * Stop the D-Bus signal monitor
+   */
+  private stopDbusSignalMonitor(): void {
+    if (this.dbusMonitor) {
+      this.dbusMonitor.kill();
+      this.dbusMonitor = null;
+    }
   }
 
   private async checkSlackEvents(): Promise<void> {
     try {
       // Check for new unread messages via D-Bus
       const { stdout } = await execAsync(
-        `dbus-send --session --print-reply --dest=com.aiworkflow.SlackAgent ` +
-          `/com/aiworkflow/SlackAgent com.aiworkflow.SlackAgent.GetPending`
+        `dbus-send --session --print-reply --dest=com.aiworkflow.BotSlack ` +
+          `/com/aiworkflow/BotSlack com.aiworkflow.BotSlack.GetPending`
       );
 
       // Parse response for pending message count
@@ -264,8 +456,12 @@ export class NotificationManager {
     if (this.dbusWatcher) {
       clearInterval(this.dbusWatcher);
     }
+    this.stopDbusSignalMonitor();
   }
 }
+
+// Export the signal type for use by other modules
+export type { SlackMessageSignal };
 
 export function registerNotifications(
   context: vscode.ExtensionContext,

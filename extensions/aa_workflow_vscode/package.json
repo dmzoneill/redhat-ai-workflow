@@ -39,6 +39,12 @@
           "name": "Memory",
           "icon": "$(database)",
           "contextualTitle": "AI Workflow Memory"
+        },
+        {
+          "id": "aaWorkflowSlides",
+          "name": "Slides",
+          "icon": "$(preview)",
+          "contextualTitle": "AI Workflow Slides"
         }
       ]
     },
@@ -50,6 +56,10 @@
       {
         "view": "aaWorkflowMemory",
         "contents": "Memory system not initialized.\n[Refresh](command:aa-workflow.refreshMemory)\n\nMemory files are stored in ~/src/redhat-ai-workflow/memory/"
+      },
+      {
+        "view": "aaWorkflowSlides",
+        "contents": "Google Slides integration.\n[Refresh](command:aa-workflow.refreshSlides)\n\nUse the presentations persona to create and manage slide decks."
       }
     ],
     "commands": [
@@ -93,6 +103,41 @@
         "title": "AI Workflow: Cleanup Memory",
         "shortTitle": "Cleanup Memory",
         "icon": "$(trash)",
+        "category": "AI Workflow"
+      },
+      {
+        "command": "aa-workflow.refreshSlides",
+        "title": "AI Workflow: Refresh Slides",
+        "shortTitle": "Refresh Slides",
+        "icon": "$(refresh)",
+        "category": "AI Workflow"
+      },
+      {
+        "command": "aa-workflow.createPresentation",
+        "title": "AI Workflow: Create Presentation",
+        "shortTitle": "Create Presentation",
+        "icon": "$(add)",
+        "category": "AI Workflow"
+      },
+      {
+        "command": "aa-workflow.listPresentations",
+        "title": "AI Workflow: List Presentations",
+        "shortTitle": "List Presentations",
+        "icon": "$(list-flat)",
+        "category": "AI Workflow"
+      },
+      {
+        "command": "aa-workflow.checkSlidesStatus",
+        "title": "AI Workflow: Check Slides Status",
+        "shortTitle": "Check Slides Status",
+        "icon": "$(plug)",
+        "category": "AI Workflow"
+      },
+      {
+        "command": "aa-workflow.exportPresentation",
+        "title": "AI Workflow: Export Presentation to PDF",
+        "shortTitle": "Export to PDF",
+        "icon": "$(export)",
         "category": "AI Workflow"
       }
     ],
@@ -161,6 +206,76 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically send commands to Cursor chat (if false, copies to clipboard instead)"
+        },
+        "aa-workflow.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable toast notifications from backend services"
+        },
+        "aa-workflow.notifications.skill": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for skill execution events"
+        },
+        "aa-workflow.notifications.persona": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications when personas are loaded"
+        },
+        "aa-workflow.notifications.session": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for session create/resume"
+        },
+        "aa-workflow.notifications.cron": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for cron job execution"
+        },
+        "aa-workflow.notifications.meet": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for meeting events"
+        },
+        "aa-workflow.notifications.sprint": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for sprint bot issue processing"
+        },
+        "aa-workflow.notifications.slack": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for Slack messages"
+        },
+        "aa-workflow.notifications.auto_heal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for auto-heal events"
+        },
+        "aa-workflow.notifications.git": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for git operations"
+        },
+        "aa-workflow.notifications.jira": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for Jira operations"
+        },
+        "aa-workflow.notifications.gitlab": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for GitLab operations"
+        },
+        "aa-workflow.notifications.memory": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show notifications for memory operations (can be noisy)"
+        },
+        "aa-workflow.notifications.daemon": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notifications for daemon status changes"
         }
       }
     }

@@ -15,7 +15,7 @@ Since MCP doesn't provide a unique chat ID, we generate session IDs when
 `session_start()` is called. Multiple sessions can exist per workspace.
 
 Persistence:
-- Sessions are persisted to ~/.mcp/workspace_states/workspace_states.json
+- Sessions are persisted to ~/.config/aa-workflow/workspace_states.json
 - On server startup, sessions are restored from the persisted file
 - This ensures sessions survive server restarts
 
@@ -68,9 +68,11 @@ def get_default_persona() -> str:
 # Session stale timeout (hours) - sessions inactive for longer are cleaned up
 SESSION_STALE_HOURS = 24
 
-# Persistence file location
-PERSIST_DIR = Path.home() / ".mcp" / "workspace_states"
-PERSIST_FILE = PERSIST_DIR / "workspace_states.json"
+# Persistence file location - centralized in server.paths
+from server.paths import AA_CONFIG_DIR, WORKSPACE_STATES_FILE
+
+PERSIST_DIR = AA_CONFIG_DIR
+PERSIST_FILE = WORKSPACE_STATES_FILE
 
 # Global cache of tool counts per persona (refreshed on session_start/persona_load)
 _persona_tool_counts: dict[str, int] = {}
@@ -198,6 +200,10 @@ def get_cursor_chat_id_from_db(workspace_uri: str) -> str | None:
 def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
     """List all Cursor chats for a workspace and get the active chat ID.
 
+    Cursor may have multiple storage directories for the same workspace URI
+    (e.g., from reopening the same folder). This function aggregates chats
+    from all matching directories and deduplicates by composerId.
+
     Args:
         workspace_uri: The workspace URI
 
@@ -211,6 +217,10 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
 
         if not workspace_storage_dir.exists():
             return [], None
+
+        # Aggregate chats from all matching storage directories
+        all_chats: dict[str, dict] = {}  # composerId -> chat dict (dedup by ID)
+        active_chat_id = None
 
         for storage_dir in workspace_storage_dir.iterdir():
             if not storage_dir.is_dir():
@@ -235,38 +245,50 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
                     result = subprocess.run(["sqlite3", str(db_path), query], capture_output=True, text=True, timeout=5)
 
                     if result.returncode != 0 or not result.stdout.strip():
-                        return [], None
+                        continue  # Try other storage directories
 
                     composer_data = json.loads(result.stdout.strip())
                     all_composers = composer_data.get("allComposers", [])
 
-                    # Get the active/focused chat ID (first in lastFocusedComposerIds)
+                    # Get the active/focused chat ID (use most recent if multiple dirs)
                     last_focused = composer_data.get("lastFocusedComposerIds", [])
-                    active_chat_id = last_focused[0] if last_focused else None
+                    if last_focused and not active_chat_id:
+                        active_chat_id = last_focused[0]
 
-                    # Return relevant fields for active chats, sorted by lastUpdatedAt
-                    # Keep name as None if Cursor hasn't set one yet (don't default to "unnamed")
-                    # Filter out "ghost" chats: no name AND no lastUpdatedAt (never used)
-                    chats = [
-                        {
-                            "composerId": c.get("composerId"),
+                    # Add chats to aggregated dict, keeping newer versions
+                    for c in all_composers:
+                        if c.get("isArchived") or c.get("isDraft"):
+                            continue
+                        # Exclude ghost chats: no name AND no lastUpdatedAt (never actually used)
+                        if c.get("name") is None and c.get("lastUpdatedAt") is None:
+                            continue
+
+                        composer_id = c.get("composerId")
+                        if not composer_id:
+                            continue
+
+                        chat_dict = {
+                            "composerId": composer_id,
                             "name": c.get("name"),  # Keep None if not set
                             "createdAt": c.get("createdAt", 0),
                             "lastUpdatedAt": c.get("lastUpdatedAt", 0),
                             "isArchived": c.get("isArchived", False),
                             "isDraft": c.get("isDraft", False),
                         }
-                        for c in all_composers
-                        if not c.get("isArchived") and not c.get("isDraft")
-                        # Exclude ghost chats: no name AND no lastUpdatedAt (never actually used)
-                        and not (c.get("name") is None and c.get("lastUpdatedAt") is None)
-                    ]
-                    return sorted(chats, key=lambda x: x["lastUpdatedAt"], reverse=True), active_chat_id
+
+                        # Keep the chat with the most recent lastUpdatedAt
+                        if (
+                            composer_id not in all_chats
+                            or chat_dict["lastUpdatedAt"] > all_chats[composer_id]["lastUpdatedAt"]
+                        ):
+                            all_chats[composer_id] = chat_dict
 
             except (json.JSONDecodeError, KeyError):
                 continue
 
-        return [], None
+        # Return sorted list
+        chats = sorted(all_chats.values(), key=lambda x: x["lastUpdatedAt"], reverse=True)
+        return chats, active_chat_id
 
     except Exception as e:
         logger.warning(f"Error listing Cursor chats: {e}")
@@ -370,6 +392,263 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
     except Exception as e:
         logger.warning(f"Error scanning Cursor chats for issue keys: {e}")
         return {}
+
+
+def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
+    """Extract conversation content from a Cursor chat.
+
+    Reads the global Cursor database to get all messages (bubbles) for a chat.
+    Returns structured data including user messages, assistant responses,
+    tool calls, code changes, and metadata.
+
+    Args:
+        chat_id: The Cursor chat/composer ID (UUID)
+        max_messages: Maximum number of messages to return (default 50)
+
+    Returns:
+        Dict with chat content:
+        {
+            "chat_id": str,
+            "message_count": int,
+            "messages": [
+                {
+                    "type": "user" | "assistant",
+                    "text": str,
+                    "timestamp": str | None,
+                    "tool_results": list[str] | None,
+                    "code_chunks": list[str] | None,
+                }
+            ],
+            "summary": {
+                "user_messages": int,
+                "assistant_messages": int,
+                "tool_calls": int,
+                "code_changes": int,
+                "issue_keys": list[str],
+            }
+        }
+    """
+    import re
+    import subprocess
+
+    result = {
+        "chat_id": chat_id,
+        "message_count": 0,
+        "messages": [],
+        "summary": {
+            "user_messages": 0,
+            "assistant_messages": 0,
+            "tool_calls": 0,
+            "code_changes": 0,
+            "issue_keys": [],
+        },
+    }
+
+    try:
+        global_db = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "state.vscdb"
+        if not global_db.exists():
+            logger.debug("Cursor global storage not found")
+            return result
+
+        # Query all bubbles for this chat
+        query = f"SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:{chat_id}:%'"
+        db_result = subprocess.run(
+            ["sqlite3", str(global_db), query],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        if db_result.returncode != 0:
+            logger.debug(f"Failed to query Cursor global DB: {db_result.stderr}")
+            return result
+
+        # Parse messages
+        messages_raw = []
+        issue_pattern = re.compile(r"AAP-\d{4,7}", re.IGNORECASE)
+        all_issue_keys: set[str] = set()
+
+        for line in db_result.stdout.strip().split("\n"):
+            if not line or "|" not in line:
+                continue
+            try:
+                key, value = line.split("|", 1)
+                data = json.loads(value)
+
+                # Extract bubble ID for ordering
+                parts = key.split(":")
+                bubble_id = parts[2] if len(parts) >= 3 else ""
+
+                msg_type = data.get("type", 0)
+                text = data.get("text", "")
+                created_at = data.get("createdAt")
+
+                # Type 1 = user, Type 2 = assistant
+                msg_role = "user" if msg_type == 1 else "assistant" if msg_type == 2 else "system"
+
+                # Extract tool results
+                tool_results = []
+                if data.get("toolResults"):
+                    for tr in data["toolResults"][:5]:  # Limit tool results
+                        if isinstance(tr, dict) and tr.get("result"):
+                            tool_results.append(str(tr["result"])[:200])
+                    result["summary"]["tool_calls"] += len(data["toolResults"])
+
+                # Extract code chunks
+                code_chunks = []
+                if data.get("attachedCodeChunks"):
+                    for chunk in data["attachedCodeChunks"][:3]:
+                        if isinstance(chunk, dict):
+                            file_path = chunk.get("filePath", "")
+                            code_chunks.append(file_path)
+                    result["summary"]["code_changes"] += len(data["attachedCodeChunks"])
+
+                # Find issue keys in text
+                if text:
+                    for match in issue_pattern.findall(text):
+                        all_issue_keys.add(match.upper())
+
+                messages_raw.append(
+                    {
+                        "bubble_id": bubble_id,
+                        "type": msg_role,
+                        "text": text[:2000] if text else "",  # Truncate long messages
+                        "timestamp": datetime.fromtimestamp(created_at / 1000).isoformat() if created_at else None,
+                        "tool_results": tool_results if tool_results else None,
+                        "code_chunks": code_chunks if code_chunks else None,
+                    }
+                )
+
+                # Update counts
+                if msg_role == "user":
+                    result["summary"]["user_messages"] += 1
+                elif msg_role == "assistant":
+                    result["summary"]["assistant_messages"] += 1
+
+            except (json.JSONDecodeError, ValueError, KeyError) as e:
+                logger.debug(f"Error parsing bubble: {e}")
+                continue
+
+        # Sort by timestamp if available, otherwise by bubble_id
+        messages_raw.sort(key=lambda x: x.get("timestamp") or x.get("bubble_id") or "")
+
+        # Limit to max_messages
+        result["messages"] = messages_raw[:max_messages]
+        result["message_count"] = len(messages_raw)
+        result["summary"]["issue_keys"] = sorted(all_issue_keys)
+
+        logger.info(f"Extracted {len(messages_raw)} messages from chat {chat_id[:8]}...")
+        return result
+
+    except subprocess.TimeoutExpired:
+        logger.warning("Timeout extracting Cursor chat content")
+        return result
+    except Exception as e:
+        logger.warning(f"Error extracting Cursor chat content: {e}")
+        return result
+
+
+def format_session_context_for_jira(
+    chat_content: dict,
+    session: "ChatSession | None" = None,
+    include_transcript: bool = False,
+    max_transcript_chars: int = 5000,
+) -> str:
+    """Format session context as Jira wiki markup.
+
+    Creates a well-formatted comment for Jira that summarizes the AI session,
+    including key actions, tool calls, and optionally the full transcript.
+
+    Args:
+        chat_content: Output from get_cursor_chat_content()
+        session: Optional ChatSession for additional metadata
+        include_transcript: Whether to include full conversation transcript
+        max_transcript_chars: Max chars for transcript (default 5000)
+
+    Returns:
+        Jira wiki markup formatted string
+    """
+    lines = []
+
+    # Header panel
+    lines.append("{panel:title=AI Session Context|borderStyle=solid|borderColor=#0052CC}")
+
+    # Session metadata
+    if session:
+        lines.append(f"*Session ID:* {session.session_id[:8]}...")
+        lines.append(f"*Persona:* {session.persona}")
+        if session.project:
+            lines.append(f"*Project:* {session.project}")
+        if session.branch:
+            lines.append(f"*Branch:* {{monospace}}{session.branch}{{monospace}}")
+        if session.started_at:
+            lines.append(f"*Started:* {session.started_at.strftime('%Y-%m-%d %H:%M')}")
+        if session.last_activity:
+            duration = session.last_activity - session.started_at
+            minutes = int(duration.total_seconds() / 60)
+            lines.append(f"*Duration:* ~{minutes} minutes")
+        lines.append("")
+
+    # Summary stats
+    summary = chat_content.get("summary", {})
+    lines.append("h3. Summary")
+    lines.append(
+        f"* *Messages:* {summary.get('user_messages', 0)} user, {summary.get('assistant_messages', 0)} assistant"
+    )
+    lines.append(f"* *Tool Calls:* {summary.get('tool_calls', 0)}")
+    lines.append(f"* *Code References:* {summary.get('code_changes', 0)}")
+
+    # Related issues
+    issue_keys = summary.get("issue_keys", [])
+    if issue_keys:
+        lines.append(f"* *Related Issues:* {', '.join(issue_keys)}")
+    lines.append("")
+
+    # Key actions (extract from messages)
+    messages = chat_content.get("messages", [])
+    key_actions = []
+
+    for msg in messages:
+        if msg.get("type") == "assistant" and msg.get("tool_results"):
+            # Extract tool action summaries
+            for tr in msg["tool_results"][:3]:
+                if tr and len(tr) > 10:
+                    # Truncate and clean
+                    action = tr[:100].replace("\n", " ").strip()
+                    if action:
+                        key_actions.append(action)
+
+    if key_actions:
+        lines.append("h3. Key Actions")
+        for action in key_actions[:10]:  # Limit to 10 actions
+            lines.append(f"* {action}")
+        lines.append("")
+
+    # Optional transcript
+    if include_transcript and messages:
+        lines.append("{expand:Full Transcript}")
+        lines.append("{code}")
+
+        transcript_chars = 0
+        for msg in messages:
+            if transcript_chars >= max_transcript_chars:
+                lines.append("... (truncated)")
+                break
+
+            role = msg.get("type", "unknown").upper()
+            text = msg.get("text", "")[:500]  # Truncate individual messages
+            timestamp = msg.get("timestamp", "")[:16] if msg.get("timestamp") else ""
+
+            entry = f"[{timestamp}] {role}: {text}\n"
+            lines.append(entry)
+            transcript_chars += len(entry)
+
+        lines.append("{code}")
+        lines.append("{expand}")
+
+    lines.append("{panel}")
+
+    return "\n".join(lines)
 
 
 def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str]:
@@ -505,6 +784,163 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
         return {}
 
 
+def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str]:
+    """Scan Cursor chat content to detect the project being worked on in each chat.
+
+    Looks for patterns like:
+    - session_start(project="automation-analytics-backend")
+    - session_set_project(project="pdf-generator")
+    - Repository names: "automation-analytics-backend", "pdf-generator"
+    - GitLab paths: "automation-analytics/automation-analytics-backend"
+    - File paths: "/home/.../automation-analytics-backend/..."
+    - **Project:** `automation-analytics-backend` (session_start output)
+
+    Args:
+        chat_ids: Optional list of chat IDs to scan. If None, scans all chats.
+
+    Returns:
+        Dict mapping chat ID to the detected project name.
+    """
+    import re
+    import subprocess
+
+    # Load valid project names from config
+    try:
+        from server.utils import load_config
+
+        config = load_config()
+        repos = config.get("repositories", {})
+        VALID_PROJECTS = set(repos.keys())
+    except Exception:
+        # Fallback to known projects
+        VALID_PROJECTS = {
+            "automation-analytics-backend",
+            "pdf-generator",
+            "app-interface",
+            "konflux-release-data",
+            "redhat-ai-workflow",
+        }
+
+    if not VALID_PROJECTS:
+        return {}
+
+    try:
+        global_db = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "state.vscdb"
+        if not global_db.exists():
+            logger.debug("Cursor global storage not found")
+            return {}
+
+        # Build query - look for project-related content
+        # Search for any of the project names or common patterns
+        project_patterns_sql = " OR ".join(f"value LIKE '%{proj}%'" for proj in VALID_PROJECTS)
+
+        if chat_ids:
+            like_clauses = " OR ".join(f"key LIKE 'bubbleId:{cid}:%'" for cid in chat_ids)
+            query = f"""SELECT key, value FROM cursorDiskKV
+                       WHERE ({like_clauses})
+                       AND ({project_patterns_sql} OR value LIKE '%project=%' OR value LIKE '%Project:%')"""
+        else:
+            query = f"""SELECT key, value FROM cursorDiskKV
+                      WHERE key LIKE 'bubbleId:%'
+                      AND ({project_patterns_sql} OR value LIKE '%project=%' OR value LIKE '%Project:%')"""
+
+        result = subprocess.run(["sqlite3", str(global_db), query], capture_output=True, text=True, timeout=30)
+
+        if result.returncode != 0:
+            logger.debug(f"Failed to query Cursor global DB for projects: {result.stderr}")
+            return {}
+
+        # Build regex patterns for each project
+        # Escape special characters in project names for regex
+        project_patterns = []
+        for proj in VALID_PROJECTS:
+            escaped = re.escape(proj)
+            # Pattern 1: session_start(project="proj") or session_set_project(project="proj")
+            project_patterns.append(
+                (re.compile(rf'project\s*=\s*["\']({escaped})["\']', re.IGNORECASE), 10)  # High priority
+            )
+            # Pattern 2: **Project:** `proj` (markdown output)
+            project_patterns.append((re.compile(rf"\*\*Project:\*\*\s*`({escaped})`", re.IGNORECASE), 9))
+            # Pattern 3: Project: proj (plain text)
+            project_patterns.append((re.compile(rf'Project:\s*[`"\']?({escaped})[`"\']?', re.IGNORECASE), 8))
+            # Pattern 4: File path containing project name
+            project_patterns.append(
+                (re.compile(rf"/(?:home|Users)/[^/]+/(?:src|projects?|repos?)/({escaped})/", re.IGNORECASE), 7)
+            )
+            # Pattern 5: GitLab path (automation-analytics/automation-analytics-backend)
+            project_patterns.append((re.compile(rf'[\w-]+/({escaped})(?:\s|$|["\'\]])', re.IGNORECASE), 6))
+            # Pattern 6: Direct mention of project name (word boundary)
+            project_patterns.append((re.compile(rf"\b({escaped})\b", re.IGNORECASE), 5))
+
+        # Collect all project mentions per chat with their position and priority
+        # Structure: {chat_id: [(position, priority, project), ...]}
+        chat_projects: dict[str, list[tuple[int, int, str]]] = {}
+
+        for line in result.stdout.strip().split("\n"):
+            if not line or "|" not in line:
+                continue
+            try:
+                key, value = line.split("|", 1)
+                # Extract chat ID and bubble ID from key: bubbleId:<chatId>:<bubbleId>
+                parts = key.split(":")
+                if len(parts) >= 3:
+                    chat_id = parts[1]
+                    try:
+                        bubble_id = int(parts[2]) if parts[2].isdigit() else 0
+                    except (ValueError, IndexError):
+                        bubble_id = 0
+
+                    data = json.loads(value)
+                    text = data.get("text", "")
+                    if not text:
+                        continue
+
+                    # Try each pattern to find project mentions
+                    for pattern, priority in project_patterns:
+                        matches = pattern.findall(text)
+                        for match in matches:
+                            # Normalize project name
+                            project_name = match.lower()
+                            # Find the canonical name (case-insensitive match)
+                            for valid_proj in VALID_PROJECTS:
+                                if valid_proj.lower() == project_name:
+                                    project_name = valid_proj
+                                    break
+
+                            if project_name in VALID_PROJECTS:
+                                if chat_id not in chat_projects:
+                                    chat_projects[chat_id] = []
+                                chat_projects[chat_id].append((bubble_id, priority, project_name))
+
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+        # Return the best project for each chat
+        # Priority: highest priority pattern, then most recent (highest bubble_id)
+        result_map = {}
+        for chat_id, project_list in chat_projects.items():
+            if project_list:
+                # Sort by priority (desc), then by bubble_id (desc)
+                project_list.sort(key=lambda x: (x[1], x[0]), reverse=True)
+                best_project = project_list[0][2]
+                # Skip if it's just redhat-ai-workflow (the workspace default)
+                # Only return if we found a more specific project
+                if best_project != "redhat-ai-workflow":
+                    result_map[chat_id] = best_project
+
+        if result_map:
+            logger.info(f"Detected projects in {len(result_map)} chat(s) from content")
+
+        return result_map
+
+    except subprocess.TimeoutExpired:
+        logger.warning("Timeout scanning Cursor DB for projects")
+        return {}
+    except Exception as e:
+        logger.warning(f"Error scanning Cursor chats for projects: {e}")
+        return {}
+
+
 def get_meeting_transcript_issue_keys(issue_keys: list[str] | None = None) -> dict[str, list[dict]]:
     """Scan meeting transcripts for Jira issue keys.
 
@@ -532,7 +968,9 @@ def get_meeting_transcript_issue_keys(issue_keys: list[str] | None = None) -> di
     from collections import defaultdict
 
     try:
-        db_path = Path.home() / ".local/share/meet_bot/meetings.db"
+        from server.paths import MEETINGS_DB_FILE
+
+        db_path = MEETINGS_DB_FILE
         if not db_path.exists():
             logger.debug("Meet bot database not found")
             return {}
@@ -648,6 +1086,162 @@ def get_cursor_chat_names(workspace_uri: str) -> dict[str, str]:
     """
     chats, _ = list_cursor_chats(workspace_uri)
     return {c["composerId"]: c.get("name") for c in chats if c.get("composerId")}
+
+
+def inject_context_to_cursor_chat(
+    workspace_uri: str,
+    chat_id: str | None = None,
+    context: dict | None = None,
+    system_message: str | None = None,
+) -> bool:
+    """Inject pre-built context into a Cursor chat.
+
+    This modifies the chat's state in Cursor's SQLite database to include
+    initial context that will be loaded when the chat is opened.
+
+    WARNING: This modifies Cursor's internal database. Use with caution.
+    The database format may change between Cursor versions.
+
+    Args:
+        workspace_uri: The workspace URI (e.g., "file:///home/user/project")
+        chat_id: Optional specific chat ID. If None, creates a new chat.
+        context: Dict with context to inject (persona, skills, memory, etc.)
+        system_message: Optional system message to prepend to the chat
+
+    Returns:
+        True if successful, False otherwise
+    """
+    import subprocess
+    import time
+
+    try:
+        workspace_storage_dir = Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
+
+        if not workspace_storage_dir.exists():
+            logger.warning("Cursor workspace storage not found")
+            return False
+
+        # Find the workspace storage folder
+        for storage_dir in workspace_storage_dir.iterdir():
+            if not storage_dir.is_dir():
+                continue
+
+            workspace_json = storage_dir / "workspace.json"
+            if not workspace_json.exists():
+                continue
+
+            try:
+                workspace_data = json.loads(workspace_json.read_text())
+                folder_uri = workspace_data.get("folder", "")
+
+                if folder_uri == workspace_uri:
+                    db_path = storage_dir / "state.vscdb"
+                    if not db_path.exists():
+                        logger.warning(f"Cursor state.vscdb not found at {db_path}")
+                        return False
+
+                    # Read current composer data
+                    query = "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
+                    result = subprocess.run(
+                        ["sqlite3", str(db_path), query],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+
+                    if result.returncode != 0:
+                        logger.warning(f"Failed to read composer data: {result.stderr}")
+                        return False
+
+                    if not result.stdout.strip():
+                        # No existing composer data, create new structure
+                        composer_data = {
+                            "allComposers": [],
+                            "lastFocusedComposerIds": [],
+                        }
+                    else:
+                        composer_data = json.loads(result.stdout.strip())
+
+                    # Generate a new chat ID if not provided
+                    if chat_id is None:
+                        import uuid
+
+                        chat_id = str(uuid.uuid4())
+
+                    # Build the context message
+                    context_text = ""
+                    if system_message:
+                        context_text += f"{system_message}\n\n"
+
+                    if context:
+                        if context.get("persona"):
+                            context_text += f"**Persona:** {context['persona']}\n"
+                        if context.get("issue_key"):
+                            context_text += f"**Issue:** {context['issue_key']}\n"
+                        if context.get("skills"):
+                            context_text += f"**Skills:** {', '.join(context['skills'])}\n"
+                        if context.get("memory"):
+                            context_text += f"**Memory:** {', '.join(context['memory'])}\n"
+
+                    # Create or update the chat entry
+                    now_ms = int(time.time() * 1000)
+                    new_chat = {
+                        "composerId": chat_id,
+                        "name": context.get("name") if context else None,
+                        "createdAt": now_ms,
+                        "lastUpdatedAt": now_ms,
+                        "isArchived": False,
+                        "isDraft": False,
+                        # Note: We can't directly inject messages into the chat history
+                        # as that's stored in a separate global database.
+                        # Instead, we create a chat entry that will be populated
+                        # when the user opens it.
+                    }
+
+                    # Check if chat already exists
+                    existing_idx = None
+                    for i, c in enumerate(composer_data.get("allComposers", [])):
+                        if c.get("composerId") == chat_id:
+                            existing_idx = i
+                            break
+
+                    if existing_idx is not None:
+                        composer_data["allComposers"][existing_idx].update(new_chat)
+                    else:
+                        composer_data["allComposers"].insert(0, new_chat)
+
+                    # Set as the focused chat
+                    composer_data["lastFocusedComposerIds"] = [chat_id]
+
+                    # Write back to database
+                    # Need to escape the JSON for SQLite
+                    json_value = json.dumps(composer_data).replace("'", "''")
+                    update_query = f"UPDATE ItemTable SET value = '{json_value}' WHERE key = 'composer.composerData'"
+
+                    result = subprocess.run(
+                        ["sqlite3", str(db_path), update_query],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+
+                    if result.returncode != 0:
+                        logger.warning(f"Failed to update composer data: {result.stderr}")
+                        return False
+
+                    logger.info(f"Injected context into Cursor chat {chat_id}")
+                    return True
+
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.debug(f"Error processing workspace.json in {storage_dir}: {e}")
+                continue
+
+        logger.warning(f"No matching workspace storage found for {workspace_uri}")
+        return False
+
+    except Exception as e:
+        logger.warning(f"Error injecting context to Cursor chat: {e}")
+        return False
 
 
 @dataclass
@@ -1072,6 +1666,9 @@ class WorkspaceState:
         # Third pass: scan chat content for persona loads (backup detection)
         personas_from_content = get_cursor_chat_personas(list(cursor_ids))
 
+        # Fourth pass: scan chat content for project mentions
+        projects_from_content = get_cursor_chat_projects(list(cursor_ids))
+
         # Merge: combine keys from name and content, deduplicate and sort
         issue_keys: dict[str, str] = {}
         for sid in cursor_ids:
@@ -1118,12 +1715,19 @@ class WorkspaceState:
             if detected_persona:
                 logger.info(f"Detected persona '{detected_persona}' from chat content for {sid}")
 
+            # Use detected project from chat content if available, otherwise workspace default
+            detected_project = projects_from_content.get(sid)
+            session_project = detected_project or self.project
+            is_project_auto = detected_project is None and self.is_auto_detected
+            if detected_project:
+                logger.info(f"Detected project '{detected_project}' from chat content for {sid}")
+
             session = ChatSession(
                 session_id=sid,
                 workspace_uri=self.workspace_uri,
                 persona=session_persona,
-                project=self.project,
-                is_project_auto_detected=self.is_auto_detected,
+                project=session_project,
+                is_project_auto_detected=is_project_auto,
                 name=cursor_chat.get("name"),
                 static_tool_count=get_persona_tool_count(session_persona),
                 issue_key=issue_keys.get(sid),  # Set issue key if found in chat
@@ -1199,6 +1803,18 @@ class WorkspaceState:
                     new_tool_count = get_persona_tool_count(detected_persona)
                     if new_tool_count > 0:
                         session.static_tool_count = new_tool_count
+                    updated = True
+
+            # Update project from chat content if session has auto-detected (workspace default) project
+            # Only update if we detected a more specific project than the workspace default
+            if session.is_project_auto_detected and sid in projects_from_content:
+                detected_project = projects_from_content[sid]
+                if detected_project and detected_project != session.project:
+                    logger.info(
+                        f"Updating project for {sid} from chat content: " f"'{session.project}' -> '{detected_project}'"
+                    )
+                    session.project = detected_project
+                    session.is_project_auto_detected = False  # Now explicitly detected
                     updated = True
 
             if updated:
@@ -2182,89 +2798,89 @@ class WorkspaceRegistry:
                     except (ValueError, TypeError):
                         pass
 
-            # Restore sessions
-            sessions_data = ws_data.get("sessions", {})
-            for session_id, sess_data in sessions_data.items():
-                # Get session's project - use persisted value or fall back to workspace project
-                session_project = sess_data.get("project")
-                session_auto_detected = sess_data.get("is_project_auto_detected", False)
+                # Restore sessions (inside the for loop, per workspace)
+                sessions_data = ws_data.get("sessions", {})
+                for session_id, sess_data in sessions_data.items():
+                    # Get session's project - use persisted value or fall back to workspace project
+                    session_project = sess_data.get("project")
+                    session_auto_detected = sess_data.get("is_project_auto_detected", False)
 
-                # If session has no project, inherit from workspace (for backward compat)
-                if session_project is None:
-                    session_project = workspace.project
-                    session_auto_detected = workspace.is_auto_detected
+                    # If session has no project, inherit from workspace (for backward compat)
+                    if session_project is None:
+                        session_project = workspace.project
+                        session_auto_detected = workspace.is_auto_detected
 
-                session = ChatSession(
-                    session_id=session_id,
-                    workspace_uri=workspace_uri,
-                    persona=sess_data.get("persona", get_default_persona()),
-                    project=session_project,
-                    is_project_auto_detected=session_auto_detected,
-                    issue_key=sess_data.get("issue_key"),
-                    branch=sess_data.get("branch"),
-                    name=sess_data.get("name"),
-                )
+                    session = ChatSession(
+                        session_id=session_id,
+                        workspace_uri=workspace_uri,
+                        persona=sess_data.get("persona", get_default_persona()),
+                        project=session_project,
+                        is_project_auto_detected=session_auto_detected,
+                        issue_key=sess_data.get("issue_key"),
+                        branch=sess_data.get("branch"),
+                        name=sess_data.get("name"),
+                    )
 
-                # Parse session timestamps
-                if sess_data.get("started_at"):
-                    try:
-                        session.started_at = datetime.fromisoformat(sess_data["started_at"])
-                    except (ValueError, TypeError):
-                        # Keep the default (datetime.now()) if parsing fails
-                        pass
+                    # Parse session timestamps
+                    if sess_data.get("started_at"):
+                        try:
+                            session.started_at = datetime.fromisoformat(sess_data["started_at"])
+                        except (ValueError, TypeError):
+                            # Keep the default (datetime.now()) if parsing fails
+                            pass
 
-                if sess_data.get("last_activity"):
-                    try:
-                        session.last_activity = datetime.fromisoformat(sess_data["last_activity"])
-                    except (ValueError, TypeError):
-                        pass
+                    if sess_data.get("last_activity"):
+                        try:
+                            session.last_activity = datetime.fromisoformat(sess_data["last_activity"])
+                        except (ValueError, TypeError):
+                            pass
 
-                # Restore dual tool counts (new format) or derive from old format
-                if sess_data.get("static_tool_count"):
-                    session.static_tool_count = sess_data["static_tool_count"]
-                elif sess_data.get("tool_count"):
-                    session.static_tool_count = sess_data["tool_count"]
-                elif sess_data.get("active_tools"):
-                    session.static_tool_count = len(sess_data["active_tools"])
+                    # Restore dual tool counts (new format) or derive from old format
+                    if sess_data.get("static_tool_count"):
+                        session.static_tool_count = sess_data["static_tool_count"]
+                    elif sess_data.get("tool_count"):
+                        session.static_tool_count = sess_data["tool_count"]
+                    elif sess_data.get("active_tools"):
+                        session.static_tool_count = len(sess_data["active_tools"])
 
-                session.dynamic_tool_count = sess_data.get("dynamic_tool_count", 0)
-                session.last_filter_message = sess_data.get("last_filter_message")
-                if sess_data.get("last_filter_time"):
-                    try:
-                        session.last_filter_time = datetime.fromisoformat(sess_data["last_filter_time"])
-                    except (ValueError, TypeError):
-                        pass
+                    session.dynamic_tool_count = sess_data.get("dynamic_tool_count", 0)
+                    session.last_filter_message = sess_data.get("last_filter_message")
+                    if sess_data.get("last_filter_time"):
+                        try:
+                            session.last_filter_time = datetime.fromisoformat(sess_data["last_filter_time"])
+                        except (ValueError, TypeError):
+                            pass
 
-                # Restore activity tracking
-                session.last_tool = sess_data.get("last_tool")
-                if sess_data.get("last_tool_time"):
-                    try:
-                        session.last_tool_time = datetime.fromisoformat(sess_data["last_tool_time"])
-                    except (ValueError, TypeError):
-                        pass
-                session.tool_call_count = sess_data.get("tool_call_count", 0)
-                session.meeting_references = sess_data.get("meeting_references", [])
+                    # Restore activity tracking
+                    session.last_tool = sess_data.get("last_tool")
+                    if sess_data.get("last_tool_time"):
+                        try:
+                            session.last_tool_time = datetime.fromisoformat(sess_data["last_tool_time"])
+                        except (ValueError, TypeError):
+                            pass
+                    session.tool_call_count = sess_data.get("tool_call_count", 0)
+                    session.meeting_references = sess_data.get("meeting_references", [])
 
-                workspace.sessions[session_id] = session
-                restored_sessions += 1
+                    workspace.sessions[session_id] = session
+                    restored_sessions += 1
 
-            # Update session names from Cursor's database (sync names if changed)
-            cursor_chats, cursor_active_id = list_cursor_chats(workspace_uri)
-            cursor_chat_map = {c["composerId"]: c for c in cursor_chats}
+                # Update session names from Cursor's database (sync names if changed)
+                cursor_chats, cursor_active_id = list_cursor_chats(workspace_uri)
+                cursor_chat_map = {c["composerId"]: c for c in cursor_chats}
 
-            # Update active session from Cursor
-            if cursor_active_id and cursor_active_id in workspace.sessions:
-                workspace.active_session_id = cursor_active_id
-            for session_id, session in workspace.sessions.items():
-                if session_id in cursor_chat_map:
-                    cursor_name = cursor_chat_map[session_id].get("name")
-                    if cursor_name and cursor_name != session.name:
-                        logger.info(f"Updating session {session_id} name from '{session.name}' to '{cursor_name}'")
-                        session.name = cursor_name
+                # Update active session from Cursor
+                if cursor_active_id and cursor_active_id in workspace.sessions:
+                    workspace.active_session_id = cursor_active_id
+                for session_id, session in workspace.sessions.items():
+                    if session_id in cursor_chat_map:
+                        cursor_name = cursor_chat_map[session_id].get("name")
+                        if cursor_name and cursor_name != session.name:
+                            logger.info(f"Updating session {session_id} name from '{session.name}' to '{cursor_name}'")
+                            session.name = cursor_name
 
-            # Only add workspace if it has sessions or is recent
-            if workspace.sessions or not workspace.is_stale(max_age_hours=24):
-                cls._workspaces[workspace_uri] = workspace
+                # Only add workspace if it has sessions or is recent
+                if workspace.sessions or not workspace.is_stale(max_age_hours=24):
+                    cls._workspaces[workspace_uri] = workspace
 
             logger.info(f"Restored {restored_sessions} session(s) from {len(cls._workspaces)} workspace(s)")
             return restored_sessions

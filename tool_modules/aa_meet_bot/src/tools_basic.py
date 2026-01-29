@@ -19,6 +19,16 @@ from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
 
+# Import centralized paths
+try:
+    from server.paths import MEETBOT_DATA_DIR, MEETBOT_STATE_FILE
+except ImportError:
+    # Fallback for standalone usage
+    from pathlib import Path
+
+    MEETBOT_DATA_DIR = Path.home() / ".config" / "aa-workflow" / "meet_bot"
+    MEETBOT_STATE_FILE = MEETBOT_DATA_DIR / "state.json"
+
 from server.tool_registry import ToolRegistry
 from tool_modules.aa_meet_bot.src.audio_output import AudioOutputManager
 from tool_modules.aa_meet_bot.src.browser_controller import CaptionEntry, GoogleMeetController
@@ -1182,6 +1192,75 @@ async def _meet_notes_cleanup_audio_impl() -> str:
     return "\n".join(lines)
 
 
+async def _meet_notes_cleanup_all_devices_impl() -> str:
+    """Force cleanup ALL MeetBot audio/video devices, ignoring active sessions."""
+    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices, get_meetbot_device_count
+
+    # Get counts before cleanup
+    before = await get_meetbot_device_count()
+
+    # Force cleanup ALL devices (pass empty set to skip active session check)
+    results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
+
+    # Get counts after cleanup
+    after = await get_meetbot_device_count()
+
+    lines = [
+        "# 🔊 Force Device Cleanup (ALL)",
+        "",
+        "⚠️ **This removes ALL MeetBot devices, including any active meetings!**",
+        "",
+        "## Before",
+        f"- Modules: {before['module_count']}",
+        f"- Sinks: {before['sink_count']}",
+        f"- Sources: {before['source_count']}",
+        f"- Pipes: {before['pipe_count']}",
+        f"- Video devices: {before['video_count']}",
+        "",
+        "## After",
+        f"- Modules: {after['module_count']}",
+        f"- Sinks: {after['sink_count']}",
+        f"- Sources: {after['source_count']}",
+        f"- Pipes: {after['pipe_count']}",
+        f"- Video devices: {after['video_count']}",
+        "",
+    ]
+
+    if results["removed_modules"]:
+        lines.append("## Removed Modules")
+        for mod in results["removed_modules"]:
+            lines.append(f"- ✅ {mod}")
+        lines.append("")
+
+    if results["removed_pipes"]:
+        lines.append("## Removed Pipes")
+        for pipe in results["removed_pipes"]:
+            lines.append(f"- ✅ {pipe}")
+        lines.append("")
+
+    if results.get("removed_video_devices"):
+        lines.append("## Removed Video Devices")
+        for vid in results["removed_video_devices"]:
+            lines.append(f"- ✅ {vid}")
+        lines.append("")
+
+    if results["errors"]:
+        lines.append("## Errors")
+        for err in results["errors"]:
+            lines.append(f"- ❌ {err}")
+        lines.append("")
+
+    total_removed = (
+        len(results["removed_modules"]) + len(results["removed_pipes"]) + len(results.get("removed_video_devices", []))
+    )
+    if total_removed == 0:
+        lines.append("✅ No devices found to clean up.")
+    else:
+        lines.append(f"✅ Force cleaned {total_removed} device(s).")
+
+    return "\n".join(lines)
+
+
 async def _meet_notes_list_meetings_impl(days: int, calendar_id: str) -> str:
     """List recent meetings."""
     from datetime import datetime, timedelta
@@ -1549,14 +1628,12 @@ async def _meet_notes_export_state_impl() -> str:
     }
 
     # Write to state file
-    state_dir = Path.home() / ".local" / "share" / "meet_bot"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    state_file = state_dir / "state.json"
+    MEETBOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    with open(state_file, "w") as f:
+    with open(MEETBOT_STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-    return f"✅ State exported to {state_file}\n\nFound {len(upcoming_meetings)} upcoming meetings with Meet links."
+    return f"✅ State exported to {MEETBOT_STATE_FILE}\n\nFound {len(upcoming_meetings)} upcoming meetings with Meet links."
 
 
 # ==================== VOICE PIPELINE IMPLEMENTATIONS ====================
@@ -1672,12 +1749,135 @@ async def _meet_voice_pipeline_status_impl() -> str:
     return "\n".join(lines)
 
 
+# ==================== STARTUP CLEANUP ====================
+
+_startup_cleanup_done = False
+_cleanup_task: Optional[asyncio.Task] = None
+
+
+async def _run_startup_cleanup() -> None:
+    """
+    Clean up orphaned MeetBot devices on startup.
+
+    This runs once when the MCP server starts to remove any devices
+    left over from previous sessions that weren't properly cleaned up.
+    """
+    global _startup_cleanup_done
+    if _startup_cleanup_done:
+        return
+
+    _startup_cleanup_done = True
+
+    try:
+        from tool_modules.aa_meet_bot.src.virtual_devices import (
+            cleanup_orphaned_meetbot_devices,
+            get_meetbot_device_count,
+        )
+
+        # Check if there are any orphaned devices
+        counts = await get_meetbot_device_count()
+        total_devices = counts["module_count"] + counts["pipe_count"] + counts["video_count"]
+
+        if total_devices == 0:
+            logger.info("🔊 MeetBot startup: No orphaned devices found")
+            return
+
+        logger.info(
+            f"🔊 MeetBot startup: Found {total_devices} orphaned devices "
+            f"(modules={counts['module_count']}, pipes={counts['pipe_count']}, video={counts['video_count']})"
+        )
+
+        # Clean up all orphaned devices (no active sessions on startup)
+        results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
+
+        removed_count = (
+            len(results.get("removed_modules", []))
+            + len(results.get("removed_pipes", []))
+            + len(results.get("removed_video_devices", []))
+        )
+
+        if removed_count > 0:
+            logger.info(f"🔊 MeetBot startup: Cleaned up {removed_count} orphaned devices")
+        else:
+            logger.info("🔊 MeetBot startup: No devices needed cleanup")
+
+        if results.get("errors"):
+            for err in results["errors"]:
+                logger.warning(f"🔊 MeetBot startup cleanup error: {err}")
+
+    except Exception as e:
+        logger.error(f"🔊 MeetBot startup cleanup failed: {e}")
+
+
+async def _periodic_cleanup_task() -> None:
+    """
+    Background task that periodically cleans up orphaned devices.
+
+    Runs every 5 minutes to catch any devices that weren't properly
+    cleaned up due to crashes or unexpected termination.
+    """
+    while True:
+        try:
+            await asyncio.sleep(300)  # 5 minutes
+
+            # Get active instance IDs from the bot manager
+            global _bot_manager
+            active_ids = set()
+            if _bot_manager:
+                for session in _bot_manager._sessions.values():
+                    if session.bot._controller:
+                        active_ids.add(session.bot._controller._instance_id)
+
+            from tool_modules.aa_meet_bot.src.virtual_devices import (
+                cleanup_orphaned_meetbot_devices,
+                get_meetbot_device_count,
+            )
+
+            # Check if cleanup is needed
+            counts = await get_meetbot_device_count()
+            expected_modules = len(active_ids) * 2  # Each instance has sink + source
+
+            if counts["module_count"] > expected_modules:
+                logger.info(
+                    f"🔊 Periodic cleanup: {counts['module_count']} modules but only "
+                    f"{len(active_ids)} active meetings (expected ~{expected_modules})"
+                )
+                results = await cleanup_orphaned_meetbot_devices(active_ids)
+
+                if results.get("removed_modules") or results.get("removed_pipes"):
+                    logger.info(
+                        f"🔊 Periodic cleanup: Removed {len(results.get('removed_modules', []))} modules, "
+                        f"{len(results.get('removed_pipes', []))} pipes"
+                    )
+
+        except asyncio.CancelledError:
+            logger.info("🔊 Periodic cleanup task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"🔊 Periodic cleanup error: {e}")
+
+
+def _start_periodic_cleanup() -> None:
+    """Start the periodic cleanup background task."""
+    global _cleanup_task
+    if _cleanup_task is None or _cleanup_task.done():
+        _cleanup_task = asyncio.create_task(_periodic_cleanup_task())
+        logger.info("🔊 Started periodic device cleanup task")
+
+
 # ==================== TOOL REGISTRATION ====================
 
 
 def register_tools(server: FastMCP) -> int:
     """Register Meet Bot tools with the MCP server."""
     registry = ToolRegistry(server)
+
+    # Schedule startup cleanup to run in the background
+    # This ensures orphaned devices from previous sessions are cleaned up
+    asyncio.get_event_loop().call_soon(lambda: asyncio.create_task(_run_startup_cleanup()))
+
+    # Start periodic cleanup task
+    _start_periodic_cleanup()
 
     @registry.tool()
     async def meet_bot_status() -> str:
@@ -2043,6 +2243,23 @@ def register_tools(server: FastMCP) -> int:
         but can be called manually if needed.
         """
         return await _meet_notes_cleanup_audio_impl()
+
+    @registry.tool()
+    async def meet_notes_cleanup_all_devices() -> str:
+        """
+        Force cleanup ALL MeetBot audio/video devices.
+
+        ⚠️ WARNING: This removes ALL devices, including any that may be
+        in use by active meetings! Use this when:
+
+        - The MCP server was restarted and lost track of active sessions
+        - Devices are stuck and normal cleanup doesn't work
+        - You want to start fresh with no MeetBot devices
+
+        For normal cleanup that preserves active meetings, use
+        `meet_notes_cleanup_audio()` instead.
+        """
+        return await _meet_notes_cleanup_all_devices_impl()
 
     @registry.tool()
     async def meet_notes_list_meetings(

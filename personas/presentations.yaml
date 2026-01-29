@@ -1,0 +1,33 @@
+# Presentations Persona Configuration
+# Focused on creating and managing slide decks and presentations
+
+name: presentations
+description: Create and manage Google Slides presentations from project materials
+persona: personas/presentations.md
+
+# Tool modules to load (from tool_modules/aa_*)
+tools:
+  - workflow        # Core (memory, persona, session, skill, infra, meta)
+  - google_slides   # Google Slides API operations
+  - google_calendar # For scheduling presentation meetings
+  - knowledge       # Project knowledge for content
+  - code_search     # Search codebase for examples/diagrams
+
+# Note: This persona focuses on presentation creation and management.
+# Use persona_load() to switch to developer when ready to implement features.
+
+skills:
+  # Presentation workflows
+  - create_slide_deck       # Create new presentation from outline
+  - edit_slide_deck         # Edit existing presentation
+  - list_presentations      # List available presentations
+  - export_presentation     # Export to PDF
+
+  # Content gathering
+  - gather_context          # Gather context for presentation content
+  - research_topic          # Research topic for slides
+  - summarize_findings      # Summarize research into slide format
+
+  # Knowledge management
+  - memory_view             # View/manage persistent memory
+  - knowledge_refresh       # Refresh project knowledge

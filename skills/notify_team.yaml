@@ -4,21 +4,50 @@
 name: notify_team
 description: |
   Send notifications to Slack channels for key workflow events.
+  Uses consistent templates for uniform, predictable messages.
 
-  Use for:
-  - Deployment completed notifications
-  - MR ready for review
-  - Alert resolved
-  - Release announcements
-  - General team updates
+  ## Templates Available
 
-  The skill will:
-  1. Find the appropriate channel
-  2. Format the message nicely
-  3. Post to Slack
-  4. Optionally mention specific users
+  **mr_ready** - MR ready for review
+  ```json
+  {"template": "mr_ready", "template_data": {"mr_id": "1495", "title": "fix(deps): update urllib3", "url": "https://gitlab.../1495", "issue_key": "AAP-62128"}}
+  ```
 
-version: "1.0"
+  **deployment** - Deployment status
+  ```json
+  {"template": "deployment", "template_data": {"environment": "stage", "namespace": "ephemeral-xxx", "status": "success", "duration": "5m"}}
+  ```
+
+  **alert** - Alert notification
+  ```json
+  {"template": "alert", "template_data": {"alert_name": "HighCPU", "severity": "warning", "environment": "prod"}}
+  ```
+
+  **release** - Release announcement
+  ```json
+  {"template": "release", "template_data": {"version": "1.2.3", "environments": ["stage", "prod"]}}
+  ```
+
+  **cve_fix** - Security fix notification
+  ```json
+  {"template": "cve_fix", "template_data": {"cve_id": "CVE-2025-66471", "package": "urllib3", "version": "2.6.3", "mr_url": "https://..."}}
+  ```
+
+  **generic** - Plain message with emoji (default)
+
+  ## Quick Examples
+
+  Simple message:
+  ```
+  skill_run("notify_team", '{"message": "Build complete"}')
+  ```
+
+  MR notification:
+  ```
+  skill_run("notify_team", '{"message": "", "template": "mr_ready", "template_data": {"mr_id": "1495", "title": "fix: update deps", "url": "https://...", "issue_key": "AAP-62128"}}')
+  ```
+
+version: "1.1"
 
 inputs:
   - name: message
@@ -29,8 +58,8 @@ inputs:
   - name: channel
     type: string
     required: false
-    default: "team-automation-analytics"
-    description: "Slack channel name (without #)"
+    default: ""
+    description: "Slack channel name or ID (defaults to team channel from config.json)"
 
   - name: type
     type: string
@@ -53,6 +82,32 @@ inputs:
     required: false
     description: "Additional context (e.g., MR ID, namespace, issue key)"
 
+  - name: template
+    type: string
+    required: false
+    default: ""
+    description: |
+      Message template to use. If not specified, auto-detects from 'type'.
+      Available templates:
+        - mr_ready: MR ready for review (requires: mr_id, title, url, issue_key)
+        - mr_merged: MR merged notification (requires: mr_id, title, url)
+        - deployment: Deployment status (requires: environment, namespace, status)
+        - alert: Alert notification (requires: alert_name, severity, environment)
+        - release: Release announcement (requires: version, environments)
+        - cve_fix: CVE fix notification (requires: cve_id, package, version, mr_url)
+        - generic: Plain message with emoji (default)
+
+  - name: template_data
+    type: object
+    required: false
+    description: |
+      Data for the template as JSON object. Fields depend on template:
+        mr_ready: {"mr_id": "1495", "title": "fix: ...", "url": "https://...", "issue_key": "AAP-12345"}
+        deployment: {"environment": "stage", "namespace": "ephemeral-xxx", "status": "success", "duration": "5m"}
+        alert: {"alert_name": "HighCPU", "severity": "warning", "environment": "prod", "runbook": "https://..."}
+        release: {"version": "1.2.3", "environments": ["stage", "prod"], "changelog": "..."}
+        cve_fix: {"cve_id": "CVE-2025-66471", "package": "urllib3", "version": "2.6.3", "mr_url": "https://..."}
+
 steps:
   # ==================== LOAD SLACK PERSONA ====================
   # This skill requires slack tools which are only in slack/admin personas
@@ -69,7 +124,7 @@ steps:
     description: "Check for known Slack issues before starting"
     tool: check_known_issues
     args:
-      tool_name: "slack_post_message"
+      tool_name: "slack_send_message"
       error_text: ""
     output: slack_known_issues
     on_error: continue
@@ -80,6 +135,38 @@ steps:
       result = {"slack_failures": []}
     output: autoheal_state
     on_error: continue
+
+  # ==================== LOAD CONFIG ====================
+
+  - name: load_slack_config
+    description: "Load Slack configuration from config.json"
+    compute: |
+      from scripts.common.config_loader import load_config
+
+      config = load_config()
+      slack_cfg = config.get("slack", {})
+      channels_cfg = slack_cfg.get("channels", {})
+
+      # Get team channel from config
+      team_channel = channels_cfg.get("team", {})
+      team_channel_id = team_channel.get("id", "")
+      team_channel_name = team_channel.get("name", "")
+
+      # Use input channel if provided, otherwise default to team channel from config
+      channel_input = inputs.get("channel") if hasattr(inputs, 'get') else getattr(inputs, 'channel', None)
+      if channel_input and channel_input.strip():
+          resolved_channel = channel_input.strip()
+      else:
+          # Default to team channel ID from config
+          resolved_channel = team_channel_id or team_channel_name or "team-automation-analytics"
+
+      result = {
+          "team_channel_id": team_channel_id,
+          "team_channel_name": team_channel_name,
+          "resolved_channel": resolved_channel,
+          "group_handle": team_channel.get("group_handle", ""),
+      }
+    output: channel_config
 
   # ==================== FIND CHANNEL ====================
 
@@ -95,25 +182,40 @@ steps:
     description: "Find the target channel"
     compute: |
       channels_text = str(channels_raw) if channels_raw else ""
-
-      target = inputs.channel.lower().replace("#", "")
-      channel_found = target in channels_text.lower()
-
-      # Try to extract channel ID
       import re
-      channel_id = None
-      for line in channels_text.split("\n"):
-          if target in line.lower():
-              # Look for channel ID pattern
-              id_match = re.search(r'(C[A-Z0-9]+)', line)
-              if id_match:
-                  channel_id = id_match.group(1)
-                  break
+
+      # Use resolved channel from config (already handles default to team channel)
+      original_channel = channel_config.get("resolved_channel", "").replace("#", "")
+
+      # Check if input is already a channel ID (starts with C and is alphanumeric)
+      is_channel_id = bool(re.match(r'^C[A-Z0-9]+$', original_channel))
+
+      if is_channel_id:
+          # Input is already a channel ID, use it directly
+          channel_id = original_channel
+          channel_found = True
+          # Try to get friendly name from config
+          channel_name = channel_config.get("team_channel_name") if original_channel == channel_config.get("team_channel_id") else original_channel
+      else:
+          # Input is a channel name, search for it
+          target = original_channel.lower()
+          channel_found = target in channels_text.lower()
+
+          # Try to extract channel ID from listing
+          channel_id = None
+          for line in channels_text.split("\n"):
+              if target in line.lower():
+                  # Look for channel ID pattern
+                  id_match = re.search(r'(C[A-Z0-9]+)', line)
+                  if id_match:
+                      channel_id = id_match.group(1)
+                      break
+          channel_name = target
 
       result = {
           "found": channel_found,
           "channel_id": channel_id,
-          "channel_name": target,
+          "channel_name": channel_name,
       }
     output: channel_info
 
@@ -151,11 +253,39 @@ steps:
   # ==================== FORMAT MESSAGE ====================
 
   - name: format_message
-    description: "Format the Slack message with emoji and structure"
+    description: "Format the Slack message using templates for consistent notifications"
     compute: |
-      msg_type = inputs.type.lower()
+      import json
 
-      # Choose emoji based on type
+      msg_type = inputs.get("type", "info").lower() if hasattr(inputs, 'get') else getattr(inputs, 'type', 'info').lower()
+      template_name = inputs.get("template", "").lower() if hasattr(inputs, 'get') else getattr(inputs, 'template', '').lower()
+      message = inputs.get("message", "") if hasattr(inputs, 'get') else getattr(inputs, 'message', '')
+
+      # Parse template_data if provided
+      template_data_raw = inputs.get("template_data") if hasattr(inputs, 'get') else getattr(inputs, 'template_data', None)
+      if isinstance(template_data_raw, str):
+          try:
+              data = json.loads(template_data_raw)
+          except:
+              data = {}
+      elif isinstance(template_data_raw, dict):
+          data = template_data_raw
+      else:
+          data = {}
+
+      # Auto-detect template from type if not specified
+      if not template_name:
+          type_to_template = {
+              "mr_ready": "mr_ready",
+              "mr_merged": "mr_merged",
+              "deployment": "deployment",
+              "alert": "alert",
+              "release": "release",
+              "cve": "cve_fix",
+          }
+          template_name = type_to_template.get(msg_type, "generic")
+
+      # Emoji map
       emoji_map = {
           "info": "ℹ️",
           "success": "✅",
@@ -163,25 +293,228 @@ steps:
           "error": "❌",
           "deployment": "🚀",
           "release": "📦",
+          "mr_ready": "🔍",
+          "mr_merged": "✅",
+          "alert": "🚨",
+          "cve": "🔒",
       }
-      emoji = emoji_map.get(msg_type, "📢")
+      emoji = emoji_map.get(msg_type, emoji_map.get(template_name, "📢"))
 
-      # Build message
-      parts = [f"{emoji} {inputs.message}"]
+      # ==================== TEMPLATES ====================
 
-      # Add mention
+      def format_mr_ready(data, message):
+          """MR ready for review template"""
+          mr_id = data.get("mr_id", "")
+          title = data.get("title", message)
+          url = data.get("url", "")
+          issue_key = data.get("issue_key", "")
+          author = data.get("author", "")
+
+          lines = ["🔍 *MR Ready for Review*"]
+          lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+
+          if mr_id:
+              if url:
+                  lines.append(f"*MR:* <{url}|!{mr_id}>")
+              else:
+                  lines.append(f"*MR:* !{mr_id}")
+
+          if title:
+              lines.append(f"*Title:* {title}")
+
+          if issue_key:
+              jira_url = f"https://issues.redhat.com/browse/{issue_key}"
+              lines.append(f"*Jira:* <{jira_url}|{issue_key}>")
+
+          if author:
+              lines.append(f"*Author:* {author}")
+
+          return "\n".join(lines)
+
+      def format_mr_merged(data, message):
+          """MR merged template"""
+          mr_id = data.get("mr_id", "")
+          title = data.get("title", message)
+          url = data.get("url", "")
+          target_branch = data.get("target_branch", "main")
+
+          lines = ["✅ *MR Merged*"]
+          lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+
+          if mr_id:
+              if url:
+                  lines.append(f"*MR:* <{url}|!{mr_id}>")
+              else:
+                  lines.append(f"*MR:* !{mr_id}")
+
+          if title:
+              lines.append(f"*Title:* {title}")
+
+          lines.append(f"*Branch:* `{target_branch}`")
+
+          return "\n".join(lines)
+
+      def format_deployment(data, message):
+          """Deployment notification template"""
+          environment = data.get("environment", "unknown")
+          namespace = data.get("namespace", "")
+          status = data.get("status", "unknown")
+          duration = data.get("duration", "")
+          image = data.get("image", "")
+          sha = data.get("sha", "")
+
+          status_emoji = "✅" if status.lower() in ("success", "complete", "ready") else "❌" if status.lower() in ("failed", "error") else "🔄"
+
+          lines = [f"🚀 *Deployment {status.title()}*"]
+          lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+          lines.append(f"*Environment:* `{environment}`")
+
+          if namespace:
+              lines.append(f"*Namespace:* `{namespace}`")
+
+          lines.append(f"*Status:* {status_emoji} {status}")
+
+          if duration:
+              lines.append(f"*Duration:* {duration}")
+
+          if sha:
+              lines.append(f"*Commit:* `{sha[:12]}`")
+
+          if image:
+              lines.append(f"*Image:* `{image}`")
+
+          if message and message != status:
+              lines.append(f"\n{message}")
+
+          return "\n".join(lines)
+
+      def format_alert(data, message):
+          """Alert notification template"""
+          alert_name = data.get("alert_name", message)
+          severity = data.get("severity", "warning")
+          environment = data.get("environment", "")
+          runbook = data.get("runbook", "")
+          description = data.get("description", "")
+
+          severity_emoji = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(severity.lower(), "🟡")
+
+          lines = [f"🚨 *Alert: {alert_name}*"]
+          lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+          lines.append(f"*Severity:* {severity_emoji} {severity.upper()}")
+
+          if environment:
+              lines.append(f"*Environment:* `{environment}`")
+
+          if description:
+              lines.append(f"*Details:* {description}")
+
+          if runbook:
+              lines.append(f"*Runbook:* <{runbook}|View Runbook>")
+
+          return "\n".join(lines)
+
+      def format_release(data, message):
+          """Release announcement template"""
+          version = data.get("version", "")
+          environments = data.get("environments", [])
+          changelog = data.get("changelog", "")
+          release_url = data.get("release_url", "")
+
+          lines = ["📦 *New Release*"]
+          lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+
+          if version:
+              if release_url:
+                  lines.append(f"*Version:* <{release_url}|{version}>")
+              else:
+                  lines.append(f"*Version:* `{version}`")
+
+          if environments:
+              env_list = ", ".join(f"`{e}`" for e in environments)
+              lines.append(f"*Environments:* {env_list}")
+
+          if changelog:
+              lines.append(f"\n*Changes:*\n{changelog}")
+
+          if message and message != version:
+              lines.append(f"\n{message}")
+
+          return "\n".join(lines)
+
+      def format_cve_fix(data, message):
+          """CVE fix notification template"""
+          cve_id = data.get("cve_id", "")
+          package = data.get("package", "")
+          version = data.get("version", "")
+          mr_url = data.get("mr_url", "")
+          mr_id = data.get("mr_id", "")
+          severity = data.get("severity", "")
+
+          lines = ["🔒 *Security Fix*"]
+          lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+
+          if cve_id:
+              cve_url = f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+              lines.append(f"*CVE:* <{cve_url}|{cve_id}>")
+
+          if severity:
+              severity_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(severity.lower(), "")
+              lines.append(f"*Severity:* {severity_emoji} {severity.upper()}")
+
+          if package and version:
+              lines.append(f"*Fix:* `{package}` → `{version}`")
+          elif package:
+              lines.append(f"*Package:* `{package}`")
+
+          if mr_url:
+              mr_text = f"!{mr_id}" if mr_id else "View MR"
+              lines.append(f"*MR:* <{mr_url}|{mr_text}>")
+
+          if message:
+              lines.append(f"\n{message}")
+
+          return "\n".join(lines)
+
+      def format_generic(data, message, emoji):
+          """Generic message with emoji"""
+          parts = [f"{emoji} {message}"]
+
+          # Add any extra data fields
+          for key, value in data.items():
+              if key not in ("message",) and value:
+                  parts.append(f"*{key.replace('_', ' ').title()}:* {value}")
+
+          return "\n".join(parts)
+
+      # ==================== SELECT TEMPLATE ====================
+
+      template_funcs = {
+          "mr_ready": format_mr_ready,
+          "mr_merged": format_mr_merged,
+          "deployment": format_deployment,
+          "alert": format_alert,
+          "release": format_release,
+          "cve_fix": format_cve_fix,
+      }
+
+      if template_name in template_funcs:
+          formatted = template_funcs[template_name](data, message)
+      else:
+          formatted = format_generic(data, message, emoji)
+
+      # Add mention if provided
       if 'user_mention' in dir() and user_mention and user_mention.get('mention_text'):
-          parts.append(f"\ncc: {user_mention['mention_text']}")
+          formatted += f"\n\ncc: {user_mention['mention_text']}"
 
-      # Add context
-      if inputs.context:
-          parts.append(f"\n```{inputs.context}```")
-
-      formatted = "".join(parts)
+      # Add context if provided
+      context_val = inputs.get("context") if hasattr(inputs, 'get') else getattr(inputs, 'context', None)
+      if context_val:
+          formatted += f"\n```{context_val}```"
 
       result = {
           "text": formatted,
           "emoji": emoji,
+          "template": template_name,
       }
     output: formatted_msg
 
@@ -189,10 +522,10 @@ steps:
 
   - name: post_message
     description: "Post the message to Slack"
-    tool: slack_post_message
+    tool: slack_send_message
     args:
-      channel: "{{ channel_info.channel_name }}"
-      message: "{{ formatted_msg.text }}"
+      target: "{{ channel_info.channel_id or channel_info.channel_name }}"
+      text: "{{ formatted_msg.text }}"
       thread_ts: "{{ inputs.thread_ts or '' }}"
     output: post_result
     on_error: auto_heal  # Slack API - may need auth
@@ -271,13 +604,19 @@ steps:
       if "slack_notifications" not in patterns:
           patterns["slack_notifications"] = []
 
-      # Record this notification
+      # Record this notification (use .get() for dict access)
+      channel_name = channel_info.get("channel_name", "unknown") if isinstance(channel_info, dict) else "unknown"
+      msg_type = inputs.get("type", "info") if hasattr(inputs, 'get') else getattr(inputs, 'type', 'info')
+      has_mention = bool(inputs.get("mention") if hasattr(inputs, 'get') else getattr(inputs, 'mention', None))
+      has_context = bool(inputs.get("context") if hasattr(inputs, 'get') else getattr(inputs, 'context', None))
+      has_thread = bool(inputs.get("thread_ts") if hasattr(inputs, 'get') else getattr(inputs, 'thread_ts', None))
+
       notification_record = {
-          "channel": channel_info.channel_name if channel_info else "unknown",
-          "type": inputs.type,
-          "has_mention": bool(inputs.mention),
-          "has_context": bool(inputs.context),
-          "threaded": bool(inputs.thread_ts),
+          "channel": channel_name,
+          "type": msg_type,
+          "has_mention": has_mention,
+          "has_context": has_context,
+          "threaded": has_thread,
           "timestamp": datetime.now().isoformat(),
       }
 
@@ -340,21 +679,21 @@ outputs:
 
       if "not_in_channel" in combined.lower() or "channel_not_found" in combined.lower():
           errors_detected.append({
-              "tool": "slack_post_message",
+              "tool": "slack_send_message",
               "pattern": "channel_not_found",
               "cause": "Slack channel not found or bot not added",
               "fix": "Check channel name and invite bot to channel"
           })
       if "invalid_auth" in combined.lower():
           errors_detected.append({
-              "tool": "slack_post_message",
+              "tool": "slack_send_message",
               "pattern": "invalid_auth",
               "cause": "Slack token expired or invalid",
               "fix": "Check Slack token in config.json"
           })
       if "rate_limited" in combined.lower():
           errors_detected.append({
-              "tool": "slack_post_message",
+              "tool": "slack_send_message",
               "pattern": "rate_limited",
               "cause": "Slack API rate limit exceeded",
               "fix": "Wait a few seconds and retry"
@@ -369,7 +708,7 @@ outputs:
     condition: "notify_team_errors_detected and any(e.get('pattern') == 'channel_not_found' for e in notify_team_errors_detected)"
     tool: learn_tool_fix
     args:
-      tool_name: "slack_post_message"
+      tool_name: "slack_send_message"
       error_pattern: "channel_not_found"
       root_cause: "Slack channel not found or bot not added"
       fix_description: "Check channel name and invite bot to channel"

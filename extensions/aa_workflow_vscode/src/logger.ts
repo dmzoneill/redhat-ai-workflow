@@ -93,6 +93,8 @@ export function clearLog(): void {
 export function createLogger(source: string) {
   return {
     log: (message: string) => log(message, source),
+    info: (message: string) => log(message, source),  // Alias for log
+    debug: (message: string) => log(message, source), // Alias for log (could add DEBUG prefix if needed)
     error: (message: string, error?: any) => logError(message, error, source),
     warn: (message: string) => logWarn(message, source),
     show: showLog,

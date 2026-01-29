@@ -23,13 +23,13 @@ Usage:
     python scripts/sprint_daemon.py --dbus         # Enable D-Bus IPC
 
 Systemd:
-    systemctl --user start sprint-bot
-    systemctl --user status sprint-bot
-    systemctl --user stop sprint-bot
+    systemctl --user start bot-sprint
+    systemctl --user status bot-sprint
+    systemctl --user stop bot-sprint
 
 D-Bus:
-    Service: com.aiworkflow.SprintBot
-    Path: /com/aiworkflow/SprintBot
+    Service: com.aiworkflow.BotSprint
+    Path: /com/aiworkflow/BotSprint
 """
 
 import argparse
@@ -59,8 +59,10 @@ from scripts.sprint_bot.workflow_config import WorkflowConfig, get_workflow_conf
 LOCK_FILE = Path("/tmp/sprint-daemon.lock")
 PID_FILE = Path("/tmp/sprint-daemon.pid")
 
-# State file shared with VS Code extension
-WORKSPACE_STATE_FILE = Path.home() / ".mcp" / "workspace_states" / "workspace_states.json"
+# Sprint daemon owns its own state file - no shared file with other services
+from server.paths import SPRINT_STATE_FILE_V2
+
+SPRINT_STATE_FILE = SPRINT_STATE_FILE_V2
 
 # Directory for background work logs
 SPRINT_WORK_DIR = PROJECT_ROOT / "memory" / "state" / "sprint_work"
@@ -127,9 +129,9 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
     """Main Sprint Bot daemon with D-Bus support."""
 
     # D-Bus configuration
-    service_name = "com.aiworkflow.SprintBot"
-    object_path = "/com/aiworkflow/SprintBot"
-    interface_name = "com.aiworkflow.SprintBot"
+    service_name = "com.aiworkflow.BotSprint"
+    object_path = "/com/aiworkflow/BotSprint"
+    interface_name = "com.aiworkflow.BotSprint"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = False):
         super().__init__()
@@ -173,6 +175,8 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
         self.register_handler("process_next", self._handle_process_next)
         self.register_handler("open_in_cursor", self._handle_open_in_cursor)
         self.register_handler("get_work_log", self._handle_get_work_log)
+        self.register_handler("write_state", self._handle_write_state)
+        self.register_handler("start_issue", self._handle_start_issue)
 
     # ==================== Abstract Method Implementations ====================
 
@@ -433,6 +437,171 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
 
         return {"success": True, "work_log": work_log}
 
+    async def _handle_write_state(self, params: dict) -> dict:
+        """Write state to file immediately (for UI refresh requests)."""
+        try:
+            state = self._load_state()
+            self._save_state(state)
+            return {"success": True, "file": str(SPRINT_STATE_FILE)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_start_issue(self, params: dict) -> dict:
+        """Start processing an issue immediately, bypassing all checks.
+
+        This is triggered from the UI "Start Issue" button and:
+        - Skips sprint started/automatic mode checks
+        - Skips Jira hygiene checks (missing story points, etc.)
+        - Skips actionable status checks
+        - Immediately starts processing the issue
+
+        Parameters:
+            issue_key: The Jira issue key to start
+            background: If False, opens chat in foreground (default: use state.backgroundTasks)
+        """
+        issue_key = params.get("issue_key")
+        if not issue_key:
+            return {"success": False, "error": "issue_key required"}
+
+        # Get background preference from params, falling back to state setting
+        state = self._load_state()
+        background_mode = params.get("background")
+        if background_mode is None:
+            background_mode = state.get("backgroundTasks", True)
+
+        # Find the issue
+        target_issue = None
+        for issue in state.get("issues", []):
+            if issue.get("key") == issue_key:
+                target_issue = issue
+                break
+
+        if not target_issue:
+            return {"success": False, "error": f"Issue {issue_key} not found in sprint"}
+
+        logger.info(f"Starting issue immediately: {issue_key} (background={background_mode})")
+
+        # Mark as in_progress and set as processing
+        target_issue["approvalStatus"] = "in_progress"
+        state["processingIssue"] = issue_key
+        target_issue["timeline"] = target_issue.get("timeline", [])
+        target_issue["timeline"].append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "action": "force_started",
+                "description": "Issue started immediately via UI (bypassing checks)",
+            }
+        )
+        self._save_state(state)
+
+        # Initialize execution tracer
+        tracer = self._get_tracer(issue_key, target_issue)
+        self._trace_transition(tracer, WorkflowState.LOADING, trigger="force_start")
+        self._trace_step(
+            tracer,
+            "force_start_issue",
+            inputs={"issue_key": issue_key, "background_mode": background_mode},
+            decision="force_start",
+            reason="User requested immediate start via UI, bypassing all checks",
+        )
+
+        # FOREGROUND MODE: Open Cursor chat
+        if not background_mode:
+            cursor_available = await self._is_cursor_available()
+            if not cursor_available:
+                # Can't do foreground without Cursor - inform user
+                target_issue["approvalStatus"] = "blocked"
+                target_issue["waitingReason"] = "Cursor not available for foreground mode"
+                state["processingIssue"] = None
+                self._save_state(state)
+                return {
+                    "success": False,
+                    "error": "Cursor is not available. Please open VS Code/Cursor first, or use background mode.",
+                }
+
+            # Process in Cursor (foreground)
+            result = await self._process_in_cursor_traced(target_issue, state, tracer)
+            return result
+
+        # BACKGROUND MODE: Run via Claude CLI
+        # Transition Jira to In Progress
+        self._trace_transition(tracer, WorkflowState.TRANSITIONING_JIRA, trigger="force_start_background")
+        jira_success = await self._transition_jira_issue(issue_key, self.JIRA_STATUS_IN_PROGRESS)
+        self._trace_step(
+            tracer,
+            "transition_jira_in_progress",
+            inputs={"issue_key": issue_key, "target_status": self.JIRA_STATUS_IN_PROGRESS},
+            outputs={"success": jira_success},
+            tool_name="jira_transition",
+        )
+
+        target_issue["jiraStatus"] = self.JIRA_STATUS_IN_PROGRESS
+        target_issue["timeline"].append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "action": "started",
+                "description": "Sprint bot started background processing",
+                "jiraTransition": self.JIRA_STATUS_IN_PROGRESS,
+            }
+        )
+        target_issue["hasTrace"] = True
+        target_issue["tracePath"] = str(tracer.trace_path)
+        self._save_state(state)
+
+        # Build prompt and run
+        self._trace_transition(tracer, WorkflowState.BUILDING_PROMPT, trigger="jira_transitioned")
+        self._trace_transition(tracer, WorkflowState.IMPLEMENTING, trigger="prompt_ready_background")
+
+        result = await self._run_issue_in_background_traced(target_issue, tracer)
+
+        # Reload state and update
+        state = self._load_state()
+        target_issue = next((i for i in state.get("issues", []) if i["key"] == issue_key), target_issue)
+
+        if result.get("success"):
+            self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
+            await self._transition_jira_issue(issue_key, self.JIRA_STATUS_IN_REVIEW)
+            self._trace_transition(tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created")
+            tracer.mark_completed(summary=f"MR created for {issue_key}")
+
+            target_issue["timeline"].append(
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "background_completed",
+                    "description": "Background processing completed - moved to review",
+                    "workLogPath": str(self._get_work_log_path(issue_key)),
+                    "jiraTransition": self.JIRA_STATUS_IN_REVIEW,
+                }
+            )
+            target_issue["approvalStatus"] = "completed"
+            target_issue["jiraStatus"] = self.JIRA_STATUS_IN_REVIEW
+            target_issue["hasWorkLog"] = True
+            target_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
+            state["processingIssue"] = None
+            self._save_state(state)
+            self._issues_processed += 1
+
+            return {"success": True, "message": f"Completed {issue_key}", "mode": "background"}
+        else:
+            error_reason = result.get("error", "Background processing failed")
+            tracer.mark_blocked(error_reason)
+
+            target_issue["timeline"].append(
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "background_blocked",
+                    "description": f"Bot blocked: {error_reason}",
+                }
+            )
+            target_issue["approvalStatus"] = "blocked"
+            target_issue["waitingReason"] = error_reason
+            target_issue["hasWorkLog"] = True
+            target_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
+            state["processingIssue"] = None
+            self._save_state(state)
+
+            return {"success": False, "error": error_reason, "mode": "background"}
+
     async def _handle_open_in_cursor(self, params: dict) -> dict:
         """Open an issue's work log in Cursor for interactive continuation.
 
@@ -588,14 +757,13 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
     # ==================== State Management ====================
 
     def _load_state(self) -> dict:
-        """Load sprint state from workspace_states.json.
+        """Load sprint state from sprint_state.json.
 
         Handles backward compatibility with old 'botEnabled' field.
         """
         try:
-            if WORKSPACE_STATE_FILE.exists():
-                content = json.loads(WORKSPACE_STATE_FILE.read_text())
-                state = content.get("sprint", self._default_state())
+            if SPRINT_STATE_FILE.exists():
+                state = json.loads(SPRINT_STATE_FILE.read_text())
 
                 # Migrate old 'botEnabled' field to new fields
                 if "botEnabled" in state and "automaticMode" not in state:
@@ -616,26 +784,31 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
         return self._default_state()
 
     def _save_state(self, sprint_state: dict) -> None:
-        """Save sprint state to workspace_states.json."""
+        """Save sprint state to sprint_state.json.
+
+        Each service owns its own state file. The VS Code extension reads
+        all state files on refresh. No shared file = no race conditions.
+        """
         try:
-            WORKSPACE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            import tempfile
 
-            # Load existing state
-            if WORKSPACE_STATE_FILE.exists():
-                content = json.loads(WORKSPACE_STATE_FILE.read_text())
-            else:
-                content = {}
+            SPRINT_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-            # Update sprint section
-            content["sprint"] = sprint_state
+            # Add workflow config to state for UI consumption
+            sprint_state["workflowConfig"] = self._export_workflow_config()
 
-            # Also export workflow config for UI consumption
-            content["workflowConfig"] = self._export_workflow_config()
-
-            # Write atomically
-            temp_file = WORKSPACE_STATE_FILE.with_suffix(".tmp")
-            temp_file.write_text(json.dumps(content, indent=2))
-            temp_file.replace(WORKSPACE_STATE_FILE)
+            # Write atomically (temp file + rename)
+            temp_fd, temp_path = tempfile.mkstemp(suffix=".tmp", prefix="sprint_state_", dir=SPRINT_STATE_FILE.parent)
+            try:
+                with os.fdopen(temp_fd, "w") as f:
+                    json.dump(sprint_state, f, indent=2, default=str)
+                Path(temp_path).replace(SPRINT_STATE_FILE)
+            except Exception:
+                try:
+                    Path(temp_path).unlink()
+                except OSError:
+                    pass
+                raise
 
         except Exception as e:
             logger.error(f"Failed to save state: {e}")
@@ -718,66 +891,133 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
     # ==================== Jira Integration ====================
 
     async def _refresh_from_jira(self) -> None:
-        """Refresh sprint issues from Jira using Claude CLI.
+        """Refresh sprint issues from Jira by calling the Jira API directly.
 
-        Uses Claude CLI to call the sprint_load MCP tool, which handles
-        all Jira integration properly through the MCP server.
-
-        Falls back to reading existing state if Claude CLI fails/times out.
+        Fetches sprint issues and saves to state file.
         """
-        logger.info("Refreshing sprint issues from Jira via Claude CLI...")
+        logger.info("Refreshing sprint issues from Jira...")
 
         try:
-            import shutil
+            from tool_modules.aa_workflow.src.sprint_bot import (
+                SprintBotConfig,
+                WorkingHours,
+                fetch_sprint_issues,
+                to_sprint_issue_format,
+            )
+            from tool_modules.aa_workflow.src.sprint_history import (
+                SprintIssue,
+                SprintState,
+                load_sprint_state,
+                save_sprint_state,
+            )
+            from tool_modules.aa_workflow.src.sprint_prioritizer import prioritize_issues
 
-            claude_path = shutil.which("claude")
-            if not claude_path:
-                logger.error("Claude CLI not found in PATH - using existing state")
-                self._last_jira_refresh = datetime.now()
-                return
-
-            # Build prompt for Claude to load sprint issues
-            prompt = """Call sprint_load() now to fetch sprint issues from Jira."""
-
-            # Run Claude CLI with longer timeout
-            process = await asyncio.create_subprocess_exec(
-                claude_path,
-                "--print",
-                "--dangerously-skip-permissions",
-                prompt,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(PROJECT_ROOT),
+            config = SprintBotConfig(
+                working_hours=WorkingHours(),
+                jira_project="AAP",
             )
 
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=300,  # 5 minute timeout (Claude CLI can be slow to start)
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                logger.warning("Claude CLI timed out - will retry later, using existing state")
-                # Don't block the daemon - just use existing state
+            # Fetch issues from Jira (async)
+            jira_issues = await fetch_sprint_issues(config)
+
+            if not jira_issues:
+                logger.warning("No issues fetched from Jira, keeping existing state")
                 self._last_jira_refresh = datetime.now()
                 return
 
-            output = stdout.decode("utf-8", errors="replace") if stdout else ""
+            # Filter to only show issues assigned to current user
+            from server.config import load_config
 
-            if process.returncode == 0:
-                logger.info(f"Sprint refresh completed successfully")
-                if self.verbose:
-                    logger.info(f"Output: {output[:500]}")
+            user_config = load_config()
+            user_info = user_config.get("user", {})
+            jira_username = user_info.get("jira_username", "")
+            full_name = user_info.get("full_name", "")
+            if jira_username or full_name:
+                original_count = len(jira_issues)
+                # Match against username OR full name (Jira may use either)
+                match_values = [v.lower() for v in [jira_username, full_name] if v]
+                jira_issues = [issue for issue in jira_issues if issue.get("assignee", "").lower() in match_values]
+                logger.info(
+                    f"Filtered to {len(jira_issues)}/{original_count} issues assigned to {jira_username or full_name}"
+                )
+
+            if not jira_issues:
+                logger.info("No issues assigned to current user, clearing sprint list")
+                state = load_sprint_state()
+                state.issues = []
+                state.last_updated = datetime.now().isoformat()
+                save_sprint_state(state)
                 self._last_jira_refresh = datetime.now()
-            else:
-                error = stderr.decode("utf-8", errors="replace") if stderr else ""
-                logger.warning(f"Sprint refresh had issues: {error[:200]}")
-                # Still mark as refreshed to avoid retry loop
-                self._last_jira_refresh = datetime.now()
+                return
+
+            # Prioritize issues
+            prioritized = prioritize_issues(jira_issues)
+            sprint_issues = to_sprint_issue_format(prioritized)
+
+            # Load existing state to preserve approval status, chat IDs, etc.
+            state = load_sprint_state()
+            existing_by_key = {issue.key: issue for issue in state.issues}
+
+            # Merge with existing state
+            new_issues = []
+            for issue_data in sprint_issues:
+                key = issue_data["key"]
+
+                if key in existing_by_key:
+                    # Preserve existing state
+                    existing = existing_by_key[key]
+                    new_issues.append(
+                        SprintIssue(
+                            key=key,
+                            summary=issue_data["summary"],
+                            story_points=issue_data.get("storyPoints", 0),
+                            priority=issue_data.get("priority", "Major"),
+                            jira_status=issue_data.get("jiraStatus", "New"),
+                            assignee=issue_data.get("assignee", ""),
+                            approval_status=existing.approval_status,  # Preserve
+                            waiting_reason=existing.waiting_reason,  # Preserve
+                            priority_reasoning=issue_data.get("priorityReasoning", []),
+                            estimated_actions=issue_data.get("estimatedActions", []),
+                            chat_id=existing.chat_id,  # Preserve
+                            timeline=existing.timeline,  # Preserve
+                            issue_type=issue_data.get("issueType", "Story"),
+                            created=issue_data.get("created", ""),
+                        )
+                    )
+                else:
+                    # New issue
+                    new_issues.append(
+                        SprintIssue(
+                            key=key,
+                            summary=issue_data["summary"],
+                            story_points=issue_data.get("storyPoints", 0),
+                            priority=issue_data.get("priority", "Major"),
+                            jira_status=issue_data.get("jiraStatus", "New"),
+                            assignee=issue_data.get("assignee", ""),
+                            approval_status="pending",
+                            waiting_reason=None,
+                            priority_reasoning=issue_data.get("priorityReasoning", []),
+                            estimated_actions=issue_data.get("estimatedActions", []),
+                            chat_id=None,
+                            timeline=[],
+                            issue_type=issue_data.get("issueType", "Story"),
+                            created=issue_data.get("created", ""),
+                        )
+                    )
+
+            # Update state
+            state.issues = new_issues
+            state.last_updated = datetime.now().isoformat()
+            save_sprint_state(state)
+
+            logger.info(f"Sprint refresh completed: {len(new_issues)} issues")
+            self._last_jira_refresh = datetime.now()
 
         except Exception as e:
             logger.error(f"Failed to refresh sprint: {e}")
+            import traceback
+
+            logger.debug(traceback.format_exc())
             # Don't block - use existing state
             self._last_jira_refresh = datetime.now()
 
@@ -1682,6 +1922,14 @@ Also output the MR ID if found: [MR_ID: <number>]
         self._log_action(issue_key, "started", "Background processing started")
         self._trace_step(tracer, "init_work_log", outputs={"work_log_path": str(self._get_work_log_path(issue_key))})
 
+        # Emit toast notification for issue started
+        try:
+            from tool_modules.aa_workflow.src.notification_emitter import notify_sprint_issue_started
+
+            notify_sprint_issue_started(issue_key, issue.get("summary", "")[:50])
+        except Exception:
+            pass
+
         try:
             import shutil
 
@@ -1777,6 +2025,14 @@ Also output the MR ID if found: [MR_ID: <number>]
             if bot_status["status"] == "COMPLETED":
                 work_log["status"] = "completed"
                 self._log_action(issue_key, "completed", "Background processing completed successfully")
+
+                # Emit toast notification for issue completed
+                try:
+                    from tool_modules.aa_workflow.src.notification_emitter import notify_sprint_issue_completed
+
+                    notify_sprint_issue_completed(issue_key)
+                except Exception:
+                    pass
                 self._trace_step(
                     tracer,
                     "parse_result",
@@ -1799,6 +2055,14 @@ Also output the MR ID if found: [MR_ID: <number>]
                 work_log["status"] = "blocked"
                 work_log["blocked_reason"] = blocked_reason
                 self._log_action(issue_key, "blocked", f"Bot blocked: {blocked_reason}")
+
+                # Emit toast notification for issue blocked
+                try:
+                    from tool_modules.aa_workflow.src.notification_emitter import notify_sprint_issue_blocked
+
+                    notify_sprint_issue_blocked(issue_key, blocked_reason)
+                except Exception:
+                    pass
                 self._trace_step(
                     tracer,
                     "parse_result",
@@ -2024,6 +2288,11 @@ Also output the MR ID if found: [MR_ID: <number>]
         # Initial Jira refresh
         await self._refresh_from_jira()
 
+        # Save initial state for UI
+        state = self._load_state()
+        self._save_state(state)
+        logger.info(f"Initial state saved: {len(state.get('issues', []))} issues")
+
         while not self._shutdown_event.is_set():
             try:
                 state = self._load_state()
@@ -2075,6 +2344,9 @@ Also output the MR ID if found: [MR_ID: <number>]
                         logger.debug(
                             f"Issues: {len(issues)} total, {len(actionable)} actionable, 0 approved+actionable"
                         )
+
+                # Save state periodically (for UI to read)
+                self._save_state(state)
 
                 # Wait before next check (with shutdown awareness)
                 check_interval = self._config["check_interval_seconds"]
@@ -2134,7 +2406,7 @@ async def main_async(args):
     # Handle --list
     if args.list:
         try:
-            client = get_client("com.aiworkflow.SprintBot", "/com/aiworkflow/SprintBot", "com.aiworkflow.SprintBot")
+            client = get_client("com.aiworkflow.BotSprint", "/com/aiworkflow/BotSprint", "com.aiworkflow.BotSprint")
             result = client.call_method("list_issues", {})
             issues = json.loads(result).get("issues", [])
 

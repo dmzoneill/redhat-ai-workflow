@@ -1,0 +1,20 @@
+
+digraph MeetSection {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial Bold", fontsize=14];
+
+    title [label="Meet Bot", fillcolor="#1976D2", fontcolor=white, width=3, height=1.2];
+
+    subgraph cluster_topics {
+        style=invis;
+
+        join [label="Auto-Join", fillcolor="#BBDEFB"];
+        transcribe [label="Transcription", fillcolor="#90CAF9"];
+        notes [label="AI Notes", fillcolor="#64B5F6"];
+    }
+
+    title -> join [style=invis];
+    title -> transcribe [style=invis];
+    title -> notes [style=invis];
+}

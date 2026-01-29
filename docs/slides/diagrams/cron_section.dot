@@ -1,0 +1,20 @@
+
+digraph CronSection {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial Bold", fontsize=14];
+
+    title [label="Cron\nScheduler", fillcolor="#1976D2", fontcolor=white, width=3, height=1.2];
+
+    subgraph cluster_topics {
+        style=invis;
+
+        daily [label="Daily Routines", fillcolor="#BBDEFB"];
+        skills [label="Skill Triggers", fillcolor="#90CAF9"];
+        config [label="Configurable", fillcolor="#64B5F6"];
+    }
+
+    title -> daily [style=invis];
+    title -> skills [style=invis];
+    title -> config [style=invis];
+}

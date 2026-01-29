@@ -499,11 +499,19 @@ steps:
     args:
       persona_name: "slack"
 
+  - name: find_team_channel_for_context
+    description: "Find team channel ID"
+    tool: slack_find_channel
+    args:
+      query: "team-automation-analytics"
+    output: team_channel_info
+    on_error: continue
+
   - name: check_slack_discussions
     description: "Check team Slack channel for recent relevant discussions"
-    tool: slack_channel_read
+    tool: slack_list_messages
     args:
-      channel: "team-automation-analytics"
+      channel_id: "{{ team_channel_info.channels[0].channel_id if team_channel_info and team_channel_info.channels else '' }}"
       limit: 30
     output: slack_messages_raw
     on_error: continue

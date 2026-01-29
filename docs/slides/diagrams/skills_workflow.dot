@@ -1,0 +1,27 @@
+
+digraph SkillsWorkflow {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    trigger [label="Trigger\n(User/Cron)", fillcolor="#E3F2FD"];
+
+    subgraph cluster_skill {
+        label="Skill Execution";
+        style=filled;
+        fillcolor="#FFF3E0";
+
+        load [label="Load\nYAML", fillcolor="#FFCC80"];
+        steps [label="Execute\nSteps", fillcolor="#FFB74D"];
+        tools [label="Call\nTools", fillcolor="#FFA726"];
+    }
+
+    result [label="Result\n+ Memory", fillcolor="#C8E6C9"];
+
+    trigger -> load;
+    load -> steps;
+    steps -> tools;
+    tools -> steps [label="next", style=dashed];
+    steps -> result;
+}

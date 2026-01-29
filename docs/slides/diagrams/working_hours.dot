@@ -1,0 +1,21 @@
+
+digraph WorkingHours {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    action [label="External\nAction", fillcolor="#E3F2FD"];
+    check [label="Working\nHours?", fillcolor="#FFF9C4", shape=diamond];
+    delay [label="Add Human\nDelay", fillcolor="#C8E6C9"];
+    execute [label="Execute", fillcolor="#A5D6A7"];
+    wait [label="Wait Until\n9 AM", fillcolor="#FFCC80"];
+
+    action -> check;
+    check -> delay [label="yes\n(Mon-Fri 9-5)"];
+    delay -> execute [label="1-5s random"];
+    check -> wait [label="no"];
+    wait -> check [label="retry"];
+
+    config [label="Config:\nstart: 9\nend: 17\ntz: America/NY", fillcolor="#E1BEE7", shape=note];
+}

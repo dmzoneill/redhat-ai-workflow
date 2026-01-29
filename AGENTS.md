@@ -5,7 +5,7 @@
   Compatible with: Claude Code, Cursor, Codex, Amp, and others.
 
   Source: docs/ai-rules/
-  Generated: 2026-01-23 16:57:18
+  Generated: 2026-01-27 13:55:19
 -->
 
 
@@ -50,27 +50,61 @@ When user requests an action:
 ```
 1. Parse intent → What are they trying to do?
 2. Check skills → Does skill_list() have a matching skill?
-   ├─ YES → Run skill_run("skill_name", '{"params": "..."}')
+   ├─ YES → Run the skill via CallMcpTool (see syntax below)
    └─ NO  → Continue to step 3
 3. Check persona → Do I have the right tools loaded?
-   ├─ NO  → persona_load("devops") or appropriate persona
+   ├─ NO  → Load persona via CallMcpTool
    └─ YES → Proceed with manual steps
 4. Execute → Only now attempt manual execution
 ```
 
+## MCP Tool Call Syntax
+
+**CRITICAL:** All workflow tools are called via `CallMcpTool`. The `inputs` parameter must be a **JSON string**.
+
+```json
+// skill_run - Execute a skill
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "skill_run",
+  arguments: {
+    "skill_name": "start_work",
+    "inputs": "{\"issue_key\": \"AAP-12345\"}"  // JSON STRING, not object!
+  }
+)
+
+// skill_list - List available skills
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "skill_list",
+  arguments: {}
+)
+
+// persona_load - Load a persona
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "persona_load",
+  arguments: {"persona": "developer"}
+)
+```
+
+**Common Mistake:** Passing `inputs` as an object instead of a JSON string:
+- ❌ WRONG: `"inputs": {"issue_key": "AAP-12345"}`
+- ✅ RIGHT: `"inputs": "{\"issue_key\": \"AAP-12345\"}"`
+
 ## Intent → Skill Mapping
 
-| User Says | Skill | Example |
-|-----------|-------|---------|
-| "deploy MR X to ephemeral" | `test_mr_ephemeral` | `skill_run("test_mr_ephemeral", '{"mr_id": 1454}')` |
-| "start work on AAP-X" | `start_work` | `skill_run("start_work", '{"issue_key": "AAP-12345"}')` |
-| "create MR" / "open PR" | `create_mr` | `skill_run("create_mr", '{"issue_key": "AAP-12345"}')` |
-| "what's firing?" / "check alerts" | `investigate_alert` | `skill_run("investigate_alert", '{"environment": "stage"}')` |
-| "morning briefing" | `coffee` | `skill_run("coffee")` |
-| "end of day" | `beer` | `skill_run("beer")` |
-| "review this PR" | `review_pr` | `skill_run("review_pr", '{"mr_id": 1234}')` |
-| "release to prod" | `release_to_prod` | `skill_run("release_to_prod")` |
-| "extend my namespace" | `extend_ephemeral` | `skill_run("extend_ephemeral", '{"namespace": "ephemeral-xxx"}')` |
+| User Says | Skill | inputs JSON |
+|-----------|-------|-------------|
+| "deploy MR X to ephemeral" | `test_mr_ephemeral` | `{"mr_id": 1454}` |
+| "start work on AAP-X" | `start_work` | `{"issue_key": "AAP-12345"}` |
+| "create MR" / "open PR" | `create_mr` | `{"issue_key": "AAP-12345"}` |
+| "what's firing?" / "check alerts" | `investigate_alert` | `{"environment": "stage"}` |
+| "morning briefing" | `coffee` | `{}` |
+| "end of day" | `beer` | `{}` |
+| "review this PR" | `review_pr` | `{"mr_id": 1234}` |
+| "release to prod" | `release_to_prod` | `{}` |
+| "extend my namespace" | `extend_ephemeral` | `{"namespace": "ephemeral-xxx"}` |
 
 ## Intent → Persona Mapping
 
@@ -103,33 +137,100 @@ The skill may have important steps you'd miss.
 
 **IMPORTANT:** Multiple Cursor chats share the same MCP server. You MUST track your session_id to maintain separate context per chat.
 
-```python
-# Start a NEW session - SAVE the returned session_id!
-session_start()  # Returns something like "Session ID: abc123" - REMEMBER THIS!
+## MCP Tool Call Syntax
 
-# To check YOUR session (not another chat's), pass your session_id:
-session_info(session_id="abc123")  # Gets YOUR session info
+All session tools are called via `CallMcpTool` with the server `project-0-redhat-ai-workflow-aa_workflow`.
 
-# To resume a previous session:
-session_start(session_id="abc123")  # Resumes existing session
+```json
+// Start a NEW session - SAVE the returned session_id!
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "session_start",
+  arguments: {}  // Returns "Session ID: abc123" - REMEMBER THIS!
+)
 
-# Start with specific options:
-session_start(agent="devops")       # DevOps/monitoring
-session_start(agent="developer")    # Coding/PRs
-session_start(agent="incident")     # Incidents
-session_start(agent="release")      # Releases
-session_start(name="Fixing AAP-12345")  # Named session
+// Resume an existing session
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "session_start",
+  arguments: {"session_id": "abc123"}
+)
+
+// Start with specific agent/persona
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "session_start",
+  arguments: {"agent": "devops"}  // or "developer", "incident", "release"
+)
+
+// Start with a name
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "session_start",
+  arguments: {"name": "Fixing AAP-12345"}
+)
+
+// Check YOUR session (pass your session_id!)
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "session_info",
+  arguments: {"session_id": "abc123"}
+)
 ```
 
 ## Session Management Commands
 
-```python
-session_list()                    # List all sessions
-session_switch(session_id="...")  # Switch to different session
-session_rename(name="...")        # Rename session
+```json
+// List all sessions
+CallMcpTool(toolName: "session_list", arguments: {})
+
+// Switch to different session
+CallMcpTool(toolName: "session_switch", arguments: {"session_id": "..."})
+
+// Rename current session
+CallMcpTool(toolName: "session_rename", arguments: {"name": "..."})
 ```
 
 **Why track session_id?** Without it, `session_info()` returns whichever session was most recently active - which might be from a DIFFERENT chat window!
+
+## Project Detection - CRITICAL
+
+**The workspace may be `redhat-ai-workflow`, but the user might be working on a DIFFERENT project!**
+
+When starting a conversation, Claude MUST determine the correct project and set it:
+
+1. **Look for issue keys** (AAP-XXXXX) - these indicate work context
+2. **Look for repository mentions** in user's message (automation-analytics-backend, pdf-generator)
+3. **Look for file paths** that indicate which repo (/home/.../automation-analytics-backend/...)
+4. **Look for GitLab paths** (automation-analytics/automation-analytics-backend)
+5. **If uncertain, ASK** the user which project they're working on
+
+Then call `session_set_project` to set the correct project:
+
+```json
+// Set project for current session
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "session_set_project",
+  arguments: {"project": "automation-analytics-backend"}
+)
+
+// Or set when starting session
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "session_start",
+  arguments: {"project": "automation-analytics-backend"}
+)
+```
+
+**Available Projects:**
+- `automation-analytics-backend` - Main backend API (AAP issues, billing, reports)
+- `pdf-generator` - PDF generation service
+- `app-interface` - SaaS deployment configs (APPSRE issues)
+- `konflux-release-data` - Release data (KONFLUX issues)
+- `redhat-ai-workflow` - This workflow system itself
+
+**DO NOT assume `redhat-ai-workflow` is the project just because that's the workspace.**
 
 ## Dynamic Agent Loading
 

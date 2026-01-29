@@ -187,6 +187,99 @@ class CommandRegistry:
             command_type=CommandType.BUILTIN,
             examples=["@me list", "@me list skills", "@me list tools"],
         ),
+        "watch": CommandInfo(
+            name="watch",
+            description="Show this channel's ID for adding to watch list",
+            command_type=CommandType.BUILTIN,
+            examples=["@me watch"],
+        ),
+        # Jira commands
+        "jira": CommandInfo(
+            name="jira",
+            description="Create a Jira issue from thread context",
+            command_type=CommandType.BUILTIN,
+            category="jira",
+            contextual=True,
+            examples=["@me jira", "@me jira bug", "@me jira task", "@me jira subtask AAP-12345"],
+        ),
+        # Search commands
+        "search": CommandInfo(
+            name="search",
+            description="Search Slack messages, code, or Jira",
+            command_type=CommandType.BUILTIN,
+            category="search",
+            examples=["@me search billing errors", "@me search code auth handler", "@me search jira AAP billing"],
+        ),
+        "who": CommandInfo(
+            name="who",
+            description="Look up a Slack user by name or email",
+            command_type=CommandType.BUILTIN,
+            category="search",
+            examples=["@me who @daoneill", "@me who john.smith@redhat.com"],
+        ),
+        "find": CommandInfo(
+            name="find",
+            description="Find a Slack channel by name",
+            command_type=CommandType.BUILTIN,
+            category="search",
+            examples=["@me find #aap-analytics", "@me find alerts"],
+        ),
+        # Cursor chat commands
+        "cursor": CommandInfo(
+            name="cursor",
+            description="Create a Cursor chat from thread context",
+            command_type=CommandType.BUILTIN,
+            category="cursor",
+            contextual=True,
+            examples=["@me cursor", "@me cursor chat from thread", "@me cursor AAP-12345"],
+        ),
+        # Sprint bot commands
+        "sprint": CommandInfo(
+            name="sprint",
+            description="Control the sprint bot - list/approve/start issues",
+            command_type=CommandType.BUILTIN,
+            category="sprint",
+            examples=["@me sprint issues", "@me sprint approve AAP-12345", "@me sprint start AAP-12345"],
+        ),
+        # Meet bot commands
+        "meet": CommandInfo(
+            name="meet",
+            description="Control the meet bot - join/leave meetings, get captions",
+            command_type=CommandType.BUILTIN,
+            category="meet",
+            examples=["@me meet join", "@me meet leave", "@me meet captions", "@me meet list"],
+        ),
+        # Cron commands
+        "cron": CommandInfo(
+            name="cron",
+            description="Control the cron scheduler - run/list jobs",
+            command_type=CommandType.BUILTIN,
+            category="cron",
+            examples=["@me cron list", "@me cron run coffee", "@me cron history"],
+        ),
+        # Research commands
+        "research": CommandInfo(
+            name="research",
+            description="Research a topic in Slack and build knowledge",
+            command_type=CommandType.BUILTIN,
+            category="research",
+            examples=["@me research billing errors", "@me research deep auth issues"],
+        ),
+        "learn": CommandInfo(
+            name="learn",
+            description="Learn from the current thread and save to knowledge base",
+            command_type=CommandType.BUILTIN,
+            category="research",
+            contextual=True,
+            examples=["@me learn", "@me learn billing patterns"],
+        ),
+        "knowledge": CommandInfo(
+            name="knowledge",
+            description="Query or list saved knowledge",
+            command_type=CommandType.BUILTIN,
+            category="research",
+            examples=["@me knowledge billing", "@me knowledge list", "@me knowledge delete billing-errors"],
+        ),
     }
 
     def __init__(

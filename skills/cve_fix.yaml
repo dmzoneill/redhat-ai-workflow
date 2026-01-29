@@ -1,0 +1,1180 @@
+# Skill: CVE Fix
+# Automated CVE remediation for Python dependencies
+# Queries Jira for CVEs, updates Pipfile and Pipfile.lock, creates MRs
+#
+# LESSONS LEARNED (from production use):
+#
+# 1. DEPENDENCY CASCADE: Upgrading one package often breaks others:
+#    - aiohttp 3.13+ broke gql -> required backoff + requests-toolbelt
+#    - urllib3 2.x broke boto3/botocore -> required upgrading both to 1.34.46+
+#    The skill should research compatibility BEFORE updating.
+#
+# 2. BOTH FILES MUST UPDATE: Always update Pipfile AND Pipfile.lock together.
+#    Missing Pipfile changes caused CI failures.
+#
+# 3. BRANCH ISOLATION: Always create branches from origin/main, never from
+#    another feature branch. Cross-contamination caused multiple MR issues.
+#
+# 4. ERROR HANDLING: Use isinstance() checks before .get() on variables that
+#    might be error strings instead of dicts (e.g., when pipenv lock fails).
+#
+# 5. LOCAL VALIDATION: Build container + run pytest --collect-only to catch
+#    import errors from missing transitive dependencies before CI.
+#
+# 6. REBASE CONFLICTS: When multiple CVE fixes are in flight, document which
+#    packages were modified to help resolve conflicts.
+
+name: cve_fix
+description: |
+  Automatically fix CVE vulnerabilities in Python dependencies.
+
+  Workflow:
+  1. Query Jira for CVEs with downstream component "automation-analytics-backend"
+  2. Filter to CVEs not already fixed (no commit mentioning CVE-XXXX in git log)
+  3. Assign to current user and set to In Progress
+  4. Create feature branch FROM ORIGIN/MAIN (critical for branch isolation)
+  5. Research package compatibility requirements (check for known breaking changes)
+  6. Read Python version from original Pipfile's [requires] section
+  7. Create temp pipenv in /tmp with that Python version
+  8. Install the vulnerable package (latest version) into temp pipenv
+  9. Check for transitive dependency changes that may break existing code
+  10. Extract new version and hashes from temp Pipfile.lock
+  11. Update original Pipfile: add/update package with >= version constraint AND CVE comment
+  12. Update original Pipfile.lock: update version and hashes
+  13. If companion packages need upgrading (e.g., boto3 for urllib3), update those too
+  14. Commit both Pipfile and Pipfile.lock changes
+  15. Create MR with CVE details including compatibility notes
+  16. Add GitLab MR link to Jira issue
+
+  Known Compatibility Issues (add more as discovered):
+  - urllib3 2.x requires boto3/botocore >= 1.34.46
+  - aiohttp 3.13+ requires gql >= 3.5.0 (which requires backoff, requests-toolbelt)
+
+  Uses MCP tools: jira_search, jira_assign, jira_transition, jira_add_comment,
+                  git_branch_create, git_commit, git_push, gitlab_mr_create
+
+version: "1.1"
+
+inputs:
+  - name: downstream_component
+    type: string
+    required: false
+    default: "automation-analytics-backend"
+    description: "Downstream component name to filter CVEs"
+
+  - name: repo
+    type: string
+    required: false
+    default: ""
+    description: "Repository path - if not provided, resolved from config"
+
+  - name: repo_name
+    type: string
+    required: false
+    default: "automation-analytics-backend"
+    description: "Repository name from config"
+
+  - name: dry_run
+    type: boolean
+    required: false
+    default: false
+    description: "Show what would be done without making changes"
+
+  - name: max_cves
+    type: integer
+    required: false
+    default: 1
+    description: "Maximum number of CVEs to process (default: 1 at a time)"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for Git, GitLab, and Jira tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== RESOLVE REPOSITORY ====================
+
+  - name: resolve_repo
+    description: "Determine which repo to use"
+    compute: |
+      from scripts.common.repo_utils import resolve_repo
+
+      resolved = resolve_repo(
+          repo_path=inputs.get("repo") if inputs.get("repo") and inputs.get("repo") not in ("", ".") else None,
+          repo_name=inputs.get("repo_name") if inputs.get("repo_name") else None,
+      )
+
+      result = {
+          "path": resolved.path,
+          "gitlab_project": resolved.gitlab_project or "automation-analytics/automation-analytics-backend",
+          "default_branch": resolved.default_branch,
+          "name": resolved.name,
+      }
+    output: resolved_repo
+
+  # ==================== QUERY JIRA FOR CVES ====================
+
+  - name: search_cves
+    description: "Search for CVEs assigned to downstream component"
+    tool: jira_search
+    args:
+      jql: '"Downstream Component Name" ~ "{{ inputs.downstream_component }}" AND type = Vulnerability AND resolution = Unresolved ORDER BY created DESC'
+      max_results: 50
+    output: cve_search_raw
+    on_error: auto_heal
+
+  - name: parse_cve_results
+    description: "Parse CVE search results and extract issue keys"
+    compute: |
+      import re
+
+      cve_text = str(cve_search_raw) if cve_search_raw else ""
+
+      # Extract issue keys (AAP-XXXXX pattern)
+      issue_keys = re.findall(r'(AAP-\d+)', cve_text)
+
+      # Deduplicate while preserving order
+      seen = set()
+      unique_keys = []
+      for key in issue_keys:
+          if key not in seen:
+              seen.add(key)
+              unique_keys.append(key)
+
+      result = {
+          "issue_keys": unique_keys,
+          "total_found": len(unique_keys),
+      }
+    output: cve_issues
+
+  # ==================== CHECK ORIGIN/MAIN, BRANCHES, AND MRs ====================
+
+  - name: fetch_origin
+    description: "Fetch latest from origin to ensure we have up-to-date refs"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved_repo.path }}"
+      prune: true
+    output: fetch_result
+    on_error: continue
+
+  - name: get_main_log
+    description: "Get git log from origin/main to check for merged CVE fixes"
+    compute: |
+      import subprocess
+
+      repo_path = resolved_repo["path"]
+      default_branch = resolved_repo.get("default_branch", "main")
+
+      # Get commits from origin/main (the upstream branch)
+      cmd = ["git", "-C", repo_path, "log", f"origin/{default_branch}", "--oneline", "-500"]
+      try:
+          result_proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+          result = result_proc.stdout if result_proc.returncode == 0 else ""
+      except Exception as e:
+          result = ""
+
+      result = result
+    output: main_log_raw
+
+  - name: get_all_branches
+    description: "Get all branches to check for CVE work in progress"
+    tool: git_branch_list
+    args:
+      repo: "{{ resolved_repo.path }}"
+      all_branches: true
+    output: all_branches_raw
+    on_error: continue
+
+  - name: get_open_mrs
+    description: "Get all open MRs to check for existing CVE fixes"
+    tool: gitlab_mr_list
+    args:
+      project: "{{ resolved_repo.gitlab_project }}"
+    output: open_mrs_raw
+    on_error: continue
+
+  - name: filter_unfixed_cves
+    description: "Filter out CVEs that are merged to main, have branches, or have open MRs"
+    compute: |
+      import re
+
+      # Only check origin/main for "merged" status - local commits don't count
+      main_log = str(main_log_raw) if main_log_raw else ""
+      all_branches = str(all_branches_raw) if all_branches_raw else ""
+      open_mrs = str(open_mrs_raw) if open_mrs_raw else ""
+      all_cves = cve_issues.get("issue_keys", [])
+
+      unfixed = []
+      merged_to_main = []
+      has_branch = []
+      has_mr = []
+
+      for issue_key in all_cves:
+          issue_key_lower = issue_key.lower()
+
+          # Check 1: Is there a commit on origin/main mentioning this issue key?
+          # This means the fix is actually merged and deployed
+          if issue_key in main_log or issue_key_lower in main_log.lower():
+              merged_to_main.append({"key": issue_key, "reason": "merged to main"})
+              continue
+
+          # Check 2: Is there an open MR for this issue?
+          # Check MRs before branches since MR is more definitive
+          if issue_key in open_mrs or issue_key_lower in open_mrs.lower():
+              has_mr.append({"key": issue_key, "reason": "MR exists"})
+              continue
+
+          # Check 3: Is there a branch for this issue (but no MR yet)?
+          if issue_key_lower in all_branches.lower():
+              has_branch.append({"key": issue_key, "reason": "branch exists"})
+              continue
+
+          # Not found anywhere - this CVE needs work
+          unfixed.append(issue_key)
+
+      # Apply max_cves limit
+      max_cves = inputs.get("max_cves", 1)
+      to_process = unfixed[:max_cves]
+
+      # Combine all "in progress" items for reporting
+      in_progress = has_branch + has_mr
+
+      result = {
+          "to_process": to_process,
+          "unfixed_count": len(unfixed),
+          "in_progress": in_progress,
+          "in_progress_count": len(in_progress),
+          "merged_to_main": [item["key"] for item in merged_to_main],
+          "merged_count": len(merged_to_main),
+          "has_branch": [item["key"] for item in has_branch],
+          "has_branch_count": len(has_branch),
+          "has_mr": [item["key"] for item in has_mr],
+          "has_mr_count": len(has_mr),
+      }
+    output: filtered_cves
+
+  - name: check_has_work
+    description: "Check if there are CVEs to process"
+    compute: |
+      to_process = filtered_cves.get("to_process", [])
+      in_progress = filtered_cves.get("in_progress_count", 0)
+
+      if not to_process:
+          msg_parts = ["No unfixed CVEs found."]
+          if filtered_cves.get("merged_count", 0) > 0:
+              msg_parts.append(f"Merged: {filtered_cves['merged_count']}")
+          if filtered_cves.get("has_mr_count", 0) > 0:
+              msg_parts.append(f"Has MR: {filtered_cves['has_mr_count']}")
+          if filtered_cves.get("has_branch_count", 0) > 0:
+              msg_parts.append(f"Has branch: {filtered_cves['has_branch_count']}")
+
+          result = {
+              "has_work": False,
+              "message": " ".join(msg_parts)
+          }
+      else:
+          result = {
+              "has_work": True,
+              "issue_key": to_process[0],
+              "message": f"Found {len(to_process)} CVE(s) to process, {in_progress} in progress (branch/MR)"
+          }
+    output: work_check
+
+  # ==================== PROCESS FIRST CVE ====================
+
+  - name: get_cve_details
+    description: "Get detailed CVE information from Jira"
+    condition: "work_check.has_work"
+    tool: jira_view_issue
+    args:
+      issue_key: "{{ work_check.issue_key }}"
+    output: cve_details_raw
+    on_error: auto_heal
+
+  - name: parse_cve_details
+    description: "Extract CVE ID and affected package from issue"
+    condition: "work_check.has_work"
+    compute: |
+      import re
+
+      details = str(cve_details_raw) if cve_details_raw else ""
+      issue_key = work_check["issue_key"]
+
+      # Extract CVE ID (CVE-YYYY-NNNNN pattern)
+      cve_match = re.search(r'(CVE-\d{4}-\d+)', details, re.IGNORECASE)
+      cve_id = cve_match.group(1).upper() if cve_match else ""
+
+      # Extract affected package - try multiple strategies
+      affected_package = ""
+
+      # Strategy 1: "Upstream Affected Component" field
+      package_match = re.search(r'upstream.*affected.*component\s*:\s*(\S+)', details, re.IGNORECASE)
+      if package_match:
+          affected_package = package_match.group(1).strip()
+
+      # Strategy 2: Look for package name in description patterns like "aiohttp is" or "urllib3 is"
+      # Common patterns: "PACKAGE is an HTTP", "PACKAGE's HTTP Parser", "PACKAGE vulnerable"
+      if not affected_package:
+          # Look for known Python packages mentioned at start of description
+          known_packages = ['aiohttp', 'urllib3', 'requests', 'django', 'flask', 'cryptography',
+                           'pillow', 'numpy', 'pandas', 'jinja2', 'pyyaml', 'sqlalchemy',
+                           'celery', 'redis', 'psycopg2', 'boto3', 'paramiko', 'lxml']
+          details_lower = details.lower()
+          for pkg in known_packages:
+              # Check if package is mentioned prominently (at start of sentence or in title)
+              if re.search(rf'\b{pkg}\b.*(?:is|vulnerable|version|prior)', details_lower):
+                  affected_package = pkg
+                  break
+
+      # Strategy 3: Extract from summary line - pattern like "CVE-XXXX package-name: description"
+      if not affected_package:
+          summary_match = re.search(r'summary\s*:\s*CVE-\d+-\d+\s+[\w-]+:\s*(\w+)', details, re.IGNORECASE)
+          if summary_match:
+              candidate = summary_match.group(1).lower()
+              if candidate not in ['the', 'a', 'an', 'http', 'is', 'vulnerable']:
+                  affected_package = candidate
+
+      # Strategy 4: Look for "X vulnerable to" pattern in description
+      if not affected_package:
+          vuln_match = re.search(r'(\w+)\s+(?:is\s+)?vulnerable\s+to', details, re.IGNORECASE)
+          if vuln_match:
+              candidate = vuln_match.group(1).lower()
+              if candidate not in ['the', 'a', 'an', 'http', 'is', 'version', 'prior']:
+                  affected_package = candidate
+
+      # Extract summary
+      summary_match = re.search(r'summary\s*:\s*(.+?)(?:\n|$)', details, re.IGNORECASE)
+      summary = summary_match.group(1).strip()[:100] if summary_match else ""
+
+      # Extract CVSS score if available
+      cvss_match = re.search(r'cvss.*score\s*:\s*([\d.]+)', details, re.IGNORECASE)
+      cvss_score = cvss_match.group(1) if cvss_match else ""
+
+      # Extract severity/priority
+      severity_match = re.search(r'(?:severity|priority)\s*:\s*(\w+)', details, re.IGNORECASE)
+      severity = severity_match.group(1) if severity_match else ""
+
+      result = {
+          "issue_key": issue_key,
+          "cve_id": cve_id,
+          "affected_package": affected_package,
+          "summary": summary,
+          "cvss_score": cvss_score,
+          "severity": severity,
+          "valid": bool(cve_id and affected_package),
+      }
+    output: cve_info
+
+  - name: validate_cve_info
+    description: "Ensure we have required CVE information"
+    condition: "work_check.has_work"
+    compute: |
+      if not cve_info.get("valid"):
+          missing = []
+          if not cve_info.get("cve_id"):
+              missing.append("CVE ID")
+          if not cve_info.get("affected_package"):
+              missing.append("affected package")
+
+          raise ValueError(
+              f"Missing required CVE information for {cve_info.get('issue_key')}: {', '.join(missing)}. "
+              "Please ensure the Jira issue has CVE ID and Upstream Affected Component fields populated."
+          )
+
+      result = "CVE info validated"
+    output: validation_result
+
+  - name: check_compatibility_requirements
+    description: "Check for known compatibility requirements when upgrading this package"
+    condition: "work_check.has_work"
+    compute: |
+      # Known compatibility requirements discovered from production issues
+      # Add new entries here as they are discovered
+      COMPATIBILITY_MAP = {
+          "urllib3": {
+              "min_version": "2.0.0",
+              "requires": [
+                  {"package": "boto3", "min_version": "1.34.46", "reason": "urllib3 2.x removed DEFAULT_CIPHERS"},
+                  {"package": "botocore", "min_version": "1.34.46", "reason": "urllib3 2.x removed DEFAULT_CIPHERS"},
+              ],
+              "notes": "urllib3 2.x has breaking changes that affect boto3/botocore. Older versions import DEFAULT_CIPHERS which was removed.",
+          },
+          "aiohttp": {
+              "min_version": "3.9.0",
+              "requires": [
+                  {"package": "gql", "min_version": "3.5.0", "reason": "aiohttp 3.9+ changed AIOHTTPTransport API"},
+              ],
+              "notes": "aiohttp 3.9+ changed transport APIs. gql < 3.5.0 uses old API and will fail to import.",
+          },
+          "gql": {
+              "min_version": "3.5.0",
+              "requires": [
+                  {"package": "backoff", "min_version": "2.2.1", "reason": "gql 3.5+ requires backoff for retry logic"},
+                  {"package": "requests-toolbelt", "min_version": "1.0.0", "reason": "gql[requests] requires requests-toolbelt"},
+              ],
+              "notes": "gql 3.5+ added new dependencies. If using gql[requests] extra, requests-toolbelt is required.",
+          },
+      }
+
+      package = cve_info["affected_package"].lower()
+      compat_info = COMPATIBILITY_MAP.get(package, {})
+
+      companion_packages = []
+      compatibility_notes = ""
+
+      if compat_info:
+          companion_packages = compat_info.get("requires", [])
+          compatibility_notes = compat_info.get("notes", "")
+
+      result = {
+          "package": package,
+          "has_compatibility_requirements": bool(companion_packages),
+          "companion_packages": companion_packages,
+          "notes": compatibility_notes,
+      }
+    output: compatibility_check
+
+  # ==================== ASSIGN AND TRANSITION ====================
+
+  - name: assign_to_me
+    description: "Assign CVE issue to current user"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: jira_assign
+    args:
+      issue_key: "{{ cve_info.issue_key }}"
+      assignee: "currentUser"
+    output: assign_result
+    on_error: auto_heal
+
+  - name: transition_to_progress
+    description: "Transition issue to In Progress"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: jira_transition
+    args:
+      issue_key: "{{ cve_info.issue_key }}"
+      status: "In Progress"
+    output: transition_result
+    on_error: auto_heal
+
+  # ==================== CREATE BRANCH ====================
+
+  - name: create_branch_name
+    description: "Generate branch name for CVE fix"
+    condition: "work_check.has_work"
+    compute: |
+      from scripts.common.parsers import slugify_text
+
+      issue_key = cve_info["issue_key"]
+      cve_id = cve_info["cve_id"].lower()
+      package = cve_info["affected_package"].lower().replace("_", "-")
+
+      # Branch format: AAP-XXXXX-cve-2025-69223-aiohttp
+      branch_name = f"{issue_key}-{cve_id}-{package}"
+
+      result = branch_name
+    output: branch_name
+
+  - name: fetch_latest
+    description: "Fetch latest from origin"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: git_fetch
+    args:
+      repo: "{{ resolved_repo.path }}"
+      prune: true
+    output: fetch_result
+    on_error: auto_heal
+
+  - name: checkout_main
+    description: "Checkout main branch"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: git_checkout
+    args:
+      repo: "{{ resolved_repo.path }}"
+      target: "{{ resolved_repo.default_branch }}"
+    output: checkout_main_result
+    on_error: continue
+
+  - name: pull_main
+    description: "Pull latest main"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: git_pull
+    args:
+      repo: "{{ resolved_repo.path }}"
+      rebase: true
+    output: pull_result
+    on_error: auto_heal
+
+  - name: create_branch
+    description: "Create feature branch for CVE fix"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: git_branch_create
+    args:
+      repo: "{{ resolved_repo.path }}"
+      branch_name: "{{ branch_name }}"
+      checkout: true
+    output: branch_result
+    on_error: continue
+
+  # ==================== UPDATE PIPFILE AND PIPFILE.LOCK ====================
+
+  - name: update_pipfile_and_lock
+    description: "Create temp pipenv with project's Python version, install package and companions, copy version/hashes to Pipfile and Pipfile.lock"
+    condition: "work_check.has_work and not inputs.dry_run"
+    compute: |
+      import json
+      import os
+      import re
+      import shutil
+      import subprocess
+      import tempfile
+
+      repo_path = resolved_repo["path"]
+      package = cve_info["affected_package"]
+      cve_id = cve_info["cve_id"]
+
+      # Get companion packages from compatibility check
+      companion_packages = compatibility_check.get("companion_packages", []) if isinstance(compatibility_check, dict) else []
+
+      # Read Python version from the ORIGINAL Pipfile (not Pipfile.lock)
+      pipfile_path = os.path.join(repo_path, "Pipfile")
+      pipfile_lock_path = os.path.join(repo_path, "Pipfile.lock")
+
+      if not os.path.exists(pipfile_path):
+          raise ValueError(f"Pipfile not found at {pipfile_path}")
+      if not os.path.exists(pipfile_lock_path):
+          raise ValueError(f"Pipfile.lock not found at {pipfile_lock_path}")
+
+      with open(pipfile_path, "r") as f:
+          original_pipfile = f.read()
+
+      # Extract Python version from Pipfile's [requires] section
+      python_version_match = re.search(r'python_version\s*=\s*["\']([^"\']+)["\']', original_pipfile)
+      if not python_version_match:
+          raise ValueError("Could not find python_version in Pipfile [requires] section")
+      python_version = python_version_match.group(1)
+
+      # Read current Pipfile.lock
+      with open(pipfile_lock_path, "r") as f:
+          current_lock = json.load(f)
+
+      # Create temp directory for isolated pipenv
+      temp_dir = tempfile.mkdtemp(prefix="cve-fix-", dir="/tmp")
+
+      try:
+          # Build package list: main package + any companion packages that need upgrading
+          packages_to_install = [f'{package} = "*"']
+
+          # Check which companion packages are in the project and need upgrading
+          companion_updates = []
+          for comp in companion_packages:
+              comp_name = comp["package"]
+              comp_min_version = comp["min_version"]
+              comp_reason = comp["reason"]
+
+              # Check if companion package exists in current lock
+              comp_in_lock = False
+              for section in ["default", "develop"]:
+                  if section in current_lock:
+                      for pkg_name in current_lock[section].keys():
+                          if pkg_name.lower() == comp_name.lower():
+                              comp_in_lock = True
+                              break
+                  if comp_in_lock:
+                      break
+
+              if comp_in_lock:
+                  packages_to_install.append(f'{comp_name} = ">={comp_min_version}"')
+                  companion_updates.append({
+                      "package": comp_name,
+                      "min_version": comp_min_version,
+                      "reason": comp_reason,
+                  })
+
+          # Create minimal Pipfile with affected package and companions
+          temp_pipfile_lines = [
+              "[[source]]",
+              'url = "https://pypi.org/simple"',
+              "verify_ssl = true",
+              'name = "pypi"',
+              "",
+              "[packages]",
+          ]
+          temp_pipfile_lines.extend(packages_to_install)
+          temp_pipfile_lines.extend([
+              "",
+              "[requires]",
+              f'python_version = "{python_version}"',
+          ])
+          temp_pipfile_content = "\n".join(temp_pipfile_lines) + "\n"
+          temp_pipfile_path = os.path.join(temp_dir, "Pipfile")
+          with open(temp_pipfile_path, "w") as f:
+              f.write(temp_pipfile_content)
+
+          # Set up environment for pipenv
+          env = os.environ.copy()
+          env["PIPENV_IGNORE_VIRTUALENVS"] = "1"
+          env["PIPENV_VENV_IN_PROJECT"] = "1"  # Create .venv in temp_dir
+
+          # Run pipenv lock to resolve latest version and get hashes
+          lock_result = subprocess.run(
+              ["pipenv", "lock"],
+              cwd=temp_dir,
+              capture_output=True,
+              text=True,
+              timeout=180,
+              env=env,
+          )
+
+          if lock_result.returncode != 0:
+              raise ValueError(f"pipenv lock failed: {lock_result.stderr}")
+
+          # Read the new lock file from temp pipenv
+          new_lock_path = os.path.join(temp_dir, "Pipfile.lock")
+          with open(new_lock_path, "r") as f:
+              new_lock = json.load(f)
+
+          # ==================== EXTRACT PACKAGE INFO FROM TEMP LOCK ====================
+          def get_package_info(lock_data, pkg_name):
+              """Extract package info from lock file."""
+              pkg_lower = pkg_name.lower()
+              for section in ["default", "develop"]:
+                  if section in lock_data:
+                      for name, info in lock_data[section].items():
+                          if name.lower() == pkg_lower:
+                              return info
+              return None
+
+          # Get main package info
+          new_package_info = get_package_info(new_lock, package)
+          if not new_package_info:
+              raise ValueError(f"Package {package} not found in temp Pipfile.lock")
+
+          new_version = new_package_info.get("version", "")
+          new_hashes = new_package_info.get("hashes", [])
+          version_num = new_version.lstrip("=<>~!")
+
+          # Get companion package info
+          companion_info = []
+          for comp in companion_updates:
+              comp_pkg_info = get_package_info(new_lock, comp["package"])
+              if comp_pkg_info:
+                  companion_info.append({
+                      "package": comp["package"],
+                      "version": comp_pkg_info.get("version", ""),
+                      "hashes": comp_pkg_info.get("hashes", []),
+                      "min_version": comp["min_version"],
+                      "reason": comp["reason"],
+                  })
+
+          # ==================== UPDATE PIPFILE ====================
+          updated_pipfile = original_pipfile
+
+          # Update main package
+          package_pattern = rf'^{re.escape(package)}\s*=.*$'
+          package_exists = re.search(package_pattern, updated_pipfile, re.MULTILINE | re.IGNORECASE)
+
+          if package_exists:
+              new_line = f'{package} = ">={version_num}"  # {cve_id}'
+              updated_pipfile = re.sub(
+                  package_pattern,
+                  new_line,
+                  updated_pipfile,
+                  flags=re.MULTILINE | re.IGNORECASE
+              )
+          else:
+              packages_match = re.search(r'(\[packages\].*?\n)', updated_pipfile, re.DOTALL)
+              if packages_match:
+                  insert_pos = packages_match.end()
+                  new_line = f'{package} = ">={version_num}"  # {cve_id}\n'
+                  updated_pipfile = updated_pipfile[:insert_pos] + new_line + updated_pipfile[insert_pos:]
+              else:
+                  raise ValueError("Could not find [packages] section in Pipfile")
+
+          # Update companion packages in Pipfile
+          for comp in companion_info:
+              comp_name = comp["package"]
+              comp_version = comp["version"].lstrip("=<>~!")
+              comp_reason = comp["reason"]
+
+              comp_pattern = rf'^{re.escape(comp_name)}\s*=.*$'
+              comp_exists = re.search(comp_pattern, updated_pipfile, re.MULTILINE | re.IGNORECASE)
+
+              if comp_exists:
+                  new_comp_line = f'{comp_name} = ">={comp_version}"  # {comp_reason}'
+                  updated_pipfile = re.sub(
+                      comp_pattern,
+                      new_comp_line,
+                      updated_pipfile,
+                      flags=re.MULTILINE | re.IGNORECASE
+                  )
+
+          # Write updated Pipfile
+          with open(pipfile_path, "w") as f:
+              f.write(updated_pipfile)
+
+          # ==================== UPDATE PIPFILE.LOCK ====================
+          def update_lock_package(lock_data, pkg_name, new_ver, new_hash):
+              """Update a package in the lock file, return old version."""
+              pkg_lower = pkg_name.lower()
+              for section in ["default", "develop"]:
+                  if section in lock_data:
+                      for name in list(lock_data[section].keys()):
+                          if name.lower() == pkg_lower:
+                              old_ver = lock_data[section][name].get("version", "")
+                              lock_data[section][name]["version"] = new_ver
+                              lock_data[section][name]["hashes"] = new_hash
+                              return old_ver
+              return None
+
+          # Update main package
+          old_version = update_lock_package(current_lock, package, new_version, new_hashes)
+          if old_version is None:
+              if "default" not in current_lock:
+                  current_lock["default"] = {}
+              current_lock["default"][package] = {
+                  "version": new_version,
+                  "hashes": new_hashes,
+              }
+              old_version = "(not present)"
+
+          # Update companion packages
+          companion_changes = []
+          for comp in companion_info:
+              comp_old = update_lock_package(
+                  current_lock,
+                  comp["package"],
+                  comp["version"],
+                  comp["hashes"]
+              )
+              if comp_old:
+                  companion_changes.append({
+                      "package": comp["package"],
+                      "old_version": comp_old,
+                      "new_version": comp["version"],
+                      "reason": comp["reason"],
+                  })
+
+          # Write updated Pipfile.lock
+          with open(pipfile_lock_path, "w") as f:
+              json.dump(current_lock, f, indent=4)
+              f.write("\n")
+
+          result = {
+              "success": True,
+              "package": package,
+              "old_version": old_version,
+              "new_version": new_version,
+              "version_constraint": f">={version_num}",
+              "hashes_count": len(new_hashes),
+              "python_version": python_version,
+              "temp_dir": temp_dir,
+              "pipfile_updated": True,
+              "pipfile_lock_updated": True,
+              "companion_packages_updated": companion_changes,
+              "compatibility_notes": compatibility_check.get("notes", "") if isinstance(compatibility_check, dict) else "",
+          }
+
+      except Exception as e:
+          # Clean up temp dir on error
+          shutil.rmtree(temp_dir, ignore_errors=True)
+          raise
+
+      result = result
+    output: pipfile_update
+
+  - name: cleanup_temp
+    description: "Clean up temporary directory"
+    condition: "work_check.has_work and not inputs.dry_run and pipfile_update"
+    compute: |
+      import shutil
+
+      temp_dir = pipfile_update.get("temp_dir", "")
+      if temp_dir and temp_dir.startswith("/tmp/"):
+          shutil.rmtree(temp_dir, ignore_errors=True)
+
+      result = "Temp directory cleaned up"
+    output: cleanup_result
+
+  # ==================== COMMIT CHANGES ====================
+
+  - name: build_commit_message
+    description: "Build commit message for CVE fix"
+    condition: "work_check.has_work"
+    compute: |
+      from scripts.common.config_loader import format_commit_message
+
+      issue_key = cve_info["issue_key"]
+      cve_id = cve_info["cve_id"]
+      package = cve_info["affected_package"]
+
+      # Handle pipfile_update being a dict or string (error case)
+      if isinstance(pipfile_update, dict):
+          old_version = pipfile_update.get("old_version", "")
+          new_version = pipfile_update.get("new_version", "")
+      else:
+          old_version = ""
+          new_version = ""
+
+      description = f"update {package} to fix {cve_id}"
+      if old_version and new_version:
+          description = f"update {package} {old_version} -> {new_version} to fix {cve_id}"
+
+      message = format_commit_message(
+          description=description,
+          issue_key=issue_key,
+          commit_type="fix",
+          scope="deps",
+      )
+
+      result = message
+    output: commit_message
+
+  - name: stage_changes
+    description: "Stage Pipfile and Pipfile.lock changes"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: git_add
+    args:
+      repo: "{{ resolved_repo.path }}"
+      files: "Pipfile Pipfile.lock"
+    output: stage_result
+    on_error: continue
+
+  - name: commit_changes
+    description: "Commit the CVE fix"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: git_commit
+    args:
+      repo: "{{ resolved_repo.path }}"
+      message: "{{ commit_message }}"
+    output: commit_result
+    on_error: continue
+
+  # ==================== CREATE MR ====================
+
+  - name: push_branch
+    description: "Push branch to origin"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: git_push
+    args:
+      repo: "{{ resolved_repo.path }}"
+      branch: "{{ branch_name }}"
+      set_upstream: true
+    output: push_result
+    on_error: auto_heal
+
+  - name: build_mr_description
+    description: "Build MR description with CVE details and companion package info"
+    condition: "work_check.has_work"
+    compute: |
+      import textwrap
+
+      issue_key = cve_info["issue_key"]
+      cve_id = cve_info["cve_id"]
+      package = cve_info["affected_package"]
+      summary = cve_info.get("summary", "")
+      cvss_score = cve_info.get("cvss_score", "")
+      severity = cve_info.get("severity", "")
+
+      # Handle pipfile_update being a dict or string (error case)
+      if isinstance(pipfile_update, dict):
+          old_version = pipfile_update.get("old_version", "")
+          new_version = pipfile_update.get("new_version", "")
+          version_constraint = pipfile_update.get("version_constraint", "")
+          companion_changes = pipfile_update.get("companion_packages_updated", [])
+          compatibility_notes = pipfile_update.get("compatibility_notes", "")
+      else:
+          old_version = ""
+          new_version = ""
+          version_constraint = ""
+          companion_changes = []
+          compatibility_notes = ""
+
+      # Build changes section
+      changes_lines = [
+          f"- Added `{package} = \"{version_constraint}\"` to `Pipfile` (pinned to fixed version)",
+          f"- Updated `{package}` from `{old_version}` to `{new_version}` in `Pipfile.lock`",
+          "- Updated hashes in `Pipfile.lock`",
+      ]
+
+      # Add companion package changes if any
+      if companion_changes:
+          changes_lines.append("")
+          changes_lines.append("### Companion Package Updates (for compatibility)")
+          changes_lines.append("")
+          for comp in companion_changes:
+              comp_pkg = comp.get("package", "")
+              comp_old = comp.get("old_version", "")
+              comp_new = comp.get("new_version", "")
+              comp_reason = comp.get("reason", "")
+              changes_lines.append(f"- `{comp_pkg}`: `{comp_old}` → `{comp_new}` ({comp_reason})")
+
+      changes_section = "\n".join(changes_lines)
+
+      # Build compatibility notes section if present
+      compat_section = ""
+      if compatibility_notes:
+          compat_section = f"""
+## Compatibility Notes
+
+{compatibility_notes}
+"""
+
+      description = textwrap.dedent(f"""
+          ## Summary
+
+          Security fix for {cve_id} in {package}.
+
+          {summary}
+
+          ## CVE Details
+
+          - **CVE ID:** [{cve_id}](https://nvd.nist.gov/vuln/detail/{cve_id})
+          - **Package:** {package}
+          - **Severity:** {severity}
+          - **CVSS Score:** {cvss_score}
+
+          ## Changes
+
+          {changes_section}
+          {compat_section}
+          ## Jira
+
+          [{issue_key}](https://issues.redhat.com/browse/{issue_key})
+
+          ## Testing
+
+          - [ ] CI pipeline passes
+          - [ ] No breaking changes to existing functionality
+          - [ ] Local test collection passes (`pytest --collect-only`)
+
+          ## Checklist
+
+          - [x] Pipfile updated with version constraint and CVE comment
+          - [x] Pipfile.lock updated with new version and hashes
+          - [x] Companion packages updated if needed for compatibility
+          - [ ] Verified package version addresses CVE
+      """).strip()
+
+      result = description
+    output: mr_description
+
+  - name: build_mr_title
+    description: "Build MR title"
+    condition: "work_check.has_work"
+    compute: |
+      from scripts.common.config_loader import format_commit_message
+
+      issue_key = cve_info["issue_key"]
+      cve_id = cve_info["cve_id"]
+      package = cve_info["affected_package"]
+
+      title = format_commit_message(
+          description=f"fix {cve_id} in {package}",
+          issue_key=issue_key,
+          commit_type="fix",
+          scope="security",
+      )
+
+      result = title
+    output: mr_title
+
+  - name: create_mr
+    description: "Create GitLab merge request"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: gitlab_mr_create
+    args:
+      project: "{{ resolved_repo.gitlab_project }}"
+      title: "{{ mr_title }}"
+      description: "{{ mr_description }}"
+      target_branch: "{{ resolved_repo.default_branch }}"
+      source_branch: "{{ branch_name }}"
+      draft: false
+    output: mr
+    on_error: auto_heal
+
+  # ==================== UPDATE JIRA ====================
+
+  - name: build_jira_comment
+    description: "Build Jira comment with safe variable access"
+    condition: "work_check.has_work and not inputs.dry_run and mr"
+    compute: |
+      issue_key = cve_info["issue_key"]
+      cve_id = cve_info["cve_id"]
+      package = cve_info["affected_package"]
+      mr_url = mr.get("web_url", "") if isinstance(mr, dict) else str(mr)
+
+      # Handle pipfile_update being a dict or string (error case)
+      if isinstance(pipfile_update, dict):
+          old_version = pipfile_update.get("old_version", "")
+          new_version = pipfile_update.get("new_version", "")
+          version_info = f"{old_version} -> {new_version}" if old_version and new_version else "to latest"
+      else:
+          version_info = "to latest"
+
+      comment = f"MR created to fix {cve_id}:\n{mr_url}\n\nChanges:\n- Updated {package} {version_info}"
+
+      result = {
+          "issue_key": issue_key,
+          "comment": comment,
+      }
+    output: jira_comment_data
+
+  - name: add_mr_link_to_jira
+    description: "Add MR link to Jira issue"
+    condition: "work_check.has_work and not inputs.dry_run and mr and jira_comment_data"
+    tool: jira_add_comment
+    args:
+      issue_key: "{{ jira_comment_data.issue_key }}"
+      comment: "{{ jira_comment_data.comment }}"
+    output: jira_comment_result
+    on_error: auto_heal
+
+  # ==================== NOTIFY TEAM ====================
+
+  - name: build_slack_notification_data
+    description: "Build Slack notification data with safe variable access"
+    condition: "work_check.has_work and not inputs.dry_run and mr"
+    compute: |
+      import json
+
+      cve_id = cve_info.get("cve_id", "") if isinstance(cve_info, dict) else ""
+      package = cve_info.get("affected_package", "") if isinstance(cve_info, dict) else ""
+      severity = cve_info.get("severity", "") if isinstance(cve_info, dict) else ""
+
+      # Handle pipfile_update being a dict or string
+      if isinstance(pipfile_update, dict):
+          new_version = pipfile_update.get("new_version", "")
+      else:
+          new_version = ""
+
+      # Handle mr being a dict or string
+      if isinstance(mr, dict):
+          mr_url = mr.get("web_url", "")
+          mr_id = str(mr.get("iid", ""))
+      else:
+          mr_url = ""
+          mr_id = ""
+
+      notification_inputs = {
+          "message": "",
+          "template": "cve_fix",
+          "template_data": {
+              "cve_id": cve_id,
+              "package": package,
+              "version": new_version,
+              "mr_url": mr_url,
+              "mr_id": mr_id,
+              "severity": severity,
+          }
+      }
+
+      result = json.dumps(notification_inputs)
+    output: slack_notification_inputs
+
+  - name: notify_team_slack
+    description: "Notify team Slack channel about CVE fix"
+    condition: "work_check.has_work and not inputs.dry_run and mr and slack_notification_inputs"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: "{{ slack_notification_inputs }}"
+    output: slack_notification
+    on_error: continue
+
+  # ==================== MEMORY LOGGING ====================
+
+  - name: log_session
+    description: "Log CVE fix to session"
+    condition: "work_check.has_work"
+    tool: memory_session_log
+    args:
+      action: "{{ 'Would fix' if inputs.dry_run else 'Fixed' }} CVE {{ cve_info.cve_id }} in {{ cve_info.affected_package }}"
+      details: "Issue: {{ cve_info.issue_key }}, MR: {{ mr.web_url if mr else 'N/A (dry run)' }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## {{ "🔍 CVE Fix Dry Run" if inputs.dry_run else "✅ CVE Fix Complete" }}
+
+      ### CVE Status Summary
+
+      | Status | Count | Issues |
+      |--------|-------|--------|
+      | ✅ Merged to main | {{ filtered_cves.merged_count }} | {{ filtered_cves.merged_to_main | join(', ') if filtered_cves.merged_to_main else '-' }} |
+      | 🔀 Has Open MR | {{ filtered_cves.has_mr_count }} | {{ filtered_cves.has_mr | join(', ') if filtered_cves.has_mr else '-' }} |
+      | 🌿 Has Branch (no MR) | {{ filtered_cves.has_branch_count }} | {{ filtered_cves.has_branch | join(', ') if filtered_cves.has_branch else '-' }} |
+      | 🔧 Needs Work | {{ filtered_cves.unfixed_count }} | {{ filtered_cves.to_process | join(', ') if filtered_cves.to_process else '-' }} |
+
+      {% if not work_check.has_work %}
+      {{ work_check.message }}
+      {% else %}
+      ---
+      ### Processing: {{ cve_info.issue_key }}
+
+      | Field | Value |
+      |-------|-------|
+      | Issue | [{{ cve_info.issue_key }}](https://issues.redhat.com/browse/{{ cve_info.issue_key }}) |
+      | CVE ID | {{ cve_info.cve_id }} |
+      | Package | {{ cve_info.affected_package }} |
+      | Severity | {{ cve_info.severity }} |
+      | CVSS | {{ cve_info.cvss_score }} |
+
+      {% if not inputs.dry_run and pipfile_update is mapping %}
+      ### Changes Made
+
+      - **Branch:** `{{ branch_name }}`
+      - **Python Version:** `{{ pipfile_update.python_version | default('N/A') }}`
+      - **Pipfile:** Added `{{ cve_info.affected_package }} = "{{ pipfile_update.version_constraint | default('>=latest') }}"`
+      - **Pipfile.lock:** `{{ pipfile_update.old_version | default('?') }}` → `{{ pipfile_update.new_version | default('?') }}`
+      - **Hashes Updated:** {{ pipfile_update.hashes_count | default(0) }}
+
+      {% if mr is mapping %}
+      ### Merge Request
+
+      **MR:** [{{ mr.title | default('MR') }}]({{ mr.web_url | default('#') }})
+      {% endif %}
+      {% elif not inputs.dry_run %}
+      ### Changes Made
+
+      - **Branch:** `{{ branch_name }}`
+      - **Note:** Pipfile update details unavailable (manual update may have been performed)
+
+      {% if mr is mapping %}
+      ### Merge Request
+
+      **MR:** [{{ mr.title | default('MR') }}]({{ mr.web_url | default('#') }})
+      {% endif %}
+      {% else %}
+      ### Would Do
+
+      1. Assign {{ cve_info.issue_key }} to current user
+      2. Create branch: `{{ branch_name }}`
+      3. Create temp pipenv in /tmp with Python {{ pipfile_update.python_version if pipfile_update else 'from Pipfile' }}
+      4. Install latest {{ cve_info.affected_package }} to get version and hashes
+      5. Update Pipfile with version constraint (>= fixed version)
+      6. Update Pipfile.lock with new version and hashes
+      7. Create MR with CVE details
+      8. Add MR link to Jira issue
+      {% endif %}
+
+      {% if filtered_cves.unfixed_count > 1 %}
+      ---
+      **Note:** {{ filtered_cves.unfixed_count - 1 }} more CVE(s) remaining to process after this one.
+      {% endif %}
+      {% endif %}
+
+  - name: context
+    value:
+      processed: "{{ work_check.has_work }}"
+      issue_key: "{{ cve_info.issue_key if cve_info else none }}"
+      cve_id: "{{ cve_info.cve_id if cve_info else none }}"
+      package: "{{ cve_info.affected_package if cve_info else none }}"
+      mr_url: "{{ mr.web_url if mr else none }}"
+      branch: "{{ branch_name if branch_name else none }}"
+      remaining_cves: "{{ filtered_cves.unfixed_count - 1 if filtered_cves else 0 }}"
+      in_progress_count: "{{ filtered_cves.in_progress_count if filtered_cves else 0 }}"

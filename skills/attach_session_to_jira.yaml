@@ -1,0 +1,154 @@
+# Skill: Attach Session Context to Jira
+# Exports AI session context and attaches it to a Jira issue for investigation
+
+name: attach_session_to_jira
+description: |
+  Attach the current AI session context to a Jira issue as a formatted comment.
+
+  This skill extracts conversation history, tool calls, and metadata from the
+  current Cursor session and posts it to Jira. Useful for:
+
+  - **Investigation**: Team members can see what was discussed and done
+  - **Audit Trail**: Document AI-assisted work on issues
+  - **Handoff**: Share context when passing work to another developer
+  - **Debugging**: Review what the AI did when troubleshooting
+
+  The Jira comment includes:
+  - Session metadata (ID, persona, project, branch, duration)
+  - Summary statistics (messages, tool calls, code references)
+  - Key actions extracted from tool results
+  - Related issue keys mentioned in conversation
+  - Optional: Full conversation transcript (collapsible)
+
+  Uses MCP tools: jira_attach_session, session_info
+
+version: "1.0"
+
+inputs:
+  - name: issue_key
+    type: string
+    required: true
+    description: "Jira issue key to attach context to (e.g., AAP-12345)"
+
+  - name: session_id
+    type: string
+    required: false
+    default: ""
+    description: "Session ID to export. If empty, uses the active session."
+
+  - name: include_transcript
+    type: boolean
+    required: false
+    default: false
+    description: "Include full conversation transcript (collapsible in Jira)"
+
+steps:
+  # Step 1: Validate issue key format
+  - name: validate_issue_key
+    description: "Validate Jira issue key format"
+    compute: |
+      import re
+
+      key = inputs.issue_key.upper().strip()
+
+      if not re.match(r'^[A-Z]+-\d+$', key):
+          raise ValueError(
+              f"Invalid issue key format: {inputs.issue_key}. "
+              "Expected format: AAP-12345"
+          )
+
+      result = key
+    output: validated_issue_key
+
+  # Step 2: Get current session info (for validation)
+  - name: get_session_info
+    description: "Get current session information"
+    tool: session_info
+    args:
+      session_id: "{{ inputs.session_id }}"
+    output: session_info_raw
+    on_error: continue
+
+  - name: check_session_exists
+    description: "Verify session exists"
+    compute: |
+      info = str(session_info_raw) if session_info_raw else ""
+
+      if "No Active Session" in info or "Session Not Found" in info:
+          raise ValueError(
+              "No active session found. "
+              "Call session_start() first or provide a valid session_id."
+          )
+
+      # Extract session ID from output if present
+      import re
+      match = re.search(r'Session ID[:\s]+`?([a-f0-9-]+)', info, re.I)
+      session_id = match.group(1) if match else inputs.session_id
+
+      result = {"valid": True, "session_id": session_id}
+    output: session_check
+
+  # Step 3: Attach session context to Jira
+  - name: attach_to_jira
+    description: "Attach session context to Jira issue"
+    tool: jira_attach_session
+    args:
+      issue_key: "{{ validated_issue_key }}"
+      session_id: "{{ session_check.session_id }}"
+      include_transcript: "{{ inputs.include_transcript }}"
+    output: attach_result
+
+  # Step 4: Log the action
+  - name: log_session
+    description: "Log attachment to session log"
+    tool: memory_session_log
+    args:
+      action: "Attached session context to {{ validated_issue_key }}"
+      details: "Include transcript: {{ inputs.include_transcript }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {{ attach_result }}
+
+      ---
+
+      ## Next Steps
+
+      1. **View on Jira:** [{{ validated_issue_key }}](https://issues.redhat.com/browse/{{ validated_issue_key }})
+      2. **Export locally:** `session_export_context()` for markdown/JSON export
+      3. **Share with team:** Link the Jira issue in Slack or email
+
+  - name: context
+    value:
+      issue_key: "{{ validated_issue_key }}"
+      session_id: "{{ session_check.session_id }}"
+      include_transcript: "{{ inputs.include_transcript }}"
+
+on_error:
+  - pattern: "Invalid issue key"
+    message: |
+      ❌ Invalid Jira issue key format.
+
+      **Expected:** AAP-12345, APPSRE-1234, etc.
+      **Got:** {{ inputs.issue_key }}
+
+      Please provide a valid issue key.
+
+  - pattern: "No active session"
+    message: |
+      ❌ No active session found.
+
+      Run `session_start()` first to initialize a session, then try again.
+
+  - pattern: "Failed to add comment"
+    message: |
+      ❌ Failed to add comment to Jira.
+
+      This could be due to:
+      - Jira authentication issues (check JIRA_JPAT)
+      - Issue doesn't exist or you don't have permission
+      - Network/VPN issues
+
+      Try: `jira_view_issue("{{ inputs.issue_key }}")` to verify access.

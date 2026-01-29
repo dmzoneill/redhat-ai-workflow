@@ -261,7 +261,7 @@ async def cmd_stop(client: SlackAgentClient, args):
 def cmd_start(args):
     """Start the daemon in background."""
     daemon_script = PROJECT_ROOT / "scripts" / "slack_daemon.py"
-    log_file = Path("/tmp/slack-daemon.log")
+    log_file = Path.home() / ".config" / "aa-workflow" / "slack_daemon.log"
     pid_file = Path("/tmp/slack-daemon.pid")
 
     # Check if already running

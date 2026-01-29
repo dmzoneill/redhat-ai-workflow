@@ -813,12 +813,22 @@ steps:
   - name: build_description
     description: "Build MR description with Jira link and knowledge context"
     compute: |
+      import re
       import textwrap
 
       jira_url = resolved_repo.get("jira_url", "https://issues.redhat.com")
       issue_key = inputs.get("issue_key", "").upper()
-      issue_text = str(issue) if issue else ""
-      summary_match = issue_text[:100] if issue_text else "No description"
+
+      # Parse issue summary from jira_view_issue text output
+      issue_summary = "No description"
+      if issue:
+          issue_text = str(issue)
+          # Look for summary line in the formatted output
+          summary_match = re.search(r'summary\s*:\s*(.+?)(?:\n|$)', issue_text, re.IGNORECASE)
+          if summary_match:
+              issue_summary = summary_match.group(1).strip()
+          elif isinstance(issue, dict) and issue.get("summary"):
+              issue_summary = issue.get("summary", "No description")
 
       # Build suggested reviewers section
       reviewers_section = ""
@@ -840,7 +850,7 @@ steps:
 
       description = textwrap.dedent(f"""
           ## Summary
-          {summary_match}
+          {issue_summary}
 
           ## Jira
           [{issue_key}]({jira_url}/browse/{issue_key})
@@ -867,11 +877,23 @@ steps:
   - name: build_mr_title
     description: "Build MR title following commit format from config.json"
     compute: |
+      import re
       from scripts.common.config_loader import format_commit_message
 
       issue_key = inputs.get("issue_key", "").upper()
-      issue_summary = str(issue.get("summary", "Update") if issue and isinstance(issue, dict) else issue)[:50] if issue else "Update"
       commit_type = mr_commit_type if mr_commit_type else "feat"
+
+      # Parse issue summary from jira_view_issue text output
+      # Format: "summary             : The actual summary text"
+      issue_summary = "Update"
+      if issue:
+          issue_text = str(issue)
+          # Look for summary line in the formatted output
+          summary_match = re.search(r'summary\s*:\s*(.+?)(?:\n|$)', issue_text, re.IGNORECASE)
+          if summary_match:
+              issue_summary = summary_match.group(1).strip()[:80]
+          elif isinstance(issue, dict) and issue.get("summary"):
+              issue_summary = issue.get("summary", "Update")[:80]
 
       # Use the centralized formatter (scope is optional for MR titles)
       title = format_commit_message(

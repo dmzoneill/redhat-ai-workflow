@@ -937,6 +937,20 @@ def _index_project(project: str, force: bool = False) -> dict:
             stats["index_type"] = "FLAT"
             stats["index_note"] = "Too few vectors for IVF index, using brute force"
 
+        # Optimize data files to reduce disk usage
+        # LanceDB creates new fragment files on each write; optimize merges them
+        try:
+            from datetime import timedelta
+
+            optimize_start = time.time()
+            # Remove all old versions except the latest
+            table.optimize(cleanup_older_than=timedelta(days=0))
+            stats["optimize_time_ms"] = (time.time() - optimize_start) * 1000
+            logger.info(f"Optimized table in {stats['optimize_time_ms']:.0f}ms")
+        except Exception as e:
+            logger.warning(f"Failed to optimize table: {e}")
+            stats["optimize_error"] = str(e)
+
     # Save metadata
     metadata = {
         "project": project,
@@ -1023,14 +1037,35 @@ def _search_code(
         # nprobes not supported (FLAT index or old LanceDB version)
         pass
 
-    results = search_query.to_pandas()
+    # Execute search with error handling for corrupted/empty indexes
+    try:
+        results = search_query.to_pandas()
+    except Exception as e:
+        logger.error(f"LanceDB search failed for project '{project}': {e}")
+        return [{"error": f"Search failed: {e}. Try re-indexing with code_index(project='{project}', force=True)"}]
+
     search_time_ms = (time.time() - search_start) * 1000
 
+    # Handle empty results
+    if results is None or results.empty:
+        return []
+
+    # Validate required columns exist
+    required_cols = {"file_path", "type", "content", "start_line", "end_line", "name", "language"}
+    missing_cols = required_cols - set(results.columns)
+    if missing_cols:
+        logger.error(f"Index schema mismatch for '{project}': missing columns {missing_cols}")
+        return [{"error": f"Index schema mismatch. Re-index with code_index(project='{project}', force=True)"}]
+
     # Apply filters
-    if file_filter:
-        results = results[results["file_path"].str.contains(file_filter, case=False)]
-    if type_filter:
-        results = results[results["type"] == type_filter]
+    try:
+        if file_filter:
+            results = results[results["file_path"].str.contains(file_filter, case=False)]
+        if type_filter:
+            results = results[results["type"] == type_filter]
+    except Exception as e:
+        logger.warning(f"Filter application failed: {e}")
+        # Continue without filters rather than crashing
 
     # Limit results
     results = results.head(limit)
@@ -1649,6 +1684,92 @@ def register_tools(registry: Any) -> None:
         return [TextContent(type="text", text=output)]
 
     @registry.tool()
+    async def code_compact(
+        project: str = "",
+    ) -> list[TextContent]:
+        """
+        Optimize vector database files to reduce disk usage.
+
+        LanceDB creates new fragment files on each write/update. Over time this
+        causes significant disk bloat (can grow to GB). This tool merges fragments
+        and removes old versions.
+
+        Args:
+            project: Project name. If empty, optimizes all projects.
+
+        Returns:
+            Optimization statistics showing space saved.
+
+        Example:
+            code_compact("redhat-ai-workflow")  # Optimize single project
+            code_compact()  # Optimize all projects
+        """
+        from datetime import timedelta
+
+        config = _load_config()
+        projects = list(config.get("repositories", {}).keys())
+
+        if project:
+            if project not in projects:
+                return [TextContent(type="text", text=f"❌ Project '{project}' not found in config.json")]
+            projects = [project]
+
+        results = []
+        total_saved = 0
+
+        for proj in projects:
+            try:
+                db = _get_lance_db(proj)
+                table_name = _get_table_name(proj)
+
+                if table_name not in db.table_names():
+                    results.append(f"⏭️ **{proj}**: Not indexed (skipped)")
+                    continue
+
+                table = db.open_table(table_name)
+
+                # Get size before
+                db_path = VECTOR_DB_PATH / proj
+                size_before = sum(f.stat().st_size for f in db_path.rglob("*.lance"))
+                files_before = len(list(db_path.rglob("*.lance")))
+
+                # Optimize - remove all old versions
+                table.optimize(cleanup_older_than=timedelta(days=0))
+
+                # Get size after
+                size_after = sum(f.stat().st_size for f in db_path.rglob("*.lance"))
+                files_after = len(list(db_path.rglob("*.lance")))
+                saved = size_before - size_after
+                total_saved += saved
+
+                if saved > 0:
+                    if saved >= 1024 * 1024:
+                        saved_str = f"{saved / (1024 * 1024):.1f} MB"
+                    elif saved >= 1024:
+                        saved_str = f"{saved / 1024:.1f} KB"
+                    else:
+                        saved_str = f"{saved} B"
+                    results.append(f"✅ **{proj}**: {files_before} → {files_after} files, saved {saved_str}")
+                else:
+                    results.append(f"✅ **{proj}**: Already optimized ({files_after} files)")
+
+            except Exception as e:
+                results.append(f"❌ **{proj}**: {e}")
+
+        output = "## 🗜️ Vector Database Optimization\n\n"
+        output += "\n".join(results)
+
+        if total_saved >= 1024 * 1024:
+            total_str = f"{total_saved / (1024 * 1024):.1f} MB"
+        elif total_saved >= 1024:
+            total_str = f"{total_saved / 1024:.1f} KB"
+        else:
+            total_str = f"{total_saved} B"
+        output += f"\n\n**Total space saved:** {total_str}"
+
+        return [TextContent(type="text", text=output)]
+
+    @registry.tool()
     async def knowledge_deep_scan(
         project: str,
         update_memory: bool = True,
@@ -2043,5 +2164,3 @@ Use `code_cache('clear')` to clear the cache.
 """
 
         return [TextContent(type="text", text=output)]
-
-

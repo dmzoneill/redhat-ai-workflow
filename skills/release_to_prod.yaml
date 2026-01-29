@@ -430,9 +430,13 @@ steps:
       skill_name: notify_team
       inputs: |
         {
-          "message": "📦 Production Release - {{ validated_sha.short }} released to {{ inputs.component }}",
-          "type": "release",
-          "context": "Component: {{ inputs.component }}\nSHA: {{ validated_sha.sha }}"
+          "message": "",
+          "template": "release",
+          "template_data": {
+            "version": "{{ validated_sha.short }}",
+            "environments": ["production"],
+            "changelog": "Component: {{ inputs.component }}\nSHA: {{ validated_sha.sha }}"
+          }
         }
     output: slack_release_notify
     on_error: continue

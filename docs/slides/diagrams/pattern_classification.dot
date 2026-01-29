@@ -1,0 +1,37 @@
+
+digraph PatternClassification {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    error [label="Error\nMessage", fillcolor="#FFCDD2"];
+
+    classifier [label="Pattern\nClassifier", fillcolor="#FFCC80"];
+
+    subgraph cluster_types {
+        label="Error Types";
+        style=dashed;
+
+        auth [label="AUTH\n401/403", fillcolor="#E1BEE7"];
+        timeout [label="TIMEOUT\nconnection", fillcolor="#D1C4E9"];
+        notfound [label="NOT_FOUND\n404", fillcolor="#C5CAE9"];
+        rate [label="RATE_LIMIT\n429", fillcolor="#BBDEFB"];
+        syntax [label="SYNTAX\nparse error", fillcolor="#B3E5FC"];
+    }
+
+    fix [label="Apply\nFix Strategy", fillcolor="#C8E6C9"];
+
+    error -> classifier;
+    classifier -> auth;
+    classifier -> timeout;
+    classifier -> notfound;
+    classifier -> rate;
+    classifier -> syntax;
+
+    auth -> fix;
+    timeout -> fix;
+    notfound -> fix;
+    rate -> fix;
+    syntax -> fix;
+}

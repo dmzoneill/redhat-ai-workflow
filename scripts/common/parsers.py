@@ -240,8 +240,15 @@ def parse_git_branches(output: str, issue_key: Optional[str] = None) -> List[str
     """
     Parse git branch output into branch names.
 
+    Handles multiple formats:
+    - Raw git branch -a output: "* main", "  feature-branch", "  remotes/origin/main"
+    - Formatted markdown from git_branch_list tool:
+        "## Branches in `/repo`"
+        "**Current:** `branch-name`"
+        "  `branch1` → `origin/branch1` (3 weeks ago)"
+
     Args:
-        output: Raw output from git branch -a
+        output: Raw output from git branch -a or git_branch_list tool
         issue_key: Optional issue key to filter branches
 
     Returns:
@@ -252,9 +259,29 @@ def parse_git_branches(output: str, issue_key: Optional[str] = None) -> List[str
         return branches
 
     for line in str(output).split("\n"):
-        # Clean the branch name
-        branch = line.strip().replace("* ", "").replace("remotes/origin/", "")
-        if not branch or branch in ["main", "master", "HEAD"]:
+        branch = None
+
+        # Handle formatted markdown from git_branch_list tool
+        # Format: "**Current:** `branch-name`"
+        current_match = re.search(r"\*\*Current:\*\*\s*`([^`]+)`", line)
+        if current_match:
+            branch = current_match.group(1)
+        else:
+            # Format: "  `branch-name` → `origin/branch-name` (time ago)"
+            # or: "→ `branch-name` → `origin/branch-name` (time ago)"
+            backtick_match = re.search(r"^\s*[→\s]*`([^`]+)`", line)
+            if backtick_match:
+                branch = backtick_match.group(1)
+            else:
+                # Fallback: Raw git branch output
+                # Clean the branch name from raw format
+                branch = line.strip().replace("* ", "").replace("remotes/origin/", "")
+
+        if not branch or branch in ["main", "master", "HEAD", ""]:
+            continue
+
+        # Skip header lines
+        if branch.startswith("##") or branch.startswith("Branches in"):
             continue
 
         # Filter by issue key if provided

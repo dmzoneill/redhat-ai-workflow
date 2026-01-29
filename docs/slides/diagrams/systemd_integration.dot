@@ -1,0 +1,30 @@
+
+digraph SystemdIntegration {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    user [label="User\nLogin", fillcolor="#E3F2FD"];
+
+    systemd [label="systemd\n--user", fillcolor="#FFF9C4"];
+
+    subgraph cluster_services {
+        label="Service Files";
+        style=dashed;
+
+        s1 [label="bot-slack.service", fillcolor="#FFCC80"];
+        s2 [label="bot-sprint.service", fillcolor="#FFB74D"];
+        s3 [label="bot-cron.service", fillcolor="#FFA726"];
+    }
+
+    dbus [label="D-Bus\nSession Bus", fillcolor="#C8E6C9"];
+
+    user -> systemd [label="auto-start"];
+    systemd -> s1;
+    systemd -> s2;
+    systemd -> s3;
+    s1 -> dbus;
+    s2 -> dbus;
+    s3 -> dbus;
+}

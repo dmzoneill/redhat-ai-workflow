@@ -326,8 +326,8 @@ Use existing D-Bus interface (already in slack_daemon):
 
 ```python
 # slack_daemon.py already exposes:
-# - com.aiworkflow.SlackAgent.GetStatus
-# - com.aiworkflow.SlackAgent.GetStats
+# - com.aiworkflow.BotSlack.GetStatus
+# - com.aiworkflow.BotSlack.GetStats
 ```text
 
 Extension can query via D-Bus for real-time status.

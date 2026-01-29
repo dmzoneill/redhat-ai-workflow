@@ -271,15 +271,11 @@ async def ensure_session_exists(ctx: "Context", export: bool = True) -> ChatSess
         logger.info(f"No active session, auto-creating for workspace {state.workspace_uri}")
         session = state.create_session(name="Auto-created")
 
-        # Export state so VS Code extension can see the new session
+        # NOTE: We no longer export here to avoid race conditions with other services
+        # (sprint bot, meet bot, cron) that also write to workspace_states.json.
+        # The UI reads from the file which is updated by the cron sync service.
         if export:
-            try:
-                from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state
-
-                export_workspace_state()
-                logger.debug("Exported workspace state after auto-creating session")
-            except Exception as e:
-                logger.warning(f"Failed to export workspace state: {e}")
+            logger.debug("Session created - UI will see it on next sync cycle")
 
     return session
 

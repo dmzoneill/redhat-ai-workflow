@@ -10,13 +10,13 @@ last_coffee:
     stage: 0
   failed_pipelines: 0
   feedback_waiting: 0
-  pr_count: 9
+  pr_count: 2
   review_assignments: 0
-  timestamp: '2026-01-19T09:16:23.273421'
-last_updated: '2026-01-19T09:24:23.384666'
+  timestamp: '2026-01-26T10:10:56.778457'
+last_updated: '2026-01-28T17:31:34.613502'
 prepared_standup:
-  date: '2026-01-20'
-  generated_at: '2026-01-19T09:24:23.384344'
+  date: '2026-01-29'
+  generated_at: '2026-01-28T17:31:34.613469'
   notes: '**Yesterday:**
 
     - (no commits today)
@@ -24,9 +24,9 @@ prepared_standup:
 
     **Today:**
 
-    - Continue [!1491](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/1491):
-    [AAP-58394](https://issues.redhat.com/browse/AAP-58394) - fix(billing): calculate
-    accuracy after syncing r
+    - Continue [!1502](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/1502):
+    [AAP-61939](https://issues.redhat.com/browse/AAP-61939) - fix(deps): update aiohttp
+    to 3.13.3 for [CVE-2025](https://issues.redhat.com/browse/CVE-2025)
 
 
     **Blockers:**

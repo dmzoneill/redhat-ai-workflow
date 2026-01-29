@@ -15,12 +15,12 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 
-// Unified state file
-const WORKSPACE_STATE_FILE = path.join(
+// Performance data directory
+const PERFORMANCE_DIR = path.join(
   os.homedir(),
-  ".mcp",
-  "workspace_states",
-  "workspace_states.json"
+  ".config",
+  "aa-workflow",
+  "performance"
 );
 
 // ==================== INTERFACES ====================
@@ -71,24 +71,33 @@ export interface SunburstChild {
 
 // ==================== STATE LOADING ====================
 
-function loadUnifiedState(): Record<string, unknown> {
-  try {
-    if (fs.existsSync(WORKSPACE_STATE_FILE)) {
-      const content = fs.readFileSync(WORKSPACE_STATE_FILE, "utf-8");
-      return JSON.parse(content);
-    }
-  } catch (e) {
-    console.error("Failed to load workspace state:", e);
-  }
-  return {};
+function getPerformanceSummaryPath(): string {
+  // Get current quarter's summary file
+  const now = new Date();
+  const year = now.getFullYear();
+  const quarter = Math.floor(now.getMonth() / 3) + 1;
+  return path.join(PERFORMANCE_DIR, String(year), `q${quarter}`, "performance", "summary.json");
 }
 
 export function loadPerformanceState(): PerformanceState {
   try {
-    const unified = loadUnifiedState();
-    const perf = unified.performance as PerformanceState | undefined;
-    if (perf) {
-      return perf;
+    const summaryPath = getPerformanceSummaryPath();
+    if (fs.existsSync(summaryPath)) {
+      const content = fs.readFileSync(summaryPath, "utf-8");
+      const summary = JSON.parse(content);
+
+      // Map summary.json format to PerformanceState
+      return {
+        last_updated: summary.last_updated || new Date().toISOString(),
+        quarter: getCurrentQuarter(),
+        day_of_quarter: getDayOfQuarter(),
+        overall_percentage: summary.overall_percentage || 0,
+        competencies: summary.competencies || {},
+        sunburst_data: summary.sunburst_data,
+        highlights: summary.highlights || [],
+        gaps: summary.gaps || [],
+        questions_summary: summary.questions_summary,
+      };
     }
   } catch (e) {
     console.error("Failed to load performance state:", e);

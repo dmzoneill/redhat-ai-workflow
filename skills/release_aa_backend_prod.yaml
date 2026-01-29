@@ -545,9 +545,14 @@ steps:
       skill_name: notify_team
       inputs: |
         {
-          "message": "Production release MR ready for {{ inputs.release_date }}",
-          "type": "release",
-          "context": "SHA: {{ inputs.commit_sha[:12] }}\nMR: {{ mr_result.get('web_url', 'N/A') }}\nJira: {{ jira_issue.get('key', 'N/A') if jira_issue else 'N/A' }}"
+          "message": "",
+          "template": "release",
+          "template_data": {
+            "version": "{{ inputs.release_date }}",
+            "environments": ["production"],
+            "release_url": "{{ mr_result.get('web_url', '') }}",
+            "changelog": "SHA: {{ inputs.commit_sha[:12] }}\nJira: {{ jira_issue.get('key', 'N/A') if jira_issue else 'N/A' }}"
+          }
         }
       execute: true
     output: slack_release_notification

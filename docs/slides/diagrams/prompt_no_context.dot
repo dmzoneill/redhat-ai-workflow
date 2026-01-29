@@ -1,0 +1,24 @@
+
+digraph PromptNoContext {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    user [label="User\nPrompt", fillcolor="#E3F2FD"];
+
+    subgraph cluster_problem {
+        label="Without Context";
+        style=filled;
+        fillcolor="#FFCDD2";
+
+        llm [label="LLM", fillcolor="#EF9A9A"];
+        guess [label="Guessing\n???", fillcolor="#E57373"];
+    }
+
+    bad [label="Wrong\nAnswer", fillcolor="#FFCDD2"];
+
+    user -> llm;
+    llm -> guess [label="no context"];
+    guess -> bad;
+}

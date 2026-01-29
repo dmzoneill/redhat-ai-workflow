@@ -17,6 +17,28 @@ from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
 
+# Import centralized paths
+try:
+    from server.paths import (
+        AA_CONFIG_DIR,
+        MEETBOT_AUDIO_DIR,
+        MEETBOT_CLIPS_DIR,
+        MEETBOT_LOGS_DIR,
+        MEETBOT_MODELS_DIR,
+        MEETBOT_PIPES_DIR,
+        MEETBOT_RECORDINGS_DIR,
+    )
+except ImportError:
+    # Fallback for standalone usage
+    AA_CONFIG_DIR = Path.home() / ".config" / "aa-workflow"
+    MEETBOT_DATA_DIR = AA_CONFIG_DIR / "meet_bot"
+    MEETBOT_AUDIO_DIR = MEETBOT_DATA_DIR / "audio"
+    MEETBOT_CLIPS_DIR = MEETBOT_DATA_DIR / "clips"
+    MEETBOT_LOGS_DIR = MEETBOT_DATA_DIR / "logs"
+    MEETBOT_MODELS_DIR = MEETBOT_DATA_DIR / "models"
+    MEETBOT_PIPES_DIR = MEETBOT_DATA_DIR / "pipes"
+    MEETBOT_RECORDINGS_DIR = MEETBOT_DATA_DIR / "recordings"
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,7 +104,7 @@ class AvatarConfig:
     face_image: Path = Path("/home/daoneill/Documents/Identification/IMG_3249_.jpg")
 
     # Pre-generated video clips directory
-    clips_dir: Path = Path.home() / ".local/share/meet_bot/clips"
+    clips_dir: Path = field(default_factory=lambda: MEETBOT_CLIPS_DIR)
 
     # Output resolution for real-time generation
     output_width: int = 256
@@ -107,10 +129,10 @@ class AudioConfig:
     chunk_size: int = 1024
 
     # Output directory for generated audio
-    output_dir: Path = Path.home() / ".local/share/meet_bot/audio"
+    output_dir: Path = field(default_factory=lambda: MEETBOT_AUDIO_DIR)
 
     # Per-instance audio device settings
-    pipe_dir: Path = Path.home() / ".local/share/meet_bot/pipes"
+    pipe_dir: Path = field(default_factory=lambda: MEETBOT_PIPES_DIR)
     max_concurrent_meetings: int = 2
 
 
@@ -156,12 +178,6 @@ class VideoConfig:
     height: int = 480
     fps: int = 30
 
-    # Mirror output horizontally for Google Meet
-    # Google Meet mirrors the camera preview, so we pre-flip the video
-    # so that meeting participants see it correctly (un-mirrored)
-    # Set to True (default) so text/content appears correctly to viewers
-    mirror_for_meet: bool = True
-
 
 @dataclass
 class ModelPaths:
@@ -172,8 +188,8 @@ class ModelPaths:
     gpt_sovits_ref_audio: Optional[Path] = None
 
     # Wav2Lip model
-    wav2lip_checkpoint: Path = Path.home() / ".local/share/meet_bot/models/wav2lip.pth"
-    wav2lip_face_detect: Path = Path.home() / ".local/share/meet_bot/models/s3fd.pth"
+    wav2lip_checkpoint: Path = field(default_factory=lambda: MEETBOT_MODELS_DIR / "wav2lip.pth")
+    wav2lip_face_detect: Path = field(default_factory=lambda: MEETBOT_MODELS_DIR / "s3fd.pth")
 
     # Whisper model (fallback STT)
     whisper_model: str = "small"  # OpenVINO optimized
@@ -229,10 +245,10 @@ class MeetBotConfig:
     # Voice interaction settings
     enable_voice_pipeline: bool = False  # Enable real-time voice interaction
 
-    # Data directories
-    data_dir: Path = Path.home() / ".local/share/meet_bot"
-    logs_dir: Path = Path.home() / ".local/share/meet_bot/logs"
-    recordings_dir: Path = Path.home() / ".local/share/meet_bot/recordings"
+    # Data directories - centralized in ~/.config/aa-workflow/
+    data_dir: Path = field(default_factory=lambda: AA_CONFIG_DIR)
+    logs_dir: Path = field(default_factory=lambda: MEETBOT_LOGS_DIR)
+    recordings_dir: Path = field(default_factory=lambda: MEETBOT_RECORDINGS_DIR)
 
     def ensure_directories(self) -> None:
         """Create all required directories."""

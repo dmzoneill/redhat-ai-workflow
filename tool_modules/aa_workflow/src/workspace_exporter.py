@@ -4,7 +4,7 @@ Exports ALL UI data to a single JSON file that the VS Code extension watches
 for real-time updates. This is the single source of truth for the Command Center.
 
 The exported file is written to:
-  ~/.mcp/workspace_states/workspace_states.json
+  ~/.config/aa-workflow/workspace_states.json
 
 The VS Code extension uses a file watcher to detect changes and update
 ALL UI sections accordingly (no manual refresh buttons needed).
@@ -58,16 +58,16 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context
+
+from server.paths import AA_CONFIG_DIR, WORKSPACE_STATES_FILE
 
 logger = logging.getLogger(__name__)
 
-# Export file location - must match VS Code extension's expected path
-EXPORT_DIR = Path.home() / ".mcp" / "workspace_states"
-EXPORT_FILE = EXPORT_DIR / "workspace_states.json"
+# Export file location - centralized in server.paths
+EXPORT_DIR = AA_CONFIG_DIR
+EXPORT_FILE = WORKSPACE_STATES_FILE
 
 
 def _ensure_export_dir() -> None:
@@ -80,6 +80,9 @@ def export_workspace_state(cleanup_stale: bool = False, max_stale_hours: int = 2
 
     For full unified export with all UI data, use export_workspace_state_with_data().
 
+    This function preserves existing sprint/cron/service data from the file
+    to prevent accidental data loss when called without those parameters.
+
     Args:
         cleanup_stale: If True, remove stale workspaces before export.
         max_stale_hours: Hours of inactivity before a workspace is considered stale
@@ -87,10 +90,30 @@ def export_workspace_state(cleanup_stale: bool = False, max_stale_hours: int = 2
     Returns:
         Dictionary with export status and workspace count.
     """
-    # Delegate to unified export with no additional data
+    # Load existing data to preserve sprint/cron/service data
+    existing_data = {}
+    if EXPORT_FILE.exists():
+        try:
+            with open(EXPORT_FILE) as f:
+                existing_data = json.load(f)
+        except Exception:
+            pass
+
+    # Delegate to unified export, preserving existing data
     return export_workspace_state_with_data(
         cleanup_stale=cleanup_stale,
         max_stale_hours=max_stale_hours,
+        # Preserve existing data from legacy file
+        services=existing_data.get("services"),
+        ollama=existing_data.get("ollama"),
+        cron=existing_data.get("cron"),
+        slack_channels=existing_data.get("slack_channels"),
+        sprint_issues=existing_data.get("sprint_issues"),
+        sprint_issues_updated=existing_data.get("sprint_issues_updated"),
+        meet=existing_data.get("meet"),
+        sprint=existing_data.get("sprint"),
+        sprint_history=existing_data.get("sprint_history"),
+        performance=existing_data.get("performance"),
     )
 
 
@@ -106,11 +129,12 @@ def export_workspace_state_with_data(
     meet: dict | None = None,
     sprint: dict | None = None,
     sprint_history: list | None = None,
+    performance: dict | None = None,
 ) -> dict:
     """Export unified UI state to JSON file.
 
-    This is the primary export function used by sync_workspace_state.py.
-    It exports ALL data needed by the Command Center UI.
+    DEPRECATED: Each service now writes its own state file.
+    This function is kept for backward compatibility.
 
     Args:
         cleanup_stale: If True, remove stale workspaces before export.
@@ -124,6 +148,7 @@ def export_workspace_state_with_data(
         meet: Meet bot data (upcoming meetings, countdown, calendars)
         sprint: Full sprint state (currentSprint, issues, botEnabled, etc.)
         sprint_history: List of completed sprints
+        performance: Performance tracking data (quarterly connection)
 
     Returns:
         Dictionary with export status.
@@ -151,13 +176,35 @@ def export_workspace_state_with_data(
     # Get flattened sessions list for easier UI consumption
     all_sessions = WorkspaceRegistry.get_all_sessions()
 
+    # Load existing data to preserve keys not managed by sync (e.g., performance)
+    existing_data = {}
+    if EXPORT_FILE.exists():
+        try:
+            with open(EXPORT_FILE) as f:
+                existing_data = json.load(f)
+        except Exception:
+            pass
+
+    # SAFETY: If registry is empty but file has workspaces, preserve them
+    # This prevents data loss when called from standalone scripts where
+    # WorkspaceRegistry isn't populated
+    if not all_states and existing_data.get("workspaces"):
+        logger.warning(
+            f"WorkspaceRegistry empty but file has {len(existing_data['workspaces'])} workspaces. "
+            "Preserving existing workspaces."
+        )
+        all_states = existing_data["workspaces"]
+        all_sessions = existing_data.get("sessions", [])
+
     # Build export data (v3 format with all UI data)
     export_data = {
         "version": 3,
         "exported_at": datetime.now().isoformat(),
         # Session data
         "workspace_count": len(all_states),
-        "session_count": WorkspaceRegistry.total_session_count(),
+        "session_count": (
+            len(all_sessions) if all_sessions else sum(len(ws.get("sessions", {})) for ws in all_states.values())
+        ),
         "workspaces": all_states,
         "sessions": all_sessions,
         # Service status
@@ -183,6 +230,8 @@ def export_workspace_state_with_data(
         "sprint_history": sprint_history or [],
         # Meet bot data (upcoming meetings, countdown, calendars)
         "meet": meet or {},
+        # Performance tracking data (quarterly connection)
+        "performance": performance or existing_data.get("performance", {}),
     }
 
     # Write to file atomically (write to temp, then rename)

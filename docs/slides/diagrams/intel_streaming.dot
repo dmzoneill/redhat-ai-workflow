@@ -1,0 +1,27 @@
+
+digraph IntelStreaming {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_gpu {
+        label="Intel iGPU";
+        style=filled;
+        fillcolor="#E8EAF6";
+
+        opencl [label="OpenCL\nRender\n(Xe Cores)", fillcolor="#C5CAE9"];
+        va [label="VA Surface\n(Zero-Copy)", fillcolor="#9FA8DA"];
+        vaapi [label="VAAPI\nH.264\n(Quick Sync)", fillcolor="#7986CB"];
+    }
+
+    webrtc [label="WebRTC\nStream", fillcolor="#81C784"];
+    browser [label="Browser/\nVSCode", fillcolor="#A5D6A7"];
+
+    opencl -> va [label="DMA"];
+    va -> vaapi [label="encode"];
+    vaapi -> webrtc [label="RTP"];
+    webrtc -> browser;
+
+    stats [label="~6-8W\n<50ms", shape=note, fillcolor="#FFF9C4"];
+}

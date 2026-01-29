@@ -77,10 +77,11 @@ export class WorkspaceStateProvider implements vscode.Disposable {
 
     constructor() {
         // Path to workspace state file - must match exporter's path
+        // Centralized in ~/.config/aa-workflow/
         this.stateFilePath = path.join(
             os.homedir(),
-            '.mcp',
-            'workspace_states',
+            '.config',
+            'aa-workflow',
             'workspace_states.json'
         );
 

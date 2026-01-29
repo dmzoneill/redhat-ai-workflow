@@ -1,0 +1,31 @@
+
+digraph AutoRemediation {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    error [label="Tool Error", fillcolor="#FFCDD2"];
+
+    l1 [label="Layer 1\nRetry Logic", fillcolor="#BBDEFB"];
+    l2 [label="Layer 2\nParameter Fix", fillcolor="#90CAF9"];
+    l3 [label="Layer 3\nAlternative Tool", fillcolor="#64B5F6"];
+    l4 [label="Layer 4\nKnown Fixes", fillcolor="#42A5F5"];
+    l5 [label="Layer 5\nLearned Patterns", fillcolor="#2196F3", fontcolor=white];
+
+    success [label="Success", fillcolor="#C8E6C9"];
+    escalate [label="Escalate to\nHuman", fillcolor="#FFF9C4"];
+
+    error -> l1;
+    l1 -> l2 [label="fail"];
+    l2 -> l3 [label="fail"];
+    l3 -> l4 [label="fail"];
+    l4 -> l5 [label="fail"];
+    l5 -> escalate [label="fail"];
+
+    l1 -> success [style=dashed];
+    l2 -> success [style=dashed];
+    l3 -> success [style=dashed];
+    l4 -> success [style=dashed];
+    l5 -> success [style=dashed];
+}

@@ -29,6 +29,13 @@ __project_root__ = PROJECT_ROOT
 from tool_modules.aa_meet_bot.src.config import get_config
 from tool_modules.aa_meet_bot.src.virtual_devices import InstanceDeviceManager, InstanceDevices
 
+# Import centralized paths
+try:
+    from server.paths import MEETBOT_SCREENSHOTS_DIR
+except ImportError:
+    # Fallback for standalone usage
+    MEETBOT_SCREENSHOTS_DIR = Path.home() / ".config" / "aa-workflow" / "meet_bot" / "screenshots"
+
 logger = logging.getLogger(__name__)
 
 
@@ -1022,12 +1029,44 @@ class GoogleMeetController:
             logger.error(error_msg)
             if self.state:
                 self.state.errors.append(error_msg)
+
+            # Clean up any devices that were created before the import error
+            if self._device_manager:
+                try:
+                    await self._device_manager.cleanup(restore_browser_audio=False)
+                except Exception:
+                    pass
+                self._device_manager = None
+                self._devices = None
+
             return False
         except Exception as e:
             error_msg = f"Failed to initialize browser: {e}"
             logger.error(error_msg, exc_info=True)
             if self.state:
                 self.state.errors.append(error_msg)
+
+            # CRITICAL: Clean up audio devices if browser initialization failed
+            # Otherwise devices are orphaned and accumulate on repeated failures
+            if self._device_manager:
+                logger.info(f"[{self._instance_id}] Cleaning up devices after browser init failure")
+                try:
+                    await self._device_manager.cleanup(restore_browser_audio=False)
+                except Exception as cleanup_err:
+                    logger.warning(f"[{self._instance_id}] Device cleanup failed: {cleanup_err}")
+                self._device_manager = None
+                self._devices = None
+
+            # Also clean up ffmpeg if it was started
+            if self._ffmpeg_process:
+                try:
+                    self._ffmpeg_process.terminate()
+                    self._ffmpeg_process.wait(timeout=5)
+                except Exception:
+                    pass
+                self._ffmpeg_process = None
+                self._ffmpeg_pid = None
+
             return False
 
     async def _generate_idle_video(self, avatar_path: Path, output_path: Path) -> bool:
@@ -2297,8 +2336,9 @@ class GoogleMeetController:
         """
         Scrape the participant list from Google Meet UI.
 
-        Opens the People panel if needed, extracts participant names and emails,
-        then closes the panel.
+        Uses accessibility attributes (aria-label, role) which are stable across
+        Google's CSS obfuscation. Opens the People panel if needed, extracts
+        participant names, then closes the panel.
 
         Returns:
             List of dicts with 'name' and optionally 'email' for each participant.
@@ -2310,173 +2350,263 @@ class GoogleMeetController:
         participants = []
         panel_was_opened = False
 
-        try:
-            # First check if People panel is already open
-            # The panel has aria-label="Participants" or similar
-            panel_selectors = [
-                '[aria-label="Participants"]',
-                '[aria-label="People"]',
-                '[data-panel-id="participants"]',
-                '.google-material-icons:has-text("people")',
-            ]
+        # Words that indicate UI elements, not participant names
+        ui_keywords = [
+            "mute",
+            "unmute",
+            "pin",
+            "unpin",
+            "remove",
+            "more options",
+            "more actions",
+            "turn off",
+            "turn on",
+            "present",
+            "presentation",
+            "screen",
+            "camera",
+            "microphone",
+            "admit",
+            "deny",
+            "waiting",
+        ]
 
+        def is_valid_name(name: str) -> bool:
+            """Check if a string looks like a valid participant name."""
+            if not name or len(name) < 2 or len(name) > 100:
+                return False
+            name_lower = name.lower()
+            # Filter out UI element labels
+            if any(kw in name_lower for kw in ui_keywords):
+                return False
+            # Filter out strings that are just "(You)" or similar
+            if name_lower in ["(you)", "you", "me"]:
+                return False
+            return True
+
+        def clean_name(name: str) -> str:
+            """Clean up a participant name."""
+            # Remove "(You)" suffix for self
+            if "(You)" in name:
+                name = name.replace("(You)", "").strip()
+            # Remove "Meeting host" or similar suffixes
+            for suffix in ["Meeting host", "Host", "Co-host", "Presentation"]:
+                if name.endswith(suffix):
+                    name = name[: -len(suffix)].strip()
+            return name.strip()
+
+        try:
+            # First check if People panel is already open by looking for the
+            # participant list container (uses stable aria-label)
             panel_open = False
-            for selector in panel_selectors:
-                try:
-                    panel = await self.page.wait_for_selector(selector, timeout=500)
-                    if panel and await panel.is_visible():
-                        panel_open = True
-                        break
-                except Exception:
-                    continue
+            try:
+                # Look for the "In call" region which contains participants
+                panel = await self.page.wait_for_selector(
+                    '[role="region"][aria-label="In call"], ' '[role="list"][aria-label="Participants"]',
+                    timeout=500,
+                )
+                if panel and await panel.is_visible():
+                    panel_open = True
+            except Exception:
+                pass
 
             # If panel not open, click the People button to open it
             if not panel_open:
+                # The People button uses stable aria-labels
                 people_button_selectors = [
                     '[aria-label="Show everyone"]',
                     '[aria-label="People"]',
                     '[data-tooltip="Show everyone"]',
-                    'button[aria-label*="participant" i]',
-                    'button[aria-label*="people" i]',
+                    '[role="button"][aria-label*="People" i]',
+                    '[role="button"][aria-label*="participant" i]',
                 ]
 
                 for selector in people_button_selectors:
                     try:
                         btn = await self.page.wait_for_selector(selector, timeout=1000)
-                        if btn:
+                        if btn and await btn.is_visible():
                             await btn.click()
                             panel_was_opened = True
-                            await asyncio.sleep(1)  # Wait for panel to load
+                            await asyncio.sleep(1.5)  # Wait for panel animation
                             break
                     except Exception:
                         continue
 
-            # Now scrape participant names from the panel
-            # Google Meet uses various selectors for participant items
-            participant_selectors = [
-                # Main participant list items
-                "[data-participant-id]",
-                "[data-requested-participant-id]",
-                # Participant name spans
-                ".ZjFb7c",  # Common name class
-                ".cS7ype",  # Another name class
-                ".dwSJ2e",  # Participant row
-                # Fallback: any element with participant data
-                "[data-self-name]",
-            ]
+            # Primary method: Use JavaScript to extract from accessibility tree
+            # This is the most reliable as it uses stable ARIA attributes
+            js_participants = await self.page.evaluate(
+                """
+                () => {
+                    const participants = [];
+                    const seen = new Set();
 
-            # Try to get participant elements
-            for selector in participant_selectors:
-                try:
-                    elements = await self.page.query_selector_all(selector)
-                    if elements and len(elements) > 0:
-                        for el in elements:
-                            try:
-                                # Try to get the name from various attributes/text
-                                name = None
-                                email = None
+                    // UI keywords to filter out (lowercase)
+                    const uiKeywords = [
+                        'mute', 'unmute', 'pin', 'unpin', 'remove', 'more options',
+                        'more actions', 'turn off', 'turn on', 'present', 'presentation',
+                        'screen', 'camera', 'microphone', 'admit', 'deny', 'waiting'
+                    ];
 
-                                # Check for data attributes first
-                                name = await el.get_attribute("data-self-name")
-                                if not name:
-                                    name = await el.get_attribute("aria-label")
-                                if not name:
-                                    # Get text content
-                                    name = await el.text_content()
+                    function isValidName(name) {
+                        if (!name || name.length < 2 || name.length > 100) return false;
+                        const lower = name.toLowerCase();
+                        if (uiKeywords.some(kw => lower.includes(kw))) return false;
+                        if (['(you)', 'you', 'me'].includes(lower)) return false;
+                        return true;
+                    }
 
-                                if name:
-                                    name = name.strip()
-                                    # Filter out UI elements and invalid names
-                                    if (
-                                        name
-                                        and len(name) > 1
-                                        and len(name) < 100
-                                        and not any(
-                                            x in name.lower()
-                                            for x in [
-                                                "mute",
-                                                "pin",
-                                                "remove",
-                                                "more options",
-                                                "turn off",
-                                                "turn on",
-                                                "present",
-                                                "you",
-                                                "host",
-                                                "co-host",
-                                            ]
-                                        )
-                                    ):
-                                        # Check if this looks like an email
-                                        if "@" in name:
-                                            email = name
-                                            # Try to extract name from email
-                                            name = name.split("@")[0].replace(".", " ").title()
+                    function cleanName(name) {
+                        // Remove "(You)" suffix
+                        name = name.replace(/\\s*\\(You\\)\\s*/g, '').trim();
+                        return name;
+                    }
 
-                                        # Avoid duplicates
-                                        if not any(p["name"] == name for p in participants):
-                                            participants.append({"name": name, "email": email})
-                            except Exception as e:
-                                logger.debug(f"Error extracting participant: {e}")
-                                continue
+                    function addParticipant(name, email = null) {
+                        name = cleanName(name);
+                        if (isValidName(name) && !seen.has(name)) {
+                            seen.add(name);
+                            participants.push({ name, email });
+                        }
+                    }
 
-                        if participants:
-                            break  # Found participants, stop trying other selectors
-                except Exception as e:
-                    logger.debug(f"Selector {selector} failed: {e}")
-                    continue
+                    // Method 1: Find participant list items by role="listitem" with aria-label
+                    // This is the most reliable - Google Meet uses aria-label for accessibility
+                    const listItems = document.querySelectorAll('[role="listitem"][aria-label]');
+                    listItems.forEach(item => {
+                        const name = item.getAttribute('aria-label');
+                        if (name) {
+                            addParticipant(name);
+                        }
+                    });
 
-            # If we still have no participants, try JavaScript extraction
-            if not participants:
-                try:
-                    js_participants = await self.page.evaluate(
-                        """
-                        () => {
-                            const participants = [];
-
-                            // Method 1: Look for participant list items
-                            const items = document.querySelectorAll('[data-participant-id], [data-requested-participant-id]');
-                            items.forEach(item => {
-                                // Find name within the item
-                                const nameEl = item.querySelector('.ZjFb7c, .cS7ype, [data-self-name]');
-                                if (nameEl) {
-                                    const name = nameEl.textContent?.trim() || nameEl.getAttribute('data-self-name');
-                                    if (name && name.length > 1 && name.length < 100) {
-                                        participants.push({ name: name, email: null });
-                                    }
-                                }
-                            });
-
-                            // Method 2: Look for participant count and names in the panel
-                            if (participants.length === 0) {
-                                const panel = document.querySelector('[aria-label="Participants"], [aria-label="People"]');
-                                if (panel) {
-                                    const nameEls = panel.querySelectorAll('.ZjFb7c, .cS7ype');
-                                    nameEls.forEach(el => {
-                                        const name = el.textContent?.trim();
-                                        if (name && name.length > 1 && name.length < 100 &&
-                                            !name.toLowerCase().includes('mute') &&
-                                            !name.toLowerCase().includes('pin')) {
-                                            participants.push({ name: name, email: null });
-                                        }
-                                    });
+                    // Method 2: Find elements with data-participant-id and extract aria-label
+                    if (participants.length === 0) {
+                        const participantItems = document.querySelectorAll('[data-participant-id]');
+                        participantItems.forEach(item => {
+                            // First try aria-label on the item itself
+                            let name = item.getAttribute('aria-label');
+                            if (!name) {
+                                // Look for nested element with aria-label
+                                const labeled = item.querySelector('[aria-label]');
+                                if (labeled) {
+                                    name = labeled.getAttribute('aria-label');
                                 }
                             }
+                            if (name) {
+                                addParticipant(name);
+                            }
+                        });
+                    }
 
-                            // Deduplicate
-                            const seen = new Set();
-                            return participants.filter(p => {
-                                if (seen.has(p.name)) return false;
-                                seen.add(p.name);
-                                return true;
+                    // Method 3: Find the participant list region and extract names
+                    if (participants.length === 0) {
+                        // Look for the "In call" region
+                        const region = document.querySelector('[role="region"][aria-label="In call"]');
+                        if (region) {
+                            // Find all list items within
+                            const items = region.querySelectorAll('[role="listitem"]');
+                            items.forEach(item => {
+                                const name = item.getAttribute('aria-label');
+                                if (name) {
+                                    addParticipant(name);
+                                }
                             });
                         }
-                    """
-                    )
-                    if js_participants:
-                        participants = js_participants
+                    }
+
+                    // Method 4: Look for participant list by aria-label="Participants"
+                    if (participants.length === 0) {
+                        const list = document.querySelector('[role="list"][aria-label="Participants"]');
+                        if (list) {
+                            const items = list.querySelectorAll('[role="listitem"]');
+                            items.forEach(item => {
+                                const name = item.getAttribute('aria-label');
+                                if (name) {
+                                    addParticipant(name);
+                                }
+                            });
+                        }
+                    }
+
+                    // Method 5: Fallback - find any element with data-participant-id
+                    // and look for text content in a structured way
+                    if (participants.length === 0) {
+                        const items = document.querySelectorAll('[data-participant-id]');
+                        items.forEach(item => {
+                            // Try to find the name by looking at the DOM structure
+                            // Names are typically in a div with specific structure
+                            const walker = document.createTreeWalker(
+                                item,
+                                NodeFilter.SHOW_TEXT,
+                                {
+                                    acceptNode: (node) => {
+                                        const text = node.textContent?.trim();
+                                        if (text && text.length > 1 && text.length < 100) {
+                                            // Check if parent is not a button or icon
+                                            const parent = node.parentElement;
+                                            if (parent && !parent.closest('button') &&
+                                                !parent.closest('[aria-hidden="true"]')) {
+                                                return NodeFilter.FILTER_ACCEPT;
+                                            }
+                                        }
+                                        return NodeFilter.FILTER_REJECT;
+                                    }
+                                }
+                            );
+
+                            const firstText = walker.nextNode();
+                            if (firstText) {
+                                const name = firstText.textContent?.trim();
+                                if (name) {
+                                    addParticipant(name);
+                                }
+                            }
+                        });
+                    }
+
+                    return participants;
+                }
+            """
+            )
+
+            if js_participants:
+                participants = js_participants
+                logger.debug(f"JavaScript extraction found {len(participants)} participants")
+
+            # Fallback: Try Playwright selectors if JS extraction failed
+            if not participants:
+                try:
+                    # Use role-based selectors
+                    elements = await self.page.query_selector_all('[role="listitem"][aria-label]')
+                    for el in elements:
+                        try:
+                            name = await el.get_attribute("aria-label")
+                            if name:
+                                name = clean_name(name)
+                                if is_valid_name(name):
+                                    if not any(p["name"] == name for p in participants):
+                                        participants.append({"name": name, "email": None})
+                        except Exception:
+                            continue
                 except Exception as e:
-                    logger.debug(f"JavaScript participant extraction failed: {e}")
+                    logger.debug(f"Playwright fallback failed: {e}")
+
+            # Secondary fallback: data-participant-id elements
+            if not participants:
+                try:
+                    elements = await self.page.query_selector_all("[data-participant-id]")
+                    for el in elements:
+                        try:
+                            name = await el.get_attribute("aria-label")
+                            if name:
+                                name = clean_name(name)
+                                if is_valid_name(name):
+                                    if not any(p["name"] == name for p in participants):
+                                        participants.append({"name": name, "email": None})
+                        except Exception:
+                            continue
+                except Exception as e:
+                    logger.debug(f"data-participant-id fallback failed: {e}")
 
             # Update state with participant list
             if self.state:
@@ -2491,8 +2621,8 @@ class GoogleMeetController:
             # Close the panel if we opened it
             if panel_was_opened:
                 try:
-                    # Press Escape or click the close button
                     await self.page.keyboard.press("Escape")
+                    await asyncio.sleep(0.3)  # Brief wait for panel to close
                 except Exception:
                     pass
 
@@ -2722,7 +2852,7 @@ class GoogleMeetController:
     # ==================== Screenshot Capture ====================
 
     # Directory for storing meeting screenshots
-    SCREENSHOT_DIR = Path.home() / ".local" / "share" / "meet_bot" / "screenshots"
+    SCREENSHOT_DIR = MEETBOT_SCREENSHOTS_DIR
 
     async def take_screenshot(self) -> Optional[Path]:
         """

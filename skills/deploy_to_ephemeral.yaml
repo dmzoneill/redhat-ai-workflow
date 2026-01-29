@@ -489,9 +489,14 @@ steps:
       skill_name: notify_team
       inputs: |
         {
-          "message": "Ephemeral deployment complete for {{ inputs.app }}",
-          "type": "deployment",
-          "context": "Namespace: {{ namespace_info.get('namespace', 'unknown') }}\nApp: {{ inputs.app }}\nComponent: {{ inputs.component }}\nImage: {{ inputs.image_tag or 'latest' }}"
+          "message": "",
+          "template": "deployment",
+          "template_data": {
+            "environment": "ephemeral",
+            "namespace": "{{ namespace_info.get('namespace', 'unknown') }}",
+            "status": "success",
+            "sha": "{{ inputs.image_tag or 'latest' }}"
+          }
         }
       execute: true
     output: slack_deployment_notification
@@ -506,9 +511,14 @@ steps:
       skill_name: notify_team
       inputs: |
         {
-          "message": "Ephemeral deployment failed for {{ inputs.app }}",
-          "type": "error",
-          "context": "App: {{ inputs.app }}\nComponent: {{ inputs.component }}\nError: {{ deploy_status.get('output', 'unknown')[:200] }}"
+          "message": "",
+          "template": "deployment",
+          "template_data": {
+            "environment": "ephemeral",
+            "namespace": "{{ namespace_info.get('namespace', 'unknown') }}",
+            "status": "failed",
+            "sha": "{{ inputs.image_tag or 'latest' }}"
+          }
         }
       execute: true
     output: slack_deployment_failure_notification

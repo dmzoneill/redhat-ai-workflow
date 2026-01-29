@@ -1,0 +1,63 @@
+
+digraph SystemArch {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_ide {
+        label="IDE Layer";
+        style=filled;
+        fillcolor="#E3F2FD";
+
+        cursor [label="Cursor IDE", fillcolor="#BBDEFB"];
+        vscode [label="VSCode\nExtension", fillcolor="#90CAF9"];
+    }
+
+    subgraph cluster_server {
+        label="MCP Server";
+        style=filled;
+        fillcolor="#E8F5E9";
+
+        main [label="Main Server", fillcolor="#A5D6A7"];
+        personas [label="Persona\nLoader", fillcolor="#81C784"];
+        skills [label="Skill\nEngine", fillcolor="#66BB6A"];
+        tools [label="Tool\nRegistry", fillcolor="#4CAF50"];
+    }
+
+    subgraph cluster_daemons {
+        label="Background Daemons";
+        style=filled;
+        fillcolor="#FFF3E0";
+
+        slack [label="Slack", fillcolor="#FFCC80"];
+        sprint [label="Sprint", fillcolor="#FFB74D"];
+        meet [label="Meet", fillcolor="#FFA726"];
+        cron [label="Cron", fillcolor="#FF9800"];
+    }
+
+    subgraph cluster_storage {
+        label="Storage";
+        style=filled;
+        fillcolor="#F3E5F5";
+
+        memory [label="Memory\n(YAML)", fillcolor="#CE93D8", shape=cylinder];
+        config [label="Config\n(JSON)", fillcolor="#BA68C8", shape=cylinder];
+        state [label="State\n(JSON)", fillcolor="#AB47BC", shape=cylinder];
+    }
+
+    cursor -> main [label="MCP/stdio"];
+    vscode -> main [label="WebSocket"];
+    main -> personas;
+    main -> skills;
+    main -> tools;
+
+    slack -> main [label="D-Bus", style=dashed];
+    sprint -> main [label="D-Bus", style=dashed];
+    meet -> main [label="D-Bus", style=dashed];
+    cron -> skills [label="triggers"];
+
+    main -> memory;
+    main -> config;
+    main -> state;
+}

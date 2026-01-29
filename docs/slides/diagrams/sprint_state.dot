@@ -1,0 +1,26 @@
+
+digraph SprintState {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=circle, style=filled, fontname="Arial", fontsize=9, width=1];
+    edge [fontname="Arial", fontsize=8];
+
+    idle [label="Idle", fillcolor="#E0E0E0"];
+    loading [label="Loading", fillcolor="#BBDEFB"];
+    analyzing [label="Analyzing", fillcolor="#90CAF9"];
+    classifying [label="Classifying", fillcolor="#64B5F6"];
+    checking [label="Checking\nActionable", fillcolor="#42A5F5"];
+    transitioning [label="Transitioning", fillcolor="#2196F3", fontcolor=white];
+    working [label="Working", fillcolor="#1E88E5", fontcolor=white];
+    complete [label="Complete", fillcolor="#4CAF50", fontcolor=white];
+
+    idle -> loading [label="start"];
+    loading -> analyzing;
+    analyzing -> classifying;
+    classifying -> checking;
+    checking -> transitioning [label="actionable"];
+    checking -> idle [label="skip", style=dashed];
+    transitioning -> working;
+    working -> complete;
+    complete -> idle;
+}

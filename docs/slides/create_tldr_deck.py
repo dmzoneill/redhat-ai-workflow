@@ -209,7 +209,7 @@ add_tldr_slide(
         "## The Problem",
         "• Multi-agent = coordination overhead, state sync, higher costs",
         "• Stateless agents create disjoint, chaotic work",
-        "• Tool limit: ~80 practical, but we have 263 tools!",
+        "• Tool limit: ~80 practical, but we have 435 tools!",
         "",
         "## The Solution: Dynamic Personas",
         '• Single Claude instance wearing different "hats"',
@@ -258,7 +258,7 @@ add_tldr_slide(
         "## Common Failures → Auto-Fixed",
         '• VPN disconnected → "No route to host" → vpn_connect()',
         '• Token expired → "401 Unauthorized" → kube_login()',
-        "• 100% coverage: all 263 tools have @auto_heal decorators",
+        "• 100% coverage: all 435 tools have @auto_heal decorators",
         "",
         "## The Learning Loop",
         "• check_known_issues() → looks up memory/learned/patterns.yaml",
@@ -340,8 +340,8 @@ add_tldr_slide(
         "• End: /beer - wrap up summary",
         "",
         "## Resources",
-        "• 📖 README, ⚡ 55 Skills, 🎭 Personas, 🔧 263 Tools",
-        "• 📚 66 Slash Commands documented",
+        "• README, 82 Skills, 15 Personas, 435 Tools",
+        "• 130 Slash Commands documented",
     ],
 )
 

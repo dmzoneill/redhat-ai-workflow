@@ -23,6 +23,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Cron history file path - centralized in server.paths
+try:
+    from server.paths import CRON_HISTORY_FILE
+
+    _CRON_HISTORY_FILE = CRON_HISTORY_FILE
+except ImportError:
+    _CRON_HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "cron_history.json"
+
 
 # Default retry configuration
 DEFAULT_RETRY_CONFIG = {
@@ -181,8 +189,8 @@ class SchedulerConfig:
 class JobExecutionLog:
     """Track job execution history with file persistence."""
 
-    # File path that VSCode extension expects
-    HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "cron_history.json"
+    # File path - centralized in server.paths (set at module level)
+    HISTORY_FILE = _CRON_HISTORY_FILE
 
     def __init__(self, max_entries: int = 100):
         self.max_entries = max_entries
@@ -460,6 +468,8 @@ class CronScheduler:
         inputs = job_config.get("inputs", {})
         notify = job_config.get("notify", [])
         persona = job_config.get("persona", "")  # Optional persona to load
+        # Timeout in seconds - default 600 (10 min), can be increased for batch jobs
+        timeout_seconds = job_config.get("timeout_seconds", 600)
 
         # Get retry configuration for this job
         retry_config = self.config.get_retry_config(job_config)
@@ -485,13 +495,17 @@ class CronScheduler:
                     "notify": notify,
                     "persona": persona,
                     "retry_config": retry_config,
+                    "timeout_seconds": timeout_seconds,
                 },
                 replace_existing=True,
             )
 
             persona_info = f" (persona: {persona})" if persona else ""
             retry_info = f", retry: {retry_config.max_attempts}" if retry_config.enabled else ", retry: disabled"
-            logger.info(f"Added cron job: {job_name} ({cron_expr}) -> skill:{skill}{persona_info}{retry_info}")
+            timeout_info = f", timeout: {timeout_seconds}s" if timeout_seconds != 600 else ""
+            logger.info(
+                f"Added cron job: {job_name} ({cron_expr}) -> skill:{skill}{persona_info}{retry_info}{timeout_info}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to add job {job_name}: {e}")
@@ -524,6 +538,7 @@ class CronScheduler:
         notify: list[str],
         persona: str = "",
         retry_config: RetryConfig | None = None,
+        timeout_seconds: int = 600,
     ):
         """Execute a scheduled job with retry and auto-remediation support.
 
@@ -534,6 +549,7 @@ class CronScheduler:
             notify: Notification channels
             persona: Optional persona to load
             retry_config: Retry configuration (defaults to global config)
+            timeout_seconds: Maximum execution time in seconds (default 600 = 10 min)
         """
         import asyncio
         import shutil
@@ -549,6 +565,14 @@ class CronScheduler:
         self._log_to_file(
             f"_execute_job called: job={job_name}, skill={skill}, persona={persona}, session={session_name}"
         )
+
+        # Emit toast notification for job start
+        try:
+            from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_started
+
+            notify_cron_job_started(job_name, skill)
+        except Exception:
+            pass
 
         # Use default retry config if not provided
         if retry_config is None:
@@ -594,6 +618,7 @@ class CronScheduler:
                     inputs=inputs,
                     session_name=f"{session_name}-attempt{attempt + 1}" if attempt > 0 else session_name,
                     persona=persona,
+                    timeout_seconds=timeout_seconds,
                 )
             else:
                 if use_claude_cli and not claude_path:
@@ -633,6 +658,20 @@ class CronScheduler:
                 logger.warning(f"Job {job_name}: Remediation failed, but will still retry")
 
         duration_ms = int((time.time() - start_time) * 1000)
+        duration_seconds = duration_ms / 1000.0
+
+        # Emit toast notification for job completion
+        try:
+            if success:
+                from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_completed
+
+                notify_cron_job_completed(job_name, skill, duration_seconds)
+            else:
+                from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_failed
+
+                notify_cron_job_failed(job_name, skill, error_msg or "Unknown error")
+        except Exception:
+            pass
 
         # Log execution with retry info
         self.execution_log.log_execution(
@@ -852,6 +891,7 @@ class CronScheduler:
         inputs: dict,
         session_name: str,
         persona: str = "",
+        timeout_seconds: int = 600,
     ) -> tuple[bool, str | None, str | None]:
         """Run a skill using Claude CLI for AI-powered execution.
 
@@ -861,6 +901,7 @@ class CronScheduler:
             inputs: Input parameters for the skill
             session_name: Session name for logging
             persona: Optional persona to load before executing
+            timeout_seconds: Maximum execution time in seconds (default 600 = 10 min)
 
         Returns:
             Tuple of (success, output, error_message)
@@ -901,7 +942,8 @@ Begin execution now."""
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"{session_name}.log"
 
-        self._log_to_file(f"Running Claude CLI, output to {log_file}")
+        timeout_minutes = timeout_seconds // 60
+        self._log_to_file(f"Running Claude CLI, output to {log_file}, timeout={timeout_seconds}s")
 
         try:
             # Run Claude CLI with --print flag for non-interactive mode
@@ -916,18 +958,19 @@ Begin execution now."""
                 cwd=str(Path.home() / "src" / "redhat-ai-workflow"),
             )
 
-            # Wait for completion with timeout (10 minutes max)
+            # Wait for completion with configurable timeout
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=600,  # 10 minute timeout
+                    timeout=timeout_seconds,
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
                 # Clean up stale skill execution state so UI doesn't show "running" forever
-                self._cleanup_skill_execution_state(skill, "Claude CLI timed out after 10 minutes")
-                return False, None, "Claude CLI timed out after 10 minutes"
+                timeout_msg = f"Claude CLI timed out after {timeout_minutes} minutes"
+                self._cleanup_skill_execution_state(skill, timeout_msg)
+                return False, None, timeout_msg
 
             # Decode output
             output = stdout.decode("utf-8", errors="replace") if stdout else ""

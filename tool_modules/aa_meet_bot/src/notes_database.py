@@ -6,6 +6,8 @@ Provides persistent storage for:
 - Meeting metadata (title, calendar, participants, times)
 - Full transcripts (speaker, text, timestamp)
 - AI-generated summaries and action items
+
+Database location: ~/.config/aa-workflow/meetings.db
 """
 
 import asyncio
@@ -20,8 +22,14 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-# Default database path
-DEFAULT_DB_PATH = Path.home() / ".local/share/meet_bot/meetings.db"
+# Default database path - centralized in server.paths
+try:
+    from server.paths import MEETINGS_DB_FILE
+
+    DEFAULT_DB_PATH = MEETINGS_DB_FILE
+except ImportError:
+    # Fallback for standalone usage
+    DEFAULT_DB_PATH = Path.home() / ".config" / "aa-workflow" / "meetings.db"
 
 
 @dataclass
@@ -148,7 +156,7 @@ class MeetingNotesDB:
         Initialize the database.
 
         Args:
-            db_path: Path to SQLite database file. Defaults to ~/.local/share/meet_bot/meetings.db
+            db_path: Path to SQLite database file. Defaults to ~/.config/aa-workflow/meetings.db
         """
         self.db_path = db_path or DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

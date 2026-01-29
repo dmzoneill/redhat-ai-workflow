@@ -189,22 +189,39 @@ async def _run_vpn_connect() -> bool:
         else:
             vpn_script = os.path.expanduser(vpn_script)
 
-        if not os.path.exists(vpn_script):
-            logger.warning(f"Auto-heal: VPN script not found: {vpn_script}")
+        if os.path.exists(vpn_script):
+            success, stdout, stderr = await run_cmd_shell(
+                [vpn_script],
+                timeout=120,
+            )
+
+            output = stdout + stderr
+            if success or "successfully activated" in output.lower():
+                logger.info("Auto-heal: vpn_connect successful")
+                return True
+
+            logger.warning(f"Auto-heal: vpn_connect failed: {output[:200]}")
             return False
+        else:
+            # Fallback to nmcli with common VPN connection names
+            logger.info(f"Auto-heal: VPN script not found at {vpn_script}, trying nmcli fallback")
+            vpn_names = [
+                "Red Hat Global VPN",
+                "Red Hat VPN",
+                "redhat-vpn",
+                "RH-VPN",
+            ]
+            for vpn_name in vpn_names:
+                success, stdout, stderr = await run_cmd_shell(
+                    ["nmcli", "connection", "up", vpn_name],
+                    timeout=30,
+                )
+                if success:
+                    logger.info(f"Auto-heal: vpn_connect successful via nmcli ({vpn_name})")
+                    return True
 
-        success, stdout, stderr = await run_cmd_shell(
-            [vpn_script],
-            timeout=120,
-        )
-
-        output = stdout + stderr
-        if success or "successfully activated" in output.lower():
-            logger.info("Auto-heal: vpn_connect successful")
-            return True
-
-        logger.warning(f"Auto-heal: vpn_connect failed: {output[:200]}")
-        return False
+            logger.warning("Auto-heal: All VPN connection attempts failed")
+            return False
 
     except ImportError as e:
         logger.warning(f"Auto-heal: vpn_connect missing dependency: {e}")

@@ -1,0 +1,37 @@
+
+digraph RalphLoop {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=11];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_cursor {
+        label="Cursor IDE";
+        style=dashed;
+        color="#666666";
+
+        user [label="User Request", fillcolor="#E3F2FD"];
+        claude [label="Claude Agent", fillcolor="#BBDEFB"];
+        hook [label="Stop Hook", fillcolor="#90CAF9"];
+    }
+
+    subgraph cluster_system {
+        label="Ralph Wiggum System";
+        style=dashed;
+        color="#666666";
+
+        todo [label="TODO.md", fillcolor="#C8E6C9", shape=note];
+        manager [label="Loop Manager", fillcolor="#A5D6A7"];
+        config [label="Loop Config\n(JSON)", fillcolor="#81C784", shape=cylinder];
+    }
+
+    user -> claude [label="1. Goals"];
+    claude -> todo [label="2. Generate"];
+    claude -> manager [label="3. Start Loop"];
+    manager -> config [label="4. Save State"];
+    claude -> hook [label="5. Try Stop", style=dashed];
+    hook -> todo [label="6. Check Tasks"];
+    hook -> claude [label="7. Continue\n(if incomplete)", color="#4CAF50", penwidth=2];
+
+    {rank=same; todo; config}
+}

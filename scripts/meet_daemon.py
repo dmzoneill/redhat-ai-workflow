@@ -21,13 +21,13 @@ Usage:
     python scripts/meet_daemon.py --dbus         # Enable D-Bus IPC
 
 Systemd:
-    systemctl --user start meet-bot
-    systemctl --user status meet-bot
-    systemctl --user stop meet-bot
+    systemctl --user start bot-meet
+    systemctl --user status bot-meet
+    systemctl --user stop bot-meet
 
 D-Bus:
-    Service: com.aiworkflow.MeetBot
-    Path: /com/aiworkflow/MeetBot
+    Service: com.aiworkflow.BotMeet
+    Path: /com/aiworkflow/BotMeet
 """
 
 import argparse
@@ -49,6 +49,9 @@ from scripts.common.sleep_wake import SleepWakeAwareDaemon  # noqa: E402
 
 LOCK_FILE = Path("/tmp/meet-daemon.lock")
 PID_FILE = Path("/tmp/meet-daemon.pid")
+
+# Import centralized paths - meet daemon owns its own state file
+from server.paths import MEET_STATE_FILE
 
 # Configure logging for journalctl
 # When running under systemd, stdout/stderr automatically go to journald
@@ -118,9 +121,9 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
     """Main Google Meet bot daemon with D-Bus support."""
 
     # D-Bus configuration
-    service_name = "com.aiworkflow.MeetBot"
-    object_path = "/com/aiworkflow/MeetBot"
-    interface_name = "com.aiworkflow.MeetBot"
+    service_name = "com.aiworkflow.BotMeet"
+    object_path = "/com/aiworkflow/BotMeet"
+    interface_name = "com.aiworkflow.BotMeet"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = False):
         super().__init__()
@@ -147,6 +150,7 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
         self.register_handler("mute_audio", self._handle_mute_audio)
         self.register_handler("unmute_audio", self._handle_unmute_audio)
         self.register_handler("get_audio_state", self._handle_get_audio_state)
+        self.register_handler("write_state", self._handle_write_state)
 
     # ==================== D-Bus Interface Methods ====================
 
@@ -545,6 +549,14 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
             logger.debug(f"Failed to get audio state: {e}")
             return {"muted": True, "has_meeting": True, "error": str(e)}
 
+    async def _handle_write_state(self) -> dict:
+        """Write state to file immediately (for UI refresh requests)."""
+        try:
+            await self._write_state()
+            return {"success": True, "file": str(MEET_STATE_FILE)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     # ==================== Sleep/Wake Handling ====================
 
     async def on_system_wake(self):
@@ -640,16 +652,141 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
         await self.start_sleep_monitor()
         print("✅ Sleep/wake monitor started")
 
+        # Start state writer task (writes meet_state.json periodically)
+        self._state_writer_task = asyncio.create_task(self._state_writer_loop())
+        print("✅ State writer started")
+
         print()
         print("-" * 60)
         print("Daemon running. Press Ctrl+C to stop.")
-        print("Logs: journalctl --user -u meet-bot -f")
+        print("Logs: journalctl --user -u bot-meet -f")
         if self.enable_dbus:
             print(f"D-Bus: {self.service_name}")
         print("-" * 60)
 
         # Wait for shutdown signal
         await self._shutdown_event.wait()
+
+    async def _state_writer_loop(self):
+        """Periodically write meet state to meet_state.json.
+
+        Each service owns its own state file. The VS Code extension reads
+        all state files on refresh. No shared file = no race conditions.
+        """
+        while not self._shutdown_event.is_set():
+            try:
+                await self._write_state()
+                await asyncio.sleep(10)  # Write every 10 seconds
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"State writer error: {e}")
+                await asyncio.sleep(10)
+
+    async def _write_state(self):
+        """Write current meet state to meet_state.json."""
+        import json
+        import tempfile
+
+        if not self._scheduler:
+            return
+
+        try:
+            # Get current status from scheduler
+            status = await self._scheduler.get_status()
+            calendars = await self._scheduler.list_calendars()
+
+            # Build meet state
+            meet_state = {
+                "schedulerRunning": self.is_running,
+                "upcomingMeetings": [
+                    {
+                        "id": m.get("event_id", ""),
+                        "title": m.get("title", "Untitled"),
+                        "url": m.get("meet_url", ""),
+                        "startTime": m.get("start", ""),
+                        "endTime": m.get("end", ""),
+                        "organizer": m.get("organizer", ""),
+                        "status": m.get("status", "scheduled"),
+                        "botMode": m.get("bot_mode", "notes"),
+                        "calendarName": m.get("calendar_name", ""),
+                    }
+                    for m in status.get("upcoming_meetings", [])
+                ],
+                "currentMeetings": [
+                    {
+                        "id": m.get("event_id", ""),
+                        "sessionId": m.get("event_id", ""),
+                        "title": m.get("title", "Untitled"),
+                        "url": m.get("meet_url", ""),
+                        "startTime": m.get("start", ""),
+                        "endTime": m.get("end", ""),
+                        "organizer": m.get("organizer", ""),
+                        "status": "joined",
+                        "botMode": m.get("bot_mode", "notes"),
+                        "screenshotPath": m.get("screenshot_path"),
+                        "screenshotUpdated": m.get("screenshot_updated"),
+                    }
+                    for m in status.get("current_meetings", [])
+                ],
+                "monitoredCalendars": [{"id": c.calendar_id, "name": c.name, "enabled": c.enabled} for c in calendars],
+                "lastPoll": status.get("last_poll"),
+                "updated_at": datetime.now().isoformat(),
+            }
+
+            # Calculate countdown to next meeting
+            upcoming = meet_state["upcomingMeetings"]
+            if upcoming:
+                next_meeting = None
+                for m in upcoming:
+                    if m.get("status") in ("scheduled", "approved", "joining"):
+                        next_meeting = m
+                        break
+
+                if next_meeting:
+                    meet_state["nextMeeting"] = next_meeting
+                    try:
+                        start_str = next_meeting.get("startTime", "")
+                        if start_str:
+                            start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                            now = datetime.now(start_time.tzinfo) if start_time.tzinfo else datetime.now()
+                            delta = start_time - now
+                            total_seconds = int(delta.total_seconds())
+                            meet_state["countdownSeconds"] = max(0, total_seconds)
+
+                            if total_seconds <= 0:
+                                meet_state["countdown"] = "Starting now"
+                            elif total_seconds < 60:
+                                meet_state["countdown"] = f"{total_seconds}s"
+                            elif total_seconds < 3600:
+                                meet_state["countdown"] = f"{total_seconds // 60}m"
+                            elif total_seconds < 86400:
+                                hours = total_seconds // 3600
+                                minutes = (total_seconds % 3600) // 60
+                                meet_state["countdown"] = f"{hours}h {minutes}m"
+                            else:
+                                days = total_seconds // 86400
+                                hours = (total_seconds % 86400) // 3600
+                                meet_state["countdown"] = f"{days}d {hours}h"
+                    except Exception:
+                        pass
+
+            # Write atomically
+            MEET_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            temp_fd, temp_path = tempfile.mkstemp(suffix=".tmp", prefix="meet_state_", dir=MEET_STATE_FILE.parent)
+            try:
+                with os.fdopen(temp_fd, "w") as f:
+                    json.dump(meet_state, f, indent=2, default=str)
+                Path(temp_path).replace(MEET_STATE_FILE)
+            except Exception:
+                try:
+                    Path(temp_path).unlink()
+                except OSError:
+                    pass
+                raise
+
+        except Exception as e:
+            logger.debug(f"Failed to write meet state: {e}")
 
     async def stop(self):
         """Stop the daemon gracefully."""
@@ -658,6 +795,14 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
 
         print()
         print("Stopping daemon...")
+
+        # Stop state writer task
+        if hasattr(self, "_state_writer_task") and self._state_writer_task:
+            self._state_writer_task.cancel()
+            try:
+                await self._state_writer_task
+            except asyncio.CancelledError:
+                pass
 
         # Stop sleep monitor first (from SleepWakeAwareDaemon mixin)
         try:
@@ -759,8 +904,8 @@ Examples:
     python scripts/meet_daemon.py --list       # List upcoming meetings
 
 Systemd:
-    systemctl --user start meet-bot
-    systemctl --user status meet-bot
+    systemctl --user start bot-meet
+    systemctl --user status bot-meet
 
 D-Bus Control:
     python -c "import asyncio; from scripts.common.dbus_base import get_client; \\
@@ -828,7 +973,7 @@ D-Bus Control:
             print(f"✅ Meet bot daemon is running (PID: {pid})")
             print(f"   Lock file: {LOCK_FILE}")
             print(f"   PID file: {PID_FILE}")
-            print("   Logs: journalctl --user -u meet-bot -f")
+            print("   Logs: journalctl --user -u bot-meet -f")
             print("   (D-Bus not available - run with --dbus for IPC)")
         else:
             print("❌ Meet bot daemon is not running")

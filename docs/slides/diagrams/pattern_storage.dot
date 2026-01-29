@@ -1,0 +1,28 @@
+
+digraph PatternStorage {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    error [label="New Error\nPattern", fillcolor="#FFCDD2"];
+
+    storage [label="Pattern\nStorage", fillcolor="#FFCC80"];
+
+    subgraph cluster_files {
+        label="memory/learned/";
+        style=dashed;
+
+        patterns [label="patterns.yaml", fillcolor="#E1BEE7", shape=note];
+        failures [label="tool_failures.yaml", fillcolor="#D1C4E9", shape=note];
+        fixes [label="tool_fixes.yaml", fillcolor="#C5CAE9", shape=note];
+    }
+
+    evolve [label="Pattern\nEvolution", fillcolor="#C8E6C9"];
+
+    error -> storage [label="learn"];
+    storage -> patterns;
+    storage -> failures;
+    storage -> fixes;
+    patterns -> evolve [label="refine"];
+}

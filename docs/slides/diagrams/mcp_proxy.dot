@@ -1,0 +1,22 @@
+
+digraph MCPProxy {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=11];
+    edge [fontname="Arial", fontsize=9];
+
+    cursor [label="Cursor IDE", fillcolor="#E3F2FD", shape=box3d];
+    proxy [label="MCP Proxy\n(Hot-Reload)", fillcolor="#FFF9C4"];
+    server [label="Real MCP\nServer", fillcolor="#C8E6C9"];
+
+    cursor -> proxy [label="stdio", dir=both];
+    proxy -> server [label="stdio", dir=both];
+
+    watcher [label="File Watcher", fillcolor="#FFCCBC"];
+    daemons [label="Daemons", fillcolor="#D7CCC8"];
+
+    watcher -> proxy [label="change detected", style=dashed];
+    proxy -> server [label="restart", color="#F44336", style=dashed];
+    proxy -> daemons [label="restart", color="#F44336", style=dashed];
+    proxy -> cursor [label="tools/list_changed", color="#4CAF50", style=dashed];
+}

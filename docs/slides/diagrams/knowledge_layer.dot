@@ -1,0 +1,29 @@
+
+digraph KnowledgeLayer {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_knowledge {
+        label="memory/knowledge/";
+        style=filled;
+        fillcolor="#E8F5E9";
+
+        personas [label="personas/\n(per-persona)", fillcolor="#A5D6A7"];
+        projects [label="projects/\n(per-project)", fillcolor="#81C784"];
+        shared [label="shared/\n(global)", fillcolor="#66BB6A"];
+    }
+
+    session [label="Session\nStart", fillcolor="#E3F2FD"];
+    loader [label="Knowledge\nLoader", fillcolor="#FFCC80"];
+    context [label="Claude\nContext", fillcolor="#90CAF9"];
+
+    session -> loader [label="1. trigger"];
+    loader -> personas [label="2. load"];
+    loader -> projects [label="2. load"];
+    loader -> shared [label="2. load"];
+    personas -> context [label="3. inject"];
+    projects -> context [label="3. inject"];
+    shared -> context [label="3. inject"];
+}

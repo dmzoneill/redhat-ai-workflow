@@ -1,0 +1,39 @@
+
+digraph DBus {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    bus [label="Session Bus\n(D-Bus)", fillcolor="#FFF9C4", shape=ellipse];
+
+    subgraph cluster_daemons {
+        label="Daemons";
+        style=dashed;
+
+        slack [label="com.aiworkflow\n.BotSlack", fillcolor="#FFCC80"];
+        sprint [label="com.aiworkflow\n.BotSprint", fillcolor="#FFB74D"];
+        meet [label="com.aiworkflow\n.BotMeet", fillcolor="#FFA726"];
+        video [label="com.aiworkflow\n.BotVideo", fillcolor="#FF9800"];
+        cron [label="com.aiworkflow\n.BotCron", fillcolor="#F57C00"];
+    }
+
+    subgraph cluster_clients {
+        label="Clients";
+        style=dashed;
+
+        mcp [label="MCP Server", fillcolor="#A5D6A7"];
+        cli [label="CLI Tools", fillcolor="#81C784"];
+        ext [label="VSCode Ext", fillcolor="#66BB6A"];
+    }
+
+    slack -> bus;
+    sprint -> bus;
+    meet -> bus;
+    video -> bus;
+    cron -> bus;
+
+    bus -> mcp;
+    bus -> cli;
+    bus -> ext;
+}

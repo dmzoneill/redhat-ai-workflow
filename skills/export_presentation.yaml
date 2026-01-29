@@ -1,0 +1,67 @@
+# Skill: Export Presentation
+# Export a Google Slides presentation to PDF
+
+name: export_presentation
+description: |
+  Export a Google Slides presentation to PDF format.
+
+  This skill:
+  1. Exports the presentation to PDF
+  2. Saves to the specified path or default location
+  3. Returns the file path
+
+  Use this to create shareable PDF versions of presentations.
+
+version: "1.0"
+
+inputs:
+  - name: presentation_id
+    type: string
+    required: true
+    description: "The presentation ID to export"
+
+  - name: output_path
+    type: string
+    required: false
+    description: "Output file path (default: uses presentation title)"
+
+steps:
+  # Export to PDF
+  - name: export_pdf
+    description: "Export presentation to PDF"
+    tool: google_slides_export_pdf
+    args:
+      presentation_id: "{{ inputs.presentation_id }}"
+      output_path: "{{ inputs.output_path | default('') }}"
+    output: export_result
+
+  # Build summary
+  - name: build_summary
+    compute: |
+      result = export_result or "Export failed"
+
+      lines = ["## 📄 Presentation Exported\n"]
+      lines.append(result)
+      lines.append("")
+      lines.append("---")
+      lines.append("### Next Steps")
+      lines.append("")
+      lines.append("- Share the PDF file")
+      lines.append("- Upload to document storage")
+      lines.append("- Attach to Jira issue or Slack message")
+
+      summary = "\n".join(lines)
+    output: summary
+
+  # Log to session
+  - name: log_export
+    description: "Log export to session"
+    tool: memory_session_log
+    args:
+      action: "Exported presentation to PDF"
+      details: "ID: {{ inputs.presentation_id }}"
+    on_error: continue
+
+outputs:
+  - name: result
+    value: "{{ summary }}"

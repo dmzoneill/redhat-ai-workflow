@@ -1,0 +1,33 @@
+[Unit]
+Description=AI Workflow Session Daemon - Cursor session state manager
+After=network.target dbus.socket
+Wants=dbus.socket
+
+[Service]
+Type=simple
+WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
+# Display environment for D-Bus
+Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+# XDG runtime for D-Bus
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+# Use the virtual environment's python
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 scripts/session_daemon.py
+
+# Restart policy with limits to prevent infinite restart loops
+Restart=on-failure
+RestartSec=10
+# Max 5 restarts in 5 minutes, then give up
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Graceful shutdown
+TimeoutStopSec=30
+KillMode=mixed
+
+# Logs go to journald (view with: journalctl --user -u bot-session -f)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,27 @@
+
+digraph CursorCommands {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    user [label="User\nInput", fillcolor="#E3F2FD"];
+
+    subgraph cluster_commands {
+        label="Cursor Commands";
+        style=dashed;
+
+        start [label="/start-work\nAAP-12345", fillcolor="#FFCC80"];
+        review [label="/review-pr\n1234", fillcolor="#FFB74D"];
+        deploy [label="/deploy\nephemeral", fillcolor="#FFA726"];
+    }
+
+    skill [label="Skill\nEngine", fillcolor="#C8E6C9"];
+
+    user -> start;
+    user -> review;
+    user -> deploy;
+    start -> skill;
+    review -> skill;
+    deploy -> skill;
+}

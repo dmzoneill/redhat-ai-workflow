@@ -107,9 +107,10 @@ help:
 	@printf "\033[1mProject Tools (ptools):\033[0m\n"
 	@printf "  \033[32mmake sync-ai-rules\033[0m      Sync AI rules to .cursorrules, CLAUDE.md, AGENTS.md + commands\n"
 	@printf "  \033[32mmake sync-ai-rules-dry\033[0m  Preview AI rules sync without making changes\n"
-	@printf "  \033[32mmake sync-commands\033[0m      Sync Cursor commands to Claude Code format\n"
+	@printf "  \033[32mmake sync-commands\033[0m      Generate missing + sync Cursor commands to Claude Code\n"
 	@printf "  \033[32mmake sync-commands-dry\033[0m  Preview sync without making changes\n"
 	@printf "  \033[32mmake sync-commands-reverse\033[0m  Sync Claude Code to Cursor format\n"
+	@printf "  \033[32mmake sync-commands-generate\033[0m  Generate Cursor commands for new skills\n"
 	@printf "  \033[32mmake sync-config-example\033[0m  Check config.json.example has all keys\n"
 	@printf "  \033[32mmake sync-config-example-fix\033[0m  Add missing keys to example\n"
 	@printf "\n"
@@ -234,7 +235,7 @@ slack-daemon-bg: check-env
 		echo $$! > $(SLACK_PID)
 	@sleep 2
 	@printf "\033[32m✅ Daemon started (PID: $$(cat $(SLACK_PID)))\033[0m\n"
-	@echo "   D-Bus: com.aiworkflow.SlackAgent"
+	@echo "   D-Bus: com.aiworkflow.BotSlack"
 	@echo "   Logs: $(SLACK_LOG)"
 	@echo "   Stop: make slack-daemon-stop"
 
@@ -472,16 +473,22 @@ sync-ai-rules-verbose:
 	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_ai_rules.py --verbose
 
 sync-commands:
-	@printf "\033[36mSyncing Cursor commands to Claude Code format...\033[0m\n"
+	@printf "\033[36mGenerating commands for new skills and syncing to Claude Code...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py --generate-missing
 	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py
 
 sync-commands-dry:
 	@printf "\033[36mPreviewing command sync (dry-run)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py --generate-missing --dry-run
 	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py --dry-run
 
 sync-commands-reverse:
 	@printf "\033[36mSyncing Claude Code commands to Cursor format...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py --reverse
+
+sync-commands-generate:
+	@printf "\033[36mGenerating Cursor commands for skills without commands...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_commands.py --generate-missing
 
 sync-config-example:
 	@printf "\033[36mChecking config.json.example has all keys...\033[0m\n"

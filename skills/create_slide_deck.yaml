@@ -1,0 +1,173 @@
+# Skill: Create Slide Deck
+# Create a new Google Slides presentation from an outline or topic
+
+name: create_slide_deck
+description: |
+  Create a new Google Slides presentation.
+
+  This skill:
+  1. Creates a new presentation (optionally from template)
+  2. Builds slides from a markdown outline if provided
+  3. Returns the presentation link for editing
+
+  Use this when you need to create a new presentation from scratch or outline.
+
+version: "1.0"
+
+inputs:
+  - name: title
+    type: string
+    required: true
+    description: "Title for the new presentation"
+
+  - name: outline
+    type: string
+    required: false
+    description: |
+      Markdown-style outline for slides:
+      # Section Title (creates section header)
+      ## Slide Title (creates title+body slide)
+      - Bullet point
+
+  - name: template_id
+    type: string
+    required: false
+    description: "Optional presentation ID to use as template"
+
+  - name: topic
+    type: string
+    required: false
+    description: "Topic to research and generate outline from (if no outline provided)"
+
+steps:
+  # Create the presentation
+  - name: create_presentation
+    description: "Create new Google Slides presentation"
+    tool: google_slides_create
+    args:
+      title: "{{ inputs.title }}"
+      template_id: "{{ inputs.template_id | default('') }}"
+    output: create_result
+
+  - name: extract_presentation_id
+    description: "Extract presentation ID from result"
+    compute: |
+      import re
+      result = create_result or ""
+      # Extract ID from the result text
+      match = re.search(r'\*\*ID:\*\* `([^`]+)`', result)
+      if match:
+          presentation_id = match.group(1)
+      else:
+          # Try to find any ID-like string
+          match = re.search(r'[a-zA-Z0-9_-]{20,}', result)
+          presentation_id = match.group(0) if match else ""
+    output: presentation_id
+
+  # If topic provided but no outline, research and generate outline
+  - name: research_topic
+    description: "Research topic for outline generation"
+    condition: "{{ inputs.topic and not inputs.outline }}"
+    tool: knowledge_query
+    args:
+      project: "redhat-ai-workflow"
+      section: "architecture"
+    output: topic_research
+    on_error: continue
+
+  - name: generate_outline_from_topic
+    description: "Generate outline from research"
+    condition: "{{ inputs.topic and not inputs.outline }}"
+    compute: |
+      topic = inputs.get('topic', '')
+      # Generate a basic outline structure
+      generated_outline = f"""# {topic}
+
+      ## Overview
+      - What is {topic}?
+      - Why it matters
+      - Key benefits
+
+      ## Architecture
+      - Main components
+      - How they work together
+      - Data flow
+
+      ## Getting Started
+      - Prerequisites
+      - Installation
+      - First steps
+
+      ## Best Practices
+      - Recommendations
+      - Common patterns
+      - Things to avoid
+
+      ## Summary
+      - Key takeaways
+      - Next steps
+      - Resources
+      """
+      # Remove extra indentation from the outline
+      import textwrap
+      outline = textwrap.dedent(generated_outline)
+    output: outline
+
+  - name: use_provided_outline
+    description: "Use provided outline"
+    condition: "{{ inputs.outline }}"
+    compute: |
+      outline = inputs.get('outline', '')
+    output: outline
+
+  # Build slides from outline if provided
+  - name: build_slides
+    description: "Build slides from outline"
+    condition: "{{ outline }}"
+    tool: google_slides_build_from_outline
+    args:
+      presentation_id: "{{ presentation_id }}"
+      outline: "{{ outline }}"
+    output: build_result
+    on_error: continue
+
+  # Build final summary
+  - name: build_summary
+    compute: |
+      lines = ["## 📊 Presentation Created\n"]
+      lines.append(f"**Title:** {inputs.title}")
+      lines.append(f"**ID:** `{presentation_id}`")
+      lines.append(f"**Link:** https://docs.google.com/presentation/d/{presentation_id}/edit")
+      lines.append("")
+
+      if 'build_result' in dir() and build_result:
+          lines.append("### Slides Built")
+          lines.append(build_result)
+          lines.append("")
+
+      lines.append("---")
+      lines.append("### Next Steps")
+      lines.append("")
+      lines.append("1. Open the presentation link above")
+      lines.append("2. Add images and diagrams")
+      lines.append("3. Adjust formatting and colors")
+      lines.append("4. Export to PDF when ready:")
+      lines.append(f'   `google_slides_export_pdf("{presentation_id}")`')
+
+      summary = "\n".join(lines)
+    output: summary
+
+  # Log to session
+  - name: log_creation
+    description: "Log presentation creation to session"
+    tool: memory_session_log
+    args:
+      action: "Created presentation: {{ inputs.title }}"
+      details: "ID: {{ presentation_id }}"
+    on_error: continue
+
+outputs:
+  - name: result
+    value: "{{ summary }}"
+  - name: presentation_id
+    value: "{{ presentation_id }}"

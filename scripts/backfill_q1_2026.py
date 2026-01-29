@@ -2,7 +2,9 @@
 """Backfill Q1 2026 performance data for all missing days.
 
 This script collects performance data (git commits, Jira, GitLab) for each
-missing weekday in Q1 2026 and saves to the quarterly connection directory.
+missing weekday in Q1 2026 and saves to the performance directory.
+
+Performance data is stored in: ~/.config/aa-workflow/performance/
 
 Usage:
     python scripts/backfill_q1_2026.py
@@ -15,11 +17,19 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Configuration
 YEAR = 2026
 QUARTER = 1
 QUARTER_START = date(2026, 1, 1)
-PERF_DIR = Path.home() / "src" / "redhat-quarterly-connection" / str(YEAR) / f"q{QUARTER}" / "performance"
+
+# Import centralized paths
+from server.paths import PERFORMANCE_DIR, get_performance_quarter_dir
+
+PERF_BASE_DIR = PERFORMANCE_DIR
+PERF_DIR = get_performance_quarter_dir(YEAR, QUARTER)
 DAILY_DIR = PERF_DIR / "daily"
 
 # Repos to scan for commits
@@ -273,7 +283,9 @@ def update_summary():
 
 def update_workspace_state(summary: dict):
     """Update workspace state for VS Code UI."""
-    state_file = Path.home() / ".mcp" / "workspace_states" / "workspace_states.json"
+    from server.paths import WORKSPACE_STATES_FILE
+
+    state_file = WORKSPACE_STATES_FILE
     state_file.parent.mkdir(parents=True, exist_ok=True)
 
     state = {}

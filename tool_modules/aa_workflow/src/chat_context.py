@@ -20,13 +20,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mcp.server.fastmcp import Context
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context, FastMCP
+    from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -154,8 +155,9 @@ async def get_project_work_state_path_async(ctx: "Context", project: str | None 
     Returns:
         Path to the project's current_work.yaml file.
     """
-    from .constants import MEMORY_DIR
     from server.workspace_utils import get_workspace_project
+
+    from .constants import MEMORY_DIR
 
     if project is None:
         project = await get_workspace_project(ctx)
@@ -531,5 +533,3 @@ def register_chat_context_tools(server: "FastMCP") -> int:
         return await _project_context_impl(ctx, project, issue_key, branch)
 
     return registry.count
-
-

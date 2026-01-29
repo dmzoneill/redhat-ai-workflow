@@ -9,8 +9,8 @@
  * - Sprint history (collapsed by default)
  * - Tool gap requests section
  *
- * Data is read from the unified workspace_states.json file, which is
- * kept up-to-date by the sync_workspace_state.py script and MCP server.
+ * Data is read from the unified workspace_states.json file.
+ * The UI only reads from cache - services (sprint bot, cron) maintain the cache.
  */
 
 import * as path from "path";
@@ -21,11 +21,19 @@ import * as os from "os";
 // This is where the memory/ folder lives
 const WORKSPACE_ROOT = path.join(os.homedir(), "src", "redhat-ai-workflow");
 
-// Unified state file (same as sessions, services, etc.)
+// Sprint daemon's state file (each service owns its own file)
+const SPRINT_STATE_FILE = path.join(
+  os.homedir(),
+  ".config",
+  "aa-workflow",
+  "sprint_state_v2.json"
+);
+
+// Legacy unified state file (fallback)
 const WORKSPACE_STATE_FILE = path.join(
   os.homedir(),
-  ".mcp",
-  "workspace_states",
+  ".config",
+  "aa-workflow",
   "workspace_states.json"
 );
 
@@ -189,9 +197,48 @@ export interface WorkflowConfig {
 // ==================== STATE LOADING ====================
 
 /**
- * Load unified workspace state from file
+ * Load sprint state from sprint daemon's state file
+ * Falls back to legacy unified file if new file doesn't exist
+ */
+function loadSprintStateFromFile(): Record<string, unknown> {
+  // Try new per-service state file first
+  try {
+    if (fs.existsSync(SPRINT_STATE_FILE)) {
+      const content = fs.readFileSync(SPRINT_STATE_FILE, "utf-8");
+      return JSON.parse(content);
+    }
+  } catch (e) {
+    console.error("Failed to load sprint state file:", e);
+  }
+
+  // Fallback to legacy unified file
+  try {
+    if (fs.existsSync(WORKSPACE_STATE_FILE)) {
+      const content = fs.readFileSync(WORKSPACE_STATE_FILE, "utf-8");
+      const unified = JSON.parse(content);
+      return unified.sprint || {};
+    }
+  } catch (e) {
+    console.error("Failed to load legacy workspace state:", e);
+  }
+  return {};
+}
+
+/**
+ * Load unified workspace state from file (for workflow config)
  */
 function loadUnifiedState(): Record<string, unknown> {
+  // Try sprint state file first (it includes workflowConfig)
+  try {
+    if (fs.existsSync(SPRINT_STATE_FILE)) {
+      const content = fs.readFileSync(SPRINT_STATE_FILE, "utf-8");
+      return JSON.parse(content);
+    }
+  } catch (e) {
+    // Fall through to legacy
+  }
+
+  // Fallback to legacy file
   try {
     if (fs.existsSync(WORKSPACE_STATE_FILE)) {
       const content = fs.readFileSync(WORKSPACE_STATE_FILE, "utf-8");
@@ -333,13 +380,12 @@ function getDefaultWorkflowConfig(): WorkflowConfig {
 }
 
 /**
- * Load sprint state from unified workspace_states.json
+ * Load sprint state from sprint daemon's state file
  */
 export function loadSprintState(): SprintState {
   try {
-    const unified = loadUnifiedState();
-    const sprint = unified.sprint as Record<string, unknown> | undefined;
-    if (sprint) {
+    const sprint = loadSprintStateFromFile();
+    if (sprint && Object.keys(sprint).length > 0) {
       // Handle backward compatibility with old 'botEnabled' field
       const automaticMode = sprint.automaticMode !== undefined
         ? sprint.automaticMode as boolean
@@ -1633,7 +1679,6 @@ function getSprintTabStyles(): string {
 
     .issue-key.ignored,
     .issue-summary.ignored {
-      text-decoration: line-through;
       color: var(--text-muted) !important;
     }
 
@@ -1657,6 +1702,8 @@ function renderIssueCard(issue: SprintIssue, jiraUrl: string, ignored: boolean =
   const showOpenInCursor = !ignored && issue.hasWorkLog && !issue.chatId;
   // Show "View Trace" for issues that have execution traces
   const showViewTrace = !ignored && issue.hasTrace;
+  // Show "Start" button for issues that can be started immediately (pending, waiting, approved, blocked)
+  const showStartIssue = !ignored && ["pending", "waiting", "approved", "blocked"].includes(issue.approvalStatus);
 
   // Always show Jira status in the badge (it's the actual workflow status)
   // The approval status only affects the action buttons
@@ -1701,6 +1748,7 @@ function renderIssueCard(issue: SprintIssue, jiraUrl: string, ignored: boolean =
           <span style="font-size: 0.75rem; color: var(--text-muted);">No actions</span>
         ` : `
           <div class="issue-actions">
+            ${showStartIssue ? `<button class="issue-btn start" data-action="startIssue" data-issue="${escapeHtml(issue.key)}" title="Start this issue immediately (bypasses all checks)">▶ Force Start</button>` : ""}
             ${issue.approvalStatus === "pending" || issue.approvalStatus === "waiting" ? `<button class="issue-btn approve" data-action="approve" data-issue="${escapeHtml(issue.key)}">✓ Approve</button>` : ""}
             ${issue.approvalStatus === "approved" ? `<button class="issue-btn reject" data-action="reject" data-issue="${escapeHtml(issue.key)}">✗ Unapprove</button>` : ""}
             ${showAbort ? `<button class="issue-btn abort" data-action="abort" data-issue="${escapeHtml(issue.key)}">⏹ Abort</button>` : ""}
@@ -2110,6 +2158,18 @@ export function getSprintTabContent(
     <style>${styles}</style>
 
     <div class="sprint-container">
+      <!-- Sprint Bot Header with Controls -->
+      <div class="section" style="margin-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h2 class="section-title" style="margin: 0;">🏃 Sprint Bot</h2>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="sprint">▶ Start</button>
+            <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="sprint">⏹ Stop</button>
+            <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="sprint">📋 Logs</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Sprint Headers - Current and Next -->
       <div class="sprint-headers">
         <!-- Current Sprint -->
@@ -2214,7 +2274,7 @@ export function getSprintTabContent(
             notReadyIssues.length > 0
               ? `
             <div class="sprint-issues">
-              ${notReadyIssues.map((issue) => renderIssueCard(issue, jiraUrl, true)).join("")}
+              ${notReadyIssues.map((issue) => renderIssueCard(issue, jiraUrl, false)).join("")}
             </div>
           `
               : `
@@ -2304,7 +2364,7 @@ export function getSprintTabContent(
             doneIssues.length > 0
               ? `
             <div class="sprint-issues">
-              ${doneIssues.map((issue) => renderIssueCard(issue, jiraUrl, true)).join("")}
+              ${doneIssues.map((issue) => renderIssueCard(issue, jiraUrl, false)).join("")}
             </div>
           `
               : `

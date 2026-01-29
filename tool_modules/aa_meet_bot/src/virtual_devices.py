@@ -17,7 +17,7 @@ Multi-Meeting Support:
 Device Naming:
 - Audio sink: meet_bot_<instance_id>
 - Audio source: meet_bot_<instance_id>_mic
-- Named pipe: ~/.local/share/meet_bot/pipes/<instance_id>.pipe
+- Named pipe: ~/.config/aa-workflow/meet_bot/pipes/<instance_id>.pipe
 - Video device: /dev/videoN with card_label "MeetBot_<instance_id>"
 """
 
@@ -32,12 +32,20 @@ from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
 
+# Import centralized paths
+try:
+    from server.paths import MEETBOT_DATA_DIR, MEETBOT_PIPES_DIR
+except ImportError:
+    # Fallback for standalone usage
+    MEETBOT_DATA_DIR = Path.home() / ".config" / "aa-workflow" / "meet_bot"
+    MEETBOT_PIPES_DIR = MEETBOT_DATA_DIR / "pipes"
+
 from tool_modules.aa_meet_bot.src.config import get_config
 
 logger = logging.getLogger(__name__)
 
-# Data directory for named pipes
-DATA_DIR = Path.home() / ".local" / "share" / "meet_bot"
+# Data directory for named pipes (use centralized path)
+DATA_DIR = MEETBOT_DATA_DIR
 
 
 @dataclass
@@ -53,7 +61,7 @@ class InstanceDevices:
     # Audio input (TTS -> meeting mic)
     source_name: str = ""  # e.g., "meet_bot_abc123_mic"
     source_module_id: Optional[int] = None
-    pipe_path: Optional[Path] = None  # e.g., ~/.local/share/meet_bot/pipes/abc123.pipe
+    pipe_path: Optional[Path] = None  # e.g., ~/.config/aa-workflow/meet_bot/pipes/abc123.pipe
 
     # Video output (avatar -> meeting camera)
     video_device: Optional[str] = None  # e.g., "/dev/video11"

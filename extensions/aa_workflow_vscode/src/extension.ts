@@ -16,6 +16,7 @@ import { WorkflowDataProvider } from "./dataProvider";
 import { registerCommands } from "./commands";
 import { registerTreeView, WorkflowTreeProvider } from "./treeView";
 import { registerMemoryTab, MemoryTreeProvider } from "./memoryTab";
+import { registerSlidesTab, SlidesTreeProvider } from "./slidesTab";
 import { registerNotifications, NotificationManager } from "./notifications";
 import { registerCommandCenter, registerCommandCenterSerializer, getCommandCenterPanel } from "./commandCenter";
 import { registerSkillExecutionWatcher } from "./skillExecutionWatcher";
@@ -26,6 +27,7 @@ import { SkillToastManager, SkillToastWebview } from "./skillToast";
 import { disposeSkillWebSocketClient } from "./skillWebSocket";
 import { registerChatDbusService, unregisterChatDbusService } from "./chatDbusService";
 import { createLogger, disposeLogger } from "./logger";
+import { getNotificationWatcher, stopNotificationWatcher } from "./notificationWatcher";
 
 const logger = createLogger("Extension");
 
@@ -33,6 +35,7 @@ let statusBarManager: StatusBarManager | undefined;
 let dataProvider: WorkflowDataProvider | undefined;
 let treeProvider: WorkflowTreeProvider | undefined;
 let memoryTreeProvider: MemoryTreeProvider | undefined;
+let slidesTreeProvider: SlidesTreeProvider | undefined;
 let notificationManager: NotificationManager | undefined;
 let workspaceStateProvider: WorkspaceStateProvider | undefined;
 let skillToastManager: SkillToastManager | undefined;
@@ -74,6 +77,10 @@ export function activate(context: vscode.ExtensionContext) {
   memoryTreeProvider = registerMemoryTab(context);
   logger.log("Memory tab initialized");
 
+  // Initialize slides tab
+  slidesTreeProvider = registerSlidesTab(context);
+  logger.log("Slides tab initialized");
+
   // Initialize notifications
   notificationManager = registerNotifications(context, dataProvider);
 
@@ -103,6 +110,12 @@ export function activate(context: vscode.ExtensionContext) {
     logger.warn("Failed to register Chat D-Bus service: " + e.message);
   });
 
+  // Start notification watcher (watches notifications.json for toast messages)
+  const notificationWatcher = getNotificationWatcher();
+  notificationWatcher.start();
+  context.subscriptions.push({ dispose: () => notificationWatcher.dispose() });
+  logger.log("Notification watcher started");
+
   // Legacy command aliases removed - only openCommandCenter is exposed
 
   // Register commands
@@ -117,6 +130,7 @@ export function activate(context: vscode.ExtensionContext) {
     statusBarManager?.update();
     treeProvider?.refresh();
     memoryTreeProvider?.refresh();
+    slidesTreeProvider?.refresh();
     await notificationManager?.checkAndNotify();
   }, intervalSeconds * 1000);
 
@@ -156,6 +170,12 @@ export async function deactivate() {
     disposeSkillWebSocketClient();
   } catch (e: any) {
     logger.error("Error disposing WebSocket client", e);
+  }
+
+  try {
+    stopNotificationWatcher();
+  } catch (e: any) {
+    logger.error("Error stopping notification watcher", e);
   }
 
   try {

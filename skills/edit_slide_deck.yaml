@@ -1,0 +1,174 @@
+# Skill: Edit Slide Deck
+# Edit an existing Google Slides presentation
+
+name: edit_slide_deck
+description: |
+  Edit an existing Google Slides presentation.
+
+  This skill:
+  1. Gets the current presentation structure
+  2. Allows adding, updating, or deleting slides
+  3. Supports text updates and new content
+
+  Use this to modify existing presentations.
+
+version: "1.0"
+
+inputs:
+  - name: presentation_id
+    type: string
+    required: true
+    description: "The presentation ID to edit"
+
+  - name: action
+    type: string
+    required: true
+    description: |
+      Action to perform:
+      - "view" - Show current slides
+      - "add_slide" - Add a new slide
+      - "update_text" - Update text in an element
+      - "delete_slide" - Delete a slide
+      - "add_text_box" - Add a text box
+
+  - name: slide_id
+    type: string
+    required: false
+    description: "Slide ID for operations (required for some actions)"
+
+  - name: object_id
+    type: string
+    required: false
+    description: "Element ID for text updates"
+
+  - name: layout
+    type: string
+    required: false
+    default: "TITLE_AND_BODY"
+    description: "Layout for new slides"
+
+  - name: title
+    type: string
+    required: false
+    description: "Title for new slide or text box"
+
+  - name: body
+    type: string
+    required: false
+    description: "Body text for new slide"
+
+  - name: text
+    type: string
+    required: false
+    description: "Text content for updates or text boxes"
+
+  - name: x
+    type: number
+    required: false
+    default: 100
+    description: "X position for text box"
+
+  - name: y
+    type: number
+    required: false
+    default: 100
+    description: "Y position for text box"
+
+steps:
+  # View action - get presentation details
+  - name: view_presentation
+    description: "Get presentation details"
+    condition: "{{ inputs.action == 'view' }}"
+    tool: google_slides_get
+    args:
+      presentation_id: "{{ inputs.presentation_id }}"
+    output: view_result
+
+  # Add slide action
+  - name: add_slide
+    description: "Add a new slide"
+    condition: "{{ inputs.action == 'add_slide' }}"
+    tool: google_slides_add_slide
+    args:
+      presentation_id: "{{ inputs.presentation_id }}"
+      layout: "{{ inputs.layout | default('TITLE_AND_BODY') }}"
+      title: "{{ inputs.title | default('') }}"
+      body: "{{ inputs.body | default('') }}"
+    output: add_result
+
+  # Update text action
+  - name: update_text
+    description: "Update text in element"
+    condition: "{{ inputs.action == 'update_text' }}"
+    tool: google_slides_update_text
+    args:
+      presentation_id: "{{ inputs.presentation_id }}"
+      object_id: "{{ inputs.object_id }}"
+      text: "{{ inputs.text }}"
+    output: update_result
+
+  # Delete slide action
+  - name: delete_slide
+    description: "Delete a slide"
+    condition: "{{ inputs.action == 'delete_slide' }}"
+    tool: google_slides_delete_slide
+    args:
+      presentation_id: "{{ inputs.presentation_id }}"
+      slide_id: "{{ inputs.slide_id }}"
+    output: delete_result
+
+  # Add text box action
+  - name: add_text_box
+    description: "Add a text box"
+    condition: "{{ inputs.action == 'add_text_box' }}"
+    tool: google_slides_add_text_box
+    args:
+      presentation_id: "{{ inputs.presentation_id }}"
+      slide_id: "{{ inputs.slide_id }}"
+      text: "{{ inputs.text }}"
+      x: "{{ inputs.x | default(100) }}"
+      y: "{{ inputs.y | default(100) }}"
+    output: textbox_result
+
+  # Build summary based on action
+  - name: build_summary
+    compute: |
+      action = inputs.get('action', 'view')
+      pres_id = inputs.get('presentation_id', '')
+
+      lines = [f"## 📊 Edit Slide Deck\n"]
+      lines.append(f"**Presentation:** `{pres_id}`")
+      lines.append(f"**Action:** {action}")
+      lines.append("")
+
+      if action == 'view' and 'view_result' in dir():
+          lines.append(view_result or "No details available")
+      elif action == 'add_slide' and 'add_result' in dir():
+          lines.append(add_result or "Slide added")
+      elif action == 'update_text' and 'update_result' in dir():
+          lines.append(update_result or "Text updated")
+      elif action == 'delete_slide' and 'delete_result' in dir():
+          lines.append(delete_result or "Slide deleted")
+      elif action == 'add_text_box' and 'textbox_result' in dir():
+          lines.append(textbox_result or "Text box added")
+      else:
+          lines.append(f"Unknown action: {action}")
+
+      lines.append("")
+      lines.append(f"**Edit:** https://docs.google.com/presentation/d/{pres_id}/edit")
+
+      summary = "\n".join(lines)
+    output: summary
+
+  # Log to session
+  - name: log_edit
+    description: "Log edit action to session"
+    tool: memory_session_log
+    args:
+      action: "Edited presentation: {{ inputs.action }}"
+      details: "ID: {{ inputs.presentation_id }}"
+    on_error: continue
+
+outputs:
+  - name: result
+    value: "{{ summary }}"

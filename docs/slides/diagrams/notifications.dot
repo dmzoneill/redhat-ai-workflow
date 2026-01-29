@@ -1,0 +1,28 @@
+
+digraph Notifications {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_sources {
+        label="Event Sources";
+        style=dashed;
+
+        skill [label="Skills", fillcolor="#E1BEE7"];
+        daemon [label="Daemons", fillcolor="#C5CAE9"];
+        autoheal [label="Auto-Heal", fillcolor="#BBDEFB"];
+    }
+
+    emitter [label="Notification\nEmitter", fillcolor="#FFF9C4"];
+    file [label="notifications.json", fillcolor="#FFCC80", shape=note];
+    ext [label="VSCode\nExtension", fillcolor="#90CAF9"];
+    toast [label="Toast\nMessage", fillcolor="#81C784"];
+
+    skill -> emitter;
+    daemon -> emitter;
+    autoheal -> emitter;
+    emitter -> file [label="write\n(locked)"];
+    file -> ext [label="watch"];
+    ext -> toast;
+}

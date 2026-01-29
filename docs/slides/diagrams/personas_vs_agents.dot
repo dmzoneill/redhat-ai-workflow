@@ -1,0 +1,36 @@
+
+digraph PersonasVsAgents {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    subgraph cluster_multi {
+        label="Multi-Agent (Complex)";
+        style=filled;
+        fillcolor="#FFCDD2";
+
+        agent1 [label="Agent 1\n(DevOps)", fillcolor="#EF9A9A"];
+        agent2 [label="Agent 2\n(Code)", fillcolor="#EF9A9A"];
+        agent3 [label="Agent 3\n(Incident)", fillcolor="#EF9A9A"];
+        coord [label="Coordinator\n(Overhead)", fillcolor="#E57373"];
+
+        agent1 -> coord;
+        agent2 -> coord;
+        agent3 -> coord;
+    }
+
+    subgraph cluster_persona {
+        label="Single Agent + Personas (Simple)";
+        style=filled;
+        fillcolor="#C8E6C9";
+
+        single [label="One Claude\nInstance", fillcolor="#81C784"];
+        p1 [label="DevOps\nPersona", fillcolor="#A5D6A7"];
+        p2 [label="Developer\nPersona", fillcolor="#A5D6A7"];
+        p3 [label="Incident\nPersona", fillcolor="#A5D6A7"];
+
+        single -> p1 [label="load"];
+        single -> p2 [label="load"];
+        single -> p3 [label="load"];
+    }
+}

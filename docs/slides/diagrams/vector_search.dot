@@ -1,0 +1,31 @@
+
+digraph VectorSearch {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    query [label="Natural\nLanguage\nQuery", fillcolor="#E3F2FD"];
+
+    ollama [label="Ollama\n(Embeddings)", fillcolor="#FFCC80"];
+
+    subgraph cluster_index {
+        label="Vector Index";
+        style=filled;
+        fillcolor="#E8F5E9";
+
+        code [label="Code\nChunks", fillcolor="#A5D6A7"];
+        docs [label="Doc\nChunks", fillcolor="#81C784"];
+        memory [label="Memory\nChunks", fillcolor="#66BB6A"];
+    }
+
+    results [label="Ranked\nResults", fillcolor="#90CAF9"];
+
+    query -> ollama [label="embed"];
+    ollama -> code [label="search"];
+    ollama -> docs [label="search"];
+    ollama -> memory [label="search"];
+    code -> results;
+    docs -> results;
+    memory -> results;
+}

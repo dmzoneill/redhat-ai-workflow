@@ -1878,9 +1878,9 @@ PID_FILE = Path("/tmp/cron-daemon.pid")
 **File:** `scripts/cron_daemon.py:117-120`
 **Code:**
 ```python
-service_name = "com.aiworkflow.CronScheduler"
-object_path = "/com/aiworkflow/CronScheduler"
-interface_name = "com.aiworkflow.CronScheduler"
+service_name = "com.aiworkflow.BotCron"
+object_path = "/com/aiworkflow/BotCron"
+interface_name = "com.aiworkflow.BotCron"
 ```
 **Refactor:** Define constants or load from config.
 

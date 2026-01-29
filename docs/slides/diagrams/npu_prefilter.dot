@@ -1,0 +1,26 @@
+
+digraph NPUPrefilter {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    msg [label="Slack\nMessage", fillcolor="#E3F2FD"];
+
+    subgraph cluster_npu {
+        label="NPU (Ollama)";
+        style=filled;
+        fillcolor="#FFF3E0";
+
+        intent [label="Intent\nClassifier", fillcolor="#FFCC80"];
+        filter [label="Tool\nFilter", fillcolor="#FFB74D"];
+    }
+
+    tools [label="501 Tools\n→ ~20 Relevant", fillcolor="#C8E6C9"];
+    claude [label="Claude\n(Final Decision)", fillcolor="#90CAF9"];
+
+    msg -> intent [label="fast"];
+    intent -> filter;
+    filter -> tools;
+    tools -> claude [label="focused"];
+}

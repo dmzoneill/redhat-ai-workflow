@@ -1,9 +1,9 @@
 metadata:
   project: redhat-ai-workflow
   persona: developer
-  last_updated: '2026-01-20T18:46:18.714583'
+  last_updated: '2026-01-25T15:00:24.680384'
   last_scanned: '2026-01-20T18:46:18.714554'
-  confidence: 0.3
+  confidence: 0.32
   auto_generated: true
 architecture:
   overview: "<picture>\n  <source media=\"(prefers-color-scheme: dark)\" srcset=\"\
@@ -42,4 +42,8 @@ patterns:
     example: pytest tests/
   deployment: []
 gotchas: []
-learned_from_tasks: []
+learned_from_tasks:
+- date: '2026-01-25'
+  task: cron-hello_world-20260125-150000
+  learning: hello_world cron job executed successfully at 2026-01-25 15:00:18 GMT
+    - skill engine verified working

@@ -25,9 +25,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Stats file path
-STATS_FILE = Path.home() / ".config" / "aa-workflow" / "agent_stats.json"
-STATS_DIR = STATS_FILE.parent
+# Stats file path - centralized in server.paths
+try:
+    from server.paths import AA_CONFIG_DIR, AGENT_STATS_FILE
+
+    STATS_FILE = AGENT_STATS_FILE
+    STATS_DIR = AA_CONFIG_DIR
+except ImportError:
+    STATS_FILE = Path.home() / ".config" / "aa-workflow" / "agent_stats.json"
+    STATS_DIR = STATS_FILE.parent
 
 # Current workspace for tracking (set by tools)
 _current_workspace_uri: str = "default"
@@ -535,5 +541,3 @@ def get_workspace_stats(workspace_uri: str) -> dict:
 def start_session() -> None:
     """Start a new session."""
     get_agent_stats().start_session()
-
-

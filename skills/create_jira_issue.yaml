@@ -4,7 +4,7 @@
 
 name: create_jira_issue
 description: |
-  Create a new Jira issue with proper linking and assignment.
+  Create a new Jira issue with proper linking and team notification.
 
   **Enhanced with Semantic Search:**
   - Searches codebase for related code based on issue summary
@@ -21,11 +21,11 @@ description: |
   The skill will:
   1. Search codebase for related code (semantic search)
   2. Create the issue with enriched description
-  3. Assign to specified user (or self)
-  4. Link to related issues
-  5. Transition to appropriate status
+  3. Link to related issues
+  4. Transition to appropriate status
+  5. Notify team channel via Slack
 
-version: "1.1"
+version: "1.2"
 
 inputs:
   - name: summary
@@ -63,10 +63,11 @@ inputs:
     default: true
     description: "Search codebase for related code (semantic search)"
 
-  - name: assignee
-    type: string
+  - name: notify_team
+    type: boolean
     required: false
-    description: "Assign to user (leave empty for self)"
+    default: true
+    description: "Send Slack notification to team channel about the new issue"
 
   - name: labels
     type: string
@@ -101,6 +102,38 @@ inputs:
     required: false
     default: false
     description: "Use Slack link format in report"
+
+  # AAP project required fields
+  - name: problem_description
+    type: string
+    required: false
+    default: ""
+    description: "Problem description (required by AAP, falls back to description)"
+
+  # Story-specific fields (required for AAP project stories)
+  - name: user_story
+    type: string
+    required: false
+    default: ""
+    description: "User story text (for Story type): 'As a..., I want..., so that...'"
+
+  - name: acceptance_criteria
+    type: string
+    required: false
+    default: ""
+    description: "Acceptance criteria (for Story type)"
+
+  - name: definition_of_done
+    type: string
+    required: false
+    default: ""
+    description: "Definition of done (for Story type)"
+
+  - name: components
+    type: string
+    required: false
+    default: ""
+    description: "Comma-separated components (e.g., 'Automation Analytics')"
 
 steps:
   # ==================== LOAD DEVELOPER PERSONA ====================
@@ -291,9 +324,14 @@ steps:
       project: "{{ inputs.project }}"
       summary: "{{ inputs.summary }}"
       description: "{{ enhanced_description.description if enhanced_description and enhanced_description.description else (inputs.description or '') }}"
+      problem_description: "{{ inputs.problem_description or inputs.description or inputs.summary }}"
       issue_type: "{{ inputs.issue_type }}"
       priority: "{{ inputs.priority }}"
       labels: "{{ inputs.labels or '' }}"
+      user_story: "{{ inputs.user_story or '' }}"
+      acceptance_criteria: "{{ inputs.acceptance_criteria or '' }}"
+      definition_of_done: "{{ inputs.definition_of_done or '' }}"
+      components: "{{ inputs.components or '' }}"
     output: create_result
     on_error: continue
 
@@ -317,18 +355,6 @@ steps:
           "message": result_text[:300] if result_text else "No response",
       }
     output: create_status
-
-  # ==================== ASSIGN ISSUE ====================
-
-  - name: assign_issue
-    description: "Assign the issue"
-    condition: "create_status.issue_key"
-    tool: jira_assign
-    args:
-      issue_key: "{{ create_status.issue_key }}"
-      assignee: "{{ inputs.assignee or 'currentUser' }}"
-    output: assign_result
-    on_error: auto_heal  # Jira API - may need auth refresh
 
   # ==================== LINK ISSUES ====================
 
@@ -453,6 +479,56 @@ steps:
         created: {{ now().isoformat() }}
     on_error: continue
 
+  # ==================== NOTIFY TEAM ====================
+
+  - name: build_notification_message
+    description: "Build Slack notification message for the new issue"
+    condition: "create_status and create_status.success and inputs.notify_team"
+    compute: |
+      issue_key = create_status.get('issue_key', 'Unknown')
+      summary = inputs.get('summary', 'No summary')
+      issue_type = inputs.get('issue_type', 'Task')
+      priority = inputs.get('priority', 'Medium')
+
+      # Build message with Slack link format
+      message = f"New {issue_type} created: <https://issues.redhat.com/browse/{issue_key}|{issue_key}> - {summary}\n\n*Priority:* {priority}"
+
+      # Add link info if present
+      link_to = inputs.get('link_to')
+      if link_to:
+          message += f"\n*Linked to:* <https://issues.redhat.com/browse/{link_to}|{link_to}>"
+
+      result = {
+          "message": message,
+          "type": "info",
+      }
+    output: notification_message
+    on_error: continue
+
+  - name: notify_team_channel
+    description: "Send Slack notification to team channel"
+    condition: "create_status and create_status.success and inputs.notify_team and notification_message"
+    tool: skill_run
+    args:
+      skill_name: "notify_team"
+      inputs: '{"message": "{{ notification_message.message }}", "type": "{{ notification_message.type }}"}'
+    output: notify_result
+    on_error: continue
+
+  - name: parse_notify_result
+    description: "Parse notification result"
+    condition: "notify_result"
+    compute: |
+      notify_text = str(notify_result) if notify_result else ""
+      success = "success" in notify_text.lower() or "sent" in notify_text.lower()
+
+      result = {
+          "success": success,
+          "message": notify_text[:200] if notify_text else "Unknown",
+      }
+    output: notify_status
+    on_error: continue
+
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_create_failures
@@ -531,8 +607,10 @@ outputs:
       **Type:** {{ inputs.issue_type }}
       **Priority:** {{ inputs.priority }}
 
-      {% if assign_result %}
-      **Assigned to:** {{ inputs.assignee or "you" }}
+      {% if notify_status and notify_status.success %}
+      **Team notified:** ✅ Slack notification sent
+      {% elif inputs.notify_team and not notify_status %}
+      **Team notified:** ⚠️ Notification failed
       {% endif %}
 
       {% if link_status and link_status.success %}
@@ -635,3 +713,4 @@ outputs:
       created: "{{ create_status.success }}"
       linked: "{{ link_status.success if link_status else false }}"
       link_to: "{{ inputs.link_to }}"
+      notified: "{{ notify_status.success if notify_status else false }}"

@@ -261,6 +261,14 @@ class NotesBot:
             self.state.joined_at = datetime.now()
             self.state.last_flush = datetime.now()
 
+            # Emit toast notification for meeting joined
+            try:
+                from tool_modules.aa_workflow.src.notification_emitter import notify_meeting_joined
+
+                notify_meeting_joined(self.state.title, mode)
+            except Exception:
+                pass
+
             # Start buffer flush task
             self._flush_task = asyncio.create_task(self._flush_loop())
 
@@ -1011,6 +1019,18 @@ class NotesBot:
             # if generate_summary:
             #     summary = await self._generate_summary()
             #     await self.db.update_meeting(self.state.meeting_id, summary=summary)
+
+        # Emit toast notification for meeting left
+        try:
+            from tool_modules.aa_workflow.src.notification_emitter import notify_meeting_left
+
+            notify_meeting_left(
+                result.get("title", "Meeting"),
+                result.get("duration_minutes", 0),
+                result.get("captions_captured", 0),
+            )
+        except Exception:
+            pass
 
         # Reset state
         self.state = NotesBotState()

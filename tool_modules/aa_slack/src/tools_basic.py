@@ -59,6 +59,8 @@ async def _send_via_dbus(channel_id: str, text: str, thread_ts: str = "") -> dic
     """
     Try to send a message via the D-Bus daemon.
 
+    Uses send_message_rich to properly format Slack links and markdown.
+
     Returns the result dict if successful, None if D-Bus is not available.
     """
     try:
@@ -71,7 +73,8 @@ async def _send_via_dbus(channel_id: str, text: str, thread_ts: str = "") -> dic
 
         client = SlackAgentClient()
         if await client.connect():
-            result = await client.send_message(channel_id, text, thread_ts)
+            # Use send_message_rich to properly format links like <url|text>
+            result = await client.send_message_rich(channel_id, text, thread_ts)
             await client.disconnect()
             logger.debug(f"D-Bus send result: {result}")
             return result

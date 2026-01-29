@@ -41,6 +41,7 @@ export class StatusBarManager {
 
   private dataProvider: WorkflowDataProvider;
   private currentAgent: string = "";
+  private slackPendingCount: number = 0;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -173,6 +174,14 @@ export class StatusBarManager {
     this.updateAgentItem();
   }
 
+  /**
+   * Update the Slack pending count (called from notification manager)
+   */
+  public setSlackPendingCount(count: number) {
+    this.slackPendingCount = count;
+    this.updateSlackItem(this.dataProvider.getStatus());
+  }
+
   private updateVpnItem(status: WorkflowStatus) {
     if (!status.vpn || status.vpn.connected) {
       // VPN connected or unknown - hide the warning
@@ -302,18 +311,41 @@ export class StatusBarManager {
         true
       );
     } else if (status.slack.online) {
-      this.slackItem.text = "$(check) Slack";
-      this.slackItem.backgroundColor = undefined;
-      this.slackItem.color = new vscode.ThemeColor("charts.green");
-      this.slackItem.tooltip = new vscode.MarkdownString(
-        `### $(check) Slack Daemon Online\n\n` +
-          `| Metric | Value |\n` +
-          `|--------|-------|\n` +
-          `| Polls | ${status.slack.polls} |\n` +
-          `| Processed | ${status.slack.processed} |\n` +
-          `| Responded | ${status.slack.responded} |`,
-        true
-      );
+      // Show pending count badge if there are pending messages
+      const pendingBadge = this.slackPendingCount > 0 ? ` (${this.slackPendingCount})` : "";
+      const pendingIcon = this.slackPendingCount > 0 ? "$(bell-dot)" : "$(check)";
+
+      this.slackItem.text = `${pendingIcon} Slack${pendingBadge}`;
+
+      if (this.slackPendingCount > 0) {
+        this.slackItem.backgroundColor = new vscode.ThemeColor(
+          "statusBarItem.warningBackground"
+        );
+        this.slackItem.color = undefined;
+      } else {
+        this.slackItem.backgroundColor = undefined;
+        this.slackItem.color = new vscode.ThemeColor("charts.green");
+      }
+
+      // Build tooltip with pending info
+      let tooltipContent = `### ${pendingIcon} Slack Daemon Online\n\n`;
+
+      if (this.slackPendingCount > 0) {
+        tooltipContent += `**⏳ ${this.slackPendingCount} pending approval${this.slackPendingCount > 1 ? "s" : ""}**\n\n`;
+      }
+
+      tooltipContent += `| Metric | Value |\n`;
+      tooltipContent += `|--------|-------|\n`;
+      tooltipContent += `| Polls | ${status.slack.polls} |\n`;
+      tooltipContent += `| Processed | ${status.slack.processed} |\n`;
+      tooltipContent += `| Responded | ${status.slack.responded} |`;
+
+      if (this.slackPendingCount > 0) {
+        tooltipContent += `\n\n---\n$(bell) Click to view pending messages`;
+      }
+
+      this.slackItem.tooltip = new vscode.MarkdownString(tooltipContent, true);
+      this.slackItem.tooltip.isTrusted = true;
     } else {
       this.slackItem.text = "$(circle-slash) Slack";
       this.slackItem.backgroundColor = new vscode.ThemeColor(

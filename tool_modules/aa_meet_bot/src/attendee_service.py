@@ -19,15 +19,23 @@ Protocol (JSON messages, newline-delimited):
 import asyncio
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-# Socket path in user config directory
-SOCKET_DIR = Path.home() / ".config" / "aa-workflow"
-SOCKET_PATH = SOCKET_DIR / "meetbot.sock"
+# Socket path - centralized in server.paths
+try:
+    from server.paths import AA_CONFIG_DIR, MEETBOT_SOCKET
+
+    SOCKET_DIR = AA_CONFIG_DIR
+    SOCKET_PATH = MEETBOT_SOCKET
+except ImportError:
+    # Fallback for standalone usage
+    SOCKET_DIR = Path.home() / ".config" / "aa-workflow"
+    SOCKET_PATH = SOCKET_DIR / "meetbot.sock"
 
 # Photo cache directory
 PHOTO_CACHE_DIR = Path.home() / ".cache" / "aa-workflow" / "photos"
@@ -104,6 +112,13 @@ class AttendeeDataService:
         self._enricher: Optional["AttendeeEnricher"] = None
         self._lock = asyncio.Lock()
         self._running = False
+
+        # Periodic polling configuration
+        self._poll_task: Optional[asyncio.Task] = None
+        self._poll_interval: float = 30.0  # seconds between polls
+        self._poll_duration: float = 600.0  # 10 minutes total polling duration
+        self._poll_callback: Optional[Callable[[], Any]] = None  # Async callback to get participants
+        self._poll_start_time: float = 0.0
 
         # Callbacks for external integration
         self._on_state_change: Optional[Callable[[MeetingState], None]] = None
@@ -411,6 +426,116 @@ class AttendeeDataService:
 
             except Exception as e:
                 logger.debug(f"Failed to enrich {attendee.name}: {e}")
+
+    # ==================== Periodic Polling ====================
+
+    async def start_periodic_polling(
+        self,
+        poll_callback: Callable[[], Any],
+        interval: float = 30.0,
+        duration: float = 600.0,
+    ) -> None:
+        """
+        Start periodic polling for new attendees.
+
+        This polls for new participants at regular intervals for a fixed duration,
+        useful for detecting new people joining the meeting in the first 10 minutes.
+
+        Args:
+            poll_callback: Async function that returns list[dict] with participant data
+                          (same format as update_participants expects)
+            interval: Seconds between polls (default 30)
+            duration: Total duration to poll in seconds (default 600 = 10 minutes)
+        """
+        # Stop any existing polling
+        await self.stop_periodic_polling()
+
+        self._poll_callback = poll_callback
+        self._poll_interval = interval
+        self._poll_duration = duration
+        self._poll_start_time = time.time()
+
+        self._poll_task = asyncio.create_task(self._polling_loop())
+        logger.info(f"Started periodic attendee polling: every {interval}s for {duration}s")
+
+    async def stop_periodic_polling(self) -> None:
+        """Stop periodic polling if running."""
+        if self._poll_task:
+            self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
+            self._poll_task = None
+            logger.info("Stopped periodic attendee polling")
+
+    async def _polling_loop(self) -> None:
+        """Internal polling loop."""
+        try:
+            while self._running:
+                # Check if we've exceeded the duration
+                elapsed = time.time() - self._poll_start_time
+                if elapsed >= self._poll_duration:
+                    logger.info(f"Periodic polling completed after {elapsed:.0f}s")
+                    break
+
+                # Wait for the interval
+                try:
+                    await asyncio.sleep(self._poll_interval)
+                except asyncio.CancelledError:
+                    break
+
+                # Check again after sleep
+                if not self._running:
+                    break
+
+                # Call the poll callback
+                if self._poll_callback:
+                    try:
+                        participants = await self._poll_callback()
+                        if participants:
+                            # Check for new participants
+                            existing_names = {a.name for a in self._state.attendees}
+                            new_count = sum(1 for p in participants if p.get("name") not in existing_names)
+
+                            if new_count > 0:
+                                logger.info(f"Polling detected {new_count} new participant(s)")
+
+                            # Update participants (will broadcast changes)
+                            await self.update_participants(participants)
+
+                    except Exception as e:
+                        logger.warning(f"Polling callback error: {e}")
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Polling loop error: {e}")
+        finally:
+            self._poll_task = None
+
+    def is_polling(self) -> bool:
+        """Check if periodic polling is active."""
+        return self._poll_task is not None and not self._poll_task.done()
+
+    def get_polling_status(self) -> dict:
+        """Get current polling status."""
+        if not self.is_polling():
+            return {
+                "active": False,
+                "elapsed": 0,
+                "remaining": 0,
+            }
+
+        elapsed = time.time() - self._poll_start_time
+        remaining = max(0, self._poll_duration - elapsed)
+        return {
+            "active": True,
+            "elapsed": elapsed,
+            "remaining": remaining,
+            "interval": self._poll_interval,
+            "duration": self._poll_duration,
+        }
 
     def get_state(self) -> MeetingState:
         """Get current meeting state (for local access)."""

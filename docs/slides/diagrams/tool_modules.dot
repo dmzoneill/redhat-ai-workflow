@@ -1,0 +1,31 @@
+
+digraph ToolModules {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    subgraph cluster_modules {
+        label="tool_modules/";
+        style=filled;
+        fillcolor="#E8F5E9";
+
+        workflow [label="aa_workflow\n108 tools", fillcolor="#A5D6A7"];
+        git [label="aa_git\n35 tools", fillcolor="#81C784"];
+        jira [label="aa_jira\n25 tools", fillcolor="#66BB6A"];
+        slack [label="aa_slack\n20 tools", fillcolor="#4CAF50"];
+        k8s [label="aa_k8s\n18 tools", fillcolor="#43A047"];
+        meet [label="aa_meet_bot\n15 tools", fillcolor="#388E3C"];
+        more [label="... 22 more\nmodules", fillcolor="#2E7D32", fontcolor=white];
+    }
+
+    subgraph cluster_structure {
+        label="Module Structure";
+        style=dashed;
+
+        pyproject [label="pyproject.toml", fillcolor="#FFF9C4", shape=note];
+        basic [label="src/tools_basic.py\n(core tools)", fillcolor="#FFCC80"];
+        extra [label="src/tools_extra.py\n(extended)", fillcolor="#FFB74D"];
+    }
+
+    workflow -> pyproject [style=invis];
+}

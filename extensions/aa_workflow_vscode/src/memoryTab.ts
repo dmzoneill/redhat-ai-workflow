@@ -42,6 +42,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import * as yaml from "js-yaml";
 import { getMemoryDir } from "./paths";
 import { createLogger } from "./logger";
@@ -75,6 +76,18 @@ export class MemoryTreeItem extends vscode.TreeItem {
   }
 }
 
+interface SessionInfo {
+  session_id: string;
+  name: string | null;
+  persona: string;
+  project: string | null;
+  issue_key: string | null;
+  started_at: string | null;
+  last_activity: string | null;
+  tool_call_count: number;
+  is_active: boolean;
+}
+
 interface MemoryStats {
   state: {
     activeIssues: number;
@@ -105,6 +118,11 @@ interface MemoryStats {
     vectorReindexes: number;
     knowledgeBootstraps: number;
     workAnalyses: number;
+  };
+  sessions: {
+    total: number;
+    active: number;
+    recentSessions: SessionInfo[];
   };
 }
 
@@ -146,12 +164,16 @@ export class MemoryTreeProvider
       return this.getStateItems();
     } else if (label.includes("Environments")) {
       return this.getEnvironmentItems();
+    } else if (label.includes("Sessions")) {
+      return this.getSessionItems();
     } else if (label.includes("Learned")) {
       return this.getLearnedItems();
     } else if (label.includes("Knowledge")) {
       return this.getKnowledgeItems();
     } else if (label.includes("Statistics")) {
       return this.getStatisticsItems();
+    } else if (label.includes("Memory Actions")) {
+      return this.getMemoryActionItems();
     } else if (element.data?.children) {
       return element.data.children;
     } else if (element.data?.items) {
@@ -184,6 +206,7 @@ export class MemoryTreeProvider
       },
       knowledge: { projects: [], personas: [], lastBootstrap: null },
       statistics: { vectorReindexes: 0, knowledgeBootstraps: 0, workAnalyses: 0 },
+      sessions: { total: 0, active: 0, recentSessions: [] },
     };
 
     try {
@@ -257,6 +280,52 @@ export class MemoryTreeProvider
         }
       }
 
+      // Load sessions from workspace_states.json (centralized in ~/.config/aa-workflow/)
+      const workspaceStatesPath = path.join(os.homedir(), ".config", "aa-workflow", "workspace_states.json");
+      if (fs.existsSync(workspaceStatesPath)) {
+        const content = JSON.parse(fs.readFileSync(workspaceStatesPath, "utf-8"));
+        const workspaces = content?.workspaces || {};
+
+        // Collect all sessions from all workspaces
+        const allSessions: SessionInfo[] = [];
+        let activeCount = 0;
+
+        for (const [uri, workspace] of Object.entries(workspaces)) {
+          const ws = workspace as any;
+          const activeSessionId = ws.active_session_id;
+          const sessions = ws.sessions || {};
+
+          for (const [sessionId, session] of Object.entries(sessions)) {
+            const s = session as any;
+            const isActive = sessionId === activeSessionId;
+            if (isActive) activeCount++;
+
+            allSessions.push({
+              session_id: s.session_id,
+              name: s.name,
+              persona: s.persona,
+              project: s.project,
+              issue_key: s.issue_key,
+              started_at: s.started_at,
+              last_activity: s.last_activity,
+              tool_call_count: s.tool_call_count || 0,
+              is_active: isActive,
+            });
+          }
+        }
+
+        // Sort by last_activity descending (most recent first)
+        allSessions.sort((a, b) => {
+          const aTime = a.last_activity ? new Date(a.last_activity).getTime() : 0;
+          const bTime = b.last_activity ? new Date(b.last_activity).getTime() : 0;
+          return bTime - aTime;
+        });
+
+        stats.sessions.total = allSessions.length;
+        stats.sessions.active = activeCount;
+        stats.sessions.recentSessions = allSessions.slice(0, 15); // Keep top 15
+      }
+
     } catch (e) {
       logger.error("Failed to load memory stats", e);
     }
@@ -301,6 +370,24 @@ export class MemoryTreeProvider
       ? `${stats.environments.stage.alerts + stats.environments.production.alerts} alerts`
       : "All healthy";
     items.push(envItem);
+
+    // Sessions
+    const sessionsItem = new MemoryTreeItem(
+      "Sessions",
+      stats.sessions.total > 0
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
+      "category"
+    );
+    sessionsItem.iconPath = new vscode.ThemeIcon(
+      "history",
+      stats.sessions.active > 0 ? new vscode.ThemeColor("charts.green") : undefined
+    );
+    sessionsItem.description = stats.sessions.total > 0
+      ? `${stats.sessions.total} total, ${stats.sessions.active} active`
+      : "No sessions";
+    sessionsItem.tooltip = "Recent AI assistant sessions from MCP server";
+    items.push(sessionsItem);
 
     // Learned Patterns
     const learnedItem = new MemoryTreeItem(
@@ -493,6 +580,11 @@ export class MemoryTreeProvider
     );
     if (stats.environments.stage.alerts > 0) {
       stageItem.description = `${stats.environments.stage.alerts} alert(s)`;
+      stageItem.tooltip = "Click to investigate stage alerts";
+      stageItem.command = {
+        command: "aa-workflow.investigateAlert",
+        title: "Investigate Alerts",
+      };
     }
     items.push(stageItem);
 
@@ -510,6 +602,11 @@ export class MemoryTreeProvider
     );
     if (stats.environments.production.alerts > 0) {
       prodItem.description = `${stats.environments.production.alerts} alert(s)`;
+      prodItem.tooltip = "Click to investigate production alerts";
+      prodItem.command = {
+        command: "aa-workflow.investigateAlert",
+        title: "Investigate Alerts",
+      };
     }
     items.push(prodItem);
 
@@ -558,6 +655,116 @@ export class MemoryTreeProvider
       command: "aa-workflow.openMemoryFile",
       title: "Open File",
       arguments: [envPath],
+    };
+    items.push(openFileItem);
+
+    return items;
+  }
+
+  private getSessionItems(): MemoryTreeItem[] {
+    const stats = this.loadStats();
+    const items: MemoryTreeItem[] = [];
+
+    if (stats.sessions.recentSessions.length === 0) {
+      const emptyItem = new MemoryTreeItem(
+        "No sessions found",
+        vscode.TreeItemCollapsibleState.None,
+        "detail"
+      );
+      emptyItem.iconPath = new vscode.ThemeIcon("info");
+      emptyItem.description = "Start a session with session_start()";
+      items.push(emptyItem);
+      return items;
+    }
+
+    // Show recent sessions
+    for (const session of stats.sessions.recentSessions) {
+      const displayName = session.name || session.session_id.substring(0, 8);
+      const sessionItem = new MemoryTreeItem(
+        this.truncate(displayName, 40),
+        vscode.TreeItemCollapsibleState.None,
+        "item",
+        session
+      );
+
+      // Icon based on active status
+      sessionItem.iconPath = new vscode.ThemeIcon(
+        session.is_active ? "debug-start" : "history",
+        session.is_active ? new vscode.ThemeColor("charts.green") : undefined
+      );
+
+      // Description shows persona and time
+      const timeAgo = session.last_activity ? this.formatDate(session.last_activity) : "unknown";
+      sessionItem.description = `${session.persona} • ${timeAgo}`;
+
+      // Rich tooltip
+      sessionItem.tooltip = new vscode.MarkdownString(
+        `**${session.name || "Unnamed Session"}**\n\n` +
+        `| | |\n|---|---|\n` +
+        `| Status | ${session.is_active ? "🟢 Active" : "⚪ Inactive"} |\n` +
+        `| Persona | ${session.persona} |\n` +
+        `| Project | ${session.project || "N/A"} |\n` +
+        `| Issue | ${session.issue_key || "N/A"} |\n` +
+        `| Tool Calls | ${session.tool_call_count} |\n` +
+        `| Started | ${session.started_at ? this.formatDate(session.started_at) : "N/A"} |\n` +
+        `| Last Activity | ${timeAgo} |\n\n` +
+        `Session ID: \`${session.session_id}\`\n\n` +
+        `_Click to ${session.is_active ? "view session info" : "resume this session"}_`
+      );
+
+      // Click to resume or view session
+      sessionItem.command = {
+        command: "aa-workflow.sessionAction",
+        title: session.is_active ? "View Session" : "Resume Session",
+        arguments: [session.session_id, session.is_active],
+      };
+
+      items.push(sessionItem);
+    }
+
+    // Show total count if there are more
+    if (stats.sessions.total > stats.sessions.recentSessions.length) {
+      const moreItem = new MemoryTreeItem(
+        `... and ${stats.sessions.total - stats.sessions.recentSessions.length} more sessions`,
+        vscode.TreeItemCollapsibleState.None,
+        "detail"
+      );
+      moreItem.iconPath = new vscode.ThemeIcon("ellipsis");
+      moreItem.command = {
+        command: "aa-workflow.listAllSessions",
+        title: "List All Sessions",
+      };
+      items.push(moreItem);
+    }
+
+    // Action to start new session
+    const newSessionItem = new MemoryTreeItem(
+      "Start New Session",
+      vscode.TreeItemCollapsibleState.None,
+      "action"
+    );
+    newSessionItem.iconPath = new vscode.ThemeIcon("add", new vscode.ThemeColor("charts.green"));
+    newSessionItem.description = "session_start()";
+    newSessionItem.command = {
+      command: "aa-workflow.startNewSession",
+      title: "Start New Session",
+    };
+    items.push(newSessionItem);
+
+    // Open workspace_states.json (centralized in ~/.config/aa-workflow/)
+    const workspaceStatesPath = path.join(os.homedir(), ".config", "aa-workflow", "workspace_states.json");
+    const openFileItem = new MemoryTreeItem(
+      "Open workspace_states.json",
+      vscode.TreeItemCollapsibleState.None,
+      "action",
+      null,
+      workspaceStatesPath
+    );
+    openFileItem.iconPath = new vscode.ThemeIcon("go-to-file");
+    openFileItem.command = {
+      command: "aa-workflow.openMemoryFile",
+      title: "Open File",
+      arguments: [workspaceStatesPath],
     };
     items.push(openFileItem);
 
@@ -751,6 +958,7 @@ export class MemoryTreeProvider
   private getStatisticsItems(): MemoryTreeItem[] {
     const stats = this.loadStats();
     const items: MemoryTreeItem[] = [];
+    const patternsPath = path.join(this.memoryDir, "learned", "patterns.yaml");
 
     // Vector Reindexes
     const reindexItem = new MemoryTreeItem(
@@ -759,7 +967,12 @@ export class MemoryTreeProvider
       "detail"
     );
     reindexItem.iconPath = new vscode.ThemeIcon("search", new vscode.ThemeColor("charts.blue"));
-    reindexItem.tooltip = "Number of times the vector index has been rebuilt";
+    reindexItem.tooltip = "Number of times the vector index has been rebuilt. Click to view patterns.yaml";
+    reindexItem.command = {
+      command: "aa-workflow.openMemoryFile",
+      title: "Open patterns.yaml",
+      arguments: [patternsPath],
+    };
     items.push(reindexItem);
 
     // Knowledge Bootstraps
@@ -769,7 +982,12 @@ export class MemoryTreeProvider
       "detail"
     );
     bootstrapItem.iconPath = new vscode.ThemeIcon("book", new vscode.ThemeColor("charts.purple"));
-    bootstrapItem.tooltip = "Number of knowledge bootstrap operations";
+    bootstrapItem.tooltip = "Number of knowledge bootstrap operations. Click to run bootstrap skill";
+    bootstrapItem.command = {
+      command: "aa-workflow.runSkillByName",
+      title: "Run Bootstrap",
+      arguments: ["bootstrap_knowledge"],
+    };
     items.push(bootstrapItem);
 
     // Work Analyses
@@ -779,7 +997,11 @@ export class MemoryTreeProvider
       "detail"
     );
     analysesItem.iconPath = new vscode.ThemeIcon("graph", new vscode.ThemeColor("charts.green"));
-    analysesItem.tooltip = "Number of work analysis reports generated";
+    analysesItem.tooltip = "Number of work analysis reports generated. Click to run work analysis";
+    analysesItem.command = {
+      command: "aa-workflow.workAnalysis",
+      title: "Run Work Analysis",
+    };
     items.push(analysesItem);
 
     // Daily Patterns
@@ -789,8 +1011,130 @@ export class MemoryTreeProvider
       "detail"
     );
     dailyItem.iconPath = new vscode.ThemeIcon("calendar", new vscode.ThemeColor("charts.yellow"));
-    dailyItem.tooltip = "Number of daily activity patterns recorded";
+    dailyItem.tooltip = "Number of daily activity patterns recorded. Click to view patterns.yaml";
+    dailyItem.command = {
+      command: "aa-workflow.openMemoryFile",
+      title: "Open patterns.yaml",
+      arguments: [patternsPath],
+    };
     items.push(dailyItem);
+
+    return items;
+  }
+
+  private getMemoryActionItems(): MemoryTreeItem[] {
+    const items: MemoryTreeItem[] = [];
+
+    // View Memory
+    const viewItem = new MemoryTreeItem(
+      "View Memory Summary",
+      vscode.TreeItemCollapsibleState.None,
+      "action"
+    );
+    viewItem.iconPath = new vscode.ThemeIcon("eye", new vscode.ThemeColor("charts.blue"));
+    viewItem.description = "Run memory_view skill";
+    viewItem.tooltip = "Get a comprehensive summary of all memory contents";
+    viewItem.command = {
+      command: "aa-workflow.runSkillByName",
+      title: "View Memory",
+      arguments: ["memory_view"],
+    };
+    items.push(viewItem);
+
+    // Edit Memory
+    const editItem = new MemoryTreeItem(
+      "Edit Memory",
+      vscode.TreeItemCollapsibleState.None,
+      "action"
+    );
+    editItem.iconPath = new vscode.ThemeIcon("edit", new vscode.ThemeColor("charts.yellow"));
+    editItem.description = "Run memory_edit skill";
+    editItem.tooltip = "Interactively edit memory entries";
+    editItem.command = {
+      command: "aa-workflow.runSkillByName",
+      title: "Edit Memory",
+      arguments: ["memory_edit"],
+    };
+    items.push(editItem);
+
+    // Cleanup Memory
+    const cleanupItem = new MemoryTreeItem(
+      "Cleanup Memory",
+      vscode.TreeItemCollapsibleState.None,
+      "action"
+    );
+    cleanupItem.iconPath = new vscode.ThemeIcon("trash", new vscode.ThemeColor("charts.red"));
+    cleanupItem.description = "Run memory_cleanup skill";
+    cleanupItem.tooltip = "Remove stale entries and optimize memory";
+    cleanupItem.command = {
+      command: "aa-workflow.runSkillByName",
+      title: "Cleanup Memory",
+      arguments: ["memory_cleanup"],
+    };
+    items.push(cleanupItem);
+
+    // Learn Pattern
+    const learnItem = new MemoryTreeItem(
+      "Learn New Pattern",
+      vscode.TreeItemCollapsibleState.None,
+      "action"
+    );
+    learnItem.iconPath = new vscode.ThemeIcon("lightbulb", new vscode.ThemeColor("charts.green"));
+    learnItem.description = "Run learn_pattern skill";
+    learnItem.tooltip = "Teach the system a new error pattern and fix";
+    learnItem.command = {
+      command: "aa-workflow.runSkillByName",
+      title: "Learn Pattern",
+      arguments: ["learn_pattern"],
+    };
+    items.push(learnItem);
+
+    // Bootstrap Knowledge
+    const bootstrapItem = new MemoryTreeItem(
+      "Bootstrap Knowledge",
+      vscode.TreeItemCollapsibleState.None,
+      "action"
+    );
+    bootstrapItem.iconPath = new vscode.ThemeIcon("book", new vscode.ThemeColor("charts.purple"));
+    bootstrapItem.description = "Run bootstrap_knowledge skill";
+    bootstrapItem.tooltip = "Generate knowledge files for all projects and personas";
+    bootstrapItem.command = {
+      command: "aa-workflow.runSkillByName",
+      title: "Bootstrap Knowledge",
+      arguments: ["bootstrap_knowledge"],
+    };
+    items.push(bootstrapItem);
+
+    // Open Memory Directory
+    const openDirItem = new MemoryTreeItem(
+      "Open Memory Directory",
+      vscode.TreeItemCollapsibleState.None,
+      "action"
+    );
+    openDirItem.iconPath = new vscode.ThemeIcon("folder-opened", new vscode.ThemeColor("charts.orange"));
+    openDirItem.description = this.memoryDir;
+    openDirItem.tooltip = "Open the memory directory in the file explorer";
+    openDirItem.command = {
+      command: "revealFileInOS",
+      title: "Open Directory",
+      arguments: [vscode.Uri.file(this.memoryDir)],
+    };
+    items.push(openDirItem);
+
+    // Refresh Memory
+    const refreshItem = new MemoryTreeItem(
+      "Refresh Memory View",
+      vscode.TreeItemCollapsibleState.None,
+      "action"
+    );
+    refreshItem.iconPath = new vscode.ThemeIcon("refresh", new vscode.ThemeColor("charts.cyan"));
+    refreshItem.description = "Reload all memory data";
+    refreshItem.tooltip = "Refresh the memory tree view";
+    refreshItem.command = {
+      command: "aa-workflow.refreshMemory",
+      title: "Refresh",
+    };
+    items.push(refreshItem);
 
     return items;
   }
@@ -815,8 +1159,15 @@ export class MemoryTreeProvider
             `**${item.key}**\n\n${item.summary}\n\n` +
             `Status: ${item.status || "Unknown"}\n` +
             `Branch: ${item.branch || "N/A"}\n` +
-            `Repo: ${item.repo || "N/A"}`
+            `Repo: ${item.repo || "N/A"}\n\n` +
+            `_Click to open in Jira_`
           );
+          // Click to open in Jira
+          treeItem.command = {
+            command: "aa-workflow.openJiraIssueByKey",
+            title: "Open in Jira",
+            arguments: [item.key],
+          };
           break;
 
         case "mr":
@@ -828,7 +1179,15 @@ export class MemoryTreeProvider
           );
           treeItem.iconPath = new vscode.ThemeIcon("git-pull-request");
           treeItem.description = this.truncate(item.title || "", 40);
-          treeItem.tooltip = `${item.title}\nStatus: ${item.status || "open"}`;
+          treeItem.tooltip = new vscode.MarkdownString(
+            `**!${item.id}**\n\n${item.title}\n\nStatus: ${item.status || "open"}\n\n_Click to open in GitLab_`
+          );
+          // Click to open in GitLab
+          treeItem.command = {
+            command: "aa-workflow.openMRById",
+            title: "Open in GitLab",
+            arguments: [item.id, item.project],
+          };
           break;
 
         case "followup":
@@ -843,6 +1202,19 @@ export class MemoryTreeProvider
             item.priority === "high" ? new vscode.ThemeColor("charts.red") : undefined
           );
           treeItem.description = item.priority || "normal";
+          treeItem.tooltip = new vscode.MarkdownString(
+            `**Follow-up:** ${item.task}\n\n` +
+            `Priority: ${item.priority || "normal"}\n` +
+            (item.issue_key ? `Issue: ${item.issue_key}\n` : "") +
+            (item.mr_id ? `MR: !${item.mr_id}\n` : "") +
+            `\n_Click to copy task to clipboard_`
+          );
+          // Click to copy task
+          treeItem.command = {
+            command: "aa-workflow.copyToClipboard",
+            title: "Copy Task",
+            arguments: [item.task, "Follow-up task copied to clipboard"],
+          };
           break;
 
         case "discovered":
@@ -859,8 +1231,23 @@ export class MemoryTreeProvider
             `Type: ${item.work_type || "discovered_work"}\n` +
             `Priority: ${item.priority || "medium"}\n` +
             `Source: ${item.source_skill || "unknown"}\n` +
-            `Synced to Jira: ${item.jira_synced ? "Yes" : "No"}`
+            `Synced to Jira: ${item.jira_synced ? `Yes (${item.jira_key})` : "No"}\n\n` +
+            (item.jira_synced ? `_Click to open Jira issue_` : `_Click to sync to Jira_`)
           );
+          // Click to open Jira if synced, or sync if not
+          if (item.jira_synced && item.jira_key) {
+            treeItem.command = {
+              command: "aa-workflow.openJiraIssueByKey",
+              title: "Open in Jira",
+              arguments: [item.jira_key],
+            };
+          } else {
+            treeItem.command = {
+              command: "aa-workflow.syncDiscoveredWork",
+              title: "Sync to Jira",
+              arguments: [item.task],
+            };
+          }
           break;
 
         case "namespace":
@@ -876,8 +1263,15 @@ export class MemoryTreeProvider
             `**${item.name}**\n\n` +
             `MR: ${item.mr_id || "N/A"}\n` +
             `Commit: ${item.commit || "N/A"}\n` +
-            `Expires: ${item.expires || "N/A"}`
+            `Expires: ${item.expires || "N/A"}\n\n` +
+            `_Click to show namespace actions_`
           );
+          // Click to show namespace actions
+          treeItem.command = {
+            command: "aa-workflow.showNamespaceActions",
+            title: "Namespace Actions",
+            arguments: [item.name],
+          };
           break;
 
         case "pattern":
@@ -893,8 +1287,16 @@ export class MemoryTreeProvider
             `**Pattern:** \`${item.pattern}\`\n\n` +
             `**Meaning:** ${item.meaning || "N/A"}\n\n` +
             `**Fix:** ${item.fix || "N/A"}\n\n` +
-            (item.commands ? `**Commands:**\n${item.commands.map((c: string) => `- \`${c}\``).join("\n")}` : "")
+            (item.commands ? `**Commands:**\n${item.commands.map((c: string) => `- \`${c}\``).join("\n")}\n\n` : "") +
+            `_Click to copy fix command_`
           );
+          // Click to copy fix or first command
+          const copyText = item.commands?.[0] || item.fix || item.pattern;
+          treeItem.command = {
+            command: "aa-workflow.copyToClipboard",
+            title: "Copy Fix",
+            arguments: [copyText, "Fix command copied to clipboard"],
+          };
           break;
 
         case "failure":
@@ -914,8 +1316,15 @@ export class MemoryTreeProvider
             `**Error Type:** ${item.error_type || "unknown"}\n\n` +
             `**Fix Applied:** ${item.fix_applied || "N/A"}\n\n` +
             `**Success:** ${item.success ? "Yes" : "No"}\n\n` +
-            `**Time:** ${item.timestamp || "N/A"}`
+            `**Time:** ${item.timestamp || "N/A"}\n\n` +
+            `_Click to debug this tool_`
           );
+          // Click to run debug_tool
+          treeItem.command = {
+            command: "aa-workflow.debugTool",
+            title: "Debug Tool",
+            arguments: [item.tool, item.error_snippet],
+          };
           break;
 
         case "fix":
@@ -932,8 +1341,15 @@ export class MemoryTreeProvider
             `**Error Pattern:** \`${item.error_pattern}\`\n\n` +
             `**Root Cause:** ${item.root_cause || "N/A"}\n\n` +
             `**Fix:** ${item.fix || "N/A"}\n\n` +
-            `**Verified:** ${item.verified ? "Yes" : "No"}`
+            `**Verified:** ${item.verified ? "Yes" : "No"}\n\n` +
+            `_Click to copy fix description_`
           );
+          // Click to copy fix description
+          treeItem.command = {
+            command: "aa-workflow.copyToClipboard",
+            title: "Copy Fix",
+            arguments: [item.fix || item.root_cause || "", "Fix description copied to clipboard"],
+          };
           break;
 
         case "knowledge_file":
@@ -945,6 +1361,7 @@ export class MemoryTreeProvider
             item.path
           );
           treeItem.iconPath = new vscode.ThemeIcon("file-code");
+          treeItem.tooltip = `Click to open ${item.name}.yaml`;
           treeItem.command = {
             command: "aa-workflow.openMemoryFile",
             title: "Open File",
@@ -960,6 +1377,12 @@ export class MemoryTreeProvider
             item
           );
           treeItem.iconPath = new vscode.ThemeIcon("json");
+          // Click to show raw JSON
+          treeItem.command = {
+            command: "aa-workflow.showItemDetails",
+            title: "Show Details",
+            arguments: [item],
+          };
       }
 
       result.push(treeItem);
@@ -972,6 +1395,12 @@ export class MemoryTreeProvider
         "detail"
       );
       moreItem.iconPath = new vscode.ThemeIcon("ellipsis");
+      // Click to open the source file
+      moreItem.command = {
+        command: "aa-workflow.openMemoryFile",
+        title: "Open Source File",
+        arguments: [path.join(this.memoryDir, "state", "current_work.yaml")],
+      };
       result.push(moreItem);
     }
 
@@ -1071,6 +1500,185 @@ export function registerMemoryTab(
   context.subscriptions.push(
     vscode.commands.registerCommand("aa-workflow.memoryCleanup", () => {
       vscode.commands.executeCommand("aa-workflow.runSkillByName", "memory_cleanup");
+    })
+  );
+
+  // Open Jira issue by key (for memory items)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.openJiraIssueByKey", (issueKey: string) => {
+      if (issueKey) {
+        const jiraUrl = "https://issues.redhat.com";
+        vscode.env.openExternal(vscode.Uri.parse(`${jiraUrl}/browse/${issueKey}`));
+      }
+    })
+  );
+
+  // Open MR by ID (for memory items)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.openMRById", (mrId: number, project?: string) => {
+      if (mrId) {
+        const gitlabUrl = "https://gitlab.cee.redhat.com";
+        // If project is provided, use it; otherwise use default
+        const projectPath = project || "automation-analytics/automation-analytics-backend";
+        vscode.env.openExternal(vscode.Uri.parse(`${gitlabUrl}/${projectPath}/-/merge_requests/${mrId}`));
+      }
+    })
+  );
+
+  // Copy to clipboard helper
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.copyToClipboard", async (text: string, message: string) => {
+      if (text) {
+        await vscode.env.clipboard.writeText(text);
+        vscode.window.showInformationMessage(message || "Copied to clipboard");
+      }
+    })
+  );
+
+  // Show namespace actions
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.showNamespaceActions", async (namespaceName: string) => {
+      const action = await vscode.window.showQuickPick(
+        [
+          { label: "$(terminal) Copy kubectl command", value: "kubectl" },
+          { label: "$(list-flat) Copy get pods command", value: "pods" },
+          { label: "$(output) Copy logs command", value: "logs" },
+          { label: "$(clock) Extend namespace", value: "extend" },
+          { label: "$(trash) Release namespace", value: "release" },
+        ],
+        { placeHolder: `Actions for ${namespaceName}` }
+      );
+
+      if (!action) return;
+
+      let cmd = "";
+      switch (action.value) {
+        case "kubectl":
+          cmd = `kubectl --kubeconfig=~/.kube/config.e -n ${namespaceName}`;
+          break;
+        case "pods":
+          cmd = `kubectl --kubeconfig=~/.kube/config.e get pods -n ${namespaceName}`;
+          break;
+        case "logs":
+          cmd = `kubectl --kubeconfig=~/.kube/config.e logs -n ${namespaceName} -l app=<pod-label> --tail=100`;
+          break;
+        case "extend":
+          cmd = `skill_run("extend_ephemeral", '{"namespace": "${namespaceName}"}')`;
+          break;
+        case "release":
+          cmd = `KUBECONFIG=~/.kube/config.e bonfire namespace release ${namespaceName} --force`;
+          break;
+      }
+
+      if (cmd) {
+        await vscode.env.clipboard.writeText(cmd);
+        vscode.window.showInformationMessage(`Command copied: ${cmd.substring(0, 50)}...`);
+      }
+    })
+  );
+
+  // Sync discovered work to Jira
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.syncDiscoveredWork", async (task: string) => {
+      const confirm = await vscode.window.showInformationMessage(
+        `Create Jira issue for: "${task.substring(0, 50)}..."?`,
+        "Create Issue",
+        "Cancel"
+      );
+
+      if (confirm === "Create Issue") {
+        // Copy the skill command to run
+        const cmd = `skill_run("sync_discovered_work", '{"task": "${task.replace(/"/g, '\\"')}"}')`;
+        await vscode.env.clipboard.writeText(cmd);
+        vscode.window.showInformationMessage("Sync command copied. Paste in chat to create Jira issue.");
+      }
+    })
+  );
+
+  // Debug tool command
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.debugTool", async (toolName: string, errorSnippet?: string) => {
+      const cmd = errorSnippet
+        ? `debug_tool("${toolName}", "${errorSnippet.substring(0, 100).replace(/"/g, '\\"')}")`
+        : `debug_tool("${toolName}")`;
+
+      await vscode.env.clipboard.writeText(cmd);
+      vscode.window.showInformationMessage(`Debug command copied for ${toolName}. Paste in chat to debug.`);
+    })
+  );
+
+  // Show item details (for unknown types)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.showItemDetails", async (item: any) => {
+      const output = vscode.window.createOutputChannel("Memory Item Details");
+      output.clear();
+      output.appendLine("=== Memory Item Details ===");
+      output.appendLine("");
+      output.appendLine(JSON.stringify(item, null, 2));
+      output.show();
+    })
+  );
+
+  // Session action (resume or view)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.sessionAction", async (sessionId: string, isActive: boolean) => {
+      if (isActive) {
+        // Show session info
+        const cmd = `session_info(session_id="${sessionId}")`;
+        await vscode.env.clipboard.writeText(cmd);
+        vscode.window.showInformationMessage("Session info command copied. Paste in chat to view details.");
+      } else {
+        // Resume session
+        const cmd = `session_start(session_id="${sessionId}")`;
+        await vscode.env.clipboard.writeText(cmd);
+        vscode.window.showInformationMessage("Resume session command copied. Paste in chat to resume.");
+      }
+    })
+  );
+
+  // List all sessions
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.listAllSessions", async () => {
+      const cmd = `session_list()`;
+      await vscode.env.clipboard.writeText(cmd);
+      vscode.window.showInformationMessage("Session list command copied. Paste in chat to see all sessions.");
+    })
+  );
+
+  // Start new session
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aa-workflow.startNewSession", async () => {
+      const agents = [
+        { label: "$(robot) Default", value: "", description: "Auto-detect persona" },
+        { label: "$(code) Developer", value: "developer", description: "Coding, PRs, code review" },
+        { label: "$(server-process) DevOps", value: "devops", description: "Deployments, k8s, ephemeral" },
+        { label: "$(flame) Incident", value: "incident", description: "Production issues, alerts" },
+        { label: "$(package) Release", value: "release", description: "Shipping, Konflux, Quay" },
+      ];
+
+      const selected = await vscode.window.showQuickPick(agents, {
+        placeHolder: "Select a persona for the new session",
+      });
+
+      if (!selected) return;
+
+      const sessionName = await vscode.window.showInputBox({
+        prompt: "Session name (optional)",
+        placeHolder: "e.g., Fix billing bug",
+      });
+
+      let cmd = "session_start(";
+      const args: string[] = [];
+      if (selected.value) {
+        args.push(`agent="${selected.value}"`);
+      }
+      if (sessionName) {
+        args.push(`name="${sessionName}"`);
+      }
+      cmd += args.join(", ") + ")";
+
+      await vscode.env.clipboard.writeText(cmd);
+      vscode.window.showInformationMessage("Start session command copied. Paste in chat to begin.");
     })
   );
 

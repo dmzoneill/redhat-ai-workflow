@@ -108,9 +108,9 @@ NO_DAEMONS = os.environ.get("MCP_PROXY_RESTART_DAEMONS", "").lower() not in ("1"
 # Restarting them was causing duplicate scheduler instances and job execution.
 # Set MCP_PROXY_RESTART_DAEMONS=1 to re-enable if needed.
 DAEMON_SERVICES: list[str] = [
-    # "cron-scheduler.service",  # Disabled - runs independently, has its own config watcher
-    # "slack-agent.service",     # Disabled - runs independently
-    # "meet-bot.service",        # Disabled - runs independently
+    # "bot-cron.service",   # Disabled - runs independently, has its own config watcher
+    # "bot-slack.service",  # Disabled - runs independently
+    # "bot-meet.service",   # Disabled - runs independently
 ]
 
 
@@ -124,8 +124,8 @@ def log(msg: str, force: bool = False):
 def restart_daemons():
     """Restart dependent systemd user services.
 
-    NOTE: This is now disabled by default. The daemons (cron-scheduler, slack-agent,
-    meet-bot) run independently of the MCP server and have their own config watchers.
+    NOTE: This is now disabled by default. The daemons (bot-cron, bot-slack,
+    bot-meet) run independently of the MCP server and have their own config watchers.
     Restarting them on MCP reload was causing duplicate scheduler instances.
 
     Set MCP_PROXY_RESTART_DAEMONS=1 to re-enable if needed.

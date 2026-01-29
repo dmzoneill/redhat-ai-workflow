@@ -1,0 +1,23 @@
+
+digraph SprintConfig {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    config [label="config.json", fillcolor="#FFF9C4", shape=note];
+
+    subgraph cluster_settings {
+        label="Sprint Bot Settings";
+        style=dashed;
+
+        interval [label="scan_interval:\n5 minutes", fillcolor="#FFCC80"];
+        transitions [label="auto_transitions:\n[Ready→InProgress]", fillcolor="#FFB74D"];
+        notify [label="notify_channel:\n#team-updates", fillcolor="#FFA726"];
+        hours [label="working_hours:\n9-17 Mon-Fri", fillcolor="#FF9800"];
+    }
+
+    config -> interval;
+    config -> transitions;
+    config -> notify;
+    config -> hours;
+}

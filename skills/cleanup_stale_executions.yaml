@@ -1,0 +1,139 @@
+# Skill: Cleanup Stale Skill Executions
+# Automatically cleans up stale/stuck skill executions from the tracking file
+
+name: cleanup_stale_executions
+description: |
+  Cleans up stale skill executions from the skill_execution.json file.
+
+  A skill execution is considered stale if:
+  - It's been "running" for more than 30 minutes, OR
+  - It's been "running" for more than 10 minutes with no recent events
+
+  Completed executions older than 5 minutes are also removed to keep the file small.
+
+  This skill is designed to run periodically via cron to prevent the execution
+  tracking file from growing unbounded and to clear stuck executions.
+
+version: "1.0"
+
+inputs: []
+
+steps:
+  - name: cleanup_executions
+    description: "Clean up stale and old skill executions"
+    compute: |
+      import json
+      from datetime import datetime, timedelta
+      from pathlib import Path
+
+      file_path = Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
+
+      if not file_path.exists():
+          result = {"cleaned": 0, "stale_marked": 0, "message": "No execution file found"}
+      else:
+          with open(file_path) as f:
+              data = json.load(f)
+
+          executions = data.get('executions', {})
+          now = datetime.now()
+
+          # Thresholds
+          STALE_RUNNING_THRESHOLD = timedelta(minutes=30)
+          INACTIVE_THRESHOLD = timedelta(minutes=10)
+          COMPLETED_CLEANUP_THRESHOLD = timedelta(minutes=5)
+
+          stale_marked = 0
+          to_remove = []
+
+          for exec_id, execution in executions.items():
+              # Mark stale running executions as failed
+              if execution.get('status') == 'running':
+                  start_time_str = execution.get('startTime')
+                  if start_time_str:
+                      try:
+                          start_time = datetime.fromisoformat(start_time_str)
+                          elapsed = now - start_time
+
+                          # Check if running too long
+                          is_stale = elapsed > STALE_RUNNING_THRESHOLD
+
+                          # Check for inactivity
+                          if not is_stale and elapsed > INACTIVE_THRESHOLD:
+                              events = execution.get('events', [])
+                              if events:
+                                  last_event = events[-1]
+                                  last_event_time = datetime.fromisoformat(last_event.get('timestamp', start_time_str))
+                                  if now - last_event_time > INACTIVE_THRESHOLD:
+                                      is_stale = True
+
+                          if is_stale:
+                              execution['status'] = 'failed'
+                              execution['endTime'] = now.isoformat()
+                              execution['events'].append({
+                                  'type': 'skill_complete',
+                                  'timestamp': now.isoformat(),
+                                  'skillName': execution.get('skillName'),
+                                  'executionId': exec_id,
+                                  'data': {
+                                      'success': False,
+                                      'error': 'Execution marked as stale by cleanup job (no activity for extended period)'
+                                  }
+                              })
+                              stale_marked += 1
+                      except (ValueError, TypeError):
+                          pass
+
+              # Remove old completed executions
+              if execution.get('status') in ('success', 'failed'):
+                  end_time_str = execution.get('endTime')
+                  if end_time_str:
+                      try:
+                          # Handle various ISO format variations
+                          end_time_str_clean = end_time_str.replace('Z', '+00:00')
+                          if '+' in end_time_str_clean:
+                              end_time_str_clean = end_time_str_clean.split('+')[0]
+                          end_time = datetime.fromisoformat(end_time_str_clean)
+                          if now - end_time > COMPLETED_CLEANUP_THRESHOLD:
+                              to_remove.append(exec_id)
+                      except (ValueError, TypeError):
+                          pass
+
+          # Remove old completed executions
+          for exec_id in to_remove:
+              del executions[exec_id]
+
+          # Also remove any idle placeholder entries
+          idle_keys = [k for k in executions.keys() if 'None' in k or executions[k].get('status') == 'idle']
+          for k in idle_keys:
+              del executions[k]
+              to_remove.append(k)
+
+          # Save back
+          data['lastUpdated'] = now.isoformat()
+          with open(file_path, 'w') as f:
+              json.dump(data, f, indent=2)
+
+          result = {
+              "cleaned": len(to_remove),
+              "stale_marked": stale_marked,
+              "remaining": len(executions),
+              "message": f"Cleaned {len(to_remove)} old executions, marked {stale_marked} stale as failed"
+          }
+    output: cleanup_result
+
+  - name: log_cleanup
+    description: "Log the cleanup to session memory"
+    tool: memory_session_log
+    args:
+      action: "Stale execution cleanup"
+      details: "{{ cleanup_result['message'] }} ({{ cleanup_result['remaining'] }} remaining)"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## Stale Execution Cleanup Complete
+
+      - **Stale executions marked as failed:** {{ cleanup_result['stale_marked'] }}
+      - **Old completed executions removed:** {{ cleanup_result['cleaned'] }}
+      - **Remaining executions:** {{ cleanup_result['remaining'] }}

@@ -397,6 +397,7 @@
       "xoxc_token": "xoxc-YOUR-TOKEN-HERE",
       "d_cookie": "xoxd-YOUR-COOKIE-HERE",
       "workspace_id": "YOUR_WORKSPACE_ID",
+      "enterprise_id": "E030G10V24F",
       "host": "your-workspace.enterprise.slack.com"
     },
     "credentials_extraction": {
@@ -598,8 +599,8 @@
       "description": "Configuration for D-Bus interface (primary IPC mechanism)",
       "dbus": {
         "enabled": true,
-        "service_name": "com.aiworkflow.SlackAgent",
-        "object_path": "/com/aiworkflow/SlackAgent"
+        "service_name": "com.aiworkflow.BotSlack",
+        "object_path": "/com/aiworkflow/BotSlack"
       }
     },
     "knowledge_cache": {
@@ -608,7 +609,25 @@
       "refresh_interval_minutes": 60,
       "cache_ttl_hours": 24
     },
-    "state_db_path": "./slack_state.db",
+    "research": {
+      "description": "Rate limiting for @me research commands to avoid Slack abuse detection",
+      "enabled": true,
+      "max_searches_per_day": 20,
+      "search_cooldown_seconds": 300,
+      "max_messages_per_search": 50,
+      "cache_ttl_hours": 24,
+      "quiet_hours": {
+        "enabled": false,
+        "start": 18,
+        "end": 9,
+        "description": "No research during off-hours (6pm-9am)"
+      },
+      "knowledge_storage": {
+        "path": "memory/knowledge/slack/",
+        "format": "yaml",
+        "auto_update_confidence": true
+      }
+    },
     "debug": false
   },
   "skill_hooks": {
@@ -1075,6 +1094,36 @@
       "7. Run google_calendar_status() to complete OAuth"
     ]
   },
+  "google_slides": {
+    "description": "Google Slides integration for creating and managing presentations",
+    "uses_same_oauth": true,
+    "oauth_note": "Uses same token as google_calendar - Slides and Drive scopes already included",
+    "required_scopes": [
+      "https://www.googleapis.com/auth/presentations",
+      "https://www.googleapis.com/auth/presentations.readonly",
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/drive.readonly"
+    ],
+    "templates": {
+      "description": "Saved presentation templates for quick creation",
+      "tech_talk": "",
+      "project_update": "",
+      "onboarding": ""
+    },
+    "default_layouts": {
+      "title_slide": "TITLE",
+      "content_slide": "TITLE_AND_BODY",
+      "section_header": "SECTION_HEADER"
+    },
+    "export_path": "~/presentations/",
+    "setup_instructions": [
+      "1. Google Slides uses the same OAuth as Google Calendar",
+      "2. Go to Google Cloud Console > APIs & Services > Library",
+      "3. Enable 'Google Slides API' and 'Google Drive API'",
+      "4. If not already authenticated, delete ~/.config/google_calendar/token.json",
+      "5. Run google_slides_status() to authenticate with new scopes"
+    ]
+  },
   "gmail": {
     "description": "Gmail integration for /coffee morning briefing. NOTE: enabled state is in state.json",
     "uses_same_oauth": true,
@@ -1145,7 +1194,6 @@
   },
   "paths": {
     "kube_base": "/home/YOUR_USER/.kube",
-    "docker_config": "/home/YOUR_USER/.docker/config.json",
     "container_auth": "/home/YOUR_USER/.config/containers/auth.json",
     "google_calendar_config": "/home/YOUR_USER/.config/google_calendar",
     "vpn_connect_script": "/home/YOUR_USER/src/redhatter/src/redhatter_vpn/vpn-connect",
@@ -1175,6 +1223,38 @@
         "persona": "developer",
         "inputs": {},
         "notify": ["slack", "desktop"]
+      },
+      {
+        "name": "morning_pr_review",
+        "description": "Review open MRs at 9 AM on weekdays. IMPORTANT: Must specify a GitLab project - this skill only works with GitLab, not GitHub.",
+        "skill": "review_all_prs",
+        "cron": "0 9 * * 1-5",
+        "persona": "developer",
+        "inputs": {
+          "repo_name": "automation-analytics-backend",
+          "limit": 10,
+          "include_my_mrs": true,
+          "auto_rebase": true
+        },
+        "notify": ["slack"]
+      },
+      {
+        "name": "nightly_jira_hygiene",
+        "description": "Run Jira hygiene on all assigned issues at 9 PM on weekdays. Uses longer timeout for batch processing.",
+        "skill": "jira_hygiene_all",
+        "cron": "0 21 * * 1-5",
+        "persona": "developer",
+        "inputs": {
+          "auto_fix": true,
+          "auto_transition": true,
+          "limit": 50
+        },
+        "timeout_seconds": 1800,
+        "notify": ["slack"],
+        "retry": {
+          "max_attempts": 1,
+          "retry_on": ["auth", "network"]
+        }
       },
       {
         "name": "evening_beer",
@@ -1210,7 +1290,43 @@
         "inputs": {},
         "notify": [],
         "condition": "sprint.enabled && sprint.bot_enabled"
+      },
+      {
+        "name": "daily_cve_fix",
+        "description": "Check and fix CVEs daily at 10 AM on weekdays",
+        "skill": "cve_fix",
+        "cron": "0 10 * * 1-5",
+        "persona": "developer",
+        "inputs": {
+          "downstream_component": "automation-analytics-backend",
+          "max_cves": 1
+        },
+        "notify": ["slack", "memory"]
       }
     ]
+  },
+  "performance": {
+    "description": "Performance tracking for quarterly connection / PSE competencies. Data stored in ~/.config/aa-workflow/performance/",
+    "enabled": true,
+    "competencies": [
+      "technical_contribution",
+      "technical_knowledge",
+      "creativity_innovation",
+      "continuous_improvement",
+      "leadership",
+      "collaboration",
+      "mentorship",
+      "speaking_publicity",
+      "portfolio_impact",
+      "planning_execution",
+      "end_to_end_delivery",
+      "opportunity_recognition"
+    ],
+    "daily_cap_per_competency": 15,
+    "quarter_max_per_competency": 100,
+    "auto_collect": {
+      "enabled": true,
+      "sources": ["git", "jira", "gitlab", "github"]
+    }
   }
 }

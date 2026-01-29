@@ -1,0 +1,25 @@
+
+digraph MeetFeatures {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    meet [label="Meet Bot", fillcolor="#FFF9C4", shape=ellipse];
+
+    subgraph cluster_features {
+        label="Features";
+        style=dashed;
+
+        join [label="Auto-Join\nMeetings", fillcolor="#BBDEFB"];
+        transcribe [label="Real-time\nTranscription", fillcolor="#90CAF9"];
+        notes [label="AI Meeting\nNotes", fillcolor="#64B5F6"];
+        video [label="Video\nOverlay", fillcolor="#42A5F5"];
+        share [label="Slack\nSharing", fillcolor="#2196F3", fontcolor=white];
+    }
+
+    meet -> join;
+    meet -> transcribe;
+    meet -> notes;
+    meet -> video;
+    meet -> share;
+}

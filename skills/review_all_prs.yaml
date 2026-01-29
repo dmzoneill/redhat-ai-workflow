@@ -164,29 +164,52 @@ steps:
       from scripts.common.config_loader import load_config
 
       gitlab_project = None
+      resolved_from = None
 
       # Load config using shared loader
       config = load_config()
       repos = config.get("repositories", {})
+      gitlab_host = config.get("gitlab", {}).get("host", "gitlab.cee.redhat.com")
 
       # Explicit project (inputs is a dict, use .get())
       if inputs.get("project"):
           gitlab_project = inputs.get("project")
+          resolved_from = "explicit_project_input"
       # Repo name from config
       elif inputs.get("repo_name") and inputs.get("repo_name") in repos:
-          gitlab_project = repos[inputs.get("repo_name")].get("gitlab")
+          repo_cfg = repos[inputs.get("repo_name")]
+          gitlab_project = repo_cfg.get("gitlab")
+          resolved_from = f"repo_name:{inputs.get('repo_name')}"
+
+          # Check if this repo is actually on GitLab (not GitHub)
+          if not gitlab_project:
+              # Check if it has a github field instead
+              github_url = repo_cfg.get("github") or repo_cfg.get("github_url")
+              if github_url:
+                  raise ValueError(
+                      f"Repository '{inputs.get('repo_name')}' is hosted on GitHub, not GitLab. "
+                      f"The review_all_prs skill only works with GitLab MRs. "
+                      f"Please specify a different repo_name that uses GitLab."
+                  )
       # Fall back to cwd
       else:
           cwd = os.getcwd()
           for name, cfg in repos.items():
               if cfg.get("path") == cwd:
                   gitlab_project = cfg.get("gitlab")
+                  resolved_from = f"cwd:{name}"
                   break
 
+      # Final fallback - but warn that this is a default
       if not gitlab_project:
           gitlab_project = "automation-analytics/automation-analytics-backend"
+          resolved_from = "default_fallback"
 
-      result = {"gitlab_project": gitlab_project}
+      result = {
+          "gitlab_project": gitlab_project,
+          "resolved_from": resolved_from,
+          "gitlab_host": gitlab_host,
+      }
     output: resolved
   # ==================== GET CURRENT USER ====================
 

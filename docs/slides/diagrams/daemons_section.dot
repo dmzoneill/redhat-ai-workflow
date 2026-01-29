@@ -1,0 +1,20 @@
+
+digraph DaemonsSection {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial Bold", fontsize=14];
+
+    title [label="Daemons &\nBackground Services", fillcolor="#1976D2", fontcolor=white, width=3, height=1.2];
+
+    subgraph cluster_topics {
+        style=invis;
+
+        six [label="6 Daemons", fillcolor="#BBDEFB"];
+        dbus [label="D-Bus IPC", fillcolor="#90CAF9"];
+        systemd [label="Systemd Integration", fillcolor="#64B5F6"];
+    }
+
+    title -> six [style=invis];
+    title -> dbus [style=invis];
+    title -> systemd [style=invis];
+}

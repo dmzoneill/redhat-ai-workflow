@@ -68,7 +68,21 @@ steps:
       year = quarter_info["year"]
       quarter = quarter_info["quarter"]
 
-      perf_dir = Path.home() / "src" / "redhat-quarterly-connection" / str(year) / f"q{quarter}" / "performance"
+      # Get data directory from config or use default
+      def get_perf_data_dir():
+          try:
+              config_file = Path.home() / ".config" / "aa-workflow" / "config.json"
+              if config_file.exists():
+                  with open(config_file) as f:
+                      config = json.load(f)
+                  data_dir = config.get("performance", {}).get("data_dir", "")
+                  if data_dir:
+                      return Path(data_dir).expanduser()
+          except Exception:
+              pass
+          return Path.home() / "src" / "redhat-quarterly-connection"
+
+      perf_dir = get_perf_data_dir() / str(year) / f"q{quarter}" / "performance"
       summary_file = perf_dir / "summary.json"
       questions_file = perf_dir / "questions.json"
 

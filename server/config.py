@@ -3,7 +3,7 @@
 All configuration comes from:
 1. Environment variables
 2. config.json (project-specific settings)
-3. System configs (~/.kube/*, ~/.docker/config.json, etc.)
+3. System configs (~/.kube/*, ~/.config/containers/auth.json, etc.)
 
 NO secrets are stored in code.
 """
@@ -135,8 +135,12 @@ def get_token_from_kubeconfig(
         return ""
 
 
-def get_docker_auth(registry: str = "quay.io") -> str | None:
-    """Get auth token from Docker/Podman config for a registry."""
+def get_container_auth(registry: str = "quay.io") -> str | None:
+    """Get auth token from Podman/container config for a registry.
+
+    Checks Podman's auth.json first, then falls back to other locations.
+    Docker support has been removed in favor of Podman.
+    """
     import base64
 
     # Try config.json paths first
@@ -145,22 +149,18 @@ def get_docker_auth(registry: str = "quay.io") -> str | None:
 
         cfg = load_config()
         paths_cfg = cfg.get("paths", {})
-        docker_config = paths_cfg.get("docker_config")
         container_auth = paths_cfg.get("container_auth")
         config_paths = []
-        if docker_config:
-            config_paths.append(Path(os.path.expanduser(docker_config)))
         if container_auth:
             config_paths.append(Path(os.path.expanduser(container_auth)))
     except ImportError:
         config_paths = []
 
-    # Fall back to standard locations
+    # Fall back to standard Podman locations
     config_paths.extend(
         [
-            Path.home() / ".docker/config.json",
             Path.home() / ".config/containers/auth.json",
-            Path(os.getenv("DOCKER_CONFIG", "")) / "config.json",
+            Path(os.getenv("XDG_RUNTIME_DIR", "/run/user/1000")) / "containers/auth.json",
         ]
     )
 
@@ -181,3 +181,7 @@ def get_docker_auth(registry: str = "quay.io") -> str | None:
             continue
 
     return None
+
+
+# Backward compatibility alias
+get_docker_auth = get_container_auth

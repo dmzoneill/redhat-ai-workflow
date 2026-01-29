@@ -1,0 +1,59 @@
+# Skill: List Presentations
+# List available Google Slides presentations
+
+name: list_presentations
+description: |
+  List Google Slides presentations from your Drive.
+
+  This skill:
+  1. Queries Google Drive for presentation files
+  2. Returns a formatted list with IDs and links
+  3. Optionally filters by search query
+
+  Use this to find existing presentations to edit or reference.
+
+version: "1.0"
+
+inputs:
+  - name: search
+    type: string
+    required: false
+    description: "Search term to filter presentations by name"
+
+  - name: max_results
+    type: integer
+    required: false
+    default: 20
+    description: "Maximum number of presentations to return"
+
+steps:
+  # List presentations
+  - name: list_slides
+    description: "List Google Slides presentations"
+    tool: google_slides_list
+    args:
+      max_results: "{{ inputs.max_results | default(20) }}"
+      search_query: "{{ inputs.search | default('') }}"
+    output: list_result
+
+  # Build summary
+  - name: build_summary
+    compute: |
+      result = list_result or "No presentations found"
+
+      lines = ["## 📊 Your Presentations\n"]
+      lines.append(result)
+      lines.append("")
+      lines.append("---")
+      lines.append("### Actions")
+      lines.append("")
+      lines.append("- **View details:** `google_slides_get(\"PRESENTATION_ID\")`")
+      lines.append("- **Create new:** `skill_run(\"create_slide_deck\", '{\"title\": \"My Presentation\"}')`")
+      lines.append("- **Export PDF:** `google_slides_export_pdf(\"PRESENTATION_ID\")`")
+
+      summary = "\n".join(lines)
+    output: summary
+
+outputs:
+  - name: result
+    value: "{{ summary }}"

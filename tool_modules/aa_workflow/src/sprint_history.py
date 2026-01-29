@@ -1,11 +1,10 @@
 """Sprint History Storage - Manages completed sprints and timeline events.
 
-Stores sprint history in ~/.config/aa-workflow/sprint_history.json
-with support for:
-- Saving completed sprints
-- Loading history with pagination
-- Adding timeline events to issues
-- Archiving old sprints
+Sprint state is managed by the sprint daemon and written to sprint_state_v2.json.
+Sprint history (completed sprints) is stored separately in sprint_history.json.
+
+Note: This module provides read access to sprint state. Write operations should be
+done through the sync script or MCP tools to maintain consistency.
 """
 
 import json
@@ -17,9 +16,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Storage paths
-SPRINT_STATE_FILE = Path.home() / ".config" / "aa-workflow" / "sprint_state.json"
-SPRINT_HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "sprint_history.json"
+# Storage paths - centralized in server.paths
+try:
+    from server.paths import SPRINT_HISTORY_FILE, SPRINT_STATE_FILE_V2
+except ImportError:
+    # Fallback for standalone usage
+    SPRINT_STATE_FILE_V2 = Path.home() / ".config" / "aa-workflow" / "sprint_state_v2.json"
+    SPRINT_HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "sprint_history.json"
 
 
 @dataclass
@@ -80,26 +83,43 @@ class SprintState:
 
 
 def ensure_storage_dir() -> None:
-    """Ensure the storage directory exists."""
+    """Ensure the storage directories exist."""
     SPRINT_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SPRINT_STATE_FILE_V2.parent.mkdir(parents=True, exist_ok=True)
 
 
 def load_sprint_state() -> SprintState:
-    """Load current sprint state from file.
+    """Load current sprint state from sprint_state_v2.json.
 
     Returns:
         SprintState with current sprint data
     """
-    if not SPRINT_STATE_FILE.exists():
+    if not SPRINT_STATE_FILE_V2.exists():
         return SprintState(last_updated=datetime.now().isoformat())
 
     try:
-        with open(SPRINT_STATE_FILE) as f:
+        with open(SPRINT_STATE_FILE_V2) as f:
             data = json.load(f)
+
+        if not data:
+            return SprintState(last_updated=datetime.now().isoformat())
 
         issues = []
         for issue_data in data.get("issues", []):
-            timeline = [TimelineEvent(**e) if isinstance(e, dict) else e for e in issue_data.get("timeline", [])]
+            timeline_data = issue_data.get("timeline", [])
+            timeline = []
+            for e in timeline_data:
+                if isinstance(e, dict):
+                    timeline.append(
+                        TimelineEvent(
+                            timestamp=e.get("timestamp", ""),
+                            action=e.get("action", ""),
+                            description=e.get("description", ""),
+                            chat_link=e.get("chatLink", e.get("chat_link")),
+                            jira_link=e.get("jiraLink", e.get("jira_link")),
+                        )
+                    )
+
             issue = SprintIssue(
                 key=issue_data.get("key", ""),
                 summary=issue_data.get("summary", ""),
@@ -131,51 +151,92 @@ def load_sprint_state() -> SprintState:
 
 
 def save_sprint_state(state: SprintState) -> None:
-    """Save current sprint state to file.
+    """Save current sprint state to sprint_state_v2.json.
+
+    This function writes the sprint state directly to its own file.
+    The sprint daemon owns this file exclusively.
 
     Args:
         state: SprintState to save
     """
-    ensure_storage_dir()
+    # Ensure directory exists
+    SPRINT_STATE_FILE_V2.parent.mkdir(parents=True, exist_ok=True)
 
-    # Convert to JSON-serializable format (camelCase for JS compatibility)
-    data = {
-        "currentSprint": state.current_sprint,
-        "issues": [
-            {
-                "key": issue.key,
-                "summary": issue.summary,
-                "storyPoints": issue.story_points,
-                "priority": issue.priority,
-                "jiraStatus": issue.jira_status,
-                "assignee": issue.assignee,
-                "approvalStatus": issue.approval_status,
-                "waitingReason": issue.waiting_reason,
-                "priorityReasoning": issue.priority_reasoning,
-                "estimatedActions": issue.estimated_actions,
-                "chatId": issue.chat_id,
-                "timeline": [
-                    {
-                        "timestamp": e.timestamp,
-                        "action": e.action,
-                        "description": e.description,
-                        "chatLink": e.chat_link,
-                        "jiraLink": e.jira_link,
-                    }
-                    for e in issue.timeline
-                ],
-                "issueType": issue.issue_type,
-                "created": issue.created,
-            }
-            for issue in state.issues
-        ],
+    # Load existing state to preserve certain fields
+    existing_sprint = {}
+    if SPRINT_STATE_FILE_V2.exists():
+        try:
+            with open(SPRINT_STATE_FILE_V2) as f:
+                existing_sprint = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            existing_sprint = {}
+
+    # Convert issues to JSON-serializable format
+    issues_data = [
+        {
+            "key": issue.key,
+            "summary": issue.summary,
+            "storyPoints": issue.story_points,
+            "priority": issue.priority,
+            "jiraStatus": issue.jira_status,
+            "assignee": issue.assignee,
+            "approvalStatus": issue.approval_status,
+            "waitingReason": issue.waiting_reason,
+            "priorityReasoning": issue.priority_reasoning,
+            "estimatedActions": issue.estimated_actions,
+            "chatId": issue.chat_id,
+            "timeline": [
+                {
+                    "timestamp": e.timestamp,
+                    "action": e.action,
+                    "description": e.description,
+                    "chatLink": e.chat_link,
+                    "jiraLink": e.jira_link,
+                }
+                for e in issue.timeline
+            ],
+            "issueType": issue.issue_type,
+            "created": issue.created,
+        }
+        for issue in state.issues
+    ]
+
+    # SAFETY: Don't overwrite existing issues with empty list
+    # This prevents race conditions where load_sprint_state reads an empty/partial file
+    existing_issues = existing_sprint.get("issues", [])
+    if not issues_data and existing_issues:
+        logger.warning(
+            f"save_sprint_state called with 0 issues but file has {len(existing_issues)}. "
+            "Preserving existing issues to prevent data loss."
+        )
+        issues_data = existing_issues
+
+    # SAFETY: Don't overwrite existing currentSprint with None
+    current_sprint = state.current_sprint
+    existing_current = existing_sprint.get("currentSprint")
+    if current_sprint is None and existing_current:
+        logger.warning(
+            "save_sprint_state called with currentSprint=None but file has sprint data. "
+            "Preserving existing currentSprint."
+        )
+        current_sprint = existing_current
+
+    # Build sprint data (camelCase for JS compatibility)
+    sprint_data = {
+        "currentSprint": current_sprint,
+        "nextSprint": existing_sprint.get("nextSprint"),  # Always preserve
+        "issues": issues_data,
         "botEnabled": state.bot_enabled,
+        "automaticMode": state.bot_enabled,  # Alias for UI
+        "manuallyStarted": existing_sprint.get("manuallyStarted", False),
+        "backgroundTasks": existing_sprint.get("backgroundTasks", False),
         "lastUpdated": state.last_updated or datetime.now().isoformat(),
         "processingIssue": state.processing_issue,
     }
 
-    with open(SPRINT_STATE_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    # Write sprint state directly to its own file
+    with open(SPRINT_STATE_FILE_V2, "w") as f:
+        json.dump(sprint_data, f, indent=2)
 
 
 def load_sprint_history(limit: int = 10) -> list[CompletedSprint]:

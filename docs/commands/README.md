@@ -1,8 +1,8 @@
-# 🎯 Cursor Commands Reference
+# Cursor Commands Reference
 
 Cursor commands are slash commands you can invoke directly in the Cursor IDE chat. Type `/` to see available commands.
 
-**Total: 82 commands** across 12 categories.
+**Total: 130 commands** across 13 categories.
 
 ## Quick Reference
 
@@ -690,7 +690,7 @@ tool_list(module='git')
 tool_list(module='gitlab')
 ```
 
-Shows ~263 tools across 16 modules.
+Shows ~435 tools across 27 modules.
 
 ---
 

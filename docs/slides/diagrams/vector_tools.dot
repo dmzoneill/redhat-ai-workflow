@@ -1,0 +1,24 @@
+
+digraph VectorTools {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    subgraph cluster_tools {
+        label="Vector Search Tools";
+        style=filled;
+        fillcolor="#E8F5E9";
+
+        index [label="code_index_project\nIndex codebase", fillcolor="#A5D6A7"];
+        search [label="code_search_semantic\nNatural language", fillcolor="#81C784"];
+        similar [label="code_find_similar\nFind related code", fillcolor="#66BB6A"];
+        explain [label="code_explain\nExplain code", fillcolor="#4CAF50"];
+    }
+
+    ollama [label="Ollama\nEmbeddings", fillcolor="#FFCC80"];
+
+    index -> ollama;
+    search -> ollama;
+    similar -> ollama;
+    explain -> ollama;
+}

@@ -25,6 +25,94 @@ import { createLogger } from "./logger";
 const logger = createLogger("SkillWatcher");
 
 // ============================================================================
+// File Locking Utilities
+// ============================================================================
+
+const LOCK_TIMEOUT_MS = 5000; // Max time to wait for lock
+const LOCK_RETRY_INTERVAL_MS = 50; // How often to retry acquiring lock
+const LOCK_STALE_MS = 10000; // Consider lock stale if older than this
+
+/**
+ * Acquire a file lock using a lockfile.
+ * Returns true if lock acquired, false if timeout.
+ */
+async function acquireFileLock(filePath: string): Promise<boolean> {
+  const lockPath = filePath + ".lock";
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < LOCK_TIMEOUT_MS) {
+    try {
+      // Check if lock exists and is stale
+      if (fs.existsSync(lockPath)) {
+        const stat = fs.statSync(lockPath);
+        const lockAge = Date.now() - stat.mtimeMs;
+        if (lockAge > LOCK_STALE_MS) {
+          // Lock is stale, remove it
+          try {
+            fs.unlinkSync(lockPath);
+            console.log(`[SkillWatcher] Removed stale lock file (age: ${lockAge}ms)`);
+          } catch {
+            // Another process may have removed it
+          }
+        }
+      }
+
+      // Try to create lock file exclusively
+      // O_CREAT | O_EXCL ensures atomic create-if-not-exists
+      const fd = fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY);
+      // Write our PID for debugging
+      fs.writeSync(fd, `${process.pid}\n${Date.now()}`);
+      fs.closeSync(fd);
+      return true;
+    } catch (e: any) {
+      if (e.code === "EEXIST") {
+        // Lock exists, wait and retry
+        await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_INTERVAL_MS));
+      } else {
+        // Unexpected error
+        console.error("[SkillWatcher] Error acquiring lock:", e);
+        return false;
+      }
+    }
+  }
+
+  console.warn("[SkillWatcher] Timeout waiting for file lock");
+  return false;
+}
+
+/**
+ * Release a file lock.
+ */
+function releaseFileLock(filePath: string): void {
+  const lockPath = filePath + ".lock";
+  try {
+    fs.unlinkSync(lockPath);
+  } catch (e: any) {
+    if (e.code !== "ENOENT") {
+      console.error("[SkillWatcher] Error releasing lock:", e);
+    }
+  }
+}
+
+/**
+ * Execute a function with file lock protection.
+ * Ensures exclusive access to the file during the operation.
+ */
+async function withFileLock<T>(filePath: string, fn: () => T): Promise<T | null> {
+  const acquired = await acquireFileLock(filePath);
+  if (!acquired) {
+    console.error("[SkillWatcher] Failed to acquire file lock, skipping operation");
+    return null;
+  }
+
+  try {
+    return fn();
+  } finally {
+    releaseFileLock(filePath);
+  }
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -346,10 +434,14 @@ export class SkillExecutionWatcher {
    */
   private _updateCommandCenter(): void {
     const commandCenter = getCommandCenterPanel();
-    if (!commandCenter) return;
+    if (!commandCenter) {
+      logger.log("Command Center panel not available, skipping update");
+      return;
+    }
 
     // Get all running executions for the panel
     const runningExecutions = this.getRunningExecutions();
+    logger.log(`Updating Command Center with ${runningExecutions.length} running executions`);
 
     // Send all running executions to Command Center
     commandCenter.updateRunningSkills(runningExecutions);
@@ -435,6 +527,189 @@ export class SkillExecutionWatcher {
     all.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 
     return all;
+  }
+
+  /**
+   * Check if an execution is stale (running too long without progress)
+   * A skill is considered stale if:
+   * - It's been "running" for more than 30 minutes, OR
+   * - It's been "running" for more than 10 minutes with no recent events
+   */
+  public isExecutionStale(state: SkillExecutionState): boolean {
+    if (state.status !== "running") {
+      return false;
+    }
+
+    const now = Date.now();
+    const startTime = new Date(state.startTime).getTime();
+    const elapsedMs = now - startTime;
+
+    // Stale if running for more than 30 minutes
+    const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+    if (elapsedMs > STALE_THRESHOLD_MS) {
+      return true;
+    }
+
+    // Check last event time - stale if no events in last 10 minutes
+    const INACTIVE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+    if (state.events && state.events.length > 0) {
+      const lastEvent = state.events[state.events.length - 1];
+      const lastEventTime = new Date(lastEvent.timestamp).getTime();
+      const timeSinceLastEvent = now - lastEventTime;
+      if (timeSinceLastEvent > INACTIVE_THRESHOLD_MS) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Get count of stale executions
+   */
+  public getStaleExecutionCount(): number {
+    let count = 0;
+    for (const state of this._executions.values()) {
+      if (this.isExecutionStale(state)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Clear stale executions from the execution file
+   * Marks them as failed and removes from tracking
+   * Uses file locking to prevent race conditions with the MCP server
+   */
+  public async clearStaleExecutions(): Promise<number> {
+    const staleIds: string[] = [];
+
+    // Find all stale executions
+    for (const [execId, state] of this._executions) {
+      if (this.isExecutionStale(state)) {
+        staleIds.push(execId);
+      }
+    }
+
+    if (staleIds.length === 0) {
+      return 0;
+    }
+
+    // Update the execution file with lock protection
+    const result = await withFileLock(this._executionFilePath, () => {
+      try {
+        if (!fs.existsSync(this._executionFilePath)) {
+          return 0;
+        }
+
+        const content = fs.readFileSync(this._executionFilePath, "utf-8");
+        const data = JSON.parse(content) as MultiExecutionFile;
+
+        // Mark stale executions as failed and set end time
+        let clearedCount = 0;
+        for (const execId of staleIds) {
+          if (data.executions[execId]) {
+            data.executions[execId].status = "failed";
+            data.executions[execId].endTime = new Date().toISOString();
+            // Add a failure event
+            data.executions[execId].events.push({
+              type: "skill_complete",
+              timestamp: new Date().toISOString(),
+              skillName: data.executions[execId].skillName,
+              executionId: execId,
+              data: {
+                success: false,
+                error: "Execution marked as stale/dead (no activity for extended period)",
+              },
+            });
+            clearedCount++;
+          }
+          // Remove from our tracking
+          this._executions.delete(execId);
+        }
+
+        // Write back to file atomically
+        data.lastUpdated = new Date().toISOString();
+        const tmpFile = this._executionFilePath + ".tmp";
+        fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2));
+        fs.renameSync(tmpFile, this._executionFilePath);
+
+        console.log(`[SkillWatcher] Cleared ${clearedCount} stale execution(s)`);
+        return clearedCount;
+      } catch (e) {
+        console.error("[SkillWatcher] Error clearing stale executions:", e);
+        return 0;
+      }
+    });
+
+    const clearedCount = result ?? 0;
+
+    // Update UI
+    this._updateStatusBar(this.getRunningExecutions().length);
+    this._updateCommandCenter();
+
+    return clearedCount;
+  }
+
+  /**
+   * Clear a specific execution by ID
+   * Uses file locking to prevent race conditions with the MCP server
+   */
+  public async clearExecution(executionId: string): Promise<boolean> {
+    // Update the execution file with lock protection
+    const result = await withFileLock(this._executionFilePath, () => {
+      try {
+        if (!fs.existsSync(this._executionFilePath)) {
+          return false;
+        }
+
+        const content = fs.readFileSync(this._executionFilePath, "utf-8");
+        const data = JSON.parse(content) as MultiExecutionFile;
+
+        if (!data.executions[executionId]) {
+          return false;
+        }
+
+        // Mark as failed
+        data.executions[executionId].status = "failed";
+        data.executions[executionId].endTime = new Date().toISOString();
+        data.executions[executionId].events.push({
+          type: "skill_complete",
+          timestamp: new Date().toISOString(),
+          skillName: data.executions[executionId].skillName,
+          executionId: executionId,
+          data: {
+            success: false,
+            error: "Execution manually cleared by user",
+          },
+        });
+
+        // Remove from tracking
+        this._executions.delete(executionId);
+        this._seenExecutionIds.delete(executionId);
+
+        // Write back atomically
+        data.lastUpdated = new Date().toISOString();
+        const tmpFile = this._executionFilePath + ".tmp";
+        fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2));
+        fs.renameSync(tmpFile, this._executionFilePath);
+
+        console.log(`[SkillWatcher] Cleared execution: ${executionId}`);
+        return true;
+      } catch (e) {
+        console.error("[SkillWatcher] Error clearing execution:", e);
+        return false;
+      }
+    });
+
+    const success = result ?? false;
+
+    // Update UI
+    this._updateStatusBar(this.getRunningExecutions().length);
+    this._updateCommandCenter();
+
+    return success;
   }
 
   /**

@@ -1,0 +1,32 @@
+
+digraph ContextSources {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    builder [label="Session\nBuilder", fillcolor="#FFCC80"];
+
+    subgraph cluster_sources {
+        label="Context Sources";
+        style=dashed;
+
+        persona [label="Persona\nConfig", fillcolor="#BBDEFB"];
+        skills [label="Skill\nDefinitions", fillcolor="#90CAF9"];
+        memory [label="Memory\nState", fillcolor="#64B5F6"];
+        jira [label="Jira\nContext", fillcolor="#42A5F5"];
+        slack [label="Slack\nHistory", fillcolor="#2196F3", fontcolor=white];
+        code [label="Code\nContext", fillcolor="#1E88E5", fontcolor=white];
+        meetings [label="Meeting\nNotes", fillcolor="#1976D2", fontcolor=white];
+    }
+
+    context [label="Assembled\nContext", fillcolor="#C8E6C9"];
+
+    persona -> builder;
+    skills -> builder;
+    memory -> builder;
+    jira -> builder;
+    slack -> builder;
+    code -> builder;
+    meetings -> builder;
+    builder -> context;
+}

@@ -1,0 +1,24 @@
+
+digraph ToolTiers {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    subgraph cluster_tiers {
+        label="Tool Tiers";
+        style=filled;
+        fillcolor="#E8F5E9";
+
+        basic [label="BASIC\n(Always Loaded)\n~50 tools", fillcolor="#A5D6A7"];
+        extra [label="EXTRA\n(On Demand)\n~300 tools", fillcolor="#81C784"];
+        admin [label="ADMIN\n(Privileged)\n~100 tools", fillcolor="#66BB6A"];
+        debug [label="DEBUG\n(Development)\n~50 tools", fillcolor="#4CAF50"];
+    }
+
+    persona [label="Persona\nLoads Tiers", fillcolor="#FFCC80"];
+
+    persona -> basic [label="always"];
+    persona -> extra [label="if needed"];
+    persona -> admin [label="if admin"];
+    persona -> debug [label="if debug"];
+}

@@ -1,0 +1,19 @@
+
+digraph VectorEmbeddings {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    code [label="Source\nCode", fillcolor="#E3F2FD"];
+
+    chunk [label="Chunking\n(AST-aware)", fillcolor="#FFCC80"];
+
+    embed [label="Ollama\nEmbeddings", fillcolor="#FFB74D"];
+
+    index [label="Vector\nIndex", fillcolor="#C8E6C9", shape=cylinder];
+
+    code -> chunk [label="split"];
+    chunk -> embed [label="encode"];
+    embed -> index [label="store"];
+}

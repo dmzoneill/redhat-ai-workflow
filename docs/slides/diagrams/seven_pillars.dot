@@ -1,0 +1,24 @@
+
+digraph SevenPillars {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, width=1.5];
+
+    center [label="AI Workflow\nAssistant", fillcolor="#FFF9C4", shape=ellipse, width=2];
+
+    tools [label="501 Tools\n28 Modules", fillcolor="#FFCDD2"];
+    personas [label="16 Personas\nDynamic Loading", fillcolor="#F8BBD9"];
+    skills [label="87 Skills\nYAML Workflows", fillcolor="#E1BEE7"];
+    memory [label="Persistent\nMemory", fillcolor="#D1C4E9"];
+    autoheal [label="5-Layer\nAuto-Heal", fillcolor="#C5CAE9"];
+    daemons [label="6 Background\nDaemons", fillcolor="#BBDEFB"];
+    ide [label="IDE\nIntegration", fillcolor="#B2EBF2"];
+
+    center -> tools;
+    center -> personas;
+    center -> skills;
+    center -> memory;
+    center -> autoheal;
+    center -> daemons;
+    center -> ide;
+}

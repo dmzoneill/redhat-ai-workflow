@@ -1004,6 +1004,9 @@ class VideoTextRenderer:
                     logger.warning(f"Failed to load font size {name}={size}")
 
             self._initialized = True
+            # Pre-allocate output buffer to avoid repeated allocations
+            self._output_buffer = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            self._rgba_buffer = np.zeros((self.height, self.width, 4), dtype=np.uint8)
             logger.info(f"VideoTextRenderer initialized: {self.width}x{self.height}")
             return True
 
@@ -1065,17 +1068,18 @@ class VideoTextRenderer:
             for text, x, y, color in size_items:
                 self._renderer._render_string(text, x, y, color)
 
-        # Single readback at the end
-        pixels = _gl.glReadPixels(0, 0, self.width, self.height, _gl.GL_RGBA, _gl.GL_UNSIGNED_BYTE)
+        # Single readback at the end - use pre-allocated buffer
+        _gl.glReadPixels(0, 0, self.width, self.height, _gl.GL_RGBA, _gl.GL_UNSIGNED_BYTE, self._rgba_buffer)
 
         _gl.glBindFramebuffer(_gl.GL_FRAMEBUFFER, 0)
 
-        # Convert to BGR numpy array
-        frame = np.frombuffer(pixels, dtype=np.uint8).reshape(self.height, self.width, 4)
-        frame = np.flipud(frame)  # OpenGL origin is bottom-left
+        # Convert RGBA to BGR in-place using pre-allocated buffer
+        # Flip vertically (OpenGL origin is bottom-left) and swap R/B channels
+        np.copyto(self._output_buffer[:, :, 0], np.flipud(self._rgba_buffer[:, :, 2]))  # B
+        np.copyto(self._output_buffer[:, :, 1], np.flipud(self._rgba_buffer[:, :, 1]))  # G
+        np.copyto(self._output_buffer[:, :, 2], np.flipud(self._rgba_buffer[:, :, 0]))  # R
 
-        # RGBA to BGR (drop alpha, swap R/B)
-        return frame[:, :, [2, 1, 0]].copy()
+        return self._output_buffer
 
     def render_frame(
         self,
@@ -1156,17 +1160,17 @@ class VideoTextRenderer:
             for text, x, y, color in size_items:
                 self._renderer._render_string(text, x, y, color)
 
-        # Single readback at the end
-        pixels = _gl.glReadPixels(0, 0, self.width, self.height, _gl.GL_RGBA, _gl.GL_UNSIGNED_BYTE)
+        # Single readback at the end - use pre-allocated buffer
+        _gl.glReadPixels(0, 0, self.width, self.height, _gl.GL_RGBA, _gl.GL_UNSIGNED_BYTE, self._rgba_buffer)
 
         _gl.glBindFramebuffer(_gl.GL_FRAMEBUFFER, 0)
 
-        # Convert to BGR numpy array
-        frame = np.frombuffer(pixels, dtype=np.uint8).reshape(self.height, self.width, 4)
-        frame = np.flipud(frame)  # OpenGL origin is bottom-left
+        # Convert RGBA to BGR in-place using pre-allocated buffer
+        np.copyto(self._output_buffer[:, :, 0], np.flipud(self._rgba_buffer[:, :, 2]))  # B
+        np.copyto(self._output_buffer[:, :, 1], np.flipud(self._rgba_buffer[:, :, 1]))  # G
+        np.copyto(self._output_buffer[:, :, 2], np.flipud(self._rgba_buffer[:, :, 0]))  # R
 
-        # RGBA to BGR (drop alpha, swap R/B)
-        return frame[:, :, [2, 1, 0]].copy()
+        return self._output_buffer
 
     def composite_onto_frame(self, frame: np.ndarray, items: List[Tuple[str, int, int, str, str]]) -> np.ndarray:
         """Composite text onto existing BGR frame.

@@ -1,0 +1,20 @@
+
+digraph SkillEngineSection {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial Bold", fontsize=14];
+
+    title [label="Skill Engine\nDeep Dive", fillcolor="#1976D2", fontcolor=white, width=3, height=1.2];
+
+    subgraph cluster_topics {
+        style=invis;
+
+        yaml [label="YAML Workflows", fillcolor="#BBDEFB"];
+        exec [label="Execution Engine", fillcolor="#90CAF9"];
+        chain [label="Tool Chaining", fillcolor="#64B5F6"];
+    }
+
+    title -> yaml [style=invis];
+    title -> exec [style=invis];
+    title -> chain [style=invis];
+}

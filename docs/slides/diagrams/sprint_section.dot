@@ -1,0 +1,20 @@
+
+digraph SprintSection {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial Bold", fontsize=14];
+
+    title [label="Sprint Bot\nAutopilot", fillcolor="#1976D2", fontcolor=white, width=3, height=1.2];
+
+    subgraph cluster_topics {
+        style=invis;
+
+        scan [label="Auto-Scan Issues", fillcolor="#BBDEFB"];
+        transition [label="Auto-Transition", fillcolor="#90CAF9"];
+        notify [label="Slack Notify", fillcolor="#64B5F6"];
+    }
+
+    title -> scan [style=invis];
+    title -> transition [style=invis];
+    title -> notify [style=invis];
+}

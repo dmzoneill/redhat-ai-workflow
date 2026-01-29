@@ -1,0 +1,44 @@
+
+digraph MeetBot {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    calendar [label="Google\nCalendar", fillcolor="#E3F2FD"];
+
+    subgraph cluster_meet {
+        label="Meet Daemon";
+        style=filled;
+        fillcolor="#FFF3E0";
+
+        scheduler [label="Meeting\nScheduler", fillcolor="#FFCC80"];
+        browser [label="Browser\nController", fillcolor="#FFB74D"];
+        transcribe [label="Whisper\nTranscription", fillcolor="#FFA726"];
+    }
+
+    subgraph cluster_video {
+        label="Video Daemon";
+        style=filled;
+        fillcolor="#E8F5E9";
+
+        renderer [label="Video\nRenderer", fillcolor="#A5D6A7"];
+        streaming [label="Intel\nStreaming", fillcolor="#81C784"];
+    }
+
+    subgraph cluster_devices {
+        label="Virtual Devices";
+        style=dashed;
+
+        v4l2 [label="v4l2loopback\n(Camera)", fillcolor="#E1BEE7"];
+        pulse [label="PulseAudio\n(Mic/Speaker)", fillcolor="#D1C4E9"];
+    }
+
+    calendar -> scheduler [label="events"];
+    scheduler -> browser [label="join"];
+    browser -> transcribe [label="audio"];
+    browser -> v4l2 [label="video"];
+    browser -> pulse [label="audio"];
+    renderer -> v4l2;
+    streaming -> renderer;
+}

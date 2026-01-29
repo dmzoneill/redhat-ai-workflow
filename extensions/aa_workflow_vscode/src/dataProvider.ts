@@ -166,10 +166,11 @@ export class WorkflowDataProvider {
   constructor() {
     this.memoryDir = getMemoryDir();
     this.configPath = getConfigPath();
+    // Centralized state directory
     this.workspaceStatesPath = path.join(
       os.homedir(),
-      ".mcp",
-      "workspace_states",
+      ".config",
+      "aa-workflow",
       "workspace_states.json"
     );
 
@@ -199,7 +200,7 @@ export class WorkflowDataProvider {
 
   private async queryDBusConfig(section: string, key: string): Promise<string | null> {
     try {
-      const cmd = `dbus-send --session --print-reply --dest=com.aiworkflow.CronScheduler /com/aiworkflow/CronScheduler com.aiworkflow.CronScheduler.CallMethod string:"get_config" string:'${JSON.stringify({ section, key })}'`;
+      const cmd = `dbus-send --session --print-reply --dest=com.aiworkflow.BotCron /com/aiworkflow/BotCron com.aiworkflow.BotCron.CallMethod string:"get_config" string:'${JSON.stringify({ section, key })}'`;
       const { stdout } = await execAsync(cmd, { timeout: 5000 });
 
       // Parse D-Bus output to extract JSON result
@@ -340,8 +341,8 @@ export class WorkflowDataProvider {
     try {
       // Use dbus-send to query the Slack daemon
       const { stdout } = await execAsync(
-        `dbus-send --session --print-reply --dest=com.aiworkflow.SlackAgent ` +
-          `/com/aiworkflow/SlackAgent com.aiworkflow.SlackAgent.GetStatus`,
+        `dbus-send --session --print-reply --dest=com.aiworkflow.BotSlack ` +
+          `/com/aiworkflow/BotSlack com.aiworkflow.BotSlack.GetStatus`,
         { timeout: 3000 }
       );
 

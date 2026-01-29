@@ -1,0 +1,25 @@
+
+digraph ToolGap {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    skill [label="Skill\nExecution", fillcolor="#E3F2FD"];
+    check [label="Tool\nExists?", fillcolor="#FFF9C4", shape=diamond];
+    execute [label="Execute\nTool", fillcolor="#C8E6C9"];
+    log [label="Log Gap", fillcolor="#FFCDD2"];
+    fallback [label="Fallback\nAction", fillcolor="#FFE0B2"];
+
+    storage [label="tool_requests.yaml", fillcolor="#E1BEE7", shape=cylinder];
+    review [label="Human\nReview", fillcolor="#D1C4E9"];
+    implement [label="Implement\nNew Tool", fillcolor="#C5CAE9"];
+
+    skill -> check;
+    check -> execute [label="yes"];
+    check -> log [label="no"];
+    log -> storage;
+    log -> fallback;
+    storage -> review [style=dashed];
+    review -> implement [style=dashed];
+}

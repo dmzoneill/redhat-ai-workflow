@@ -123,12 +123,20 @@ def _build_yaml_data_for_jira(
     labels: str,
     components: str,
     convert_fn,
+    problem_description: str = "",
 ) -> dict:
     """Build complete YAML data structure for Jira issue."""
     yaml_data = {}
 
     if description:
         yaml_data["Description"] = convert_fn(description)
+
+    # Problem Description - required by AAP project for all issue types
+    if problem_description:
+        yaml_data["Problem Description"] = convert_fn(problem_description)
+    elif description:
+        # Fall back to description if problem_description not provided
+        yaml_data["Problem Description"] = convert_fn(description)
 
     # For stories, provide defaults if required fields are empty
     if issue_type_normalized == "story":
@@ -150,8 +158,12 @@ def _build_yaml_data_for_jira(
             yaml_data["Acceptance Criteria"] = convert_fn(acceptance_criteria)
         if supporting_documentation:
             yaml_data["Supporting Documentation"] = convert_fn(supporting_documentation)
+        # Definition of Done - required by AAP for all issue types
         if definition_of_done:
             yaml_data["Definition of Done"] = convert_fn(definition_of_done)
+        else:
+            # Provide default if not specified (AAP requires this field)
+            yaml_data["Definition of Done"] = "* Code reviewed and merged\n* Tests pass"
 
     # Labels as list
     if labels:
@@ -183,6 +195,132 @@ def _parse_create_issue_result(success: bool, output: str) -> str:
         return f"✅ Issue created: [{issue_key}]({url})\n\n{output}"
 
     return f"✅ Issue created\n\n{output}"
+
+
+async def _jira_get_active_sprint_impl(project: str = "AAP") -> dict:
+    """
+    Get the active sprint for a project.
+
+    Args:
+        project: Jira project key (default: AAP)
+
+    Returns:
+        Dict with sprint info: {id, name, state, startDate, endDate} or {error: ...}
+    """
+    import re
+
+    success, output = await run_rh_issue(["get-sprint"], timeout=30)
+
+    if not success:
+        return {"error": output}
+
+    # Parse output like:
+    # 🏃 Active Sprint: Cloud Analytics Sprint 2026-4
+    #    State: active
+    #    ID: 81987
+    #    Start: 2026-01-22
+    #    End: 2026-01-29
+
+    sprint_info = {}
+
+    # Extract sprint name
+    name_match = re.search(r"Active Sprint:\s*(.+)", output)
+    if name_match:
+        sprint_info["name"] = name_match.group(1).strip()
+
+    # Extract ID
+    id_match = re.search(r"ID:\s*(\d+)", output)
+    if id_match:
+        sprint_info["id"] = int(id_match.group(1))
+
+    # Extract state
+    state_match = re.search(r"State:\s*(\w+)", output)
+    if state_match:
+        sprint_info["state"] = state_match.group(1)
+
+    # Extract dates
+    start_match = re.search(r"Start:\s*([\d-]+)", output)
+    if start_match:
+        sprint_info["startDate"] = start_match.group(1)
+
+    end_match = re.search(r"End:\s*([\d-]+)", output)
+    if end_match:
+        sprint_info["endDate"] = end_match.group(1)
+
+    if not sprint_info.get("id"):
+        return {"error": f"Could not parse sprint info from: {output}"}
+
+    return sprint_info
+
+
+async def _jira_get_sprint_issues_impl(sprint_id: int, max_results: int = 100) -> list[dict]:
+    """
+    Get all issues in a sprint.
+
+    Args:
+        sprint_id: Sprint ID from Jira
+        max_results: Maximum number of issues to return
+
+    Returns:
+        List of issue dicts with key, summary, status, priority, storyPoints, assignee, issueType
+    """
+    import re
+
+    jql = f"sprint = {sprint_id}"
+    success, output = await run_rh_issue(["search", jql, "--max-results", str(max_results)], timeout=60)
+
+    if not success:
+        logger.error(f"Failed to get sprint issues: {output}")
+        return []
+
+    # Parse tabular output
+    # Key       | Issuetype | Status      | Priority | Summary | Assignee | Reporter | Sprint | Story Points | Blocked
+    issues = []
+    lines = output.strip().split("\n")
+
+    # Skip header and separator lines
+    data_lines = [line for line in lines if line.strip() and not line.startswith("-") and "|" in line]
+
+    for line in data_lines[1:]:  # Skip header row
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) >= 5:
+            key = parts[0]
+            if not re.match(r"^[A-Z]+-\d+$", key):
+                continue  # Skip non-issue lines
+
+            issue = {
+                "key": key,
+                "issueType": parts[1] if len(parts) > 1 else "",
+                "jiraStatus": parts[2] if len(parts) > 2 else "",
+                "priority": parts[3] if len(parts) > 3 else "",
+                "summary": parts[4] if len(parts) > 4 else "",
+                "assignee": parts[5] if len(parts) > 5 else "",
+            }
+
+            # Parse story points (may be "—" for none)
+            if len(parts) > 8:
+                sp = parts[8].strip()
+                if sp and sp != "—" and sp.isdigit():
+                    issue["storyPoints"] = int(sp)
+                else:
+                    issue["storyPoints"] = 0
+            else:
+                issue["storyPoints"] = 0
+
+            issues.append(issue)
+
+    return issues
+
+
+# Expose for direct import by sprint_bot
+async def jira_get_active_sprint(project: str = "AAP") -> dict:
+    """Get the active sprint for a project (for internal use by sprint_bot)."""
+    return await _jira_get_active_sprint_impl(project)
+
+
+async def jira_get_sprint_issues(sprint_id: int, max_results: int = 100) -> list[dict]:
+    """Get all issues in a sprint (for internal use by sprint_bot)."""
+    return await _jira_get_sprint_issues_impl(sprint_id)
 
 
 @auto_heal()
@@ -280,6 +418,7 @@ async def _jira_create_issue_impl(
     issue_type: str,
     summary: str,
     description: str = "",
+    problem_description: str = "",
     user_story: str = "",
     acceptance_criteria: str = "",
     supporting_documentation: str = "",
@@ -296,18 +435,19 @@ async def _jira_create_issue_impl(
     Accepts Markdown in all text fields and auto-converts to Jira wiki markup.
     Issue type is case-insensitive (Story, story, STORY all work).
 
-    The CLI requires these fields for stories: User Story, Acceptance Criteria,
-    Supporting Documentation, Definition of Done. If not provided, sensible
-    defaults are used to avoid interactive prompts.
+    AAP project requires Problem Description and Definition of Done for all issue types.
+    If not provided, description is used as fallback for Problem Description,
+    and a sensible default is used for Definition of Done.
 
     Args:
         issue_type: Type of issue - "bug", "story", "task", "epic" (case insensitive)
         summary: Issue title/summary
         description: Issue description (accepts Markdown)
+        problem_description: Problem description - required by AAP (falls back to description)
         user_story: User story text (accepts Markdown)
         acceptance_criteria: Acceptance criteria (accepts Markdown)
         supporting_documentation: Supporting documentation (accepts Markdown)
-        definition_of_done: Definition of done (accepts Markdown)
+        definition_of_done: Definition of done (accepts Markdown) - required by AAP
         story_points: Story points (optional, for stories)
         labels: Comma-separated labels (e.g., "testing,performance")
         components: Comma-separated components (e.g., "Automation Analytics")
@@ -361,6 +501,7 @@ async def _jira_create_issue_impl(
         labels,
         components,
         convert,
+        problem_description,
     )
 
     # Write YAML to temp file
@@ -737,6 +878,7 @@ def _register_write_tools(registry: ToolRegistry) -> None:
         issue_type: str,
         summary: str,
         description: str = "",
+        problem_description: str = "",
         user_story: str = "",
         acceptance_criteria: str = "",
         supporting_documentation: str = "",
@@ -753,18 +895,19 @@ def _register_write_tools(registry: ToolRegistry) -> None:
         Accepts Markdown in all text fields and auto-converts to Jira wiki markup.
         Issue type is case-insensitive (Story, story, STORY all work).
 
-        The CLI requires these fields for stories: User Story, Acceptance Criteria,
-        Supporting Documentation, Definition of Done. If not provided, sensible
-        defaults are used to avoid interactive prompts.
+        AAP project requires Problem Description and Definition of Done for all issue types.
+        If not provided, description is used as fallback for Problem Description,
+        and a sensible default is used for Definition of Done.
 
         Args:
             issue_type: Type of issue - "bug", "story", "task", "epic" (case insensitive)
             summary: Issue title/summary
             description: Issue description (accepts Markdown)
+            problem_description: Problem description - required by AAP (falls back to description)
             user_story: User story text (accepts Markdown)
             acceptance_criteria: Acceptance criteria (accepts Markdown)
             supporting_documentation: Supporting documentation (accepts Markdown)
-            definition_of_done: Definition of done (accepts Markdown)
+            definition_of_done: Definition of done (accepts Markdown) - required by AAP
             story_points: Story points (optional, for stories)
             labels: Comma-separated labels (e.g., "testing,performance")
             components: Comma-separated components (e.g., "Automation Analytics")
@@ -776,18 +919,17 @@ def _register_write_tools(registry: ToolRegistry) -> None:
 
         Example:
             jira_create_issue(
-                issue_type="story",
-                summary="Add pytest-xdist support",
-                description="## Overview\\n\\nSpeed up test suite with parallel execution.",
-                user_story="As a developer, I want faster test runs.",
-                acceptance_criteria="- Tests run in parallel\\n- No flaky tests",
-                labels="testing,performance"
+                issue_type="task",
+                summary="Fix Slack bot issue creation",
+                description="The @me jira command fails to create issues.",
+                problem_description="create_jira_issue skill missing required AAP fields"
             )
         """
         return await _jira_create_issue_impl(
             issue_type,
             summary,
             description,
+            problem_description,
             user_story,
             acceptance_criteria,
             supporting_documentation,

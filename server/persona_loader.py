@@ -261,6 +261,13 @@ class PersonaLoader:
         # Load persona config
         config = self.load_persona_config(persona_name)
         if not config:
+            # Emit failure notification
+            try:
+                from tool_modules.aa_workflow.src.notification_emitter import notify_persona_failed
+
+                notify_persona_failed(persona_name, "Persona not found")
+            except Exception:
+                pass
             return {
                 "success": False,
                 "error": f"Persona not found: {persona_name}",
@@ -337,6 +344,14 @@ class PersonaLoader:
                 logger.info("Sent tool_list_changed notification")
         except Exception as e:
             logger.warning(f"Failed to send notification: {e}")
+
+        # Emit toast notification for persona load
+        try:
+            from tool_modules.aa_workflow.src.notification_emitter import notify_persona_loaded
+
+            notify_persona_loaded(persona_name, len(loaded_tools))
+        except Exception as e:
+            logger.debug(f"Failed to emit persona notification: {e}")
 
         # Load persona description
         persona_file = PERSONAS_DIR / f"{persona_name}.md"

@@ -1,0 +1,27 @@
+
+digraph SixDaemons {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    systemd [label="systemd\nUser Services", fillcolor="#FFF9C4"];
+
+    subgraph cluster_daemons {
+        label="Background Daemons";
+        style=dashed;
+
+        slack [label="bot-slack\nSlack Integration", fillcolor="#FFCC80"];
+        sprint [label="bot-sprint\nJira Autopilot", fillcolor="#FFB74D"];
+        meet [label="bot-meet\nMeeting Bot", fillcolor="#FFA726"];
+        video [label="bot-video\nVideo Overlay", fillcolor="#FF9800"];
+        cron [label="bot-cron\nScheduler", fillcolor="#F57C00"];
+        session [label="bot-session\nSession Manager", fillcolor="#EF6C00", fontcolor=white];
+    }
+
+    systemd -> slack;
+    systemd -> sprint;
+    systemd -> meet;
+    systemd -> video;
+    systemd -> cron;
+    systemd -> session;
+}

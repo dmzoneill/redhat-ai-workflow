@@ -96,9 +96,9 @@ class DaemonDBusBase(ABC):
     Base class for daemons with D-Bus support.
 
     Subclasses must define:
-    - service_name: D-Bus service name (e.g., "com.aiworkflow.CronScheduler")
-    - object_path: D-Bus object path (e.g., "/com/aiworkflow/CronScheduler")
-    - interface_name: D-Bus interface name (e.g., "com.aiworkflow.CronScheduler")
+    - service_name: D-Bus service name (e.g., "com.aiworkflow.BotCron")
+    - object_path: D-Bus object path (e.g., "/com/aiworkflow/BotCron")
+    - interface_name: D-Bus interface name (e.g., "com.aiworkflow.BotCron")
 
     And implement:
     - get_service_stats(): Return service-specific stats as dict
@@ -231,7 +231,7 @@ class DaemonDBusBase(ABC):
         self._custom_handlers[name] = handler
 
     async def call_handler(self, name: str, *args) -> Any:
-        """Call a registered handler."""
+        """Call a registered handler with positional arguments."""
         if name not in self._custom_handlers:
             return {"error": f"Unknown handler: {name}"}
 
@@ -239,6 +239,16 @@ class DaemonDBusBase(ABC):
         if asyncio.iscoroutinefunction(handler):
             return await handler(*args)
         return handler(*args)
+
+    async def call_handler_kwargs(self, name: str, **kwargs) -> Any:
+        """Call a registered handler with keyword arguments."""
+        if name not in self._custom_handlers:
+            return {"error": f"Unknown handler: {name}"}
+
+        handler = self._custom_handlers[name]
+        if asyncio.iscoroutinefunction(handler):
+            return await handler(**kwargs)
+        return handler(**kwargs)
 
     # Signal emission helpers
     def emit_status_changed(self, status: str):
@@ -329,10 +339,14 @@ def create_daemon_interface(daemon: DaemonDBusBase) -> "ServiceInterface":
             """Call a custom registered method."""
             try:
                 args = json.loads(args_json) if args_json else []
-                if not isinstance(args, list):
-                    args = [args]
 
-                result = await self._daemon.call_handler(method_name, *args)
+                # Handle dict args as kwargs (e.g., {"section": "x", "key": "y"})
+                if isinstance(args, dict):
+                    result = await self._daemon.call_handler_kwargs(method_name, **args)
+                else:
+                    if not isinstance(args, list):
+                        args = [args]
+                    result = await self._daemon.call_handler(method_name, *args)
                 return json.dumps(result)
             except Exception as e:
                 logger.error(f"CallMethod error: {e}")
@@ -381,9 +395,9 @@ class DaemonClient:
 
     Usage:
         client = DaemonClient(
-            service_name="com.aiworkflow.CronScheduler",
-            object_path="/com/aiworkflow/CronScheduler",
-            interface_name="com.aiworkflow.CronScheduler",
+            service_name="com.aiworkflow.BotCron",
+            object_path="/com/aiworkflow/BotCron",
+            interface_name="com.aiworkflow.BotCron",
         )
         await client.connect()
         status = await client.get_status()
@@ -481,31 +495,41 @@ def get_client(service: str) -> DaemonClient:
     Get a client for a known service.
 
     Args:
-        service: Service name - "cron", "meet", or "slack"
+        service: Service name - "cron", "meet", "slack", "sprint", or "video"
 
     Returns:
         Configured DaemonClient instance
     """
     services = {
         "cron": ServiceConfig(
-            service_name="com.aiworkflow.CronScheduler",
-            object_path="/com/aiworkflow/CronScheduler",
-            interface_name="com.aiworkflow.CronScheduler",
+            service_name="com.aiworkflow.BotCron",
+            object_path="/com/aiworkflow/BotCron",
+            interface_name="com.aiworkflow.BotCron",
         ),
         "meet": ServiceConfig(
-            service_name="com.aiworkflow.MeetBot",
-            object_path="/com/aiworkflow/MeetBot",
-            interface_name="com.aiworkflow.MeetBot",
+            service_name="com.aiworkflow.BotMeet",
+            object_path="/com/aiworkflow/BotMeet",
+            interface_name="com.aiworkflow.BotMeet",
         ),
         "slack": ServiceConfig(
-            service_name="com.aiworkflow.SlackAgent",
-            object_path="/com/aiworkflow/SlackAgent",
-            interface_name="com.aiworkflow.SlackAgent",
+            service_name="com.aiworkflow.BotSlack",
+            object_path="/com/aiworkflow/BotSlack",
+            interface_name="com.aiworkflow.BotSlack",
         ),
         "sprint": ServiceConfig(
-            service_name="com.aiworkflow.SprintBot",
-            object_path="/com/aiworkflow/SprintBot",
-            interface_name="com.aiworkflow.SprintBot",
+            service_name="com.aiworkflow.BotSprint",
+            object_path="/com/aiworkflow/BotSprint",
+            interface_name="com.aiworkflow.BotSprint",
+        ),
+        "video": ServiceConfig(
+            service_name="com.aiworkflow.BotVideo",
+            object_path="/com/aiworkflow/BotVideo",
+            interface_name="com.aiworkflow.BotVideo",
+        ),
+        "session": ServiceConfig(
+            service_name="com.aiworkflow.BotSession",
+            object_path="/com/aiworkflow/BotSession",
+            interface_name="com.aiworkflow.BotSession",
         ),
     }
 

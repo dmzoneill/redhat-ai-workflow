@@ -137,7 +137,7 @@ def prioritize_issues(issues: list[dict[str, Any]], config: dict[str, Any] | Non
         issue_type = issue.get("issuetype", issue.get("type", "Story")).lower()
         story_points = issue.get("storyPoints", issue.get("story_points", 0))
         created = issue.get("created", "")
-        status = issue.get("status", "New")
+        status = issue.get("jiraStatus", issue.get("status", "New"))
         assignee = issue.get("assignee", "")
 
         # Check for blocked/waiting status

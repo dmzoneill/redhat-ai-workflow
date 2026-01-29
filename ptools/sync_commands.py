@@ -6,9 +6,10 @@ Cursor commands: .cursor/commands/*.md (plain markdown)
 Claude Code commands: .claude/commands/*.md (markdown with YAML frontmatter)
 
 Usage:
-    python ptools/sync_commands.py              # Sync all commands
-    python ptools/sync_commands.py --dry-run   # Show what would be done
-    python ptools/sync_commands.py --reverse   # Claude Code -> Cursor
+    python ptools/sync_commands.py                    # Sync all commands
+    python ptools/sync_commands.py --dry-run         # Show what would be done
+    python ptools/sync_commands.py --reverse         # Claude Code -> Cursor
+    python ptools/sync_commands.py --generate-missing # Generate commands for skills without commands
 """
 
 import argparse
@@ -16,10 +17,16 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 # Directories
 PROJECT_ROOT = Path(__file__).parent.parent
 CURSOR_COMMANDS = PROJECT_ROOT / ".cursor" / "commands"
 CLAUDE_COMMANDS = PROJECT_ROOT / ".claude" / "commands"
+SKILLS_DIR = PROJECT_ROOT / "skills"
 
 
 def extract_command_metadata(content: str, filename: str) -> dict:
@@ -130,6 +137,121 @@ def claude_to_cursor(content: str) -> str:
     return content
 
 
+def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> int:
+    """Generate Cursor commands for skills that don't have commands."""
+    if yaml is None:
+        print("❌ PyYAML not installed. Run: pip install pyyaml")
+        return 0
+
+    # Get existing commands
+    existing_commands = {f.stem for f in CURSOR_COMMANDS.glob("*.md")}
+
+    created = 0
+
+    for skill_file in sorted(SKILLS_DIR.glob("**/*.yaml")):
+        rel = skill_file.relative_to(SKILLS_DIR)
+
+        # Determine skill name and command name
+        if len(rel.parts) > 1:
+            # Subdirectory skill like performance/collect_daily.yaml
+            skill_name = str(rel.with_suffix("")).replace("/", "-")
+            full_skill_name = str(rel.with_suffix("")).replace("-", "/")
+        else:
+            skill_name = skill_file.stem
+            full_skill_name = skill_file.stem
+
+        command_name = skill_name.replace("_", "-")
+
+        # Skip if command already exists
+        if command_name in existing_commands:
+            continue
+
+        # Load skill definition
+        try:
+            with open(skill_file) as f:
+                skill = yaml.safe_load(f)
+        except Exception as e:
+            if verbose:
+                print(f"  ⚠️  Error loading {skill_file.name}: {e}")
+            continue
+
+        if not skill:
+            continue
+
+        # Extract skill info
+        name = skill.get("name", skill_name)
+        description = skill.get("description", f"Run the {name} skill").strip()
+        short_desc = description.split("\n")[0].strip()
+        inputs = skill.get("inputs", [])
+
+        # Build command content
+        lines = [
+            f"# {name.replace('_', ' ').replace('-', ' ').title()}",
+            "",
+            short_desc,
+            "",
+            "## Instructions",
+            "",
+        ]
+
+        # Build skill_run call
+        if inputs:
+            input_parts = []
+            for inp in inputs:
+                inp_name = inp.get("name", "param")
+                inp_required = inp.get("required", False)
+                if inp_required:
+                    input_parts.append(f'"{inp_name}": "${inp_name.upper()}"')
+                else:
+                    input_parts.append(f'"{inp_name}": ""')
+            inputs_json = "{" + ", ".join(input_parts) + "}"
+            lines.append("```text")
+            lines.append(f"skill_run(\"{full_skill_name}\", '{inputs_json}')")
+            lines.append("```")
+        else:
+            lines.append("```text")
+            lines.append(f"skill_run(\"{full_skill_name}\", '{{}}')")
+            lines.append("```")
+
+        lines.append("")
+        lines.append("## What It Does")
+        lines.append("")
+
+        # Add full description
+        for line in description.split("\n"):
+            lines.append(line.strip())
+
+        # Add parameters section if there are inputs
+        if inputs:
+            lines.append("")
+            lines.append("## Parameters")
+            lines.append("")
+            lines.append("| Parameter | Description | Required |")
+            lines.append("|-----------|-------------|----------|")
+            for inp in inputs:
+                inp_name = inp.get("name", "param")
+                inp_desc = inp.get("description", "")
+                inp_required = "Yes" if inp.get("required", False) else "No"
+                inp_default = inp.get("default", "")
+                if inp_default:
+                    inp_desc += f" (default: {inp_default})"
+                lines.append(f"| `{inp_name}` | {inp_desc} | {inp_required} |")
+
+        lines.append("")
+
+        # Write command file
+        command_file = CURSOR_COMMANDS / f"{command_name}.md"
+        if verbose:
+            print(f"  ✨ {command_name}.md (generated from {skill_file.name})")
+
+        if not dry_run:
+            command_file.write_text("\n".join(lines))
+
+        created += 1
+
+    return created
+
+
 def sync_commands(
     source_dir: Path,
     target_dir: Path,
@@ -195,9 +317,38 @@ def main():
         action="store_true",
         help="Sync from Claude Code to Cursor (remove frontmatter)",
     )
+    parser.add_argument(
+        "--generate-missing",
+        action="store_true",
+        help="Generate Cursor commands for skills that don't have commands",
+    )
     parser.add_argument("--quiet", "-q", action="store_true", help="Only show summary")
 
     args = parser.parse_args()
+
+    # Handle generate-missing mode
+    if args.generate_missing:
+        print("\n🔧 Generating commands for skills without commands")
+        print(f"   Skills: {SKILLS_DIR.relative_to(PROJECT_ROOT)}")
+        print(f"   Target: {CURSOR_COMMANDS.relative_to(PROJECT_ROOT)}")
+
+        if args.dry_run:
+            print("   Mode: DRY RUN (no changes will be made)\n")
+        else:
+            print()
+
+        # Ensure target directory exists
+        if not args.dry_run:
+            CURSOR_COMMANDS.mkdir(parents=True, exist_ok=True)
+
+        created = generate_missing_commands(dry_run=args.dry_run, verbose=not args.quiet)
+
+        print(f"\n📊 Generated: {created} new commands")
+
+        if args.dry_run and created:
+            print("\n💡 Run without --dry-run to create the commands")
+
+        return 0
 
     if args.reverse:
         source_dir = CLAUDE_COMMANDS

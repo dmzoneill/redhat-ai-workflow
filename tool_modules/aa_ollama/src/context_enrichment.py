@@ -11,14 +11,11 @@ project for loading project-specific memory and semantic search.
 """
 
 import logging
-import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Optional
 
 import yaml
-
-if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +107,7 @@ async def load_memory_state_async(ctx: "Context" = None) -> dict:
     if ctx:
         try:
             from server.workspace_utils import get_workspace_project
+
             project = await get_workspace_project(ctx)
         except Exception as e:
             logger.warning(f"Failed to get workspace project: {e}")
@@ -401,6 +399,7 @@ async def run_semantic_search_async(
     if not project and ctx:
         try:
             from server.workspace_utils import get_workspace_project
+
             project = await get_workspace_project(ctx)
         except Exception as e:
             logger.warning(f"Failed to get workspace project: {e}")
@@ -471,6 +470,7 @@ async def enrich_context_async(
     if ctx:
         try:
             from server.workspace_utils import get_workspace_project
+
             project = await get_workspace_project(ctx)
         except Exception as e:
             logger.warning(f"Failed to get workspace project: {e}")
@@ -489,5 +489,3 @@ async def enrich_context_async(
         result["semantic_knowledge"] = run_semantic_search(message, project)
 
     return result
-
-

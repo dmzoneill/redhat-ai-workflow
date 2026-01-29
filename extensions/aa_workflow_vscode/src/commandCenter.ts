@@ -21,10 +21,12 @@ import * as http from "http";
 import { spawn } from "child_process";
 import { WorkflowDataProvider } from "./dataProvider";
 import { getSkillsDir, getMemoryDir } from "./paths";
-import { loadMeetBotState, getMeetingsTabStyles, getMeetingsTabContent, getMeetingsTabScript, MeetBotState } from "./meetingsTab";
+import { loadMeetBotState, getMeetingsTabStyles, getMeetingsTabContent, getMeetingsTabScript, getUpcomingMeetingsHtml, MeetBotState } from "./meetingsTab";
 import { loadSprintState, loadSprintHistory, loadToolGapRequests, getSprintTabContent, getSprintTabScript, SprintState } from "./sprintTab";
+import { loadActiveLoops, getCreateSessionTabContent, getCreateSessionTabScript, getCreateSessionTabStyles } from "./createSessionTab";
 import { loadPerformanceState, getPerformanceTabContent, PerformanceState } from "./performanceTab";
 import { createLogger } from "./logger";
+import { RefreshCoordinator, RefreshPriority, StateSection } from "./refreshCoordinator";
 
 const logger = createLogger("CommandCenter");
 
@@ -130,21 +132,26 @@ const CRON_HISTORY_FILE = path.join(
   "cron_history.json"
 );
 
-const WORKSPACE_STATES_FILE = path.join(
-  os.homedir(),
-  ".mcp",
-  "workspace_states",
-  "workspace_states.json"
-);
+// Centralized state directory
+const AA_CONFIG_DIR = path.join(os.homedir(), ".config", "aa-workflow");
+
+// Per-service state files (each service writes its own file)
+const SESSION_STATE_FILE = path.join(AA_CONFIG_DIR, "session_state.json");
+const SPRINT_STATE_FILE = path.join(AA_CONFIG_DIR, "sprint_state_v2.json");
+const MEET_STATE_FILE = path.join(AA_CONFIG_DIR, "meet_state.json");
+const CRON_STATE_FILE = path.join(AA_CONFIG_DIR, "cron_state.json");
+
+// Legacy unified state file (for backward compatibility during migration)
+const WORKSPACE_STATES_FILE = path.join(AA_CONFIG_DIR, "workspace_states.json");
 
 const DBUS_SERVICES = [
   {
     name: "Slack Agent",
-    service: "com.aiworkflow.SlackAgent",
-    path: "/com/aiworkflow/SlackAgent",
-    interface: "com.aiworkflow.SlackAgent",
+    service: "com.aiworkflow.BotSlack",
+    path: "/com/aiworkflow/BotSlack",
+    interface: "com.aiworkflow.BotSlack",
     icon: "💬",
-    systemdUnit: "slack-agent.service",
+    systemdUnit: "bot-slack.service",
     methods: [
       { name: "GetStatus", description: "Get daemon status and stats", args: [] },
       { name: "GetPending", description: "Get pending approval messages", args: [] },
@@ -161,11 +168,11 @@ const DBUS_SERVICES = [
   },
   {
     name: "Cron Scheduler",
-    service: "com.aiworkflow.CronScheduler",
-    path: "/com/aiworkflow/CronScheduler",
-    interface: "com.aiworkflow.CronScheduler",
+    service: "com.aiworkflow.BotCron",
+    path: "/com/aiworkflow/BotCron",
+    interface: "com.aiworkflow.BotCron",
     icon: "🕐",
-    systemdUnit: "cron-scheduler.service",
+    systemdUnit: "bot-cron.service",
     methods: [
       { name: "GetStatus", description: "Get scheduler status and stats", args: [] },
       { name: "GetStats", description: "Get scheduler statistics", args: [] },
@@ -178,16 +185,67 @@ const DBUS_SERVICES = [
   },
   {
     name: "Meet Bot",
-    service: "com.aiworkflow.MeetBot",
-    path: "/com/aiworkflow/MeetBot",
-    interface: "com.aiworkflow.MeetBot",
+    service: "com.aiworkflow.BotMeet",
+    path: "/com/aiworkflow/BotMeet",
+    interface: "com.aiworkflow.BotMeet",
     icon: "🎥",
-    systemdUnit: "meet-bot.service",
+    systemdUnit: "bot-meet.service",
     methods: [
       { name: "GetStatus", description: "Get bot status and upcoming meetings", args: [] },
       { name: "GetStats", description: "Get bot statistics", args: [] },
       { name: "CallMethod", description: "Call a custom method", args: [
         { name: "method_name", type: "string", default: "list_meetings" },
+        { name: "args_json", type: "string", default: "[]" },
+      ]},
+      { name: "Shutdown", description: "Gracefully shutdown the bot", args: [] },
+    ],
+  },
+  {
+    name: "Sprint Bot",
+    service: "com.aiworkflow.BotSprint",
+    path: "/com/aiworkflow/BotSprint",
+    interface: "com.aiworkflow.BotSprint",
+    icon: "🏃",
+    systemdUnit: "bot-sprint.service",
+    methods: [
+      { name: "GetStatus", description: "Get bot status and sprint info", args: [] },
+      { name: "GetStats", description: "Get bot statistics", args: [] },
+      { name: "CallMethod", description: "Call a custom method", args: [
+        { name: "method_name", type: "string", default: "list_issues" },
+        { name: "args_json", type: "string", default: "[]" },
+      ]},
+      { name: "Shutdown", description: "Gracefully shutdown the bot", args: [] },
+    ],
+  },
+  {
+    name: "Session Manager",
+    service: "com.aiworkflow.BotSession",
+    path: "/com/aiworkflow/BotSession",
+    interface: "com.aiworkflow.BotSession",
+    icon: "💬",
+    systemdUnit: "bot-session.service",
+    methods: [
+      { name: "GetStatus", description: "Get session manager status", args: [] },
+      { name: "GetStats", description: "Get session statistics", args: [] },
+      { name: "CallMethod", description: "Call a custom method", args: [
+        { name: "method_name", type: "string", default: "get_sessions" },
+        { name: "args_json", type: "string", default: "[]" },
+      ]},
+      { name: "Shutdown", description: "Gracefully shutdown the manager", args: [] },
+    ],
+  },
+  {
+    name: "Video Bot",
+    service: "com.aiworkflow.BotVideo",
+    path: "/com/aiworkflow/BotVideo",
+    interface: "com.aiworkflow.BotVideo",
+    icon: "📹",
+    systemdUnit: "bot-video.service",
+    methods: [
+      { name: "GetStatus", description: "Get video bot status", args: [] },
+      { name: "GetStats", description: "Get video statistics", args: [] },
+      { name: "CallMethod", description: "Call a custom method", args: [
+        { name: "method_name", type: "string", default: "get_render_stats" },
         { name: "args_json", type: "string", default: "[]" },
       ]},
       { name: "Shutdown", description: "Gracefully shutdown the bot", args: [] },
@@ -406,8 +464,12 @@ export class CommandCenterPanel {
   private _sprintIssues: any[] = [];
   private _sprintIssuesUpdated: string = "";
   private _meetData: any = {};
-  private _lastActiveMeetingCount: number = 0;
-  private _lastPerformanceOverall: number = 0;
+
+  // Unified refresh coordinator - handles all UI updates with debouncing and change detection
+  private _refreshCoordinator: RefreshCoordinator | null = null;
+
+  // Debounce timer for workspace watcher
+  private _workspaceWatcherDebounce: NodeJS.Timeout | null = null;
 
   public static createOrShow(
     extensionUri: vscode.Uri,
@@ -428,7 +490,7 @@ export class CommandCenterPanel {
 
     // Allow access to screenshot directory for meeting images
     const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-    const screenshotDir = vscode.Uri.file(`${homeDir}/.local/share/meet_bot/screenshots`);
+    const screenshotDir = vscode.Uri.file(`${homeDir}/.config/aa-workflow/meet_bot/screenshots`);
 
     const panel = vscode.window.createWebviewPanel(
       "aaCommandCenter",
@@ -454,6 +516,8 @@ export class CommandCenterPanel {
   public static revive(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, dataProvider: WorkflowDataProvider) {
     console.log("[CommandCenter] revive() called - restoring panel from VS Code");
     CommandCenterPanel.currentPanel = new CommandCenterPanel(panel, extensionUri, dataProvider);
+    // Also update the module-level variable so getCommandCenterPanel() works after revive
+    commandCenterPanel = CommandCenterPanel.currentPanel;
   }
 
   /**
@@ -483,9 +547,23 @@ export class CommandCenterPanel {
    */
   public updateRunningSkills(runningSkills: RunningSkillSummary[]) {
     this._runningSkills = runningSkills;
+
+    // Get stale count from watcher
+    let staleCount = 0;
+    try {
+      const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
+      const watcher = getSkillExecutionWatcher();
+      if (watcher) {
+        staleCount = watcher.getStaleExecutionCount();
+      }
+    } catch (e) {
+      // Ignore errors getting stale count
+    }
+
     this._panel.webview.postMessage({
       command: "runningSkillsUpdate",
       runningSkills,
+      staleCount,
     });
   }
 
@@ -500,6 +578,9 @@ export class CommandCenterPanel {
     this._extensionUri = extensionUri;
     this._dataProvider = dataProvider;
     this._currentTab = initialTab || "overview";
+
+    // Initialize the unified refresh coordinator
+    this._refreshCoordinator = new RefreshCoordinator(panel);
 
     // CRITICAL: Set up message handler FIRST, before any HTML is set
     // This ensures we don't miss any messages from the webview
@@ -553,16 +634,25 @@ export class CommandCenterPanel {
             console.log('[AA-WORKFLOW] openChatSession message received:', message.sessionId, message.sessionName);
             await this._openChatSession(message.sessionId, message.sessionName);
             break;
+          case "searchSessions":
+            await this._searchSessions(message.query);
+            break;
+          case "refreshSessionsNow":
+            // Trigger immediate refresh via D-Bus
+            await this._triggerImmediateRefresh();
+            break;
           case "viewMeetingNotes":
             await this._viewMeetingNotes(message.sessionId);
             break;
           case "switchTab":
             this._currentTab = message.tab;
             logger.log(`Switched to tab: ${message.tab}`);
-            // Auto-refresh sprint issues when switching to sprint tab
+            // Load sprint data from file when switching to sprint tab
+            // NOTE: Don't trigger full sync here - it takes too long and causes race conditions
+            // Full sync happens on explicit refresh or periodically via cron
             if (message.tab === "sprint") {
-              logger.log("Sprint tab selected - triggering refresh");
-              this.refreshSprintIssues();
+              logger.log("Sprint tab selected - loading from file (no sync)");
+              this._loadSprintFromFile();
             }
             break;
           case "openJira":
@@ -572,7 +662,13 @@ export class CommandCenterPanel {
             vscode.commands.executeCommand("aa-workflow.openMR");
             break;
           case "runSkill":
-            vscode.commands.executeCommand("aa-workflow.runSkill");
+            if (message.skillName) {
+              // Run specific skill in a new chat
+              await this._runSkillInNewChat(message.skillName);
+            } else {
+              // Open skill picker
+              vscode.commands.executeCommand("aa-workflow.runSkill");
+            }
             break;
           case "switchAgent":
             vscode.commands.executeCommand("aa-workflow.switchAgent");
@@ -600,7 +696,10 @@ export class CommandCenterPanel {
             await this.loadSlackHistory();
             break;
           case "sendSlackMessage":
-            await this.sendSlackMessage(message.channel, message.text);
+            await this.sendSlackMessage(message.channel, message.text, message.threadTs || "");
+            break;
+          case "replyToSlackThread":
+            await this.sendSlackMessage(message.channel, message.text, message.threadTs);
             break;
           case "refreshSlackChannels":
             // Handled by unified background sync - trigger manual sync
@@ -612,6 +711,45 @@ export class CommandCenterPanel {
           case "refreshSlackTargets":
             await this.refreshSlackTargets();
             break;
+          case "searchSlackMessages":
+            await this.searchSlackMessages(message.query);
+            break;
+          case "refreshSlackPending":
+            await this.refreshSlackPending();
+            break;
+          case "approveSlackMessage":
+            await this.approveSlackMessage(message.messageId);
+            break;
+          case "rejectSlackMessage":
+            await this.rejectSlackMessage(message.messageId);
+            break;
+          case "approveAllSlack":
+            await this.approveAllSlackMessages();
+            break;
+          case "refreshSlackCache":
+            await this.refreshSlackCache();
+            break;
+          case "refreshSlackCacheStats":
+            await this.refreshSlackCacheStats();
+            break;
+          case "loadSlackChannelBrowser":
+            await this.loadSlackChannelBrowser(message.query || "");
+            break;
+          case "loadSlackUserBrowser":
+            await this.loadSlackUserBrowser(message.query || "");
+            break;
+          case "loadSlackCommands":
+            await this.loadSlackCommands();
+            break;
+          case "sendSlackCommand":
+            await this.sendSlackCommand(message.commandName, message.args);
+            break;
+          case "loadSlackConfig":
+            await this.loadSlackConfig();
+            break;
+          case "setSlackDebugMode":
+            await this.setSlackDebugMode(message.enabled);
+            break;
           case "loadSkill":
             await this.loadSkillDefinition(message.skillName);
             break;
@@ -621,6 +759,14 @@ export class CommandCenterPanel {
           case "selectRunningSkill":
             // User clicked on a running skill to view it
             this._selectRunningSkill(message.executionId);
+            break;
+          case "clearStaleSkills":
+            // User clicked "Clear Stale" button
+            this._clearStaleSkills();
+            break;
+          case "clearSkillExecution":
+            // User clicked clear button on a specific skill
+            this._clearSkillExecution(message.executionId);
             break;
           case "openSkillFlowchart":
             console.log("[CommandCenter] Received openSkillFlowchart message:", message);
@@ -760,6 +906,24 @@ export class CommandCenterPanel {
           case "clearCaptions":
             await this.handleClearCaptions();
             break;
+          // Video preview controls
+          case "startVideoPreview":
+            await this.handleStartVideoPreview(message.device, message.mode || 'webrtc');
+            break;
+          case "stopVideoPreview":
+            await this.handleStopVideoPreview();
+            break;
+          case "getVideoPreviewFrame":
+            await this.handleGetVideoPreviewFrame();
+            break;
+          case "webviewLog":
+            // Log messages from webview to Output panel
+            debugLog(`[Webview] ${message.message}`);
+            break;
+          // Create Session tab actions
+          case "createSessionAction":
+            await this.handleCreateSessionAction(message.action, message);
+            break;
           // Sprint bot controls
           case "sprintAction":
             await this.handleSprintAction(message.action, message.issueKey, message.chatId, message.enabled);
@@ -785,12 +949,12 @@ export class CommandCenterPanel {
           // Clear cache and force fresh sync when panel becomes visible
           // This handles system wake scenarios where data may be stale
           this._clearSyncCache();
+          // Invalidate coordinator cache to force updates
+          if (this._refreshCoordinator) {
+            this._refreshCoordinator.invalidateCache();
+          }
+          // Background sync will trigger file watcher which calls _dispatchAllUIUpdates
           this._backgroundSync();
-          // Also do a delayed refresh in case the daemon needs time to respond
-          setTimeout(() => {
-            this._loadWorkspaceState();
-            this._dispatchAllUIUpdates();
-          }, 1000);
         }
       },
       null,
@@ -810,6 +974,31 @@ export class CommandCenterPanel {
       this._dispatchAllUIUpdates();
       this.checkEnvironmentHealth();
       this.getInferenceStats();
+      // Also refresh service status via D-Bus on initial load
+      this._refreshServicesViaDBus().catch(e => {
+        debugLog(`Failed to refresh services via D-Bus on init: ${e}`);
+      });
+      // Load Slack discovery data (cache stats, channel browser, user browser, pending, config)
+      this.refreshSlackCacheStats().catch(e => {
+        debugLog(`Failed to load Slack cache stats on init: ${e}`);
+      });
+      this.loadSlackChannelBrowser("").catch(e => {
+        debugLog(`Failed to load Slack channel browser on init: ${e}`);
+      });
+      this.loadSlackUserBrowser("").catch(e => {
+        debugLog(`Failed to load Slack user browser on init: ${e}`);
+      });
+      this.refreshSlackPending().catch(e => {
+        debugLog(`Failed to load Slack pending on init: ${e}`);
+      });
+      this.loadSlackConfig().catch(e => {
+        debugLog(`Failed to load Slack config on init: ${e}`);
+      });
+      this.refreshSlackTargets().catch(e => {
+        debugLog(`Failed to load Slack targets on init: ${e}`);
+      });
+      // Load sprint issues for the Overview page
+      this._loadSprintFromFile();
     }, 500);
 
     // Auto-refresh every 10 seconds with background sync
@@ -827,7 +1016,7 @@ export class CommandCenterPanel {
    */
   private _clearSyncCache(): void {
     try {
-      const cacheFile = path.join(os.homedir(), '.mcp', 'workspace_states', 'sync_cache.json');
+      const cacheFile = path.join(AA_CONFIG_DIR, 'sync_cache.json');
       if (fs.existsSync(cacheFile)) {
         fs.unlinkSync(cacheFile);
         debugLog("Cleared sync cache");
@@ -839,60 +1028,32 @@ export class CommandCenterPanel {
 
   private async refreshOllamaStatus(): Promise<void> {
     try {
-      // Check each Ollama instance by making HTTP requests
+      // Check Ollama instances via systemd status (system-level services)
       const instances = [
-        { name: "npu", port: 11434 },
-        { name: "igpu", port: 11435 },
-        { name: "nvidia", port: 11436 },
-        { name: "cpu", port: 11437 },
+        { name: "npu", port: 11434, unit: "ollama-npu.service" },
+        { name: "igpu", port: 11435, unit: "ollama-igpu.service" },
+        { name: "nvidia", port: 11436, unit: "ollama-nvidia.service" },
+        { name: "cpu", port: 11437, unit: "ollama-cpu.service" },
       ];
 
       const statuses: Record<string, any> = {};
 
-      // Helper to check a single instance
-      const checkInstance = (inst: { name: string; port: number }): Promise<void> => {
-        return new Promise((resolve) => {
-          const req = http.request(
-            {
-              hostname: "localhost",
-              port: inst.port,
-              path: "/api/tags",
-              method: "GET",
-              timeout: 2000,
-            },
-            (res) => {
-              statuses[inst.name] = {
-                available: res.statusCode === 200,
-                port: inst.port,
-              };
-              res.resume(); // Consume response data
-              resolve();
-            }
-          );
+      // Check all instances via single systemctl call
+      const { stdout } = await execAsync(
+        "systemctl is-active ollama-npu.service ollama-igpu.service ollama-nvidia.service ollama-cpu.service 2>/dev/null || true"
+      );
+      const states = stdout.trim().split("\n");
 
-          req.on("error", () => {
-            statuses[inst.name] = {
-              available: false,
-              port: inst.port,
-            };
-            resolve();
-          });
+      instances.forEach((inst, idx) => {
+        const isActive = states[idx] === "active";
+        statuses[inst.name] = {
+          available: isActive,
+          port: inst.port,
+        };
+      });
 
-          req.on("timeout", () => {
-            req.destroy();
-            statuses[inst.name] = {
-              available: false,
-              port: inst.port,
-            };
-            resolve();
-          });
-
-          req.end();
-        });
-      };
-
-      // Check all instances in parallel
-      await Promise.all(instances.map(checkInstance));
+      // Update internal cache for tab badge calculation
+      this._ollama = statuses;
 
       this._panel.webview.postMessage({
         command: "ollamaStatusUpdate",
@@ -1385,9 +1546,9 @@ except Exception as e:
       console.log("[CommandCenter] updateInferenceConfig via D-Bus:", section, subKey, value);
 
       const result = await this.queryDBus(
-        "com.aiworkflow.CronScheduler",
-        "/com/aiworkflow/CronScheduler",
-        "com.aiworkflow.CronScheduler",
+        "com.aiworkflow.BotCron",
+        "/com/aiworkflow/BotCron",
+        "com.aiworkflow.BotCron",
         "CallMethod",
         [
           { type: "string", value: "update_config" },
@@ -1551,8 +1712,31 @@ except Exception as e:
           this.loadExecutionState();
         }
       });
+
+      // Also request current running skills from the watcher on startup
+      // This ensures the Running Skills panel is populated when the Command Center opens
+      this._loadRunningSkillsFromWatcher();
     } catch (e) {
       console.error("Failed to start execution watcher:", e);
+    }
+  }
+
+  /**
+   * Load running skills from the SkillExecutionWatcher and update the UI.
+   * This is called on startup to populate the Running Skills panel.
+   */
+  private _loadRunningSkillsFromWatcher() {
+    try {
+      const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
+      const watcher = getSkillExecutionWatcher();
+      if (watcher) {
+        const runningExecutions = watcher.getRunningExecutions();
+        const staleCount = watcher.getStaleExecutionCount();
+        debugLog(`Loading ${runningExecutions.length} running skills from watcher (${staleCount} stale)`);
+        this.updateRunningSkills(runningExecutions);
+      }
+    } catch (e) {
+      debugLog(`Failed to load running skills from watcher: ${e}`);
     }
   }
 
@@ -1581,6 +1765,16 @@ except Exception as e:
 
     if (this._workspaceWatcher) {
       this._workspaceWatcher.close();
+    }
+
+    if (this._workspaceWatcherDebounce) {
+      clearTimeout(this._workspaceWatcherDebounce);
+    }
+
+    // Dispose the refresh coordinator
+    if (this._refreshCoordinator) {
+      this._refreshCoordinator.dispose();
+      this._refreshCoordinator = null;
     }
 
     this._panel.dispose();
@@ -1618,14 +1812,14 @@ except Exception as e:
     // Aggregated totals across all workspaces/sessions
     totalActiveIssues: number;
     totalActiveMRs: number;
-    allActiveIssues: { key: string; project: string; workspace: string }[];
-    allActiveMRs: { id: string; project: string; workspace: string }[];
+    allActiveIssues: { key: string; summary: string; project: string; workspace: string }[];
+    allActiveMRs: { id: string; title: string; project: string; workspace: string }[];
   } {
     // First, aggregate from workspace state (multiple workspaces/sessions)
     let totalActiveIssues = 0;
     let totalActiveMRs = 0;
-    const allActiveIssues: { key: string; project: string; workspace: string }[] = [];
-    const allActiveMRs: { id: string; project: string; workspace: string }[] = [];
+    const allActiveIssues: { key: string; summary: string; project: string; workspace: string }[] = [];
+    const allActiveMRs: { id: string; title: string; project: string; workspace: string }[] = [];
     const seenIssues = new Set<string>();
     const seenMRs = new Set<string>();
 
@@ -1641,7 +1835,8 @@ except Exception as e:
             totalActiveIssues++;
             allActiveIssues.push({
               key: session.issue_key,
-              project: session.project || ws.project || 'unknown',
+              summary: (session as any).issue_summary || (session as any).summary || '',
+              project: session.project || ws.project || workspaceName,
               workspace: workspaceName
             });
           }
@@ -1798,13 +1993,16 @@ except Exception as e:
         }
 
         // Add MRs from current_work.yaml to totals (deduplicate by ID)
+        // Default project from active issue's repo, or extract from title, or use default
+        const defaultProject = activeRepo || (activeIssue?.repo) || 'automation-analytics-backend';
         for (const mr of allOpenMRs) {
           if (mr.id && !seenMRs.has(mr.id)) {
             seenMRs.add(mr.id);
             totalActiveMRs++;
             allActiveMRs.push({
               id: mr.id,
-              project: activeRepo || 'unknown',
+              title: mr.title || '',
+              project: mr.project || defaultProject,
               workspace: 'current'
             });
           }
@@ -1933,165 +2131,60 @@ print(result[0].text if result else '[]')
   }
 
   /**
-   * Refresh sprint issues and update the UI
+   * Refresh sprint issues from cache file and update the UI.
+   *
+   * NOTE: The UI does NOT spawn sync processes. The sprint bot service
+   * handles periodic updates to workspace_states.json. This method only
+   * reads from the cache file.
    */
   private async refreshSprintIssues(): Promise<void> {
-    logger.log("refreshSprintIssues() called");
+    logger.log("refreshSprintIssues() called - loading from cache");
+    this._loadSprintFromFile();
+  }
+
+  /**
+   * Load sprint data from cache file and update UI.
+   */
+  private _loadSprintFromFile(): void {
+    logger.log("_loadSprintFromFile() called");
     try {
-      // Show loading state
-      this._panel.webview.postMessage({
-        type: "sprintIssuesLoading",
-      });
+      // Reload workspace state from file
+      this._loadWorkspaceState();
 
-      logger.log("Fetching sprint issues from Jira...");
-      const issues = await this.fetchSprintIssues();
-      logger.log(`Fetched ${issues.length} issues from Jira`);
+      // Get sprint issues from the loaded state
+      const sprintData = (this._workspaceState as any)?.sprint || {};
+      const issues = sprintData.issues || [];
 
-      // Update the Overview tab's issue list
+      logger.log(`Loaded ${issues.length} sprint issues from cache`);
+
+      // Update the Overview tab's issue list (for backward compatibility)
       this._panel.webview.postMessage({
         type: "sprintIssuesUpdate",
-        issues,
+        issues: issues.map((i: any) => ({
+          key: i.key,
+          type: i.issueType,
+          status: i.jiraStatus,
+          priority: i.priority,
+          summary: i.summary,
+          assignee: i.assignee,
+          storyPoints: i.storyPoints,
+        })),
       });
 
-      // Also update the Sprint tab by writing to workspace_states.json
-      // This keeps the Sprint Autopilot tab in sync
-      if (issues.length > 0) {
-        const workspaceStateFile = path.join(os.homedir(), ".mcp", "workspace_states", "workspace_states.json");
-        try {
-          let state: Record<string, any> = {};
-          if (fs.existsSync(workspaceStateFile)) {
-            state = JSON.parse(fs.readFileSync(workspaceStateFile, "utf-8"));
-          }
-
-          // Convert fetched issues to SprintIssue format
-          // Determine approvalStatus based on Jira status
-          const getApprovalStatus = (jiraStatus: string, existingTimeline: any[] = []): string => {
-            const status = (jiraStatus || "").toLowerCase();
-
-            // Statuses the bot should work on (pending approval)
-            const workableStatuses = ["new", "refinement", "to do", "open", "backlog"];
-
-            // Statuses that are "in progress" (bot or user working)
-            const inProgressStatuses = ["in progress", "in development", "coding"];
-
-            // Statuses that are in review (bot should follow up IF it created the PR)
-            const reviewStatuses = ["review", "in review", "code review", "peer review"];
-
-            // Statuses that are done (bot should ignore)
-            const doneStatuses = ["done", "closed", "resolved", "release pending", "released", "won't do", "won't fix", "duplicate"];
-
-            if (workableStatuses.some(s => status.includes(s))) {
-              return "pending";
-            } else if (inProgressStatuses.some(s => status.includes(s))) {
-              // Only show as in_progress if bot has timeline events
-              return existingTimeline.length > 0 ? "in_progress" : "completed";
-            } else if (reviewStatuses.some(s => status.includes(s))) {
-              // Only track review if bot moved it there (has timeline)
-              return existingTimeline.length > 0 ? "waiting" : "completed";
-            } else if (doneStatuses.some(s => status.includes(s))) {
-              return "completed";
-            }
-
-            // Default: if unknown status, mark as pending for manual review
-            return "pending";
-          };
-
-          // Get existing sprint state to preserve timeline data
-          const existingIssues: any[] = state.sprint?.issues || [];
-          const existingIssueMap = new Map<string, any>(existingIssues.map((i: any) => [i.key, i]));
-
-          const sprintIssues = issues.map((issue: any) => {
-            const existing: any = existingIssueMap.get(issue.key) || {};
-            const timeline: any[] = existing.timeline || [];
-            const jiraStatus = issue.status || "New";
-
-            return {
-              key: issue.key,
-              summary: issue.summary || "",
-              storyPoints: issue.storyPoints || 0,
-              priority: issue.priority || "Major",
-              jiraStatus: jiraStatus,
-              assignee: issue.assignee || "",
-              approvalStatus: getApprovalStatus(jiraStatus, timeline),
-              waitingReason: jiraStatus.toLowerCase().includes("review") && timeline.length > 0
-                ? "Awaiting code review"
-                : null,
-              priorityReasoning: existing.priorityReasoning || [],
-              estimatedActions: ["start_work", "implement", "create_mr"],
-              chatId: existing.chatId || null,
-              timeline: timeline,
-              issueType: issue.type || "Story",
-              created: issue.created || "",
-            };
-          });
-
-          // Extract sprint name from issues if available (they all share the same sprint)
-          const sprintName = issues[0]?.sprint || "Current Sprint";
-
-          // Calculate total points for actionable issues only
-          const actionableStatuses = ["new", "refinement", "to do", "open", "backlog"];
-          const actionableIssues = sprintIssues.filter((i: any) => {
-            const status = (i.jiraStatus || "").toLowerCase();
-            return actionableStatuses.some(s => status.includes(s));
-          });
-          const totalPoints = sprintIssues.reduce((sum: number, i: any) => sum + (i.storyPoints || 0), 0);
-          const completedPoints = sprintIssues
-            .filter((i: any) => {
-              const status = (i.jiraStatus || "").toLowerCase();
-              return status.includes("done") || status.includes("closed") || status.includes("resolved");
-            })
-            .reduce((sum: number, i: any) => sum + (i.storyPoints || 0), 0);
-
-          // Update sprint section
-          state.sprint = {
-            currentSprint: {
-              id: "active",
-              name: sprintName,
-              startDate: new Date().toISOString(),
-              endDate: "",
-              totalPoints: totalPoints,
-              completedPoints: completedPoints,
-            },
-            nextSprint: state.sprint?.nextSprint || null,  // Preserve next sprint if already set
-            issues: sprintIssues,
-            botEnabled: state.sprint?.botEnabled || false,
-            backgroundTasks: state.sprint?.backgroundTasks || false,
-            lastUpdated: new Date().toISOString(),
-            processingIssue: state.sprint?.processingIssue || null,
-          };
-
-          // Ensure directory exists
-          const stateDir = path.dirname(workspaceStateFile);
-          if (!fs.existsSync(stateDir)) {
-            fs.mkdirSync(stateDir, { recursive: true });
-          }
-
-          fs.writeFileSync(workspaceStateFile, JSON.stringify(state, null, 2));
-          logger.log(`Updated sprint state with ${sprintIssues.length} issues`);
-
-          // Also write to the source file that sync_workspace_state.py reads from
-          // This prevents the sync script from overwriting our data with empty state
-          const sprintStateFile = path.join(os.homedir(), ".config", "aa-workflow", "sprint_state.json");
-          const sprintStateDir = path.dirname(sprintStateFile);
-          if (!fs.existsSync(sprintStateDir)) {
-            fs.mkdirSync(sprintStateDir, { recursive: true });
-          }
-          fs.writeFileSync(sprintStateFile, JSON.stringify(state.sprint, null, 2));
-          logger.log(`Also updated source sprint_state.json`);
-
-          // Trigger a full refresh to update the Sprint tab UI
-          // Must use forceFullRender=true because the Sprint tab content is only
-          // rendered during full HTML render, not via postMessage updates
-          this.update(true);
-        } catch (writeErr) {
-          logger.error("Failed to update sprint state file", writeErr);
-        }
-      }
+      // Update Sprint tab with data from file
+      const sprintState = loadSprintState();
+      const sprintHistory = loadSprintHistory();
+      const toolGapRequests = loadToolGapRequests();
+      this._panel.webview.postMessage({
+        type: "sprintTabUpdate",
+        issues: sprintState.issues,
+        renderedHtml: getSprintTabContent(sprintState, sprintHistory, toolGapRequests, this._dataProvider.getJiraUrl()),
+      });
     } catch (e) {
-      console.error("Failed to refresh sprint issues:", e);
+      console.error("Failed to load sprint from cache:", e);
       this._panel.webview.postMessage({
         type: "sprintIssuesError",
-        error: "Failed to load issues",
+        error: "Failed to load issues from cache",
       });
     }
   }
@@ -2229,6 +2322,38 @@ print(result[0].text if result else '[]')
     const watcher = getSkillExecutionWatcher();
     if (watcher) {
       watcher.selectExecution(executionId);
+    }
+  }
+
+  /**
+   * Clear all stale/dead skill executions
+   */
+  private async _clearStaleSkills() {
+    const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
+    const watcher = getSkillExecutionWatcher();
+    if (watcher) {
+      const cleared = await watcher.clearStaleExecutions();
+      if (cleared > 0) {
+        vscode.window.showInformationMessage(`Cleared ${cleared} stale skill execution(s)`);
+      } else {
+        vscode.window.showInformationMessage("No stale skill executions to clear");
+      }
+    }
+  }
+
+  /**
+   * Clear a specific skill execution
+   */
+  private async _clearSkillExecution(executionId: string) {
+    const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
+    const watcher = getSkillExecutionWatcher();
+    if (watcher) {
+      const success = await watcher.clearExecution(executionId);
+      if (success) {
+        vscode.window.showInformationMessage("Skill execution cleared");
+      } else {
+        vscode.window.showWarningMessage("Failed to clear skill execution");
+      }
     }
   }
 
@@ -2574,7 +2699,10 @@ print(result[0].text if result else '[]')
     args?: { type: string; value: string }[]
   ): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
-      let cmd = `dbus-send --session --print-reply --dest=${service} ${objectPath} ${iface}.${method}`;
+      // Explicitly set DBUS_SESSION_BUS_ADDRESS in case Cursor doesn't inherit it
+      const uid = process.getuid ? process.getuid() : 1000;
+      const dbusAddr = process.env.DBUS_SESSION_BUS_ADDRESS || `unix:path=/run/user/${uid}/bus`;
+      let cmd = `DBUS_SESSION_BUS_ADDRESS="${dbusAddr}" dbus-send --session --print-reply --dest=${service} ${objectPath} ${iface}.${method}`;
 
       // Add arguments if provided
       if (args && args.length > 0) {
@@ -2677,15 +2805,20 @@ print(result[0].text if result else '[]')
 
   private async checkMCPServerStatus(): Promise<{ running: boolean; pid?: number }> {
     try {
-      // Check for MCP server running via "python3 -m server" in the redhat-ai-workflow directory
-      const { stdout } = await execAsync("pgrep -f 'python.*-m server'");
+      // Check for MCP server running - could be via mcp_proxy.py or directly via "python -m server"
+      const { stdout } = await execAsync("pgrep -f 'mcp_proxy.py|python.*-m server'");
       const pids = stdout.trim().split("\n").filter(Boolean);
       if (pids.length > 0) {
         const pid = parseInt(pids[0], 10);
-        return { running: !isNaN(pid), pid };
+        const status = { running: !isNaN(pid), pid };
+        // Update internal cache for tab badge calculation
+        this._services.mcp = status;
+        return status;
       }
+      this._services.mcp = { running: false };
       return { running: false };
     } catch {
+      this._services.mcp = { running: false };
       return { running: false };
     }
   }
@@ -2693,15 +2826,12 @@ print(result[0].text if result else '[]')
   private async handleServiceControl(action: string, service: string) {
     // Map service names to systemd units
     const serviceUnits: Record<string, string> = {
-      slack: "slack-agent.service",
-      cron: "cron-scheduler.service",
-      meet: "meet-bot.service",
-    };
-
-    const logFiles: Record<string, string> = {
-      slack: "/tmp/slack-daemon.log",
-      cron: `${process.env.HOME}/.config/aa-workflow/cron_daemon.log`,
-      meet: `${process.env.HOME}/.config/aa-workflow/meet_daemon.log`,
+      slack: "bot-slack.service",
+      cron: "bot-cron.service",
+      meet: "bot-meet.service",
+      sprint: "bot-sprint.service",
+      video: "bot-video.service",
+      session: "bot-session.service",
     };
 
     const unit = serviceUnits[service];
@@ -2715,8 +2845,11 @@ print(result[0].text if result else '[]')
         case "start":
           await execAsync(`systemctl --user start ${unit}`);
           vscode.window.showInformationMessage(`Started ${service} service`);
-          // Refresh status after a short delay
-          setTimeout(() => this.refreshServiceStatus(), 1000);
+          // Refresh status after a short delay with HIGH priority (user action)
+          setTimeout(() => {
+            this._loadWorkspaceState();
+            this._dispatchAllUIUpdates(RefreshPriority.HIGH);
+          }, 1000);
           break;
 
         case "stop":
@@ -2740,28 +2873,428 @@ print(result[0].text if result else '[]')
             await execAsync(`systemctl --user stop ${unit}`);
             vscode.window.showInformationMessage(`Stopped ${service} service`);
           }
-          setTimeout(() => this.refreshServiceStatus(), 1000);
+          // Refresh with HIGH priority (user action)
+          setTimeout(() => {
+            this._loadWorkspaceState();
+            this._dispatchAllUIUpdates(RefreshPriority.HIGH);
+          }, 1000);
           break;
 
         case "logs":
-          const logFile = logFiles[service];
-          if (logFile) {
-            // Open log file in editor
-            const uri = vscode.Uri.file(logFile);
-            try {
-              const doc = await vscode.workspace.openTextDocument(uri);
-              await vscode.window.showTextDocument(doc, { preview: true });
-            } catch {
-              // File might not exist, show journalctl instead
-              const terminal = vscode.window.createTerminal(`${service} logs`);
-              terminal.show();
-              terminal.sendText(`journalctl --user -u ${unit} -f`);
-            }
-          }
+          // Always use journalctl -f in a terminal for live log streaming
+          const terminal = vscode.window.createTerminal(`${service} logs`);
+          terminal.show();
+          terminal.sendText(`journalctl --user -u ${unit} -f`);
           break;
       }
     } catch (e: any) {
       vscode.window.showErrorMessage(`Service control failed: ${e.message}`);
+    }
+  }
+
+  // ============================================================================
+  // Create Session Tab Methods
+  // ============================================================================
+
+  /**
+   * Call an MCP tool via HTTP to the workflow server
+   */
+  private async callMcpTool(toolName: string, args: any): Promise<any> {
+    try {
+      const response = await new Promise<any>((resolve, reject) => {
+        const postData = JSON.stringify({ tool: toolName, args });
+        const req = http.request({
+          hostname: "localhost",
+          port: 8765,
+          path: "/api/tool",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(postData)
+          }
+        }, (res) => {
+          let data = "";
+          res.on("data", chunk => data += chunk);
+          res.on("end", () => {
+            try {
+              resolve(JSON.parse(data));
+            } catch {
+              resolve({ result: data });
+            }
+          });
+        });
+        req.on("error", reject);
+        req.setTimeout(30000, () => {
+          req.destroy();
+          reject(new Error("Request timeout"));
+        });
+        req.write(postData);
+        req.end();
+      });
+      return response;
+    } catch (e: any) {
+      debugLog(`[CreateSession] MCP tool call failed: ${e.message}`);
+      return { error: e.message };
+    }
+  }
+
+  /**
+   * Load Cursor chat sessions from the workspace
+   */
+  private loadCursorSessions(): any[] {
+    const sessions: any[] = [];
+
+    try {
+      // Get workspace URI
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) return sessions;
+
+      const workspaceUri = workspaceFolder.uri.toString();
+
+      // Import the function from workspace_state module (it's already used elsewhere)
+      const { list_cursor_chats, get_cursor_chat_issue_keys, get_cursor_chat_personas } = require("./workspaceStateProvider");
+
+      // Use the existing list_cursor_chats function pattern
+      const workspaceStorageDir = path.join(os.homedir(), ".config", "Cursor", "User", "workspaceStorage");
+
+      if (!fs.existsSync(workspaceStorageDir)) return sessions;
+
+      // Find matching workspace storage
+      for (const storageDir of fs.readdirSync(workspaceStorageDir)) {
+        const storagePath = path.join(workspaceStorageDir, storageDir);
+        if (!fs.statSync(storagePath).isDirectory()) continue;
+
+        const workspaceJson = path.join(storagePath, "workspace.json");
+        if (!fs.existsSync(workspaceJson)) continue;
+
+        try {
+          const workspaceData = JSON.parse(fs.readFileSync(workspaceJson, "utf-8"));
+          const folderUri = workspaceData.folder || "";
+
+          if (folderUri === workspaceUri) {
+            const dbPath = path.join(storagePath, "state.vscdb");
+            if (!fs.existsSync(dbPath)) continue;
+
+            // Query the database
+            const { execSync } = require("child_process");
+            const query = "SELECT value FROM ItemTable WHERE key = 'composer.composerData'";
+            const result = execSync(`sqlite3 "${dbPath}" "${query}"`, { encoding: "utf-8", timeout: 5000 });
+
+            if (result.trim()) {
+              const composerData = JSON.parse(result.trim());
+              const allComposers = composerData.allComposers || [];
+
+              // Filter and sort chats
+              const activeChats = allComposers
+                .filter((c: any) => !c.isArchived && !c.isDraft && (c.name || c.lastUpdatedAt))
+                .sort((a: any, b: any) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0))
+                .slice(0, 10);
+
+              for (const chat of activeChats) {
+                sessions.push({
+                  id: chat.composerId,
+                  name: chat.name || "Unnamed chat",
+                  lastUpdated: chat.lastUpdatedAt,
+                  source: "cursor",
+                  // These would need additional DB queries to populate
+                  issueKey: null,
+                  persona: null
+                });
+              }
+            }
+            break; // Found matching workspace
+          }
+        } catch (e) {
+          debugLog(`[CreateSession] Error parsing workspace.json: ${e}`);
+        }
+      }
+    } catch (e: any) {
+      debugLog(`[CreateSession] Error loading Cursor sessions: ${e.message}`);
+    }
+
+    return sessions;
+  }
+
+  /**
+   * Load Claude Console sessions from ~/.claude/
+   */
+  private loadClaudeSessions(): any[] {
+    const sessions: any[] = [];
+    const claudeDir = path.join(os.homedir(), ".claude");
+    const claudeConfigDir = path.join(os.homedir(), ".config", "claude-code");
+
+    for (const baseDir of [claudeDir, claudeConfigDir]) {
+      if (!fs.existsSync(baseDir)) continue;
+
+      const projectsDir = path.join(baseDir, "projects");
+      if (fs.existsSync(projectsDir)) {
+        try {
+          const projects = fs.readdirSync(projectsDir, { withFileTypes: true });
+          for (const project of projects) {
+            if (project.isDirectory()) {
+              const projectPath = path.join(projectsDir, project.name);
+              const sessionFiles = fs.readdirSync(projectPath).filter(f => f.endsWith(".jsonl"));
+              for (const sessionFile of sessionFiles.slice(0, 5)) { // Limit per project
+                sessions.push({
+                  id: sessionFile.replace(".jsonl", ""),
+                  name: project.name,
+                  path: path.join(projectPath, sessionFile),
+                  source: "claude"
+                });
+              }
+            }
+          }
+        } catch (e) {
+          debugLog(`[CreateSession] Error reading Claude sessions: ${e}`);
+        }
+      }
+    }
+
+    return sessions.slice(0, 10); // Limit total
+  }
+
+  /**
+   * Load Gemini sessions from import directory
+   */
+  private loadGeminiSessions(): any[] {
+    const sessions: any[] = [];
+    const geminiDir = path.join(os.homedir(), ".config", "aa-workflow", "gemini_sessions");
+
+    if (fs.existsSync(geminiDir)) {
+      try {
+        const files = fs.readdirSync(geminiDir).filter(f => f.endsWith(".json"));
+        for (const file of files.slice(0, 10)) {
+          sessions.push({
+            id: file.replace(".json", ""),
+            name: file.replace(".json", ""),
+            path: path.join(geminiDir, file),
+            source: "gemini"
+          });
+        }
+      } catch (e) {
+        debugLog(`[CreateSession] Error reading Gemini sessions: ${e}`);
+      }
+    }
+
+    return sessions;
+  }
+
+  private async handleCreateSessionAction(action: string, message: any) {
+    try {
+      switch (action) {
+        case "autoContext":
+          // Auto-populate context based on issue key
+          if (message.issueKey) {
+            // Send loading state to webview
+            this._panel?.webview.postMessage({
+              command: 'jiraLoading',
+              issueKey: message.issueKey
+            });
+
+            try {
+              // Call Jira tool via MCP to get issue details
+              const result = await this.callMcpTool("jira_get_issue", { issue_key: message.issueKey });
+              if (result && !result.error) {
+                this._panel?.webview.postMessage({
+                  command: 'jiraData',
+                  issueKey: message.issueKey,
+                  data: result
+                });
+              } else {
+                this._panel?.webview.postMessage({
+                  command: 'jiraError',
+                  issueKey: message.issueKey,
+                  error: result?.error || 'Failed to fetch issue'
+                });
+              }
+            } catch (e: any) {
+              this._panel?.webview.postMessage({
+                command: 'jiraError',
+                issueKey: message.issueKey,
+                error: e.message
+              });
+            }
+          }
+          break;
+
+        case "searchSlack":
+          // Search Slack messages
+          if (message.query) {
+            try {
+              const result = await this.callMcpTool("slack_search_messages", { query: message.query, limit: 10 });
+              this._panel?.webview.postMessage({
+                command: 'slackResults',
+                query: message.query,
+                results: result?.messages || []
+              });
+            } catch (e: any) {
+              vscode.window.showErrorMessage(`Slack search failed: ${e.message}`);
+            }
+          }
+          break;
+
+        case "searchCode":
+          // Search code using vector search
+          if (message.query) {
+            try {
+              const result = await this.callMcpTool("code_search", { query: message.query, limit: 5 });
+              this._panel?.webview.postMessage({
+                command: 'codeResults',
+                query: message.query,
+                results: result?.results || []
+              });
+            } catch (e: any) {
+              vscode.window.showErrorMessage(`Code search failed: ${e.message}`);
+            }
+          }
+          break;
+
+        case "selectPersona":
+          // Persona selected - load tools for that persona
+          if (message.personaId) {
+            debugLog(`[CreateSession] Persona selected: ${message.personaId}`);
+            // Load persona YAML to get tool list
+            const personaPath = path.join(os.homedir(), "src", "redhat-ai-workflow", "personas", `${message.personaId}.yaml`);
+            try {
+              if (fs.existsSync(personaPath)) {
+                const yaml = require("js-yaml");
+                const personaData = yaml.load(fs.readFileSync(personaPath, "utf-8"));
+                const tools = personaData?.tools || [];
+                this._panel?.webview.postMessage({
+                  command: 'personaTools',
+                  personaId: message.personaId,
+                  tools: tools
+                });
+              }
+            } catch (e: any) {
+              debugLog(`[CreateSession] Failed to load persona tools: ${e.message}`);
+            }
+          }
+          break;
+
+        case "loadSessions":
+          // Load external sessions (Cursor, Claude Console, and Gemini)
+          try {
+            const cursorSessions = this.loadCursorSessions();
+            const claudeSessions = this.loadClaudeSessions();
+            const geminiSessions = this.loadGeminiSessions();
+            this._panel?.webview.postMessage({
+              command: 'externalSessions',
+              cursor: cursorSessions,
+              claude: claudeSessions,
+              gemini: geminiSessions
+            });
+          } catch (e: any) {
+            debugLog(`[CreateSession] Failed to load sessions: ${e.message}`);
+          }
+          break;
+
+        case "stopLoop":
+          // Stop a Ralph Wiggum loop
+          if (message.sessionId) {
+            const loopConfigPath = path.join(
+              os.homedir(),
+              ".config",
+              "aa-workflow",
+              "ralph_loops",
+              `session_${message.sessionId}.json`
+            );
+            if (fs.existsSync(loopConfigPath)) {
+              fs.unlinkSync(loopConfigPath);
+              vscode.window.showInformationMessage(`Stopped loop for session ${message.sessionId}`);
+              this._dispatchAllUIUpdates();
+            }
+          }
+          break;
+
+        case "createSession":
+          // Create a new session with the configured context
+          if (message.config) {
+            const config = message.config;
+            debugLog(`[CreateSession] Creating session with config: ${JSON.stringify(config)}`);
+
+            // If Ralph Wiggum is enabled, set up the loop
+            if (config.ralph?.enabled) {
+              const loopsDir = path.join(os.homedir(), ".config", "aa-workflow", "ralph_loops");
+              if (!fs.existsSync(loopsDir)) {
+                fs.mkdirSync(loopsDir, { recursive: true });
+              }
+
+              // Generate a session ID
+              const sessionId = `cursor_${Date.now().toString(36)}`;
+              const loopConfig = {
+                session_id: sessionId,
+                max_iterations: config.ralph.maxIterations || 10,
+                current_iteration: 0,
+                todo_path: path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir(), "TODO.md"),
+                completion_criteria: config.ralph.criteria ? [config.ralph.criteria] : [],
+                started_at: new Date().toISOString(),
+              };
+
+              // Write loop config
+              const loopConfigPath = path.join(loopsDir, `session_${sessionId}.json`);
+              fs.writeFileSync(loopConfigPath, JSON.stringify(loopConfig, null, 2));
+
+              // Generate TODO.md from goals
+              if (config.ralph.goals) {
+                const todoPath = loopConfig.todo_path;
+                const todoContent = `# TODO - Session ${sessionId}\n\n${config.ralph.goals.split('\n').map((g: string) => g.trim()).filter((g: string) => g).map((g: string) => `- [ ] ${g}`).join('\n')}\n`;
+                fs.writeFileSync(todoPath, todoContent);
+                vscode.window.showInformationMessage(`Created TODO.md with ${config.ralph.goals.split('\n').filter((g: string) => g.trim()).length} tasks`);
+              }
+
+              // Set up Cursor hooks if not already configured
+              const hooksPath = path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir(), ".cursor", "hooks.json");
+              if (!fs.existsSync(hooksPath)) {
+                const hooksDir = path.dirname(hooksPath);
+                if (!fs.existsSync(hooksDir)) {
+                  fs.mkdirSync(hooksDir, { recursive: true });
+                }
+                const hooksConfig = {
+                  version: 1,
+                  hooks: {
+                    stop: [{
+                      command: `python ${path.join(os.homedir(), ".config", "aa-workflow", "ralph_wiggum_hook.py")}`
+                    }]
+                  }
+                };
+                fs.writeFileSync(hooksPath, JSON.stringify(hooksConfig, null, 2));
+                vscode.window.showInformationMessage("Created .cursor/hooks.json for Ralph Wiggum loop");
+              }
+            }
+
+            vscode.window.showInformationMessage("Session created! Open a new Cursor chat to start.");
+            this._dispatchAllUIUpdates();
+          }
+          break;
+
+        case "saveTemplate":
+          // Save the current configuration as a template
+          if (message.config) {
+            vscode.window.showInformationMessage("Template saving - feature coming soon");
+          }
+          break;
+
+        case "importGemini":
+          // Import Gemini session
+          const options: vscode.OpenDialogOptions = {
+            canSelectMany: false,
+            openLabel: "Import Gemini Session",
+            filters: { "JSON files": ["json"] }
+          };
+          const fileUri = await vscode.window.showOpenDialog(options);
+          if (fileUri && fileUri[0]) {
+            vscode.window.showInformationMessage(`Importing Gemini session from ${fileUri[0].fsPath}`);
+            // TODO: Parse and import the session
+          }
+          break;
+
+        default:
+          debugLog(`[CreateSession] Unknown action: ${action}`);
+      }
+    } catch (e: any) {
+      console.error("[CreateSession] Error:", e);
+      vscode.window.showErrorMessage(`Create session error: ${e.message}`);
     }
   }
 
@@ -2901,6 +3434,63 @@ print(result[0].text if result else '[]')
           );
           break;
 
+        case "startIssue":
+          // Start an issue immediately via D-Bus, bypassing all checks
+          if (issueKey) {
+            logger.log(`Starting issue immediately: ${issueKey}`);
+            try {
+              // Determine if we should use background mode
+              // If backgroundTasks is false, we want foreground (chat opens in front)
+              const useBackground = state.backgroundTasks;
+
+              const dbusResult = await this.queryDBus(
+                "com.aiworkflow.BotSprint",
+                "/com/aiworkflow/BotSprint",
+                "com.aiworkflow.BotSprint",
+                "CallMethod",
+                [
+                  { type: "string", value: "start_issue" },
+                  { type: "string", value: JSON.stringify({ issue_key: issueKey, background: useBackground }) },
+                ]
+              );
+
+              if (dbusResult.success && dbusResult.data) {
+                const parsed = typeof dbusResult.data === "string"
+                  ? JSON.parse(dbusResult.data)
+                  : dbusResult.data;
+                if (parsed.success) {
+                  const modeMsg = useBackground ? "in background" : "in foreground";
+                  vscode.window.showInformationMessage(
+                    `Started ${issueKey} ${modeMsg}. ${parsed.message || ""}`
+                  );
+                  // Update local state to reflect the change
+                  const issue = state.issues.find((i) => i.key === issueKey);
+                  if (issue) {
+                    issue.approvalStatus = "in_progress";
+                    if (parsed.chat_id) {
+                      issue.chatId = parsed.chat_id;
+                    }
+                  }
+                  state.processingIssue = issueKey;
+                } else {
+                  vscode.window.showErrorMessage(
+                    `Failed to start ${issueKey}: ${parsed.error || "Unknown error"}`
+                  );
+                }
+              } else {
+                vscode.window.showErrorMessage(
+                  `Failed to start ${issueKey}: ${dbusResult.error || "D-Bus call failed"}`
+                );
+              }
+            } catch (e: any) {
+              logger.error(`Failed to start ${issueKey}: ${e.message}`);
+              vscode.window.showErrorMessage(
+                `Failed to start ${issueKey}: ${e.message}`
+              );
+            }
+          }
+          break;
+
         // Legacy support for toggleBot
         case "toggleBot":
           state.automaticMode = enabled ?? !state.automaticMode;
@@ -2931,9 +3521,9 @@ print(result[0].text if result else '[]')
             logger.log(`Opening ${issueKey} in Cursor for interactive continuation`);
             try {
               const dbusResult = await this.queryDBus(
-                "com.aiworkflow.SprintBot",
-                "/com/aiworkflow/SprintBot",
-                "com.aiworkflow.SprintBot",
+                "com.aiworkflow.BotSprint",
+                "/com/aiworkflow/BotSprint",
+                "com.aiworkflow.BotSprint",
                 "CallMethod",
                 [
                   { type: "string", value: "open_in_cursor" },
@@ -3016,25 +3606,26 @@ print(result[0].text if result else '[]')
       fs.writeFileSync(sprintStateFile, JSON.stringify(state, null, 2));
 
       // Also update the unified workspace_states.json for immediate UI feedback
-      const unifiedStateFile = path.join(
-        os.homedir(),
-        ".mcp",
-        "workspace_states",
-        "workspace_states.json"
-      );
       try {
-        if (fs.existsSync(unifiedStateFile)) {
-          const unified = JSON.parse(fs.readFileSync(unifiedStateFile, "utf-8"));
+        if (fs.existsSync(WORKSPACE_STATES_FILE)) {
+          const unified = JSON.parse(fs.readFileSync(WORKSPACE_STATES_FILE, "utf-8"));
           unified.sprint = state;
           unified.exported_at = new Date().toISOString();
-          fs.writeFileSync(unifiedStateFile, JSON.stringify(unified, null, 2));
+          fs.writeFileSync(WORKSPACE_STATES_FILE, JSON.stringify(unified, null, 2));
         }
       } catch (e) {
         console.error("Failed to update unified state:", e);
       }
 
-      // Refresh the UI
-      this.update(true);
+      // Use incremental update instead of full re-render to avoid UI blanking
+      const sprintState = loadSprintState();
+      const sprintHistory = loadSprintHistory();
+      const toolGapRequests = loadToolGapRequests();
+      this._panel.webview.postMessage({
+        type: "sprintTabUpdate",
+        issues: sprintState.issues,
+        renderedHtml: getSprintTabContent(sprintState, sprintHistory, toolGapRequests, this._dataProvider.getJiraUrl()),
+      });
     } catch (e: any) {
       vscode.window.showErrorMessage(`Sprint action failed: ${e.message}`);
     }
@@ -3204,8 +3795,12 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           break;
       }
 
-      // Refresh the UI after action
-      this.update(true);
+      // Use incremental badge update instead of full re-render
+      const performanceState = loadPerformanceState();
+      this._panel.webview.postMessage({
+        type: "performanceTabBadgeUpdate",
+        percentage: performanceState.overall_percentage || 0,
+      });
     } catch (e: any) {
       vscode.window.showErrorMessage(`Performance action failed: ${e.message}`);
     }
@@ -3319,9 +3914,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleMeetingApproval(meetingId: string, meetUrl: string, mode: string) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "approve_meeting" },
@@ -3365,9 +3960,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleMeetingRejection(meetingId: string) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "reject_meeting" },
@@ -3389,9 +3984,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleMeetingUnapproval(meetingId: string) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "unapprove_meeting" },
@@ -3446,9 +4041,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       debugLog(`Calling D-Bus CallMethod for join_meeting...`);
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "join_meeting" },
@@ -3509,9 +4104,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleSetMeetingMode(meetingId: string, mode: string) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "set_meeting_mode" },
@@ -3531,9 +4126,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleStartScheduler() {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "start_scheduler" },
@@ -3555,9 +4150,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleStopScheduler() {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "stop_scheduler" },
@@ -3579,9 +4174,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleLeaveMeeting(sessionId: string) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "leave_meeting" },
@@ -3593,20 +4188,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         vscode.window.showInformationMessage("Left meeting");
         // Clear the cached meet data to force fresh fetch
         this._meetData = {};
-        this._lastActiveMeetingCount = 0;
         // Delete the sync cache file to force fresh data
         this._clearSyncCache();
-        // Run sync and force full UI update
+        // Invalidate coordinator cache to force updates
+        if (this._refreshCoordinator) {
+          this._refreshCoordinator.invalidateSections(["meetings"]);
+        }
+        // Run sync with HIGH priority (user action)
         this._backgroundSync();
-        // Also trigger immediate full re-render after sync completes
+        // Single delayed refresh with HIGH priority
         setTimeout(() => {
           this._loadWorkspaceState();
-          this.update(true);
+          this._dispatchAllUIUpdates(RefreshPriority.HIGH);
         }, 2000);
-        setTimeout(() => {
-          this._loadWorkspaceState();
-          this.update(true);
-        }, 5000);
       } else {
         vscode.window.showErrorMessage(`Failed to leave meeting: ${result.error}`);
       }
@@ -3618,9 +4212,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleLeaveAllMeetings() {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "leave_all_meetings" },
@@ -3642,9 +4236,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleMuteAudio(sessionId: string) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "mute_audio" },
@@ -3677,9 +4271,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleUnmuteAudio(sessionId: string) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "unmute_audio" },
@@ -3713,9 +4307,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       const args = sessionId ? JSON.stringify([sessionId]) : "[]";
       await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "test_tts" },
@@ -3734,9 +4328,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       const args = sessionId ? JSON.stringify([sessionId]) : "[]";
       await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "test_avatar" },
@@ -3755,9 +4349,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       const args = sessionId ? JSON.stringify([sessionId]) : "[]";
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "preload_jira" },
@@ -3776,9 +4370,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleSetDefaultMode(mode: string) {
     try {
       await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "set_default_mode" },
@@ -3793,9 +4387,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleRefreshCalendar() {
     try {
       await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "refresh_calendars" },
@@ -3812,9 +4406,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleViewNote(noteId: number) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "get_meeting_note" },
@@ -3841,9 +4435,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleViewTranscript(noteId: number) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "get_transcript" },
@@ -3871,9 +4465,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleViewBotLog(noteId: number) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "get_bot_log" },
@@ -3900,9 +4494,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleViewLinkedIssues(noteId: number) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "get_linked_issues" },
@@ -3937,9 +4531,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleSearchNotes(query: string) {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "search_notes" },
@@ -3963,9 +4557,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleCopyTranscript() {
     try {
       // Get current meeting's captions from the state
-      const stateFile = path.join(os.homedir(), '.mcp', 'workspace_states', 'workspace_states.json');
-      if (fs.existsSync(stateFile)) {
-        const content = fs.readFileSync(stateFile, 'utf-8');
+      if (fs.existsSync(WORKSPACE_STATES_FILE)) {
+        const content = fs.readFileSync(WORKSPACE_STATES_FILE, 'utf-8');
         const state = JSON.parse(content);
         const meetData = state.meetBot || {};
         const captions = meetData.captions || [];
@@ -3986,9 +4579,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async handleClearCaptions() {
     try {
       await this.queryDBus(
-        "com.aiworkflow.MeetBot",
-        "/com/aiworkflow/MeetBot",
-        "com.aiworkflow.MeetBot",
+        "com.aiworkflow.BotMeet",
+        "/com/aiworkflow/BotMeet",
+        "com.aiworkflow.BotMeet",
         "CallMethod",
         [
           { type: "string", value: "clear_captions" },
@@ -3999,6 +4592,184 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       vscode.window.showInformationMessage('Captions cleared');
     } catch (e: any) {
       vscode.window.showErrorMessage(`Failed to clear captions: ${e.message}`);
+    }
+  }
+
+  // Video preview state
+  private _videoPreviewActive = false;
+  private _videoPreviewDevice = "/dev/video10";
+  private _videoPreviewMode = "webrtc";
+  private _videoPreviewProcess: any = null;
+
+  /**
+   * Start video preview in the specified mode.
+   *
+   * Modes:
+   * - webrtc: Hardware-accelerated H.264 via Intel VAAPI, streamed via WebRTC (~6W, <50ms latency)
+   * - mjpeg: Hardware JPEG encoding via VAAPI, HTTP stream (~8W, ~100ms latency)
+   * - snapshot: Legacy ffmpeg frame capture (~35W, ~500ms latency)
+   */
+  private async handleStartVideoPreview(device: string, mode: string = 'webrtc') {
+    this._videoPreviewDevice = device || "/dev/video10";
+    this._videoPreviewMode = mode;
+    this._videoPreviewActive = true;
+
+    debugLog(`Starting video preview: device=${device}, mode=${mode}`);
+
+    if (mode === 'webrtc' || mode === 'mjpeg') {
+      // For WebRTC/MJPEG modes, we need to start the streaming pipeline via D-Bus
+      // The video daemon handles the Intel VAAPI encoding
+      try {
+        await this.queryDBus(
+          "com.aiworkflow.BotVideo",
+          "/com/aiworkflow/BotVideo",
+          "com.aiworkflow.BotVideo",
+          "StartStreaming",
+          [
+            { type: "string", value: device },
+            { type: "string", value: mode },
+            { type: "string", value: String(mode === 'webrtc' ? 8765 : 8766) }  // signaling/mjpeg port
+          ]
+        );
+
+        this._panel.webview.postMessage({
+          type: 'videoPreviewStarted',
+          mode: mode,
+          device: device
+        });
+
+        debugLog(`Video streaming started via D-Bus: ${mode}`);
+      } catch (e: any) {
+        debugLog(`D-Bus streaming start failed: ${e.message}, falling back to direct check`);
+
+        // Check if device exists for snapshot fallback
+        if (!fs.existsSync(this._videoPreviewDevice)) {
+          this._panel.webview.postMessage({
+            type: 'videoPreviewError',
+            error: `Device ${this._videoPreviewDevice} not found. Start the video daemon first.`
+          });
+          return;
+        }
+
+        // For WebRTC, the webview will connect directly to ws://localhost:8765
+        // For MJPEG, the webview will connect directly to http://localhost:8766/stream.mjpeg
+        this._panel.webview.postMessage({
+          type: 'videoPreviewStarted',
+          mode: mode,
+          device: device,
+          note: 'Connecting directly to streaming server'
+        });
+      }
+    } else {
+      // Snapshot mode - check if device exists
+      if (!fs.existsSync(this._videoPreviewDevice)) {
+        this._panel.webview.postMessage({
+          type: 'videoPreviewError',
+          error: `Device ${this._videoPreviewDevice} not found. Is the video daemon running?`
+        });
+        return;
+      }
+
+      this._panel.webview.postMessage({
+        type: 'videoPreviewStarted',
+        mode: 'snapshot',
+        device: device
+      });
+    }
+  }
+
+  private async handleStopVideoPreview() {
+    this._videoPreviewActive = false;
+
+    // Stop streaming via D-Bus if using WebRTC/MJPEG
+    if (this._videoPreviewMode === 'webrtc' || this._videoPreviewMode === 'mjpeg') {
+      try {
+        await this.queryDBus(
+          "com.aiworkflow.BotVideo",
+          "/com/aiworkflow/BotVideo",
+          "com.aiworkflow.BotVideo",
+          "StopStreaming",
+          []
+        );
+        debugLog("Video streaming stopped via D-Bus");
+      } catch (e: any) {
+        debugLog(`D-Bus streaming stop failed: ${e.message}`);
+      }
+    }
+
+    // Kill any running ffmpeg process (snapshot mode)
+    if (this._videoPreviewProcess) {
+      try {
+        this._videoPreviewProcess.kill();
+      } catch (e) {
+        // Ignore
+      }
+      this._videoPreviewProcess = null;
+    }
+
+    debugLog("Stopped video preview");
+  }
+
+  /**
+   * Get a single frame for snapshot mode (legacy, high CPU usage).
+   *
+   * This uses ffmpeg to capture from v4l2, which is inefficient but works
+   * without the streaming pipeline. Use WebRTC or MJPEG modes for better
+   * performance.
+   */
+  private async handleGetVideoPreviewFrame() {
+    if (!this._videoPreviewActive || this._videoPreviewMode !== 'snapshot') {
+      return;
+    }
+
+    try {
+      // Capture a single frame from the v4l2 device using ffmpeg
+      // Output as JPEG to stdout, then convert to base64
+      const tmpFile = `/tmp/video_preview_${Date.now()}.jpg`;
+
+      await execAsync(
+        `ffmpeg -f v4l2 -video_size 640x360 -i ${this._videoPreviewDevice} -vframes 1 -f image2 -y ${tmpFile} 2>/dev/null`,
+        { timeout: 2000 }
+      );
+
+      // Read the file and convert to base64
+      if (fs.existsSync(tmpFile)) {
+        const imageBuffer = fs.readFileSync(tmpFile);
+        const base64 = imageBuffer.toString('base64');
+        const dataUrl = `data:image/jpeg;base64,${base64}`;
+
+        // Get resolution from device
+        let resolution = "640x360";
+        try {
+          const { stdout } = await execAsync(
+            `v4l2-ctl -d ${this._videoPreviewDevice} --get-fmt-video 2>/dev/null | grep "Width/Height" | head -1`,
+            { timeout: 1000 }
+          );
+          const match = stdout.match(/(\d+)\/(\d+)/);
+          if (match) {
+            resolution = `${match[1]}x${match[2]}`;
+          }
+        } catch (e) {
+          // Use default
+        }
+
+        // Send frame to webview
+        this._panel.webview.postMessage({
+          type: 'videoPreviewFrame',
+          dataUrl: dataUrl,
+          resolution: resolution
+        });
+
+        // Clean up temp file
+        try {
+          fs.unlinkSync(tmpFile);
+        } catch (e) {
+          // Ignore
+        }
+      }
+    } catch (e: any) {
+      // Don't spam errors - just skip this frame
+      debugLog(`Video preview frame error: ${e.message}`);
     }
   }
 
@@ -4064,9 +4835,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async loadSlackHistory() {
     try {
       const result = await this.queryDBus(
-        "com.aiworkflow.SlackAgent",
-        "/com/aiworkflow/SlackAgent",
-        "com.aiworkflow.SlackAgent",
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
         "GetHistory",
         [
           { type: "int32", value: "50" },
@@ -4108,7 +4879,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     }
   }
 
-  private async sendSlackMessage(channel: string, text: string) {
+  private async sendSlackMessage(channel: string, text: string, threadTs: string = "") {
     try {
       if (!channel || !text) {
         vscode.window.showWarningMessage("Please select a channel/user and enter a message");
@@ -4117,22 +4888,24 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
       // Send via D-Bus (Slack daemon)
       const result = await this.queryDBus(
-        "com.aiworkflow.SlackAgent",
-        "/com/aiworkflow/SlackAgent",
-        "com.aiworkflow.SlackAgent",
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
         "SendMessage",
         [
           { type: "string", value: channel },
           { type: "string", value: text },
-          { type: "string", value: "" }  // thread_ts
+          { type: "string", value: threadTs || "" }  // thread_ts for replies
         ]
       );
 
       if (result.success) {
-        vscode.window.showInformationMessage("Message sent successfully");
+        const replyMsg = threadTs ? "Reply sent successfully" : "Message sent successfully";
+        vscode.window.showInformationMessage(replyMsg);
         this._panel.webview.postMessage({
           type: "slackMessageSent",
           success: true,
+          isReply: !!threadTs,
         });
         // Refresh history to show the new message
         await this.loadSlackHistory();
@@ -4159,9 +4932,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       // Query via D-Bus (Slack daemon)
       const result = await this.queryDBus(
-        "com.aiworkflow.SlackAgent",
-        "/com/aiworkflow/SlackAgent",
-        "com.aiworkflow.SlackAgent",
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
         "GetMyChannels",
         []
       );
@@ -4188,13 +4961,16 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
   private async searchSlackUsers(query: string) {
     try {
-      // Query via D-Bus (Slack daemon)
+      // Search Slack directly via SearchAndCacheUsers (finds users not in local cache)
       const result = await this.queryDBus(
-        "com.aiworkflow.SlackAgent",
-        "/com/aiworkflow/SlackAgent",
-        "com.aiworkflow.SlackAgent",
-        "FindUser",
-        [{ type: "string", value: query }]
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "SearchAndCacheUsers",
+        [
+          { type: "string", value: query },
+          { type: "int32", value: "30" }
+        ]
       );
 
       if (result.success && result.data) {
@@ -4221,9 +4997,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       // Refresh channels via D-Bus (Slack daemon)
       const result = await this.queryDBus(
-        "com.aiworkflow.SlackAgent",
-        "/com/aiworkflow/SlackAgent",
-        "com.aiworkflow.SlackAgent",
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
         "GetMyChannels",
         []
       );
@@ -4239,18 +5015,348 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     }
   }
 
+  private async searchSlackMessages(query: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "SearchMessages",
+        [
+          { type: "string", value: query },
+          { type: "int32", value: "30" }
+        ]
+      );
+      if (result.success && result.data) {
+        this._panel.webview.postMessage({
+          type: "slackSearchResults",
+          results: result.data.messages || [],
+          total: result.data.total || 0,
+          remaining: result.data.searches_remaining_today,
+          rateLimited: result.data.rate_limited || false,
+          error: result.data.error || null,
+        });
+      } else {
+        this._panel.webview.postMessage({
+          type: "slackSearchResults",
+          results: [],
+          error: result.data?.error || "Search failed",
+        });
+      }
+    } catch (e) {
+      this._panel.webview.postMessage({
+        type: "slackSearchResults",
+        results: [],
+        error: String(e),
+      });
+    }
+  }
+
+  private async refreshSlackPending() {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "GetPending",
+        []
+      );
+      if (result.success) {
+        const pending = Array.isArray(result.data) ? result.data : [];
+        this._panel.webview.postMessage({
+          type: "slackPending",
+          pending: pending,
+        });
+      }
+    } catch (e) {
+      console.error("Failed to refresh Slack pending:", e);
+    }
+  }
+
+  private async approveSlackMessage(messageId: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "ApproveMessage",
+        [{ type: "string", value: messageId }]
+      );
+      if (result.success) {
+        vscode.window.showInformationMessage("Message approved and sent");
+        await this.refreshSlackPending();
+      } else {
+        vscode.window.showErrorMessage(`Failed to approve: ${result.data?.error || "Unknown error"}`);
+      }
+    } catch (e) {
+      vscode.window.showErrorMessage(`Failed to approve: ${e}`);
+    }
+  }
+
+  private async rejectSlackMessage(messageId: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "RejectMessage",
+        [{ type: "string", value: messageId }]
+      );
+      if (result.success) {
+        vscode.window.showInformationMessage("Message rejected");
+        await this.refreshSlackPending();
+      } else {
+        vscode.window.showErrorMessage(`Failed to reject: ${result.data?.error || "Unknown error"}`);
+      }
+    } catch (e) {
+      vscode.window.showErrorMessage(`Failed to reject: ${e}`);
+    }
+  }
+
+  private async approveAllSlackMessages() {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "ApproveAll",
+        []
+      );
+      if (result.success && result.data) {
+        const approved = result.data.approved || 0;
+        const failed = result.data.failed || 0;
+        vscode.window.showInformationMessage(`Approved ${approved} messages${failed > 0 ? `, ${failed} failed` : ""}`);
+        await this.refreshSlackPending();
+      }
+    } catch (e) {
+      vscode.window.showErrorMessage(`Failed to approve all: ${e}`);
+    }
+  }
+
+  private async refreshSlackCache() {
+    try {
+      vscode.window.showInformationMessage("Refreshing Slack cache from API...");
+
+      // Refresh both channel and user caches
+      const [channelResult, userResult] = await Promise.all([
+        this.queryDBus(
+          "com.aiworkflow.BotSlack",
+          "/com/aiworkflow/BotSlack",
+          "com.aiworkflow.BotSlack",
+          "RefreshChannelCache",
+          []
+        ),
+        this.queryDBus(
+          "com.aiworkflow.BotSlack",
+          "/com/aiworkflow/BotSlack",
+          "com.aiworkflow.BotSlack",
+          "RefreshUserCache",
+          []
+        )
+      ]);
+
+      const channelCount = channelResult.data?.channels_cached || 0;
+      const userCount = userResult.data?.users_cached || 0;
+      const userSkipped = userResult.data?.skipped ? " (cached)" : "";
+
+      vscode.window.showInformationMessage(`Cache refreshed: ${channelCount} channels, ${userCount} users${userSkipped}`);
+
+      // Refresh the UI
+      await this.refreshSlackCacheStats();
+      await this.loadSlackChannelBrowser("");
+      await this.loadSlackUserBrowser("");
+    } catch (e) {
+      vscode.window.showErrorMessage(`Failed to refresh cache: ${e}`);
+    }
+  }
+
+  private async refreshSlackCacheStats() {
+    try {
+      const [channelStats, userStats] = await Promise.all([
+        this.queryDBus(
+          "com.aiworkflow.BotSlack",
+          "/com/aiworkflow/BotSlack",
+          "com.aiworkflow.BotSlack",
+          "GetChannelCacheStats",
+          []
+        ),
+        this.queryDBus(
+          "com.aiworkflow.BotSlack",
+          "/com/aiworkflow/BotSlack",
+          "com.aiworkflow.BotSlack",
+          "GetUserCacheStats",
+          []
+        )
+      ]);
+
+      this._panel.webview.postMessage({
+        type: "slackCacheStats",
+        channelStats: channelStats.data || {},
+        userStats: userStats.data || {},
+      });
+    } catch (e) {
+      console.error("Failed to refresh cache stats:", e);
+    }
+  }
+
+  private async loadSlackChannelBrowser(query: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "FindChannel",
+        [{ type: "string", value: query }]
+      );
+      if (result.success && result.data) {
+        this._panel.webview.postMessage({
+          type: "slackChannelBrowser",
+          channels: result.data.channels || [],
+          count: result.data.count || 0,
+        });
+      }
+    } catch (e) {
+      console.error("Failed to load channel browser:", e);
+    }
+  }
+
+  private async loadSlackCommands() {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "GetCommandList",
+        []
+      );
+      if (result.success && result.data) {
+        this._panel.webview.postMessage({
+          type: "slackCommands",
+          commands: result.data.commands || [],
+        });
+      }
+    } catch (e) {
+      console.error("Failed to load Slack commands:", e);
+    }
+  }
+
+  private async sendSlackCommand(command: string, args: Record<string, string>) {
+    try {
+      // Build the @me command string
+      let commandStr = `@me ${command}`;
+      for (const [key, value] of Object.entries(args)) {
+        if (value) {
+          commandStr += ` --${key}="${value}"`;
+        }
+      }
+
+      // Get the self-DM channel from config or use a default
+      const selfDmChannel = ""; // Will send to self-DM
+
+      // Send via D-Bus
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "SendMessage",
+        [
+          { type: "string", value: selfDmChannel },
+          { type: "string", value: commandStr },
+          { type: "string", value: "" }
+        ]
+      );
+
+      if (result.success) {
+        vscode.window.showInformationMessage(`Command sent: ${command}`);
+        this._panel.webview.postMessage({
+          type: "slackCommandSent",
+          success: true,
+          command: command,
+        });
+      } else {
+        vscode.window.showErrorMessage(`Failed to send command: ${result.error || "Unknown error"}`);
+      }
+    } catch (e) {
+      vscode.window.showErrorMessage(`Failed to send command: ${e}`);
+    }
+  }
+
+  private async loadSlackConfig() {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "GetConfig",
+        []
+      );
+      if (result.success && result.data) {
+        this._panel.webview.postMessage({
+          type: "slackConfig",
+          config: result.data.config || {},
+        });
+      }
+    } catch (e) {
+      console.error("Failed to load Slack config:", e);
+    }
+  }
+
+  private async setSlackDebugMode(enabled: boolean) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "SetDebugMode",
+        [{ type: "string", value: enabled ? "true" : "false" }]
+      );
+      if (result.success) {
+        vscode.window.showInformationMessage(`Debug mode ${enabled ? "enabled" : "disabled"}`);
+        this._panel.webview.postMessage({
+          type: "slackDebugModeChanged",
+          enabled: enabled,
+        });
+      } else {
+        vscode.window.showErrorMessage(`Failed to set debug mode: ${result.error || "Unknown error"}`);
+      }
+    } catch (e) {
+      vscode.window.showErrorMessage(`Failed to set debug mode: ${e}`);
+    }
+  }
+
+  private async loadSlackUserBrowser(query: string) {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack",
+        "com.aiworkflow.BotSlack",
+        "FindUser",
+        [{ type: "string", value: query }]
+      );
+      if (result.success && result.data) {
+        this._panel.webview.postMessage({
+          type: "slackUserBrowser",
+          users: result.data.users || [],
+          count: result.data.count || 0,
+        });
+      }
+    } catch (e) {
+      console.error("Failed to load user browser:", e);
+    }
+  }
+
 
   // ============================================================================
   // Cron Management
   // ============================================================================
 
-  private async loadCronConfigAsync(): Promise<{ enabled: boolean; timezone: string; jobs: CronJob[]; execution_mode: string }> {
+  private async loadCronConfigAsync(): Promise<{ enabled: boolean; timezone: string; jobs: CronJob[]; execution_mode: string } | null> {
     try {
       // Read all config via D-Bus (uses ConfigManager for thread-safe access)
       const configResult = await this.queryDBus(
-        "com.aiworkflow.CronScheduler",
-        "/com/aiworkflow/CronScheduler",
-        "com.aiworkflow.CronScheduler",
+        "com.aiworkflow.BotCron",
+        "/com/aiworkflow/BotCron",
+        "com.aiworkflow.BotCron",
         "CallMethod",
         [
           { type: "string", value: "get_config" },
@@ -4258,23 +5364,29 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         ]
       );
 
-      let schedules: any = {};
-      if (configResult.success && configResult.data?.success) {
-        schedules = configResult.data.value || {};
+      // If config fetch failed, return null to preserve cached data
+      if (!configResult.success || !configResult.data?.success) {
+        debugLog("D-Bus get_config failed, preserving cached cron config");
+        return null;
       }
+
+      const schedules = configResult.data.value || {};
 
       // Get enabled state from D-Bus (uses StateManager)
       const statsResult = await this.queryDBus(
-        "com.aiworkflow.CronScheduler",
-        "/com/aiworkflow/CronScheduler",
-        "com.aiworkflow.CronScheduler",
+        "com.aiworkflow.BotCron",
+        "/com/aiworkflow/BotCron",
+        "com.aiworkflow.BotCron",
         "GetStats"
       );
 
-      let enabled = false;
-      if (statsResult.success && statsResult.data) {
-        enabled = statsResult.data.enabled || false;
+      // If stats fetch failed, return null to preserve cached data
+      if (!statsResult.success) {
+        debugLog("D-Bus GetStats failed, preserving cached cron config");
+        return null;
       }
+
+      const enabled = statsResult.data?.enabled || false;
 
       return {
         enabled: enabled,
@@ -4284,8 +5396,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       };
     } catch (e) {
       console.error("Failed to load cron config via D-Bus:", e);
+      return null;  // Return null to preserve cached data
     }
-    return { enabled: false, timezone: "UTC", jobs: [], execution_mode: "claude_cli" };
   }
 
   // Synchronous wrapper that returns cached data (for backward compatibility)
@@ -4326,16 +5438,28 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   }
 
   private async refreshCronData(historyLimit: number = 10) {
-    // Load config via D-Bus (thread-safe) and update cache
-    const cronConfig = await this.loadCronConfigAsync();
-    this._cachedCronConfig = cronConfig;
+    // Reload cron state from file (cron daemon owns this file)
+    this._loadWorkspaceState();
+
+    // Use cron state file as primary source
+    let configToSend = this._cronData;
+    if (!configToSend || !configToSend.jobs || configToSend.jobs.length === 0) {
+      // State file empty, try D-Bus as fallback
+      const cronConfig = await this.loadCronConfigAsync();
+      if (cronConfig !== null) {
+        this._cachedCronConfig = cronConfig;
+        configToSend = cronConfig;
+      }
+    }
+    // Final fallback to defaults
+    configToSend = configToSend || { enabled: false, timezone: "UTC", jobs: [], execution_mode: "claude_cli" };
 
     const cronHistory = this.loadCronHistory(historyLimit);
     const totalHistory = this.getCronHistoryTotal();
 
     this._panel.webview.postMessage({
       type: "cronData",
-      config: cronConfig,
+      config: configToSend,
       history: cronHistory,
       totalHistory: totalHistory,
       currentLimit: historyLimit,
@@ -4345,18 +5469,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private async toggleScheduler() {
     console.log("[CommandCenter] toggleScheduler called");
     try {
-      // Get current state from D-Bus (thread-safe)
+      // Get current state from D-Bus (thread-safe), fall back to cached or workspace state
       const cronConfig = await this.loadCronConfigAsync();
-      const currentState = cronConfig.enabled;
+      const configToUse = cronConfig || this._cachedCronConfig || this._cronData || { enabled: false, timezone: "UTC", jobs: [], execution_mode: "claude_cli" };
+      const currentState = configToUse.enabled;
       const newState = !currentState;
 
       console.log("[CommandCenter] Current schedules.enabled:", currentState, "-> toggling to:", newState);
 
       // Use D-Bus to toggle scheduler state (uses StateManager for thread-safe writes)
       const result = await this.queryDBus(
-        "com.aiworkflow.CronScheduler",
-        "/com/aiworkflow/CronScheduler",
-        "com.aiworkflow.CronScheduler",
+        "com.aiworkflow.BotCron",
+        "/com/aiworkflow/BotCron",
+        "com.aiworkflow.BotCron",
         "CallMethod",
         [
           { type: "string", value: "toggle_scheduler" },
@@ -4395,9 +5520,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
       // Use D-Bus to toggle job state (uses StateManager for thread-safe writes)
       const result = await this.queryDBus(
-        "com.aiworkflow.CronScheduler",
-        "/com/aiworkflow/CronScheduler",
-        "com.aiworkflow.CronScheduler",
+        "com.aiworkflow.BotCron",
+        "/com/aiworkflow/BotCron",
+        "com.aiworkflow.BotCron",
         "CallMethod",
         [
           { type: "string", value: "toggle_job" },
@@ -4425,7 +5550,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       // Send command to Cursor chat to run the skill
       const cronConfig = await this.loadCronConfigAsync();
-      const job = cronConfig.jobs.find(j => j.name === jobName);
+      const configToUse = cronConfig || this._cachedCronConfig || this._cronData || { enabled: false, timezone: "UTC", jobs: [], execution_mode: "claude_cli" };
+      const job = configToUse.jobs.find((j: any) => j.name === jobName);
 
       if (job) {
         const command = `cron_run_now("${jobName}")`;
@@ -4873,12 +5999,87 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   // ============================================================================
 
   private _loadWorkspaceState(): void {
+    // Load state from per-service state files
+    // Each service writes its own file, we read and merge them here
+
+    // 1. Load session state (workspaces, sessions)
+    try {
+      if (fs.existsSync(SESSION_STATE_FILE)) {
+        const content = fs.readFileSync(SESSION_STATE_FILE, "utf8");
+        const sessionState = JSON.parse(content);
+        this._workspaceState = sessionState.workspaces || {};
+        this._workspaceCount = sessionState.workspace_count || Object.keys(this._workspaceState || {}).length;
+        debugLog(`Loaded session state: ${this._workspaceCount} workspaces, ${sessionState.session_count || 0} sessions`);
+      } else {
+        // Fallback to legacy file
+        this._loadLegacySessionState();
+      }
+    } catch (error) {
+      debugLog(`Error loading session state: ${error}`);
+      this._loadLegacySessionState();
+    }
+
+    // 2. Load meet state
+    try {
+      if (fs.existsSync(MEET_STATE_FILE)) {
+        const content = fs.readFileSync(MEET_STATE_FILE, "utf8");
+        this._meetData = JSON.parse(content);
+        debugLog(`Loaded meet state: ${this._meetData.upcomingMeetings?.length || 0} upcoming`);
+      } else {
+        this._meetData = {};
+      }
+    } catch (error) {
+      debugLog(`Error loading meet state: ${error}`);
+      this._meetData = {};
+    }
+
+    // 3. Load cron state
+    try {
+      if (fs.existsSync(CRON_STATE_FILE)) {
+        const content = fs.readFileSync(CRON_STATE_FILE, "utf8");
+        this._cronData = JSON.parse(content);
+        debugLog(`Loaded cron state: ${this._cronData.jobs?.length || 0} jobs`);
+      } else {
+        this._cronData = {};
+      }
+    } catch (error) {
+      debugLog(`Error loading cron state: ${error}`);
+      this._cronData = {};
+    }
+
+    // 4. Load ollama/slack from legacy file
+    // NOTE: Services are now loaded via D-Bus in _refreshServicesViaDBus(), not from file
+    // We preserve existing this._services data to avoid overwriting D-Bus results
     try {
       if (fs.existsSync(WORKSPACE_STATES_FILE)) {
         const content = fs.readFileSync(WORKSPACE_STATES_FILE, "utf8");
         const parsed = JSON.parse(content);
+        // Don't overwrite services - they come from D-Bus now
+        // this._services = parsed.services || {};
+        this._ollama = parsed.ollama || {};
+        this._slackChannels = parsed.slack_channels || [];
+      } else {
+        // Don't reset services - they come from D-Bus
+        this._ollama = {};
+        this._slackChannels = [];
+      }
+    } catch (error) {
+      // Don't reset services - they come from D-Bus
+      this._ollama = {};
+      this._slackChannels = [];
+    }
 
-        // Handle both direct workspace map and wrapped format with "workspaces" key
+    // Sprint state is loaded separately via _loadSprintFromFile()
+    this._sprintIssues = [];
+    this._sprintIssuesUpdated = "";
+  }
+
+  private _loadLegacySessionState(): void {
+    // Fallback to legacy workspace_states.json for session data
+    try {
+      if (fs.existsSync(WORKSPACE_STATES_FILE)) {
+        const content = fs.readFileSync(WORKSPACE_STATES_FILE, "utf8");
+        const parsed = JSON.parse(content);
         if (parsed.workspaces) {
           this._workspaceState = parsed.workspaces as WorkspaceExportedState;
           this._workspaceCount = parsed.workspace_count || Object.keys(this._workspaceState || {}).length;
@@ -4886,66 +6087,49 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           this._workspaceState = parsed as WorkspaceExportedState;
           this._workspaceCount = Object.keys(this._workspaceState || {}).length;
         }
-
-        // Load unified state (v3 format)
-        this._services = parsed.services || {};
-        this._ollama = parsed.ollama || {};
-        this._cronData = parsed.cron || {};
-        this._slackChannels = parsed.slack_channels || [];
-        this._sprintIssues = parsed.sprint_issues || [];
-        this._sprintIssuesUpdated = parsed.sprint_issues_updated || "";
-        this._meetData = parsed.meet || {};
-
-        debugLog(`Loaded unified state: ${this._workspaceCount} workspaces, ${Object.keys(this._services).length} services, ${Object.keys(this._ollama).length} ollama, meet: ${this._meetData.upcomingMeetings?.length || 0} upcoming`);
+        debugLog(`Loaded legacy session state: ${this._workspaceCount} workspaces`);
       } else {
         this._workspaceState = null;
         this._workspaceCount = 0;
-        this._services = {};
-        this._ollama = {};
-        this._cronData = {};
-        this._slackChannels = [];
-        this._sprintIssues = [];
-        this._sprintIssuesUpdated = "";
-        this._meetData = {};
-        debugLog("No workspace states file found");
       }
     } catch (error) {
-      debugLog(`Error loading workspace states: ${error}`);
       this._workspaceState = null;
       this._workspaceCount = 0;
-      this._services = {};
-      this._ollama = {};
-      this._cronData = {};
-      this._slackChannels = [];
-      this._sprintIssues = [];
-      this._sprintIssuesUpdated = "";
-      this._meetData = {};
     }
   }
 
-  private _workspaceWatcherDebounce: NodeJS.Timeout | undefined;
-
   private _setupWorkspaceWatcher(): void {
     try {
-      const dir = path.dirname(WORKSPACE_STATES_FILE);
+      const dir = AA_CONFIG_DIR;
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
 
+      // Watch for changes to any state file
+      const stateFiles = new Set([
+        "session_state.json",
+        "sprint_state_v2.json",
+        "meet_state.json",
+        "cron_state.json",
+        "workspace_states.json",  // Legacy fallback
+      ]);
+
       this._workspaceWatcher = fs.watch(dir, (eventType, filename) => {
-        if (filename === "workspace_states.json") {
-          // Debounce rapid changes (100ms)
+        if (filename && stateFiles.has(filename)) {
+          // Debounce is now handled by RefreshCoordinator
+          // Just load state and dispatch - coordinator handles the rest
           if (this._workspaceWatcherDebounce) {
             clearTimeout(this._workspaceWatcherDebounce);
           }
           this._workspaceWatcherDebounce = setTimeout(() => {
-            debugLog(`Workspace states file changed: ${eventType}`);
+            debugLog(`State file changed: ${filename} (${eventType})`);
             this._loadWorkspaceState();
-            this._dispatchAllUIUpdates();
-          }, 100);
+            // Use LOW priority for file watcher updates (background)
+            this._dispatchAllUIUpdates(RefreshPriority.LOW);
+          }, 100); // Reduced debounce since coordinator handles it
         }
       });
-      debugLog("Workspace watcher set up with debouncing");
+      debugLog("State file watcher set up");
     } catch (error) {
       debugLog(`Error setting up workspace watcher: ${error}`);
     }
@@ -4954,231 +6138,259 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   /**
    * Dispatch updates to ALL UI sections from unified state.
    * Called when workspace_states.json changes.
+   *
+   * Uses the RefreshCoordinator for centralized state management,
+   * debouncing, and change detection to eliminate UI flicker.
    */
-  private _dispatchAllUIUpdates(): void {
-    // Update sessions tab
-    this._updateWorkspacesTab();
+  private _dispatchAllUIUpdates(priority: RefreshPriority = RefreshPriority.NORMAL): void {
+    if (!this._refreshCoordinator) {
+      debugLog("RefreshCoordinator not initialized, skipping dispatch");
+      return;
+    }
 
-    // Update services status
-    this._panel.webview.postMessage({
-      type: "serviceStatus",
-      services: this._formatServicesForUI(),
-      mcp: this._services.mcp || { running: false },
+    // Collect all state updates
+    const updates: Array<{ section: StateSection; data: any }> = [];
+
+    // Services
+    updates.push({
+      section: "services",
+      data: {
+        list: this._formatServicesForUI(),
+        mcp: this._services.mcp || { running: false }
+      }
     });
 
-    // Update Ollama status
-    this._panel.webview.postMessage({
-      command: "ollamaStatusUpdate",
-      data: this._ollama,
+    // Ollama
+    updates.push({
+      section: "ollama",
+      data: { status: this._ollama }
     });
 
-    // Update cron data
-    this._panel.webview.postMessage({
-      type: "cronData",
-      config: {
+    // Cron
+    updates.push({
+      section: "cron",
+      data: {
         enabled: this._cronData.enabled || false,
         timezone: this._cronData.timezone || "UTC",
         jobs: this._cronData.jobs || [],
         execution_mode: this._cronData.execution_mode || "claude_cli",
-      },
-      history: this._cronData.history || [],
-      totalHistory: this._cronData.total_history || 0,
-      currentLimit: 10,
+        history: this._cronData.history || [],
+        total_history: this._cronData.total_history || 0
+      }
     });
 
-    // Update Slack channels
-    this._panel.webview.postMessage({
-      type: "slackChannels",
-      channels: this._slackChannels,
+    // Slack
+    updates.push({
+      section: "slack",
+      data: { channels: this._slackChannels }
     });
 
-    // Update sprint issues
-    if (this._sprintIssues.length > 0) {
-      this._panel.webview.postMessage({
-        type: "sprintIssuesUpdate",
-        issues: this._sprintIssues,
-      });
-    }
+    // Sprint (badge only for background updates)
+    const sprintState = loadSprintState();
+    const pendingCount = (sprintState.issues || []).filter(
+      (i: any) => i.approvalStatus === "pending" || i.approvalStatus === "waiting"
+    ).length;
+    updates.push({
+      section: "sprint",
+      data: {
+        issues: sprintState.issues || [],
+        pendingCount,
+        totalIssues: sprintState.issues?.length || 0
+        // Note: renderedHtml is NOT included for background updates to avoid expensive regeneration
+      }
+    });
 
-    // Update meetings tab - check if active meeting count changed
+    // Meetings
     const meetBotState = loadMeetBotState(this._meetData);
-    const newActiveMeetingCount = meetBotState.currentMeetings?.length || 0;
-    const oldActiveMeetingCount = this._lastActiveMeetingCount || 0;
+    updates.push({
+      section: "meetings",
+      data: {
+        currentMeeting: meetBotState.currentMeeting,
+        currentMeetings: meetBotState.currentMeetings || [],
+        upcomingMeetings: meetBotState.upcomingMeetings || [],
+        renderedUpcomingHtml: getUpcomingMeetingsHtml(meetBotState)
+      }
+    });
 
-    if (newActiveMeetingCount !== oldActiveMeetingCount) {
-      debugLog(`Active meeting count changed: ${oldActiveMeetingCount} -> ${newActiveMeetingCount}`);
-      this._lastActiveMeetingCount = newActiveMeetingCount;
-      // Force full re-render when meeting status changes
-      this.update(true);
-    } else {
-      // Just send the update message for incremental updates
-      this._panel.webview.postMessage({
-        type: "meetingsUpdate",
-        state: meetBotState,
+    // Performance
+    const performanceState = loadPerformanceState();
+    updates.push({
+      section: "performance",
+      data: { overall_percentage: performanceState.overall_percentage || 0 }
+    });
+
+    // Sessions (workspaces)
+    if (this._workspaceState) {
+      updates.push({
+        section: "sessions",
+        data: {
+          workspaces: this._workspaceState.workspaces || [],
+          totalCount: this._workspaceCount
+        }
       });
     }
 
-    // Update Performance tab - requires full re-render since it doesn't have
-    // incremental update support yet. Check if performance data changed.
-    const performanceState = loadPerformanceState();
-    const newOverallPct = performanceState.overall_percentage || 0;
-    const oldOverallPct = this._lastPerformanceOverall || 0;
+    // Overview stats
+    const stats = this.loadStats();
+    const workflowStatus = this._dataProvider.getStatus();
+    const currentWork = this.loadCurrentWork();
+    const memoryHealth = this.getMemoryHealth();
+    const today = new Date().toISOString().split("T")[0];
+    const todayStats = stats?.daily?.[today] || { tool_calls: 0, skill_executions: 0 };
+    const session = stats?.current_session || { tool_calls: 0, skill_executions: 0, memory_ops: 0 };
+    const lifetime = stats?.lifetime || { tool_calls: 0, tool_successes: 0 };
+    const toolSuccessRate = lifetime.tool_calls > 0
+      ? Math.round((lifetime.tool_successes / lifetime.tool_calls) * 100)
+      : 100;
 
-    if (newOverallPct !== oldOverallPct) {
-      debugLog(`Performance data changed: ${oldOverallPct}% -> ${newOverallPct}%`);
-      this._lastPerformanceOverall = newOverallPct;
-      // Force full re-render to update Performance tab
-      this.update(true);
+    updates.push({
+      section: "overview",
+      data: {
+        stats,
+        todayStats,
+        session,
+        toolSuccessRate,
+        workflowStatus,
+        currentWork,
+        workspaceCount: this._workspaceCount,
+        memoryHealth
+      }
+    });
+
+    // Send all updates through the coordinator
+    const changedSections = this._refreshCoordinator.updateSections(updates, priority);
+
+    if (changedSections.length > 0) {
+      debugLog(`RefreshCoordinator: ${changedSections.length} sections changed: ${changedSections.join(", ")}`);
     }
+
+    // Also update workspaces tab (has its own rendering logic)
+    this._updateWorkspacesTab();
   }
 
   /**
    * Format services data for UI consumption.
    */
   private _formatServicesForUI(): any[] {
-    const serviceNames = ["slack", "cron", "meet"];
+    const serviceNames = ["slack", "cron", "meet", "sprint", "video"];
     return serviceNames.map(name => {
       const svc = this._services[name] || {};
       return {
         name: name === "slack" ? "Slack Agent" :
-              name === "cron" ? "Cron Scheduler" : "Meet Bot",
+              name === "cron" ? "Cron Scheduler" :
+              name === "meet" ? "Meet Bot" :
+              name === "sprint" ? "Sprint Bot" : "Video Bot",
         ...svc,
       };
     });
   }
 
   /**
-   * Background sync - runs the sync script without blocking UI.
+   * Background refresh - reloads data from cache file and queries D-Bus for service status.
    * Called every 10 seconds by the interval timer.
-   * The file watcher will trigger UI update when workspace_states.json changes.
+   *
+   * NOTE: The UI does NOT spawn sync processes. The sprint bot service
+   * (cron job) handles periodic updates to workspace_states.json.
+   * The UI only reads from the cache file, but queries D-Bus directly for service status.
    */
   private _backgroundSync(): void {
-    const { spawn } = require('child_process');
-    const projectRoot = this._getProjectRoot();
-
-    if (!projectRoot) {
-      return;
-    }
-
     // Clear personas cache to ensure fresh data on next access
     this._personasCache = null;
 
-    // Run sync script in background using spawn (avoids shell/bashrc)
-    const python = spawn('python3', [path.join(projectRoot, 'scripts', 'sync_workspace_state.py')], {
-      cwd: projectRoot,
-      env: process.env,
+    // Just reload from file and update UI - no sync process spawning
+    this._loadWorkspaceState();
+    this.update(false);
+    this.getInferenceStats();
+
+    // Also refresh service status via D-Bus (services don't write to workspace_states.json)
+    // This is async but we don't need to wait - it will dispatch its own UI update when done
+    this._refreshServicesViaDBus().catch(e => {
+      debugLog(`Failed to refresh services via D-Bus: ${e}`);
     });
 
-    let stdout = '';
-    let stderr = '';
-
-    python.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
+    // Refresh Ollama status via systemd
+    this.refreshOllamaStatus().catch(e => {
+      debugLog(`Failed to refresh Ollama status: ${e}`);
     });
 
-    python.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
+    // Refresh MCP server status
+    this.checkMCPServerStatus().catch(e => {
+      debugLog(`Failed to check MCP status: ${e}`);
     });
-
-    python.on('close', (code: number) => {
-      if (code !== 0) {
-        debugLog(`Background sync error (exit ${code}): ${stderr}`);
-      } else {
-        debugLog(`Background sync: ${stdout.trim()}`);
-      }
-      // File watcher will handle UI update when workspace_states.json changes
-      // Also do incremental UI update for stats
-      this.update(false);
-      this.getInferenceStats();
-    });
-
-    // Timeout after 30 seconds
-    setTimeout(() => {
-      if (python.exitCode === null) {
-        python.kill();
-        debugLog('Background sync timed out');
-      }
-    }, 30000);
   }
 
   /**
-   * Get the project root directory.
+   * Refresh service status by querying D-Bus directly.
+   * Updates this._services which is used by _formatServicesForUI().
    */
-  private _getProjectRoot(): string | null {
-    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+  private async _refreshServicesViaDBus(): Promise<void> {
+    debugLog(`_refreshServicesViaDBus: Starting refresh for ${DBUS_SERVICES.length} services`);
 
-    // Check current workspace first
-    if (fs.existsSync(path.join(workspacePath, 'scripts', 'sync_workspace_state.py'))) {
-      return workspacePath;
-    }
+    for (const service of DBUS_SERVICES) {
+      try {
+        debugLog(`_refreshServicesViaDBus: Querying ${service.service}`);
+        const result = await this.queryDBus(
+          service.service,
+          service.path,
+          service.interface,
+          "GetStatus"
+        );
+        debugLog(`_refreshServicesViaDBus: ${service.service} result: success=${result.success}, data=${JSON.stringify(result.data)?.substring(0, 100)}`);
 
-    // Try common locations
-    const possibleRoots = [
-      path.join(os.homedir(), 'src', 'redhat-ai-workflow'),
-      '/home/daoneill/src/redhat-ai-workflow',
-    ];
-
-    for (const root of possibleRoots) {
-      if (fs.existsSync(path.join(root, 'scripts', 'sync_workspace_state.py'))) {
-        return root;
+        // Map D-Bus service name to our internal key
+        const keyMap: Record<string, string> = {
+          "com.aiworkflow.BotSlack": "slack",
+          "com.aiworkflow.BotCron": "cron",
+          "com.aiworkflow.BotMeet": "meet",
+          "com.aiworkflow.BotSprint": "sprint",
+          "com.aiworkflow.BotSession": "session",
+          "com.aiworkflow.BotVideo": "video",
+        };
+        const key = keyMap[service.service];
+        if (key) {
+          if (result.success) {
+            this._services[key] = { running: true, status: result.data };
+            debugLog(`_refreshServicesViaDBus: Set ${key} to running=true`);
+          } else {
+            this._services[key] = { running: false, error: result.error };
+            debugLog(`_refreshServicesViaDBus: Set ${key} to running=false, error=${result.error}`);
+          }
+        }
+      } catch (e) {
+        // Service not available - mark as not running
+        debugLog(`_refreshServicesViaDBus: Exception for ${service.service}: ${e}`);
+        const keyMap: Record<string, string> = {
+          "com.aiworkflow.BotSlack": "slack",
+          "com.aiworkflow.BotCron": "cron",
+          "com.aiworkflow.BotMeet": "meet",
+          "com.aiworkflow.BotSprint": "sprint",
+          "com.aiworkflow.BotSession": "session",
+          "com.aiworkflow.BotVideo": "video",
+        };
+        const key = keyMap[service.service];
+        if (key) {
+          this._services[key] = { running: false, error: "Service not available" };
+        }
       }
     }
 
-    return null;
+    debugLog(`_refreshServicesViaDBus: Final this._services = ${JSON.stringify(this._services)}`);
+    // Dispatch UI update with new service status
+    this._dispatchAllUIUpdates(RefreshPriority.LOW);
   }
 
   /**
-   * Manual sync with loading indicator - for explicit refresh requests.
+   * Refresh sessions from cache file.
+   *
+   * NOTE: The UI does NOT spawn sync processes. The cron service
+   * handles periodic updates to workspace_states.json.
    */
   private async _syncAndRefreshSessions(): Promise<void> {
-    // Show loading state
+    // Show loading state briefly
     this._panel.webview.postMessage({
       command: "updateSessionsLoading",
       loading: true,
     });
-
-    try {
-      const { spawnSync } = require('child_process');
-      const projectRoot = this._getProjectRoot();
-
-      if (!projectRoot) {
-        throw new Error('Project root not found');
-      }
-
-      debugLog('Running manual session sync');
-      // Use spawnSync to avoid shell/bashrc sourcing
-      const syncResult = spawnSync('python3', [path.join(projectRoot, 'scripts', 'sync_workspace_state.py')], {
-        encoding: 'utf8',
-        timeout: 30000,
-        cwd: projectRoot,
-        env: process.env,
-      });
-
-      if (syncResult.error) {
-        throw syncResult.error;
-      }
-      if (syncResult.status !== 0) {
-        throw new Error(syncResult.stderr || `Exit code ${syncResult.status}`);
-      }
-
-      const result = syncResult.stdout;
-      debugLog(`Session sync result: ${result.trim()}`);
-
-      // Parse result and show message
-      const match = result.match(/Sync: \+(\d+) -(\d+) ~(\d+) ↻(\d+)/);
-      if (match) {
-        const [, added, removed, renamed, updated] = match.map(Number);
-        const total = added + removed + renamed + updated;
-        if (total > 0) {
-          vscode.window.showInformationMessage(
-            `Sessions synced: +${added} added, -${removed} removed, ~${renamed} renamed, ↻${updated} updated`
-          );
-        }
-      }
-    } catch (error: any) {
-      debugLog(`Session sync error: ${error.message || error}`);
-      vscode.window.showWarningMessage('Session sync failed. Showing cached data.');
-    }
 
     // Reload from file and refresh UI
     this._loadWorkspaceState();
@@ -5740,7 +6952,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     if (selected) {
       // Open the meeting notes - for now, show info about how to access them
       // In the future, this could open a webview with the transcript
-      const dbPath = path.join(os.homedir(), '.local/share/meet_bot/meetings.db');
+      const dbPath = path.join(os.homedir(), '.config', 'aa-workflow', 'meetings.db');
 
       if (fs.existsSync(dbPath)) {
         // Query the transcript for this meeting
@@ -5843,6 +7055,167 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     }
   }
 
+  /**
+   * Search sessions via D-Bus Session Daemon
+   */
+  private async _searchSessions(query: string): Promise<void> {
+    if (!query || query.trim().length === 0) {
+      this._panel.webview.postMessage({
+        type: "searchResults",
+        results: [],
+        query: "",
+        error: null,
+      });
+      return;
+    }
+
+    try {
+      // Call D-Bus to search chats
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSession",
+        "/com/aiworkflow/BotSession",
+        "com.aiworkflow.BotSession",
+        "CallMethod",
+        [
+          { type: "string", value: "search_chats" },
+          { type: "string", value: JSON.stringify([query, 20]) }
+        ]
+      );
+
+      if (result.success && result.data) {
+        const searchResult = typeof result.data === "string" ? JSON.parse(result.data) : result.data;
+        this._panel.webview.postMessage({
+          type: "searchResults",
+          results: searchResult.results || [],
+          query: query,
+          totalFound: searchResult.total_found || 0,
+          error: searchResult.error || null,
+        });
+      } else {
+        // D-Bus call failed - daemon might not be running
+        // Fall back to local search of session names
+        this._searchSessionsLocal(query);
+      }
+    } catch (error) {
+      debugLog(`Search via D-Bus failed: ${error}, falling back to local search`);
+      this._searchSessionsLocal(query);
+    }
+  }
+
+  /**
+   * Local fallback search - searches session names only (no chat content)
+   */
+  private _searchSessionsLocal(query: string): void {
+    const queryLower = query.toLowerCase();
+    const results: any[] = [];
+
+    if (this._workspaceState) {
+      for (const [uri, ws] of Object.entries(this._workspaceState)) {
+        const sessions = ws.sessions || {};
+        for (const [sid, session] of Object.entries(sessions)) {
+          const sess = session as any;
+          const name = sess.name || "";
+          const issueKey = sess.issue_key || "";
+
+          if (name.toLowerCase().includes(queryLower) || issueKey.toLowerCase().includes(queryLower)) {
+            results.push({
+              session_id: sid,
+              name: name || `Session ${sid.substring(0, 8)}`,
+              project: sess.project || ws.project || "unknown",
+              workspace_uri: uri,
+              name_match: true,
+              content_matches: [],
+              match_count: 0,
+              last_updated: sess.last_activity,
+            });
+          }
+        }
+      }
+    }
+
+    this._panel.webview.postMessage({
+      type: "searchResults",
+      results: results,
+      query: query,
+      totalFound: results.length,
+      error: null,
+      isLocalSearch: true,
+    });
+  }
+
+  /**
+   * Trigger immediate refresh via D-Bus Session Daemon
+   */
+  private async _triggerImmediateRefresh(): Promise<void> {
+    try {
+      const result = await this.queryDBus(
+        "com.aiworkflow.BotSession",
+        "/com/aiworkflow/BotSession",
+        "com.aiworkflow.BotSession",
+        "CallMethod",
+        [
+          { type: "string", value: "refresh_now" },
+          { type: "string", value: "[]" }
+        ]
+      );
+
+      if (result.success) {
+        debugLog("Triggered immediate refresh via D-Bus");
+        // The daemon will update workspace_states.json, and our file watcher will pick it up
+      } else {
+        // Daemon not running, fall back to direct sync
+        debugLog("D-Bus refresh failed, falling back to direct sync");
+        await this._syncAndRefreshSessions();
+      }
+    } catch (error) {
+      debugLog(`D-Bus refresh failed: ${error}, falling back to direct sync`);
+      await this._syncAndRefreshSessions();
+    }
+  }
+
+  /**
+   * Run a skill in a new chat session
+   * Creates a new chat, sends the skill_run command, and auto-submits
+   */
+  private async _runSkillInNewChat(skillName: string): Promise<void> {
+    try {
+      const { createNewChat } = await import('./chatUtils');
+
+      // Build the skill command
+      const command = `skill_run("${skillName}")`;
+
+      // Create a new chat with the skill command
+      // Title will be the skill name for easy identification
+      const skillLabel = skillName
+        .split("_")
+        .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+
+      logger.log(`Running skill "${skillName}" in new chat`);
+
+      const chatId = await createNewChat({
+        message: command,
+        title: `Skill: ${skillLabel}`,
+        autoSubmit: true,
+        delay: 150,
+      });
+
+      if (chatId) {
+        logger.log(`Created new chat ${chatId} for skill ${skillName}`);
+      } else {
+        // Fallback: copy to clipboard
+        await vscode.env.clipboard.writeText(command);
+        vscode.window.showInformationMessage(
+          `Skill command copied to clipboard. Paste in a new chat to run: ${command}`
+        );
+      }
+    } catch (error) {
+      logger.log(`Failed to run skill in new chat: ${error}`);
+      // Fallback: use the existing runSkillByName command
+      vscode.commands.executeCommand("aa-workflow.runSkillByName", skillName);
+    }
+  }
+
   private async _removeWorkspace(uri: string): Promise<void> {
     if (!this._workspaceState || !this._workspaceState[uri]) {
       vscode.window.showWarningMessage(`Workspace not found: ${uri}`);
@@ -5886,12 +7259,25 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
   private async loadPersona(personaName: string) {
     try {
-      // Copy the command to clipboard for user to paste in chat
+      const { createNewChat } = await import("./chatUtils");
       const command = `agent_load("${personaName}")`;
-      await vscode.env.clipboard.writeText(command);
-      vscode.window.showInformationMessage(
-        `Command copied to clipboard: ${command}\nPaste in Cursor chat to load the ${personaName} persona.`
-      );
+
+      // Use createNewChat which handles clipboard, paste, and ydotool Enter
+      const chatId = await createNewChat({
+        message: command,
+        title: `${personaName} persona`,
+        autoSubmit: true,  // Will send Enter via ydotool
+      });
+
+      if (chatId) {
+        vscode.window.showInformationMessage(`🚀 Loading ${personaName} persona...`);
+      } else {
+        // Fallback: copy to clipboard
+        await vscode.env.clipboard.writeText(command);
+        vscode.window.showInformationMessage(
+          `📋 Copied to clipboard: ${command} - Open a new chat and paste to load the persona.`
+        );
+      }
     } catch (e) {
       vscode.window.showErrorMessage(`Failed to load persona: ${e}`);
     }
@@ -5964,9 +7350,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     const memoryHealth = this.getMemoryHealth();
     const memoryFiles = this.loadMemoryFiles();
     const vectorStats = this.loadVectorStats();
-    // Load cron config via D-Bus (thread-safe) and update cache
-    const cronConfig = await this.loadCronConfigAsync();
-    this._cachedCronConfig = cronConfig;
+    // Use cron state file as primary source (cron daemon owns this file)
+    // Only fall back to D-Bus if state file is empty/missing
+    let cronConfig = this._cronData;
+    if (!cronConfig || !cronConfig.jobs || cronConfig.jobs.length === 0) {
+      // State file empty, try D-Bus as fallback
+      const cronConfigResult = await this.loadCronConfigAsync();
+      if (cronConfigResult !== null) {
+        this._cachedCronConfig = cronConfigResult;
+        cronConfig = cronConfigResult;
+      }
+    }
+    // Final fallback to defaults
+    cronConfig = cronConfig || { enabled: false, timezone: "UTC", jobs: [], execution_mode: "claude_cli" };
     const cronHistory = this.loadCronHistory();
     const toolModules = this.loadToolModules();
     const activeAgent = this.getActiveAgent();
@@ -6214,12 +7610,38 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       skillsByCategory[cat].push(skill);
     }
 
+    // Calculate totals for tab badges
+    const totalTools = toolModules.reduce((sum, m) => sum + m.toolCount, 0);
+    const totalSkills = skills.length;
+    const totalPersonas = personas.filter(p => !p.isInternal && !p.isSlim).length;
+
+    // Check service status for services tab indicator
+    // Include: D-Bus services + MCP server + Ollama instances
+    const servicesList = this._formatServicesForUI();
+    const runningServices = servicesList.filter(s => s.running).length;
+
+    // Count MCP as a service
+    const mcpRunning = this._services.mcp?.running ? 1 : 0;
+
+    // Count Ollama instances (from this._ollama or check cache)
+    const ollamaInstances = ["npu", "igpu", "nvidia", "cpu"];
+    const ollamaRunning = ollamaInstances.filter(name => this._ollama[name]?.available).length;
+
+    // Total: D-Bus services + MCP + 4 Ollama instances
+    const totalServices = servicesList.length + 1 + ollamaInstances.length;
+    const totalRunning = runningServices + mcpRunning + ollamaRunning;
+    const offlineCount = totalServices - totalRunning;
+
+    // Color scheme: green = all online, orange = 1-2 offline (degraded), red = 3+ offline
+    const servicesStatusColor = offlineCount === 0 ? 'status-green' : offlineCount < 3 ? 'status-yellow' : 'status-red';
+    const servicesStatusIcon = offlineCount === 0 ? '●' : offlineCount < 3 ? '◐' : '○';
+
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${this._panel.webview.cspSource} https: data:;">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}' 'unsafe-inline'; img-src ${this._panel.webview.cspSource} https: data:; connect-src ws://localhost:* wss://localhost:*;">
       <title>AI Workflow Command Center</title>
       <style>
         :root {
@@ -6376,29 +7798,32 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         }
 
         /* ============================================ */
-        /* Tabs */
+        /* Tabs - Compact Vertical Layout */
         /* ============================================ */
         .tabs {
           display: flex;
           gap: 0;
           background: var(--bg-secondary);
           border-bottom: 1px solid var(--border);
-          padding: 0 16px;
+          padding: 4px 8px;
           flex-shrink: 0; /* Don't shrink the tab bar */
+          justify-content: center;
         }
 
         .tab {
-          padding: 12px 14px;
+          padding: 5px 10px 8px;
           border: none;
           background: transparent;
           color: var(--text-secondary);
-          font-size: 0.85rem;
+          font-size: 0.8rem;
           cursor: pointer;
           border-bottom: 2px solid transparent;
           transition: all 0.2s;
           display: flex;
+          flex-direction: column;
           align-items: center;
-          gap: 6px;
+          gap: 2px;
+          min-width: 48px;
         }
 
         .tab:hover {
@@ -6415,15 +7840,54 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         .tab-badge {
           background: var(--accent);
           color: var(--vscode-button-foreground);
-          font-size: 0.65rem;
-          padding: 2px 6px;
+          font-size: 0.7rem;
+          padding: 2px 5px;
           border-radius: 10px;
           font-weight: 600;
+          min-height: 15px;
+          line-height: 15px;
+          order: -1; /* Move badge to top */
         }
 
         .tab-badge.running {
           background: var(--warning);
           animation: pulse 1s ease-in-out infinite;
+        }
+
+        .tab-badge-placeholder {
+          min-height: 19px;
+          order: -1; /* Keep placeholder at top for alignment */
+        }
+
+        .tab-badge-status {
+          background: transparent;
+          font-size: 0.7rem;
+          padding: 0;
+        }
+
+        .tab-badge-status.status-green {
+          color: var(--success);
+        }
+
+        .tab-badge-status.status-yellow {
+          color: var(--warning);
+        }
+
+        .tab-badge-status.status-red {
+          color: var(--error);
+        }
+
+        .tab-icon {
+          font-size: 1.375rem;
+          line-height: 1;
+          margin: 6px 0;
+        }
+
+        .tab-label {
+          font-size: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
+          white-space: nowrap;
         }
 
         @keyframes pulse {
@@ -6553,7 +8017,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           padding: 8px;
           background: var(--bg-tertiary);
           border-radius: 6px;
-          max-height: 120px;
+          max-height: 240px;
           overflow-y: auto;
         }
 
@@ -6864,6 +8328,64 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           gap: 10px;
           font-weight: 600;
           font-size: 0.9rem;
+        }
+
+        .running-skills-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .stale-warning {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 2px 8px;
+          background: rgba(234, 179, 8, 0.2);
+          border: 1px solid var(--yellow);
+          border-radius: 12px;
+          font-size: 0.75rem;
+          color: var(--yellow);
+          font-weight: 500;
+        }
+
+        .btn-danger {
+          color: var(--error) !important;
+          border-color: var(--error) !important;
+        }
+
+        .btn-danger:hover {
+          background: rgba(239, 68, 68, 0.15) !important;
+        }
+
+        .running-skill-item.stale {
+          background: rgba(234, 179, 8, 0.1);
+          border-left: 3px solid var(--yellow);
+        }
+
+        .running-skill-item.stale .running-skill-elapsed {
+          color: var(--yellow);
+          font-weight: 600;
+        }
+
+        .running-skill-item .clear-skill-btn {
+          opacity: 0;
+          padding: 2px 6px;
+          font-size: 0.7rem;
+          background: transparent;
+          border: 1px solid var(--error);
+          color: var(--error);
+          border-radius: 4px;
+          cursor: pointer;
+          transition: opacity 0.2s, background 0.2s;
+        }
+
+        .running-skill-item:hover .clear-skill-btn {
+          opacity: 1;
+        }
+
+        .running-skill-item .clear-skill-btn:hover {
+          background: rgba(239, 68, 68, 0.15);
         }
 
         .running-indicator {
@@ -7962,6 +9484,276 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           font-size: 0.8rem;
         }
 
+        .slack-channel {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          background: var(--bg-tertiary);
+          padding: 1px 6px;
+          border-radius: 3px;
+        }
+
+        .slack-reply-btn {
+          margin-left: auto;
+          opacity: 0;
+          transition: opacity 0.2s;
+        }
+
+        .slack-message:hover .slack-reply-btn {
+          opacity: 1;
+        }
+
+        .btn-tiny {
+          padding: 2px 6px;
+          font-size: 0.7rem;
+        }
+
+        /* Toggle Switch */
+        .toggle-switch {
+          position: relative;
+          display: inline-block;
+          width: 40px;
+          height: 20px;
+        }
+
+        .toggle-switch input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+
+        .toggle-slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: var(--bg-tertiary);
+          transition: 0.3s;
+          border-radius: 20px;
+        }
+
+        .toggle-slider:before {
+          position: absolute;
+          content: "";
+          height: 14px;
+          width: 14px;
+          left: 3px;
+          bottom: 3px;
+          background-color: var(--text-muted);
+          transition: 0.3s;
+          border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+          background-color: var(--primary);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+          transform: translateX(20px);
+          background-color: white;
+        }
+
+        /* Quick Reply Modal */
+        .quick-reply-modal {
+          display: none;
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 1000;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .quick-reply-content {
+          background: var(--bg-primary);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 20px;
+          width: 90%;
+          max-width: 500px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .quick-reply-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 16px;
+        }
+
+        .quick-reply-title {
+          font-weight: 600;
+          font-size: 1rem;
+        }
+
+        .quick-reply-channel {
+          font-size: 0.85rem;
+          color: var(--text-muted);
+        }
+
+        .quick-reply-input {
+          width: 100%;
+          padding: 12px;
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          background: var(--bg-secondary);
+          color: var(--text-primary);
+          font-size: 0.9rem;
+          margin-bottom: 16px;
+          resize: vertical;
+          min-height: 80px;
+        }
+
+        .quick-reply-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+
+        /* Slack Pending Approvals */
+        .slack-pending-item {
+          display: flex;
+          gap: 12px;
+          padding: 12px;
+          border-bottom: 1px solid var(--border);
+          align-items: flex-start;
+        }
+
+        .slack-pending-item:last-child {
+          border-bottom: none;
+        }
+
+        .slack-pending-content {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .slack-pending-actions {
+          display: flex;
+          gap: 6px;
+          flex-shrink: 0;
+        }
+
+        .slack-pending-meta {
+          font-size: 0.75rem;
+          color: var(--text-secondary);
+          margin-top: 4px;
+        }
+
+        /* Slack Search Results */
+        .slack-search-result {
+          display: flex;
+          gap: 12px;
+          padding: 10px 12px;
+          border-bottom: 1px solid var(--border);
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+
+        .slack-search-result:hover {
+          background: var(--bg-secondary);
+        }
+
+        .slack-search-result:last-child {
+          border-bottom: none;
+        }
+
+        .slack-search-channel {
+          font-size: 0.7rem;
+          color: var(--text-secondary);
+          background: var(--bg-tertiary);
+          padding: 2px 6px;
+          border-radius: 4px;
+        }
+
+        .slack-search-text {
+          font-size: 0.85rem;
+          margin-top: 4px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+        }
+
+        /* Slack Channel/User Browser */
+        .slack-browser-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 8px 10px;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+
+        .slack-browser-item:hover {
+          background: var(--bg-secondary);
+        }
+
+        .slack-browser-avatar {
+          width: 28px;
+          height: 28px;
+          border-radius: 6px;
+          background: var(--bg-tertiary);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          flex-shrink: 0;
+          overflow: hidden;
+        }
+
+        .slack-browser-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .slack-browser-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .slack-browser-name {
+          font-size: 0.85rem;
+          font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .slack-browser-meta {
+          font-size: 0.7rem;
+          color: var(--text-secondary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .slack-browser-id {
+          font-size: 0.65rem;
+          color: var(--text-muted);
+          font-family: 'Fira Code', monospace;
+        }
+
+        .slack-browser-badge {
+          font-size: 0.65rem;
+          padding: 2px 6px;
+          border-radius: 4px;
+          background: var(--bg-tertiary);
+          color: var(--text-secondary);
+        }
+
+        .slack-browser-badge.member {
+          background: rgba(16, 185, 129, 0.2);
+          color: var(--success);
+        }
+
         /* D-Bus Explorer */
         .dbus-controls {
           display: flex;
@@ -8776,6 +10568,25 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           gap: 20px;
         }
 
+        /* Search Spinner */
+        .search-spinner {
+          width: 14px;
+          height: 14px;
+          border: 2px solid var(--border);
+          border-top-color: var(--accent);
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+          to { transform: translateY(-50%) rotate(360deg); }
+        }
+
+        /* Search input focus state */
+        #sessionSearchInput:focus {
+          border-color: var(--accent);
+          box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
         /* Group By Select */
         .group-by-select {
           padding: 6px 12px;
@@ -9408,11 +11219,60 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
         .cron-history-error {
           margin-top: 8px;
-          padding: 8px;
+          padding: 10px 12px;
           background: rgba(239, 68, 68, 0.1);
           border-radius: 4px;
           font-size: 0.8rem;
           color: var(--error);
+          border-left: 3px solid var(--error);
+        }
+
+        .cron-history-error-type {
+          font-weight: 600;
+          margin-bottom: 4px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .cron-history-error-message {
+          font-family: var(--font-mono, monospace);
+          font-size: 0.75rem;
+          word-break: break-word;
+          opacity: 0.9;
+        }
+
+        .cron-history-output {
+          margin-top: 8px;
+          padding: 10px 12px;
+          background: rgba(34, 197, 94, 0.1);
+          border-radius: 4px;
+          font-size: 0.8rem;
+          color: var(--text-primary);
+          border-left: 3px solid var(--success);
+          max-height: 120px;
+          overflow-y: auto;
+          white-space: pre-wrap;
+          font-family: var(--font-mono, monospace);
+        }
+
+        .cron-history-duration {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .cron-history-duration.timeout {
+          color: var(--warning, #f59e0b);
+          font-weight: 600;
+        }
+
+        .cron-history-duration.slow {
+          color: var(--warning, #f59e0b);
+        }
+
+        .cron-history-duration.fast {
+          color: var(--success);
         }
 
         .cron-history-load-more {
@@ -10165,65 +12025,94 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         <div class="header-stats">
           <div class="header-stat">
             <div class="header-stat-value" id="statToolCalls">${this._formatNumber(lifetime.tool_calls)}</div>
-            <div class="header-stat-label">Tool Calls</div>
+            <div class="header-stat-label">Tool<br/>Calls</div>
           </div>
           <div class="header-stat">
             <div class="header-stat-value" id="statSkills">${lifetime.skill_executions}</div>
-            <div class="header-stat-label">Skills</div>
+            <div class="header-stat-label">Skills<br/>Called</div>
           </div>
           <div class="header-stat">
             <div class="header-stat-value" id="statSessions">${lifetime.sessions}</div>
-            <div class="header-stat-label">Sessions</div>
+            <div class="header-stat-label">Sessions<br/>Initiated</div>
           </div>
         </div>
       </div>
 
-      <!-- Tabs -->
+      <!-- Tabs - Compact Vertical Layout -->
       <div class="tabs">
         <button class="tab ${this._currentTab === "overview" ? "active" : ""}" data-tab="overview" id="tab-overview">
-          📊 Overview
+          <span class="tab-badge-placeholder"></span>
+          <span class="tab-icon">📊</span>
+          <span class="tab-label">Overview</span>
+        </button>
+        <button class="tab ${this._currentTab === "create" ? "active" : ""}" data-tab="create" id="tab-create">
+          <span class="tab-badge-placeholder"></span>
+          <span class="tab-icon">✨</span>
+          <span class="tab-label">Create</span>
         </button>
         <button class="tab ${this._currentTab === "sprint" ? "active" : ""}" data-tab="sprint" id="tab-sprint">
-          🏃 Sprint
-          ${sprintState.issues.length > 0 ? `<span class="tab-badge">${sprintState.issues.filter(i => i.approvalStatus === "pending" || i.approvalStatus === "waiting").length}</span>` : ""}
+          <span class="tab-badge" id="sprintTabBadge" style="${sprintState.issues.length > 0 ? '' : 'display: none;'}">${sprintState.issues.length}</span>
+          ${sprintState.issues.length === 0 ? '<span class="tab-badge-placeholder"></span>' : ''}
+          <span class="tab-icon">🏃</span>
+          <span class="tab-label">Sprint</span>
         </button>
         <button class="tab ${this._currentTab === "workspaces" ? "active" : ""}" data-tab="workspaces" id="tab-workspaces">
-          💬 Sessions
           <span class="tab-badge" id="workspacesBadge">${this._getTotalSessionCount()}</span>
+          <span class="tab-icon">💬</span>
+          <span class="tab-label">Sessions</span>
         </button>
         <button class="tab ${this._currentTab === "personas" ? "active" : ""}" data-tab="personas" id="tab-personas">
-          🤖 Personas
+          <span class="tab-badge" id="personasTabBadge">${totalPersonas}</span>
+          <span class="tab-icon">🤖</span>
+          <span class="tab-label">Personas</span>
         </button>
         <button class="tab ${this._currentTab === "skills" ? "active" : ""}" data-tab="skills" id="tab-skills">
-          ⚡ Skills
-          <span class="tab-badge" id="skillsBadge" style="display: none;">Running</span>
+          <span class="tab-badge" id="skillsBadge" data-total="${totalSkills}">${totalSkills}</span>
+          <span class="tab-icon">⚡</span>
+          <span class="tab-label">Skills</span>
         </button>
         <button class="tab ${this._currentTab === "tools" ? "active" : ""}" data-tab="tools" id="tab-tools">
-          🔧 Tools
+          <span class="tab-badge" id="toolsTabBadge">${totalTools}</span>
+          <span class="tab-icon">🔧</span>
+          <span class="tab-label">Tools</span>
         </button>
         <button class="tab ${this._currentTab === "memory" ? "active" : ""}" data-tab="memory" id="tab-memory">
-          🧠 Memory
+          <span class="tab-badge" id="memoryTabBadge">${memoryHealth.totalSize}</span>
+          <span class="tab-icon">🧠</span>
+          <span class="tab-label">Memory</span>
         </button>
         <button class="tab ${this._currentTab === "meetings" ? "active" : ""}" data-tab="meetings" id="tab-meetings">
-          🎥 Meetings
-          ${meetBotState.currentMeeting ? '<span class="tab-badge running">Live</span>' : meetBotState.upcomingMeetings.length > 0 ? `<span class="tab-badge">${meetBotState.upcomingMeetings.length}</span>` : ''}
+          <span class="tab-badge ${meetBotState.currentMeeting ? 'running' : ''}" id="meetingsTabBadge" style="${meetBotState.currentMeeting || meetBotState.upcomingMeetings.length > 0 ? '' : 'display: none;'}">${meetBotState.currentMeeting ? 'Live' : meetBotState.upcomingMeetings.length}</span>
+          ${!meetBotState.currentMeeting && meetBotState.upcomingMeetings.length === 0 ? '<span class="tab-badge-placeholder"></span>' : ''}
+          <span class="tab-icon">🎥</span>
+          <span class="tab-label">Meetings</span>
         </button>
         <button class="tab ${this._currentTab === "slack" ? "active" : ""}" data-tab="slack" id="tab-slack">
-          💬 Slack
+          <span class="tab-badge-placeholder"></span>
+          <span class="tab-icon">💬</span>
+          <span class="tab-label">Slack</span>
         </button>
         <button class="tab ${this._currentTab === "inference" ? "active" : ""}" data-tab="inference" id="tab-inference">
-          🧪 Inference
+          <span class="tab-badge-placeholder"></span>
+          <span class="tab-icon">🧪</span>
+          <span class="tab-label">Inference</span>
         </button>
         <button class="tab ${this._currentTab === "cron" ? "active" : ""}" data-tab="cron" id="tab-cron">
-          🕐 Cron
           <span class="tab-badge" id="cronTabBadge" style="${cronConfig.enabled && cronConfig.jobs.filter(j => j.enabled).length > 0 ? '' : 'display: none;'}">${cronConfig.jobs.filter(j => j.enabled).length}</span>
+          ${!(cronConfig.enabled && cronConfig.jobs.filter(j => j.enabled).length > 0) ? '<span class="tab-badge-placeholder"></span>' : ''}
+          <span class="tab-icon">🕐</span>
+          <span class="tab-label">Cron</span>
         </button>
         <button class="tab ${this._currentTab === "services" ? "active" : ""}" data-tab="services" id="tab-services">
-          🔌 Services
+          <span class="tab-badge tab-badge-status ${servicesStatusColor}" id="servicesTabBadge" title="${totalRunning}/${totalServices} online">${servicesStatusIcon}</span>
+          <span class="tab-icon">🔌</span>
+          <span class="tab-label">Services</span>
         </button>
         <button class="tab ${this._currentTab === "performance" ? "active" : ""}" data-tab="performance" id="tab-performance">
-          📊 QC
-          ${performanceState.overall_percentage > 0 ? `<span class="tab-badge">${performanceState.overall_percentage}%</span>` : ''}
+          <span class="tab-badge" id="performanceTabBadge" style="${performanceState.overall_percentage > 0 ? '' : 'display: none;'}">${performanceState.overall_percentage}%</span>
+          ${performanceState.overall_percentage === 0 ? '<span class="tab-badge-placeholder"></span>' : ''}
+          <span class="tab-icon">📊</span>
+          <span class="tab-label">QC</span>
         </button>
       </div>
 
@@ -10297,13 +12186,12 @@ Display the question text, evidence, notes, and AI-generated summary.`;
               </div>
               ${currentWork.allActiveIssues.length > 0 ? `
               <div class="current-work-list" id="activeIssuesList">
-                ${currentWork.allActiveIssues.slice(0, 3).map(issue => `
-                  <div class="current-work-item" title="${issue.project} - ${issue.workspace}">
+                ${currentWork.allActiveIssues.map((issue: any) => `
+                  <div class="current-work-item" title="${issue.summary || issue.project}">
                     <span class="work-item-key">${issue.key}</span>
                     <span class="work-item-project">${issue.project}</span>
                   </div>
                 `).join('')}
-                ${currentWork.allActiveIssues.length > 3 ? `<div class="work-item-more">+${currentWork.allActiveIssues.length - 3} more</div>` : ''}
               </div>
               ` : ''}
               <div id="currentIssueActions">
@@ -10323,13 +12211,12 @@ Display the question text, evidence, notes, and AI-generated summary.`;
               </div>
               ${currentWork.allActiveMRs.length > 0 ? `
               <div class="current-work-list" id="activeMRsList">
-                ${currentWork.allActiveMRs.slice(0, 3).map(mr => `
-                  <div class="current-work-item" title="${mr.project} - ${mr.workspace}">
+                ${currentWork.allActiveMRs.map((mr: any) => `
+                  <div class="current-work-item" title="${mr.title || mr.project}">
                     <span class="work-item-key">!${mr.id}</span>
                     <span class="work-item-project">${mr.project}</span>
                   </div>
                 `).join('')}
-                ${currentWork.allActiveMRs.length > 3 ? `<div class="work-item-more">+${currentWork.allActiveMRs.length - 3} more</div>` : ''}
               </div>
               ` : ''}
               <div id="currentMRActions">
@@ -10390,16 +12277,6 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           </div>
         </div>
 
-        <!-- Quick Actions -->
-        <div class="section">
-          <h2 class="section-title">⚡ Quick Actions</h2>
-          <div class="quick-actions">
-            <button class="btn btn-primary" data-action="runSkill">🎯 Run Skill</button>
-            <button class="btn btn-secondary" data-action="switchAgent">🤖 Switch Agent</button>
-            <button class="btn btn-secondary" data-action="coffee">☕ Coffee</button>
-            <button class="btn btn-secondary" data-action="beer">🍺 Beer</button>
-          </div>
-        </div>
       </div>
 
       <!-- Sessions Tab -->
@@ -10408,14 +12285,35 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <h2 class="section-title" style="margin: 0;">💬 Sessions by Project</h2>
             <div style="display: flex; gap: 8px; align-items: center;">
+              <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="session">▶ Start</button>
+              <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="session">⏹ Stop</button>
+              <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="session">📋 Logs</button>
+              <div class="search-box" style="position: relative; margin-left: 8px;">
+                <input type="text" id="sessionSearchInput" placeholder="Search chats..."
+                  style="padding: 6px 12px 6px 32px; border-radius: 6px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); font-size: 0.85rem; width: 200px; outline: none;"
+                  onkeyup="if(event.key === 'Enter') { vscode.postMessage({ command: 'searchSessions', query: this.value }); }"
+                />
+                <span id="sessionSearchIcon" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted);">🔍</span>
+                <span id="sessionSearchSpinner" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); display: none;" class="search-spinner"></span>
+                <button id="sessionSearchClear" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; display: none; font-size: 12px;" title="Clear search">✕</button>
+              </div>
               <div class="view-toggle" id="sessionViewToggle">
                 <button class="toggle-btn ${this._sessionViewMode === 'card' ? 'active' : ''}" data-action="changeSessionViewMode" data-value="card" title="Card View">🃏 Cards</button>
                 <button class="toggle-btn ${this._sessionViewMode === 'table' ? 'active' : ''}" data-action="changeSessionViewMode" data-value="table" title="Table View">📋 Table</button>
               </div>
               <span style="font-size: 0.9rem; color: var(--text-muted);">
-                ${this._getTotalSessionCount()} session(s) • Auto-refresh 10s
+                ${this._getTotalSessionCount()} session(s)
               </span>
             </div>
+          </div>
+
+          <!-- Search Results (hidden by default) -->
+          <div id="sessionSearchResults" style="display: none; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <h3 style="margin: 0; font-size: 1rem; color: var(--text-primary);">🔍 Search Results <span id="searchResultCount" style="color: var(--text-muted); font-weight: normal;"></span></h3>
+              <button id="clearSearchBtn" class="btn btn-secondary" style="padding: 4px 12px; font-size: 0.8rem;">Clear Search</button>
+            </div>
+            <div id="searchResultsContent" class="workspaces-grid"></div>
           </div>
 
           <div class="workspaces-grid" id="workspacesGrid">
@@ -10458,8 +12356,14 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             <div class="running-skills-title">
               <span class="running-indicator"></span>
               <span id="runningSkillsCount">0</span> Running Skills
+              <span id="staleSkillsWarning" class="stale-warning" style="display: none;" title="Some skills appear stuck">
+                ⚠️ <span id="staleSkillsCount">0</span> stale
+              </span>
             </div>
-            <button class="btn btn-ghost btn-small" id="toggleRunningSkills" title="Collapse">▼</button>
+            <div class="running-skills-actions">
+              <button class="btn btn-ghost btn-small btn-danger" id="clearStaleSkills" title="Clear stale/dead skill executions" style="display: none;">🗑️ Clear Stale</button>
+              <button class="btn btn-ghost btn-small" id="toggleRunningSkills" title="Collapse">▼</button>
+            </div>
           </div>
           <div class="running-skills-list" id="runningSkillsList">
             <!-- Populated dynamically -->
@@ -10518,7 +12422,6 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         <div class="section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h2 class="section-title" style="margin: 0;">🖥️ Ollama Instances</h2>
-            <span style="font-size: 0.85rem; color: var(--text-muted);">Auto-refresh 10s</span>
           </div>
           <div class="grid-4" id="ollamaInstances">
             <div class="service-card">
@@ -10596,7 +12499,6 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         <div class="section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h2 class="section-title" style="margin: 0;">🔌 Background Services</h2>
-            <span style="font-size: 0.85rem; color: var(--text-muted);">Auto-refresh 10s</span>
           </div>
           <div class="grid-2">
             <!-- Slack Agent -->
@@ -10650,6 +12552,42 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                 <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="meet">▶ Start</button>
                 <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="meet">⏹ Stop</button>
                 <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="meet">📋 Logs</button>
+              </div>
+            </div>
+
+            <!-- Sprint Bot -->
+            <div class="service-card" id="sprintServiceCard">
+              <div class="service-header">
+                <div class="service-title">🏃 Sprint Bot</div>
+                <div class="service-status" id="sprintStatus">
+                  <span class="status-dot checking"></span> Checking...
+                </div>
+              </div>
+              <div class="service-content" id="sprintDetails">
+                <div class="service-row"><span>Status</span><span>Checking...</span></div>
+              </div>
+              <div class="service-actions">
+                <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="sprint">▶ Start</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="sprint">⏹ Stop</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="sprint">📋 Logs</button>
+              </div>
+            </div>
+
+            <!-- Video Bot -->
+            <div class="service-card" id="videoServiceCard">
+              <div class="service-header">
+                <div class="service-title">📹 Video Bot</div>
+                <div class="service-status" id="videoStatus">
+                  <span class="status-dot checking"></span> Checking...
+                </div>
+              </div>
+              <div class="service-content" id="videoDetails">
+                <div class="service-row"><span>Status</span><span>Checking...</span></div>
+              </div>
+              <div class="service-actions">
+                <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="video">▶ Start</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="video">⏹ Stop</button>
+                <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="video">📋 Logs</button>
               </div>
             </div>
 
@@ -10973,6 +12911,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                   <button class="toggle-btn" data-action="setSlackTarget" data-value="user" title="Direct Message">👤 User</button>
                 </div>
                 <button class="btn btn-ghost btn-small" data-action="refreshSlackTargets" title="Refresh channels and users">🔄</button>
+                <button class="btn btn-primary btn-small" data-action="openCommandBuilder" title="Build @me command">🤖 @me</button>
               </div>
               <!-- Channel Select (shown by default) -->
               <div id="slackChannelContainer" style="display: flex; gap: 12px; margin-bottom: 12px;">
@@ -11001,11 +12940,51 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           </div>
         </div>
 
+        <!-- Pending Approvals -->
+        <div class="section" id="slackPendingSection">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 class="section-title" style="margin: 0;">⏳ Pending Approvals <span id="slackPendingBadge" class="badge" style="display: none;">0</span></h2>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-ghost btn-small" data-action="approveAllSlack" title="Approve all pending">✅ Approve All</button>
+              <button class="btn btn-ghost btn-small" data-action="refreshSlackPending" title="Refresh">🔄</button>
+            </div>
+          </div>
+          <div class="service-card">
+            <div id="slackPendingList" style="max-height: 300px; overflow-y: auto;">
+              <div class="empty-state">
+                <div class="empty-state-icon">✅</div>
+                <div>No pending approvals</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Message Search -->
+        <div class="section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 class="section-title" style="margin: 0;">🔍 Search Messages</h2>
+            <span id="slackSearchRemaining" style="font-size: 0.75rem; color: var(--text-secondary);"></span>
+          </div>
+          <div class="service-card">
+            <div class="service-content">
+              <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+                <input type="text" id="slackSearchInput" placeholder="Search Slack messages..." style="flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
+                <button class="btn btn-primary" data-action="searchSlackMessages">Search</button>
+              </div>
+              <div id="slackSearchResults" style="max-height: 300px; overflow-y: auto;">
+                <div class="empty-state" style="padding: 20px;">
+                  <div class="empty-state-icon">🔍</div>
+                  <div>Enter a search query</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Message Feed -->
         <div class="section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h2 class="section-title" style="margin: 0;">📬 Message Feed</h2>
-            <span style="font-size: 0.85rem; color: var(--text-muted);">Auto-refresh 10s</span>
           </div>
           <div class="service-card">
             <div class="slack-messages" id="slackMessages" style="max-height: 500px;">
@@ -11014,6 +12993,174 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                 <div>No messages yet</div>
                 <div style="font-size: 0.8rem; margin-top: 8px; color: var(--text-muted);">Messages will appear automatically</div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Channel & User Browser -->
+        <div class="section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 class="section-title" style="margin: 0;">📚 Discovery</h2>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-ghost btn-small" data-action="refreshSlackCache" title="Refresh cache from Slack API">🔄 Refresh Cache</button>
+            </div>
+          </div>
+          <div class="grid-2">
+            <!-- Channel Browser -->
+            <div class="service-card">
+              <div class="service-header">
+                <div class="service-title">📢 Channels</div>
+                <span id="slackChannelCount" style="font-size: 0.75rem; color: var(--text-secondary);">0 channels</span>
+              </div>
+              <div class="service-content" style="padding: 8px;">
+                <input type="text" id="slackChannelSearch" placeholder="Filter channels..." style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); margin-bottom: 8px; font-size: 0.85rem;">
+                <div id="slackChannelBrowser" style="max-height: 250px; overflow-y: auto;">
+                  <div class="empty-state" style="padding: 20px;">
+                    <div>Loading channels...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- User Browser -->
+            <div class="service-card">
+              <div class="service-header">
+                <div class="service-title">👥 Users</div>
+                <span id="slackUserCount" style="font-size: 0.75rem; color: var(--text-secondary);">0 users</span>
+              </div>
+              <div class="service-content" style="padding: 8px;">
+                <input type="text" id="slackUserBrowserSearch" placeholder="Filter users..." style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); margin-bottom: 8px; font-size: 0.85rem;">
+                <div id="slackUserBrowser" style="max-height: 250px; overflow-y: auto;">
+                  <div class="empty-state" style="padding: 20px;">
+                    <div>Loading users...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cache Stats -->
+        <div class="section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 class="section-title" style="margin: 0;">📊 Cache Statistics</h2>
+          </div>
+          <div class="grid-2">
+            <div class="service-card">
+              <div class="service-header">
+                <div class="service-title">📢 Channel Cache</div>
+              </div>
+              <div class="service-content">
+                <div class="service-row"><span>Total Channels</span><span id="slackCacheChannelTotal">--</span></div>
+                <div class="service-row"><span>Member Channels</span><span id="slackCacheChannelMember">--</span></div>
+                <div class="service-row"><span>Cache Age</span><span id="slackCacheChannelAge">--</span></div>
+              </div>
+            </div>
+            <div class="service-card">
+              <div class="service-header">
+                <div class="service-title">👥 User Cache</div>
+              </div>
+              <div class="service-content">
+                <div class="service-row"><span>Total Users</span><span id="slackCacheUserTotal">--</span></div>
+                <div class="service-row"><span>With Avatar</span><span id="slackCacheUserAvatar">--</span></div>
+                <div class="service-row"><span>With Email</span><span id="slackCacheUserEmail">--</span></div>
+                <div class="service-row"><span>Cache Age</span><span id="slackCacheUserAge">--</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bot Configuration -->
+        <div class="section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 class="section-title" style="margin: 0;">⚙️ Bot Configuration</h2>
+            <button class="btn btn-ghost btn-small" data-action="loadSlackConfig" title="Reload configuration">🔄 Reload</button>
+          </div>
+          <div class="grid-2">
+            <div class="service-card">
+              <div class="service-header">
+                <div class="service-title">🔧 Quick Settings</div>
+              </div>
+              <div class="service-content">
+                <div class="service-row" style="justify-content: space-between;">
+                  <span>Debug Mode</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="slackDebugModeToggle" onchange="toggleSlackDebugMode(this.checked)">
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">When enabled, bot processes but doesn't respond</div>
+              </div>
+            </div>
+            <div class="service-card">
+              <div class="service-header">
+                <div class="service-title">📋 Config Summary</div>
+              </div>
+              <div class="service-content">
+                <div class="service-row"><span>Watched Channels</span><span id="slackConfigWatchedCount">--</span></div>
+                <div class="service-row"><span>Alert Channels</span><span id="slackConfigAlertCount">--</span></div>
+                <div class="service-row"><span>Safe Users</span><span id="slackConfigSafeCount">--</span></div>
+                <div class="service-row"><span>Concerned Users</span><span id="slackConfigConcernedCount">--</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Reply Modal -->
+        <div class="quick-reply-modal" id="quickReplyModal" onclick="if(event.target === this) hideQuickReply()">
+          <div class="quick-reply-content" onclick="event.stopPropagation()">
+            <div class="quick-reply-header">
+              <div>
+                <div class="quick-reply-title">↩️ Reply in Thread</div>
+                <div class="quick-reply-channel" id="quickReplyChannelLabel"></div>
+              </div>
+              <button class="btn btn-ghost btn-small" onclick="hideQuickReply()">✕</button>
+            </div>
+            <textarea class="quick-reply-input" id="quickReplyInput" placeholder="Type your reply..." onkeydown="if(event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendQuickReply()"></textarea>
+            <div class="quick-reply-actions">
+              <button class="btn btn-ghost" onclick="hideQuickReply()">Cancel</button>
+              <button class="btn btn-primary" onclick="sendQuickReply()">Send Reply</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Command Builder Modal -->
+        <div class="quick-reply-modal" id="commandBuilderModal" onclick="if(event.target === this) hideCommandBuilder()">
+          <div class="quick-reply-content" style="max-width: 600px;" onclick="event.stopPropagation()">
+            <div class="quick-reply-header">
+              <div>
+                <div class="quick-reply-title">🤖 @me Command Builder</div>
+                <div class="quick-reply-channel">Build and send @me commands</div>
+              </div>
+              <button class="btn btn-ghost btn-small" onclick="hideCommandBuilder()">✕</button>
+            </div>
+
+            <!-- Command Selection -->
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; font-size: 0.85rem; margin-bottom: 6px; font-weight: 500;">Select Command</label>
+              <select id="commandBuilderSelect" onchange="onCommandSelect()" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
+                <option value="">Choose a command...</option>
+              </select>
+            </div>
+
+            <!-- Command Description -->
+            <div id="commandBuilderDescription" style="display: none; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border-radius: 6px; font-size: 0.85rem;">
+            </div>
+
+            <!-- Command Parameters -->
+            <div id="commandBuilderParams" style="display: none; margin-bottom: 16px;">
+              <label style="display: block; font-size: 0.85rem; margin-bottom: 6px; font-weight: 500;">Parameters</label>
+              <div id="commandBuilderParamInputs"></div>
+            </div>
+
+            <!-- Command Preview -->
+            <div id="commandBuilderPreview" style="display: none; margin-bottom: 16px;">
+              <label style="display: block; font-size: 0.85rem; margin-bottom: 6px; font-weight: 500;">Preview</label>
+              <code id="commandBuilderPreviewText" style="display: block; padding: 10px 12px; background: var(--bg-tertiary); border-radius: 6px; font-size: 0.85rem; word-break: break-all;"></code>
+            </div>
+
+            <div class="quick-reply-actions">
+              <button class="btn btn-ghost" onclick="hideCommandBuilder()">Cancel</button>
+              <button class="btn btn-primary" id="commandBuilderSendBtn" onclick="sendBuiltCommand()" disabled>Send Command</button>
             </div>
           </div>
         </div>
@@ -11134,38 +13281,6 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           </div>
           `}
 
-          <!-- Dynamic Persona Details Panel -->
-          <div class="section persona-detail-section" id="personaDetailSection" style="margin-top: 24px;">
-            <h2 class="section-title">📋 <span id="personaDetailTitle">Select a Persona</span></h2>
-            <div class="card persona-detail-card" id="personaDetailCard" style="padding: 20px;">
-              <div id="personaDetailContent">
-                <p style="margin: 0 0 12px 0; color: var(--text-secondary);">
-                  Click on a persona card above to see its full details, including all tool modules and skills.
-                </p>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px;">
-                  <div style="padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
-                    <div style="font-weight: 600; margin-bottom: 4px;">👨‍💻 Developer</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted);">Coding, PRs, code review</div>
-                  </div>
-                  <div style="padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
-                    <div style="font-weight: 600; margin-bottom: 4px;">🔧 DevOps</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted);">Deployments, K8s, monitoring</div>
-                  </div>
-                  <div style="padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
-                    <div style="font-weight: 600; margin-bottom: 4px;">🚨 Incident</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted);">Production issues, alerts</div>
-                  </div>
-                  <div style="padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
-                    <div style="font-weight: 600; margin-bottom: 4px;">📦 Release</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted);">Shipping, Konflux, Quay</div>
-                  </div>
-                </div>
-                <p style="margin: 16px 0 0 0; font-size: 0.85rem; color: var(--text-muted);">
-                  💡 Tip: Use <code style="background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px;">agent_load("persona_name")</code> in chat to switch personas.
-                </p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -11411,7 +13526,14 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       <div class="tab-content ${this._currentTab === "cron" ? "active" : ""}" id="cron">
         <!-- Cron Status -->
         <div class="section">
-          <h2 class="section-title">🕐 Scheduler Status</h2>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 class="section-title" style="margin: 0;">🕐 Scheduler Status</h2>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="cron">▶ Start</button>
+              <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="cron">⏹ Stop</button>
+              <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="cron">📋 Logs</button>
+            </div>
+          </div>
           <div class="grid-4">
             <div class="stat-card ${cronConfig.enabled ? "green" : ""} clickable" id="cronEnabledCard" data-action="toggleScheduler" title="Click to ${cronConfig.enabled ? 'disable' : 'enable'} scheduler">
               <div class="stat-icon" id="cronEnabledIcon">${cronConfig.enabled ? "✅" : "⏸️"}</div>
@@ -11509,7 +13631,44 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                   <div>No execution history</div>
                   <div style="font-size: 0.8rem; margin-top: 8px;">Jobs will appear here after they run</div>
                 </div>
-              ` : cronHistory.slice(0, 10).map(exec => `
+              ` : cronHistory.slice(0, 10).map(exec => {
+                // Format duration with color coding
+                const formatDuration = (ms: number | undefined) => {
+                  if (!ms) return "";
+                  const seconds = Math.floor(ms / 1000);
+                  const minutes = Math.floor(seconds / 60);
+                  const isTimeout = ms >= 600000; // 10 minutes
+                  const isSlow = ms >= 300000; // 5 minutes
+                  const durationClass = isTimeout ? "timeout" : isSlow ? "slow" : "fast";
+                  const durationText = minutes >= 1 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+                  const icon = isTimeout ? "⏰" : "⏱️";
+                  return `<span class="cron-history-duration ${durationClass}">${icon} ${durationText}</span>`;
+                };
+
+                // Categorize error type
+                const categorizeError = (error: string | undefined) => {
+                  if (!error) return null;
+                  let errorType = "Error";
+                  let errorIcon = "❌";
+                  if (error.includes("timed out") || error.includes("timeout")) {
+                    errorType = "Timeout";
+                    errorIcon = "⏰";
+                  } else if (error.includes("API Error") || error.includes("oauth2") || error.includes("getaddrinfo")) {
+                    errorType = "Network/API Error";
+                    errorIcon = "🌐";
+                  } else if (error.includes("exited with code")) {
+                    errorType = "Process Error";
+                    errorIcon = "💥";
+                  } else if (error.includes("permission") || error.includes("unauthorized")) {
+                    errorType = "Auth Error";
+                    errorIcon = "🔒";
+                  }
+                  return { type: errorType, icon: errorIcon, message: error };
+                };
+
+                const errorInfo = categorizeError(exec.error);
+
+                return `
                 <div class="cron-history-item ${exec.success ? "success" : "failed"}">
                   <div class="cron-history-status">${exec.success ? "✅" : "❌"}</div>
                   <div class="cron-history-info">
@@ -11517,13 +13676,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                     ${exec.session_name ? `<div class="cron-history-session">💬 ${exec.session_name}</div>` : ""}
                     <div class="cron-history-details">
                       <span>⚡ ${exec.skill}</span>
-                      ${exec.duration_ms ? `<span>⏱️ ${exec.duration_ms}ms</span>` : ""}
+                      ${formatDuration(exec.duration_ms)}
                       <span>🕐 ${new Date(exec.timestamp).toLocaleString()}</span>
                     </div>
-                    ${exec.error ? `<div class="cron-history-error">❌ ${exec.error}</div>` : ""}
+                    ${errorInfo ? `
+                      <div class="cron-history-error">
+                        <div class="cron-history-error-type">${errorInfo.icon} ${errorInfo.type}</div>
+                        <div class="cron-history-error-message">${errorInfo.message}</div>
+                      </div>
+                    ` : ""}
+                    ${exec.output_preview ? `<div class="cron-history-output">${exec.output_preview}</div>` : ""}
                   </div>
                 </div>
-              `).join("")}
+              `}).join("")}
             </div>
             ${this.getCronHistoryTotal() > 10 ? `
               <div class="cron-history-load-more">
@@ -11568,9 +13733,18 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         </div>
       </div>
 
+      <!-- Create Session Tab -->
+      <div class="tab-content ${this._currentTab === "create" ? "active" : ""}" id="create">
+        <div id="create-session-content">
+          ${getCreateSessionTabContent()}
+        </div>
+      </div>
+
       <!-- Sprint Tab -->
       <div class="tab-content ${this._currentTab === "sprint" ? "active" : ""}" id="sprint">
-        ${getSprintTabContent(sprintState, sprintHistory, toolGapRequests, this._dataProvider.getJiraUrl())}
+        <div id="sprint-content">
+          ${getSprintTabContent(sprintState, sprintHistory, toolGapRequests, this._dataProvider.getJiraUrl())}
+        </div>
       </div>
 
       </div><!-- end main-content -->
@@ -11600,7 +13774,6 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         const toolModulesData = ${JSON.stringify(toolModules)};
         const personasData = ${JSON.stringify(personas)};
         let selectedSkill = null;
-        let selectedPersona = null;
         let currentExecution = null;
         let executingSkillName = null; // Track which skill is currently executing
         let currentSkillYaml = '';
@@ -11682,13 +13855,13 @@ Display the question text, evidence, notes, and AI-generated summary.`;
               });
             }
 
-            // Extract steps section - find "steps:" and capture until "outputs:" or end
+            // Extract steps section - find "steps:" and capture until end of file
+            // Note: outputs can appear before or after steps, so we can't use it as a boundary
             const stepsStartIdx = yaml.indexOf('\\nsteps:');
-            const outputsIdx = yaml.indexOf('\\noutputs:');
 
             if (stepsStartIdx !== -1) {
-              const stepsEndIdx = outputsIdx !== -1 ? outputsIdx : yaml.length;
-              const stepsSection = yaml.substring(stepsStartIdx + 7, stepsEndIdx); // +7 for "\\nsteps:"
+              // Steps section goes to end of file (steps is always the last major section in our skills)
+              const stepsSection = yaml.substring(stepsStartIdx + 7); // +7 for "\\nsteps:"
 
               // Find all step definitions by looking for "- name:" pattern
               const stepMatches = stepsSection.matchAll(/^\\s*-\\s+name:\\s*(.+)$/gm);
@@ -12447,109 +14620,6 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           }
         }
 
-        // Persona selection
-        function selectPersona(personaName) {
-          selectedPersona = personaName;
-
-          // Update card selection UI
-          document.querySelectorAll('.persona-card').forEach(card => {
-            card.classList.toggle('selected', card.getAttribute('data-persona') === personaName);
-          });
-
-          const persona = personasData.find(p => p.fileName === personaName || p.name === personaName);
-          if (!persona) return;
-
-          // Update detail panel title
-          const titleEl = document.getElementById('personaDetailTitle');
-          const contentEl = document.getElementById('personaDetailContent');
-
-          if (titleEl) {
-            const icon = getPersonaIcon(persona.name);
-            const typeBadge = persona.isSlim ? '<span class="persona-type-badge slim">slim</span>' :
-                             persona.isInternal ? '<span class="persona-type-badge internal">internal</span>' :
-                             persona.isAgent ? '<span class="persona-type-badge agent">agent</span>' : '';
-            titleEl.innerHTML = icon + ' ' + persona.name + ' ' + typeBadge;
-          }
-
-          if (contentEl) {
-            const toolsHtml = persona.tools.length > 0
-              ? persona.tools.map(t => '<span class="persona-tag tool">' + t + '</span>').join('')
-              : '<span class="persona-tag empty">No tool modules defined</span>';
-
-            const skillsHtml = persona.skills.length > 0
-              ? persona.skills.map(s => '<span class="persona-tag skill">' + s + '</span>').join('')
-              : '<span class="persona-tag empty">All skills available</span>';
-
-            contentEl.innerHTML = \`
-              <div style="margin-bottom: 16px;">
-                <p style="margin: 0; color: var(--text-secondary); font-size: 1rem;">
-                  \${persona.description || 'No description available'}
-                </p>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                <div>
-                  <h4 style="margin: 0 0 12px 0; color: var(--text-primary); font-size: 0.95rem;">
-                    🔧 Tools (\${persona.toolCount}) from \${persona.tools.length} modules
-                  </h4>
-                  <div class="persona-tags" style="flex-wrap: wrap;">
-                    \${toolsHtml}
-                  </div>
-                </div>
-                <div>
-                  <h4 style="margin: 0 0 12px 0; color: var(--text-primary); font-size: 0.95rem;">
-                    ⚡ Skills (\${persona.skills.length})
-                  </h4>
-                  <div class="persona-tags" style="flex-wrap: wrap;">
-                    \${skillsHtml}
-                  </div>
-                </div>
-              </div>
-
-              <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-color);">
-                <div style="display: flex; gap: 12px; align-items: center;">
-                  <button class="btn btn-primary btn-small" onclick="loadPersonaFromDetail('\${persona.fileName || persona.name}')">
-                    🔄 Load This Persona
-                  </button>
-                  <button class="btn btn-ghost btn-small" onclick="viewPersonaFileFromDetail('\${persona.fileName || persona.name}')">
-                    📄 View Config File
-                  </button>
-                  <span style="margin-left: auto; font-size: 0.85rem; color: var(--text-muted);">
-                    File: personas/\${persona.fileName || persona.name}.yaml
-                  </span>
-                </div>
-              </div>
-            \`;
-          }
-
-          // Scroll detail section into view
-          const detailSection = document.getElementById('personaDetailSection');
-          if (detailSection) {
-            detailSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }
-        }
-
-        function getPersonaIcon(name) {
-          const icons = {
-            developer: '👨‍💻',
-            devops: '🔧',
-            incident: '🚨',
-            release: '📦',
-            admin: '👑',
-            slack: '💬',
-            core: '⚙️',
-            universal: '🌐'
-          };
-          return icons[name.toLowerCase()] || '🤖';
-        }
-
-        function loadPersonaFromDetail(personaName) {
-          vscode.postMessage({ command: 'loadPersona', personaName });
-        }
-
-        function viewPersonaFileFromDetail(personaName) {
-          vscode.postMessage({ command: 'viewPersonaFile', personaName });
-        }
 
         // D-Bus
         function updateDbusMethods() {
@@ -12716,19 +14786,40 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         let runningSkillsCollapsed = false;
         let selectedRunningSkillId = null;
 
-        function updateRunningSkillsPanel(runningSkills) {
+        // Stale detection thresholds (in ms)
+        const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes total runtime
+        const INACTIVE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes since last event
+
+        function isSkillStale(skill) {
+          // Stale if running for more than 30 minutes
+          if (skill.elapsedMs > STALE_THRESHOLD_MS) {
+            return true;
+          }
+          // Note: We can't check last event time from the summary, but the watcher does
+          return false;
+        }
+
+        function updateRunningSkillsPanel(runningSkills, staleCount) {
           const panel = document.getElementById('runningSkillsPanel');
           const list = document.getElementById('runningSkillsList');
           const countEl = document.getElementById('runningSkillsCount');
           const badge = document.getElementById('skillsBadge');
+          const staleWarning = document.getElementById('staleSkillsWarning');
+          const staleCountEl = document.getElementById('staleSkillsCount');
+          const clearStaleBtn = document.getElementById('clearStaleSkills');
 
           if (!runningSkills || runningSkills.length === 0) {
             // Hide panel when no skills running
             if (panel) panel.style.display = 'none';
             if (badge) {
-              badge.style.display = 'none';
+              // Restore total skills count from data attribute
+              const totalSkills = badge.getAttribute('data-total') || '';
+              badge.textContent = totalSkills;
+              badge.style.display = '';
               badge.classList.remove('running');
             }
+            if (staleWarning) staleWarning.style.display = 'none';
+            if (clearStaleBtn) clearStaleBtn.style.display = 'none';
             return;
           }
 
@@ -12741,6 +14832,20 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             badge.textContent = runningSkills.length > 1 ? runningSkills.length + ' Running' : 'Running';
           }
 
+          // Count stale skills (client-side check based on elapsed time)
+          const clientStaleCount = staleCount !== undefined ? staleCount : runningSkills.filter(s => isSkillStale(s)).length;
+
+          // Show/hide stale warning and clear button
+          if (staleWarning) {
+            staleWarning.style.display = clientStaleCount > 0 ? 'inline-flex' : 'none';
+          }
+          if (staleCountEl) {
+            staleCountEl.textContent = clientStaleCount;
+          }
+          if (clearStaleBtn) {
+            clearStaleBtn.style.display = clientStaleCount > 0 ? 'inline-flex' : 'none';
+          }
+
           // Render running skills list
           if (list && !runningSkillsCollapsed) {
             list.innerHTML = runningSkills.map(skill => {
@@ -12751,8 +14856,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                                   skill.source === 'slack' ? 'Slack' :
                                   (skill.sessionName || 'Chat');
               const isSelected = skill.executionId === selectedRunningSkillId;
+              const isStale = isSkillStale(skill);
 
-              return '<div class="running-skill-item' + (isSelected ? ' selected' : '') + '" data-execution-id="' + skill.executionId + '">' +
+              return '<div class="running-skill-item' + (isSelected ? ' selected' : '') + (isStale ? ' stale' : '') + '" data-execution-id="' + skill.executionId + '">' +
                 '<div class="running-skill-progress">' +
                   '<div class="running-skill-progress-bar">' +
                     '<div class="running-skill-progress-fill" style="width: ' + progress + '%;"></div>' +
@@ -12760,19 +14866,23 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                   '<div class="running-skill-progress-text">' + (skill.currentStepIndex + 1) + '/' + skill.totalSteps + '</div>' +
                 '</div>' +
                 '<div class="running-skill-info">' +
-                  '<div class="running-skill-name">' + escapeHtml(skill.skillName) + '</div>' +
+                  '<div class="running-skill-name">' + escapeHtml(skill.skillName) + (isStale ? ' ⚠️' : '') + '</div>' +
                   '<div class="running-skill-source">' +
                     '<span class="source-badge ' + sourceClass + '">' + sourceClass + '</span>' +
                     '<span>' + escapeHtml(sourceLabel) + '</span>' +
                   '</div>' +
                 '</div>' +
                 '<div class="running-skill-elapsed">' + elapsed + '</div>' +
+                '<button class="clear-skill-btn" data-execution-id="' + skill.executionId + '" title="Clear this execution">✕</button>' +
               '</div>';
             }).join('');
 
-            // Add click handlers
+            // Add click handlers for skill items
             list.querySelectorAll('.running-skill-item').forEach(item => {
-              item.addEventListener('click', () => {
+              item.addEventListener('click', (e) => {
+                // Don't select if clicking the clear button
+                if (e.target.classList.contains('clear-skill-btn')) return;
+
                 const execId = item.getAttribute('data-execution-id');
                 selectedRunningSkillId = execId;
                 // Update selection UI
@@ -12780,6 +14890,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                 item.classList.add('selected');
                 // Tell extension to select this execution
                 vscode.postMessage({ command: 'selectRunningSkill', executionId: execId });
+              });
+            });
+
+            // Add click handlers for individual clear buttons
+            list.querySelectorAll('.clear-skill-btn').forEach(btn => {
+              btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const execId = btn.getAttribute('data-execution-id');
+                if (execId) {
+                  vscode.postMessage({ command: 'clearSkillExecution', executionId: execId });
+                }
               });
             });
           }
@@ -12807,6 +14928,14 @@ Display the question text, evidence, notes, and AI-generated summary.`;
               list.classList.toggle('collapsed', runningSkillsCollapsed);
             }
             toggleBtn.textContent = runningSkillsCollapsed ? '▶' : '▼';
+          });
+        }
+
+        // Clear stale skills button
+        const clearStaleBtn = document.getElementById('clearStaleSkills');
+        if (clearStaleBtn) {
+          clearStaleBtn.addEventListener('click', () => {
+            vscode.postMessage({ command: 'clearStaleSkills' });
           });
         }
 
@@ -13010,6 +15139,18 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             return;
           }
 
+          // Handle batch updates from RefreshCoordinator
+          // This processes multiple messages in a single frame for efficiency
+          if (message.type === 'batchUpdate' && message.messages) {
+            requestAnimationFrame(() => {
+              for (const msg of message.messages) {
+                // Re-dispatch each message through the normal handler
+                window.dispatchEvent(new MessageEvent('message', { data: msg }));
+              }
+            });
+            return;
+          }
+
           if (message.command === 'switchTab') {
             switchTab(message.tab);
           }
@@ -13035,7 +15176,10 @@ Display the question text, evidence, notes, and AI-generated summary.`;
               }
             } else {
               if (badge) {
-                badge.style.display = 'none';
+                // Restore total skills count from data attribute
+                const totalSkills = badge.getAttribute('data-total') || '';
+                badge.textContent = totalSkills;
+                badge.style.display = '';
                 badge.classList.remove('running');
               }
               // Keep executingSkillName so we can still show completed execution
@@ -13063,7 +15207,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           }
 
           if (message.command === 'runningSkillsUpdate') {
-            updateRunningSkillsPanel(message.runningSkills);
+            updateRunningSkillsPanel(message.runningSkills, message.staleCount);
           }
 
           if (message.command === 'skillDefinition') {
@@ -13118,6 +15262,45 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             }
           }
 
+          if (message.type === 'slackSearchResults') {
+            renderSlackSearchResults(message);
+          }
+
+          if (message.type === 'slackPending') {
+            renderSlackPending(message.pending || []);
+          }
+
+          if (message.type === 'slackCacheStats') {
+            updateSlackCacheStats(message.channelStats, message.userStats);
+          }
+
+          if (message.type === 'slackChannelBrowser') {
+            renderSlackChannelBrowser(message.channels || [], message.count || 0);
+          }
+
+          if (message.type === 'slackUserBrowser') {
+            renderSlackUserBrowser(message.users || [], message.count || 0);
+          }
+
+          if (message.type === 'slackCommands') {
+            populateCommandSelect(message.commands || []);
+          }
+
+          if (message.type === 'slackCommandSent') {
+            if (message.success) {
+              console.log('[Slack] Command sent: ' + message.command);
+            }
+          }
+
+          if (message.type === 'slackConfig') {
+            updateSlackConfigUI(message.config);
+          }
+
+          if (message.type === 'slackDebugModeChanged') {
+            const toggle = document.getElementById('slackDebugModeToggle');
+            if (toggle) toggle.checked = message.enabled;
+          }
+
           if (message.type === 'serviceStatus') {
             updateServiceStatus(message);
           }
@@ -13128,23 +15311,39 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           }
 
           if (message.type === 'cronData') {
-            console.log('[CommandCenter] Received cronData message:', message.config, message.history);
             // Update scheduler status from refreshed cron data
             if (message.config) {
-              updateSchedulerUI(message.config.enabled);
-              updateText('cronJobCount', (message.config.jobs || []).length);
-              const enabledJobs = (message.config.jobs || []).filter(j => j.enabled).length;
-              updateText('cronEnabledCount', enabledJobs);
-              // Update the tab badge
-              const cronTabBadge = document.getElementById('cronTabBadge');
-              if (cronTabBadge) {
-                cronTabBadge.textContent = enabledJobs.toString();
-                cronTabBadge.style.display = message.config.enabled && enabledJobs > 0 ? '' : 'none';
+              // Get current job count to detect potential stale/empty data
+              const currentJobCount = parseInt(document.getElementById('cronJobCount')?.textContent || '0', 10);
+              const newJobCount = (message.config.jobs || []).length;
+
+              // Skip cron config update if we're receiving 0 jobs but previously had jobs
+              // This prevents flicker from transient D-Bus failures
+              if (newJobCount === 0 && currentJobCount > 0) {
+                console.log('[Cron] Skipping config update with 0 jobs (had ' + currentJobCount + ' jobs) - likely stale data');
+                // Don't return - still process history update below
+              } else {
+                updateSchedulerUI(message.config.enabled);
+                updateText('cronJobCount', newJobCount);
+                const enabledJobs = (message.config.jobs || []).filter(j => j.enabled).length;
+                updateText('cronEnabledCount', enabledJobs);
+                // Update the tab badge (only if changed)
+                const cronTabBadge = document.getElementById('cronTabBadge');
+                if (cronTabBadge) {
+                  const newText = enabledJobs.toString();
+                  const newDisplay = message.config.enabled && enabledJobs > 0 ? '' : 'none';
+                  if (cronTabBadge.textContent !== newText) {
+                    cronTabBadge.textContent = newText;
+                  }
+                  if (cronTabBadge.style.display !== newDisplay) {
+                    cronTabBadge.style.display = newDisplay;
+                  }
+                }
+                // Update the jobs list dynamically (has internal hash check)
+                updateCronJobs(message.config.jobs || []);
               }
-              // Update the jobs list dynamically
-              updateCronJobs(message.config.jobs || []);
             }
-            // Update execution history
+            // Update execution history (has internal hash check)
             if (message.history !== undefined) {
               updateCronHistory(message.history, message.totalHistory, message.currentLimit);
             }
@@ -13157,6 +15356,44 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
           if (message.type === 'updateWorkspaces') {
             updateWorkspacesTab(message);
+          }
+
+          // Handle search results
+          if (message.type === 'searchResults') {
+            handleSearchResults(message);
+          }
+
+          // Incremental Sprint tab update (avoids full DOM re-render)
+          if (message.type === 'sprintTabUpdate') {
+            updateSprintTab(message);
+          }
+
+          // Sprint badge-only update (lightweight, for frequent syncs)
+          if (message.type === 'sprintBadgeUpdate') {
+            const badge = document.getElementById('sprintTabBadge');
+            if (badge) {
+              // Show total issues count, not just pending
+              const totalIssues = message.totalIssues || message.pendingCount || 0;
+              badge.textContent = totalIssues.toString();
+              badge.style.display = totalIssues > 0 ? '' : 'none';
+            }
+          }
+
+          // Incremental Meetings tab badge update
+          if (message.type === 'meetingsTabBadgeUpdate') {
+            updateMeetingsTabBadge(message);
+            // Also update the upcoming meetings list if we have rendered HTML
+            if (message.renderedUpcomingHtml !== undefined) {
+              const upcomingList = document.querySelector('.upcoming-meetings-list');
+              if (upcomingList) {
+                upcomingList.innerHTML = message.renderedUpcomingHtml;
+              }
+            }
+          }
+
+          // Incremental Performance tab badge update
+          if (message.type === 'performanceTabBadgeUpdate') {
+            updatePerformanceTabBadge(message.percentage);
           }
 
           if (message.type === 'sprintIssuesLoading') {
@@ -13290,6 +15527,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                 statusEl.innerHTML = '<span class="status-dot error"></span> Error';
               }
             });
+            // Update services tab badge
+            updateServicesTabBadge();
           }
 
           // Ollama test result handler
@@ -13776,6 +16015,216 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           }
         }
 
+        // Show/hide search loading state
+        function setSearchLoading(loading) {
+          const searchIcon = document.getElementById('sessionSearchIcon');
+          const searchSpinner = document.getElementById('sessionSearchSpinner');
+          const searchInput = document.getElementById('sessionSearchInput');
+
+          if (searchIcon) searchIcon.style.display = loading ? 'none' : 'block';
+          if (searchSpinner) searchSpinner.style.display = loading ? 'block' : 'none';
+          if (searchInput) searchInput.style.opacity = loading ? '0.7' : '1';
+        }
+
+        // Handle search results
+        function handleSearchResults(data) {
+          // Hide loading state
+          setSearchLoading(false);
+
+          const resultsContainer = document.getElementById('sessionSearchResults');
+          const resultsContent = document.getElementById('searchResultsContent');
+          const resultCount = document.getElementById('searchResultCount');
+          const searchInput = document.getElementById('sessionSearchInput');
+          const clearBtn = document.getElementById('sessionSearchClear');
+          const mainGrid = document.getElementById('workspacesGrid');
+
+          if (!data.query || data.query.trim() === '') {
+            // Clear search - show main grid
+            if (resultsContainer) resultsContainer.style.display = 'none';
+            if (mainGrid) mainGrid.style.display = '';
+            if (clearBtn) clearBtn.style.display = 'none';
+            return;
+          }
+
+          // Show search results
+          if (resultsContainer) resultsContainer.style.display = 'block';
+          if (mainGrid) mainGrid.style.display = 'none';
+          if (clearBtn) clearBtn.style.display = 'block';
+
+          // Update count
+          const isLocal = data.isLocalSearch ? ' (name only)' : '';
+          if (resultCount) {
+            resultCount.textContent = \`(\${data.results?.length || 0} found\${isLocal})\`;
+          }
+
+          // Render results
+          if (resultsContent && data.results) {
+            if (data.results.length === 0) {
+              resultsContent.innerHTML = \`
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                  <div class="empty-state-icon">🔍</div>
+                  <div>No results found for "\${data.query}"</div>
+                  <div style="font-size: 0.8rem; margin-top: 8px; color: var(--text-muted);">
+                    \${data.isLocalSearch ? 'Tip: Start the Session Daemon for full-text search' : 'Try a different search term'}
+                  </div>
+                </div>
+              \`;
+            } else {
+              resultsContent.innerHTML = data.results.map(r => \`
+                <div class="session-card" style="cursor: pointer;" onclick="vscode.postMessage({ command: 'openChatSession', sessionId: '\${r.session_id}', sessionName: '\${(r.name || '').replace(/'/g, "\\\\'")}' })">
+                  <div class="session-header">
+                    <span class="session-name">\${r.name || 'Unnamed'}</span>
+                    <span class="session-project" style="background: var(--bg-secondary); padding: 2px 8px; border-radius: 4px; font-size: 0.75rem;">\${r.project}</span>
+                  </div>
+                  \${r.name_match ? '<div style="color: var(--green); font-size: 0.8rem; margin-top: 4px;">✓ Name matches</div>' : ''}
+                  \${r.content_matches && r.content_matches.length > 0 ? \`
+                    <div style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);">
+                      \${r.content_matches.slice(0, 2).map(m => \`
+                        <div style="background: var(--bg-secondary); padding: 6px 8px; border-radius: 4px; margin-top: 4px; border-left: 2px solid var(--accent);">
+                          <span style="color: var(--text-muted); font-size: 0.7rem;">\${m.role}:</span> \${m.snippet}
+                        </div>
+                      \`).join('')}
+                      \${r.match_count > 2 ? \`<div style="margin-top: 4px; color: var(--text-muted);">+\${r.match_count - 2} more matches</div>\` : ''}
+                    </div>
+                  \` : ''}
+                </div>
+              \`).join('');
+            }
+          }
+        }
+
+        // Setup search input handlers
+        document.addEventListener('DOMContentLoaded', function() {
+          const searchInput = document.getElementById('sessionSearchInput');
+          const clearBtn = document.getElementById('sessionSearchClear');
+          const clearSearchBtn = document.getElementById('clearSearchBtn');
+
+          if (searchInput) {
+            let searchTimeout;
+            searchInput.addEventListener('input', function() {
+              clearTimeout(searchTimeout);
+              const query = this.value.trim();
+
+              // Show/hide clear button
+              if (clearBtn) {
+                clearBtn.style.display = query ? 'block' : 'none';
+              }
+
+              // Debounce search
+              if (query.length >= 2) {
+                // Show loading spinner
+                setSearchLoading(true);
+                searchTimeout = setTimeout(() => {
+                  vscode.postMessage({ command: 'searchSessions', query: query });
+                }, 300);
+              } else if (query.length === 0) {
+                // Clear results
+                setSearchLoading(false);
+                vscode.postMessage({ command: 'searchSessions', query: '' });
+              }
+            });
+
+            // Also handle Enter key
+            searchInput.addEventListener('keydown', function(e) {
+              if (e.key === 'Enter' && this.value.trim().length >= 2) {
+                clearTimeout(searchTimeout);
+                setSearchLoading(true);
+                vscode.postMessage({ command: 'searchSessions', query: this.value.trim() });
+              }
+            });
+          }
+
+          if (clearBtn) {
+            clearBtn.addEventListener('click', function() {
+              if (searchInput) searchInput.value = '';
+              this.style.display = 'none';
+              setSearchLoading(false);
+              vscode.postMessage({ command: 'searchSessions', query: '' });
+            });
+          }
+
+          if (clearSearchBtn) {
+            clearSearchBtn.addEventListener('click', function() {
+              if (searchInput) searchInput.value = '';
+              if (clearBtn) clearBtn.style.display = 'none';
+              setSearchLoading(false);
+              vscode.postMessage({ command: 'searchSessions', query: '' });
+            });
+          }
+        });
+
+        // Cache for detecting sprint content changes to avoid unnecessary DOM updates
+        let _lastSprintContentHash = '';
+
+        // Incremental update for Sprint tab - avoids full DOM re-render
+        // Uses hash comparison to skip unnecessary DOM updates
+        function updateSprintTab(data) {
+          // Update sprint tab badge - show total issues count
+          const badge = document.getElementById('sprintTabBadge');
+          if (badge) {
+            const totalIssues = (data.issues || []).length;
+            if (badge.textContent !== totalIssues.toString()) {
+              badge.textContent = totalIssues.toString();
+            }
+            const shouldShow = totalIssues > 0;
+            if ((badge.style.display === 'none') !== !shouldShow) {
+              badge.style.display = shouldShow ? '' : 'none';
+            }
+          }
+
+          // Update sprint content container with pre-rendered HTML
+          const container = document.getElementById('sprint-content');
+          if (container && data.renderedHtml !== undefined) {
+            // Create a simple hash to detect changes (avoids unnecessary DOM thrashing)
+            // Use issues array as the hash since it's smaller than full HTML
+            const newHash = JSON.stringify(data.issues || []);
+            if (newHash === _lastSprintContentHash) {
+              console.log('[CommandCenter] updateSprintTab: No changes detected, skipping DOM update');
+              return;
+            }
+            _lastSprintContentHash = newHash;
+
+            // Use requestAnimationFrame to batch the DOM update
+            requestAnimationFrame(() => {
+              container.innerHTML = data.renderedHtml;
+              // Re-initialize sprint tab event handlers after content update
+              if (typeof initSprintTab === 'function') {
+                initSprintTab();
+              }
+            });
+          }
+        }
+
+        // Incremental update for Meetings tab badge
+        function updateMeetingsTabBadge(data) {
+          const badge = document.getElementById('meetingsTabBadge');
+          if (badge) {
+            const isLive = data.currentMeeting || (data.currentMeetings && data.currentMeetings.length > 0);
+            const upcomingCount = (data.upcomingMeetings || []).length;
+
+            if (isLive) {
+              badge.textContent = 'Live';
+              badge.className = 'tab-badge running';
+              badge.style.display = '';
+            } else if (upcomingCount > 0) {
+              badge.textContent = upcomingCount.toString();
+              badge.className = 'tab-badge';
+              badge.style.display = '';
+            } else {
+              badge.style.display = 'none';
+            }
+          }
+        }
+
+        // Incremental update for Performance tab badge
+        function updatePerformanceTabBadge(percentage) {
+          const badge = document.getElementById('performanceTabBadge');
+          if (badge) {
+            badge.textContent = percentage + '%';
+            badge.style.display = percentage > 0 ? '' : 'none';
+          }
+        }
+
         function renderWorkspaceCard(uri, ws) {
           const project = ws.project || ws.auto_detected_project || 'No project';
           const shortUri = uri.replace('file://', '').split('/').slice(-2).join('/');
@@ -13942,12 +16391,12 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             const issuesList = document.getElementById('activeIssuesList');
             if (issuesList) {
               if (allIssues.length > 0) {
-                const issuesHtml = allIssues.slice(0, 3).map(issue =>
-                  '<div class="current-work-item" title="' + issue.project + ' - ' + issue.workspace + '">' +
+                const issuesHtml = allIssues.map(issue =>
+                  '<div class="current-work-item" title="' + (issue.summary || issue.project) + '">' +
                   '<span class="work-item-key">' + issue.key + '</span>' +
                   '<span class="work-item-project">' + issue.project + '</span>' +
                   '</div>'
-                ).join('') + (allIssues.length > 3 ? '<div class="work-item-more">+' + (allIssues.length - 3) + ' more</div>' : '');
+                ).join('');
                 issuesList.innerHTML = issuesHtml;
                 issuesList.style.display = 'flex';
               } else {
@@ -13987,12 +16436,12 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             const mrsList = document.getElementById('activeMRsList');
             if (mrsList) {
               if (allMRs.length > 0) {
-                const mrsHtml = allMRs.slice(0, 3).map(mr =>
-                  '<div class="current-work-item" title="' + mr.project + ' - ' + mr.workspace + '">' +
+                const mrsHtml = allMRs.map(mr =>
+                  '<div class="current-work-item" title="' + (mr.title || mr.project) + '">' +
                   '<span class="work-item-key">!' + mr.id + '</span>' +
                   '<span class="work-item-project">' + mr.project + '</span>' +
                   '</div>'
-                ).join('') + (allMRs.length > 3 ? '<div class="work-item-more">+' + (allMRs.length - 3) + ' more</div>' : '');
+                ).join('');
                 mrsList.innerHTML = mrsHtml;
                 mrsList.style.display = 'flex';
               } else {
@@ -14058,20 +16507,42 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
           // Update cron status
           if (data.cronConfig) {
-            updateSchedulerUI(data.cronConfig.enabled);
-            updateText('cronJobCount', (data.cronConfig.jobs || []).length);
-            const enabledJobs = (data.cronConfig.jobs || []).filter(j => j.enabled).length;
-            updateText('cronEnabledCount', enabledJobs);
-            // Update the tab badge
-            const cronTabBadge = document.getElementById('cronTabBadge');
-            if (cronTabBadge) {
-              cronTabBadge.textContent = enabledJobs.toString();
-              cronTabBadge.style.display = data.cronConfig.enabled && enabledJobs > 0 ? '' : 'none';
+            // Get current job count to detect potential stale/empty data
+            const currentJobCount = parseInt(document.getElementById('cronJobCount')?.textContent || '0', 10);
+            const newJobCount = (data.cronConfig.jobs || []).length;
+
+            // Skip update if we're receiving 0 jobs but previously had jobs
+            // This prevents flicker from transient D-Bus failures
+            if (newJobCount === 0 && currentJobCount > 0) {
+              console.log('[Cron] Skipping dataUpdate with 0 jobs (had ' + currentJobCount + ' jobs) - likely stale data');
+            } else {
+              updateSchedulerUI(data.cronConfig.enabled);
+              updateText('cronJobCount', newJobCount);
+              const enabledJobs = (data.cronConfig.jobs || []).filter(j => j.enabled).length;
+              updateText('cronEnabledCount', enabledJobs);
+              // Update the tab badge (only if changed)
+              const cronTabBadge = document.getElementById('cronTabBadge');
+              if (cronTabBadge) {
+                const newText = enabledJobs.toString();
+                const newDisplay = data.cronConfig.enabled && enabledJobs > 0 ? '' : 'none';
+                if (cronTabBadge.textContent !== newText) {
+                  cronTabBadge.textContent = newText;
+                }
+                if (cronTabBadge.style.display !== newDisplay) {
+                  cronTabBadge.style.display = newDisplay;
+                }
+              }
             }
           }
 
-          // Update last updated timestamp
-          updateText('lastUpdatedTime', 'Last updated: ' + new Date().toLocaleTimeString());
+          // Update last updated timestamp (only update if visible to avoid layout thrashing)
+          const lastUpdatedEl = document.getElementById('lastUpdatedTime');
+          if (lastUpdatedEl && document.visibilityState === 'visible') {
+            const newTime = 'Last updated: ' + new Date().toLocaleTimeString();
+            if (lastUpdatedEl.textContent !== newTime) {
+              lastUpdatedEl.textContent = newTime;
+            }
+          }
         }
 
         function renderSlackMessages(messages) {
@@ -14081,19 +16552,453 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             return;
           }
 
-          container.innerHTML = messages.map(msg => \`
-            <div class="slack-message">
+          container.innerHTML = messages.map(msg => {
+            const channelId = msg.channel_id || '';
+            const threadTs = msg.thread_ts || msg.ts || msg.timestamp || '';
+            const hasThread = threadTs && channelId;
+
+            return \`
+            <div class="slack-message" data-channel="\${channelId}" data-thread="\${threadTs}">
               <div class="slack-avatar">\${(msg.user_name || '?').charAt(0).toUpperCase()}</div>
               <div class="slack-content">
                 <div class="slack-header">
                   <span class="slack-user">\${msg.user_name || 'Unknown'}</span>
+                  <span class="slack-channel">\${msg.channel_name ? '#' + msg.channel_name : ''}</span>
                   <span class="slack-time">\${msg.created_at ? new Date(msg.created_at * 1000).toLocaleTimeString() : ''}</span>
+                  \${hasThread ? '<button class="btn btn-ghost btn-tiny slack-reply-btn" onclick="showQuickReply(\\'' + channelId + '\\', \\'' + threadTs + '\\', \\'' + (msg.channel_name || '') + '\\')">↩️ Reply</button>' : ''}
                 </div>
                 <div class="slack-text">\${msg.text || ''}</div>
                 \${msg.response ? '<div class="slack-response">🤖 ' + msg.response + '</div>' : ''}
               </div>
             </div>
+          \`;
+          }).join('');
+        }
+
+        // Quick reply state
+        let quickReplyChannel = '';
+        let quickReplyThread = '';
+
+        function showQuickReply(channelId, threadTs, channelName) {
+          quickReplyChannel = channelId;
+          quickReplyThread = threadTs;
+
+          const modal = document.getElementById('quickReplyModal');
+          const channelLabel = document.getElementById('quickReplyChannelLabel');
+          const input = document.getElementById('quickReplyInput');
+
+          if (modal && channelLabel && input) {
+            channelLabel.textContent = channelName ? '#' + channelName : channelId;
+            input.value = '';
+            modal.style.display = 'flex';
+            input.focus();
+          }
+        }
+
+        function hideQuickReply() {
+          const modal = document.getElementById('quickReplyModal');
+          if (modal) {
+            modal.style.display = 'none';
+          }
+          quickReplyChannel = '';
+          quickReplyThread = '';
+        }
+
+        function sendQuickReply() {
+          const input = document.getElementById('quickReplyInput');
+          const text = input?.value?.trim();
+
+          if (text && quickReplyChannel && quickReplyThread) {
+            vscode.postMessage({
+              command: 'replyToSlackThread',
+              channel: quickReplyChannel,
+              text: text,
+              threadTs: quickReplyThread
+            });
+            hideQuickReply();
+          }
+        }
+
+        // Command Builder state
+        let commandBuilderCommands = [];
+        let selectedCommand = null;
+
+        function showCommandBuilder() {
+          const modal = document.getElementById('commandBuilderModal');
+          if (modal) {
+            modal.style.display = 'flex';
+            // Load commands if not already loaded
+            if (commandBuilderCommands.length === 0) {
+              vscode.postMessage({ command: 'loadSlackCommands' });
+            }
+          }
+        }
+
+        function hideCommandBuilder() {
+          const modal = document.getElementById('commandBuilderModal');
+          if (modal) {
+            modal.style.display = 'none';
+          }
+          selectedCommand = null;
+        }
+
+        function populateCommandSelect(commands) {
+          commandBuilderCommands = commands;
+          const select = document.getElementById('commandBuilderSelect');
+          if (!select) return;
+
+          // Group by type
+          const grouped = { builtin: [], skill: [], tool: [] };
+          commands.forEach(cmd => {
+            const type = cmd.type || 'skill';
+            if (grouped[type]) grouped[type].push(cmd);
+          });
+
+          let html = '<option value="">Choose a command...</option>';
+
+          if (grouped.builtin.length > 0) {
+            html += '<optgroup label="Built-in Commands">';
+            grouped.builtin.forEach(cmd => {
+              html += '<option value="' + cmd.name + '">' + cmd.name + ' - ' + (cmd.description || '').substring(0, 40) + '</option>';
+            });
+            html += '</optgroup>';
+          }
+
+          if (grouped.skill.length > 0) {
+            html += '<optgroup label="Skills">';
+            grouped.skill.forEach(cmd => {
+              html += '<option value="' + cmd.name + '">' + cmd.name + ' - ' + (cmd.description || '').substring(0, 40) + '</option>';
+            });
+            html += '</optgroup>';
+          }
+
+          if (grouped.tool.length > 0) {
+            html += '<optgroup label="Tools">';
+            grouped.tool.slice(0, 20).forEach(cmd => {
+              html += '<option value="' + cmd.name + '">' + cmd.name + ' - ' + (cmd.description || '').substring(0, 40) + '</option>';
+            });
+            if (grouped.tool.length > 20) {
+              html += '<option disabled>... and ' + (grouped.tool.length - 20) + ' more</option>';
+            }
+            html += '</optgroup>';
+          }
+
+          select.innerHTML = html;
+        }
+
+        function onCommandSelect() {
+          const select = document.getElementById('commandBuilderSelect');
+          const cmdName = select?.value;
+
+          if (!cmdName) {
+            selectedCommand = null;
+            document.getElementById('commandBuilderDescription').style.display = 'none';
+            document.getElementById('commandBuilderParams').style.display = 'none';
+            document.getElementById('commandBuilderPreview').style.display = 'none';
+            document.getElementById('commandBuilderSendBtn').disabled = true;
+            return;
+          }
+
+          selectedCommand = commandBuilderCommands.find(c => c.name === cmdName);
+          if (!selectedCommand) return;
+
+          // Show description
+          const descEl = document.getElementById('commandBuilderDescription');
+          descEl.innerHTML = '<strong>' + selectedCommand.name + '</strong><br>' +
+            (selectedCommand.description || 'No description') +
+            (selectedCommand.contextual ? '<br><span style="color: var(--warning);">🧵 Supports thread context</span>' : '');
+          descEl.style.display = 'block';
+
+          // Show parameters
+          const paramsEl = document.getElementById('commandBuilderParams');
+          const inputsEl = document.getElementById('commandBuilderParamInputs');
+
+          if (selectedCommand.inputs && selectedCommand.inputs.length > 0) {
+            inputsEl.innerHTML = selectedCommand.inputs.map(inp => {
+              const required = inp.required ? ' <span style="color: var(--error);">*</span>' : '';
+              return '<div style="margin-bottom: 12px;">' +
+                '<label style="display: block; font-size: 0.8rem; margin-bottom: 4px;">' + inp.name + required + '</label>' +
+                '<input type="text" class="cmd-param-input" data-param="' + inp.name + '" placeholder="' + (inp.description || inp.name) + '" ' +
+                'style="width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem;" ' +
+                'oninput="updateCommandPreview()">' +
+                '</div>';
+            }).join('');
+            paramsEl.style.display = 'block';
+          } else {
+            inputsEl.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem;">No parameters required</div>';
+            paramsEl.style.display = 'block';
+          }
+
+          // Show preview
+          document.getElementById('commandBuilderPreview').style.display = 'block';
+          document.getElementById('commandBuilderSendBtn').disabled = false;
+          updateCommandPreview();
+        }
+
+        function updateCommandPreview() {
+          if (!selectedCommand) return;
+
+          let preview = '@me ' + selectedCommand.name;
+          const inputs = document.querySelectorAll('.cmd-param-input');
+          inputs.forEach(input => {
+            const value = input.value.trim();
+            if (value) {
+              preview += ' --' + input.dataset.param + '="' + value + '"';
+            }
+          });
+
+          document.getElementById('commandBuilderPreviewText').textContent = preview;
+        }
+
+        function sendBuiltCommand() {
+          if (!selectedCommand) return;
+
+          const args = {};
+          const inputs = document.querySelectorAll('.cmd-param-input');
+          inputs.forEach(input => {
+            const value = input.value.trim();
+            if (value) {
+              args[input.dataset.param] = value;
+            }
+          });
+
+          vscode.postMessage({
+            command: 'sendSlackCommand',
+            commandName: selectedCommand.name,
+            args: args
+          });
+
+          hideCommandBuilder();
+        }
+
+        // Slack Config UI functions
+        function toggleSlackDebugMode(enabled) {
+          vscode.postMessage({ command: 'setSlackDebugMode', enabled: enabled });
+        }
+
+        function loadSlackConfig() {
+          vscode.postMessage({ command: 'loadSlackConfig' });
+        }
+
+        function updateSlackConfigUI(config) {
+          // Update watched channels count
+          const watchedCount = document.getElementById('slackConfigWatchedCount');
+          if (watchedCount) {
+            const count = (config.watched_channels || []).length;
+            watchedCount.textContent = count;
+          }
+
+          // Update alert channels count
+          const alertCount = document.getElementById('slackConfigAlertCount');
+          if (alertCount) {
+            const count = Object.keys(config.alert_channels || {}).length;
+            alertCount.textContent = count;
+          }
+
+          // Update safe users count
+          const safeCount = document.getElementById('slackConfigSafeCount');
+          if (safeCount && config.user_classification) {
+            const safeList = config.user_classification.safe_list || {};
+            const count = (safeList.user_ids || []).length + (safeList.user_names || []).length;
+            safeCount.textContent = count;
+          }
+
+          // Update concerned users count
+          const concernedCount = document.getElementById('slackConfigConcernedCount');
+          if (concernedCount && config.user_classification) {
+            const concernedList = config.user_classification.concerned_list || {};
+            const count = (concernedList.user_ids || []).length + (concernedList.user_names || []).length;
+            concernedCount.textContent = count;
+          }
+
+          // Update debug mode toggle
+          const debugToggle = document.getElementById('slackDebugModeToggle');
+          if (debugToggle) {
+            debugToggle.checked = config.debug_mode || false;
+          }
+        }
+
+        function renderSlackSearchResults(data) {
+          const container = document.getElementById('slackSearchResults');
+          const remaining = document.getElementById('slackSearchRemaining');
+
+          if (remaining && data.remaining !== undefined) {
+            remaining.textContent = data.remaining + ' searches remaining today';
+          }
+
+          if (data.rateLimited) {
+            container.innerHTML = '<div class="empty-state" style="padding: 20px;"><div class="empty-state-icon">⏳</div><div>Rate limited</div><div style="font-size: 0.75rem; margin-top: 4px; color: var(--text-muted);">' + (data.error || 'Please wait before searching again') + '</div></div>';
+            return;
+          }
+
+          if (data.error) {
+            container.innerHTML = '<div class="empty-state" style="padding: 20px;"><div class="empty-state-icon">❌</div><div>Search failed</div><div style="font-size: 0.75rem; margin-top: 4px; color: var(--text-muted);">' + data.error + '</div></div>';
+            return;
+          }
+
+          if (!data.results || data.results.length === 0) {
+            container.innerHTML = '<div class="empty-state" style="padding: 20px;"><div class="empty-state-icon">🔍</div><div>No results found</div></div>';
+            return;
+          }
+
+          container.innerHTML = data.results.map(msg => \`
+            <div class="slack-search-result" onclick="window.open('\${msg.permalink}', '_blank')">
+              <div class="slack-avatar">\${(msg.username || '?').charAt(0).toUpperCase()}</div>
+              <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="slack-user">\${msg.username || 'Unknown'}</span>
+                  <span class="slack-search-channel">#\${msg.channel_name || 'unknown'}</span>
+                </div>
+                <div class="slack-search-text">\${msg.text || ''}</div>
+              </div>
+            </div>
           \`).join('');
+        }
+
+        function renderSlackPending(pending) {
+          const container = document.getElementById('slackPendingList');
+          const badge = document.getElementById('slackPendingBadge');
+
+          if (badge) {
+            if (pending.length > 0) {
+              badge.textContent = pending.length;
+              badge.style.display = 'inline-block';
+            } else {
+              badge.style.display = 'none';
+            }
+          }
+
+          if (!pending || pending.length === 0) {
+            container.innerHTML = '<div class="empty-state" style="padding: 20px;"><div class="empty-state-icon">✅</div><div>No pending approvals</div></div>';
+            return;
+          }
+
+          container.innerHTML = pending.map(msg => \`
+            <div class="slack-pending-item">
+              <div class="slack-avatar">\${(msg.user_name || '?').charAt(0).toUpperCase()}</div>
+              <div class="slack-pending-content">
+                <div class="slack-header">
+                  <span class="slack-user">\${msg.user_name || 'Unknown'}</span>
+                  <span class="slack-time">\${msg.created_at ? new Date(msg.created_at * 1000).toLocaleTimeString() : ''}</span>
+                </div>
+                <div class="slack-text">\${msg.text || ''}</div>
+                <div class="slack-response" style="margin-top: 8px;">🤖 \${msg.response || 'No response generated'}</div>
+                <div class="slack-pending-meta">\${msg.channel_name || msg.channel_id} • \${msg.classification || 'unknown'}</div>
+              </div>
+              <div class="slack-pending-actions">
+                <button class="btn btn-primary btn-small" onclick="approveSlackMessage('\${msg.id}')">✅</button>
+                <button class="btn btn-ghost btn-small" onclick="rejectSlackMessage('\${msg.id}')">❌</button>
+              </div>
+            </div>
+          \`).join('');
+        }
+
+        function approveSlackMessage(messageId) {
+          vscode.postMessage({ command: 'approveSlackMessage', messageId: messageId });
+        }
+
+        function rejectSlackMessage(messageId) {
+          vscode.postMessage({ command: 'rejectSlackMessage', messageId: messageId });
+        }
+
+        function updateSlackCacheStats(channelStats, userStats) {
+          // Channel stats
+          const channelTotal = document.getElementById('slackCacheChannelTotal');
+          const channelMember = document.getElementById('slackCacheChannelMember');
+          const channelAge = document.getElementById('slackCacheChannelAge');
+
+          if (channelTotal) channelTotal.textContent = channelStats.total_channels || 0;
+          if (channelMember) channelMember.textContent = channelStats.member_channels || 0;
+          if (channelAge) {
+            const age = channelStats.cache_age_seconds;
+            if (age === null || age === undefined) {
+              channelAge.textContent = 'Never';
+            } else if (age < 60) {
+              channelAge.textContent = Math.round(age) + 's ago';
+            } else if (age < 3600) {
+              channelAge.textContent = Math.round(age / 60) + 'm ago';
+            } else {
+              channelAge.textContent = Math.round(age / 3600) + 'h ago';
+            }
+          }
+
+          // User stats
+          const userTotal = document.getElementById('slackCacheUserTotal');
+          const userAvatar = document.getElementById('slackCacheUserAvatar');
+          const userEmail = document.getElementById('slackCacheUserEmail');
+          const userAge = document.getElementById('slackCacheUserAge');
+
+          if (userTotal) userTotal.textContent = userStats.total_users || 0;
+          if (userAvatar) userAvatar.textContent = userStats.with_avatar || 0;
+          if (userEmail) userEmail.textContent = userStats.with_email || 0;
+          if (userAge) {
+            const age = userStats.cache_age_seconds;
+            if (age === null || age === undefined) {
+              userAge.textContent = 'Never';
+            } else if (age < 60) {
+              userAge.textContent = Math.round(age) + 's ago';
+            } else if (age < 3600) {
+              userAge.textContent = Math.round(age / 60) + 'm ago';
+            } else {
+              userAge.textContent = Math.round(age / 3600) + 'h ago';
+            }
+          }
+        }
+
+        function renderSlackChannelBrowser(channels, count) {
+          const container = document.getElementById('slackChannelBrowser');
+          const countEl = document.getElementById('slackChannelCount');
+
+          if (countEl) countEl.textContent = count + ' channels';
+
+          if (!channels || channels.length === 0) {
+            container.innerHTML = '<div class="empty-state" style="padding: 20px;"><div>No channels found</div></div>';
+            return;
+          }
+
+          container.innerHTML = channels.map(ch => \`
+            <div class="slack-browser-item" onclick="copyToClipboard('\${ch.channel_id}')">
+              <div class="slack-browser-avatar">#</div>
+              <div class="slack-browser-info">
+                <div class="slack-browser-name">#\${ch.name || 'unknown'}</div>
+                <div class="slack-browser-meta">\${ch.purpose ? ch.purpose.substring(0, 50) + (ch.purpose.length > 50 ? '...' : '') : ''}</div>
+              </div>
+              \${ch.is_member ? '<span class="slack-browser-badge member">Member</span>' : ''}
+              <span class="slack-browser-id">\${ch.channel_id}</span>
+            </div>
+          \`).join('');
+        }
+
+        function renderSlackUserBrowser(users, count) {
+          const container = document.getElementById('slackUserBrowser');
+          const countEl = document.getElementById('slackUserCount');
+
+          if (countEl) countEl.textContent = count + ' users';
+
+          if (!users || users.length === 0) {
+            container.innerHTML = '<div class="empty-state" style="padding: 20px;"><div>No users found</div></div>';
+            return;
+          }
+
+          container.innerHTML = users.map(u => \`
+            <div class="slack-browser-item" onclick="copyToClipboard('\${u.user_id}')">
+              <div class="slack-browser-avatar">
+                \${u.avatar_url ? '<img src="' + u.avatar_url + '" alt="">' : (u.display_name || u.user_name || '?').charAt(0).toUpperCase()}
+              </div>
+              <div class="slack-browser-info">
+                <div class="slack-browser-name">\${u.display_name || u.user_name || 'Unknown'}</div>
+                <div class="slack-browser-meta">\${u.real_name || ''}\${u.email ? ' • ' + u.email : ''}</div>
+              </div>
+              <span class="slack-browser-id">\${u.user_id}</span>
+            </div>
+          \`).join('');
+        }
+
+        function copyToClipboard(text) {
+          navigator.clipboard.writeText(text).then(() => {
+            // Could show a toast here
+            console.log('Copied to clipboard:', text);
+          });
         }
 
         function updateSchedulerUI(enabled) {
@@ -14163,7 +17068,43 @@ Display the question text, evidence, notes, and AI-generated summary.`;
               </div>
             \`;
           } else {
-            newHtml = history.map(exec => \`
+            // Helper to format duration with color coding
+            const formatDuration = (ms) => {
+              if (!ms) return '';
+              const seconds = Math.floor(ms / 1000);
+              const minutes = Math.floor(seconds / 60);
+              const isTimeout = ms >= 600000; // 10 minutes
+              const isSlow = ms >= 300000; // 5 minutes
+              const durationClass = isTimeout ? 'timeout' : isSlow ? 'slow' : 'fast';
+              const durationText = minutes >= 1 ? minutes + 'm ' + (seconds % 60) + 's' : seconds + 's';
+              const icon = isTimeout ? '⏰' : '⏱️';
+              return '<span class="cron-history-duration ' + durationClass + '">' + icon + ' ' + durationText + '</span>';
+            };
+
+            // Helper to categorize error type
+            const categorizeError = (error) => {
+              if (!error) return null;
+              let errorType = 'Error';
+              let errorIcon = '❌';
+              if (error.includes('timed out') || error.includes('timeout')) {
+                errorType = 'Timeout';
+                errorIcon = '⏰';
+              } else if (error.includes('API Error') || error.includes('oauth2') || error.includes('getaddrinfo')) {
+                errorType = 'Network/API Error';
+                errorIcon = '🌐';
+              } else if (error.includes('exited with code')) {
+                errorType = 'Process Error';
+                errorIcon = '💥';
+              } else if (error.includes('permission') || error.includes('unauthorized')) {
+                errorType = 'Auth Error';
+                errorIcon = '🔒';
+              }
+              return { type: errorType, icon: errorIcon, message: error };
+            };
+
+            newHtml = history.map(exec => {
+              const errorInfo = categorizeError(exec.error);
+              return \`
               <div class="cron-history-item \${exec.success ? 'success' : 'failed'}">
                 <div class="cron-history-status">\${exec.success ? '✅' : '❌'}</div>
                 <div class="cron-history-info">
@@ -14171,14 +17112,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                   \${exec.session_name ? \`<div class="cron-history-session">💬 \${exec.session_name}</div>\` : ''}
                   <div class="cron-history-details">
                     <span>⚡ \${exec.skill}</span>
-                    \${exec.duration_ms ? \`<span>⏱️ \${exec.duration_ms}ms</span>\` : ''}
+                    \${formatDuration(exec.duration_ms)}
                     <span>🕐 \${new Date(exec.timestamp).toLocaleString()}</span>
                   </div>
-                  \${exec.error ? \`<div class="cron-history-error">❌ \${exec.error}</div>\` : ''}
+                  \${errorInfo ? \`
+                    <div class="cron-history-error">
+                      <div class="cron-history-error-type">\${errorInfo.icon} \${errorInfo.type}</div>
+                      <div class="cron-history-error-message">\${errorInfo.message}</div>
+                    </div>
+                  \` : ''}
                   \${exec.output_preview ? \`<div class="cron-history-output">\${exec.output_preview}</div>\` : ''}
                 </div>
               </div>
-            \`).join('');
+            \`}).join('');
           }
 
           // Update the DOM
@@ -14210,14 +17156,22 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         let _lastCronJobsHash = '';
 
         function updateCronJobs(jobs) {
-          console.log('[CommandCenter] updateCronJobs called with', jobs?.length || 0, 'jobs');
+          // Check hash FIRST before any DOM operations or HTML generation
+          const newHash = JSON.stringify(jobs || []);
+          if (newHash === _lastCronJobsHash) {
+            // No changes - skip everything
+            return;
+          }
+          _lastCronJobsHash = newHash;
+
+          console.log('[CommandCenter] updateCronJobs: Data changed, updating DOM');
           const container = document.querySelector('.cron-jobs-list');
           if (!container) {
             console.error('[CommandCenter] updateCronJobs: .cron-jobs-list not found');
             return;
           }
 
-          // Build the new HTML content
+          // Build the new HTML content (only if data changed)
           let newHtml;
           if (!jobs || jobs.length === 0) {
             newHtml = \`
@@ -14255,14 +17209,6 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             \`).join('');
           }
 
-          // Create a simple hash to detect changes (avoids unnecessary DOM thrashing)
-          const newHash = JSON.stringify(jobs || []);
-          if (newHash === _lastCronJobsHash) {
-            console.log('[CommandCenter] updateCronJobs: No changes detected, skipping DOM update');
-            return;
-          }
-          _lastCronJobsHash = newHash;
-
           // Update the DOM
           container.innerHTML = newHtml;
 
@@ -14294,6 +17240,45 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
           if (seconds < 86400) return (seconds / 3600).toFixed(1) + 'h';
           return (seconds / 86400).toFixed(1) + 'd';
+        }
+
+        // Update services tab badge based on current DOM state
+        function updateServicesTabBadge() {
+          const badge = document.getElementById('servicesTabBadge');
+          if (!badge) return;
+
+          // Count online services from DOM
+          const serviceCards = ['slackServiceCard', 'cronServiceCard', 'meetServiceCard', 'sprintServiceCard', 'videoServiceCard'];
+          let servicesOnline = 0;
+          serviceCards.forEach(id => {
+            const card = document.getElementById(id);
+            if (card && !card.classList.contains('service-offline')) {
+              servicesOnline++;
+            }
+          });
+
+          // Check MCP
+          const mcpCard = document.getElementById('mcpServiceCard');
+          const mcpOnline = mcpCard && !mcpCard.classList.contains('service-offline') ? 1 : 0;
+
+          // Check Ollama instances from status dots
+          const ollamaInstances = ['npu', 'igpu', 'nvidia', 'cpu'];
+          let ollamaOnline = 0;
+          ollamaInstances.forEach(inst => {
+            const statusEl = document.getElementById(inst + 'Status');
+            if (statusEl && statusEl.innerHTML.includes('online')) {
+              ollamaOnline++;
+            }
+          });
+
+          const totalServices = serviceCards.length + 1 + ollamaInstances.length; // 5 + 1 + 4 = 10
+          const totalOnline = servicesOnline + mcpOnline + ollamaOnline;
+          const offlineCount = totalServices - totalOnline;
+
+          // Update badge: green = all online, orange = 1-2 offline, red = 3+ offline
+          badge.className = 'tab-badge tab-badge-status ' + (offlineCount === 0 ? 'status-green' : offlineCount < 3 ? 'status-yellow' : 'status-red');
+          badge.textContent = offlineCount === 0 ? '●' : offlineCount < 3 ? '◐' : '○';
+          badge.title = totalOnline + '/' + totalServices + ' online';
         }
 
         // Cache for detecting service status changes to avoid unnecessary DOM updates
@@ -14436,6 +17421,56 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             }
           }
 
+          // Sprint Bot
+          const sprintService = message.services.find(s => s.name === 'Sprint Bot');
+          if (sprintService) {
+            const sprintStatus = document.getElementById('sprintStatus');
+            const sprintDetails = document.getElementById('sprintDetails');
+            const sprintCard = document.getElementById('sprintServiceCard');
+
+            if (sprintService.running) {
+              updateInnerHTMLIfChanged(sprintStatus, '<span class="status-dot online"></span> Online');
+              sprintCard?.classList.remove('service-offline');
+              const status = sprintService.status || {};
+              const isActive = status.is_active || status.manually_started || (status.automatic_mode && status.within_working_hours);
+              const modeText = status.manually_started ? 'Manual' : (status.automatic_mode ? 'Auto' : 'Paused');
+              updateInnerHTMLIfChanged(sprintDetails, \`
+                <div class="service-row"><span>Mode</span><span>\${modeText}</span></div>
+                <div class="service-row"><span>Active</span><span>\${isActive ? 'Yes' : 'No'}</span></div>
+                <div class="service-row"><span>Issues</span><span>\${status.total_issues || 0}</span></div>
+                <div class="service-row"><span>Processed</span><span>\${status.issues_processed || 0}</span></div>
+              \`);
+            } else {
+              updateInnerHTMLIfChanged(sprintStatus, '<span class="status-dot offline"></span> Offline');
+              sprintCard?.classList.add('service-offline');
+              updateInnerHTMLIfChanged(sprintDetails, '<div class="service-row"><span>Status</span><span>Not running</span></div>');
+            }
+          }
+
+          // Video Bot
+          const videoService = message.services.find(s => s.name === 'Video Bot');
+          if (videoService) {
+            const videoStatus = document.getElementById('videoStatus');
+            const videoDetails = document.getElementById('videoDetails');
+            const videoCard = document.getElementById('videoServiceCard');
+
+            if (videoService.running) {
+              updateInnerHTMLIfChanged(videoStatus, '<span class="status-dot online"></span> Online');
+              videoCard?.classList.remove('service-offline');
+              const status = videoService.status || {};
+              updateInnerHTMLIfChanged(videoDetails, \`
+                <div class="service-row"><span>Uptime</span><span>\${formatUptime(status.uptime)}</span></div>
+                <div class="service-row"><span>Status</span><span>\${status.status || 'idle'}</span></div>
+                <div class="service-row"><span>Device</span><span>\${status.device || 'None'}</span></div>
+                <div class="service-row"><span>Frames</span><span>\${status.frames_rendered || 0}</span></div>
+              \`);
+            } else {
+              updateInnerHTMLIfChanged(videoStatus, '<span class="status-dot offline"></span> Offline');
+              videoCard?.classList.add('service-offline');
+              updateInnerHTMLIfChanged(videoDetails, '<div class="service-row"><span>Status</span><span>Not running</span></div>');
+            }
+          }
+
           // MCP Server
           const mcpStatus = document.getElementById('mcpStatus');
           const mcpDetails = document.getElementById('mcpDetails');
@@ -14450,6 +17485,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             mcpCard?.classList.add('service-offline');
             updateInnerHTMLIfChanged(mcpDetails, '<div class="service-row"><span>Status</span><span>Not running</span></div>');
           }
+
+          // Update services tab badge based on current status
+          updateServicesTabBadge();
         }
 
         // Services are auto-refreshed via unified background sync
@@ -14528,12 +17566,70 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             case 'refreshSlackTargets':
               refreshSlackTargets();
               break;
+            case 'openCommandBuilder':
+              showCommandBuilder();
+              break;
+            case 'loadSlackConfig':
+              loadSlackConfig();
+              break;
             case 'clearSlackUser':
               clearSlackUser();
+              break;
+            case 'searchSlackMessages':
+              const searchQuery = document.getElementById('slackSearchInput')?.value;
+              if (searchQuery) {
+                vscode.postMessage({ command: 'searchSlackMessages', query: searchQuery });
+              }
+              break;
+            case 'refreshSlackPending':
+              vscode.postMessage({ command: 'refreshSlackPending' });
+              break;
+            case 'approveAllSlack':
+              vscode.postMessage({ command: 'approveAllSlack' });
+              break;
+            case 'refreshSlackCache':
+              vscode.postMessage({ command: 'refreshSlackCache' });
               break;
             default: break; // Unknown action
           }
         });
+
+        // Slack search input - enter key
+        const slackSearchInput = document.getElementById('slackSearchInput');
+        if (slackSearchInput) {
+          slackSearchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+              const query = e.target.value;
+              if (query) {
+                vscode.postMessage({ command: 'searchSlackMessages', query: query });
+              }
+            }
+          });
+        }
+
+        // Slack channel browser filter
+        const slackChannelSearchInput = document.getElementById('slackChannelSearch');
+        if (slackChannelSearchInput) {
+          let channelSearchTimeout;
+          slackChannelSearchInput.addEventListener('input', (e) => {
+            clearTimeout(channelSearchTimeout);
+            channelSearchTimeout = setTimeout(() => {
+              vscode.postMessage({ command: 'loadSlackChannelBrowser', query: e.target.value });
+            }, 300);
+          });
+        }
+
+        // Slack user browser filter
+        const slackUserBrowserSearchInput = document.getElementById('slackUserBrowserSearch');
+        if (slackUserBrowserSearchInput) {
+          let userSearchTimeout;
+          slackUserBrowserSearchInput.addEventListener('input', (e) => {
+            clearTimeout(userSearchTimeout);
+            userSearchTimeout = setTimeout(() => {
+              vscode.postMessage({ command: 'loadSlackUserBrowser', query: e.target.value });
+            }, 300);
+          });
+        }
 
         // Slack user search input
         const slackUserSearchInput = document.getElementById('slackUserSearch');
@@ -14620,7 +17716,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           });
         });
 
-        // Persona card click to show details
+        // Persona card click to load persona in new chat
         document.querySelectorAll('.persona-card[data-persona]').forEach(card => {
           card.addEventListener('click', (e) => {
             // Don't trigger if clicking a button inside the card
@@ -14628,7 +17724,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
             const personaName = card.getAttribute('data-persona');
             if (personaName) {
-              selectPersona(personaName);
+              // Load the persona in a new chat instead of showing details
+              vscode.postMessage({ command: 'loadPersona', personaName });
             }
           });
         });
@@ -14778,6 +17875,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         // Meetings Tab Functions
         ${getMeetingsTabScript()}
 
+        // Create Session Tab Functions
+        ${getCreateSessionTabScript()}
+
         // Sprint Tab Functions
         ${getSprintTabScript()}
 
@@ -14807,7 +17907,9 @@ function getNonce(): string {
 let commandCenterPanel: CommandCenterPanel | undefined;
 
 export function getCommandCenterPanel(): CommandCenterPanel | undefined {
-  return commandCenterPanel;
+  // Return the static panel if it exists (handles both command-opened and revived panels)
+  // The module-level variable may be undefined if the panel was revived from a previous session
+  return commandCenterPanel ?? CommandCenterPanel.currentPanel;
 }
 
 export function registerCommandCenter(

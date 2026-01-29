@@ -1,0 +1,36 @@
+
+digraph MCPProtocol {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_client {
+        label="MCP Client (Cursor)";
+        style=filled;
+        fillcolor="#E3F2FD";
+
+        init [label="Initialize", fillcolor="#BBDEFB"];
+        list [label="List Tools", fillcolor="#90CAF9"];
+        call [label="Call Tool", fillcolor="#64B5F6"];
+    }
+
+    subgraph cluster_server {
+        label="MCP Server";
+        style=filled;
+        fillcolor="#E8F5E9";
+
+        handle [label="Handle\nRequest", fillcolor="#A5D6A7"];
+        execute [label="Execute\nTool", fillcolor="#81C784"];
+        respond [label="Send\nResponse", fillcolor="#66BB6A"];
+    }
+
+    init -> handle [label="initialize"];
+    handle -> init [label="capabilities"];
+    list -> handle [label="tools/list"];
+    handle -> list [label="tool definitions"];
+    call -> handle [label="tools/call"];
+    handle -> execute;
+    execute -> respond;
+    respond -> call [label="result"];
+}

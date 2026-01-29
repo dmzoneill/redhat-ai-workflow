@@ -1,0 +1,24 @@
+
+digraph ProjectManagement {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    subgraph cluster_tools {
+        label="Project Management Tools";
+        style=filled;
+        fillcolor="#E8F5E9";
+
+        jira [label="Jira\nIssue Tracking", fillcolor="#A5D6A7"];
+        gitlab [label="GitLab\nMRs & CI/CD", fillcolor="#81C784"];
+        sprint [label="Sprint\nPlanning", fillcolor="#66BB6A"];
+        standup [label="Standup\nSummaries", fillcolor="#4CAF50"];
+    }
+
+    workflow [label="Unified\nWorkflow", fillcolor="#FFCC80"];
+
+    jira -> workflow;
+    gitlab -> workflow;
+    sprint -> workflow;
+    standup -> workflow;
+}

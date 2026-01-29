@@ -38,11 +38,9 @@ from pathlib import Path
 from threading import Timer
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from server.paths import STATE_FILE
 
-# Project root (this file is at server/state_manager.py)
-PROJECT_ROOT = Path(__file__).parent.parent
-STATE_FILE = PROJECT_ROOT / "state.json"
+logger = logging.getLogger(__name__)
 
 # Debounce delay in seconds
 DEBOUNCE_DELAY = 2.0

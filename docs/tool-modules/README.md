@@ -1,4 +1,4 @@
-# 🔧 Tool Modules Reference
+# Tool Modules Reference
 
 Tool modules are MCP plugins that provide specific capabilities. Each module contains related tools that are loaded based on which persona is active.
 
@@ -6,154 +6,237 @@ Tool modules are MCP plugins that provide specific capabilities. Each module con
 
 ## Quick Reference
 
-**263 tools** across **16 modules**, split into **188 basic** (used in skills, 71%) and **75 extra** (rarely used, 29%).
+**435 tools** across **27 modules**, split into **294 basic** (loaded by default) and **90 extra** (on-demand) plus **51 workflow core** tools.
 
-> **Performance:** Loading basic tools only reduces context window usage by **30%**. See [Tool Organization](../tool-organization.md) for details.
+> **Performance:** Loading basic tools only reduces context window usage by approximately 30%. Extra tools are available via `tool_exec()`.
 
-| Module | Variant | Tools | Usage % | Description |
-|--------|---------|-------|---------|-------------|
-| [workflow](./workflow.md) | basic | 18 | 100% | Core: agents, skills, memory, vpn_connect, kube_login |
-| [git](./git.md) | basic | 27 | 90% | Essential git (status, log, diff, add, commit, push, rebase, merge) |
-| [git](./git.md) | extra | 3 | - | Rarely used (clean, remote_info, docker_compose_down) |
-| [gitlab](./gitlab.md) | basic | 16 | 53% | MRs, CI basics (list, view, create, comment, lint) |
-| [gitlab](./gitlab.md) | extra | 14 | - | Advanced (approve, merge, rebase, issues, releases) |
-| [jira](./jira.md) | basic | 17 | 61% | Essential (view, search, status, comments, create, clone) |
-| [jira](./jira.md) | extra | 11 | - | Advanced (sprint, links, flags, lint, ai_helper) |
-| [k8s](./k8s.md) | basic | 22 | 79% | Essential k8s (pods, logs, deployments, exec, cp, scale) |
-| [k8s](./k8s.md) | extra | 6 | - | Advanced k8s (list helpers, delete, saas logs) |
-| [bonfire](./bonfire.md) | basic | 10 | 50% | Used in deploy workflows (reserve, list, release, deploy) |
-| [bonfire](./bonfire.md) | extra | 10 | - | Specialized deploys (process, local, snapshot, test workflow) |
-| [konflux](./konflux.md) | basic | 22 | 63% | Pipelines, components, snapshots, builds, releases |
-| [konflux](./konflux.md) | extra | 13 | - | Releases plans, environments, low-level tkn tools |
-| [prometheus](./prometheus.md) | basic | 5 | 38% | Queries, alerts, rules, pod health |
-| [prometheus](./prometheus.md) | extra | 8 | - | Range queries, namespace metrics, targets, labels |
-| [kibana](./kibana.md) | basic | 1 | 11% | Log search (kibana_search_logs) |
-| [kibana](./kibana.md) | extra | 8 | - | URL gen, index patterns, dashboards, trace (interactive) |
-| [quay](./quay.md) | basic | 5 | 71% | Image ops (check exists, get tag, manifest, vulnerabilities) |
-| [quay](./quay.md) | extra | 2 | - | Repository management (get_repository, list_tags) |
-| [alertmanager](./alertmanager.md) | basic | 4 | 57% | Alerts, silences, create/delete |
-| [alertmanager](./alertmanager.md) | extra | 3 | - | Receivers, status |
-| [google_calendar](./google_calendar.md) | basic | 6 | 100% | Calendar & meetings (all used in skills) |
-| [slack](./slack.md) | basic | 6 | 67% | Messaging, channels, user lookup |
-| [slack](./slack.md) | extra | 3 | - | Reactions, get_channels, list_messages |
-| [appinterface](./appinterface.md) | basic | 4 | 57% | Core validation (diff, get_saas, resources, validate) |
-| [appinterface](./appinterface.md) | extra | 3 | - | Clusters, user, search |
-| [lint](./lint.md) | basic | 1 | 14% | lint_python (used in pre-MR checks) |
-| [lint](./lint.md) | extra | 6 | - | dockerfile, yaml, precommit, security, test coverage |
-| [dev_workflow](./dev_workflow.md) | basic | 9 | 100% | Workflow helpers (start_work, prepare_mr, etc.) |
+| Module | Basic | Extra | Total | Description |
+|--------|-------|-------|-------|-------------|
+| [aa_meet_bot](./meet_bot.md) | 33 | 0 | 33 | Google Meet bot control, scheduling, transcription |
+| [aa_konflux](./konflux.md) | 22 | 13 | 35 | Tekton pipelines, components, snapshots, releases |
+| [aa_gitlab](./gitlab.md) | 18 | 14 | 32 | MRs, pipelines, comments, reviews, issues |
+| [aa_git](./git.md) | 28 | 3 | 31 | Repository operations, commits, branches, remotes |
+| [aa_jira](./jira.md) | 17 | 11 | 28 | Issue management, sprints, comments, workflows |
+| [aa_k8s](./k8s.md) | 22 | 6 | 28 | Pods, deployments, logs, exec, secrets |
+| [aa_docker](./docker.md) | 24 | 0 | 24 | Docker/compose operations, image builds |
+| [aa_bonfire](./bonfire.md) | 10 | 10 | 20 | Ephemeral namespace management |
+| [aa_slack](./slack.md) | 12 | 3 | 15 | Messaging, channels, reactions |
+| [aa_podman](./podman.md) | 13 | 0 | 13 | Container management via Podman |
+| [aa_prometheus](./prometheus.md) | 5 | 8 | 13 | Metrics queries, alerts, rules |
+| [aa_performance](./performance.md) | 13 | 0 | 13 | Performance tracking, competency evidence |
+| [aa_code_search](./code_search.md) | 9 | 0 | 9 | Semantic code search, vector indexing |
+| [aa_concur](./concur.md) | 9 | 0 | 9 | SAP Concur expense submission |
+| [aa_dev_workflow](./dev_workflow.md) | 9 | 0 | 9 | Workflow helpers, start_work, prepare_mr |
+| [aa_kibana](./kibana.md) | 1 | 8 | 9 | Log search, index patterns, dashboards |
+| [aa_google_calendar](./google_calendar.md) | 8 | 0 | 8 | Calendar events, meeting management |
+| [aa_quay](./quay.md) | 6 | 2 | 8 | Container registry, image verification |
+| [aa_scheduler](./scheduler.md) | 7 | 0 | 7 | Cron job scheduling, background tasks |
+| [aa_alertmanager](./alertmanager.md) | 4 | 3 | 7 | Alert management, silences |
+| [aa_appinterface](./appinterface.md) | 4 | 3 | 7 | GitOps configuration validation |
+| [aa_lint](./lint.md) | 1 | 6 | 7 | Code linting, pre-commit checks |
+| [aa_ollama](./ollama.md) | 7 | 0 | 7 | Local LLM inference via Ollama |
+| [aa_knowledge](./knowledge.md) | 6 | 0 | 6 | Project knowledge management |
+| [aa_project](./project.md) | 5 | 0 | 5 | Project configuration management |
+| [aa_make](./make.md) | 1 | 0 | 1 | Makefile target execution |
+| [aa_workflow](./workflow.md) | 51 | 0 | 51 | Core: sessions, memory, skills, personas, infra |
 
-**Total:** 263 tools (**188 basic**, **75 extra**) across 16 modules
-
-> **Data-Driven Split:** Based on analysis of 55 skills. See `.claude/skill-tool-usage-report.md` for full details.
-
-> Plus **45+ shared parsers** in `scripts/common/parsers.py` for reusable output parsing
-> And **config helpers** in `scripts/common/config_loader.py` for commit format, repo resolution
+**Grand Total:** 435 tools (294 basic + 90 extra + 51 workflow)
 
 ## Architecture
 
 ```mermaid
 graph TB
-    subgraph MCP["MCP Server (server)"]
-        LOADER[AgentLoader]
-        CORE[Core Tools]
+    subgraph MCP["MCP Server"]
+        MAIN[main.py]
+        LOADER[PersonaLoader]
+        REGISTRY[ToolRegistry]
     end
 
-    subgraph MODULES["Tool Modules"]
-        GIT[aa_git]
-        GITLAB[aa_gitlab]
-        JIRA[aa_jira]
-        K8S[aa_k8s]
-        MORE[...]
+    subgraph Modules["Tool Modules (27)"]
+        subgraph Dev["Development"]
+            GIT[aa_git<br/>31 tools]
+            GITLAB[aa_gitlab<br/>32 tools]
+            JIRA[aa_jira<br/>28 tools]
+            LINT[aa_lint<br/>7 tools]
+        end
+
+        subgraph Infra["Infrastructure"]
+            K8S[aa_k8s<br/>28 tools]
+            BONFIRE[aa_bonfire<br/>20 tools]
+            DOCKER[aa_docker<br/>24 tools]
+            PODMAN[aa_podman<br/>13 tools]
+        end
+
+        subgraph Release["Release"]
+            KONFLUX[aa_konflux<br/>35 tools]
+            QUAY[aa_quay<br/>8 tools]
+            APPINT[aa_appinterface<br/>7 tools]
+        end
+
+        subgraph Monitor["Monitoring"]
+            PROM[aa_prometheus<br/>13 tools]
+            ALERT[aa_alertmanager<br/>7 tools]
+            KIBANA[aa_kibana<br/>9 tools]
+        end
+
+        subgraph Comm["Communication"]
+            SLACK[aa_slack<br/>15 tools]
+            GCAL[aa_google_calendar<br/>8 tools]
+            MEET[aa_meet_bot<br/>33 tools]
+        end
+
+        subgraph Core["Core/Workflow"]
+            WORKFLOW[aa_workflow<br/>51 tools]
+            KNOWLEDGE[aa_knowledge<br/>6 tools]
+            SEARCH[aa_code_search<br/>9 tools]
+        end
     end
 
-    LOADER --> |loads| GIT
-    LOADER --> |loads| GITLAB
-    LOADER --> |loads| JIRA
-    LOADER --> |loads| K8S
-    LOADER --> |loads| MORE
+    MAIN --> LOADER
+    LOADER --> REGISTRY
+    REGISTRY --> Dev
+    REGISTRY --> Infra
+    REGISTRY --> Release
+    REGISTRY --> Monitor
+    REGISTRY --> Comm
+    REGISTRY --> Core
 
     style MCP fill:#6366f1,stroke:#4f46e5,color:#fff
-    style MODULES fill:#10b981,stroke:#059669,color:#fff
-```text
+    style WORKFLOW fill:#10b981,stroke:#059669,color:#fff
+```
 
 ## Module Categories
 
-### 💻 Development
+### Development (98 tools)
 
-| Module | Purpose |
-|--------|---------|
-| [git](./git.md) | Git repository operations |
-| [gitlab](./gitlab.md) | GitLab MRs, pipelines, comments |
-| [jira](./jira.md) | Jira issue management |
+| Module | Tools | Purpose |
+|--------|-------|---------|
+| [aa_git](./git.md) | 31 | Git repository operations, commits, branches |
+| [aa_gitlab](./gitlab.md) | 32 | Merge requests, pipelines, comments |
+| [aa_jira](./jira.md) | 28 | Issue tracking, sprints, workflows |
+| [aa_lint](./lint.md) | 7 | Code linting, pre-commit checks |
 
-### ☸️ Infrastructure
+### Infrastructure (85 tools)
 
-| Module | Purpose |
-|--------|---------|
-| [k8s](./k8s.md) | Kubernetes pods, deployments, logs |
-| [bonfire](./bonfire.md) | Ephemeral namespace management |
-| [quay](./quay.md) | Container image verification |
+| Module | Tools | Purpose |
+|--------|-------|---------|
+| [aa_k8s](./k8s.md) | 28 | Kubernetes pods, deployments, logs |
+| [aa_docker](./docker.md) | 24 | Docker/compose operations |
+| [aa_bonfire](./bonfire.md) | 20 | Ephemeral namespace management |
+| [aa_podman](./podman.md) | 13 | Podman container management |
 
-### 📊 Monitoring
+### Release & CI/CD (50 tools)
 
-| Module | Purpose |
-|--------|---------|
-| [prometheus](./prometheus.md) | Metrics and alert queries |
-| [alertmanager](./alertmanager.md) | Alert and silence management |
-| [kibana](./kibana.md) | Log search and analysis |
+| Module | Tools | Purpose |
+|--------|-------|---------|
+| [aa_konflux](./konflux.md) | 35 | Tekton pipelines, builds, releases |
+| [aa_quay](./quay.md) | 8 | Container image registry |
+| [aa_appinterface](./appinterface.md) | 7 | GitOps configuration |
 
-### 💬 Communication
+### Monitoring & Observability (29 tools)
 
-| Module | Purpose |
-|--------|---------|
-| [slack](./slack.md) | Slack message handling |
-| [google_calendar](./google_calendar.md) | Calendar and meetings |
-| [gmail](./gmail.md) | Email processing and summarization |
+| Module | Tools | Purpose |
+|--------|-------|---------|
+| [aa_prometheus](./prometheus.md) | 13 | Metrics queries, alerts |
+| [aa_kibana](./kibana.md) | 9 | Log search, dashboards |
+| [aa_alertmanager](./alertmanager.md) | 7 | Alert and silence management |
 
-### 📦 Release
+### Communication (56 tools)
 
-| Module | Purpose |
-|--------|---------|
-| [konflux](./konflux.md) | Build pipelines |
-| [appinterface](./appinterface.md) | GitOps configuration |
+| Module | Tools | Purpose |
+|--------|-------|---------|
+| [aa_meet_bot](./meet_bot.md) | 33 | Google Meet automation |
+| [aa_slack](./slack.md) | 15 | Slack messaging |
+| [aa_google_calendar](./google_calendar.md) | 8 | Calendar events |
 
-### 🔧 Core/Workflow
+### Core System (117 tools)
 
-| Module | Purpose |
-|--------|---------|
-| [workflow](./workflow.md) | Agents, skills, memory, infrastructure tools |
+| Module | Tools | Purpose |
+|--------|-------|---------|
+| [aa_workflow](./workflow.md) | 51 | Sessions, memory, skills, personas |
+| [aa_performance](./performance.md) | 13 | Performance tracking |
+| [aa_code_search](./code_search.md) | 9 | Semantic code search |
+| [aa_dev_workflow](./dev_workflow.md) | 9 | Workflow helpers |
+| [aa_concur](./concur.md) | 9 | Expense submission |
+| [aa_scheduler](./scheduler.md) | 7 | Background job scheduling |
+| [aa_ollama](./ollama.md) | 7 | Local LLM inference |
+| [aa_knowledge](./knowledge.md) | 6 | Project knowledge |
+| [aa_project](./project.md) | 5 | Project configuration |
+| [aa_make](./make.md) | 1 | Make targets |
 
-## Infrastructure Tools
+## Tool Loading Flow
 
-The workflow module includes essential infrastructure tools for auto-healing:
+```mermaid
+sequenceDiagram
+    participant User
+    participant Claude
+    participant MCP as MCP Server
+    participant Loader as PersonaLoader
+    participant Registry as ToolRegistry
+    participant Cursor
 
-| Tool | Purpose |
-|------|---------|
-| `vpn_connect()` | Connect to Red Hat VPN for internal resources |
-| `kube_login(cluster)` | Refresh Kubernetes authentication |
-| `session_start(agent)` | Initialize session with context |
-| `debug_tool(tool, error)` | Analyze failing tool source code |
+    User->>Claude: "Load devops persona"
+    Claude->>MCP: persona_load("devops")
+    MCP->>Loader: switch_persona("devops")
 
-These are used by skill auto-healing to recover from common failures.
+    Loader->>Loader: Preserve core tools (workflow, memory)
+    Loader->>Registry: Unload current persona modules
+    Registry->>Registry: Remove tool registrations
 
-## Module Loading
+    Loader->>Loader: Read devops.yaml
+    Note over Loader: tools: [k8s, bonfire, gitlab, quay]
 
-Modules are loaded dynamically when you switch agents:
+    loop For each module
+        Loader->>Registry: Load module tools
+        Registry->>Registry: Register @registry.tool() functions
+    end
 
-```text
-You: Load devops agent
+    Loader->>MCP: Update tool count
+    MCP->>Cursor: tools/list_changed notification
+    Cursor->>Cursor: Refresh tool list
 
-Claude: [AgentLoader]
-        → Unloading: git_basic, gitlab_basic, jira_basic
-        → Loading: k8s_basic, bonfire_basic, jira_basic, quay
-        → Notifying Cursor of tool change
+    MCP-->>Claude: "Loaded devops (~74 tools)"
+```
 
-        🔧 DevOps agent ready with ~74 tools
+## Basic vs Extra Tools
+
+Tools are split to optimize context window usage:
+
+| Type | When Loaded | Use Case |
+|------|-------------|----------|
+| **Basic** | Always with persona | Common operations used in skills |
+| **Extra** | On-demand via `tool_exec()` | Specialized operations |
+
+```mermaid
+graph LR
+    subgraph Basic["Basic Tools (294)"]
+        B1[git_status]
+        B2[gitlab_mr_list]
+        B3[jira_view_issue]
+        B4[k8s_pod_logs]
+    end
+
+    subgraph Extra["Extra Tools (90)"]
+        E1[git_rebase]
+        E2[gitlab_mr_approve]
+        E3[jira_add_to_sprint]
+        E4[k8s_delete_pod]
+    end
+
+    subgraph Access["Access Methods"]
+        DIRECT[Direct Call]
+        META[tool_exec]
+    end
+
+    DIRECT --> Basic
+    META --> Extra
+    META --> Basic
+
+    style Basic fill:#10b981,stroke:#059669,color:#fff
+    style Extra fill:#f59e0b,stroke:#d97706,color:#fff
 ```
 
 ### Accessing Extra Tools
-
-When you need an advanced tool not in your persona's basic set:
 
 ```python
 # Git rebase (in git_extra)
@@ -166,63 +249,71 @@ tool_exec("jira_add_to_sprint", '{"issue_key": "AAP-12345"}')
 tool_exec("bonfire_deploy_aa", '{"namespace": "ephemeral-xxx"}')
 ```
 
+## Infrastructure Tools
+
+The workflow module includes essential infrastructure tools for auto-healing:
+
+| Tool | Purpose |
+|------|---------|
+| `vpn_connect()` | Connect to Red Hat VPN |
+| `kube_login(cluster)` | Refresh Kubernetes authentication |
+| `session_start(agent)` | Initialize session with context |
+| `debug_tool(tool, error)` | Analyze failing tool source |
+
 ## Environment Variables
 
 | Variable | Module | Description |
 |----------|--------|-------------|
-| `JIRA_URL` | jira | Jira instance URL |
-| `JIRA_JPAT` | jira | Jira Personal Access Token |
-| `GITLAB_TOKEN` | gitlab | GitLab API token |
-| `KUBECONFIG` | k8s | Default kubeconfig path |
-
-> **Note:** Quay uses `skopeo` which leverages your existing `docker login` credentials - no separate token needed!
+| `JIRA_URL` | aa_jira | Jira instance URL |
+| `JIRA_JPAT` | aa_jira | Jira Personal Access Token |
+| `GITLAB_TOKEN` | aa_gitlab | GitLab API token |
+| `KUBECONFIG` | aa_k8s | Default kubeconfig path |
+| `SLACK_BOT_TOKEN` | aa_slack | Slack bot OAuth token |
+| `SLACK_APP_TOKEN` | aa_slack | Slack app-level token |
+| `OLLAMA_HOST` | aa_ollama | Ollama server URL |
 
 ## Adding a New Module
 
-1. Create directory: `tool_modules/aa_{name}/src/`
+1. Create directory structure:
+```bash
+mkdir -p tool_modules/aa_{name}/src
+touch tool_modules/aa_{name}/src/__init__.py
+touch tool_modules/aa_{name}/src/tools_basic.py
+```
 
-2. Create `tools.py`:
+2. Create `tools_basic.py`:
 ```python
 from mcp.server.fastmcp import FastMCP
+from server.tool_registry import ToolRegistry
 
 def register_tools(server: FastMCP) -> int:
-    @server.tool()
+    registry = ToolRegistry(server)
+
+    @registry.tool()
     async def my_tool(arg: str) -> str:
         """Tool description."""
         return f"Result: {arg}"
 
-    return 1  # tool count
+    return registry.count
 ```
 
-3. Add to `server/persona_loader.py`:
-```python
-TOOL_MODULES = {
-    "{name}": 5,  # estimated tool count
-}
-```
-
-4. Add to persona config:
+3. Add to persona config (`personas/{name}.yaml`):
 ```yaml
 tools:
-  - {name}
+  - {module_name}
 ```
 
-5. Add to `tool_modules/aa_workflow/src/meta_tools.py`:
+4. Register in meta_tools.py:
 ```python
 TOOL_REGISTRY = {
     # ...
-    "{name}": ["my_tool", ...],
-}
-
-MODULE_PREFIXES = {
-    # ...
-    "my_": "{name}",
+    "{module_name}": ["my_tool"],
 }
 ```
 
 ## See Also
 
-- [Architecture Overview](../architecture/README.md)
-- [Personas](../personas/README.md)
-- [MCP Implementation Details](../architecture/mcp-implementation.md)
-- [Skills Reference](../skills/README.md) - Skills that use these tools
+- [Architecture Overview](../architecture/README.md) - System design
+- [Personas](../personas/README.md) - Tool loading profiles
+- [MCP Implementation](../architecture/mcp-implementation.md) - Server details
+- [Skills Reference](../skills/README.md) - Workflows using these tools

@@ -1214,9 +1214,14 @@ steps:
       skill_name: notify_team
       inputs: |
         {
-          "message": "Ephemeral environment ready for MR !{{ inputs.mr_id }}",
-          "type": "deployment",
-          "context": "Namespace: {{ namespace_name }}\nMR: !{{ inputs.mr_id }}\nSHA: {{ resolved_sha.sha[:12] if resolved_sha else 'latest' }}"
+          "message": "",
+          "template": "deployment",
+          "template_data": {
+            "environment": "ephemeral",
+            "namespace": "{{ namespace_name }}",
+            "status": "success",
+            "sha": "{{ commit_sha[:12] if commit_sha else 'latest' }}"
+          }
         }
       execute: true
     output: slack_ephemeral_notification
@@ -1231,9 +1236,14 @@ steps:
       skill_name: notify_team
       inputs: |
         {
-          "message": "Tests failed in ephemeral for MR !{{ inputs.mr_id }}",
-          "type": "warning",
-          "context": "Namespace: {{ namespace_name or 'unknown' }}\nMR: !{{ inputs.mr_id }}\nFailed: {{ test_result.get('failed_count', 'unknown') }} tests"
+          "message": "",
+          "template": "deployment",
+          "template_data": {
+            "environment": "ephemeral",
+            "namespace": "{{ namespace_name or 'unknown' }}",
+            "status": "failed",
+            "sha": "{{ commit_sha[:12] if commit_sha else 'unknown' }}"
+          }
         }
       execute: true
     output: slack_test_failure_notification

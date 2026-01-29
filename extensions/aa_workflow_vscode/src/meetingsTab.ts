@@ -13,11 +13,11 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 
-// Meet bot state file
+// Meet bot state file (legacy fallback - primary is meet_state.json in AA_CONFIG_DIR)
 const MEET_BOT_STATE_FILE = path.join(
   os.homedir(),
-  ".local",
-  "share",
+  ".config",
+  "aa-workflow",
   "meet_bot",
   "state.json"
 );
@@ -540,6 +540,108 @@ export function getMeetingsTabStyles(): string {
       color: white;
       font-size: 0.75rem;
       text-align: center;
+    }
+
+    /* Video Preview Panel */
+    .video-preview-panel {
+      margin-top: 16px;
+      background: var(--bg-card);
+      border-radius: 8px;
+      padding: 16px;
+      border: 1px solid var(--border);
+    }
+
+    .video-preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .video-preview-header h4 {
+      margin: 0;
+      color: var(--text-primary);
+    }
+
+    .video-preview-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .video-preview-controls .btn-sm {
+      padding: 4px 8px;
+      font-size: 0.75rem;
+    }
+
+    .video-device-select {
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      font-size: 0.75rem;
+    }
+
+    .video-preview-container {
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+      aspect-ratio: 16/9;
+      max-height: 400px;
+    }
+
+    .video-preview-placeholder {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: var(--text-secondary);
+      gap: 8px;
+    }
+
+    .placeholder-icon {
+      font-size: 3rem;
+      opacity: 0.5;
+    }
+
+    .placeholder-text {
+      font-size: 0.9rem;
+    }
+
+    .placeholder-hint {
+      font-size: 0.75rem;
+      opacity: 0.7;
+    }
+
+    .video-preview-frame {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .video-preview-frame.flipped {
+      transform: scaleX(-1);
+    }
+
+    .video-preview-status {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+
+    .video-preview-status span {
+      padding: 4px 8px;
+      background: var(--bg-secondary);
+      border-radius: 4px;
     }
 
     /* Transcription Feed */
@@ -1855,6 +1957,48 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
         )}
       </div>
 
+      <!-- Video Preview Panel -->
+      <div class="video-preview-panel">
+        <div class="video-preview-header">
+          <h4>🎬 Video Preview</h4>
+          <div class="video-preview-controls">
+            <button class="btn btn-sm" id="btn-start-preview">▶️ Start</button>
+            <button class="btn btn-sm" id="btn-stop-preview" disabled>⏹️ Stop</button>
+            <button class="btn btn-sm" id="btn-flip-preview">🔄 Flip</button>
+            <select id="video-preview-mode" class="video-device-select" title="Preview mode">
+              <option value="webrtc">WebRTC (best)</option>
+              <option value="mjpeg">MJPEG</option>
+              <option value="snapshot">Snapshot</option>
+            </select>
+            <select id="video-preview-device" class="video-device-select">
+              <option value="/dev/video10">/dev/video10</option>
+              <option value="/dev/video11">/dev/video11</option>
+              <option value="/dev/video12">/dev/video12</option>
+            </select>
+          </div>
+        </div>
+        <div class="video-preview-container" id="video-preview-container">
+          <div class="video-preview-placeholder" id="video-preview-placeholder">
+            <span class="placeholder-icon">📷</span>
+            <span class="placeholder-text">Click "Start" to preview video output</span>
+            <span class="placeholder-hint">WebRTC: Hardware-accelerated, low latency (~50ms)</span>
+          </div>
+          <video id="video-preview-webrtc" class="video-preview-frame" style="display: none;" autoplay playsinline muted></video>
+          <img id="video-preview-frame" class="video-preview-frame" style="display: none;" alt="Video Preview" />
+        </div>
+        <div class="video-preview-status">
+          <span id="video-preview-status-text">Status: Stopped</span>
+          <span id="video-preview-fps">FPS: --</span>
+          <span id="video-preview-resolution">Resolution: --</span>
+          <span id="video-preview-latency" style="display: none;">Latency: --</span>
+        </div>
+        <div class="video-preview-info" style="margin-top: 8px; font-size: 0.75rem; color: var(--text-secondary);">
+          <strong>WebRTC</strong>: Zero-copy Intel GPU encoding → H.264 → Browser (~6W, &lt;50ms latency)<br>
+          <strong>MJPEG</strong>: Hardware JPEG encoding → HTTP stream (~8W, ~100ms latency)<br>
+          <strong>Snapshot</strong>: Periodic frame capture via ffmpeg (~35W, ~500ms latency)
+        </div>
+      </div>
+
       <div class="integration-info-box">
         <h4>ℹ️ About Virtual Camera (v4l2loopback)</h4>
         <p>The bot uses a virtual camera to display an avatar in Google Meet:</p>
@@ -1893,6 +2037,93 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
 }
 
 /**
+ * Generate HTML for just the upcoming meetings list.
+ * This is used for incremental updates without re-rendering the entire tab.
+ * @param state - The meet bot state
+ */
+export function getUpcomingMeetingsHtml(state: MeetBotState): string {
+  if (state.upcomingMeetings.length === 0) {
+    return `<div class="no-meeting" style="padding: 40px; text-align: center;">
+      <div class="no-meeting-icon">📅</div>
+      <div class="no-meeting-text">No upcoming meetings</div>
+      <div class="no-meeting-hint">Meetings from monitored calendars will appear here</div>
+    </div>`;
+  }
+
+  const now = new Date();
+  // Find the first meeting that hasn't ended yet (next upcoming)
+  let nextMeetingIndex = -1;
+  for (let i = 0; i < state.upcomingMeetings.length; i++) {
+    const m = state.upcomingMeetings[i];
+    const startTime = new Date(m.startTime);
+    if (startTime > now) {
+      nextMeetingIndex = i;
+      break;
+    }
+  }
+
+  return state.upcomingMeetings.map((meeting, index) => {
+    const meetingAny = meeting as any;
+    const calendarName = meetingAny.calendarName || "";
+    const startTime = new Date(meeting.startTime);
+    const endTime = meeting.endTime ? new Date(meeting.endTime) : null;
+    // Meeting is active if it has started but not ended
+    const isActive = startTime <= now && (!endTime || endTime > now);
+    // Meeting is next if it's the first one that hasn't started yet
+    const isNext = index === nextMeetingIndex && !isActive;
+    const meetUrlSafe = escapeHtml(meeting.url).replace(/'/g, "\\'");
+    const titleSafe = escapeHtml(meeting.title).replace(/'/g, "\\'");
+    const meetingMode = meetingAny.botMode || "notes"; // Default to notes
+    const isApproved = meeting.status === "approved";
+    const statusStr = meeting.status as string;
+    const isScheduled = statusStr === "scheduled" || statusStr === "pending";
+    return `
+    <div class="upcoming-meeting-row ${isActive ? 'active-meeting' : ''} ${isNext ? 'next-meeting' : ''}" data-meeting-id="${meeting.id}">
+      <div class="upcoming-meeting-time">
+        <div class="upcoming-time-main">${formatTime(meeting.startTime)}</div>
+        <div class="upcoming-time-date">${formatDateShort(meeting.startTime)}</div>
+      </div>
+      <div class="upcoming-meeting-info">
+        <div class="upcoming-meeting-title">
+          ${isActive ? '<span class="active-badge">ACTIVE</span>' : isNext ? '<span class="next-badge">NEXT</span>' : ''}
+          ${escapeHtml(meeting.title)}
+        </div>
+        <div class="upcoming-meeting-meta">
+          <span class="upcoming-organizer">👤 ${escapeHtml(meeting.organizer)}</span>
+          ${calendarName ? `<span class="upcoming-calendar">📅 ${escapeHtml(calendarName)}</span>` : ""}
+        </div>
+      </div>
+      <div class="upcoming-meeting-controls">
+        <!-- Mode selector + Approval + Join all on same line -->
+        <div class="meeting-mode-selector" data-meeting-id="${meeting.id}">
+          <button class="mode-btn ${meetingMode === 'notes' ? 'active' : ''}" data-mode="notes" data-id="${meeting.id}" title="Capture notes only">
+            📝 Notes
+          </button>
+          <button class="mode-btn ${meetingMode === 'interactive' ? 'active' : ''}" data-mode="interactive" data-id="${meeting.id}" title="AI voice interaction">
+            🎤 Interactive
+          </button>
+        </div>
+        ${isScheduled ? `
+          <button class="meeting-btn approve" data-action="approve" data-id="${meeting.id}" data-url="${meetUrlSafe}" data-mode="${meetingMode}">✓ Approve</button>
+        ` : isApproved ? `
+          <span class="status-badge approved" data-action="unapprove" data-id="${meeting.id}" title="Click to skip this meeting">✓ Approved</span>
+        ` : (meeting.status === "rejected" || meeting.status === "missed" || meeting.status === "skipped") ? `
+          <span class="status-badge skipped" data-action="approve" data-id="${meeting.id}" data-url="${meetUrlSafe}" data-mode="${meetingMode}" title="Click to approve this meeting">✗ Skipped</span>
+        ` : meeting.status === "failed" ? `
+          <span class="status-badge failed" data-action="approve" data-id="${meeting.id}" data-url="${meetUrlSafe}" data-mode="${meetingMode}" title="Join failed - click to retry">✗ Failed</span>
+        ` : meeting.status === "active" ? `
+          <span class="status-badge active">● Active</span>
+        ` : `
+          <span class="status-badge ${meeting.status}">${meeting.status}</span>
+        `}
+        <button class="meeting-btn join" data-action="join" data-url="${meetUrlSafe}" data-title="${titleSafe}" data-mode="${meetingMode}">🎥 Join Now</button>
+      </div>
+    </div>
+  `;
+  }).join("");
+}
+
+/**
  * Generate HTML for the Meetings tab content
  * @param state - The meet bot state
  * @param webview - Optional webview for converting local file URIs (for screenshots)
@@ -1909,87 +2140,8 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
   const upcomingCount = state.upcomingMeetings.length;
   const historyCount = state.recentNotes.length;
 
-  // Format upcoming meetings for the Upcoming tab - list view sorted by time
-  // Each meeting has: mode selector (Notes/Interactive), approval, and join controls
-  const upcomingMeetingsHtml = state.upcomingMeetings.length > 0
-    ? (() => {
-        const now = new Date();
-        // Find the first meeting that hasn't ended yet (next upcoming)
-        let nextMeetingIndex = -1;
-        for (let i = 0; i < state.upcomingMeetings.length; i++) {
-          const m = state.upcomingMeetings[i];
-          const startTime = new Date(m.startTime);
-          if (startTime > now) {
-            nextMeetingIndex = i;
-            break;
-          }
-        }
-
-        return state.upcomingMeetings.map((meeting, index) => {
-        const meetingAny = meeting as any;
-        const calendarName = meetingAny.calendarName || "";
-        const startTime = new Date(meeting.startTime);
-        const endTime = meeting.endTime ? new Date(meeting.endTime) : null;
-        // Meeting is active if it has started but not ended
-        const isActive = startTime <= now && (!endTime || endTime > now);
-        // Meeting is next if it's the first one that hasn't started yet
-        const isNext = index === nextMeetingIndex && !isActive;
-        const meetUrlSafe = escapeHtml(meeting.url).replace(/'/g, "\\'");
-        const titleSafe = escapeHtml(meeting.title).replace(/'/g, "\\'");
-        const meetingMode = meetingAny.botMode || "notes"; // Default to notes
-        const isApproved = meeting.status === "approved";
-        const statusStr = meeting.status as string;
-        const isScheduled = statusStr === "scheduled" || statusStr === "pending";
-        return `
-        <div class="upcoming-meeting-row ${isActive ? 'active-meeting' : ''} ${isNext ? 'next-meeting' : ''}" data-meeting-id="${meeting.id}">
-          <div class="upcoming-meeting-time">
-            <div class="upcoming-time-main">${formatTime(meeting.startTime)}</div>
-            <div class="upcoming-time-date">${formatDateShort(meeting.startTime)}</div>
-          </div>
-          <div class="upcoming-meeting-info">
-            <div class="upcoming-meeting-title">
-              ${isActive ? '<span class="active-badge">ACTIVE</span>' : isNext ? '<span class="next-badge">NEXT</span>' : ''}
-              ${escapeHtml(meeting.title)}
-            </div>
-            <div class="upcoming-meeting-meta">
-              <span class="upcoming-organizer">👤 ${escapeHtml(meeting.organizer)}</span>
-              ${calendarName ? `<span class="upcoming-calendar">📅 ${escapeHtml(calendarName)}</span>` : ""}
-            </div>
-          </div>
-          <div class="upcoming-meeting-controls">
-            <!-- Mode selector + Approval + Join all on same line -->
-            <div class="meeting-mode-selector" data-meeting-id="${meeting.id}">
-              <button class="mode-btn ${meetingMode === 'notes' ? 'active' : ''}" data-mode="notes" data-id="${meeting.id}" title="Capture notes only">
-                📝 Notes
-              </button>
-              <button class="mode-btn ${meetingMode === 'interactive' ? 'active' : ''}" data-mode="interactive" data-id="${meeting.id}" title="AI voice interaction">
-                🎤 Interactive
-              </button>
-            </div>
-            ${isScheduled ? `
-              <button class="meeting-btn approve" data-action="approve" data-id="${meeting.id}" data-url="${meetUrlSafe}" data-mode="${meetingMode}">✓ Approve</button>
-            ` : isApproved ? `
-              <span class="status-badge approved" data-action="unapprove" data-id="${meeting.id}" title="Click to skip this meeting">✓ Approved</span>
-            ` : (meeting.status === "rejected" || meeting.status === "missed" || meeting.status === "skipped") ? `
-              <span class="status-badge skipped" data-action="approve" data-id="${meeting.id}" data-url="${meetUrlSafe}" data-mode="${meetingMode}" title="Click to approve this meeting">✗ Skipped</span>
-            ` : meeting.status === "failed" ? `
-              <span class="status-badge failed" data-action="approve" data-id="${meeting.id}" data-url="${meetUrlSafe}" data-mode="${meetingMode}" title="Join failed - click to retry">✗ Failed</span>
-            ` : meeting.status === "active" ? `
-              <span class="status-badge active">● Active</span>
-            ` : `
-              <span class="status-badge ${meeting.status}">${meeting.status}</span>
-            `}
-            <button class="meeting-btn join" data-action="join" data-url="${meetUrlSafe}" data-title="${titleSafe}" data-mode="${meetingMode}">🎥 Join Now</button>
-          </div>
-        </div>
-      `;
-      }).join("");
-      })()
-    : `<div class="no-meeting" style="padding: 40px; text-align: center;">
-        <div class="no-meeting-icon">📅</div>
-        <div class="no-meeting-text">No upcoming meetings</div>
-        <div class="no-meeting-hint">Meetings from monitored calendars will appear here</div>
-      </div>`;
+  // Format upcoming meetings for the Upcoming tab - use the shared function
+  const upcomingMeetingsHtml = getUpcomingMeetingsHtml(state);
 
   // Format captions
   const captionsHtml = state.captions.length > 0
@@ -2153,6 +2305,18 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
 
   return `
     <div class="meetings-container">
+      <!-- Meet Bot Header with Controls -->
+      <div class="section" style="margin-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h2 class="section-title" style="margin: 0;">🎥 Meet Bot</h2>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-ghost btn-small" data-action="serviceStart" data-service="meet">▶ Start</button>
+            <button class="btn btn-ghost btn-small" data-action="serviceStop" data-service="meet">⏹ Stop</button>
+            <button class="btn btn-ghost btn-small" data-action="serviceLogs" data-service="meet">📋 Logs</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Sub-tabs Navigation -->
       <div class="meetings-subtabs">
         <button class="meetings-subtab active" id="subtab-btn-current" data-tab="current">
@@ -2604,6 +2768,344 @@ export function getMeetingsTabScript(): string {
     function testVirtualAudio() {
       vscode.postMessage({ type: 'testVirtualAudio' });
     }
+
+    // Video Preview Functions - WebRTC + MJPEG + Snapshot modes
+    let videoPreviewInterval = null;
+    let videoPreviewFlipped = false;
+    let videoPreviewFrameCount = 0;
+    let videoPreviewStartTime = null;
+    let videoPreviewMode = 'webrtc';
+    let webrtcPeerConnection = null;
+    let webrtcSignalingWs = null;
+
+    function startVideoPreview() {
+      vscode.postMessage({ type: 'webviewLog', message: 'startVideoPreview() called' });
+
+      const device = document.getElementById('video-preview-device').value;
+      const modeSelect = document.getElementById('video-preview-mode');
+      videoPreviewMode = modeSelect ? modeSelect.value : 'webrtc';
+
+      vscode.postMessage({ type: 'webviewLog', message: 'Mode: ' + videoPreviewMode + ', Device: ' + device });
+
+      const placeholder = document.getElementById('video-preview-placeholder');
+      const videoEl = document.getElementById('video-preview-webrtc');
+      const imgEl = document.getElementById('video-preview-frame');
+      const statusText = document.getElementById('video-preview-status-text');
+      const latencyText = document.getElementById('video-preview-latency');
+      const startBtn = document.getElementById('btn-start-preview');
+      const stopBtn = document.getElementById('btn-stop-preview');
+
+      // Update UI
+      placeholder.style.display = 'none';
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      statusText.textContent = 'Status: Connecting...';
+
+      // Reset counters
+      videoPreviewFrameCount = 0;
+      videoPreviewStartTime = Date.now();
+
+      if (videoPreviewMode === 'webrtc') {
+        // WebRTC mode - hardware accelerated, lowest latency
+        videoEl.style.display = 'block';
+        imgEl.style.display = 'none';
+        latencyText.style.display = 'inline';
+        startWebRTCPreview(device);
+      } else if (videoPreviewMode === 'mjpeg') {
+        // MJPEG mode - HTTP stream
+        imgEl.style.display = 'block';
+        videoEl.style.display = 'none';
+        latencyText.style.display = 'none';
+        startMJPEGPreview(device);
+      } else {
+        // Snapshot mode - periodic frame capture (legacy)
+        imgEl.style.display = 'block';
+        videoEl.style.display = 'none';
+        latencyText.style.display = 'none';
+        startSnapshotPreview(device);
+      }
+    }
+
+    async function startWebRTCPreview(device) {
+      const statusText = document.getElementById('video-preview-status-text');
+      const videoEl = document.getElementById('video-preview-webrtc');
+
+      try {
+        // Request backend to start streaming pipeline
+        vscode.postMessage({ type: 'startVideoPreview', device: device, mode: 'webrtc' });
+
+        // Connect to WebRTC signaling server
+        const signalingPort = 8765;
+        function webrtcLog(msg) {
+          console.log('[WebRTC] ' + msg);
+          vscode.postMessage({ type: 'webviewLog', message: '[WebRTC] ' + msg });
+        }
+
+        webrtcLog('Connecting to signaling server at ws://localhost:' + signalingPort);
+        statusText.textContent = 'Status: Connecting to signaling...';
+
+        try {
+          webrtcSignalingWs = new WebSocket('ws://localhost:' + signalingPort);
+        } catch (e) {
+          webrtcLog('Failed to create WebSocket: ' + e);
+          statusText.textContent = 'Status: WebSocket creation failed';
+          return;
+        }
+
+        webrtcSignalingWs.onopen = async () => {
+          webrtcLog('WebSocket connected to signaling server');
+          statusText.textContent = 'Status: Signaling connected';
+
+          // Create peer connection
+          webrtcPeerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+          });
+
+          // Handle incoming tracks
+          webrtcPeerConnection.ontrack = (event) => {
+            webrtcLog('Track received: ' + event.track.kind);
+            if (event.track.kind === 'video') {
+              videoEl.srcObject = event.streams[0];
+              statusText.textContent = 'Status: Streaming (WebRTC)';
+
+              // Start latency measurement
+              measureWebRTCLatency();
+            }
+          };
+
+          // Handle ICE candidates
+          webrtcPeerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+              webrtcSignalingWs.send(JSON.stringify({
+                type: 'ice-candidate',
+                candidate: event.candidate.candidate,
+                sdpMLineIndex: event.candidate.sdpMLineIndex
+              }));
+            }
+          };
+
+          // Request offer from server
+          webrtcLog('Requesting offer from server');
+          webrtcSignalingWs.send(JSON.stringify({ type: 'request_offer' }));
+        };
+
+        webrtcSignalingWs.onmessage = async (event) => {
+          const data = JSON.parse(event.data);
+          webrtcLog('Received message: ' + data.type);
+
+          if (data.type === 'offer') {
+            // Set remote description and create answer
+            await webrtcPeerConnection.setRemoteDescription({
+              type: 'offer',
+              sdp: data.sdp
+            });
+
+            const answer = await webrtcPeerConnection.createAnswer();
+            await webrtcPeerConnection.setLocalDescription(answer);
+
+            webrtcSignalingWs.send(JSON.stringify({
+              type: 'answer',
+              sdp: answer.sdp
+            }));
+
+            statusText.textContent = 'Status: Negotiating...';
+          } else if (data.type === 'ice-candidate' && data.candidate) {
+            await webrtcPeerConnection.addIceCandidate({
+              candidate: data.candidate,
+              sdpMLineIndex: data.sdpMLineIndex
+            });
+          }
+        };
+
+        webrtcSignalingWs.onerror = (error) => {
+          webrtcLog('Signaling error: ' + error);
+          statusText.textContent = 'Status: Signaling error - check if video generator is running with --webrtc';
+        };
+
+        webrtcSignalingWs.onclose = (event) => {
+          webrtcLog('Signaling closed, code: ' + event.code + ', reason: ' + event.reason);
+          statusText.textContent = 'Status: Disconnected (code: ' + event.code + ')';
+        };
+
+      } catch (error) {
+        console.error('WebRTC setup error:', error);
+        statusText.textContent = 'Status: WebRTC error - ' + error.message;
+      }
+    }
+
+    function measureWebRTCLatency() {
+      const latencyText = document.getElementById('video-preview-latency');
+      const fpsText = document.getElementById('video-preview-fps');
+      const resText = document.getElementById('video-preview-resolution');
+      const videoEl = document.getElementById('video-preview-webrtc');
+
+      // Update stats periodically
+      setInterval(() => {
+        if (webrtcPeerConnection) {
+          webrtcPeerConnection.getStats().then(stats => {
+            stats.forEach(report => {
+              if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                // Calculate FPS from frames received
+                const fps = report.framesPerSecond || 0;
+                fpsText.textContent = 'FPS: ' + fps.toFixed(1);
+
+                // Get resolution
+                if (report.frameWidth && report.frameHeight) {
+                  resText.textContent = 'Resolution: ' + report.frameWidth + 'x' + report.frameHeight;
+                }
+              }
+
+              if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                // Get round-trip time (latency estimate)
+                const rtt = report.currentRoundTripTime;
+                if (rtt) {
+                  latencyText.textContent = 'Latency: ' + (rtt * 1000).toFixed(0) + 'ms';
+                }
+              }
+            });
+          });
+        }
+      }, 1000);
+    }
+
+    function startMJPEGPreview(device) {
+      const imgEl = document.getElementById('video-preview-frame');
+      const statusText = document.getElementById('video-preview-status-text');
+
+      // Request backend to start MJPEG server
+      vscode.postMessage({ type: 'startVideoPreview', device: device, mode: 'mjpeg' });
+
+      // Connect to MJPEG stream
+      const mjpegPort = 8766;
+      imgEl.src = 'http://localhost:' + mjpegPort + '/stream.mjpeg';
+      imgEl.onload = () => {
+        statusText.textContent = 'Status: Streaming (MJPEG)';
+        videoPreviewFrameCount++;
+        updatePreviewStats();
+      };
+      imgEl.onerror = () => {
+        statusText.textContent = 'Status: MJPEG connection failed';
+      };
+    }
+
+    function startSnapshotPreview(device) {
+      const statusText = document.getElementById('video-preview-status-text');
+
+      // Request backend to start snapshot mode
+      vscode.postMessage({ type: 'startVideoPreview', device: device, mode: 'snapshot' });
+
+      // Start polling for frames (legacy mode)
+      videoPreviewInterval = setInterval(() => {
+        vscode.postMessage({ type: 'getVideoPreviewFrame' });
+      }, 100); // 10 FPS preview
+
+      statusText.textContent = 'Status: Polling...';
+    }
+
+    function updatePreviewStats() {
+      const fpsText = document.getElementById('video-preview-fps');
+      const elapsed = (Date.now() - videoPreviewStartTime) / 1000;
+      if (elapsed > 0) {
+        const fps = (videoPreviewFrameCount / elapsed).toFixed(1);
+        fpsText.textContent = 'FPS: ' + fps;
+      }
+    }
+
+    function stopVideoPreview() {
+      const placeholder = document.getElementById('video-preview-placeholder');
+      const videoEl = document.getElementById('video-preview-webrtc');
+      const imgEl = document.getElementById('video-preview-frame');
+      const statusText = document.getElementById('video-preview-status-text');
+      const fpsText = document.getElementById('video-preview-fps');
+      const latencyText = document.getElementById('video-preview-latency');
+      const startBtn = document.getElementById('btn-start-preview');
+      const stopBtn = document.getElementById('btn-stop-preview');
+
+      // Stop polling interval
+      if (videoPreviewInterval) {
+        clearInterval(videoPreviewInterval);
+        videoPreviewInterval = null;
+      }
+
+      // Close WebRTC connection
+      if (webrtcPeerConnection) {
+        webrtcPeerConnection.close();
+        webrtcPeerConnection = null;
+      }
+      if (webrtcSignalingWs) {
+        webrtcSignalingWs.close();
+        webrtcSignalingWs = null;
+      }
+
+      // Clear video element
+      if (videoEl.srcObject) {
+        videoEl.srcObject.getTracks().forEach(track => track.stop());
+        videoEl.srcObject = null;
+      }
+
+      // Update UI
+      placeholder.style.display = 'flex';
+      videoEl.style.display = 'none';
+      imgEl.style.display = 'none';
+      latencyText.style.display = 'none';
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusText.textContent = 'Status: Stopped';
+      fpsText.textContent = 'FPS: --';
+
+      // Tell backend to stop
+      vscode.postMessage({ type: 'stopVideoPreview' });
+    }
+
+    function toggleVideoFlip() {
+      const videoEl = document.getElementById('video-preview-webrtc');
+      const imgEl = document.getElementById('video-preview-frame');
+      videoPreviewFlipped = !videoPreviewFlipped;
+
+      if (videoPreviewFlipped) {
+        videoEl.classList.add('flipped');
+        imgEl.classList.add('flipped');
+      } else {
+        videoEl.classList.remove('flipped');
+        imgEl.classList.remove('flipped');
+      }
+    }
+
+    function updateVideoPreviewFrame(dataUrl, resolution) {
+      const imgEl = document.getElementById('video-preview-frame');
+      const statusText = document.getElementById('video-preview-status-text');
+      const fpsText = document.getElementById('video-preview-fps');
+      const resText = document.getElementById('video-preview-resolution');
+
+      if (dataUrl) {
+        imgEl.src = dataUrl;
+        statusText.textContent = 'Status: Streaming (Snapshot)';
+
+        // Update FPS
+        videoPreviewFrameCount++;
+        updatePreviewStats();
+
+        // Update resolution
+        if (resolution) {
+          resText.textContent = 'Resolution: ' + resolution;
+        }
+      }
+    }
+
+    // Handle messages from extension
+    window.addEventListener('message', event => {
+      const message = event.data;
+      if (message.type === 'videoPreviewFrame') {
+        updateVideoPreviewFrame(message.dataUrl, message.resolution);
+      } else if (message.type === 'videoPreviewError') {
+        const statusText = document.getElementById('video-preview-status-text');
+        statusText.textContent = 'Status: Error - ' + message.error;
+        stopVideoPreview();
+      } else if (message.type === 'videoPreviewStarted') {
+        const statusText = document.getElementById('video-preview-status-text');
+        statusText.textContent = 'Status: Pipeline started';
+      }
+    });
 
     function joinNow() {
       const url = prompt('Enter Google Meet URL:');
@@ -3118,6 +3620,28 @@ export function getMeetingsTabScript(): string {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
     }
+
+    // Wire up video preview buttons (CSP blocks inline onclick handlers)
+    document.addEventListener('DOMContentLoaded', function() {
+      const startBtn = document.getElementById('btn-start-preview');
+      const stopBtn = document.getElementById('btn-stop-preview');
+      const flipBtn = document.getElementById('btn-flip-preview');
+
+      if (startBtn) startBtn.addEventListener('click', startVideoPreview);
+      if (stopBtn) stopBtn.addEventListener('click', stopVideoPreview);
+      if (flipBtn) flipBtn.addEventListener('click', toggleVideoFlip);
+    });
+
+    // Also try immediate wiring in case DOMContentLoaded already fired
+    (function() {
+      const startBtn = document.getElementById('btn-start-preview');
+      const stopBtn = document.getElementById('btn-stop-preview');
+      const flipBtn = document.getElementById('btn-flip-preview');
+
+      if (startBtn) startBtn.addEventListener('click', startVideoPreview);
+      if (stopBtn) stopBtn.addEventListener('click', stopVideoPreview);
+      if (flipBtn) flipBtn.addEventListener('click', toggleVideoFlip);
+    })();
   `;
 }
 

@@ -19,17 +19,31 @@ from datetime import datetime, time
 from pathlib import Path
 from typing import Any
 
-from .sprint_history import (
-    SprintIssue,
-    SprintState,
-    TimelineEvent,
-    add_timeline_event,
-    get_next_issue_to_process,
-    load_sprint_state,
-    save_sprint_state,
-    update_issue_status,
-)
-from .sprint_prioritizer import prioritize_issues, to_sprint_issue_format
+# Support both package import and direct loading
+try:
+    from .sprint_history import (
+        SprintIssue,
+        SprintState,
+        TimelineEvent,
+        add_timeline_event,
+        get_next_issue_to_process,
+        load_sprint_state,
+        save_sprint_state,
+        update_issue_status,
+    )
+    from .sprint_prioritizer import prioritize_issues, to_sprint_issue_format
+except ImportError:
+    from sprint_history import (
+        SprintIssue,
+        SprintState,
+        TimelineEvent,
+        add_timeline_event,
+        get_next_issue_to_process,
+        load_sprint_state,
+        save_sprint_state,
+        update_issue_status,
+    )
+    from sprint_prioritizer import prioritize_issues, to_sprint_issue_format
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +218,32 @@ def refresh_sprint_state(config: SprintBotConfig) -> SprintState:
 
     if not jira_issues:
         logger.warning("No issues fetched from Jira, keeping existing state")
+        return state
+
+    # Filter to only show issues assigned to current user
+    try:
+        from server.config import load_config
+
+        user_config = load_config()
+        user_info = user_config.get("user", {})
+        jira_username = user_info.get("jira_username", "")
+        full_name = user_info.get("full_name", "")
+        if jira_username or full_name:
+            original_count = len(jira_issues)
+            # Match against username OR full name (Jira may use either)
+            match_values = [v.lower() for v in [jira_username, full_name] if v]
+            jira_issues = [issue for issue in jira_issues if issue.get("assignee", "").lower() in match_values]
+            logger.info(
+                f"Filtered to {len(jira_issues)}/{original_count} issues assigned to {jira_username or full_name}"
+            )
+    except Exception as e:
+        logger.warning(f"Could not filter by assignee: {e}")
+
+    if not jira_issues:
+        logger.info("No issues assigned to current user")
+        state.issues = []
+        state.last_updated = datetime.now().isoformat()
+        save_sprint_state(state)
         return state
 
     # Prioritize issues

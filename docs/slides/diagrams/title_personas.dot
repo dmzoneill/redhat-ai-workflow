@@ -1,0 +1,22 @@
+
+digraph TitlePersonas {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial Bold", fontsize=12];
+
+    center [label="AI Workflow\nAssistant", fillcolor="#1976D2", fontcolor=white, width=2.5, height=1];
+
+    subgraph cluster_features {
+        style=invis;
+
+        personas [label="16 Personas", fillcolor="#BBDEFB"];
+        tools [label="501 Tools", fillcolor="#90CAF9"];
+        skills [label="87 Skills", fillcolor="#64B5F6"];
+        autoheal [label="Auto-Heal", fillcolor="#42A5F5"];
+    }
+
+    center -> personas [style=invis];
+    center -> tools [style=invis];
+    center -> skills [style=invis];
+    center -> autoheal [style=invis];
+}

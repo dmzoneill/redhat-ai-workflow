@@ -1,0 +1,20 @@
+
+digraph AutoLoopsSection {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial Bold", fontsize=14];
+
+    title [label="Autonomous\nLoops", fillcolor="#1976D2", fontcolor=white, width=3, height=1.2];
+
+    subgraph cluster_topics {
+        style=invis;
+
+        ralph [label="Ralph Wiggum", fillcolor="#BBDEFB"];
+        todo [label="TODO.md Driven", fillcolor="#90CAF9"];
+        hooks [label="Cursor Hooks", fillcolor="#64B5F6"];
+    }
+
+    title -> ralph [style=invis];
+    title -> todo [style=invis];
+    title -> hooks [style=invis];
+}

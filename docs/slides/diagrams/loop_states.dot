@@ -1,0 +1,19 @@
+
+digraph LoopStates {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=circle, style=filled, fontname="Arial", fontsize=10, width=1.2];
+    edge [fontname="Arial", fontsize=9];
+
+    idle [label="Idle", fillcolor="#E0E0E0"];
+    active [label="Active", fillcolor="#4CAF50", fontcolor=white];
+    paused [label="Paused\n(HARD STOP)", fillcolor="#FF9800", fontcolor=white];
+    complete [label="Complete", fillcolor="#2196F3", fontcolor=white];
+
+    idle -> active [label="start_loop()"];
+    active -> active [label="iterate()\n(tasks remain)"];
+    active -> paused [label="HARD STOP\nmarker found"];
+    paused -> active [label="remove_hard_stop()"];
+    active -> complete [label="all tasks\ndone"];
+    active -> complete [label="max iterations\nreached", style=dashed];
+}

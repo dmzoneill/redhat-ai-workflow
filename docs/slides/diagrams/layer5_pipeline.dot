@@ -1,0 +1,25 @@
+
+digraph Layer5 {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    error [label="Tool Error", fillcolor="#FFCDD2"];
+    classify [label="Classifier", fillcolor="#F8BBD9"];
+    extract [label="Extractor", fillcolor="#E1BEE7"];
+    store [label="Storage\n(YAML)", fillcolor="#D1C4E9", shape=cylinder];
+    check [label="Checker", fillcolor="#C5CAE9"];
+    inject [label="Injector", fillcolor="#BBDEFB"];
+    prevent [label="Prevention\nTracker", fillcolor="#B2EBF2"];
+
+    error -> classify [label="1"];
+    classify -> extract [label="2"];
+    extract -> store [label="3"];
+    store -> check [label="4", style=dashed];
+    check -> inject [label="5"];
+    inject -> prevent [label="6"];
+
+    next_call [label="Next Tool Call", fillcolor="#C8E6C9"];
+    inject -> next_call [label="⚠️ Warning", color="#FF9800", penwidth=2];
+}

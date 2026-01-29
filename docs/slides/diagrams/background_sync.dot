@@ -1,0 +1,28 @@
+
+digraph BackgroundSync {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    slack [label="Slack API", fillcolor="#E3F2FD"];
+
+    subgraph cluster_sync {
+        label="Background Sync";
+        style=filled;
+        fillcolor="#FFF3E0";
+
+        channels [label="Sync\nChannels", fillcolor="#FFCC80"];
+        members [label="Sync\nMembers", fillcolor="#FFB74D"];
+        photos [label="Download\nPhotos", fillcolor="#FFA726"];
+    }
+
+    cache [label="Local Cache\n~/.cache/aa-workflow/", fillcolor="#C8E6C9", shape=cylinder];
+
+    slack -> channels [label="1 req/sec"];
+    channels -> members;
+    members -> photos;
+    photos -> cache;
+
+    rate [label="Rate Limit:\n• 1 req/sec\n• Random 1-3s\n• Respect 429", fillcolor="#E1BEE7", shape=note];
+}

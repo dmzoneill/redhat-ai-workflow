@@ -1,0 +1,29 @@
+
+digraph Integrations {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+
+    center [label="AI Workflow\nAssistant", fillcolor="#FFF9C4", shape=ellipse];
+
+    subgraph cluster_int {
+        label="Integrations";
+        style=dashed;
+
+        jira [label="Jira", fillcolor="#BBDEFB"];
+        gitlab [label="GitLab", fillcolor="#90CAF9"];
+        slack [label="Slack", fillcolor="#64B5F6"];
+        k8s [label="Kubernetes", fillcolor="#42A5F5"];
+        quay [label="Quay", fillcolor="#2196F3", fontcolor=white];
+        meet [label="Google Meet", fillcolor="#1E88E5", fontcolor=white];
+        calendar [label="Calendar", fillcolor="#1976D2", fontcolor=white];
+    }
+
+    center -> jira;
+    center -> gitlab;
+    center -> slack;
+    center -> k8s;
+    center -> quay;
+    center -> meet;
+    center -> calendar;
+}

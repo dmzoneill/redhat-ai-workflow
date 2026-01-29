@@ -1,0 +1,34 @@
+metadata:
+  project: redhat-ai-workflow
+  persona: workspace
+  last_updated: '2026-01-25T21:00:24.814795'
+  last_scanned: ''
+  confidence: 0.56
+architecture:
+  overview: ''
+  key_modules: []
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding: []
+  testing: []
+  deployment: []
+gotchas: []
+learned_from_tasks:
+- date: '2026-01-25'
+  task: cron-reindex_all_vectors-20260125-190000
+  learning: 'Hourly vector reindex cron job completed successfully at 2026-01-25 19:00.
+    Results: 5 projects processed - app-interface (16048 files, no changes), automation-analytics-backend
+    (876 files, no changes), konflux-release-data (82210 files, no changes), pdf-generator
+    (75 files, no changes), redhat-ai-workflow (700 files, 6 changed, 1112 chunks
+    created). All watchers restarted. Total vectors: 149,579. Health status: HEALTHY.'
+- date: '2026-01-25'
+  task: cron-reindex_all_vectors-20260125-200000
+  learning: 'Hourly vector reindex cron job completed successfully at 2026-01-25 20:00.
+    Incremental reindex (force=false): 4 projects unchanged, redhat-ai-workflow had
+    7 changed files (1128 chunks reindexed). Total vectors: 149,593 across 5 projects.
+    All 5 watchers restarted successfully.'
+- date: '2026-01-25'
+  task: cron-hello_world-20260125-210000
+  learning: Cron job hello_world_test executed successfully at 2026-01-25 21:00:00.
+    Skill engine verified operational.

@@ -52,9 +52,10 @@ OLLAMA_INSTANCES = [
 
 # Systemd service names
 SYSTEMD_SERVICES = {
-    "slack": "slack-agent.service",
-    "cron": "cron-scheduler.service",
-    "meet": "meet-bot.service",
+    "slack": "bot-slack.service",
+    "cron": "bot-cron.service",
+    "meet": "bot-meet.service",
+    "sprint": "bot-sprint.service",
 }
 
 

@@ -195,12 +195,62 @@ class SlackListener:
 
     async def _load_channel_names(self):
         """Load channel names for watched channels."""
+        # First, try to load from the channel cache (populated by background sync)
         try:
-            channels = await self.session.get_conversations_list()
-            for channel in channels:
-                self._channel_names[channel["id"]] = channel.get("name", channel["id"])
+            for channel_id in self.config.watched_channels:
+                cached = await self.state_db.get_cached_channel(channel_id)
+                if cached and cached.name:
+                    self._channel_names[channel_id] = cached.name
+            if self._channel_names:
+                logger.info(f"Loaded {len(self._channel_names)} channel names from cache")
         except Exception as e:
-            logger.warning(f"Could not load channel names: {e}")
+            logger.debug(f"Could not load channel names from cache: {e}")
+
+        # Fall back to API for any missing channels (may fail on enterprise)
+        missing = [c for c in self.config.watched_channels if c not in self._channel_names]
+        if missing:
+            try:
+                channels = await self.session.get_conversations_list()
+                for channel in channels:
+                    if channel["id"] in missing:
+                        self._channel_names[channel["id"]] = channel.get("name", channel["id"])
+            except Exception as e:
+                logger.warning(f"Could not load channel names from API: {e}")
+
+    async def _resolve_channel_name(self, channel_id: str) -> str:
+        """
+        Resolve a channel ID to its name.
+
+        Tries in order:
+        1. In-memory cache
+        2. Database cache (from background sync)
+        3. For DMs, try to get the user name
+        4. Falls back to channel ID
+        """
+        # Check in-memory cache first
+        if channel_id in self._channel_names:
+            return self._channel_names[channel_id]
+
+        # Try database cache for channels
+        try:
+            cached = await self.state_db.get_cached_channel(channel_id)
+            if cached and cached.name:
+                # Update in-memory cache for future lookups
+                self._channel_names[channel_id] = cached.name
+                return cached.name
+        except Exception as e:
+            logger.debug(f"Could not resolve channel name from cache: {e}")
+
+        # For DMs (D...), the "name" is typically the other user
+        # We can't easily resolve this without knowing who the DM is with
+        # Just mark it as "DM" for now
+        if channel_id.startswith("D"):
+            name = "DM"
+            self._channel_names[channel_id] = name
+            return name
+
+        # Fallback to channel ID
+        return channel_id
 
     async def _poll_loop(self):
         """Main polling loop."""
@@ -240,6 +290,8 @@ class SlackListener:
         """
         had_errors = False
         for i, channel_id in enumerate(self.config.watched_channels):
+            # Yield to allow other coroutines (like D-Bus handlers) to run
+            await asyncio.sleep(0)
             try:
                 logger.debug(f"Polling channel {i + 1}/{len(self.config.watched_channels)}: {channel_id}")
                 await self._poll_channel(channel_id)
@@ -307,7 +359,7 @@ class SlackListener:
 
         # Update last processed timestamp
         if newest_ts and newest_ts != last_ts:
-            channel_name = self._channel_names.get(channel_id, channel_id)
+            channel_name = await self._resolve_channel_name(channel_id)
             await self.state_db.set_last_processed_ts(channel_id, newest_ts, channel_name)
             if self.config.debug:
                 logger.debug(f"Updated {channel_id} last_ts to {newest_ts}")
@@ -471,8 +523,8 @@ class SlackListener:
         # Check if DM
         is_dm = channel_id.startswith("D")
 
-        # Get channel name
-        channel_name = self._channel_names.get(channel_id, channel_id)
+        # Get channel name (try cache first, then in-memory, then fallback to ID)
+        channel_name = await self._resolve_channel_name(channel_id)
 
         # Create pending message
         pending = PendingMessage(

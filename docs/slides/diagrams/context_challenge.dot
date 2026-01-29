@@ -1,0 +1,31 @@
+
+digraph ContextChallenge {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_problem {
+        label="The Problem";
+        style=filled;
+        fillcolor="#FFCDD2";
+
+        limited [label="200K Token\nLimit", fillcolor="#EF9A9A"];
+        sources [label="Many\nSources", fillcolor="#E57373"];
+        stale [label="Context\nRot", fillcolor="#EF5350"];
+    }
+
+    subgraph cluster_solution {
+        label="Our Solution";
+        style=filled;
+        fillcolor="#C8E6C9";
+
+        select [label="Smart\nSelection", fillcolor="#A5D6A7"];
+        compress [label="Token\nBudgeting", fillcolor="#81C784"];
+        fresh [label="Fresh\nContext", fillcolor="#66BB6A"];
+    }
+
+    limited -> select [label="solve"];
+    sources -> compress [label="solve"];
+    stale -> fresh [label="solve"];
+}

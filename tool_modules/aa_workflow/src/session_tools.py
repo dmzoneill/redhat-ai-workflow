@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
+from mcp.server.fastmcp import Context
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
@@ -30,7 +31,7 @@ except ImportError:
     KNOWLEDGE_DIR = MEMORY_DIR / "knowledge" / "personas"
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context, FastMCP
+    from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -601,6 +602,14 @@ async def _session_start_impl(
 
                 chat_session.touch()
                 logger.info(f"Resumed session {session_id}")
+
+                # Emit notification for session resume
+                try:
+                    from .notification_emitter import notify_session_resumed
+
+                    notify_session_resumed(session_id, name or chat_session.name)
+                except Exception:
+                    pass
             else:
                 # Session not found - list available sessions
                 available = list(workspace.sessions.keys())
@@ -636,6 +645,14 @@ async def _session_start_impl(
                 is_project_auto_detected=is_auto_detected,
             )
             session_id = chat_session.session_id
+
+            # Emit notification for session creation
+            try:
+                from .notification_emitter import notify_session_created
+
+                notify_session_created(session_id, name or None)
+            except Exception:
+                pass
 
             # #region agent log
             import json as _json
@@ -970,6 +987,398 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             session_start(name="Fixing billing bug")  # Named session for easy identification
         """
         return await _session_start_impl(ctx, agent, project, name, memory_session_log_fn, session_id)
+
+    @registry.tool()
+    async def session_set_project(ctx: Context, project: str, session_id: str = "") -> list[TextContent]:
+        """Set the project for the current or specified session.
+
+        CRITICAL: Claude should call this when it determines which project the user is working on.
+        The workspace may be redhat-ai-workflow, but the user might be working on a different project.
+
+        Project detection signals (in priority order):
+        1. Repository name mentioned (automation-analytics-backend, pdf-generator, app-interface)
+        2. GitLab project mentioned (automation-analytics/automation-analytics-backend)
+        3. File paths mentioned (/home/user/src/automation-analytics-backend/...)
+        4. Issue key context - if discussing AAP issues, likely automation-analytics-backend
+
+        Args:
+            project: Project name from config.json (e.g., "automation-analytics-backend", "pdf-generator")
+            session_id: Optional session ID. If empty, uses active session.
+
+        Returns:
+            Confirmation of project update with session details.
+
+        Examples:
+            session_set_project(project="automation-analytics-backend")
+            session_set_project(project="pdf-generator", session_id="abc123")
+        """
+        from server.utils import load_config
+        from server.workspace_state import WorkspaceRegistry
+
+        lines = []
+
+        try:
+            # Validate project exists in config
+            config = load_config()
+            repos = config.get("repositories", {})
+
+            if project not in repos:
+                available = ", ".join(repos.keys())
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"# Invalid Project\n\n"
+                        f"Project `{project}` not found in config.json.\n\n"
+                        f"**Available projects:** {available}",
+                    )
+                ]
+
+            # Get workspace state
+            workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+
+            # Find the target session
+            target_session_id = session_id if session_id else workspace.active_session_id
+
+            if not target_session_id:
+                return [
+                    TextContent(
+                        type="text",
+                        text="# No Active Session\n\n"
+                        "No active session found. Call `session_start()` first or provide a session_id.",
+                    )
+                ]
+
+            session = workspace.sessions.get(target_session_id)
+            if not session:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"# Session Not Found\n\n" f"Session `{target_session_id}` not found in workspace.",
+                    )
+                ]
+
+            # Update the session's project
+            old_project = session.project
+            session.project = project
+            session.is_project_auto_detected = False  # Explicitly set, not auto-detected
+            session.touch()
+
+            # Persist to disk
+            WorkspaceRegistry.save_to_disk()
+
+            # Build response
+            lines.append("# Project Updated\n")
+            lines.append(f"**Session:** `{target_session_id}`")
+            if session.name:
+                lines.append(f" ({session.name})")
+            lines.append("\n")
+            lines.append(f"**Project:** `{old_project}` -> `{project}`\n")
+
+            # Show project details
+            repo_config = repos[project]
+            if repo_config.get("path"):
+                lines.append(f"**Path:** `{repo_config['path']}`\n")
+            if repo_config.get("gitlab"):
+                lines.append(f"**GitLab:** `{repo_config['gitlab']}`\n")
+            if repo_config.get("jira_project"):
+                lines.append(f"**Jira Project:** `{repo_config['jira_project']}`\n")
+
+            logger.info(f"Updated session {target_session_id} project: {old_project} -> {project}")
+
+            # Emit notification
+            try:
+                from .notification_emitter import notify_session_updated
+
+                notify_session_updated(target_session_id, f"Project changed to {project}")
+            except Exception:
+                pass
+
+        except Exception as e:
+            import traceback
+
+            lines.append(f"# Error\n\n**Error:** {e}\n")
+            lines.append(f"```\n{traceback.format_exc()}\n```")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
+    async def jira_attach_session(
+        ctx: Context,
+        issue_key: str,
+        session_id: str = "",
+        include_transcript: bool = False,
+    ) -> list[TextContent]:
+        """Attach current session context to a Jira issue as a comment.
+
+        Exports the AI session context (conversation summary, tool calls, code changes)
+        and posts it as a formatted comment on the specified Jira issue. This allows
+        team members to investigate what was discussed and done during the session.
+
+        The comment includes:
+        - Session metadata (ID, persona, project, duration)
+        - Summary stats (message count, tool calls, code references)
+        - Key actions taken (extracted from tool results)
+        - Related issue keys mentioned in the conversation
+        - Optionally: full conversation transcript (collapsible)
+
+        Args:
+            issue_key: The Jira issue key to attach context to (e.g., AAP-12345)
+            session_id: Optional session ID. If empty, uses active session.
+            include_transcript: Whether to include full conversation transcript (default: False).
+                               The transcript is collapsible in Jira's UI.
+
+        Returns:
+            Confirmation of the comment being added with a preview.
+
+        Examples:
+            jira_attach_session(issue_key="AAP-12345")
+            jira_attach_session(issue_key="AAP-12345", include_transcript=True)
+            jira_attach_session(issue_key="AAP-12345", session_id="abc123")
+        """
+        from server.workspace_state import WorkspaceRegistry, format_session_context_for_jira, get_cursor_chat_content
+
+        lines = []
+
+        try:
+            # Validate issue key format
+            import re
+
+            if not re.match(r"^[A-Z]+-\d+$", issue_key.upper()):
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"# Invalid Issue Key\n\n"
+                        f"`{issue_key}` is not a valid Jira issue key.\n"
+                        f"Expected format: AAP-12345",
+                    )
+                ]
+
+            issue_key = issue_key.upper()
+
+            # Get workspace and session
+            workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+            target_session_id = session_id if session_id else workspace.active_session_id
+
+            if not target_session_id:
+                return [
+                    TextContent(
+                        type="text",
+                        text="# No Active Session\n\n"
+                        "No active session found. Call `session_start()` first or provide a session_id.",
+                    )
+                ]
+
+            session = workspace.sessions.get(target_session_id)
+            if not session:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"# Session Not Found\n\n"
+                        f"Session `{target_session_id}` not found.\n"
+                        f"Use `session_list()` to see available sessions.",
+                    )
+                ]
+
+            # Extract chat content from Cursor DB
+            lines.append("# Attaching Session Context to Jira\n")
+            lines.append(f"**Issue:** [{issue_key}](https://issues.redhat.com/browse/{issue_key})")
+            lines.append(f"**Session:** `{target_session_id[:8]}...`\n")
+
+            chat_content = get_cursor_chat_content(target_session_id, max_messages=100)
+
+            if chat_content["message_count"] == 0:
+                lines.append("⚠️ **Warning:** No conversation content found in Cursor DB for this session.")
+                lines.append("The session may be new or the chat ID may not match.\n")
+
+            # Format for Jira
+            jira_comment = format_session_context_for_jira(
+                chat_content=chat_content,
+                session=session,
+                include_transcript=include_transcript,
+                max_transcript_chars=5000,
+            )
+
+            # Preview
+            lines.append("## Comment Preview\n")
+            lines.append("```")
+            # Show truncated preview
+            preview = jira_comment[:1500]
+            if len(jira_comment) > 1500:
+                preview += "\n... (truncated)"
+            lines.append(preview)
+            lines.append("```\n")
+
+            # Post to Jira using the jira module
+            try:
+                # Import the jira add comment function
+                from tool_modules.aa_jira.src.tools_basic import _jira_add_comment_impl
+
+                result = await _jira_add_comment_impl(issue_key, jira_comment)
+
+                if "❌" in result:
+                    lines.append(f"## Result\n\n{result}")
+                else:
+                    lines.append(f"## ✅ Success\n\n{result}")
+                    lines.append(f"\n[View on Jira](https://issues.redhat.com/browse/{issue_key})")
+
+                    # Log to session
+                    try:
+                        await memory_session_log_fn(
+                            ctx,
+                            f"Attached session context to {issue_key}",
+                            f"Messages: {chat_content['message_count']}, "
+                            f"Tool calls: {chat_content['summary']['tool_calls']}",
+                        )
+                    except Exception:
+                        pass
+
+            except ImportError as e:
+                lines.append(f"## Error\n\n❌ Could not import Jira tools: {e}")
+                lines.append("\nMake sure the `developer` or `devops` persona is loaded.")
+
+        except Exception as e:
+            import traceback
+
+            lines.append(f"# Error\n\n**Error:** {e}\n")
+            lines.append(f"```\n{traceback.format_exc()}\n```")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
+    async def session_export_context(
+        ctx: Context,
+        session_id: str = "",
+        format: str = "markdown",
+    ) -> list[TextContent]:
+        """Export session context as markdown or JSON.
+
+        Extracts the full conversation context from the current session,
+        including messages, tool calls, and metadata. Useful for:
+        - Sharing session context with team members
+        - Archiving session history
+        - Debugging session issues
+
+        Args:
+            session_id: Optional session ID. If empty, uses active session.
+            format: Output format - "markdown" (default) or "json"
+
+        Returns:
+            Formatted session context.
+
+        Examples:
+            session_export_context()
+            session_export_context(format="json")
+            session_export_context(session_id="abc123")
+        """
+        from server.workspace_state import WorkspaceRegistry, get_cursor_chat_content
+
+        try:
+            # Get workspace and session
+            workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+            target_session_id = session_id if session_id else workspace.active_session_id
+
+            if not target_session_id:
+                return [
+                    TextContent(
+                        type="text",
+                        text="# No Active Session\n\n"
+                        "No active session found. Call `session_start()` first or provide a session_id.",
+                    )
+                ]
+
+            session = workspace.sessions.get(target_session_id)
+            if not session:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"# Session Not Found\n\n" f"Session `{target_session_id}` not found.",
+                    )
+                ]
+
+            # Extract chat content
+            chat_content = get_cursor_chat_content(target_session_id, max_messages=200)
+
+            if format.lower() == "json":
+                # JSON format
+                import json
+
+                export_data = {
+                    "session": {
+                        "id": session.session_id,
+                        "persona": session.persona,
+                        "project": session.project,
+                        "issue_key": session.issue_key,
+                        "branch": session.branch,
+                        "started_at": session.started_at.isoformat() if session.started_at else None,
+                        "last_activity": session.last_activity.isoformat() if session.last_activity else None,
+                        "tool_call_count": session.tool_call_count,
+                    },
+                    "chat": chat_content,
+                }
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"```json\n{json.dumps(export_data, indent=2, default=str)}\n```",
+                    )
+                ]
+
+            # Markdown format
+            lines = []
+            lines.append("# Session Context Export\n")
+            lines.append(f"**Session ID:** `{session.session_id}`")
+            lines.append(f"**Persona:** {session.persona}")
+            if session.project:
+                lines.append(f"**Project:** {session.project}")
+            if session.issue_key:
+                lines.append(f"**Issue:** {session.issue_key}")
+            if session.branch:
+                lines.append(f"**Branch:** `{session.branch}`")
+            if session.started_at:
+                lines.append(f"**Started:** {session.started_at.strftime('%Y-%m-%d %H:%M')}")
+            lines.append("")
+
+            # Summary
+            summary = chat_content.get("summary", {})
+            lines.append("## Summary\n")
+            lines.append(f"- **Total Messages:** {chat_content['message_count']}")
+            lines.append(f"- **User Messages:** {summary.get('user_messages', 0)}")
+            lines.append(f"- **Assistant Messages:** {summary.get('assistant_messages', 0)}")
+            lines.append(f"- **Tool Calls:** {summary.get('tool_calls', 0)}")
+            lines.append(f"- **Code References:** {summary.get('code_changes', 0)}")
+
+            issue_keys = summary.get("issue_keys", [])
+            if issue_keys:
+                lines.append(f"- **Related Issues:** {', '.join(issue_keys)}")
+            lines.append("")
+
+            # Conversation
+            messages = chat_content.get("messages", [])
+            if messages:
+                lines.append("## Conversation\n")
+                for msg in messages[:50]:  # Limit display
+                    role = msg.get("type", "unknown")
+                    text = msg.get("text", "")[:500]
+                    timestamp = msg.get("timestamp", "")[:16] if msg.get("timestamp") else ""
+
+                    role_emoji = "👤" if role == "user" else "🤖" if role == "assistant" else "⚙️"
+                    lines.append(f"### {role_emoji} {role.title()} {f'({timestamp})' if timestamp else ''}\n")
+                    lines.append(text)
+                    lines.append("")
+
+                if len(messages) > 50:
+                    lines.append(f"*... and {len(messages) - 50} more messages*")
+
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        except Exception as e:
+            import traceback
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"# Error\n\n**Error:** {e}\n```\n{traceback.format_exc()}\n```",
+                )
+            ]
 
     return registry.count
 

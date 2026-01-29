@@ -1,0 +1,26 @@
+
+digraph SprintBot {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    jira [label="Jira\nSprint", fillcolor="#E3F2FD"];
+
+    subgraph cluster_bot {
+        label="Sprint Bot";
+        style=filled;
+        fillcolor="#FFF3E0";
+
+        scan [label="Scan\nIssues", fillcolor="#FFCC80"];
+        classify [label="Classify\nActionable", fillcolor="#FFB74D"];
+        transition [label="Auto\nTransition", fillcolor="#FFA726"];
+    }
+
+    notify [label="Slack\nNotify", fillcolor="#C8E6C9"];
+
+    jira -> scan;
+    scan -> classify;
+    classify -> transition [label="ready"];
+    transition -> notify;
+}

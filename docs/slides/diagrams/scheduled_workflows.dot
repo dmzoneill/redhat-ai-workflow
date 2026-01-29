@@ -1,0 +1,24 @@
+
+digraph ScheduledWorkflows {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    cron [label="Cron\nDaemon", fillcolor="#FFCC80"];
+
+    subgraph cluster_jobs {
+        label="Daily Schedule";
+        style=dashed;
+
+        coffee [label="8:30 AM\nmorning_coffee", fillcolor="#C8E6C9"];
+        standup [label="9:00 AM\nstandup_summary", fillcolor="#A5D6A7"];
+        review [label="2:00 PM\npr_review", fillcolor="#81C784"];
+        beer [label="5:30 PM\nevening_beer", fillcolor="#66BB6A"];
+    }
+
+    cron -> coffee;
+    cron -> standup;
+    cron -> review;
+    cron -> beer;
+}

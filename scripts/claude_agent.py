@@ -111,6 +111,62 @@ except ImportError as e:
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
+def _get_available_skills_description() -> str:
+    """Dynamically build skill list from skills/ directory."""
+    if not SKILLS_DIR or not SKILLS_DIR.exists():
+        return "Skills directory not available."
+
+    skills = []
+    for f in sorted(SKILLS_DIR.glob("*.yaml")):
+        try:
+            with open(f) as fp:
+                data = skill_yaml.safe_load(fp)
+            name = data.get("name", f.stem)
+            desc = data.get("description", "").split("\n")[0][:60]  # First line, truncated
+            inputs = [i["name"] for i in data.get("inputs", []) if i.get("required")]
+            input_str = f" (inputs: {', '.join(inputs)})" if inputs else ""
+            skills.append(f"- {name}: {desc}{input_str}")
+        except Exception:
+            skills.append(f"- {f.stem}: (error loading)")
+
+    if not skills:
+        return "No skills found."
+
+    # Return top 20 most useful skills to keep description manageable
+    # Prioritize commonly used ones
+    priority_skills = [
+        "test_mr_ephemeral",
+        "start_work",
+        "create_mr",
+        "create_jira_issue",
+        "review_pr",
+        "close_issue",
+        "coffee",
+        "beer",
+        "standup_summary",
+        "investigate_slack_alert",
+        "debug_prod",
+        "investigate_alert",
+    ]
+
+    sorted_skills = []
+    other_skills = []
+    for s in skills:
+        skill_name = s.split(":")[0].replace("- ", "")
+        if skill_name in priority_skills:
+            sorted_skills.append(s)
+        else:
+            other_skills.append(s)
+
+    # Show priority skills first, then note there are more
+    result = sorted_skills[:15]
+    remaining = len(other_skills) + len(sorted_skills) - 15
+    if remaining > 0:
+        result.append(f"- ... and {remaining} more skills available")
+
+    return "\n".join(result)
+
+
 @dataclass
 class ToolDefinition:
     """Definition of a tool Claude can call."""
@@ -562,26 +618,21 @@ REQUIRED:
         )
 
         # Skill tools
+        # Build dynamic skill list
+        skills_list = _get_available_skills_description()
+
         self.register(
             ToolDefinition(
                 name="skill_run",
-                description="""Run a workflow skill.
+                description=f"""Run a workflow skill.
 
-Available skills include:
-- test_mr_ephemeral: Deploy MR to ephemeral (inputs: mr_id or commit_sha, billing: bool)
-- start_work: Begin work on Jira issue (inputs: issue_key, repo)
-- create_mr: Create merge request (inputs: issue_key, repo, draft: bool)
-- review_pr: Review a PR/MR (inputs: mr_id or issue_key)
-- close_issue: Close a Jira issue (inputs: issue_key)
-- coffee: Morning briefing with alerts, PRs, merges
-- beer: End of day summary
-- standup_summary: Generate standup summary
+Available skills:
+{skills_list}
 
-For ephemeral deployments, USE THIS:
-  skill_run("test_mr_ephemeral", {"mr_id": 1459})
-  skill_run("test_mr_ephemeral", {"mr_id": 1459, "billing": true})
-
-This handles everything: gets SHA, checks image, reserves namespace, deploys.""",
+Example usage:
+  skill_run("test_mr_ephemeral", {{"mr_id": 1459}})
+  skill_run("create_jira_issue", {{"summary": "Bug title", "issue_type": "Bug"}})
+  skill_run("start_work", {{"issue_key": "AAP-12345"}})""",
                 parameters={
                     "type": "object",
                     "properties": {

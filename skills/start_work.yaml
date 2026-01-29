@@ -295,13 +295,19 @@ steps:
 
       issue_key = inputs.issue_key.upper()
 
-      # Use shared parser with issue key filter
-      matching = parse_git_branches(branches_raw or "", issue_key=issue_key)
-
-      if matching:
-        result = {"exists": True, "branch": matching[0], "all_matches": matching}
+      # Handle case where branches_raw is an error string or None
+      branches_text = branches_raw or ""
+      if isinstance(branches_text, str) and branches_text.startswith("❌"):
+        # Git command failed - treat as no branches found
+        result = {"exists": False, "branch": None, "all_matches": [], "error": branches_text}
       else:
-        result = {"exists": False, "branch": None, "all_matches": []}
+        # Use shared parser with issue key filter
+        matching = parse_git_branches(branches_text, issue_key=issue_key)
+
+        if matching:
+          result = {"exists": True, "branch": matching[0], "all_matches": matching}
+        else:
+          result = {"exists": False, "branch": None, "all_matches": []}
     output: branch_check
 
   # Step 4: If branch exists, check for MR using MCP tool
@@ -444,7 +450,7 @@ steps:
       issue_text = str(issue)
       summary = slugify_text(issue_text, max_length=40)
       # Branch format: AAP-XXXXX-description
-      branch_name = f"{key}-{summary}"
+      result = f"{key}-{summary}"
     output: new_branch_name
 
   # Step 7b: Stash uncommitted changes if needed
@@ -540,7 +546,7 @@ steps:
     tool: jira_transition
     args:
       issue_key: "{{ inputs.issue_key }}"
-      transition: "Start Progress"
+      status: "In Progress"
     output: transition_result
     on_error: auto_heal  # Jira API - may need auth refresh
 
@@ -558,10 +564,19 @@ steps:
   # Step 10: Determine final branch name
   - name: get_final_branch
     compute: |
-      if branch_check.get('exists', False):
-        result = branch_check['branch']
+      # Safely handle branch_check - it might be a string if earlier steps failed
+      # Also handle case where new_branch_name is not defined (when resuming existing branch)
+      _new_branch = new_branch_name if 'new_branch_name' in dir() and new_branch_name else None
+
+      if isinstance(branch_check, dict) and branch_check.get('exists', False):
+        # Resuming existing branch - use the found branch name
+        result = branch_check.get('branch') or _new_branch or f"{inputs.issue_key}-work"
+      elif _new_branch:
+        # New branch was created
+        result = _new_branch
       else:
-        result = new_branch_name
+        # Fallback - generate a simple branch name
+        result = f"{inputs.issue_key}-work"
     output: final_branch
 
   # Step 10b: Run Jira hygiene on new work (uses jira_hygiene skill)
@@ -587,14 +602,14 @@ steps:
     description: "Log work start to session log"
     tool: memory_session_log
     args:
-      action: "{{ 'Resumed' if branch_check.exists else 'Started' }} work on {{ inputs.issue_key }}"
+      action: "{{ 'Resumed' if (branch_check is mapping and branch_check.get('exists', False)) else 'Started' }} work on {{ inputs.issue_key }}"
       details: "Branch: {{ final_branch }}, Repo: {{ resolved_repo.path }}"
     on_error: continue
 
   # Step 11b: Notify team on Slack (optional)
   - name: notify_slack_start
     description: "Notify team channel that work started (uses notify_team skill)"
-    condition: "not branch_check.exists"
+    condition: "not (branch_check is mapping and branch_check.get('exists', False))"
     tool: skill_run
     args:
       skill_name: notify_team

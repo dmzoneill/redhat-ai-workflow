@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from mcp.server.fastmcp import Context
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
@@ -40,7 +41,7 @@ except ImportError:
     MEMORY_DIR = PROJECT_DIR / "memory"
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context, FastMCP
+    from mcp.server.fastmcp import FastMCP
 
 
 # Keys that are project-specific (stored per-project)
@@ -69,10 +70,12 @@ def _resolve_memory_path(key: str) -> Path:
     if key_normalized in PROJECT_SPECIFIC_KEYS:
         try:
             from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+
             return get_project_work_state_path()
         except ImportError:
             try:
                 from .chat_context import get_project_work_state_path
+
                 return get_project_work_state_path()
             except ImportError:
                 # Fallback to global path if chat_context not available
@@ -107,6 +110,7 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
         if ctx is not None:
             try:
                 from server.workspace_utils import get_workspace_project
+
                 project = await get_workspace_project(ctx)
                 return MEMORY_DIR / "state" / "projects" / project / "current_work.yaml"
             except Exception:
@@ -115,10 +119,12 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
         # Fall back to sync version
         try:
             from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+
             return get_project_work_state_path()
         except ImportError:
             try:
                 from .chat_context import get_project_work_state_path
+
                 return get_project_work_state_path()
             except ImportError:
                 pass
@@ -983,8 +989,6 @@ async def _memory_stats_impl() -> list[TextContent]:
 
 def register_memory_tools(server: "FastMCP") -> int:
     """Register memory tools with the MCP server."""
-    from mcp.server.fastmcp import Context
-
     registry = ToolRegistry(server)
 
     @registry.tool()

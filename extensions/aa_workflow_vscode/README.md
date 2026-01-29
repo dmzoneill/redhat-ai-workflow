@@ -81,7 +81,7 @@ The extension reads from:
    - `state/environments.yaml` - Environment health
 
 2. **D-Bus** (when Slack daemon running)
-   - `com.aiworkflow.SlackAgent.GetStatus` - Daemon statistics (running, uptime, messages_processed, messages_responded, polls, errors)
+   - `com.aiworkflow.BotSlack.GetStatus` - Daemon statistics (running, uptime, messages_processed, messages_responded, polls, errors)
 
 ## Development
 

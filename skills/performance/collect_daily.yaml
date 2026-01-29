@@ -378,8 +378,22 @@ steps:
           "saved_at": datetime.now().isoformat(),
       }
 
+      # Get data directory from config or use default
+      def get_perf_data_dir():
+          try:
+              config_file = Path.home() / ".config" / "aa-workflow" / "config.json"
+              if config_file.exists():
+                  with open(config_file) as f:
+                      config = json.load(f)
+                  data_dir = config.get("performance", {}).get("data_dir", "")
+                  if data_dir:
+                      return Path(data_dir).expanduser()
+          except Exception:
+              pass
+          return Path.home() / "src" / "redhat-quarterly-connection"
+
       # Save to file
-      perf_dir = Path.home() / "src" / "redhat-quarterly-connection" / str(target_date["year"]) / f"q{target_date['quarter']}" / "performance" / "daily"
+      perf_dir = get_perf_data_dir() / str(target_date["year"]) / f"q{target_date['quarter']}" / "performance" / "daily"
       perf_dir.mkdir(parents=True, exist_ok=True)
 
       daily_file = perf_dir / f"{target_date['date']}.json"
@@ -411,8 +425,22 @@ steps:
       from pathlib import Path
       from datetime import datetime
 
+      # Get data directory from config or use default
+      def get_perf_data_dir():
+          try:
+              config_file = Path.home() / ".config" / "aa-workflow" / "config.json"
+              if config_file.exists():
+                  with open(config_file) as f:
+                      config = json.load(f)
+                  data_dir = config.get("performance", {}).get("data_dir", "")
+                  if data_dir:
+                      return Path(data_dir).expanduser()
+          except Exception:
+              pass
+          return Path.home() / "src" / "redhat-quarterly-connection"
+
       # Load summary
-      perf_dir = Path.home() / "src" / "redhat-quarterly-connection" / str(target_date["year"]) / f"q{target_date['quarter']}" / "performance"
+      perf_dir = get_perf_data_dir() / str(target_date["year"]) / f"q{target_date['quarter']}" / "performance"
       summary_file = perf_dir / "summary.json"
 
       summary = {}

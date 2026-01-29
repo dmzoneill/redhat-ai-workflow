@@ -1,0 +1,36 @@
+
+digraph SessionBuilder {
+    rankdir=TB;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_sources {
+        label="Context Sources";
+        style=dashed;
+
+        persona [label="Personas", fillcolor="#E1BEE7"];
+        skills [label="Skills", fillcolor="#D1C4E9"];
+        memory [label="Memory", fillcolor="#C5CAE9"];
+        jira [label="Jira", fillcolor="#BBDEFB"];
+        slack [label="Slack", fillcolor="#B3E5FC"];
+        code [label="Code", fillcolor="#B2EBF2"];
+        meet [label="Meetings", fillcolor="#B2DFDB"];
+    }
+
+    builder [label="Session\nBuilder", fillcolor="#FFF9C4", shape=box3d];
+
+    persona -> builder;
+    skills -> builder;
+    memory -> builder;
+    jira -> builder;
+    slack -> builder;
+    code -> builder;
+    meet -> builder;
+
+    prompt [label="Super Prompt", fillcolor="#C8E6C9", shape=note];
+    tokens [label="Token\nEstimate", fillcolor="#DCEDC8"];
+
+    builder -> prompt;
+    builder -> tokens;
+}

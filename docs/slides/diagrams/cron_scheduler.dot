@@ -1,0 +1,34 @@
+
+digraph CronScheduler {
+    rankdir=LR;
+    bgcolor="transparent";
+    node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    config [label="config.json\nschedules", fillcolor="#FFF9C4", shape=note];
+
+    cron [label="Cron\nDaemon", fillcolor="#FFCC80"];
+
+    subgraph cluster_jobs {
+        label="Scheduled Jobs";
+        style=dashed;
+
+        coffee [label="morning_coffee\n8:30 AM", fillcolor="#A5D6A7"];
+        beer [label="evening_beer\n5:30 PM", fillcolor="#81C784"];
+        cleanup [label="memory_cleanup\n2:00 AM", fillcolor="#66BB6A"];
+        refresh [label="knowledge_refresh\n6:00 AM", fillcolor="#4CAF50"];
+    }
+
+    skills [label="Skill\nEngine", fillcolor="#90CAF9"];
+
+    config -> cron;
+    cron -> coffee;
+    cron -> beer;
+    cron -> cleanup;
+    cron -> refresh;
+
+    coffee -> skills [label="skill_run()"];
+    beer -> skills [label="skill_run()"];
+    cleanup -> skills [label="skill_run()"];
+    refresh -> skills [label="skill_run()"];
+}

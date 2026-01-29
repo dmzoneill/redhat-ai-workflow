@@ -1,0 +1,37 @@
+[Unit]
+Description=AI Workflow Video Generator Daemon
+After=network.target dbus.socket
+Wants=dbus.socket
+
+[Service]
+Type=simple
+WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
+
+# Display environment for OpenGL rendering (X11/Wayland)
+Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+# Force GLX platform for headless OpenGL
+Environment=PYOPENGL_PLATFORM=glx
+# XDG runtime for PipeWire/PulseAudio access
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
+# Use the virtual environment's python with D-Bus enabled
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 scripts/video_daemon.py
+
+# Restart policy with limits to prevent infinite restart loops
+Restart=on-failure
+RestartSec=10
+# Max 5 restarts in 5 minutes, then give up
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Give the daemon 10 seconds to shut down gracefully
+TimeoutStopSec=10
+KillMode=mixed
+
+# Logs go to journald (view with: journalctl --user -u bot-video -f)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
