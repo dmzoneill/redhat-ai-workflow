@@ -11,13 +11,14 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Claude](https://img.shields.io/badge/Claude-Anthropic-FF6B6B?style=for-the-badge&logo=anthropic&logoColor=white)](https://anthropic.com/)
 [![Cursor](https://img.shields.io/badge/Cursor-IDE-000000?style=for-the-badge&logo=cursor&logoColor=white)](https://cursor.sh/)
+[![OpenCode](https://img.shields.io/badge/OpenCode-Compatible-0ea5e9?style=for-the-badge)](https://opencode.ai/)
 ![Tools](https://img.shields.io/badge/Tools-435-10b981?style=for-the-badge&logo=toolbox&logoColor=white)
 ![Skills](https://img.shields.io/badge/Skills-82-f59e0b?style=for-the-badge&logo=lightning&logoColor=white)
 [![License](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 **Transform Claude into your personal DevOps engineer, developer assistant, and incident responder.**
 
-*Works with both **Claude Code** and **Cursor IDE***
+*Works with **Claude Code**, **Cursor IDE**, and **OpenCode***
 
 [Getting Started](#quick-start) •
 [Commands](docs/commands/README.md) •
@@ -107,6 +108,60 @@ Create `.cursor/mcp.json` in your **project directory**:
     }
   }
 }
+```
+
+Then restart Cursor (Cmd/Ctrl+P → "Reload Window").
+
+</details>
+
+<details>
+<summary><strong>🟦 OpenCode</strong></summary>
+
+Create `opencode.json` in your **project root**:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "aa_workflow": {
+      "type": "local",
+      "command": [
+        "bash",
+        "-c",
+        "cd ~/src/ai-workflow && source .venv/bin/activate && python3 -m server"
+      ]
+    }
+  }
+}
+```
+
+Then restart OpenCode or reload the configuration.
+
+**OpenCode includes:**
+- **Custom Commands** - 12 slash commands in `.opencode/commands/`
+- **Specialized Agents** - 7 agents (2 primary, 5 subagents) in `.opencode/agents/`
+
+See [OpenCode Setup Guide](.opencode/SETUP.md) for details.
+
+</details>
+
+<details>
+<summary><strong>⬛ Cursor IDE</strong></summary>
+
+Create `.cursor/mcp.json` in your **project directory**:
+
+```json
+{
+  "mcpServers": {
+    "aa_workflow": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ~/src/ai-workflow && source .venv/bin/activate && python3 -m server"
+      ]
+    }
+  }
+}
 ```text
 
 Then restart Cursor (Cmd/Ctrl+Shift+P → "Reload Window").
@@ -132,6 +187,114 @@ Claude: [Runs start_work skill]
         ✅ Updated Jira: In Progress
         Ready to code!
 ```
+
+---
+
+## 🟦 Using OpenCode
+
+[OpenCode](https://opencode.ai/) is a powerful AI coding assistant with advanced agent and command support.
+
+### Quick Start with OpenCode
+
+```bash
+# Install OpenCode
+npm install -g @opencode/cli
+
+# Start OpenCode in your project
+cd ~/src/ai-workflow
+opencode
+
+# Try a command
+/coffee
+```
+
+### OpenCode Features
+
+**12 Custom Commands** (`.opencode/commands/`)
+
+| Command | Description |
+|---------|-------------|
+| `/coffee` | Morning briefing with email, PRs, alerts |
+| `/start-work AAP-12345` | Begin work on Jira issue |
+| `/create-mr AAP-12345` | Create merge request |
+| `/deploy 1483` | Deploy MR to ephemeral |
+| `/review 1483` | Single-agent code review |
+| `/review-mr-multiagent 1483` | Multi-agent review (6 agents) |
+| `/check-my-prs` | Check your MRs for feedback |
+| `/debug-prod stage` | Debug production issues |
+| `/investigate-alert stage` | Systematic alert investigation |
+| `/memory` | View current work state |
+| `/beer` | End of day wrap-up |
+
+**7 Specialized Agents** (`.opencode/agents/`)
+
+| Agent | Type | Focus | Usage |
+|-------|------|-------|-------|
+| **developer** | Primary | Daily coding, PRs, Jira | Tab to switch |
+| **devops** | Primary | Infrastructure, K8s, deployments | Tab to switch |
+| **@incident** | Subagent | Production incident response | @ mention |
+| **@release** | Subagent | Release management | @ mention |
+| **@researcher** | Subagent | Information gathering | @ mention |
+| **@code** | Subagent | Pure coding focus | @ mention |
+| **@observability** | Subagent | Monitoring and logs | @ mention |
+
+### Agent Switching
+
+**Primary Agents** (Tab to cycle):
+```bash
+Tab    # Developer → DevOps → Developer
+```
+
+**Subagents** (@ mention):
+```bash
+@researcher how does billing calculation work?
+@incident investigate this production alert
+@release what's the status of the current release?
+```
+
+### OpenCode Workflow Example
+
+```bash
+# Start your day
+/coffee
+
+# Research a feature
+@researcher how is authentication implemented?
+
+# Start work
+/start-work AAP-12345
+
+# Code with developer agent (default)
+# ... write code ...
+
+# Switch to devops for testing
+Tab  # Switch to DevOps agent
+/deploy 1483
+
+# Get comprehensive review
+/review-mr-multiagent 1483 true
+
+# End your day
+/beer
+```
+
+### OpenCode vs Cursor/Claude Code
+
+| Feature | Cursor/Claude Code | OpenCode |
+|---------|-------------------|----------|
+| Commands | Single file format | Individual `.md` files |
+| Agents | Not supported | Primary + subagent system |
+| Arguments | Basic | `$1`, `$2`, `$ARGUMENTS`, `!`cmd``, `@file` |
+| Permissions | Not available | Per-agent tool/bash permissions |
+| Tool Control | Global | Per-agent customization |
+| Navigation | N/A | `<Leader>+Left/Right` for sessions |
+
+### Documentation
+
+- **Setup Guide**: [.opencode/SETUP.md](.opencode/SETUP.md)
+- **Commands Reference**: [.opencode/commands/README.md](.opencode/commands/README.md)
+- **Agents Reference**: [.opencode/agents/README.md](.opencode/agents/README.md)
+- **OpenCode Docs**: https://opencode.ai/docs/
 
 ---
 

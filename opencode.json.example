@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md"
+  ],
+  "permission": {
+    "skill": {
+      "*": "allow",
+      "debug-*": "ask",
+      "test-*": "ask"
+    }
+  },
+  "agent": {
+    "plan": {
+      "permission": {
+        "skill": {
+          "investigate-*": "allow",
+          "debug-*": "allow"
+        }
+      }
+    }
+  }
+}

@@ -24,6 +24,7 @@
         sync-ai-rules sync-ai-rules-dry sync-ai-rules-verbose \
         sync-commands sync-commands-dry sync-commands-reverse \
         sync-config-example sync-config-example-fix \
+        sync-opencode-skills sync-opencode-skills-dry \
         ext-build ext-install ext-watch ext-clean ext-package \
         super-lint
 
@@ -113,6 +114,8 @@ help:
 	@printf "  \033[32mmake sync-commands-generate\033[0m  Generate Cursor commands for new skills\n"
 	@printf "  \033[32mmake sync-config-example\033[0m  Check config.json.example has all keys\n"
 	@printf "  \033[32mmake sync-config-example-fix\033[0m  Add missing keys to example\n"
+	@printf "  \033[32mmake sync-opencode-skills\033[0m  Convert YAML skills to OpenCode SKILL.md format\n"
+	@printf "  \033[32mmake sync-opencode-skills-dry\033[0m  Preview skill conversion (shows what would be generated)\n"
 	@printf "\n"
 	@printf "\033[1mVSCode Extension:\033[0m\n"
 	@printf "  \033[32mmake ext-build\033[0m          Build the VSCode/Cursor extension\n"
@@ -497,6 +500,21 @@ sync-config-example:
 sync-config-example-fix:
 	@printf "\033[36mAdding missing keys to config.json.example...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) ptools/sync_config_example.py --fix -v
+
+sync-opencode-skills:
+	@printf "\033[36mConverting YAML skills to OpenCode format...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/convert_skills_to_opencode.py
+	@printf "\033[32m✅ OpenCode skills generated in .opencode/skills/ and .claude/skills/\033[0m\n"
+
+sync-opencode-skills-dry:
+	@printf "\033[36mPreviewing OpenCode skill conversion...\033[0m\n"
+	@printf "\033[33mNOTE: This is a read-only operation that shows what would be generated\033[0m\n"
+	@printf "\n\033[36mYAML Skills → OpenCode SKILL.md:\033[0m\n"
+	@for skill in $(PROJECT_ROOT)/skills/*.yaml; do \
+		name=$$(basename $$skill .yaml | tr '_' '-'); \
+		printf "  \033[32m%-30s\033[0m → .opencode/skills/$$name/SKILL.md\n" "$$(basename $$skill)"; \
+	done
+	@printf "\n\033[33mRun 'make sync-opencode-skills' to generate files\033[0m\n"
 
 # =============================================================================
 # QUICK START
