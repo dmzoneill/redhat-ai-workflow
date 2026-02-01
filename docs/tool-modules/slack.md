@@ -136,7 +136,7 @@ Configure channels in `config.json`:
 ### Automatic Extraction
 
 ```bash
-pip install pycookiecheat
+uv add pycookiecheat
 python scripts/get_slack_creds.py
 ```
 

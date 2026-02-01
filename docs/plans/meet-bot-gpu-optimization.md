@@ -264,7 +264,7 @@ export PYOPENCL_ENABLE_GL=1
 export CL_INC_DIR=/usr/include
 export CL_LIB_DIR=/usr/lib64
 export CL_LIBNAME=OpenCL
-pip install . -v
+uv pip install . -v
 ```
 
 Verify:

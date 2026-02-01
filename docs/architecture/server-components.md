@@ -101,7 +101,6 @@ sequenceDiagram
 |----------|---------|
 | `create_mcp_server()` | Create and configure FastMCP server |
 | `run_mcp_server()` | Run in stdio mode (for AI integration) |
-| `run_web_server()` | Run web UI for testing |
 | `init_scheduler()` | Initialize cron scheduler subsystem |
 
 #### __main__.py
@@ -636,9 +635,6 @@ python -m server --tools git,jira,gitlab
 
 # Run all tools (may exceed limits)
 python -m server --all
-
-# Run with web UI
-python -m server --web --port 8765
 
 # Disable scheduler
 python -m server --no-scheduler

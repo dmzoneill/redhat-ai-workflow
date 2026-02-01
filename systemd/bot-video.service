@@ -16,7 +16,7 @@ Environment=PYOPENGL_PLATFORM=glx
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 
 # Use the virtual environment's python with D-Bus enabled
-ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 scripts/video_daemon.py
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.video
 
 # Restart policy with limits to prevent infinite restart loops
 Restart=on-failure

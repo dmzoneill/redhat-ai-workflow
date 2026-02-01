@@ -288,7 +288,7 @@ Output:
 
 2. Check dependencies are installed:
    ```bash
-   pip install apscheduler croniter
+   uv add apscheduler croniter
    ```
 
 3. Check server logs for errors

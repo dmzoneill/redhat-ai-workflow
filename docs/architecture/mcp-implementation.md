@@ -77,8 +77,7 @@ server/                           # Core infrastructure
 ├── tool_registry.py              # Tool registration
 ├── workspace_utils.py            # Workspace helpers
 ├── workspace_exporter.py         # VSCode extension export
-├── usage_pattern_*.py            # Layer 5 learning system (7 files)
-└── web/                          # FastAPI web UI (optional)
+└── usage_pattern_*.py            # Layer 5 learning system (7 files)
 
 tool_modules/                     # Tool plugins (20+ modules)
 ├── aa_workflow/                  # Core workflow tools (18 tools)
@@ -553,14 +552,7 @@ python -m server --tools git,gitlab,jira
 # Load specific modules without persona context
 ```
 
-### 4. Web UI Mode
-
-```bash
-python -m server --web
-# Runs FastAPI web interface on port 8765
-```
-
-### 5. All Tools Mode (Testing)
+### 4. All Tools Mode (Testing)
 
 ```bash
 python -m server --all

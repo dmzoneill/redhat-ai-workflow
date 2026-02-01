@@ -1302,6 +1302,20 @@
           "max_cves": 1
         },
         "notify": ["slack", "memory"]
+      },
+      {
+        "name": "slack_persona_sync",
+        "description": "Daily sync of Slack messages to persona vector store at 2 AM",
+        "skill": "slack_persona_sync",
+        "cron": "0 2 * * *",
+        "persona": "admin",
+        "inputs": {
+          "mode": "incremental",
+          "days": 1,
+          "months": 48
+        },
+        "notify": ["memory"],
+        "timeout_seconds": 3600
       }
     ]
   },
@@ -1327,6 +1341,50 @@
     "auto_collect": {
       "enabled": true,
       "sources": ["git", "jira", "gitlab", "github"]
+    }
+  },
+  "slop_bot": {
+    "description": "Slop Bot - Continuous code quality monitoring with named parallel analysis loops",
+    "enabled": true,
+    "ai_backend": "claude",
+    "max_parallel_loops": 3,
+    "watch_paths": [
+      "server/",
+      "scripts/",
+      "services/",
+      "tool_modules/"
+    ],
+    "ignore_patterns": [
+      "**/test_*.py",
+      "**/migrations/**",
+      "**/__pycache__/**",
+      "**/node_modules/**",
+      "**/.venv/**",
+      "**/dist/**",
+      "**/build/**"
+    ],
+    "loops": {
+      "leaker": {"enabled": true, "max_iterations": 3, "description": "Security vulnerabilities"},
+      "ghost": {"enabled": true, "max_iterations": 2, "description": "Hallucinated imports"},
+      "racer": {"enabled": true, "max_iterations": 5, "description": "Race conditions"},
+      "leaky": {"enabled": true, "max_iterations": 5, "description": "Memory leaks"},
+      "swallower": {"enabled": true, "max_iterations": 3, "description": "Exception handling gaps"},
+      "zombie": {"enabled": true, "max_iterations": 3, "description": "Dead code"},
+      "tangled": {"enabled": true, "max_iterations": 4, "description": "Complexity issues"},
+      "copycat": {"enabled": true, "max_iterations": 2, "description": "Code duplication"},
+      "sloppy": {"enabled": true, "max_iterations": 3, "description": "AI slop patterns"},
+      "drifter": {"enabled": false, "max_iterations": 3, "description": "Verbosity, over-engineering"}
+    },
+    "severity_threshold": "low",
+    "notifications": {
+      "slack_channel": "#code-quality",
+      "slack_severity_threshold": "high",
+      "vscode_enabled": true
+    },
+    "database": {
+      "path": "~/.config/aa-workflow/slop.db",
+      "max_findings": 10000,
+      "retention_days": 90
     }
   }
 }

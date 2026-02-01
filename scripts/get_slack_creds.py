@@ -10,7 +10,7 @@ Usage:
     python scripts/get_slack_creds.py --xoxc "..." # Manually provide xoxc_token
 
 Requirements:
-    pip install pycookiecheat
+    uv add pycookiecheat
 
 Both credentials are extracted directly from Chrome's storage:
 - d_cookie: From Chrome's encrypted Cookies database
@@ -72,7 +72,7 @@ def get_chrome_settings() -> tuple[Path, list[str]]:
 def get_d_cookie_from_chrome(profile: str = "") -> str | None:
     """Get the d cookie from Chrome's cookie storage."""
     if not HAS_PYCOOKIECHEAT:
-        print("❌ Missing: pip install pycookiecheat")
+        print("❌ Missing: uv add pycookiecheat")
         return None
 
     chrome_base, default_profiles = get_chrome_settings()

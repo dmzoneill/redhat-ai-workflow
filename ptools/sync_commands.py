@@ -140,7 +140,7 @@ def claude_to_cursor(content: str) -> str:
 def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> int:
     """Generate Cursor commands for skills that don't have commands."""
     if yaml is None:
-        print("❌ PyYAML not installed. Run: pip install pyyaml")
+        print("❌ PyYAML not installed. Run: uv add pyyaml")
         return 0
 
     # Get existing commands

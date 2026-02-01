@@ -159,7 +159,7 @@ async def memory_query(key: str, query: str) -> list[TextContent]:
 
 **Impact:** Reduces memory reads for large files, enables precise data extraction, improves query performance.
 
-**Note:** Requires `pip install jsonpath-ng`. Tool gracefully degrades with helpful error message if not installed.
+**Note:** Requires `uv add jsonpath-ng`. Tool gracefully degrades with helpful error message if not installed.
 
 ---
 

@@ -12,7 +12,7 @@ Environment=WAYLAND_DISPLAY=wayland-0
 # XDG runtime for D-Bus
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 # Use the virtual environment's python
-ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 scripts/session_daemon.py
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.session
 
 # Restart policy with limits to prevent infinite restart loops
 Restart=on-failure

@@ -53,17 +53,17 @@ AI Workflow is a **comprehensive MCP (Model Context Protocol) server** that give
 git clone https://github.com/yourusername/ai-workflow.git ~/src/ai-workflow
 cd ~/src/ai-workflow
 
-# Option 1: Using UV (recommended - fast!)
+# Using UV (recommended - fast!)
 uv venv
-uv pip install -e .
-
-# Option 2: Traditional pip
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+uv sync
 ```
 
 > **Don't have UV?** Install it: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+For development tools (pytest, black, flake8, mypy), also run:
+```bash
+uv sync --extra dev
+```
 
 ### 2️⃣ Configure Your IDE
 
@@ -144,7 +144,7 @@ The Slack bot is an autonomous agent that monitors channels, responds to queries
 The bot uses Slack's web API. Extract credentials from Chrome:
 
 ```bash
-pip install pycookiecheat
+uv add pycookiecheat
 python scripts/get_slack_creds.py
 ```
 

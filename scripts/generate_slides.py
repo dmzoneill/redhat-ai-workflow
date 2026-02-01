@@ -7,7 +7,7 @@ Usage:
     python scripts/generate_slides.py docs/slides/onboarding-outline.md -o presentation.pptx
 
 Requirements:
-    pip install python-pptx
+    uv add python-pptx
 """
 
 import argparse

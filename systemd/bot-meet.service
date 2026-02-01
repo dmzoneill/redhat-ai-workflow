@@ -22,7 +22,7 @@ Environment=WAYLAND_DISPLAY=wayland-0
 # XDG runtime for PipeWire/PulseAudio access
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 # Use the virtual environment's python with D-Bus enabled
-ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 scripts/meet_daemon.py --dbus
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.meet --dbus
 
 # Restart policy
 Restart=on-failure

@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+"""Slack Persona Sync Script.
+
+Standalone script for syncing Slack messages to persona vector store.
+Can be run manually or via cron daemon.
+
+Usage:
+    # Full sync (48 months default)
+    python scripts/slack_persona_sync.py --full
+
+    # Full sync with custom window
+    python scripts/slack_persona_sync.py --full --months 12
+
+    # Resume interrupted sync
+    python scripts/slack_persona_sync.py --full --resume
+
+    # Incremental sync (1 day default)
+    python scripts/slack_persona_sync.py --incremental
+
+    # Incremental sync with custom window
+    python scripts/slack_persona_sync.py --incremental --days 7
+
+    # Check status
+    python scripts/slack_persona_sync.py --status
+
+    # Search
+    python scripts/slack_persona_sync.py --search "CVE release"
+"""
+
+import argparse
+import asyncio
+import fcntl
+import logging
+import os
+import sys
+from pathlib import Path
+
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_slack" / "src"))
+sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_slack_persona" / "src"))
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+LOCK_FILE = Path("/tmp/slack_persona_sync.lock")
+
+
+class SingleInstance:
+    """Ensures only one instance of the sync runs at a time."""
+
+    def __init__(self):
+        self._lock_file = None
+        self._acquired = False
+
+    def acquire(self) -> bool:
+        """Try to acquire the lock. Returns True if successful."""
+        try:
+            self._lock_file = open(LOCK_FILE, "w")
+            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._lock_file.write(str(os.getpid()))
+            self._lock_file.flush()
+            self._acquired = True
+            return True
+        except OSError:
+            return False
+
+    def release(self):
+        """Release the lock."""
+        if self._lock_file:
+            try:
+                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+                self._lock_file.close()
+            except Exception:
+                pass
+        if LOCK_FILE.exists():
+            try:
+                LOCK_FILE.unlink()
+            except Exception:
+                pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.release()
+
+
+async def run_full_sync(months: int, include_threads: bool, resume: bool = False):
+    """Run full sync."""
+    from tool_modules.aa_slack_persona.src.sync import SlackPersonaSync
+
+    print("=" * 60)
+    print(f"Slack Persona Full Sync - {months} months" + (" (RESUMING)" if resume else ""))
+    print("=" * 60)
+    print()
+
+    sync = SlackPersonaSync()
+
+    def progress(current, total, channel_id):
+        print(f"  [{current}/{total}] {channel_id}")
+
+    result = await sync.full_sync(
+        months=months,
+        include_threads=include_threads,
+        progress_callback=progress,
+        resume=resume,
+    )
+
+    print()
+    print("=" * 60)
+    print("Results")
+    print("=" * 60)
+    print(f"Status: {result['status']}")
+    print(f"Messages synced: {result['messages_synced']:,}")
+    print(f"Conversations: {result['conversations']}")
+    print(f"Time window: {result['months']} months")
+    print(f"Elapsed: {result['elapsed_seconds']}s")
+    print()
+    print("Vector Store:")
+    print(f"  Total messages: {result['vector_stats']['total_messages']:,}")
+    print(f"  Database size: {result['vector_stats']['db_size_mb']} MB")
+    print(f"  Path: {result['vector_stats']['db_path']}")
+
+
+async def run_incremental_sync(days: int, include_threads: bool):
+    """Run incremental sync."""
+    from tool_modules.aa_slack_persona.src.sync import SlackPersonaSync
+
+    print("=" * 60)
+    print(f"Slack Persona Incremental Sync - {days} day(s)")
+    print("=" * 60)
+    print()
+
+    sync = SlackPersonaSync()
+
+    result = await sync.incremental_sync(
+        days=days,
+        include_threads=include_threads,
+    )
+
+    print()
+    print("Results")
+    print("-" * 40)
+    print(f"Status: {result['status']}")
+    print(f"Messages synced: {result['messages_synced']:,}")
+    print(f"Messages pruned: {result.get('messages_pruned', 0):,}")
+    print(f"Days: {result['days']}")
+    print(f"Elapsed: {result['elapsed_seconds']}s")
+    print()
+    print("Vector Store:")
+    print(f"  Total messages: {result['vector_stats']['total_messages']:,}")
+    print(f"  Database size: {result['vector_stats']['db_size_mb']} MB")
+
+
+async def show_status():
+    """Show sync status."""
+    from tool_modules.aa_slack_persona.src.sync import SlackPersonaSync
+
+    sync = SlackPersonaSync()
+    status = sync.get_status()
+
+    metadata = status.get("metadata", {})
+    stats = status.get("vector_stats", {})
+
+    print("=" * 60)
+    print("Slack Persona Sync Status")
+    print("=" * 60)
+    print()
+
+    print("Sync Metadata:")
+    if metadata:
+        print(f"  Last full sync: {metadata.get('last_full_sync', 'Never')}")
+        print(f"  Time window: {metadata.get('months', 'N/A')} months")
+        print(f"  Total messages: {metadata.get('total_messages', 0):,}")
+        print(f"  Conversations: {metadata.get('conversations', 0)}")
+        print(f"  Include threads: {metadata.get('include_threads', True)}")
+        print(f"  Last incremental: {metadata.get('last_incremental_sync', 'Never')}")
+    else:
+        print("  No sync metadata found. Run a full sync first.")
+
+    print()
+    print("Vector Store:")
+    print(f"  Messages indexed: {stats.get('total_messages', 0):,}")
+    print(f"  Database size: {stats.get('db_size_mb', 0)} MB")
+    print(f"  Path: {stats.get('db_path', 'N/A')}")
+
+
+async def run_search(query: str, limit: int, my_only: bool):
+    """Run search."""
+    from tool_modules.aa_slack_persona.src.sync import SlackPersonaSync
+
+    sync = SlackPersonaSync()
+
+    results = sync.search(
+        query=query,
+        limit=limit,
+        my_messages_only=my_only,
+    )
+
+    print("=" * 60)
+    print(f"Search: {query}")
+    print("=" * 60)
+    print()
+
+    if not results:
+        print("No matching messages found.")
+        return
+
+    print(f"Found {len(results)} results:")
+    print()
+
+    for i, msg in enumerate(results, 1):
+        score = 1 - msg.get("score", 0)
+        print(f"{i}. [{msg['channel_type']}] {msg['datetime_str']}")
+        print(f"   User: {msg['user_name'] or msg['user_id']}")
+        print(f"   Relevance: {score:.2%}")
+        print(f"   > {msg['text'][:200]}{'...' if len(msg['text']) > 200 else ''}")
+        print()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Slack Persona Sync")
+    parser.add_argument("--full", action="store_true", help="Run full sync")
+    parser.add_argument("--incremental", action="store_true", help="Run incremental sync")
+    parser.add_argument("--status", action="store_true", help="Show sync status")
+    parser.add_argument("--search", type=str, help="Search for messages")
+    parser.add_argument("--months", type=int, default=48, help="Months for full sync (default: 48 = 4 years)")
+    parser.add_argument("--days", type=int, default=1, help="Days for incremental sync (default: 1)")
+    parser.add_argument("--no-threads", action="store_true", help="Exclude thread replies")
+    parser.add_argument("--resume", action="store_true", help="Resume interrupted full sync")
+    parser.add_argument("--limit", type=int, default=5, help="Search result limit (default: 5)")
+    parser.add_argument("--my-only", action="store_true", help="Search only my messages")
+
+    args = parser.parse_args()
+
+    include_threads = not args.no_threads
+
+    # Status and search don't need lock
+    if args.status:
+        asyncio.run(show_status())
+        return
+    elif args.search:
+        asyncio.run(run_search(args.search, args.limit, args.my_only))
+        return
+
+    # Sync operations need single instance lock
+    if args.full or args.incremental:
+        lock = SingleInstance()
+        if not lock.acquire():
+            print("❌ Another sync is already running!")
+            print("   Check with: ps aux | grep slack_persona_sync")
+            print("   Or remove lock: rm /tmp/slack_persona_sync.lock")
+            sys.exit(1)
+
+        try:
+            if args.full:
+                asyncio.run(run_full_sync(args.months, include_threads, args.resume))
+            elif args.incremental:
+                asyncio.run(run_incremental_sync(args.days, include_threads))
+        finally:
+            lock.release()
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

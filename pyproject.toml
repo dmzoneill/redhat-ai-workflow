@@ -25,44 +25,56 @@ classifiers = [
 dependencies = [
     # MCP Server
     "mcp>=1.0.0",
-    "fastmcp>=0.1.0",
-
+    "fastmcp>=3.0.0b1",
     # Configuration & Templating
     "pyyaml>=6.0",
     "jinja2>=3.0.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
-
     # HTTP Client
     "httpx>=0.25.0",
-
-    # Web Server (for optional web UI)
-    "fastapi>=0.100.0",
-    "uvicorn>=0.22.0",
-
     # Async Database
     "aiosqlite>=0.19.0",
-
     # D-Bus IPC (for Slack daemon control)
     "dbus-next>=0.2.3",
-
     # Claude Agent
     "anthropic>=0.18.0",
-
     # Google APIs
     "google-api-python-client>=2.100.0",
     "google-auth-httplib2>=0.1.0",
     "google-auth-oauthlib>=1.0.0",
-
     # Ephemeral environment management
     "crc-bonfire>=5.0.0",
-
     # Scheduler
     "apscheduler>=3.10.0",
     "croniter>=2.0.0",
-
     # WebSocket server for real-time skill updates
     "websockets>=12.0",
+    # Slack integration
+    "pycookiecheat>=0.7.0",
+    # Code search with vector embeddings
+    "lancedb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+    "watchfiles>=0.21.0",
+    # Meet bot browser automation and video
+    "playwright>=1.40.0",
+    "pillow>=10.0.0",
+    # Meet bot GPU acceleration
+    "pyopencl>=2023.1",
+    "PyOpenGL>=3.1.0",
+    "PyOpenGL_accelerate>=3.1.0",
+    "freetype-py>=2.4.0",
+    "glfw>=2.6.0",
+    # Speech-to-text with OpenVINO (requires Python <=3.13)
+    "openvino-genai>=2024.0.0; python_version < '3.14'",
+    "optimum[openvino]>=1.16.0; python_version < '3.14'",
+    # ONNX runtime for model inference (requires Python <=3.13)
+    "onnxruntime>=1.16.0; python_version < '3.14'",
+    # Document processing
+    "python-pptx>=0.6.21",
+    "pypdf>=3.17.0",
+    "jsonpath-ng>=1.6.0",
+    "ai-slop-detector>=2.6.3",
 ]
 
 [project.optional-dependencies]
@@ -75,13 +87,6 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.8.0",
     "bandit>=1.7.0",
-]
-
-slack = [
-    # Chrome cookie extraction for Slack credentials
-    "pycookiecheat>=0.7.0",
-    # Desktop notifications (requires system libnotify)
-    # "PyGObject>=3.42.0",
 ]
 
 [project.urls]
@@ -98,7 +103,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["tool_modules", "scripts", "agents", "skills"]
+packages = ["tool_modules", "scripts", "agents", "skills", "services", "server"]
 
 [tool.black]
 line-length = 88

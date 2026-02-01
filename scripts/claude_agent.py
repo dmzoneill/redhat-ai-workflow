@@ -1493,7 +1493,7 @@ Please verify the image exists before proceeding."""
                 if str(scripts_dir) not in sys.path:
                     sys.path.insert(0, str(scripts_dir))
 
-                from slack_dbus import SlackAgentClient
+                from services.slack.dbus import SlackAgentClient
 
                 client = SlackAgentClient()
                 if await client.connect():
@@ -1699,7 +1699,7 @@ class ClaudeAgent:
         system_prompt: Optional[str] = None,
     ) -> None:
         if not ANTHROPIC_AVAILABLE:
-            raise ImportError("anthropic package not installed. Install with: pip install anthropic")
+            raise ImportError("anthropic package not installed. Install with: uv add anthropic")
 
         self.max_tokens = max_tokens
         self.system_prompt = system_prompt or self._default_system_prompt()
@@ -1716,7 +1716,7 @@ class ClaudeAgent:
 
         if use_vertex and vertex_project:
             if not VERTEX_AVAILABLE:
-                raise ImportError("AnthropicVertex not available. Update anthropic: pip install -U anthropic")
+                raise ImportError("AnthropicVertex not available. Update anthropic: uv add anthropic --upgrade")
             self.client = AnthropicVertex(
                 project_id=vertex_project,
                 region=vertex_region,
@@ -1751,6 +1751,7 @@ class ClaudeAgent:
         self._conversations: dict[str, list[dict[str, str]]] = {}
         self._max_history: int = 10  # Keep last N message pairs per conversation
         self._history_ttl: int = 3600  # Clear conversations older than 1 hour
+        self._max_conversations: int = 200  # Prevent unbounded memory growth
         self._conversation_timestamps: dict[str, float] = {}
 
     def _get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]:
@@ -1762,6 +1763,13 @@ class ClaudeAgent:
         for cid in stale_ids:
             self._conversations.pop(cid, None)
             self._conversation_timestamps.pop(cid, None)
+
+        # Enforce max conversations limit - remove oldest if over limit
+        if len(self._conversations) > self._max_conversations:
+            sorted_convs = sorted(self._conversation_timestamps.items(), key=lambda x: x[1])
+            for cid, _ in sorted_convs[: len(self._conversations) - self._max_conversations]:
+                self._conversations.pop(cid, None)
+                self._conversation_timestamps.pop(cid, None)
 
         return self._conversations.get(conversation_id, [])
 

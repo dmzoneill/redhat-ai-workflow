@@ -325,7 +325,7 @@ async def main():
 
     if not DBUS_AVAILABLE:
         print("Error: dbus-next not installed")
-        print("Install with: pip install dbus-next")
+        print("Install with: uv add dbus-next")
         sys.exit(1)
 
     if not args.command:

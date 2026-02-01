@@ -26,13 +26,25 @@ class RateLimiter:
 
     window_seconds: int = 300
     max_per_author: int = 3
+    max_tracked_authors: int = 500  # Prevent unbounded memory growth
     _counts: dict = field(default_factory=lambda: defaultdict(list))
 
     def can_send(self, author_id: str) -> bool:
         """Check if we can send to this author."""
         now = time.time()
-        # Clean old entries
+        # Clean old entries for this author
         self._counts[author_id] = [ts for ts in self._counts[author_id] if now - ts < self.window_seconds]
+
+        # Periodic cleanup: remove stale authors if over limit
+        if len(self._counts) > self.max_tracked_authors:
+            stale_authors = [
+                aid
+                for aid, timestamps in self._counts.items()
+                if not timestamps or all(now - ts >= self.window_seconds for ts in timestamps)
+            ]
+            for aid in stale_authors:
+                del self._counts[aid]
+
         return len(self._counts[author_id]) < self.max_per_author
 
     def record(self, author_id: str):

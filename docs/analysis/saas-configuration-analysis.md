@@ -1,8 +1,9 @@
 # SaaS Configuration Maturity Analysis Report
 
-**Project:** Automation Analytics (tower-analytics / aap-aa-tenant)  
-**Date:** 2026-01-29  
+**Project:** Automation Analytics (tower-analytics / aap-aa-tenant)
+**Date:** 2026-01-29
 **Scope:** Konflux Release-Data + App-Interface configurations
+**Compared Against:** 12 Insights services (notifications, rbac, host-inventory, compliance, sources, export-service, playbook-dispatcher, vulnerability) + 4 Konflux tenants
 
 ---
 
@@ -10,15 +11,30 @@
 
 This analysis compares your Automation Analytics SaaS configurations against other projects in the Insights platform to identify gaps, best practices, and improvement opportunities. Your configuration is **moderately mature** with some notable strengths but several areas for improvement.
 
-### Maturity Score: 7/10
+### Maturity Score: 6.5/10 (Revised)
 
 | Category | Score | Notes |
 |----------|-------|-------|
-| Konflux Configuration | 8/10 | Strong test coverage, good ECP policy |
-| App-Interface SaaS | 7/10 | Good structure, missing some best practices |
-| SLO/Observability | 6/10 | Basic SLOs, could be more comprehensive |
-| Security/Compliance | 7/10 | Good ECP exclusions, missing some hardening |
+| Konflux Configuration | 7/10 | Good test coverage, but using custom ECP instead of shared |
+| App-Interface SaaS | 6/10 | Missing many modern patterns from mature services |
+| SLO/Observability | 5/10 | Basic SLOs, missing error tracking, CloudWatch explicit |
+| Security/Compliance | 6/10 | Many ECP exclusions, missing PGSSLMODE, no SBOM notifications |
 | Release Process | 8/10 | Proper promotion gates, pinned prod refs |
+| Operational Controls | 5/10 | Missing job suspension flags, health probes, Kafka resilience |
+
+### Key Findings Summary
+
+| Finding | Severity | Effort to Fix |
+|---------|----------|---------------|
+| Custom ECP instead of shared policy | Medium | Low |
+| Missing SBOM notifications | High | Low |
+| No Sentry/error tracking | High | Medium |
+| Missing `PGSSLMODE: verify-full` | High | Low |
+| No Kafka resilience parameters | Medium | Low |
+| Missing job suspension flags | Medium | Low |
+| Low Gunicorn workers (1 vs 4-8) | Medium | Low |
+| Stale hardcoded dates | Low | Low |
+| No ElastiCache/Redis caching | Low | High |
 
 ---
 
@@ -49,7 +65,72 @@ This analysis compares your Automation Analytics SaaS configurations against oth
 
 #### Gaps & Recommendations 🔧
 
-##### 1. Missing Quick/Slow Test Scenarios
+##### 1. Using Custom ECP Instead of Shared Policy ⚠️ NEW
+
+**Current:** aap-aa-tenant uses a tenant-specific ECP (`ecp-aap-aa.yml`) with 60+ exclusions.
+
+**Observed in mature tenants:**
+- `rh-subs-watch-tenant`: Uses `rhtap-releng-tenant/app-interface-rh-subs-watch-prod`
+- `insights-management-tenant`: Uses `rhtap-releng-tenant/consoledot-backend-standard`
+- `hcc-platex-services-tenant`: Uses `rhtap-releng-tenant/app-interface-standard`
+
+**Issue:** Maintaining a custom ECP creates technical debt and may miss security updates.
+
+**Recommendation:** Migrate to a shared policy:
+```yaml
+# In IntegrationTestScenario, change:
+params:
+  - name: POLICY_CONFIGURATION
+    value: rhtap-releng-tenant/app-interface-standard  # Use shared policy
+```
+
+##### 2. Missing SBOM Notifications ⚠️ NEW (HIGH PRIORITY)
+
+**Observed in insights-management-tenant:**
+```yaml
+# In ImageRepository
+spec:
+  notifications:
+    - config:
+        url: https://bombino.api.redhat.com/v1/sbom/quay/push
+      event: repo_push
+      method: webhook
+      title: SBOM-event-to-Bombino
+```
+
+**Current:** aap-aa-tenant has no SBOM notifications.
+
+**Impact:** Missing compliance requirement for software bill of materials.
+
+**Recommendation:** Add SBOM notifications to `ir-aap-aa.yml`:
+```yaml
+spec:
+  notifications:
+    - config:
+        url: https://bombino.api.redhat.com/v1/sbom/quay/push
+      event: repo_push
+      method: webhook
+      title: SBOM-event-to-Bombino
+```
+
+##### 3. Missing Component-Level Testing ⚠️ NEW
+
+**Observed in insights-management-tenant:**
+```yaml
+spec:
+  params:
+    - name: SINGLE_COMPONENT
+      value: 'true'  # Component-level EC testing
+  contexts:
+    - description: Component Testing
+      name: component_aap-aa  # Component-specific context
+```
+
+**Current:** aap-aa-tenant uses application-level testing only.
+
+**Recommendation:** Add `SINGLE_COMPONENT: 'true'` for more granular EC tests.
+
+##### 4. Missing Quick/Slow Test Scenarios
 
 **Current:** You have `its-aap-aa-quick.yml` and `its-aap-aa-slow.yml` referenced but need to verify they exist.
 
@@ -64,39 +145,32 @@ metadata:
     test.appstudio.openshift.io/pipeline_timeout: "15m"  # Quick timeout
 ```
 
-##### 2. Missing Version-Specific Release Plans
+##### 5. Missing Version-Specific Release Plans
 
-**Observed in mature tenants (rhdh-tenant, rhoai-tenant):** Version-specific release plans for stage vs prod.
+**Observed in mature tenants (rhdh-tenant, rhoai-tenant, insights-management-tenant):** Separate stage/prod release plans.
 
 **Current:** Single release plan for all releases.
 
-**Recommendation:** Consider separate stage/prod release plans:
-
+**Observed in insights-management-tenant:**
 ```yaml
-# rp-aap-aa-stage.yml
-apiVersion: appstudio.redhat.com/v1alpha1
-kind: ReleasePlan
+# Stage ReleasePlan
 metadata:
-  name: aap-aa-stage
   labels:
-    release.appstudio.openshift.io/auto-release: "true"
-spec:
-  application: aap-aa
-  target: rhtap-releng-tenant-stage  # Stage target
-  
-# rp-aap-aa-prod.yml  
-apiVersion: appstudio.redhat.com/v1alpha1
-kind: ReleasePlan
+    release.appstudio.openshift.io/auto-release: 'true'   # Auto for stage
+    release.appstudio.openshift.io/releasePlanAdmission: 'iop-satellite-stage'
+  name: iop-advisor-backend-stage
+
+# Prod ReleasePlan
 metadata:
-  name: aap-aa-prod
   labels:
-    release.appstudio.openshift.io/auto-release: "false"  # Manual prod releases
-spec:
-  application: aap-aa
-  target: rhtap-releng-tenant
+    release.appstudio.openshift.io/auto-release: 'false'  # Manual for prod
+    release.appstudio.openshift.io/releasePlanAdmission: 'iop-satellite-prod'
+  name: iop-advisor-backend-prod
 ```
 
-##### 3. Enterprise Contract Policy Exclusions Review
+**Recommendation:** Create separate stage/prod release plans for better control.
+
+##### 6. Enterprise Contract Policy Exclusions Review
 
 **Current exclusions that should be reviewed:**
 
@@ -225,7 +299,7 @@ a) **Increase SLO targets** (if achievable):
 slos:
 - name: RequestsResultSuccessfulNon5xxResponse
   SLOTarget: 0.95  # Increase from 0.90 to 0.95
-  
+
 - name: RequestLatencyUnder2000ms
   SLOTarget: 0.95  # Increase from 0.90 to 0.95
 ```
@@ -247,7 +321,7 @@ b) **Add additional SLOs:**
       }[7d]
     ) / avg_over_time(
       kube_deployment_status_replicas{
-        namespace="tower-analytics-prod", 
+        namespace="tower-analytics-prod",
         deployment=~".*processor-controller.*"
       }[7d]
     )
@@ -476,26 +550,73 @@ allowed_registry_prefixes:
 
 ## Part 6: Prioritized Action Items
 
-### High Priority (Do Now)
+### Critical Priority (Security/Compliance) 🔴
 
-1. **Add `dora` label** to deploy-clowder.yml
-2. **Add prod promotion gate** for deployment visibility
-3. **Clean up TODO comments** in configuration
-4. **Review and update SRE checkpoint** contract version
+| # | Action | Impact | Effort | Location |
+|---|--------|--------|--------|----------|
+| 1 | **Add SBOM notifications** to ImageRepository | Compliance | Low | `ir-aap-aa.yml` |
+| 2 | **Add `PGSSLMODE: verify-full`** | Security | Low | `deploy-clowder.yml` |
+| 3 | **Migrate to shared ECP policy** | Maintainability | Medium | `ecp-aap-aa.yml` |
 
-### Medium Priority (Next Sprint)
+### High Priority (Observability/Reliability) 🟠
 
-5. **Enable CVE scanning** in ECP (warning mode first)
-6. **Add Sentry integration** for error tracking
-7. **Increase SLO targets** if metrics support it
-8. **Add per-component SLOs** for critical services
+| # | Action | Impact | Effort | Location |
+|---|--------|--------|--------|----------|
+| 4 | **Add Sentry integration** | Error tracking | Medium | `deploy-clowder.yml` |
+| 5 | **Add prod promotion gate** | Visibility | Low | `deploy-clowder.yml` |
+| 6 | **Add `dora` label** | DORA metrics | Low | `deploy-clowder.yml` |
+| 7 | **Add Kafka resilience params** | Reliability | Low | `deploy-clowder.yml` |
+| 8 | **Add health probe configuration** | Reliability | Low | `deploy-clowder.yml` |
 
-### Low Priority (Backlog)
+### Medium Priority (Operations) 🟡
 
-9. **Consider KEDA autoscaling** for variable workloads
-10. **Add performance testing namespace** 
-11. **Create query library** for ad-hoc investigations
-12. **Evaluate hermetic builds** for reproducibility
+| # | Action | Impact | Effort | Location |
+|---|--------|--------|--------|----------|
+| 9 | **Add job suspension flags** | Incident response | Low | `deploy-clowder.yml` |
+| 10 | **Increase Gunicorn workers** (1→4) | Performance | Low | `deploy-clowder.yml` |
+| 11 | **Add CPU requests** for all components | Resource planning | Medium | `deploy-clowder.yml` |
+| 12 | **Clean up stale TODOs** | Maintainability | Low | `deploy-clowder.yml` |
+| 13 | **Fix hardcoded dates** | Maintenance | Low | `deploy-clowder.yml` |
+| 14 | **Separate stage/prod ReleasePlans** | Release control | Medium | Konflux configs |
+
+### Low Priority (Enhancements) 🟢
+
+| # | Action | Impact | Effort | Location |
+|---|--------|--------|--------|----------|
+| 15 | **Add component-level EC testing** | Test granularity | Medium | Konflux ITS |
+| 16 | **Consider KEDA autoscaling** | Cost optimization | High | `deploy-clowder.yml` |
+| 17 | **Add ElastiCache** | Performance | High | Namespace configs |
+| 18 | **Add performance testing namespace** | Testing | High | App-interface |
+| 19 | **Create query library** | Investigations | Medium | App-interface |
+| 20 | **Increase SLO targets** | Reliability | Low | SLO documents |
+
+### Quick Wins (< 1 hour each)
+
+```yaml
+# 1. Add PGSSLMODE (deploy-clowder.yml)
+parameters:
+  PGSSLMODE: 'verify-full'
+
+# 2. Add dora label (deploy-clowder.yml)
+labels:
+  dora: insights-production
+
+# 3. Add prod promotion gate (deploy-clowder.yml)
+promotion:
+  publish:
+  - automation-analytics-prod-deploy-success-channel
+
+# 4. Increase Gunicorn workers (deploy-clowder.yml)
+GUNICORN_PROCESSES: 4
+
+# 5. Add job suspension flags (deploy-clowder.yml)
+DATA_PRUNING_SUSPEND: 'false'
+MSG_RECOVERY_SUSPEND: 'false'
+
+# 6. Add Kafka resilience (deploy-clowder.yml)
+KAFKA_PRODUCER_RETRIES: '8'
+KAFKA_PRODUCER_RETRY_BACKOFF_MS: '250'
+```
 
 ---
 
@@ -950,6 +1071,318 @@ This allows disabling jobs without code changes during incidents.
 
 ---
 
+## Part 8: Additional Service Patterns (Extended Analysis)
+
+This section covers patterns from additional services: sources, export-service, playbook-dispatcher, and vulnerability.
+
+### 8.1 Component-Specific Resource Naming Patterns
+
+**Best Practice from vulnerability service:**
+```yaml
+# Per-component resource definitions
+CPU_REQUEST_WEBAPP: '250m'
+CPU_LIMIT_WEBAPP: '500m'
+MEMORY_REQUEST_WEBAPP: '800Mi'
+MEMORY_LIMIT_WEBAPP: '1Gi'
+
+CPU_REQUEST_MANAGER: '500m'
+CPU_LIMIT_MANAGER: '1000m'
+MEMORY_REQUEST_MANAGER: '1Gi'
+MEMORY_LIMIT_MANAGER: '2Gi'
+
+# Replicas per component
+REPLICAS_WEBAPP: '3'
+REPLICAS_MANAGER: '12'
+REPLICAS_LISTENER: '3'
+REPLICAS_EVALUATOR_UPLOAD: '3'
+```
+
+**Tower-analytics current pattern:**
+```yaml
+# Mixed naming - some follow pattern, some don't
+MEMORY_REQUEST_ONEVIEW: 1Gi
+MEMORY_LIMIT_ONEVIEW: 2Gi
+CPU_LIMIT_PROCESSOR_CONTROLLER: 500m
+# Missing: CPU_REQUEST_PROCESSOR_CONTROLLER
+```
+
+**Recommendation:** Standardize on `{METRIC}_{REQUEST|LIMIT}_{COMPONENT}` pattern and ensure all components have both request AND limit.
+
+### 8.2 Job Configuration Patterns
+
+**Best Practice from vulnerability service:**
+```yaml
+# Job scheduling via single parameter
+JOBS: 'stale_systems:5,delete_systems:30,rules_git_sync:240,db_metrics:30,cacheman:5'
+
+# Startup job sequencing
+JOBS_STARTUP: 'db_metrics,cacheman,missing_refs'
+```
+
+**Best Practice from playbook-dispatcher:**
+```yaml
+# Job execution control
+POPULATOR_RUN_NUMBER: '1'  # Increment to trigger job
+
+# Connector pause control
+CONNECTOR_PAUSE: 'false'
+```
+
+**Tower-analytics current pattern:**
+```yaml
+# Individual cron schedules (verbose)
+CRON_SCHEDULE_MSG_RECOVERY: 0 */2 * * *
+CRON_SCHEDULE_USER_METRICS: 0 10 * * *
+CRON_SCHEDULE_DATA_PRUNING: 30 19 * * 4
+```
+
+**Assessment:** Tower-analytics pattern is fine but consider adding:
+```yaml
+# Job control flags (NEW)
+MSG_RECOVERY_SUSPEND: 'false'
+USER_METRICS_SUSPEND: 'false'
+DATA_PRUNING_SUSPEND: 'false'
+
+# Job version for manual triggers (NEW)
+DATA_PRUNING_JOB_VERSION: '0'  # Increment to trigger
+```
+
+### 8.3 Feature Flag Patterns
+
+**Best Practice from sources service:**
+```yaml
+# Disable patterns
+DISABLED_APPLICATION_TYPES: 'type1,type2'  # Comma-separated list
+DISABLE_RESOURCE_CREATION: 'false'
+DISABLE_RESOURCE_DELETION: 'false'
+
+# Skip patterns
+SOURCE_TYPE_SKIP_LIST: 'skip1,skip2'
+SKIP_EMPTY_SOURCES: 'true'
+```
+
+**Best Practice from vulnerability service:**
+```yaml
+# Enable patterns
+ENABLE_UNLEASH: 'true'
+ENABLE_PROFILER: 'true'  # Stage only
+CW_ENABLED: 'TRUE'
+
+# Suspend patterns
+SUSPEND_CLUSTER: 'false'
+FLOORIST_SUSPEND: 'false'
+```
+
+**Tower-analytics current pattern:**
+```yaml
+DATA_PRUNING_ENABLED: 'True'
+DATA_EXPORT_ENABLED: 'True'
+AUTO_HEALER_DRY_RUN: 'True'
+```
+
+**Recommendation:** Add operational control flags:
+```yaml
+# Operational controls (NEW)
+PROCESSOR_CONTROLLER_SUSPEND: 'false'
+PROCESSOR_INGRESS_SUSPEND: 'false'
+EXPORTER_SUSPEND: 'false'
+ROLLUPS_SUSPEND: 'false'
+
+# Dry run controls (already have some)
+AUTO_HEALER_DRY_RUN: 'True'  # Existing
+DATA_PRUNING_DRY_RUN: 'false'  # NEW
+```
+
+### 8.4 Environment-Specific Configuration
+
+**Best Practice from sources/vulnerability:**
+```yaml
+# Environment identifier
+SOURCES_ENV: 'stage'  # or 'prod', 'perf'
+VULNERABILITY_ENV: 'PROD'
+
+# Environment-specific buckets
+EXPORT_SERVICE_BUCKET: 'export-service-stage'  # Stage
+EXPORT_SERVICE_BUCKET: 'export-service-prod'   # Prod
+```
+
+**Tower-analytics current pattern:**
+```yaml
+ENV_NAME: stage  # or prod
+```
+
+**Assessment:** Tower-analytics pattern is adequate.
+
+### 8.5 Timeout and Buffer Configuration
+
+**Best Practice from export-service:**
+```yaml
+# HTTP server timeouts
+PUBLIC_HTTP_SERVER_READ_TIMEOUT: '30s'
+PUBLIC_HTTP_SERVER_WRITE_TIMEOUT: '30s'
+PRIVATE_HTTP_SERVER_READ_TIMEOUT: '30s'
+PRIVATE_HTTP_SERVER_WRITE_TIMEOUT: '30s'
+
+# Buffer sizes
+AWS_UPLOADER_BUFFER_SIZE: '10485760'  # 10MB
+AWS_DOWNLOADER_BUFFER_SIZE: '10485760'
+```
+
+**Best Practice from vulnerability:**
+```yaml
+# Pagination limits
+MAXIMUM_PAGE_SIZE: '1000'
+
+# Cache thresholds
+CACHE_MINIMAL_ACCOUNT_SYSTEMS: '150'
+```
+
+**Tower-analytics:** Missing timeout/buffer configuration.
+
+**Recommendation:** Add if applicable:
+```yaml
+# API timeouts (NEW)
+API_READ_TIMEOUT: '30s'
+API_WRITE_TIMEOUT: '60s'
+
+# Processing limits (NEW)
+MAX_BATCH_SIZE: '1000'
+```
+
+### 8.6 Go Runtime Configuration
+
+**Best Practice from vulnerability (Go services):**
+```yaml
+# Go memory limit (80% of container limit)
+GOMEMLIMIT: '4915MiB'  # For 6Gi container
+```
+
+**Tower-analytics:** Python-based, not applicable.
+
+### 8.7 Kafka Connector Patterns
+
+**Best Practice from playbook-dispatcher:**
+```yaml
+# Kafka connector configuration
+KAFKA_SASL_MECHANISM: 'scram-sha-512'
+NUM_REPLICAS: '3'  # Connector replicas
+EVENT_CONSUMER_REPLICAS: '3'
+
+# JVM settings for Kafka Connect
+XMX: '3g'
+XMS: '1g'
+
+# Topic configuration
+KAFKA_TOPIC_PREFIX: 'platform.'
+```
+
+**Tower-analytics current pattern:**
+```yaml
+KAFKA_GROUP_PROCESSOR_INGRESS: aa-processor-billing
+```
+
+**Recommendation:** Add Kafka resilience (already noted in Part 7).
+
+### 8.8 Quota Patterns
+
+**Best Practice from vulnerability:**
+```yaml
+# Separate quotas for terminating vs non-terminating
+# Non-terminating (services):
+limits: cpu: "24", memory: 24Gi
+requests: cpu: "12", memory: 12Gi
+
+# Terminating (jobs):
+limits: cpu: "6", memory: 24Gi
+requests: cpu: "3", memory: 12Gi
+```
+
+**Tower-analytics:** Has `tower-analytics-quota.yml` but should verify it has separate terminating/non-terminating quotas.
+
+### 8.9 Floorist/Metrics Export Patterns
+
+**Best Practice (common across services):**
+```yaml
+FLOORIST_SUSPEND: 'false'
+FLOORIST_BUCKET_SECRET_NAME: 'insights-metrics-export-prod'
+FLOORIST_DB_SECRET_NAME: 'automation-analytics-db'
+FLOORIST_SCHEDULE: '0 */2 * * *'  # Every 2 hours
+FLOORIST_QUERY_PREFIX: '/queries/'
+FLOORIST_HMS_BUCKET_SECRET_NAME: 'hms-floorist-bucket'
+```
+
+**Tower-analytics:** Not using Floorist for metrics export.
+
+**Recommendation:** Consider Floorist for standardized metrics export if not already using another solution.
+
+### 8.10 Secret Version Tracking
+
+**Best Practice (all mature services):**
+```yaml
+# In namespace files
+- provider: vault-secret
+  path: insights/secrets/insights-prod/tower-analytics-prod/django
+  version: 1  # Track version
+  annotations:
+    qontract.recycle: "true"  # Enable rotation
+```
+
+**Tower-analytics:** Already following this pattern. ✅
+
+### 8.11 Database Version Pinning
+
+**Best Practice from sources:**
+```yaml
+# In namespace RDS configuration
+overrides:
+  engine_version: '15.12'  # Pin specific version
+```
+
+**Tower-analytics:** Using parameter group reference but should verify version pinning.
+
+---
+
+## Part 9: Konflux Configuration Deep-Dive
+
+### 9.1 Shared vs Custom ECP Comparison
+
+| Tenant | ECP Type | Policy Reference |
+|--------|----------|------------------|
+| aap-aa-tenant | Custom | `aap-aa` (tenant-specific) |
+| rh-subs-watch-tenant | Shared | `rhtap-releng-tenant/app-interface-rh-subs-watch-prod` |
+| insights-management-tenant | Shared | `rhtap-releng-tenant/consoledot-backend-standard` |
+| hcc-platex-services-tenant | Shared | `rhtap-releng-tenant/app-interface-standard` |
+
+**Recommendation:** Migrate to `app-interface-standard` or `consoledot-backend-standard`.
+
+### 9.2 IntegrationTestScenario Comparison
+
+| Feature | aap-aa-tenant | insights-management-tenant | Recommendation |
+|---------|---------------|---------------------------|----------------|
+| Test count | 8 | Varies by component | OK |
+| SINGLE_COMPONENT | ❌ | ✅ | Add |
+| Component contexts | ❌ | ✅ | Add |
+| Optional label | ❌ | ✅ | Add for PR tests |
+| Custom annotations | ✅ | ❌ | OK (unique to AA) |
+
+### 9.3 ReleasePlan Comparison
+
+| Feature | aap-aa-tenant | insights-management-tenant | Recommendation |
+|---------|---------------|---------------------------|----------------|
+| Separate stage/prod | ❌ | ✅ | Add |
+| Auto-release (stage) | ✅ | ✅ | OK |
+| Manual release (prod) | N/A | ✅ | Add |
+| Enhanced releaseNotes | Partial | ✅ | Enhance |
+
+### 9.4 ImageRepository Comparison
+
+| Feature | aap-aa-tenant | insights-management-tenant | Recommendation |
+|---------|---------------|---------------------------|----------------|
+| SBOM notifications | ❌ | ✅ | **Add (HIGH)** |
+| Mintmaker disabled | ❌ | ✅ | Add if needed |
+
+---
+
 ## Appendix C: Full Parameter Comparison Matrix
 
 ### Deploy Configuration Parameters
@@ -993,14 +1426,16 @@ This allows disabling jobs without code changes during incidents.
 
 ## Appendix D: Recommended Configuration Template
 
-Based on the analysis, here's a recommended configuration template for tower-analytics:
+Based on the analysis of 12+ services and 4+ Konflux tenants, here's a comprehensive recommended configuration template for tower-analytics:
+
+### D.1 deploy-clowder.yml Changes
 
 ```yaml
-# deploy-clowder.yml additions
+# Header changes
 labels:
   service: tower-analytics
   platform: insights
-  dora: insights-production  # NEW
+  dora: insights-production  # NEW - DORA metrics
 
 managedResourceTypes:
 - ClowdApp
@@ -1008,45 +1443,179 @@ managedResourceTypes:
 - Service
 - Frontend
 
-# Stage target additions
+# Stage target parameter additions
 parameters:
-  # Observability (NEW)
-  SENTRY_DSN: ${SENTRY_DSN}
-  SENTRY_ENABLED: 'true'
-  CLOUDWATCH_ENABLED: 'true'
-  LOG_LEVEL: 'DEBUG'
-  
-  # Database (NEW)
-  PGSSLMODE: 'verify-full'
-  
-  # Kafka resilience (NEW)
-  KAFKA_PRODUCER_RETRIES: '8'
-  KAFKA_PRODUCER_RETRY_BACKOFF_MS: '250'
-  KAFKA_CONSUMER_SESSION_TIMEOUT_MS: '15000'
-  KAFKA_CONSUMER_HEARTBEAT_INTERVAL_MS: '5000'
-  
-  # Health checks (NEW)
-  READINESS_INITIAL_DELAY: '30'
-  LIVENESS_INITIAL_DELAY: '30'
-  
-  # Job control (NEW)
-  DATA_PRUNING_SUSPEND: 'false'
-  MSG_RECOVERY_SUSPEND: 'false'
-  
-  # Performance (UPDATE)
-  GUNICORN_PROCESSES: 4  # Increase from 1
-  
-  # Autoscaling (NEW)
-  MIN_REPLICAS_API: 10
-  MAX_REPLICAS_API: 25
+  # === SECURITY (CRITICAL) ===
+  PGSSLMODE: 'verify-full'  # NEW - enforce SSL
+
+  # === OBSERVABILITY (HIGH) ===
+  SENTRY_DSN: ${SENTRY_DSN}  # NEW
+  SENTRY_ENABLED: 'true'  # NEW
+  CLOUDWATCH_ENABLED: 'true'  # NEW - explicit
+  LOG_LEVEL: 'DEBUG'  # Stage only
+
+  # === KAFKA RESILIENCE (HIGH) ===
+  KAFKA_PRODUCER_RETRIES: '8'  # NEW
+  KAFKA_PRODUCER_RETRY_BACKOFF_MS: '250'  # NEW
+  KAFKA_CONSUMER_SESSION_TIMEOUT_MS: '15000'  # NEW
+  KAFKA_CONSUMER_HEARTBEAT_INTERVAL_MS: '5000'  # NEW
+
+  # === HEALTH CHECKS (HIGH) ===
+  READINESS_INITIAL_DELAY: '30'  # NEW
+  LIVENESS_INITIAL_DELAY: '30'  # NEW
+  READINESS_PROBE_PERIOD_SECONDS: '30'  # NEW
+  LIVENESS_PROBE_PERIOD_SECONDS: '60'  # NEW
+
+  # === JOB CONTROL (MEDIUM) ===
+  DATA_PRUNING_SUSPEND: 'false'  # NEW
+  MSG_RECOVERY_SUSPEND: 'false'  # NEW
+  USER_METRICS_SUSPEND: 'false'  # NEW
+  ETL_PROCESSOR_LIGHTSPEED_SUSPEND: 'false'  # NEW
+
+  # === PERFORMANCE (MEDIUM) ===
+  GUNICORN_PROCESSES: 4  # UPDATE from 1
+
+  # === RESOURCE REQUESTS (MEDIUM) ===
+  CPU_REQUEST_DATA_PRUNING: '150m'  # NEW - 30% of limit
+  CPU_REQUEST_EXPORTER: '150m'  # NEW
+  CPU_REQUEST_PROCESSOR_CONTROLLER: '150m'  # NEW
+  CPU_REQUEST_PROCESSOR_INGRESS: '150m'  # NEW
+
+  # === AUTOSCALING (LOW) ===
+  MIN_REPLICAS_API: 10  # NEW
+  MAX_REPLICAS_API: 25  # NEW
 
 # Prod target additions
-promotion:
-  publish:
-  - automation-analytics-prod-deploy-success-channel  # NEW
+- namespace:
+    $ref: /services/insights/tower-analytics/namespaces/tower-analytics-prod.yml
+  ref: <sha>
+  parameters:
+    # ... existing params ...
+
+    # === REMOVE STALE PARAMS ===
+    # BUNDLES_BUCKET_NAME: insights-ingress-prod # REMOVE - not used
+    # BUNDLES_SECRET_NAME: upload-s3 # REMOVE - not used
+
+    # === ADD NEW PARAMS ===
+    PGSSLMODE: 'verify-full'
+    SENTRY_DSN: ${SENTRY_DSN}
+    SENTRY_ENABLED: 'true'
+    LOG_LEVEL: 'INFO'  # Prod uses INFO
+
+    # === FIX HARDCODED DATES ===
+    # UNPROCESSED_EVENTS_MIN_DATE: '2023-10-25'  # REMOVE - stale
+    UNPROCESSED_EVENTS_LOOKBACK_DAYS: '90'  # NEW - rolling window
+
+  promotion:
+    publish:
+    - automation-analytics-prod-deploy-success-channel  # NEW
 ```
+
+### D.2 Konflux Configuration Changes
+
+#### ir-aap-aa.yml (ImageRepository) - Add SBOM Notifications
+```yaml
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: ImageRepository
+metadata:
+  name: aap-aa
+spec:
+  # ... existing config ...
+  notifications:  # NEW - CRITICAL
+    - config:
+        url: https://bombino.api.redhat.com/v1/sbom/quay/push
+      event: repo_push
+      method: webhook
+      title: SBOM-event-to-Bombino
+```
+
+#### IntegrationTestScenario - Use Shared Policy
+```yaml
+# In its-aap-aa-*.yml files
+spec:
+  params:
+    - name: POLICY_CONFIGURATION
+      value: rhtap-releng-tenant/app-interface-standard  # CHANGE from aap-aa
+    - name: SINGLE_COMPONENT  # NEW
+      value: 'true'
+```
+
+#### Separate Stage/Prod ReleasePlans
+```yaml
+# rp-aap-aa-stage.yml (NEW)
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: ReleasePlan
+metadata:
+  name: aap-aa-stage
+  labels:
+    release.appstudio.openshift.io/auto-release: "true"
+    release.appstudio.openshift.io/standing-attribution: "true"
+    release.appstudio.openshift.io/releasePlanAdmission: "aap-aa-stage"
+spec:
+  application: aap-aa
+  target: rhtap-releng-tenant
+
+# rp-aap-aa-prod.yml (MODIFY existing)
+metadata:
+  labels:
+    release.appstudio.openshift.io/auto-release: "false"  # Manual for prod
+```
+
+### D.3 Namespace Configuration Changes
+
+```yaml
+# In tower-analytics-prod.yml namespace
+labels:
+  service: tower-analytics
+  insights_cost_management_optimizations: "true"  # NEW - cost tracking
+```
+
+### D.4 Parameter Removal Checklist
+
+| Parameter | Location | Reason |
+|-----------|----------|--------|
+| `BUNDLES_BUCKET_NAME: insights-ingress-prod` | Prod | Unused (TODO comment) |
+| `BUNDLES_SECRET_NAME: upload-s3` | Prod | Unused (TODO comment) |
+| `UNPROCESSED_EVENTS_MIN_DATE: '2023-10-25'` | Prod | Stale date (2+ years old) |
+| `AMPLITUDE_ETL_END_DATE: '2025-03-05'` | Stage | Stale date |
+
+### D.5 Boolean Standardization
+
+Change all boolean strings to lowercase for consistency:
+```yaml
+# Before (inconsistent)
+RBAC_ENABLED: 'True'
+LOCK_MESSAGES_RECOVERY_ENABLED: 'true'
+AUTO_HEALER_DRY_RUN: 'True'
+
+# After (consistent)
+RBAC_ENABLED: 'true'
+LOCK_MESSAGES_RECOVERY_ENABLED: 'true'
+AUTO_HEALER_DRY_RUN: 'true'
+```
+
+---
+
+## Appendix E: Services Analyzed
+
+| Service | Type | Key Patterns Extracted |
+|---------|------|----------------------|
+| notifications | Mature | Sentry, KEDA, DORA, promotion gates |
+| rbac | Mature | PGSSLMODE, Celery, autoscaling |
+| host-inventory | Data-heavy | Read replicas, Kafka tuning, Dynatrace |
+| compliance | Mature | ElastiCache, job suspension |
+| sources | Mature | Component resources, feature flags |
+| export-service | Simple | Timeout configuration, buffer sizes |
+| playbook-dispatcher | Worker-heavy | Kafka connector, JVM settings |
+| vulnerability | Complex | 15+ components, Go runtime, quotas |
+| rh-subs-watch-tenant | Konflux | Shared ECP policy |
+| insights-management-tenant | Konflux | SBOM, component testing, stage/prod plans |
+| hcc-platex-services-tenant | Konflux | Shared ECP policy |
+| rhdh-tenant | Konflux | Version-specific releases |
+| rhoai-tenant | Konflux | ProjectDevelopmentStream |
 
 ---
 
 *Report generated by SaaS Configuration Analyzer*
 *Deep-dive analysis completed: 2026-01-29*
+*Services analyzed: 12+ App-Interface, 5+ Konflux tenants*

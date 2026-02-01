@@ -32,10 +32,10 @@ python3 --version
 
 # Install dependencies
 cd ~/src/redhat-ai-workflow
-pip install -e .
+uv sync
 
-# D-Bus support (for daemon control)
-pip install dbus-next
+# D-Bus support (for daemon control - already in pyproject.toml)
+# uv add dbus-next
 ```
 
 ### 2. Get Slack Credentials
@@ -44,7 +44,7 @@ The bot uses Slack's web API (not official Bot API). Extract credentials from yo
 
 ```bash
 # Automatic extraction (requires Chrome)
-pip install pycookiecheat
+uv add pycookiecheat
 python scripts/get_slack_creds.py
 ```
 

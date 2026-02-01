@@ -32,7 +32,7 @@ SHELL := /bin/bash
 
 # Configuration
 PYTHON := python3
-PIP := pip3
+UV := uv
 PROJECT_ROOT := $(shell pwd)
 VENV := $(PROJECT_ROOT)/.venv
 SLACK_LOG := /tmp/slack-daemon.log
@@ -134,13 +134,12 @@ help:
 
 install:
 	@printf "\033[36mInstalling dependencies...\033[0m\n"
-	$(PIP) install -r requirements.txt 2>/dev/null || \
-		$(PIP) install fastmcp pyyaml httpx jinja2 python-dotenv aiosqlite pydantic
+	$(UV) sync
 	@printf "\033[32m✅ Dependencies installed\033[0m\n"
 
 install-dev: install
 	@printf "\033[36mInstalling dev dependencies...\033[0m\n"
-	$(PIP) install pytest pytest-asyncio black flake8 isort
+	$(UV) sync --extra dev
 	@printf "\033[32m✅ Dev dependencies installed\033[0m\n"
 
 # =============================================================================

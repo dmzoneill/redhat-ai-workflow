@@ -10,7 +10,7 @@ Environment=DISPLAY=:0
 Environment=WAYLAND_DISPLAY=wayland-0
 # XDG runtime for D-Bus/notifications
 Environment=XDG_RUNTIME_DIR=/run/user/1000
-ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 scripts/extension_watcher.py --notify
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.extension_watcher --notify
 Restart=always
 RestartSec=10
 # Logs go to journald (view with: journalctl --user -u extension-watcher -f)

@@ -99,7 +99,7 @@ Configure in `config.json`:
 
 4. **Playwright** - Browser automation
    ```bash
-   pip install playwright
+   uv add playwright
    playwright install chromium
    ```
 
