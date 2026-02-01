@@ -102,18 +102,28 @@ steps:
   - name: resolve_namespace
     description: "Determine the target namespace"
     compute: |
-      env = inputs.environment.lower()
+      # Validate that config was loaded successfully
+      if not cfg or not isinstance(cfg, dict):
+          raise ValueError(f"Config not loaded properly: cfg={cfg}")
+
+      env = inputs.environment.lower() if inputs.environment else ""
+      if not env:
+          raise ValueError("Environment input is required but was empty")
+
       ns_input = (inputs.namespace or "main").lower()
 
-      if env == "stage":
+      # Normalize environment name
+      if env in ("stage", "s"):
           namespace = cfg["namespace_stage"]
           env_label = "stage"
-      elif "billing" in ns_input:
+      elif env in ("production", "prod", "p") and "billing" in ns_input:
           namespace = cfg["namespace_prod_billing"]
           env_label = "production"
-      else:
+      elif env in ("production", "prod", "p"):
           namespace = cfg["namespace_prod_main"]
           env_label = "production"
+      else:
+          raise ValueError(f"Unknown environment: {env}. Expected: stage, production, or prod")
 
       result = {
           "namespace": namespace,

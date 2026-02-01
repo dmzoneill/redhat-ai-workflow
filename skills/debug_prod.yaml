@@ -39,6 +39,11 @@ inputs:
     default: "1h"
     description: "How far back to search (15m, 1h, 6h, 24h)"
 
+  - name: issue_key
+    type: string
+    required: false
+    description: "Optional Jira issue key to attach debug context to (e.g., AAP-12345)"
+
 # No hardcoded constants - resolved dynamically from config.json
 
 steps:
@@ -123,6 +128,10 @@ steps:
   - name: resolve_namespace
     description: "Resolve which namespace to investigate"
     compute: |
+      # Validate that config was loaded successfully
+      if not cfg or not isinstance(cfg, dict):
+          raise ValueError(f"Config not loaded properly: cfg={cfg}")
+
       if inputs.namespace:
         ns_input = inputs.namespace.lower()
         if 'billing' in ns_input:
@@ -1307,6 +1316,18 @@ steps:
       memory.update_field("state/environments", f"environments.{env_key}.status", status)
       result = "environment updated"
     output: env_update_result
+    on_error: continue
+
+  # ==================== ATTACH SESSION CONTEXT TO JIRA ====================
+
+  - name: attach_session_context
+    description: "Attach AI debug session context to Jira for post-mortem/investigation"
+    condition: "not namespace_prompt and inputs.issue_key"
+    tool: jira_attach_session
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      include_transcript: true
+    output: session_context_attached
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

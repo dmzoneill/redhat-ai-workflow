@@ -76,7 +76,7 @@ steps:
     args:
       project: "automation-analytics-backend"
       persona: "devops"
-      query: "gotchas"
+      section: "gotchas"
     output: alert_knowledge_raw
     on_error: continue
 

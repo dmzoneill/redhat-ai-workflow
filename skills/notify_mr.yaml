@@ -76,7 +76,7 @@ steps:
     args:
       project: "automation-analytics-backend"
       persona: "developer"
-      query: "gotchas"
+      section: "gotchas"
     output: notification_knowledge_raw
     on_error: continue
 

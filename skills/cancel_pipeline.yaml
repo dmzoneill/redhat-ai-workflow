@@ -62,7 +62,7 @@ steps:
     args:
       project: "automation-analytics-backend"
       persona: "devops"
-      query: "gotchas"
+      section: "gotchas"
     output: pipeline_knowledge_raw
     on_error: continue
 

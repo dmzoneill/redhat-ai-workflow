@@ -70,7 +70,7 @@ steps:
     args:
       project: "automation-analytics-backend"
       persona: "devops"
-      query: "gotchas"
+      section: "gotchas"
     output: ci_knowledge_raw
     on_error: continue
 

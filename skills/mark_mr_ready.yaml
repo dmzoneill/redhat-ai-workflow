@@ -70,7 +70,7 @@ steps:
     args:
       project: "automation-analytics-backend"
       persona: "developer"
-      query: "gotchas"
+      section: "gotchas"
     output: mr_ready_knowledge_raw
     on_error: continue
 

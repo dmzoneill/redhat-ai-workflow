@@ -1175,6 +1175,18 @@ steps:
       details: "Issue: {{ cve_info.issue_key }}, MR: {{ mr.web_url if mr else 'N/A (dry run)' }}"
     on_error: continue
 
+  # ==================== ATTACH SESSION CONTEXT TO JIRA ====================
+
+  - name: attach_session_context
+    description: "Attach AI session context to CVE Jira issue for security audit trail"
+    condition: "work_check.has_work and not inputs.dry_run and mr"
+    tool: jira_attach_session
+    args:
+      issue_key: "{{ cve_info.issue_key }}"
+      include_transcript: true
+    output: session_context_attached
+    on_error: continue
+
 outputs:
   - name: summary
     value: |

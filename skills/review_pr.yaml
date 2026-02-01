@@ -1617,6 +1617,18 @@ steps:
     output: jira_updated
     on_error: auto_heal  # Jira API - may need auth refresh
 
+  # ==================== ATTACH SESSION CONTEXT TO JIRA ====================
+
+  - name: attach_session_context
+    description: "Attach AI review session context to Jira for audit trail"
+    condition: "{{ jira_key != 'NOT_FOUND' }}"
+    tool: jira_attach_session
+    args:
+      issue_key: "{{ jira_key }}"
+      include_transcript: false
+    output: session_context_attached
+    on_error: continue
+
   # ==================== MEMORY INTEGRATION ====================
 
   - name: build_memory_context

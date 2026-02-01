@@ -47,7 +47,7 @@ steps:
     args:
       project: "automation-analytics-backend"
       persona: "developer"
-      query: "gotchas"
+      section: "gotchas"
     output: jira_knowledge_raw
     on_error: continue
 
@@ -526,6 +526,18 @@ steps:
       memory.write_memory("state/shared_context", shared)
       result = "shared context saved"
     output: shared_context_result
+    on_error: continue
+
+  # ==================== ATTACH SESSION CONTEXT TO JIRA ====================
+
+  - name: attach_session_context
+    description: "Attach AI session context to Jira for investigation/audit trail"
+    condition: "{{ not status_check.already_done and transition_result }}"
+    tool: jira_attach_session
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      include_transcript: false
+    output: session_context_attached
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

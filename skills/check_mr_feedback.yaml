@@ -59,7 +59,7 @@ steps:
     args:
       project: "automation-analytics-backend"
       persona: "developer"
-      query: "gotchas"
+      section: "gotchas"
     output: review_knowledge_raw
     on_error: continue
 

@@ -1,0 +1,177 @@
+# Skill: Build Persona from Slack Style
+# Exports your Slack messages, analyzes your writing style, and generates a persona
+
+name: build_persona_style
+description: |
+  Build a personalized AI persona from your Slack message history.
+
+  This skill:
+  1. Exports your Slack messages (DMs, channels, threads)
+  2. Analyzes your writing style patterns
+  3. Generates a persona YAML and markdown file
+
+  The resulting persona can be used to make AI responses sound like you.
+
+version: "1.0"
+
+inputs:
+  - name: months
+    type: integer
+    required: false
+    default: 6
+    description: "Number of months of message history to export"
+
+  - name: persona_name
+    type: string
+    required: false
+    default: "dave"
+    description: "Name for the generated persona"
+
+  - name: include_dms
+    type: boolean
+    required: false
+    default: true
+    description: "Include direct messages"
+
+  - name: include_channels
+    type: boolean
+    required: false
+    default: true
+    description: "Include channel messages"
+
+  - name: include_threads
+    type: boolean
+    required: false
+    default: true
+    description: "Include thread replies"
+
+  - name: skip_export
+    type: boolean
+    required: false
+    default: false
+    description: "Skip export step (use existing corpus)"
+
+steps:
+  # ==================== LOAD ADMIN PERSONA ====================
+  # Admin persona has access to style tools
+
+  - name: load_admin_persona
+    description: "Load admin persona for style tools"
+    tool: persona_load
+    args:
+      persona_name: "admin"
+
+  # ==================== EXPORT MESSAGES ====================
+
+  - name: export_messages
+    description: "Export your Slack messages"
+    condition: "not inputs.get('skip_export', False)"
+    tool: slack_export_my_messages
+    args:
+      months: "{{ inputs.months }}"
+      include_dms: "{{ inputs.include_dms }}"
+      include_channels: "{{ inputs.include_channels }}"
+      include_threads: "{{ inputs.include_threads }}"
+    output: export_result
+    on_error: continue
+
+  - name: check_export
+    description: "Check if export succeeded or corpus exists"
+    compute: |
+      from pathlib import Path
+
+      corpus_file = Path.home() / "src/redhat-ai-workflow/memory/style/slack_corpus.jsonl"
+
+      if corpus_file.exists():
+          # Count messages
+          with open(corpus_file) as f:
+              count = sum(1 for _ in f)
+          result = {"success": True, "message_count": count}
+      else:
+          result = {"success": False, "message_count": 0}
+    output: corpus_check
+
+  - name: fail_if_no_corpus
+    description: "Fail if no corpus available"
+    condition: "not corpus_check.get('success', False)"
+    compute: |
+      raise ValueError("No message corpus found. Export failed or was skipped.")
+
+  # ==================== ANALYZE STYLE ====================
+
+  - name: analyze_style
+    description: "Analyze your writing style patterns"
+    tool: style_analyze
+    args:
+      profile_name: "{{ inputs.persona_name }}"
+    output: analysis_result
+
+  # ==================== GENERATE PERSONA ====================
+
+  - name: generate_persona
+    description: "Generate persona from style profile"
+    tool: persona_generate_from_style
+    args:
+      profile_name: "{{ inputs.persona_name }}"
+      persona_name: "{{ inputs.persona_name }}"
+      example_count: 20
+    output: persona_result
+
+  # ==================== SUMMARY ====================
+
+  - name: format_summary
+    description: "Create summary of the build process"
+    compute: |
+      lines = []
+
+      lines.append(f"# Persona Build Complete: {inputs.get('persona_name', 'dave')}")
+      lines.append("")
+
+      # Export stats
+      if 'export_result' in dir() and export_result:
+          lines.append("## Export")
+          lines.append(str(export_result)[:500])
+          lines.append("")
+
+      # Analysis stats
+      if 'analysis_result' in dir() and analysis_result:
+          lines.append("## Style Analysis")
+          lines.append(str(analysis_result)[:1000])
+          lines.append("")
+
+      # Persona generation
+      if 'persona_result' in dir() and persona_result:
+          lines.append("## Persona Generated")
+          lines.append(str(persona_result)[:500])
+          lines.append("")
+
+      # Next steps
+      lines.append("## Next Steps")
+      lines.append("")
+      lines.append(f"1. **Test the persona:**")
+      lines.append(f"   ```")
+      lines.append(f"   persona_load(\"{inputs.get('persona_name', 'dave')}\")")
+      lines.append(f"   ```")
+      lines.append("")
+      lines.append(f"2. **Compare with your real messages:**")
+      lines.append(f"   ```")
+      lines.append(f"   persona_test_style(\"{inputs.get('persona_name', 'dave')}\")")
+      lines.append(f"   ```")
+      lines.append("")
+      lines.append(f"3. **Refine if needed:**")
+      lines.append(f"   ```")
+      lines.append(f"   persona_refine_style(\"{inputs.get('persona_name', 'dave')}\", feedback=\"...\")")
+      lines.append(f"   ```")
+
+      result = '\n'.join(lines)
+    output: summary
+
+outputs:
+  - name: summary
+    value: "{{ summary }}"
+
+  - name: persona_name
+    value: "{{ inputs.persona_name }}"
+
+  - name: message_count
+    value: "{{ corpus_check.message_count if corpus_check else 0 }}"

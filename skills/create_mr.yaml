@@ -1022,6 +1022,18 @@ steps:
       value: "{{ memory_context.timestamp }}"
     on_error: continue
 
+  # ==================== ATTACH SESSION CONTEXT TO JIRA ====================
+
+  - name: attach_session_context
+    description: "Attach AI session context to Jira for investigation/audit trail"
+    condition: "mr and not inputs.draft"
+    tool: jira_attach_session
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      include_transcript: false
+    output: session_context_attached
+    on_error: continue
+
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_create_mr_failures

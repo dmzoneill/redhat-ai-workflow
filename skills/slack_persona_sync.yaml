@@ -1,0 +1,51 @@
+name: slack_persona_sync
+description: |
+  Sync Slack messages to persona vector store.
+
+  This skill syncs all messages from all channels, DMs, group chats, and threads
+  to a vector database for semantic search. Used to provide context to the
+  Dave persona for more authentic responses.
+
+  Modes:
+  - full: Complete resync of all messages within time window
+  - incremental: Sync only recent messages and prune old ones
+
+  The vector store maintains a rolling window (default 6 months) of messages
+  that can be searched semantically.
+
+inputs:
+  mode:
+    type: string
+    description: "Sync mode: 'full' or 'incremental'"
+    default: "incremental"
+  months:
+    type: integer
+    description: "Time window in months (for full sync)"
+    default: 48
+  days:
+    type: integer
+    description: "Days to sync (for incremental)"
+    default: 1
+  include_threads:
+    type: boolean
+    description: "Include thread replies"
+    default: true
+
+steps:
+  - name: run_sync
+    description: "Run Slack persona sync"
+    tool: slack_persona_sync
+    args:
+      mode: "{{ inputs.mode }}"
+      months: "{{ inputs.months }}"
+      days: "{{ inputs.days }}"
+      include_threads: "{{ inputs.include_threads }}"
+    output: sync_result
+
+outputs:
+  result: "{{ sync_result }}"
+
+report: |
+  ## Slack Persona Sync Complete
+
+  {{ sync_result }}

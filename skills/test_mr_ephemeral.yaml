@@ -164,7 +164,7 @@ steps:
       # bonfire is required, kubectl/oc need at least one
       if "bonfire" in missing:
           raise ValueError(
-              "bonfire not installed. Install with: pip install crc-bonfire"
+              "bonfire not installed. Install with: uv add crc-bonfire"
           )
 
       if "kubectl" in missing and "oc" in missing:
