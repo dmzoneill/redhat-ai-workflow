@@ -1,0 +1,21 @@
+# Slop Bot Persona Configuration
+# Code quality analysis - semantic search, linting, pattern detection
+
+name: slop
+description: Code quality analysis - detect AI slop, code smells, and quality issues
+persona: personas/slop.md
+
+# Tool modules to load (from tool_modules/aa_*)
+# Using _core suffix for heavy modules to stay under 80 tool limit
+tools:
+  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
+  - code_search     # 9 tools - Semantic code search (vector embeddings)
+  - lint            # 7 tools - Code formatting and linting
+  - git_core        # 8 tools - Git operations for diff analysis
+
+# Total: ~42 tools
+
+# Skills for code quality analysis
+skills:
+  - find_similar_code    # Find duplicate/similar code
+  - review_pr            # Code review patterns

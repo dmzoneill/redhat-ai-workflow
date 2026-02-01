@@ -6,15 +6,17 @@ description: Release management and deployments
 persona: personas/release.md
 
 # Tool modules to load (from tool_modules/aa_*)
-# Tool counts are determined dynamically - use tool_list() to see actual counts
+# Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow        # Core (memory, persona, session, skill, infra, meta)
-  - konflux_basic   # Pipelines, components, snapshots, status
-  - quay            # Container images
-  - git_basic       # Git operations for app-interface changes
-  - appinterface    # App-interface config management
+  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
+  - konflux_basic   # 22 tools - Pipelines, components, snapshots, status
+  - quay            # 8 tools - Container images
+  - git_core        # 8 tools - Git operations for app-interface changes
+  - appinterface    # 7 tools - App-interface config management
 
-# Note: jira_basic available via tool_exec() if needed
+# Total: ~63 tools
+
+# Note: jira_core available via tool_exec() if needed
 
 skills:
   # Release workflows

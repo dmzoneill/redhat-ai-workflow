@@ -6,12 +6,15 @@ description: Information gathering, research, and planning - the starting point 
 persona: personas/researcher.md
 
 # Tool modules to load (from tool_modules/aa_*)
-# Tool counts are determined dynamically - use tool_list() to see actual counts
+# Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow        # Core (memory, persona, session, skill, infra, meta)
-  - code_search     # Semantic code search across projects
-  - knowledge       # Project knowledge management
-  - project         # Project configuration and detection
+  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
+  - code_search     # 9 tools - Semantic code search across projects
+  - knowledge       # 6 tools - Project knowledge management
+  - project         # 5 tools - Project configuration and detection
+  - ollama          # 7 tools - Local LLM for research
+
+# Total: ~45 tools
 
 # Note: This persona is intentionally read-only focused.
 # Use persona_load() to switch to developer/devops when ready to take action.

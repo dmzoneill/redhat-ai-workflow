@@ -1,0 +1,25 @@
+name: infra
+description: Infrastructure automation and cloud management
+
+tools:
+  - workflow_core    # 18 tools - Core workflow (session, persona, skill, memory)
+  - ansible_core     # 8 tools - Ansible automation
+  - aws_core         # 6 tools - AWS cloud operations
+  - gcloud           # 13 tools - Google Cloud (small enough to load full)
+  - systemd_core     # 7 tools - Service management
+  - ssh              # 10 tools - Remote access
+
+# Total: ~62 tools
+
+# Note: For advanced tools, use tool_exec():
+# - ansible_basic: Full playbook management, galaxy, vault
+# - aws_basic: Full EC2, IAM, S3 operations
+# - libvirt: VM management (via tool_exec)
+
+skills:
+  # Infrastructure provisioning
+  - deploy_to_ephemeral     # Deploy to ephemeral cluster
+  - extend_ephemeral        # Extend namespace reservation
+
+  # Configuration management
+  - check_secrets           # Verify secrets/configmaps

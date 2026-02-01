@@ -6,12 +6,15 @@ description: Create and manage Google Slides presentations from project material
 persona: personas/presentations.md
 
 # Tool modules to load (from tool_modules/aa_*)
+# Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow        # Core (memory, persona, session, skill, infra, meta)
-  - google_slides   # Google Slides API operations
-  - google_calendar # For scheduling presentation meetings
-  - knowledge       # Project knowledge for content
-  - code_search     # Search codebase for examples/diagrams
+  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
+  - google_slides   # 10 tools - Google Slides API operations
+  - google_calendar # 8 tools - For scheduling presentation meetings
+  - knowledge       # 6 tools - Project knowledge for content
+  - code_search     # 9 tools - Search codebase for examples/diagrams
+
+# Total: ~51 tools
 
 # Note: This persona focuses on presentation creation and management.
 # Use persona_load() to switch to developer when ready to implement features.

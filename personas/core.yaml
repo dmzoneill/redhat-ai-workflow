@@ -6,12 +6,14 @@ name: core
 description: Shared tools for all agents with persona switching
 
 # Tool modules to load (from tool_modules/aa_*)
-# Tool counts are determined dynamically - use tool_list() to see actual counts
+# Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow        # Core (memory, persona, session, skill, infra, meta)
-  - git_basic       # Essential git operations
-  - jira_basic      # Issue viewing, search, status updates
-  - k8s_basic       # Essential k8s (pods, logs, deployments)
+  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
+  - git_core        # 8 tools - Essential git operations
+  - jira_core       # 6 tools - Issue viewing, search, status updates
+  - k8s_core        # 8 tools - Essential k8s (pods, logs, deployments)
+
+# Total: ~40 tools
 
 # Note: Use tool_exec() for additional modules or load a specialized persona
 

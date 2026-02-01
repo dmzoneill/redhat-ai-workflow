@@ -1,0 +1,19 @@
+name: security
+description: Security scanning and certificate management
+
+tools:
+  - workflow_core    # 18 tools - Core workflow (session, persona, skill, memory)
+  - nmap             # 10 tools - Network scanning
+  - openssl          # 10 tools - Certificate management
+  - ssh              # 10 tools - Secure remote access
+  - k8s_core         # 8 tools - Kubernetes secrets inspection
+
+# Total: ~56 tools
+
+# Note: This persona is focused on security operations.
+# For incident response, switch to incident persona.
+
+skills:
+  # Security operations
+  - check_secrets           # Verify secrets/configmaps
+  - investigate_alert       # Investigate security alerts

@@ -1,0 +1,21 @@
+name: github
+description: GitHub-specific workflows (PRs, Actions, Issues)
+
+tools:
+  - workflow_core    # 18 tools - Core workflow (session, persona, skill, memory)
+  - github_core      # 7 tools - GitHub PR and repo operations
+  - git_core         # 8 tools - Git operations
+  - jira_core        # 6 tools - Issue tracking
+  - code_search      # 9 tools - Semantic code search
+
+# Total: ~48 tools
+
+# Note: This persona is for GitHub-based projects.
+# For GitLab projects, use the developer persona.
+
+skills:
+  # GitHub workflows
+  - start_work            # Start working on an issue
+  - create_mr             # Create pull request
+  - review_pr             # Review pull request
+  - check_mr_feedback     # Check PR review comments

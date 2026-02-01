@@ -6,15 +6,22 @@ description: Infrastructure, monitoring, and ephemeral deployments
 persona: personas/devops.md
 
 # Tool modules to load (from tool_modules/aa_*)
-# Tool counts are determined dynamically - use tool_list() to see actual counts
+# Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow        # Core (memory, persona, session, skill, infra, meta)
-  - k8s_basic       # Essential k8s (pods, logs, deployments, events)
-  - bonfire_basic   # Namespace management (reserve, list, release, extend)
-  - jira_basic      # Issue viewing, search, status updates, comments
-  - quay            # Container image checks
+  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
+  - k8s_core        # 8 tools - Essential k8s (pods, logs, deployments, events)
+  - bonfire_basic   # 10 tools - Namespace management (reserve, list, release, extend)
+  - jira_core       # 6 tools - Issue viewing, search, status updates
+  - quay            # 8 tools - Container image checks
+  - docker_core     # 8 tools - Container operations
+  - podman          # 13 tools - Podman container operations
 
-# Note: docker, prometheus, knowledge, project, scheduler available via tool_exec() if needed
+# Total: ~71 tools
+
+# Note: For additional tools, use tool_exec():
+# - k8s_basic: Full k8s operations (scale, rollout, etc.)
+# - jira_basic: Full Jira operations (create, assign, etc.)
+# - prometheus_basic: Metrics and alerts
 
 skills:
   # Ephemeral environments

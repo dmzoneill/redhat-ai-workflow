@@ -6,12 +6,14 @@ description: Monitoring, metrics, and logs - no incident response
 persona: personas/observability.md
 
 # Tool modules to load (from tool_modules/aa_*)
-# Tool counts are determined dynamically - use tool_list() to see actual counts
+# Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow          # Core (memory, persona, session, skill, infra, meta)
-  - prometheus_basic  # Metrics and alerts
-  - kibana            # Log search
-  - k8s_basic         # Pod logs and events
+  - workflow_core     # 18 tools - Core (session, persona, skill, memory)
+  - prometheus_basic  # 5 tools - Metrics and alerts
+  - kibana            # 9 tools - Log search
+  - k8s_core          # 8 tools - Pod logs and events
+
+# Total: ~40 tools
 
 # Note: Use tool_exec() for alertmanager, jira tools if needed
 
