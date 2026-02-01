@@ -1,0 +1,10 @@
+[project]
+name = "aa_nmap"
+version = "0.1.0"
+description = "Nmap network scanning tools for AI Workflow"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,10 @@
+[project]
+name = "aa_curl"
+version = "0.1.0"
+description = "cURL HTTP client tools for AI Workflow"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

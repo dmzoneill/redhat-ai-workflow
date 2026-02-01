@@ -1,0 +1,10 @@
+[project]
+name = "aa_gcloud"
+version = "0.1.0"
+description = "Google Cloud CLI tools for AI Workflow"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

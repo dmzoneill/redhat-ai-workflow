@@ -1,0 +1,10 @@
+[project]
+name = "aa_systemd"
+version = "0.1.0"
+description = "Systemd service management tools for AI Workflow"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

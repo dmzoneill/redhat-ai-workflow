@@ -1,0 +1,10 @@
+[project]
+name = "aa_openssl"
+version = "0.1.0"
+description = "OpenSSL cryptography and certificate tools for AI Workflow"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
