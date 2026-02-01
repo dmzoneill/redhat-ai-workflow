@@ -26,6 +26,9 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { createLogger } from "./logger";
+
+const logger = createLogger("SprintChat");
 
 // Storage for issue-to-chat mappings
 const CHAT_MAPPINGS_FILE = path.join(
@@ -65,7 +68,7 @@ function loadChatMappings(): ChatMappings {
       return JSON.parse(content);
     }
   } catch (e) {
-    console.error("Failed to load chat mappings:", e);
+    logger.error("Failed to load chat mappings", e);
   }
   return { mappings: [], lastUpdated: new Date().toISOString() };
 }
@@ -81,7 +84,7 @@ function saveChatMappings(mappings: ChatMappings): void {
     }
     fs.writeFileSync(CHAT_MAPPINGS_FILE, JSON.stringify(mappings, null, 2));
   } catch (e) {
-    console.error("Failed to save chat mappings:", e);
+    logger.error("Failed to save chat mappings", e);
   }
 }
 
@@ -118,15 +121,15 @@ async function getLatestChatIdFromDatabase(): Promise<string | null> {
   const dbPath = getCursorDatabasePath();
 
   if (!fs.existsSync(dbPath)) {
-    console.warn("Cursor database not found at:", dbPath);
+    logger.warn(`Cursor database not found at: ${dbPath}`);
     return null;
   }
 
   try {
     // We would need to use better-sqlite3 or similar to read the database
     // For now, return null and document the approach
-    console.log("Database path:", dbPath);
-    console.log("Note: SQLite reading requires better-sqlite3 package");
+    logger.log(`Database path: ${dbPath}`);
+    logger.log("Note: SQLite reading requires better-sqlite3 package");
 
     // The database structure (based on investigation):
     // Table: ItemTable
@@ -136,7 +139,7 @@ async function getLatestChatIdFromDatabase(): Promise<string | null> {
 
     return null;
   } catch (e) {
-    console.error("Failed to read Cursor database:", e);
+    logger.error("Failed to read Cursor database", e);
     return null;
   }
 }
@@ -185,7 +188,7 @@ Let me know when you're ready to start, or if you need any clarification about t
       await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
     } catch {
       // Fallback: Try to type directly (less reliable)
-      console.warn("Clipboard paste failed, trying alternative method");
+      logger.warn("Clipboard paste failed, trying alternative method");
     }
 
     // Restore original clipboard
@@ -231,7 +234,7 @@ Let me know when you're ready to start, or if you need any clarification about t
 
     return finalChatId;
   } catch (e) {
-    console.error("Failed to launch issue chat:", e);
+    logger.error("Failed to launch issue chat", e);
     vscode.window.showErrorMessage(`Failed to create chat for ${issueKey}: ${e}`);
     return null;
   }
@@ -284,7 +287,7 @@ export async function returnToIssueChat(issueKey: string): Promise<boolean> {
 
     return true;
   } catch (e) {
-    console.error("Failed to return to chat:", e);
+    logger.error("Failed to return to chat", e);
     vscode.window.showErrorMessage(`Failed to open chat for ${issueKey}`);
     return false;
   }

@@ -1,0 +1,24 @@
+[Unit]
+Description=AI Workflow Stats Daemon - Agent statistics via D-Bus
+After=network.target dbus.socket
+Wants=dbus.socket
+
+[Service]
+Type=simple
+WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
+# Display environment for D-Bus
+Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+# XDG runtime for D-Bus
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+# Use the virtual environment's python
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.stats
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Install]
+WantedBy=default.target

@@ -9,13 +9,14 @@
  * - Slack messages received/processed
  * - Pending approvals
  *
- * Subscribes to D-Bus signals for real-time updates using dbus-monitor.
+ * Subscribes to D-Bus signals for real-time updates using dbus-next (persistent connection).
  */
 
 import * as vscode from "vscode";
 import { WorkflowDataProvider, WorkflowStatus } from "./dataProvider";
 import { spawn, ChildProcess } from "child_process";
 import { createLogger } from "./logger";
+import DBusNext, { MessageBus, ClientInterface } from "dbus-next";
 
 const logger = createLogger("Notifications");
 
@@ -86,9 +87,15 @@ export class NotificationManager {
   private dataProvider: WorkflowDataProvider;
   private state: NotificationState;
   private dbusWatcher: ReturnType<typeof setInterval> | undefined;
-  private dbusMonitor: ChildProcess | null = null;
+  private dbusMonitor: ChildProcess | null = null;  // Legacy - kept for fallback
   private signalBuffer: string = "";
   private onSlackSignal: ((signal: SlackMessageSignal) => void) | null = null;
+
+  // dbus-next persistent connection for signal listening
+  private dbusBus: MessageBus | null = null;
+  private dbusInterface: ClientInterface | null = null;
+  private dbusConnected: boolean = false;
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(dataProvider: WorkflowDataProvider) {
     this.dataProvider = dataProvider;
@@ -241,50 +248,104 @@ export class NotificationManager {
   }
 
   /**
-   * Start dbus-monitor to listen for real-time signals from Slack daemon
+   * Start D-Bus signal listener using dbus-next (persistent connection)
    */
-  private startDbusSignalMonitor(): void {
+  private async startDbusSignalMonitor(): Promise<void> {
+    // Already connected
+    if (this.dbusConnected) {
+      return;
+    }
+
     try {
-      // Use dbus-monitor to watch for signals from our services
-      this.dbusMonitor = spawn('/bin/bash', ['--norc', '--noprofile', '-c',
-        `dbus-monitor --session "type='signal',interface='com.aiworkflow.BotSlack'"`
-      ], {
-        env: {
-          ...process.env,
-          BASH_ENV: '',
-          ENV: '',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      this.dbusBus = DBusNext.sessionBus();
 
-      this.dbusMonitor.stdout?.on('data', (data: Buffer) => {
-        this.handleDbusMonitorOutput(data.toString());
-      });
-
-      this.dbusMonitor.stderr?.on('data', (data: Buffer) => {
-        logger.debug(`dbus-monitor stderr: ${data.toString()}`);
-      });
-
-      this.dbusMonitor.on('close', (code) => {
-        logger.debug(`dbus-monitor exited with code ${code}`);
-        this.dbusMonitor = null;
-        // Restart after a delay if it wasn't intentionally stopped
-        setTimeout(() => {
-          if (!this.dbusMonitor) {
-            this.startDbusSignalMonitor();
-          }
+      // Handle connection errors
+      this.dbusBus.on("error", (err: Error) => {
+        logger.error(`D-Bus connection error: ${err.message}`);
+        // Clean up to prevent memory leak
+        this.cleanupDbusConnection();
+        // Attempt reconnection - cancel any pending timeout first
+        if (this.reconnectTimeout) {
+          clearTimeout(this.reconnectTimeout);
+        }
+        this.reconnectTimeout = setTimeout(() => {
+          this.reconnectTimeout = null;
+          this.startDbusSignalMonitor();
         }, 5000);
       });
 
-      this.dbusMonitor.on('error', (err) => {
-        logger.error(`dbus-monitor error: ${err.message}`);
-        this.dbusMonitor = null;
+      // Get the Slack daemon proxy and interface
+      const proxy = await this.dbusBus.getProxyObject(
+        "com.aiworkflow.BotSlack",
+        "/com/aiworkflow/BotSlack"
+      );
+
+      // Remove old interface listeners before getting new interface
+      if (this.dbusInterface) {
+        try {
+          this.dbusInterface.removeAllListeners();
+        } catch {
+          // Ignore errors
+        }
+      }
+
+      this.dbusInterface = proxy.getInterface("com.aiworkflow.BotSlack");
+
+      // Subscribe to signals (fresh listeners on new interface)
+      this.dbusInterface.on("MessageReceived", (jsonData: string) => {
+        this.handleSlackSignal("MessageReceived", jsonData);
       });
 
-      logger.info("D-Bus signal monitor started");
+      this.dbusInterface.on("MessageProcessed", (jsonData: string) => {
+        this.handleSlackSignal("MessageProcessed", jsonData);
+      });
+
+      this.dbusInterface.on("PendingApproval", (jsonData: string) => {
+        this.handleSlackSignal("PendingApproval", jsonData);
+      });
+
+      this.dbusConnected = true;
+      logger.info("D-Bus signal listener started (dbus-next persistent connection)");
     } catch (err) {
-      logger.error(`Failed to start dbus-monitor: ${err}`);
+      logger.error(`Failed to start D-Bus signal listener: ${err}`);
+      this.dbusConnected = false;
+      // Retry after delay - cancel any pending timeout first
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout);
+      }
+      this.reconnectTimeout = setTimeout(() => {
+        this.reconnectTimeout = null;
+        this.startDbusSignalMonitor();
+      }, 5000);
     }
+  }
+
+  /**
+   * Clean up D-Bus connection and remove all listeners to prevent memory leak
+   */
+  private cleanupDbusConnection(): void {
+    // Remove interface signal listeners first
+    if (this.dbusInterface) {
+      try {
+        this.dbusInterface.removeAllListeners();
+      } catch {
+        // Ignore errors
+      }
+      this.dbusInterface = null;
+    }
+
+    // Remove bus listeners and disconnect
+    if (this.dbusBus) {
+      try {
+        this.dbusBus.removeAllListeners();
+        this.dbusBus.disconnect();
+      } catch {
+        // Ignore errors
+      }
+      this.dbusBus = null;
+    }
+
+    this.dbusConnected = false;
   }
 
   /**
@@ -405,10 +466,21 @@ export class NotificationManager {
    * Stop the D-Bus signal monitor
    */
   private stopDbusSignalMonitor(): void {
+    // Cancel any pending reconnection
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
+    // Stop legacy dbus-monitor if running
     if (this.dbusMonitor) {
       this.dbusMonitor.kill();
       this.dbusMonitor = null;
     }
+
+    // Clean up dbus-next connection with proper listener removal
+    this.cleanupDbusConnection();
+    logger.info("D-Bus signal listener stopped");
   }
 
   private async checkSlackEvents(): Promise<void> {

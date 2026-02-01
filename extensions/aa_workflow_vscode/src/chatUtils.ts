@@ -84,7 +84,7 @@ export function sendKeys(keycodes: string[]): boolean {
     });
     return result.status === 0;
   } catch (e) {
-    console.error("[ChatUtils] sendKeys failed:", e);
+    logger.error("sendKeys failed", e);
     return false;
   }
 }
@@ -267,7 +267,7 @@ export async function createNewChat(options: ChatOptions = {}): Promise<string |
   const delay = options.delay || 150;
   const previousChatId = options.returnToPrevious ? getActiveChatId() : null;
 
-  console.log("[ChatUtils] Creating new chat, returnToPrevious:", options.returnToPrevious);
+  logger.log(`Creating new chat, returnToPrevious: ${options.returnToPrevious}`);
 
   // Save original clipboard if we need to paste
   let originalClipboard: string | undefined;
@@ -321,7 +321,7 @@ export async function createNewChat(options: ChatOptions = {}): Promise<string |
 
     return newChatId;
   } catch (e) {
-    console.error("[ChatUtils] createNewChat failed:", e);
+    logger.error("createNewChat failed", e);
     // Restore clipboard on error
     if (originalClipboard !== undefined) {
       await vscode.env.clipboard.writeText(originalClipboard);
@@ -361,7 +361,7 @@ export async function openChatByName(chatName: string, options: OpenChatOptions 
 
     return true;
   } catch (e) {
-    console.error("[ChatUtils] openChatByName failed:", e);
+    logger.error("openChatByName failed", e);
     return false;
   }
 }

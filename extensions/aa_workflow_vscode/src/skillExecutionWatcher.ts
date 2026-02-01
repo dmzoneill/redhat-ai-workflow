@@ -50,7 +50,7 @@ async function acquireFileLock(filePath: string): Promise<boolean> {
           // Lock is stale, remove it
           try {
             fs.unlinkSync(lockPath);
-            console.log(`[SkillWatcher] Removed stale lock file (age: ${lockAge}ms)`);
+            logger.log(`Removed stale lock file (age: ${lockAge}ms)`);
           } catch {
             // Another process may have removed it
           }
@@ -70,13 +70,13 @@ async function acquireFileLock(filePath: string): Promise<boolean> {
         await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_INTERVAL_MS));
       } else {
         // Unexpected error
-        console.error("[SkillWatcher] Error acquiring lock:", e);
+        logger.error("Error acquiring lock", e);
         return false;
       }
     }
   }
 
-  console.warn("[SkillWatcher] Timeout waiting for file lock");
+  logger.warn("Timeout waiting for file lock");
   return false;
 }
 
@@ -89,7 +89,7 @@ function releaseFileLock(filePath: string): void {
     fs.unlinkSync(lockPath);
   } catch (e: any) {
     if (e.code !== "ENOENT") {
-      console.error("[SkillWatcher] Error releasing lock:", e);
+      logger.error("Error releasing lock", e);
     }
   }
 }
@@ -101,7 +101,7 @@ function releaseFileLock(filePath: string): void {
 async function withFileLock<T>(filePath: string, fn: () => T): Promise<T | null> {
   const acquired = await acquireFileLock(filePath);
   if (!acquired) {
-    console.error("[SkillWatcher] Failed to acquire file lock, skipping operation");
+    logger.error("Failed to acquire file lock, skipping operation");
     return null;
   }
 
@@ -250,10 +250,11 @@ export class SkillExecutionWatcher {
         }
       );
     } catch (e) {
-      console.error("Failed to start skill execution watcher:", e);
-      // Fallback to polling
-      this._startPolling();
+      logger.error("Failed to start skill execution watcher", e);
     }
+
+    // Always start polling as backup - fs.watch is unreliable on Linux
+    this._startPolling();
 
     // Initial check
     this._onFileChange();
@@ -307,7 +308,7 @@ export class SkillExecutionWatcher {
         });
       }
     } catch (e) {
-      console.error("[SkillWatcher] Error processing file:", e);
+      logger.error("Error processing file", e);
     }
   }
 
@@ -365,7 +366,7 @@ export class SkillExecutionWatcher {
       }
     });
 
-    console.log(`[SkillWatcher] New skill started: ${state.skillName} (${state.source})`);
+    logger.log(`New skill started: ${state.skillName} (${state.source})`);
   }
 
   /**
@@ -635,10 +636,10 @@ export class SkillExecutionWatcher {
         fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2));
         fs.renameSync(tmpFile, this._executionFilePath);
 
-        console.log(`[SkillWatcher] Cleared ${clearedCount} stale execution(s)`);
+        logger.log(`Cleared ${clearedCount} stale execution(s)`);
         return clearedCount;
       } catch (e) {
-        console.error("[SkillWatcher] Error clearing stale executions:", e);
+        logger.error("Error clearing stale executions", e);
         return 0;
       }
     });
@@ -695,10 +696,10 @@ export class SkillExecutionWatcher {
         fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2));
         fs.renameSync(tmpFile, this._executionFilePath);
 
-        console.log(`[SkillWatcher] Cleared execution: ${executionId}`);
+        logger.log(`Cleared execution: ${executionId}`);
         return true;
       } catch (e) {
-        console.error("[SkillWatcher] Error clearing execution:", e);
+        logger.error("Error clearing execution", e);
         return false;
       }
     });

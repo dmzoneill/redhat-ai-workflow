@@ -15,12 +15,11 @@ import { StatusBarManager } from "./statusBar";
 import { WorkflowDataProvider } from "./dataProvider";
 import { registerCommands } from "./commands";
 import { registerTreeView, WorkflowTreeProvider } from "./treeView";
-import { registerMemoryTab, MemoryTreeProvider } from "./memoryTab";
-import { registerSlidesTab, SlidesTreeProvider } from "./slidesTab";
+import { registerMemoryTab, MemoryTreeProvider } from "./memoryTreeView";
+import { registerSlidesTab, SlidesTreeProvider } from "./slidesTreeView";
 import { registerNotifications, NotificationManager } from "./notifications";
 import { registerCommandCenter, registerCommandCenterSerializer, getCommandCenterPanel } from "./commandCenter";
 import { registerSkillExecutionWatcher } from "./skillExecutionWatcher";
-import { registerSkillFlowchartPanel } from "./skillFlowchartPanel";
 import { getWorkspaceStateProvider, disposeWorkspaceStateProvider, WorkspaceStateProvider } from "./workspaceStateProvider";
 import { registerTestCommand } from "./testChatRefresh";
 import { SkillToastManager, SkillToastWebview } from "./skillToast";
@@ -62,9 +61,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // IMPORTANT: Register webview serializers IMMEDIATELY after data provider
   // This ensures VS Code can restore panels even if other init takes time
-  // Both serializers must be registered before VS Code tries to restore any panels
   logger.log("Registering webview serializers...");
-  registerSkillFlowchartPanel(context);
   registerCommandCenterSerializer(context, dataProvider);
 
   // Initialize status bar items

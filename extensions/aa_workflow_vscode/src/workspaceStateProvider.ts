@@ -230,7 +230,7 @@ export class WorkspaceStateProvider implements vscode.Disposable {
                 this._onDidChange.fire(newState);
             }
         } catch (error) {
-            console.error('Failed to load workspace state:', error);
+            logger.error('Failed to load workspace state', error);
         }
     }
 
@@ -253,7 +253,7 @@ export class WorkspaceStateProvider implements vscode.Disposable {
                 }
             });
         } catch (error) {
-            console.error('Failed to start watching workspace state:', error);
+            logger.error('Failed to start watching workspace state', error);
         }
     }
 

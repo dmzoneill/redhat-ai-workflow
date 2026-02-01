@@ -13,69 +13,12 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { spawn, SpawnOptions } from "child_process";
 import { getConfigPath, getMemoryDir } from "./paths";
 import { createLogger } from "./logger";
+import { dbus, CurrentWork, EnvironmentStatus as DBusEnvironmentStatus } from "./dbusClient";
+import { execAsync } from "./utils";
 
 const logger = createLogger("DataProvider");
-
-/**
- * Execute a command using spawn with bash --norc --noprofile to avoid sourcing
- * .bashrc.d scripts (which can trigger Bitwarden password prompts).
- *
- * This replaces exec() which spawns an interactive shell by default.
- */
-async function execAsync(command: string, options?: { timeout?: number; cwd?: string }): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    // Use bash with --norc --noprofile to prevent sourcing any startup files
-    // -c tells bash to execute the following command string
-    const proc = spawn('/bin/bash', ['--norc', '--noprofile', '-c', command], {
-      cwd: options?.cwd,
-      env: {
-        ...process.env,
-        // Extra safety: clear env vars that could trigger rc file sourcing
-        BASH_ENV: '',
-        ENV: '',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let killed = false;
-
-    // Handle timeout
-    const timeout = options?.timeout || 30000;
-    const timer = setTimeout(() => {
-      killed = true;
-      proc.kill('SIGTERM');
-      reject(new Error(`Command timed out after ${timeout}ms`));
-    }, timeout);
-
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr.on('data', (data) => { stderr += data.toString(); });
-
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (killed) return;
-
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        const error = new Error(`Command failed with exit code ${code}: ${stderr}`);
-        (error as any).code = code;
-        (error as any).stdout = stdout;
-        (error as any).stderr = stderr;
-        reject(error);
-      }
-    });
-
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-  });
-}
 
 export interface SlackStatus {
   online: boolean;
@@ -226,14 +169,11 @@ export class WorkflowDataProvider {
     return this.workspaceInfo;
   }
 
-  private loadWorkspaceInfo(): void {
+  private async loadWorkspaceInfoAsync(): Promise<void> {
     try {
-      if (fs.existsSync(this.workspaceStatesPath)) {
-        const content = fs.readFileSync(this.workspaceStatesPath, "utf-8");
-        const data = JSON.parse(content);
-
-        // Handle new format with 'workspaces' wrapper (version 2+)
-        const workspaces = data.workspaces || data;
+      const result = await dbus.session_getState();
+      if (result.success && result.data?.workspaces) {
+        const workspaces = result.data.workspaces;
 
         // Get the current workspace folder
         const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -257,16 +197,12 @@ export class WorkflowDataProvider {
           }
 
           if (workspaceState) {
-            // Get active session's info if available (per-session project support)
             const activeSessionId = (workspaceState as any).active_session_id;
             const sessions = (workspaceState as any).sessions || {};
             const activeSession = activeSessionId ? sessions[activeSessionId] : null;
 
-            // Merge workspace and active session info
-            // Session-level fields override workspace-level for per-session support
             this.workspaceInfo = {
               workspace_uri: (workspaceState as any).workspace_uri,
-              // Use session's project if available, fall back to workspace project
               project: activeSession?.project || (workspaceState as any).project,
               auto_detected_project: activeSession?.is_project_auto_detected
                 ? activeSession.project
@@ -281,8 +217,15 @@ export class WorkflowDataProvider {
         }
       }
     } catch (e) {
-      console.error("Failed to load workspace info:", e);
+      logger.log(`D-Bus session_getState failed: ${e}`);
     }
+  }
+
+  private loadWorkspaceInfo(): void {
+    // Synchronous wrapper - call async version
+    this.loadWorkspaceInfoAsync().catch(e => {
+      logger.log(`Failed to load workspace info: ${e}`);
+    });
   }
 
   public refreshWorkspaceInfo(): void {
@@ -367,160 +310,118 @@ export class WorkflowDataProvider {
 
   private async refreshActiveIssue(): Promise<void> {
     try {
-      const currentWorkPath = path.join(
-        this.memoryDir,
-        "state",
-        "current_work.yaml"
-      );
-      if (!fs.existsSync(currentWorkPath)) {
-        this.status.activeIssue = undefined;
-        return;
-      }
-
-      const content = fs.readFileSync(currentWorkPath, "utf-8");
-      const activeIssues = this.parseYamlList(content, "active_issues");
-
-      if (activeIssues.length > 0) {
-        const issue = activeIssues[0];
-        this.status.activeIssue = {
-          key: issue.key || "",
-          summary: issue.summary || "",
-          status: issue.status || "Unknown",
-          branch: issue.branch,
-          repo: issue.repo,
-        };
-      } else {
-        this.status.activeIssue = undefined;
+      // Try D-Bus first (MemoryDaemon)
+      const result = await dbus.memory_getCurrentWork();
+      if (result.success && result.data?.work) {
+        const work = result.data.work;
+        // Use activeIssue if available, otherwise first from activeIssues array
+        const issue = work.activeIssue || (work.activeIssues && work.activeIssues[0]);
+        if (issue) {
+          this.status.activeIssue = {
+            key: issue.key || "",
+            summary: issue.summary || "",
+            status: issue.status || "Unknown",
+            branch: issue.branch,
+            repo: issue.repo,
+          };
+          return;
+        }
       }
     } catch (e) {
-      console.error("Failed to read active issue:", e);
+      logger.log(`D-Bus memory_getCurrentWork failed: ${e}`);
       this.status.activeIssue = undefined;
     }
   }
 
   private async refreshActiveMR(): Promise<void> {
     try {
-      const currentWorkPath = path.join(
-        this.memoryDir,
-        "state",
-        "current_work.yaml"
-      );
-      if (!fs.existsSync(currentWorkPath)) {
-        this.status.activeMR = undefined;
-        return;
+      const result = await dbus.memory_getCurrentWork();
+      if (result.success && result.data?.work) {
+        const work = result.data.work;
+        const mr = work.activeMR || (work.openMRs && work.openMRs[0]);
+        if (mr) {
+          this.status.activeMR = {
+            id: mr.id || 0,
+            title: mr.title || "",
+            project: (mr as any).project || "",
+            url: (mr as any).url || "",
+            pipelineStatus: (mr as any).pipeline_status || "unknown",
+            needsReview: (mr as any).needs_review !== false,
+          };
+          return;
+        }
       }
-
-      const content = fs.readFileSync(currentWorkPath, "utf-8");
-      const openMRs = this.parseYamlList(content, "open_mrs");
-
-      if (openMRs.length > 0) {
-        const mr = openMRs[0];
-        this.status.activeMR = {
-          id: mr.id || 0,
-          title: mr.title || "",
-          project: mr.project || "",
-          url: mr.url || "",
-          pipelineStatus: mr.pipeline_status || "unknown",
-          needsReview: mr.needs_review !== false,
-        };
-      } else {
-        this.status.activeMR = undefined;
-      }
+      this.status.activeMR = undefined;
     } catch (e) {
-      console.error("Failed to read active MR:", e);
+      logger.log(`D-Bus memory_getCurrentWork failed for MR: ${e}`);
       this.status.activeMR = undefined;
     }
   }
 
   private async refreshEnvironment(): Promise<void> {
     try {
-      const envPath = path.join(this.memoryDir, "state", "environments.yaml");
-      if (!fs.existsSync(envPath)) {
-        this.status.environment = undefined;
+      const result = await dbus.memory_getEnvironments();
+      if (result.success && result.data?.environments) {
+        const envs = result.data.environments;
+        const stage = envs.find((e: DBusEnvironmentStatus) => e.name === "stage");
+        const prod = envs.find((e: DBusEnvironmentStatus) => e.name === "production");
+
+        this.status.environment = {
+          stageStatus: stage?.status || "unknown",
+          prodStatus: prod?.status || "unknown",
+          stageAlerts: stage?.alerts?.length || 0,
+          prodAlerts: prod?.alerts?.length || 0,
+        };
         return;
       }
-
-      const content = fs.readFileSync(envPath, "utf-8");
-
-      // Simple YAML parsing for our known structure
-      const stageMatch = content.match(
-        /stage:\s*\n(?:.*\n)*?\s*status:\s*(\w+)/
-      );
-      const prodMatch = content.match(
-        /production:\s*\n(?:.*\n)*?\s*status:\s*(\w+)/
-      );
-      const stageAlertsMatch = content.match(
-        /stage:\s*\n(?:.*\n)*?\s*alerts:\s*\[(.*?)\]/s
-      );
-      const prodAlertsMatch = content.match(
-        /production:\s*\n(?:.*\n)*?\s*alerts:\s*\[(.*?)\]/s
-      );
-
-      this.status.environment = {
-        stageStatus: stageMatch ? stageMatch[1] : "unknown",
-        prodStatus: prodMatch ? prodMatch[1] : "unknown",
-        stageAlerts: stageAlertsMatch
-          ? (stageAlertsMatch[1].match(/name:/g) || []).length
-          : 0,
-        prodAlerts: prodAlertsMatch
-          ? (prodAlertsMatch[1].match(/name:/g) || []).length
-          : 0,
-      };
+      this.status.environment = undefined;
     } catch (e) {
-      console.error("Failed to read environment status:", e);
+      logger.log(`D-Bus memory_getEnvironments failed: ${e}`);
       this.status.environment = undefined;
     }
   }
 
   private async refreshFollowUps(): Promise<void> {
     try {
-      const currentWorkPath = path.join(
-        this.memoryDir,
-        "state",
-        "current_work.yaml"
-      );
-      if (!fs.existsSync(currentWorkPath)) {
-        this.status.followUps = [];
+      const result = await dbus.memory_getCurrentWork();
+      if (result.success && result.data?.work?.followUps) {
+        this.status.followUps = result.data.work.followUps.map((fu: any) => ({
+          task: fu.task || "",
+          priority: fu.priority || "normal",
+          issueKey: fu.issue_key,
+          mrId: fu.mr_id,
+          due: fu.due,
+        }));
         return;
       }
-
-      const content = fs.readFileSync(currentWorkPath, "utf-8");
-      const followUps = this.parseYamlList(content, "follow_ups");
-
-      this.status.followUps = followUps.map((fu) => ({
-        task: fu.task || "",
-        priority: fu.priority || "normal",
-        issueKey: fu.issue_key,
-        mrId: fu.mr_id,
-        due: fu.due,
-      }));
+      this.status.followUps = [];
     } catch (e) {
-      console.error("Failed to read follow-ups:", e);
+      logger.log(`D-Bus memory_getCurrentWork failed for follow-ups: ${e}`);
       this.status.followUps = [];
     }
   }
 
   private async refreshNamespaces(): Promise<void> {
     try {
-      const envPath = path.join(this.memoryDir, "state", "environments.yaml");
-      if (!fs.existsSync(envPath)) {
-        this.status.namespaces = [];
-        return;
+      const result = await dbus.memory_getEnvironments();
+      if (result.success && result.data?.environments) {
+        const envs = result.data.environments;
+        const ephemeral = envs.find((e: DBusEnvironmentStatus) => e.name === "ephemeral");
+        if (ephemeral && (ephemeral as any).namespaces) {
+          this.status.namespaces = (ephemeral as any).namespaces.map((ns: any) => ({
+            name: ns.name || "",
+            mrId: ns.mr_id,
+            commitSha: ns.commit_sha,
+            deployedAt: ns.deployed_at,
+            expires: ns.expires,
+            status: ns.status || "unknown",
+          }));
+          return;
+        }
       }
-
-      const content = fs.readFileSync(envPath, "utf-8");
-      const namespaces = this.parseYamlList(content, "ephemeral_namespaces");
-
-      this.status.namespaces = namespaces.map((ns) => ({
-        name: ns.name || "",
-        mrId: ns.mr_id,
-        commitSha: ns.commit_sha,
-        deployedAt: ns.deployed_at,
-        expires: ns.expires,
-        status: ns.status || "unknown",
-      }));
+      this.status.namespaces = [];
     } catch (e) {
-      console.error("Failed to read namespaces:", e);
+      logger.log(`D-Bus memory_getEnvironments failed for namespaces: ${e}`);
       this.status.namespaces = [];
     }
   }

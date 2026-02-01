@@ -10,6 +10,10 @@ import * as path from "path";
 import { WorkflowDataProvider } from "./dataProvider";
 import { StatusBarManager } from "./statusBar";
 import { getSkillsDir, getCommandsDir } from "./paths";
+import { dbus } from "./dbusClient";
+import { createLogger } from "./logger";
+
+const logger = createLogger("Commands");
 
 // Cache of available slash commands (loaded from .cursor/commands/)
 let availableSlashCommands: Set<string> | null = null;
@@ -156,7 +160,7 @@ async function sendToCursorChat(message: string): Promise<boolean> {
 
     return true;
   } catch (error) {
-    console.error("[aa-workflow] Failed to send to chat:", error);
+    logger.error("Failed to send to chat", error);
     return false;
   } finally {
     // Restore previous clipboard content after a short delay
@@ -198,58 +202,45 @@ async function sendOrCopyToChat(message: string, description: string): Promise<v
 /**
  * Load all skills from the skills directory
  */
+let _skillsCache: Array<{ name: string; label: string; description: string }> = [];
+
+async function loadSkillsFromDbusAsync(): Promise<Array<{
+  name: string;
+  label: string;
+  description: string;
+}>> {
+  try {
+    const result = await dbus.config_getSkillsList();
+    if (result.success && result.data) {
+      const data = result.data as any;
+      const skills = (data.skills || []).map((s: any) => {
+        const name = s.name;
+        const label = name
+          .split("_")
+          .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" ");
+        return {
+          name,
+          label,
+          description: s.description || `Run ${name} skill`,
+        };
+      });
+      _skillsCache = skills.sort((a: any, b: any) => a.label.localeCompare(b.label));
+      return _skillsCache;
+    }
+  } catch (e) {
+    logger.error("Failed to load skills via D-Bus", e);
+  }
+  return _skillsCache;
+}
+
 function loadSkillsFromDisk(): Array<{
   name: string;
   label: string;
   description: string;
 }> {
-  const skills: Array<{ name: string; label: string; description: string }> =
-    [];
-
-  try {
-    const skillsDir = getSkillsDir();
-    if (!fs.existsSync(skillsDir)) {
-      return skills;
-    }
-
-    const files = fs.readdirSync(skillsDir).filter((f) => f.endsWith(".yaml"));
-
-    for (const file of files) {
-      try {
-        const content = fs.readFileSync(path.join(skillsDir, file), "utf-8");
-
-        // Simple YAML parsing for name and description
-        const nameMatch = content.match(/^name:\s*(.+)$/m);
-        const descMatch = content.match(
-          /^description:\s*\|?\s*\n?\s*(.+?)(?:\n\s*\n|\n\s*[a-z]+:)/ms
-        );
-
-        if (nameMatch) {
-          const name = nameMatch[1].trim();
-          const description = descMatch
-            ? descMatch[1].trim().split("\n")[0].trim() // First line of description
-            : `Run ${name} skill`;
-
-          // Convert snake_case to Title Case for label
-          const label = name
-            .split("_")
-            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(" ");
-
-          skills.push({ name, label, description });
-        }
-      } catch {
-        // Skip files that can't be parsed
-      }
-    }
-
-    // Sort alphabetically by label
-    skills.sort((a, b) => a.label.localeCompare(b.label));
-  } catch {
-    // Return empty array on error
-  }
-
-  return skills;
+  // Return cached skills (populated by async D-Bus call)
+  return _skillsCache;
 }
 
 /**

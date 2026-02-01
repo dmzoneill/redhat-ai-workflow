@@ -114,7 +114,7 @@ export class SkillWebSocketClient {
           this.ws?.close();
           return;
         }
-        console.log('[SkillWebSocket] Connected to MCP server');
+        logger.log('Connected to MCP server');
         this._isConnected = true;
         this.reconnectAttempts = 0; // Reset on successful connection
         this.reconnectBackoff = 5000;
@@ -128,12 +128,12 @@ export class SkillWebSocketClient {
           const message = JSON.parse(data.toString());
           this.handleMessage(message);
         } catch (e) {
-          console.error('[SkillWebSocket] Failed to parse message:', e);
+          logger.error('Failed to parse message', e);
         }
       });
 
       this.ws.on('close', () => {
-        console.log('[SkillWebSocket] Disconnected');
+        logger.log('Disconnected');
         this._isConnected = false;
         this._onConnectionChange.fire(false);
         this.stopHeartbeat();
@@ -145,12 +145,12 @@ export class SkillWebSocketClient {
       this.ws.on('error', (error: Error) => {
         // Don't log connection refused errors (server not running)
         if (!error.message.includes('ECONNREFUSED')) {
-          console.error('[SkillWebSocket] Error:', error.message);
+          logger.error(`Error: ${error.message}`);
         }
         // Don't throw - let the close handler deal with reconnection
       });
     } catch (e) {
-      console.error('[SkillWebSocket] Failed to connect:', e);
+      logger.error('Failed to connect', e);
       if (!this.isDisposed) {
         this.scheduleReconnect();
       }
@@ -165,13 +165,13 @@ export class SkillWebSocketClient {
     // Exponential backoff with max attempts
     this.reconnectAttempts++;
     if (this.reconnectAttempts > this.maxReconnectAttempts) {
-      console.log('[SkillWebSocket] Max reconnect attempts reached, stopping reconnection');
+      logger.log('Max reconnect attempts reached, stopping reconnection');
       return;
     }
 
     // Increase backoff (max 60 seconds)
     const delay = Math.min(this.reconnectBackoff * Math.pow(1.5, this.reconnectAttempts - 1), 60000);
-    console.log(`[SkillWebSocket] Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    logger.log(`Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;

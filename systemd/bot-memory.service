@@ -1,0 +1,30 @@
+[Unit]
+Description=AI Workflow Memory Daemon - Centralized memory/state service
+After=network.target dbus.socket
+Wants=dbus.socket
+# Max 5 restarts in 5 minutes, then give up
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
+# XDG runtime for D-Bus
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+# Use the virtual environment's python with D-Bus enabled
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.memory --dbus
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Graceful shutdown
+TimeoutStopSec=10
+KillMode=mixed
+
+# Logs go to journald (view with: journalctl --user -u bot-memory -f)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

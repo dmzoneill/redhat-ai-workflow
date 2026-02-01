@@ -32,10 +32,13 @@
  */
 
 import * as vscode from "vscode";
-import * as fs from "fs";
 import * as path from "path";
 import { WorkflowDataProvider, WorkflowStatus } from "./dataProvider";
 import { getSkillsDir } from "./paths";
+import { dbus } from "./dbusClient";
+import { createLogger } from "./logger";
+
+const logger = createLogger("TreeView");
 
 // Tree item types for context menu handling
 type TreeItemType =
@@ -902,70 +905,39 @@ export class WorkflowTreeProvider
     });
   }
 
+  private _skillsCache: Array<{ name: string; label: string; description: string; tags?: string[]; personas?: string[] }> = [];
+
   private loadSkillsFromDisk(): Array<{ name: string; label: string; description: string; tags?: string[]; personas?: string[] }> {
-    const skills: Array<{ name: string; label: string; description: string; tags?: string[]; personas?: string[] }> = [];
+    // Return cached skills (populated by async D-Bus call)
+    return this._skillsCache;
+  }
 
+  private async loadSkillsAsync(): Promise<Array<{ name: string; label: string; description: string; tags?: string[]; personas?: string[] }>> {
     try {
-      if (!fs.existsSync(this.skillsDir)) {
-        return skills;
+      const result = await dbus.config_getSkillsList();
+      if (result.success && result.data) {
+        const data = result.data as any;
+        const skills = (data.skills || []).map((s: any) => {
+          const name = s.name;
+          const label = name
+            .split("_")
+            .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" ");
+          return {
+            name,
+            label,
+            description: s.description || `Run ${name} skill`,
+            tags: s.tags,
+            personas: s.personas,
+          };
+        });
+        this._skillsCache = skills.sort((a: any, b: any) => a.label.localeCompare(b.label));
+        return this._skillsCache;
       }
-
-      const files = fs.readdirSync(this.skillsDir).filter((f) => f.endsWith(".yaml"));
-
-      for (const file of files) {
-        try {
-          const content = fs.readFileSync(path.join(this.skillsDir, file), "utf-8");
-
-          // Simple YAML parsing for name, description, tags, and personas
-          const nameMatch = content.match(/^name:\s*(.+)$/m);
-          const descMatch = content.match(/^description:\s*\|?\s*\n?\s*(.+?)(?:\n\s*\n|\n\s*[a-z]+:)/ms);
-
-          // Extract tags array
-          const tagsMatch = content.match(/^tags:\s*\n((?:\s+-\s*.+\n?)+)/m);
-          let tags: string[] | undefined;
-          if (tagsMatch) {
-            tags = tagsMatch[1]
-              .split('\n')
-              .map(line => line.replace(/^\s*-\s*/, '').trim())
-              .filter(t => t.length > 0);
-          }
-
-          // Extract personas array
-          const personasMatch = content.match(/^personas:\s*\n((?:\s+-\s*.+\n?)+)/m);
-          let personas: string[] | undefined;
-          if (personasMatch) {
-            personas = personasMatch[1]
-              .split('\n')
-              .map(line => line.replace(/^\s*-\s*/, '').trim())
-              .filter(p => p.length > 0);
-          }
-
-          if (nameMatch) {
-            const name = nameMatch[1].trim();
-            const description = descMatch
-              ? descMatch[1].trim().split('\n')[0].trim()  // First line of description
-              : `Run ${name} skill`;
-
-            // Convert snake_case to Title Case for label
-            const label = name
-              .split("_")
-              .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-              .join(" ");
-
-            skills.push({ name, label, description, tags, personas });
-          }
-        } catch (e) {
-          // Skip files that can't be parsed
-        }
-      }
-
-      // Sort alphabetically by label
-      skills.sort((a, b) => a.label.localeCompare(b.label));
     } catch (e) {
-      console.error("Failed to load skills:", e);
+      logger.error("Failed to load skills via D-Bus", e);
     }
-
-    return skills;
+    return this._skillsCache;
   }
 
   private getSkillIcon(skillName: string): string {
