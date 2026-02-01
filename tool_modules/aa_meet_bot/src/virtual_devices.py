@@ -146,6 +146,9 @@ class InstanceDeviceManager:
         self._saved_browser_connections: list[tuple[str, str]] = []  # [(output_id, source_name)]
         self._original_default_source: Optional[str] = None
 
+        # Background task to monitor and restore default source
+        self._source_monitor_task: Optional[asyncio.Task] = None
+
     async def create_all(self) -> InstanceDevices:
         """
         Create all audio and video devices for this instance BEFORE Chrome launches.
@@ -185,7 +188,42 @@ class InstanceDeviceManager:
             f"[{self.instance_id}] Created devices: sink={self.sink_name}, "
             f"source={self.source_name}, video={video_device}"
         )
+
+        # Start background task to monitor and restore default source if WirePlumber changes it
+        if self._original_default_source:
+            self._source_monitor_task = asyncio.create_task(self._monitor_default_source(self._original_default_source))
+
         return self._devices
+
+    async def _monitor_default_source(self, original_source: str) -> None:
+        """
+        Background task that monitors the default source and restores it if changed.
+
+        WirePlumber can sometimes re-evaluate and change the default source after
+        we've restored it. This task ensures the user's microphone stays as default.
+        """
+        check_interval = 10  # Check every 10 seconds
+        logger.info(f"[{self.instance_id}] Starting default source monitor (original: {original_source})")
+
+        try:
+            while True:
+                await asyncio.sleep(check_interval)
+
+                # Check current default source
+                success, output = await run_cmd(["pactl", "get-default-source"], check=False)
+                if success:
+                    current = output.strip()
+                    # If it changed to our meetbot source, restore it
+                    if "meet_bot" in current.lower() and current != original_source:
+                        logger.warning(
+                            f"[{self.instance_id}] Default source changed to {current}, "
+                            f"restoring to {original_source}"
+                        )
+                        await self._force_restore_default_source(original_source)
+        except asyncio.CancelledError:
+            logger.info(f"[{self.instance_id}] Default source monitor stopped")
+        except Exception as e:
+            logger.warning(f"[{self.instance_id}] Default source monitor error: {e}")
 
     async def _save_browser_audio_state(self) -> None:
         """
@@ -311,7 +349,8 @@ class InstanceDeviceManager:
 
         config = get_config()
 
-        # Create pipe-source
+        # Create pipe-source with low priority to prevent WirePlumber from selecting it as default
+        # node.priority.session=0 tells WirePlumber this is NOT a preferred device
         cmd = [
             "pactl",
             "load-module",
@@ -321,7 +360,11 @@ class InstanceDeviceManager:
             f"rate={config.audio.sample_rate}",
             "channels=1",
             "format=s16le",
-            f'source_properties=device.description="MeetBot_{self.instance_id}_Mic"',
+            f'source_properties=device.description="MeetBot_{self.instance_id}_Mic"'
+            f" node.priority.session=0"
+            f" node.priority.driver=0"
+            f" priority.session=0"
+            f" priority.driver=0",
         ]
 
         success, output = await run_cmd(cmd)
@@ -333,25 +376,7 @@ class InstanceDeviceManager:
                 # CRITICAL: Immediately restore the original default source
                 # PipeWire automatically makes new sources the default - we must undo this
                 if original_default_source and "meet_bot" not in original_default_source.lower():
-                    # Use pw-metadata for persistent default (pactl gets overridden)
-                    await run_cmd(
-                        [
-                            "pw-metadata",
-                            "-n",
-                            "default",
-                            "0",
-                            "default.audio.source",
-                            f'{{"name":"{original_default_source}"}}',
-                        ],
-                        check=False,
-                    )
-                    logger.info(
-                        f"[{self.instance_id}] Restored default source via pw-metadata: {original_default_source}"
-                    )
-
-                    # Also disconnect any browser streams from our new source
-                    # and reconnect them to the physical mic
-                    await self._restore_browser_mic_connections(original_default_source)
+                    await self._force_restore_default_source(original_default_source)
 
                 return self._source_module_id
             except ValueError:
@@ -360,6 +385,95 @@ class InstanceDeviceManager:
 
         logger.error(f"[{self.instance_id}] Failed to create source: {output}")
         return None
+
+    async def _force_restore_default_source(self, original_source: str) -> None:
+        """
+        Lock the system default source to prevent WirePlumber from changing it.
+
+        Uses default.configured.audio.source which is the highest priority setting
+        in WirePlumber. This LOCKS the system default but does NOT prevent apps
+        from using a different device if manually selected.
+
+        Key insight: The "configured" setting only affects what WirePlumber considers
+        the system default. Apps like Chrome can still use any device if the user
+        manually selects it in the app's audio settings dropdown.
+
+        This allows:
+        - User manually selecting headset in Google Meet dropdown -> works fine
+        - MeetBot creating virtual device -> system default stays on physical mic
+        - Apps using "Default" device -> get the locked physical mic
+        """
+        max_attempts = 5
+
+        for attempt in range(max_attempts):
+            # Method 1: Lock using default.configured.audio.source (highest priority)
+            # This prevents WirePlumber from ever changing the system default
+            await run_cmd(
+                [
+                    "pw-metadata",
+                    "-n",
+                    "default",
+                    "0",
+                    "default.configured.audio.source",
+                    f'{{"name":"{original_source}"}}',
+                ],
+                check=False,
+            )
+
+            # Method 2: Also set default.audio.source for immediate effect
+            await run_cmd(
+                [
+                    "pw-metadata",
+                    "-n",
+                    "default",
+                    "0",
+                    "default.audio.source",
+                    f'{{"name":"{original_source}"}}',
+                ],
+                check=False,
+            )
+
+            # Method 3: pactl set-default-source (immediate effect)
+            await run_cmd(["pactl", "set-default-source", original_source], check=False)
+
+            # Very short wait - just enough for PipeWire to process
+            await asyncio.sleep(0.1)
+
+            # Verify it stuck
+            success, current = await run_cmd(["pactl", "get-default-source"], check=False)
+            if success:
+                current = current.strip()
+                if current == original_source:
+                    logger.info(f"[{self.instance_id}] Default source LOCKED to {current} " f"(attempt {attempt + 1})")
+                    return  # Success!
+                elif "meet_bot" not in current.lower():
+                    # Different physical source - acceptable (user may have switched)
+                    logger.info(
+                        f"[{self.instance_id}] Default source is {current} (physical device) "
+                        f"(attempt {attempt + 1})"
+                    )
+                    return
+                else:
+                    logger.warning(
+                        f"[{self.instance_id}] Default source is still {current}, "
+                        f"retrying (attempt {attempt + 1}/{max_attempts})"
+                    )
+                    await asyncio.sleep(0.1 * (attempt + 1))
+
+        # Final attempt
+        logger.warning(f"[{self.instance_id}] Final lock attempt for {original_source}")
+        await run_cmd(
+            ["pw-metadata", "-n", "default", "0", "default.configured.audio.source", f'{{"name":"{original_source}"}}'],
+            check=False,
+        )
+        await run_cmd(
+            ["pw-metadata", "-n", "default", "0", "default.audio.source", f'{{"name":"{original_source}"}}'],
+            check=False,
+        )
+        await run_cmd(["pactl", "set-default-source", original_source], check=False)
+
+        # Also restore any browser streams that got moved to meetbot devices
+        await self._restore_browser_mic_connections(original_source)
 
     async def _restore_browser_mic_connections(self, original_source: str) -> None:
         """
@@ -543,11 +657,16 @@ class InstanceDeviceManager:
 
         # Create a new v4l2loopback device dynamically
         # -v for verbose output (returns device path)
+        # -x 1 for exclusive_caps=1 (CRITICAL for Chrome detection)
+        # With exclusive_caps=1, device shows as OUTPUT when idle, CAPTURE when streaming
+        # Chrome ONLY detects devices that show as pure CAPTURE devices
         cmd = [
             "v4l2loopback-ctl",
             "add",
             "-n",
             self.video_device_name,
+            "-x",
+            "1",  # exclusive_caps=1 - Chrome requires this to detect the device
             "-v",  # verbose - prints device info
         ]
 
@@ -685,6 +804,47 @@ class InstanceDeviceManager:
         IMPORTANT: We only remove OUR virtual devices. We never touch the user's
         Chrome or any other application's audio connections (unless restore_browser_audio=True).
         """
+        # Stop the source monitor task first
+        if self._source_monitor_task and not self._source_monitor_task.done():
+            self._source_monitor_task.cancel()
+            try:
+                await asyncio.wait_for(self._source_monitor_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            self._source_monitor_task = None
+
+        # Ensure the default source lock is still in place after cleanup
+        # We keep the lock (default.configured.audio.source) so new virtual devices
+        # created by other bot instances don't hijack the default
+        if self._original_default_source:
+            success, current = await run_cmd(["pactl", "get-default-source"], check=False)
+            if success and "meet_bot" in current.strip().lower():
+                logger.info(f"[{self.instance_id}] Restoring default source to {self._original_default_source}")
+                # Re-lock to original physical device
+                await run_cmd(
+                    [
+                        "pw-metadata",
+                        "-n",
+                        "default",
+                        "0",
+                        "default.configured.audio.source",
+                        f'{{"name":"{self._original_default_source}"}}',
+                    ],
+                    check=False,
+                )
+                await run_cmd(
+                    [
+                        "pw-metadata",
+                        "-n",
+                        "default",
+                        "0",
+                        "default.audio.source",
+                        f'{{"name":"{self._original_default_source}"}}',
+                    ],
+                    check=False,
+                )
+                await run_cmd(["pactl", "set-default-source", self._original_default_source], check=False)
+
         # Check for any streams still connected to our devices before removing
         # This is just for debugging - we still remove our devices regardless
         if self._sink_module_id or self._source_module_id:
@@ -1101,6 +1261,12 @@ async def cleanup_orphaned_meetbot_devices(active_instance_ids: set[str] | None 
             except Exception as e:
                 results["errors"].append(f"Failed to remove pipe {pipe_file}: {e}")
 
+    # Clean up orphaned parec processes targeting MeetBot sinks
+    results["killed_processes"] = []
+    parec_cleanup = await _cleanup_orphaned_parec_processes(active_safe_ids)
+    results["killed_processes"] = parec_cleanup.get("killed", [])
+    results["errors"].extend(parec_cleanup.get("errors", []))
+
     # Clean up orphaned video devices
     results["removed_video_devices"] = []
     video_cleanup = await _cleanup_orphaned_video_devices(active_safe_ids)
@@ -1111,9 +1277,93 @@ async def cleanup_orphaned_meetbot_devices(active_instance_ids: set[str] | None 
     # Restore default audio source if it was set to a meetbot device
     await _restore_default_audio_source()
 
-    total_removed = len(results["removed_modules"]) + len(results["removed_pipes"])
+    total_removed = len(results["removed_modules"]) + len(results["removed_pipes"]) + len(results["killed_processes"])
     if total_removed > 0:
         logger.info(f"Orphaned device cleanup complete: {total_removed} items removed")
+
+    return results
+
+
+async def _cleanup_orphaned_parec_processes(active_safe_ids: set[str]) -> dict:
+    """
+    Kill orphaned parec processes that are targeting MeetBot sinks.
+
+    These processes are spawned by the video bot's audio capture and can become
+    orphaned if the meeting ends unexpectedly or cleanup fails.
+
+    Args:
+        active_safe_ids: Set of active instance IDs (sanitized, with underscores)
+
+    Returns:
+        Dict with killed, errors lists
+    """
+    results = {"killed": [], "errors": []}
+
+    try:
+        # Find all parec processes
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep",
+            "-a",
+            "parec",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+
+        if proc.returncode != 0 or not stdout:
+            # No parec processes found
+            return results
+
+        # Parse output: "PID command args..."
+        for line in stdout.decode().strip().split("\n"):
+            if not line:
+                continue
+
+            parts = line.split(None, 1)
+            if len(parts) < 2:
+                continue
+
+            pid_str, cmd_line = parts
+            pid = int(pid_str)
+
+            # Check if this parec is targeting a MeetBot sink
+            if "meet_bot" not in cmd_line.lower():
+                continue
+
+            # Extract instance ID from the command line
+            # Patterns: --device meet_bot_<id>.monitor or --monitor-stream=<N>
+            instance_id = None
+            if "meet_bot_" in cmd_line:
+                # Extract instance ID from sink name
+                import re
+
+                match = re.search(r"meet_bot_([a-zA-Z0-9_]+)", cmd_line)
+                if match:
+                    instance_id = match.group(1)
+                    # Remove trailing .monitor if present
+                    if instance_id.endswith("_monitor"):
+                        instance_id = instance_id[:-8]
+
+            # Check if this instance is still active
+            if instance_id and active_safe_ids and instance_id in active_safe_ids:
+                logger.debug(f"Skipping active parec process {pid} for instance {instance_id}")
+                continue
+
+            # Kill the orphaned process
+            try:
+                os.kill(pid, 15)  # SIGTERM
+                results["killed"].append(f"parec {pid} (instance: {instance_id or 'unknown'})")
+                logger.info(f"Killed orphaned parec process {pid} targeting MeetBot sink")
+            except ProcessLookupError:
+                # Process already gone
+                pass
+            except PermissionError as e:
+                results["errors"].append(f"Permission denied killing parec {pid}: {e}")
+            except Exception as e:
+                results["errors"].append(f"Failed to kill parec {pid}: {e}")
+
+    except Exception as e:
+        results["errors"].append(f"Error finding parec processes: {e}")
 
     return results
 

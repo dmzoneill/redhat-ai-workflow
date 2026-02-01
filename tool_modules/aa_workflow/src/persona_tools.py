@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import Context
+from fastmcp import Context
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
@@ -24,7 +24,7 @@ except ImportError:
     PERSONAS_DIR = PROJECT_DIR / "personas"
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 

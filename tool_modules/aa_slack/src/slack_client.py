@@ -538,6 +538,46 @@ class SlackSession:
         result = await self._request("conversations.history", data)
         return result.get("messages", [])
 
+    async def get_channel_history_with_cursor(
+        self,
+        channel_id: str,
+        limit: int = 200,
+        oldest: str | None = None,
+        latest: str | None = None,
+        cursor: str | None = None,
+        inclusive: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Get message history for a channel with cursor-based pagination.
+
+        This method returns the full API response including pagination metadata,
+        allowing proper iteration through all messages in a channel.
+
+        Args:
+            channel_id: Channel ID (e.g., C12345678)
+            limit: Number of messages to return (max 200)
+            oldest: Start of time range (Unix timestamp as string)
+            latest: End of time range (Unix timestamp as string)
+            cursor: Pagination cursor from previous response
+            inclusive: Include messages at boundary timestamps
+
+        Returns:
+            Full API response dict with:
+            - ok: bool
+            - messages: list of message objects
+            - has_more: bool indicating if more messages exist
+            - response_metadata: dict with next_cursor for pagination
+        """
+        data = {"channel": channel_id, "limit": min(limit, 200), "inclusive": inclusive}
+        if oldest:
+            data["oldest"] = oldest
+        if latest:
+            data["latest"] = latest
+        if cursor:
+            data["cursor"] = cursor
+
+        return await self._request("conversations.history", data)
+
     async def get_channel_info(self, channel_id: str) -> dict[str, Any] | None:
         """
         Get information about a channel.

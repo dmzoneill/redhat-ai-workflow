@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
@@ -57,10 +57,20 @@ CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 TOKEN_FILE = CONFIG_DIR / "token.json"
 SERVICE_ACCOUNT_FILE = CONFIG_DIR / "service_account.json"
 
-# Scopes required (same as calendar - presentations and drive.file already included)
+# Scopes required - MUST match aa_google_calendar to share the same token
+# All Google tool modules use the same comprehensive scope list
 SCOPES = [
+    # Calendar
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    # Gmail
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
+    # Slides
     "https://www.googleapis.com/auth/presentations",
     "https://www.googleapis.com/auth/presentations.readonly",
+    # Drive
     "https://www.googleapis.com/auth/drive.file",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
@@ -132,7 +142,7 @@ def get_slides_service() -> tuple["Resource | None", str | None]:
         return (
             None,
             "Google API libraries not installed. Run: "
-            "pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib",
+            "uv add google-api-python-client google-auth-httplib2 google-auth-oauthlib",
         )
 
     # Try OAuth token, refresh if needed, then service account
@@ -172,7 +182,7 @@ def get_drive_service() -> tuple["Resource | None", str | None]:
         return (
             None,
             "Google API libraries not installed. Run: "
-            "pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib",
+            "uv add google-api-python-client google-auth-httplib2 google-auth-oauthlib",
         )
 
     # Try OAuth token, refresh if needed, then service account

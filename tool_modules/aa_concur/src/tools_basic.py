@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from mcp.types import TextContent
 
 # Setup project path for server imports
@@ -475,7 +475,7 @@ def register_tools(server: FastMCP) -> int:
                         text=f"✅ Receipt file exists for {month_slug}\n\n"
                         f"**File:** `{first_page_pdf}`\n"
                         f"**Amount:** *(install pypdf to extract)*\n\n"
-                        f"*Receipt file ready, run `pip install pypdf` for amount extraction*",
+                        f"*Receipt file ready, run `uv add pypdf` for amount extraction*",
                     )
                 ]
             except Exception as e:

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
-from mcp.server.fastmcp import Context
+from fastmcp import Context
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
@@ -31,7 +31,7 @@ except ImportError:
     KNOWLEDGE_DIR = MEMORY_DIR / "knowledge" / "personas"
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -828,7 +828,7 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
         server: The FastMCP server instance
         memory_session_log_fn: Optional function to log session actions
     """
-    from mcp.server.fastmcp import Context
+    from fastmcp import Context
 
     registry = ToolRegistry(server)
 

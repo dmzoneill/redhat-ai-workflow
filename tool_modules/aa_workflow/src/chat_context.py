@@ -20,14 +20,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import Context
+from fastmcp import Context
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +499,7 @@ async def _project_context_impl(
 
 def register_chat_context_tools(server: "FastMCP") -> int:
     """Register chat context tools with the MCP server."""
-    from mcp.server.fastmcp import Context
+    from fastmcp import Context
 
     registry = ToolRegistry(server)
 

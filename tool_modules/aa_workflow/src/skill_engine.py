@@ -9,6 +9,7 @@ This module is workspace-aware: skill execution context includes workspace_uri
 for proper isolation of skill state and events per workspace.
 """
 
+import asyncio
 import json
 import logging
 import sys
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
-from mcp.server.fastmcp import Context, FastMCP
+from fastmcp import Context, FastMCP
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
@@ -1001,20 +1002,34 @@ class SkillExecutor:
             return None
 
     def _template(self, text: str) -> str:
-        """Resolve {{ variable }} templates in text using Jinja2 if available."""
+        """Resolve {{ variable }} templates in text using Jinja2 if available.
+
+        Uses ChainableUndefined to allow attribute access on undefined variables
+        (returns empty string) while still catching completely missing variables
+        in debug mode.
+        """
         if not isinstance(text, str) or "{{" not in text:
             return text
 
         try:
-            from jinja2 import Environment
+            from jinja2 import ChainableUndefined, Environment
 
             # autoescape=False to preserve Slack link format <url|text>
             # Skills don't generate HTML, they generate plain text and Slack markdown
-            env = Environment(autoescape=False)
+            # ChainableUndefined allows {{ foo.bar.baz }} to return "" if foo is undefined
+            # but still allows chained attribute access without errors
+            env = Environment(autoescape=False, undefined=ChainableUndefined)
             env.filters.update(self._create_jinja_filters())
 
             template = env.from_string(text)
-            return template.render(**self.context)
+            rendered = template.render(**self.context)
+
+            # Warn if template rendered to empty when it had variables
+            # This helps catch cases where context variables are missing
+            if rendered == "" and "{{" in text:
+                self._debug(f"WARNING: Template rendered to empty string: {text[:100]}")
+
+            return rendered
         except ImportError:
             return self._template_with_regex_fallback(text)
         except Exception as e:
@@ -1503,7 +1518,15 @@ class SkillExecutor:
         """
         if isinstance(result, tuple):
             result = result[0]
-        if isinstance(result, list) and result:
+
+        # Handle FastMCP ToolResult objects
+        if hasattr(result, "content") and isinstance(result.content, list):
+            # ToolResult from FastMCP - extract text from content
+            if result.content and hasattr(result.content[0], "text"):
+                text = result.content[0].text
+            else:
+                text = str(result)
+        elif isinstance(result, list) and result:
             text = result[0].text if hasattr(result[0], "text") else str(result[0])
         else:
             text = str(result)
@@ -1711,6 +1734,7 @@ class SkillExecutor:
         # Network patterns that can be fixed with vpn_connect
         network_patterns = [
             "no route to host",
+            "no such host",  # DNS resolution failure
             "connection refused",
             "network unreachable",
             "timeout",
@@ -1718,6 +1742,7 @@ class SkillExecutor:
             "connection reset",
             "eof",
             "cannot connect",
+            "name or service not known",  # Another DNS failure pattern
         ]
 
         # Determine cluster from error context
@@ -1797,6 +1822,11 @@ class SkillExecutor:
                     output_lines.append(f"   ⚠️ vpn_connect failed: {error_msg}")
                     return None
                 output_lines.append("   ✅ vpn_connect successful")
+
+                # Wait for VPN connection to stabilize before retrying
+                # Network routes need time to propagate after VPN connects
+                output_lines.append("   ⏳ Waiting 3s for VPN to stabilize...")
+                await asyncio.sleep(3)
 
             else:
                 return None
@@ -2149,6 +2179,29 @@ class SkillExecutor:
 
         return False, None
 
+    def _validate_tool_args(self, tool: str, raw_args: dict, args: dict, step_name: str) -> str | None:
+        """Validate tool arguments after template rendering.
+
+        Returns:
+            Error message if validation fails, None if valid.
+        """
+        # Check for empty required arguments that came from templates
+        for key, raw_value in raw_args.items():
+            if isinstance(raw_value, str) and "{{" in raw_value:
+                rendered_value = args.get(key, "")
+                if rendered_value == "" or rendered_value is None:
+                    # Extract variable name from template for better error message
+                    import re
+
+                    var_match = re.search(r"\{\{\s*([^}]+)\s*\}\}", raw_value)
+                    var_name = var_match.group(1).strip() if var_match else raw_value
+                    return (
+                        f"Required argument '{key}' is empty. "
+                        f"Template '{raw_value}' rendered to empty string. "
+                        f"Check if '{var_name}' is defined in a previous step."
+                    )
+        return None
+
     async def _process_tool_step(self, step: dict, step_num: int, step_name: str, output_lines: list[str]) -> bool:
         """Process a 'tool' step and append results to output_lines.
 
@@ -2158,6 +2211,31 @@ class SkillExecutor:
         tool = step["tool"]
         raw_args = step.get("args", {})
         args = self._template_dict(raw_args)
+
+        # Validate that template rendering produced valid arguments
+        validation_error = self._validate_tool_args(tool, raw_args, args, step_name)
+        if validation_error:
+            self._debug(f"Argument validation failed for {tool}: {validation_error}")
+            output_lines.append(f"🔧 **Step {step_num}: {step_name}**")
+            output_lines.append(f"   *Tool: `{tool}`*")
+            output_lines.append(f"   ❌ {validation_error}")
+
+            # Check on_error handling
+            on_error = step.get("on_error", "fail")
+            if on_error == "continue":
+                output_lines.append("   ⏭️ Continuing (on_error: continue)")
+                return True
+
+            # Record step failure
+            self.step_results.append(
+                {
+                    "step": step_name,
+                    "tool": tool,
+                    "success": False,
+                    "error": validation_error,
+                }
+            )
+            return False
 
         output_lines.append(f"🔧 **Step {step_num}: {step_name}**")
         output_lines.append(f"   *Tool: `{tool}`*")
@@ -2389,8 +2467,30 @@ class SkillExecutor:
 
                 try:
                     result = self._exec_compute(step["compute"], output_name)
-                    self.context[output_name] = result
-                    output_lines.append(f"   → `{output_name}` = {str(result)[:100]}\n")
+
+                    # Check if compute returned an error string
+                    if isinstance(result, str) and result.startswith("<compute error:"):
+                        step_success = False
+                        step_error = result
+                        output_lines.append(f"   ❌ {result}\n")
+                        self._debug(f"Compute step '{step_name}' failed: {result}")
+
+                        # Store error result in context so dependent steps can check
+                        self.context[output_name] = None
+                        self.context[f"{output_name}_error"] = result
+
+                        # Record step failure
+                        self.step_results.append(
+                            {
+                                "step": step_name,
+                                "compute": True,
+                                "success": False,
+                                "error": result,
+                            }
+                        )
+                    else:
+                        self.context[output_name] = result
+                        output_lines.append(f"   → `{output_name}` = {str(result)[:100]}\n")
                 except Exception as e:
                     step_success = False
                     step_error = str(e)

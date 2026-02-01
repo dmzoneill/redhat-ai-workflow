@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from mcp.server.fastmcp import Context
+from fastmcp import Context
 
 logger = logging.getLogger(__name__)
 

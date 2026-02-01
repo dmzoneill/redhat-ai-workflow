@@ -382,38 +382,38 @@ def wrap_server_tools_runtime(server) -> int:
     count = 0
 
     # Access the server's internal tool registry
-    # FastMCP stores tools in _tool_manager or similar
-    if not hasattr(server, "_tool_manager"):
-        logger.warning("Server has no _tool_manager, cannot wrap tools")
-        return 0
-
-    tool_manager = server._tool_manager
-
-    # Get all registered tools
-    if not hasattr(tool_manager, "_tools"):
-        logger.warning("Tool manager has no _tools dict")
-        return 0
-
-    tools = tool_manager._tools
-
-    for tool_name, tool_info in tools.items():
-        if tool_name.startswith("_") or tool_name == "debug_tool":
+    # FastMCP v3 stores tools in providers._components with keys like 'tool:name@'
+    for provider in server.providers:
+        if not hasattr(provider, "_components"):
             continue
 
-        # Get the original handler
-        original_handler = tool_info.fn if hasattr(tool_info, "fn") else None
+        for key, tool_info in provider._components.items():
+            if not key.startswith("tool:"):
+                continue
 
-        if not original_handler:
-            continue
+            # Extract tool name from 'tool:name@' format
+            tool_name = key.split(":")[1].split("@")[0]
 
-        # Create wrapped handler
-        wrapped = _create_debug_wrapper(tool_name, original_handler)
+            if tool_name.startswith("_") or tool_name == "debug_tool":
+                continue
 
-        # Replace the handler
-        if hasattr(tool_info, "fn"):
-            tool_info.fn = wrapped
-            count += 1
-            logger.debug(f"Wrapped tool: {tool_name}")
+            # Get the original handler - FastMCP v3 uses 'fn' attribute
+            original_handler = tool_info.fn if hasattr(tool_info, "fn") else None
+
+            if not original_handler:
+                continue
+
+            # Create wrapped handler
+            wrapped = _create_debug_wrapper(tool_name, original_handler)
+
+            # Replace the handler
+            if hasattr(tool_info, "fn"):
+                tool_info.fn = wrapped
+                count += 1
+                logger.debug(f"Wrapped tool: {tool_name}")
+
+    if count == 0:
+        logger.warning("No tools found to wrap - server may have no providers")
 
     logger.info(f"Wrapped {count} tools with debug hints")
     return count

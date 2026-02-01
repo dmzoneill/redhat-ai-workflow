@@ -230,7 +230,16 @@ def get_kubeconfig(environment: str, namespace: str = "") -> str:
 
     Returns:
         Full path to kubeconfig file
+
+    Raises:
+        ValueError: If environment is empty or invalid
     """
+    if not environment or not environment.strip():
+        raise ValueError(
+            "Environment is required for kubeconfig lookup. "
+            "Got empty environment. Check that the 'environment' parameter is being passed correctly."
+        )
+
     # Try config.json first for custom paths
     config = load_config()
 
@@ -1002,8 +1011,15 @@ def get_service_url(service: str, environment: str) -> str:
         Service URL
 
     Raises:
-        ValueError: If URL not configured
+        ValueError: If URL not configured or environment is empty
     """
+    if not environment or not environment.strip():
+        raise ValueError(
+            f"{service.capitalize()} URL not configured for empty environment. "
+            f"The 'environment' parameter is required. "
+            f"Check that the environment is being passed correctly from the skill."
+        )
+
     env_config = get_env_config(environment, service)
     url = cast(str, env_config.get("url", ""))
 

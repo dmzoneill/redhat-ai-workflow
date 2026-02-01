@@ -13,7 +13,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from mcp.server.fastmcp import Context
+from fastmcp import Context
 
 # Support both package import and direct loading
 try:

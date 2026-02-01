@@ -39,9 +39,16 @@ TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
 
 
 class ToolTier(str, Enum):
-    """Tool tier classification."""
+    """Tool tier classification.
 
-    BASIC = "basic"  # Essential tools, loaded by default
+    Three-tier system for managing tool context limits (~80 tools max):
+    - CORE: Essential tools loaded by default with persona (5-10 per module)
+    - BASIC: Common tools, available via explicit _basic suffix or tool_exec()
+    - EXTRA: Advanced tools, available via tool_exec() only
+    """
+
+    CORE = "core"  # Essential tools, loaded by default with persona
+    BASIC = "basic"  # Common tools, loaded with _basic suffix
     EXTRA = "extra"  # Additional tools, available via tool_exec
 
 
@@ -124,14 +131,14 @@ def register_tool(
 
     Args:
         module: Module name (e.g., "quay", "gitlab", "git")
-        tier: Tool tier - "basic" or "extra"
+        tier: Tool tier - "core", "basic", or "extra"
         description: Optional description override
 
     Returns:
         Decorator function
 
     Example:
-        @register_tool(module="quay", tier="basic")
+        @register_tool(module="quay", tier="core")
         @registry.tool()
         async def quay_get_tag(...):
             ...
@@ -168,6 +175,11 @@ def register_tool(
 
 
 # Convenience decorators for common patterns
+def core_tool(module: str, description: str = "") -> Callable:
+    """Shorthand for @register_tool(module=..., tier="core")."""
+    return register_tool(module=module, tier=ToolTier.CORE, description=description)
+
+
 def basic_tool(module: str, description: str = "") -> Callable:
     """Shorthand for @register_tool(module=..., tier="basic")."""
     return register_tool(module=module, tier=ToolTier.BASIC, description=description)
@@ -263,7 +275,13 @@ def discover_tools_from_file(filepath: Path, module: str) -> list[ToolInfo]:
         return []
 
     tools = []
-    tier = ToolTier.BASIC if "basic" in filepath.name else ToolTier.EXTRA
+    # Determine tier from filename
+    if "core" in filepath.name:
+        tier = ToolTier.CORE
+    elif "extra" in filepath.name:
+        tier = ToolTier.EXTRA
+    else:
+        tier = ToolTier.BASIC
 
     for node in ast.walk(tree):
         if isinstance(node, ast.AsyncFunctionDef):
@@ -309,12 +327,18 @@ def discover_module_tools(module: str) -> dict[str, list[str]]:
         module: Module name (e.g., "quay", "gitlab")
 
     Returns:
-        Dict with "basic" and "extra" tool lists
+        Dict with "core", "basic" and "extra" tool lists
     """
-    base_name = module.replace("_basic", "").replace("_extra", "")
+    base_name = module.replace("_core", "").replace("_basic", "").replace("_extra", "")
     module_dir = TOOL_MODULES_DIR / f"aa_{base_name}" / "src"
 
-    result = {"basic": [], "extra": []}
+    result = {"core": [], "basic": [], "extra": []}
+
+    # Scan core tools (highest priority, smallest set)
+    core_file = module_dir / "tools_core.py"
+    if core_file.exists():
+        for info in discover_tools_from_file(core_file, base_name):
+            result["core"].append(info.name)
 
     # Scan basic tools
     basic_file = module_dir / "tools_basic.py"
@@ -328,8 +352,8 @@ def discover_module_tools(module: str) -> dict[str, list[str]]:
         for info in discover_tools_from_file(extra_file, base_name):
             result["extra"].append(info.name)
 
-    # Fallback to legacy tools.py
-    if not result["basic"] and not result["extra"]:
+    # Fallback to legacy tools.py (treat as basic)
+    if not result["core"] and not result["basic"] and not result["extra"]:
         legacy_file = module_dir / "tools.py"
         if legacy_file.exists():
             for info in discover_tools_from_file(legacy_file, base_name):
@@ -337,7 +361,7 @@ def discover_module_tools(module: str) -> dict[str, list[str]]:
 
     # Special case: workflow module has tools split across multiple files
     # Scan all *_tools.py files in the module directory
-    if not result["basic"] and not result["extra"] and module_dir.exists():
+    if not result["core"] and not result["basic"] and not result["extra"] and module_dir.exists():
         for py_file in module_dir.glob("*_tools.py"):
             for info in discover_tools_from_file(py_file, base_name):
                 result["basic"].append(info.name)
@@ -372,12 +396,30 @@ def build_full_manifest() -> dict[str, list[str]]:
         module_name = module_dir.name[3:]  # Remove "aa_" prefix
         discovered = discover_module_tools(module_name)
 
-        # Combine basic and extra
-        all_tools = discovered["basic"] + discovered["extra"]
+        # Combine core, basic and extra
+        all_tools = discovered["core"] + discovered["basic"] + discovered["extra"]
         if all_tools:
             manifest[module_name] = all_tools
 
     return manifest
+
+
+def get_module_tool_counts(module: str) -> dict[str, int]:
+    """Get tool counts per tier for a module.
+
+    Args:
+        module: Module name (e.g., "quay", "gitlab")
+
+    Returns:
+        Dict with "core", "basic", "extra" counts
+    """
+    discovered = discover_module_tools(module)
+    return {
+        "core": len(discovered["core"]),
+        "basic": len(discovered["basic"]),
+        "extra": len(discovered["extra"]),
+        "total": len(discovered["core"]) + len(discovered["basic"]) + len(discovered["extra"]),
+    }
 
 
 # ============== Module Prefix Mapping ==============
@@ -416,18 +458,27 @@ def get_module_for_tool(tool_name: str) -> str | None:
     """
     global _MODULE_PREFIXES
 
-    # First check the manifest
+    # First check the manifest (tools that have been loaded)
     module = TOOL_MANIFEST.get_tool_module(tool_name)
     if module:
         return module
 
-    # Build prefix map if needed
+    # Check the full discovered manifest (scans files without loading)
+    # This is more accurate than prefix matching
+    full_manifest = build_full_manifest()
+    for mod_name, tools in full_manifest.items():
+        if tool_name in tools:
+            return mod_name
+
+    # Build prefix map if needed (last resort fallback)
     if _MODULE_PREFIXES is None:
         _MODULE_PREFIXES = _build_prefix_map()
 
-    # Try prefix matching
+    # Try prefix matching - but verify the tool exists in that module
     for prefix, module in _MODULE_PREFIXES.items():
         if tool_name.startswith(prefix):
-            return module
+            # Verify the tool actually exists in this module
+            if module in full_manifest and tool_name in full_manifest[module]:
+                return module
 
     return None

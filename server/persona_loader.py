@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, cast
 import yaml
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context, FastMCP
+    from fastmcp import Context, FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +35,10 @@ PERSONAS_DIR = PROJECT_DIR / "personas"
 
 # Tool file naming conventions
 TOOLS_FILE = "tools.py"
+TOOLS_CORE_FILE = "tools_core.py"
 TOOLS_BASIC_FILE = "tools_basic.py"
 TOOLS_EXTRA_FILE = "tools_extra.py"
+TOOLS_STYLE_FILE = "tools_style.py"
 
 
 def discover_tool_modules() -> set[str]:
@@ -44,12 +46,14 @@ def discover_tool_modules() -> set[str]:
     Dynamically discover available tool modules from the tool_modules directory.
 
     Scans for:
-    - Base modules: aa_*/src/tools.py or aa_*/src/tools_basic.py
+    - Base modules: aa_*/src/tools.py or aa_*/src/tools_basic.py or aa_*/src/tools_core.py
+    - Core variants: aa_*/src/tools_core.py -> module_core
     - Basic variants: aa_*/src/tools_basic.py -> module_basic
     - Extra variants: aa_*/src/tools_extra.py -> module_extra
+    - Style variants: aa_*/src/tools_style.py -> module_style
 
     Returns:
-        Set of available module names (e.g., {'git', 'git_basic', 'git_extra', 'jira', ...})
+        Set of available module names (e.g., {'git', 'git_core', 'git_basic', 'git_extra', ...})
     """
     modules = set()
 
@@ -70,12 +74,18 @@ def discover_tool_modules() -> set[str]:
 
         # Check for tools files
         tools_py = src_dir / TOOLS_FILE
+        tools_core_py = src_dir / TOOLS_CORE_FILE
         tools_basic_py = src_dir / TOOLS_BASIC_FILE
         tools_extra_py = src_dir / TOOLS_EXTRA_FILE
+        tools_style_py = src_dir / TOOLS_STYLE_FILE
 
-        # Add base module if tools.py or tools_basic.py exists
-        if tools_py.exists() or tools_basic_py.exists():
+        # Add base module if any tools file exists
+        if tools_py.exists() or tools_core_py.exists() or tools_basic_py.exists():
             modules.add(base_name)
+
+        # Add _core variant if tools_core.py exists
+        if tools_core_py.exists():
+            modules.add(f"{base_name}_core")
 
         # Add _basic variant if tools_basic.py exists
         if tools_basic_py.exists():
@@ -84,6 +94,10 @@ def discover_tool_modules() -> set[str]:
         # Add _extra variant if tools_extra.py exists
         if tools_extra_py.exists():
             modules.add(f"{base_name}_extra")
+
+        # Add _style variant if tools_style.py exists
+        if tools_style_py.exists():
+            modules.add(f"{base_name}_style")
 
     logger.debug(f"Discovered {len(modules)} tool modules: {sorted(modules)}")
     return modules
@@ -141,12 +155,18 @@ class PersonaLoader:
         """
         Determine the correct tools file path for a tool module name.
 
-        Handles _basic and _extra suffixes properly:
+        Handles _core, _basic, _extra, and _style suffixes properly:
+        - k8s_core -> aa_k8s/src/tools_core.py
         - k8s_basic -> aa_k8s/src/tools_basic.py
         - k8s_extra -> aa_k8s/src/tools_extra.py
-        - workflow -> aa_workflow/src/tools_basic.py (or tools.py fallback)
+        - slack_style -> aa_slack/src/tools_style.py
+        - workflow -> aa_workflow/src/tools_core.py (if exists) or tools_basic.py fallback
         """
-        if module_name.endswith("_basic"):
+        if module_name.endswith("_core"):
+            base_name = module_name[:-5]  # Remove "_core"
+            module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+            return module_dir / "src" / TOOLS_CORE_FILE
+        elif module_name.endswith("_basic"):
             base_name = module_name[:-6]  # Remove "_basic"
             module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
             return module_dir / "src" / TOOLS_BASIC_FILE
@@ -154,9 +174,17 @@ class PersonaLoader:
             base_name = module_name[:-6]  # Remove "_extra"
             module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
             return module_dir / "src" / TOOLS_EXTRA_FILE
+        elif module_name.endswith("_style"):
+            base_name = module_name[:-6]  # Remove "_style"
+            module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+            return module_dir / "src" / TOOLS_STYLE_FILE
         else:
-            # For non-suffixed modules, try tools_basic.py first, then tools.py
+            # For non-suffixed modules, try tools_core.py first (new default),
+            # then tools_basic.py, then tools.py
             module_dir = TOOL_MODULES_DIR / f"aa_{module_name}"
+            tools_core = module_dir / "src" / TOOLS_CORE_FILE
+            if tools_core.exists():
+                return tools_core
             tools_basic = module_dir / "src" / TOOLS_BASIC_FILE
             if tools_basic.exists():
                 return tools_basic
@@ -354,10 +382,28 @@ class PersonaLoader:
             logger.debug(f"Failed to emit persona notification: {e}")
 
         # Load persona description
-        persona_file = PERSONAS_DIR / f"{persona_name}.md"
+        # Check if persona points to a file or is inline
+        persona_ref = config.get("persona", "")
         persona = ""
-        if persona_file.exists():
-            persona = persona_file.read_text()
+
+        if persona_ref.endswith(".md"):
+            # It's a file reference (e.g., "personas/dave.md")
+            persona_path = PERSONAS_DIR.parent / persona_ref
+            if persona_path.exists():
+                persona = persona_path.read_text()
+        elif persona_ref:
+            # It's inline content
+            persona = persona_ref
+        else:
+            # Fall back to {persona_name}.md
+            persona_file = PERSONAS_DIR / f"{persona_name}.md"
+            if persona_file.exists():
+                persona = persona_file.read_text()
+
+        # Append additional persona instructions if specified
+        persona_append = config.get("persona_append", "")
+        if persona_append:
+            persona = persona + "\n" + persona_append
 
         return {
             "success": True,

@@ -406,6 +406,7 @@ class SkillExecutionEmitter:
 _workspace_emitters: dict[str, SkillExecutionEmitter] = {}
 _current_workspace: str = "default"
 _current_execution_id: str | None = None
+_MAX_EMITTERS = 50  # Prevent unbounded memory growth
 
 
 def get_emitter(workspace_uri: str | None = None, execution_id: str | None = None) -> SkillExecutionEmitter | None:
@@ -446,6 +447,15 @@ def set_emitter(emitter: SkillExecutionEmitter | None, workspace_uri: str = "def
             _workspace_emitters.pop(exec_id, None)
         _current_execution_id = None
     else:
+        # Cleanup: remove completed/failed emitters if we're over the limit
+        if len(_workspace_emitters) >= _MAX_EMITTERS:
+            # Remove non-running emitters first (oldest first)
+            non_running = [(exec_id, e) for exec_id, e in _workspace_emitters.items() if e.status != "running"]
+            # Sort by start_time (oldest first) and remove
+            non_running.sort(key=lambda x: x[1].start_time or "")
+            for exec_id, _ in non_running[: len(_workspace_emitters) - _MAX_EMITTERS + 1]:
+                _workspace_emitters.pop(exec_id, None)
+
         # Register by execution_id
         _workspace_emitters[emitter.execution_id] = emitter
         _current_execution_id = emitter.execution_id

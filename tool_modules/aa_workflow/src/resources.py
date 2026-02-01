@@ -21,7 +21,7 @@ except ImportError:
     SKILLS_DIR = PROJECT_DIR / "skills"
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 
 async def _get_current_work() -> str:

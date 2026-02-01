@@ -27,13 +27,12 @@ from tool_modules.aa_meet_bot.src.llm_responder import LLMResponder
 from tool_modules.aa_meet_bot.src.notes_database import MeetingNote, MeetingNotesDB, TranscriptEntry, init_notes_db
 from tool_modules.aa_meet_bot.src.wake_word import WakeWordEvent, WakeWordManager
 
-# Attendee data service for live video integration
-_attendee_service_available = False
+# D-Bus client for video daemon communication
+_video_dbus_available = False
 try:
-    from tool_modules.aa_meet_bot.src.attendee_service import AttendeeDataService
-    from tool_modules.aa_meet_bot.src.attendee_service import start_service as start_attendee_service
+    from scripts.common.dbus_base import get_client
 
-    _attendee_service_available = True
+    _video_dbus_available = True
 except ImportError:
     pass
 
@@ -107,10 +106,10 @@ class NotesBot:
         self._npu_stt_pipeline = None
         self._use_npu_stt: bool = True  # Use NPU STT by default in interactive mode
 
-        # Attendee data service for live video integration
-        self._attendee_service: Optional[AttendeeDataService] = None
+        # Video daemon integration via D-Bus
+        self._video_daemon_active: bool = False
         self._participant_poll_task: Optional[asyncio.Task] = None
-        self._enable_attendee_service: bool = _attendee_service_available
+        self._enable_video_integration: bool = _video_dbus_available
 
     async def initialize(self) -> bool:
         """Initialize the bot and database.
@@ -139,17 +138,20 @@ class NotesBot:
             self.state.errors.append(str(e))
             return False
 
-    async def _ensure_browser(self) -> bool:
+    async def _ensure_browser(self, video_enabled: bool = False) -> bool:
         """Ensure browser controller is initialized (lazy initialization).
 
         Called before joining a meeting to start the browser if needed.
+
+        Args:
+            video_enabled: If True, start full AI video overlay. If False, start black screen.
         """
         if self._controller is not None:
             return True
 
         try:
             self._controller = GoogleMeetController()
-            if not await self._controller.initialize():
+            if not await self._controller.initialize(video_enabled=video_enabled):
                 logger.error("Failed to initialize browser controller")
                 if self._controller.state and self._controller.state.errors:
                     self.state.errors.extend(self._controller.state.errors)
@@ -175,6 +177,7 @@ class NotesBot:
         attendees: Optional[list[str]] = None,
         mode: str = "notes",
         use_npu_stt: bool = True,  # Enable NPU STT by default for local transcription
+        video_enabled: bool = False,  # Show full AI video overlay (default: black screen)
     ) -> bool:
         """
         Join a meeting and start capturing notes.
@@ -189,15 +192,20 @@ class NotesBot:
             attendees: List of attendee emails
             mode: "notes" for passive capture, "interactive" for wake word + voice responses
             use_npu_stt: Use NPU-based STT instead of Google Meet captions (faster, local)
+            video_enabled: If True, show full AI video overlay. If False, show black screen.
 
         Returns:
             True if successfully joined
         """
-        # Set NPU STT flag
+        # Set NPU STT flag and video flag
         self._use_npu_stt = use_npu_stt
-        logger.info(f"NPU STT: {'enabled' if use_npu_stt else 'disabled'}")
+        self._video_enabled = video_enabled
+        logger.info(
+            f"NPU STT: {'enabled' if use_npu_stt else 'disabled'}, Video: {'enabled' if video_enabled else 'disabled'}"
+        )
         # Ensure browser is initialized (lazy initialization)
-        if not await self._ensure_browser():
+        # Pass video_enabled so the browser controller can start the correct video mode
+        if not await self._ensure_browser(video_enabled=video_enabled):
             logger.error("Failed to initialize browser for meeting")
             return False
 
@@ -289,9 +297,9 @@ class NotesBot:
             else:
                 logger.info(f"Joined meeting in NOTES mode: {self.state.title}")
 
-            # Start attendee data service for live video integration
-            if self._enable_attendee_service:
-                await self._start_attendee_service()
+            # Start video daemon integration via D-Bus
+            if self._enable_video_integration:
+                await self._start_video_integration()
 
             return True
 
@@ -432,69 +440,253 @@ class NotesBot:
             logger.error(f"Failed to set up interactive mode: {e}")
             self._interactive_mode = False
 
-    async def _start_attendee_service(self) -> None:
-        """Start the attendee data service for live video integration.
+    async def _start_video_integration(self) -> None:
+        """Start or upgrade video daemon integration via D-Bus.
 
-        This service:
-        - Provides participant data to the video generator via Unix socket
-        - Polls Google Meet for participant updates
-        - Enriches participant data from app-interface and Slack
+        The video daemon is already streaming (black screen) before the browser
+        launched. This method:
+        - Switches from black screen to full AI video overlay
+        - Finds Chromium's sink-input index for audio capture
+        - Starts polling for participant updates
+        - Sends participant updates via D-Bus
+
+        If video was disabled for this meeting, this is a no-op (keeps black screen).
         """
-        if not _attendee_service_available:
-            logger.debug("Attendee service not available")
+        if not _video_dbus_available:
+            logger.debug("Video D-Bus integration not available")
             return
 
         try:
-            # Start the service
-            self._attendee_service = await start_attendee_service()
+            # Get device info from the controller
+            video_device = None
+            audio_source = None
+            sink_name = None
+            if self._controller:
+                devices = self._controller.get_audio_devices()
+                if devices:
+                    video_device = devices.video_device
+                    sink_name = devices.sink_name
+                    # Audio source is the sink's monitor (for logging - actual capture via sink-input)
+                    audio_source = f"{devices.sink_name}.monitor" if devices.sink_name else None
+                    logger.info(f"📺 Device info: video={video_device}, audio={audio_source}")
 
-            # Set initial meeting status
-            await self._attendee_service.set_meeting_status("scanning", title=self.state.title)
+            if not video_device:
+                logger.warning("📺 No video device available, skipping video integration")
+                return
 
-            # Start participant polling task
-            self._participant_poll_task = asyncio.create_task(self._poll_participants())
+            # Find Chromium's sink-input index for monitor-stream capture
+            # This bypasses broken null-sink monitors in PipeWire
+            sink_input_index = await self._find_chromium_sink_input(sink_name)
+            if sink_input_index is not None:
+                logger.info(f"📺 Found Chromium sink-input index: {sink_input_index}")
+            else:
+                logger.warning("📺 Could not find Chromium sink-input, waveform may not work")
 
-            logger.info("📺 Attendee data service started for live video integration")
+            # Update audio source on the video daemon
+            # The video daemon is already rendering - just update the audio capture
+            # to use the Chromium sink-input for monitor-stream capture
+            client = get_client("video")
+            if await client.connect():
+                # First try update_audio_source (doesn't restart render loop)
+                result = await client.call_method(
+                    "update_audio_source",
+                    [sink_input_index if sink_input_index is not None else -1],
+                )
+
+                if not result or not result.get("success"):
+                    # Fall back to switch_to_full_video if update_audio_source fails
+                    # (e.g., if in black screen mode)
+                    logger.info(f"📺 update_audio_source failed ({result}), trying switch_to_full_video...")
+                    result = await client.call_method(
+                        "switch_to_full_video",
+                        [audio_source or "", "", False, sink_input_index if sink_input_index is not None else -1],
+                    )
+
+                await client.disconnect()
+
+                if result and result.get("success"):
+                    self._video_daemon_active = True
+                    logger.info(f"📺 Video integration active on {video_device}")
+
+                    # Start participant polling task
+                    self._participant_poll_task = asyncio.create_task(self._poll_participants())
+                else:
+                    # May fail if video was disabled - that's OK, keep black screen
+                    logger.info(f"📺 Video result: {result}")
+                    # Still mark as active for cleanup purposes
+                    self._video_daemon_active = True
+            else:
+                logger.warning("📺 Could not connect to video daemon D-Bus service")
 
         except Exception as e:
-            logger.warning(f"Failed to start attendee service: {e}")
-            self._attendee_service = None
+            logger.warning(f"📺 Failed to start video integration: {e}")
+
+    async def _find_chromium_sink_input(self, target_sink: Optional[str]) -> Optional[int]:
+        """Find Chromium's sink-input index for monitor-stream capture.
+
+        PipeWire's null-sink monitors don't work properly (output zeros).
+        Instead, we use parec --monitor-stream=<index> to capture directly
+        from Chromium's audio stream.
+
+        Args:
+            target_sink: The sink name Chromium should be connected to
+
+        Returns:
+            Sink-input index if found, None otherwise
+        """
+        import asyncio
+
+        try:
+            # First, get sink ID to name mapping
+            sink_id_to_name = {}
+            proc = await asyncio.create_subprocess_exec(
+                "pactl",
+                "list",
+                "sinks",
+                "short",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            for line in stdout.decode().strip().split("\n"):
+                if line:
+                    parts = line.split("\t")
+                    if len(parts) >= 2:
+                        sink_id_to_name[parts[0]] = parts[1]
+
+            # Run pactl to list sink-inputs
+            proc = await asyncio.create_subprocess_exec(
+                "pactl",
+                "list",
+                "sink-inputs",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            output = stdout.decode()
+
+            # Parse the output to find Chromium's sink-input
+            current_index = None
+            current_sink_id = None
+            is_chromium = False
+            chromium_candidates = []  # Store all Chromium sink-inputs
+
+            for line in output.split("\n"):
+                line = line.strip()
+
+                if line.startswith("Sink Input #"):
+                    # Save previous if it was Chromium
+                    if is_chromium and current_index is not None:
+                        sink_name = sink_id_to_name.get(current_sink_id, current_sink_id)
+                        chromium_candidates.append((current_index, sink_name))
+
+                    # Start new sink-input
+                    current_index = int(line.split("#")[1])
+                    current_sink_id = None
+                    is_chromium = False
+
+                elif line.startswith("Sink:"):
+                    # Get sink ID
+                    current_sink_id = line.split(":", 1)[1].strip()
+
+                elif "application.name" in line.lower():
+                    app_name = line.split("=", 1)[1].strip().strip('"').lower()
+                    if "chromium" in app_name or "chrome" in app_name:
+                        is_chromium = True
+
+                elif "application.process.binary" in line.lower():
+                    binary = line.split("=", 1)[1].strip().strip('"').lower()
+                    if "chromium" in binary or "chrome" in binary:
+                        is_chromium = True
+
+            # Check the last one
+            if is_chromium and current_index is not None:
+                sink_name = sink_id_to_name.get(current_sink_id, current_sink_id)
+                chromium_candidates.append((current_index, sink_name))
+
+            logger.info(f"📺 Found {len(chromium_candidates)} Chromium sink-inputs: {chromium_candidates}")
+
+            # Find the one connected to our target sink
+            for idx, sink_name in chromium_candidates:
+                if target_sink and target_sink in sink_name:
+                    logger.info(f"📺 Selected Chromium sink-input {idx} (connected to {sink_name})")
+                    return idx
+
+            # If no match but we have candidates, return the last one (most recent)
+            # This handles cases where Playwright Chromium might be named differently
+            if chromium_candidates:
+                idx, sink_name = chromium_candidates[-1]
+                logger.info(f"📺 Using last Chromium sink-input {idx} (connected to {sink_name})")
+                return idx
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"📺 Error finding Chromium sink-input: {e}")
+            return None
 
     async def _poll_participants(self) -> None:
         """Poll Google Meet for participant updates.
 
-        Runs every 15 seconds (matching video rotation interval) to
-        update the attendee service with current participants.
+        Does rapid initial polls (every 2s for first 10s) to quickly get
+        participants, then slows to every 15 seconds (matching video rotation).
         """
-        poll_interval = 15.0  # Match video rotation interval
+        import json
 
-        while self.state.status == "capturing" and self._controller:
+        poll_count = 0
+        rapid_poll_count = 5  # First 5 polls are rapid (every 2s = 10s total)
+        rapid_interval = 2.0  # Fast polling at start
+        normal_interval = 15.0  # Match video rotation interval
+
+        while self.state.status == "capturing" and self._controller and self._video_daemon_active:
             try:
                 # Get participants from Google Meet
                 participants = await self._controller.get_participants()
 
-                if participants and self._attendee_service:
-                    # Update the service
-                    await self._attendee_service.update_participants(
-                        participants, enrich=True  # Enrich with app-interface/Slack data
-                    )
-                    logger.debug(f"Updated {len(participants)} participants in attendee service")
-
-                elif not participants:
-                    # No participants found, try to get count at least
-                    count = await self._controller.get_participant_count()
-                    if count > 0:
-                        logger.debug(f"Meeting has {count} participants but couldn't scrape names")
+                if participants:
+                    # Send to video daemon via D-Bus
+                    await self._update_video_attendees(participants)
+                    if poll_count == 0:
+                        logger.info(f"📺 Initial participant poll: {len(participants)} participants")
+                    else:
+                        logger.debug(f"📺 Sent {len(participants)} participants to video daemon")
 
             except Exception as e:
                 logger.debug(f"Participant poll error: {e}")
 
-            await asyncio.sleep(poll_interval)
+            poll_count += 1
+
+            # Use rapid polling for first few polls, then slow down
+            if poll_count < rapid_poll_count:
+                await asyncio.sleep(rapid_interval)
+            else:
+                await asyncio.sleep(normal_interval)
 
         logger.info("Participant polling stopped")
 
-    async def _stop_attendee_service(self) -> None:
-        """Stop the attendee data service."""
+    async def _update_video_attendees(self, participants: list[dict]) -> None:
+        """Send participant updates to video daemon via D-Bus.
+
+        Args:
+            participants: List of participant dicts with 'name' and optionally 'email'
+        """
+        import json
+
+        try:
+            client = get_client("video")
+            if await client.connect():
+                # Convert to JSON for D-Bus
+                attendees_json = json.dumps(participants)
+                result = await client.call_method("update_attendees", [attendees_json])
+                await client.disconnect()
+
+                if not (result and result.get("success")):
+                    logger.debug(f"📺 update_attendees returned: {result}")
+        except Exception as e:
+            logger.debug(f"📺 Failed to update attendees: {e}")
+
+    async def _stop_video_integration(self) -> None:
+        """Stop video daemon integration."""
         # Cancel polling task
         if self._participant_poll_task:
             self._participant_poll_task.cancel()
@@ -504,13 +696,24 @@ class NotesBot:
                 pass
             self._participant_poll_task = None
 
-        # Stop service
-        if self._attendee_service:
-            await self._attendee_service.set_meeting_status("ended")
-            await self._attendee_service.stop()
-            self._attendee_service = None
+        # Stop video daemon rendering via D-Bus
+        if self._video_daemon_active:
+            try:
+                client = get_client("video")
+                if await client.connect():
+                    result = await client.call_method("stop_video", [])
+                    await client.disconnect()
 
-        logger.info("Attendee data service stopped")
+                    if result and result.get("success"):
+                        logger.info("📺 Video daemon stopped rendering")
+                    else:
+                        logger.debug(f"📺 stop_video returned: {result}")
+            except Exception as e:
+                logger.debug(f"📺 Failed to stop video daemon: {e}")
+
+            self._video_daemon_active = False
+
+        logger.info("📺 Video integration stopped")
 
     async def _setup_npu_stt(self) -> None:
         """Set up NPU-based real-time STT pipeline.
@@ -840,6 +1043,10 @@ class NotesBot:
             entries = self.state.transcript_buffer.copy()
             self.state.transcript_buffer = []
 
+            # Clear caption ID tracking to prevent unbounded memory growth
+            # IDs are only used for update-in-place within the buffer
+            self.state.caption_id_to_index.clear()
+
             # Write to database
             await self.db.add_transcript_entries(self.state.meeting_id, entries)
             self.state.last_flush = datetime.now()
@@ -854,11 +1061,13 @@ class NotesBot:
     async def _monitor_browser_health(self) -> None:
         """Monitor browser health and trigger cleanup if browser closes."""
         logger.info("Browser health monitor started")
+        consecutive_failures = 0
+        max_failures = 3  # Trigger cleanup after 3 consecutive failures
 
         while self.state.status == "capturing":
-            await asyncio.sleep(5)  # Check every 5 seconds
+            await asyncio.sleep(1)  # Check every 1 second for faster detection
 
-            # Check if controller reports browser closed
+            # Check if controller reports browser closed (now actively checks browser state)
             if self._controller and self._controller.is_browser_closed():
                 logger.warning("Browser health monitor: Browser closed detected!")
                 await self._cleanup_stale_meeting()
@@ -869,6 +1078,36 @@ class NotesBot:
                 logger.warning("Browser health monitor: Meeting ended (not joined)")
                 await self._cleanup_stale_meeting()
                 break
+
+            # Additional check: verify page is responsive by checking URL
+            if self._controller and self._controller.page:
+                try:
+                    # Quick check - if this throws, browser is dead
+                    _ = self._controller.page.url
+                    consecutive_failures = 0  # Reset on success
+                except Exception as e:
+                    consecutive_failures += 1
+                    logger.warning(
+                        f"Browser health monitor: Page check failed ({consecutive_failures}/{max_failures}): {e}"
+                    )
+                    if consecutive_failures >= max_failures:
+                        logger.warning("Browser health monitor: Page unresponsive - triggering cleanup")
+                        await self._cleanup_stale_meeting()
+                        break
+
+            # Check if browser process is still alive (belt and suspenders)
+            if self._controller and self._controller.browser:
+                try:
+                    # This will throw if browser process is dead
+                    contexts = self._controller.browser.contexts
+                    if not contexts:
+                        logger.warning("Browser health monitor: No browser contexts - browser likely closed")
+                        await self._cleanup_stale_meeting()
+                        break
+                except Exception as e:
+                    logger.warning(f"Browser health monitor: Browser check failed: {e}")
+                    await self._cleanup_stale_meeting()
+                    break
 
         logger.info("Browser health monitor stopped")
 
@@ -910,6 +1149,14 @@ class NotesBot:
                 logger.warning(f"Error stopping NPU STT: {e}")
             self._npu_stt_pipeline = None
 
+        # Stop video daemon integration - CRITICAL for releasing resources
+        if self._video_daemon_active:
+            try:
+                await self._stop_video_integration()
+                logger.info("Video daemon integration stopped")
+            except Exception as e:
+                logger.warning(f"Error stopping video integration: {e}")
+
         # Flush any remaining buffer
         try:
             await self._flush_buffer()
@@ -936,6 +1183,21 @@ class NotesBot:
             except (asyncio.TimeoutError, Exception) as e:
                 logger.warning(f"Error closing controller: {e}")
             self._controller = None
+
+        # Clean up any orphaned audio devices and parec processes
+        # This catches anything that wasn't properly cleaned up
+        try:
+            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+
+            results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
+            if results.get("removed_modules") or results.get("killed_processes") or results.get("removed_pipes"):
+                logger.info(
+                    f"Orphan cleanup: {len(results.get('removed_modules', []))} modules, "
+                    f"{len(results.get('killed_processes', []))} processes, "
+                    f"{len(results.get('removed_pipes', []))} pipes"
+                )
+        except Exception as e:
+            logger.warning(f"Error during orphan cleanup: {e}")
 
         # Reset state
         self.state.status = "idle"
@@ -981,9 +1243,9 @@ class NotesBot:
             await self._npu_stt_pipeline.stop()
             self._npu_stt_pipeline = None
 
-        # Stop attendee data service
-        if self._attendee_service:
-            await self._stop_attendee_service()
+        # Stop video daemon integration
+        if self._video_daemon_active:
+            await self._stop_video_integration()
 
         # Final buffer flush
         await self._flush_buffer()
@@ -1031,6 +1293,19 @@ class NotesBot:
             )
         except Exception:
             pass
+
+        # Clean up any orphaned audio devices and parec processes
+        try:
+            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+
+            cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
+            if cleanup_results.get("removed_modules") or cleanup_results.get("killed_processes"):
+                logger.info(
+                    f"Post-meeting cleanup: {len(cleanup_results.get('removed_modules', []))} modules, "
+                    f"{len(cleanup_results.get('killed_processes', []))} processes removed"
+                )
+        except Exception as e:
+            logger.warning(f"Error during post-meeting cleanup: {e}")
 
         # Reset state
         self.state = NotesBotState()

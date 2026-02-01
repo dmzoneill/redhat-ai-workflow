@@ -199,7 +199,7 @@ def _get_lancedb():
 
             _lancedb = lancedb
         except ImportError:
-            raise ImportError("lancedb not installed. Run: pip install lancedb")
+            raise ImportError("lancedb not installed. Run: uv add lancedb")
     return _lancedb
 
 
@@ -248,7 +248,7 @@ def _get_embedding_model():
             _sentence_transformer = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
             logger.info("Using sentence-transformers embedding backend")
         except ImportError:
-            raise ImportError("sentence-transformers not installed. Run: pip install sentence-transformers")
+            raise ImportError("sentence-transformers not installed. Run: uv add sentence-transformers")
     return _sentence_transformer
 
 
@@ -259,7 +259,7 @@ def _load_openvino_model():
     For NPU: Uses fixed input shapes (padding to max_length) to avoid
     dynamic shape compilation errors.
 
-    Requires: pip install optimum[openvino] openvino
+    Requires: uv add optimum[openvino] openvino
     """
     try:
         import numpy as np
@@ -438,7 +438,7 @@ def _load_onnx_model():
     """
     Load embedding model with ONNX Runtime for GPU acceleration.
 
-    Requires: pip install onnxruntime-gpu (or onnxruntime for CPU)
+    Requires: uv add onnxruntime-gpu (or onnxruntime for CPU)
     """
     try:
         from sentence_transformers import SentenceTransformer
@@ -1506,7 +1506,7 @@ def register_tools(registry: Any) -> None:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Missing dependency: {e}\n\nInstall with:\n```\npip install lancedb sentence-transformers\n```",
+                    text=f"❌ Missing dependency: {e}\n\nInstall with:\n```\nuv add lancedb sentence-transformers\n```",
                 )
             ]
         except Exception as e:
@@ -1589,7 +1589,7 @@ def register_tools(registry: Any) -> None:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Missing dependency: {e}\n\nInstall with:\n```\npip install lancedb sentence-transformers\n```",
+                    text=f"❌ Missing dependency: {e}\n\nInstall with:\n```\nuv add lancedb sentence-transformers\n```",
                 )
             ]
         except Exception as e:
@@ -1965,7 +1965,7 @@ Use `code_watch('{project}', 'stop')` to stop watching.
                 return [
                     TextContent(
                         type="text",
-                        text=f"❌ Missing dependency: {e}\n\nInstall with:\n```\npip install watchfiles\n```",
+                        text=f"❌ Missing dependency: {e}\n\nInstall with:\n```\nuv add watchfiles\n```",
                     )
                 ]
             except Exception as e:

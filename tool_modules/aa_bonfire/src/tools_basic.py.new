@@ -142,7 +142,7 @@ async def run_bonfire(
     except subprocess.TimeoutExpired:
         return False, f"Command timed out after {timeout}s"
     except FileNotFoundError:
-        return False, "bonfire not found. Install with: pip install crc-bonfire"
+        return False, "bonfire not found. Install with: uv add crc-bonfire"
     except Exception as e:
         return False, str(e)
 

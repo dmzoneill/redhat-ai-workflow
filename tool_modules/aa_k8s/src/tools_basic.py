@@ -7,7 +7,7 @@ Authentication: Uses kubeconfig files in ~/.kube/
   - config.ap = App-SRE SaaS pipelines
 """
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
@@ -87,6 +87,10 @@ async def _k8s_namespace_health_impl(
     """
     kubeconfig = get_kubeconfig(environment, namespace)
     lines = [f"## Namespace Health: {namespace} ({environment})", ""]
+
+    # Initialize counters at function scope to avoid UnboundLocalError
+    failed = 0
+    pending = 0
 
     # Get pods
     success, output = await run_kubectl(["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace)

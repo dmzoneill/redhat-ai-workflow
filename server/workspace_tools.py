@@ -18,7 +18,7 @@ import logging
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context
+    from fastmcp import Context
 
 logger = logging.getLogger(__name__)
 

@@ -26,7 +26,7 @@ except ImportError:
     PROJECT_DIR = TOOL_MODULES_DIR.parent
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +245,7 @@ def _generate_test_setup(project_path: Path, language: str) -> str:
                 "# 1. Create virtual environment:",
                 "#    python -m venv venv && source venv/bin/activate",
                 "# 2. Install dependencies:",
-                "#    pip install -e '.[dev]'",
+                "#    uv pip install -e '.[dev]'",
             ]
         )
 

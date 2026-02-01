@@ -59,7 +59,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from mcp.server.fastmcp import Context
+from fastmcp import Context
 
 from server.paths import AA_CONFIG_DIR, WORKSPACE_STATES_FILE
 

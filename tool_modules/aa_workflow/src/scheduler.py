@@ -19,7 +19,7 @@ from apscheduler.triggers.cron import CronTrigger
 from croniter import croniter
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +237,7 @@ class JobExecutionLog:
             success: Whether the execution succeeded
             duration_ms: Total execution duration in milliseconds
             error: Error message if failed
-            output_preview: Preview of output (truncated to 200 chars)
+            output_preview: Preview of output (truncated to 500 chars)
             session_name: Session name for logging
             retry_info: Optional retry information dict with:
                 - attempts: Total attempts made (including initial)
@@ -253,7 +253,7 @@ class JobExecutionLog:
             "success": success,
             "duration_ms": duration_ms,
             "error": error,
-            "output_preview": output_preview[:200] if output_preview else None,
+            "output_preview": output_preview[:500] if output_preview else None,
             "session_name": session_name,
         }
 

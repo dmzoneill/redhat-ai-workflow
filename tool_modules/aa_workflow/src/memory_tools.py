@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from mcp.server.fastmcp import Context
+from fastmcp import Context
 from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
@@ -41,7 +41,7 @@ except ImportError:
     MEMORY_DIR = PROJECT_DIR / "memory"
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 
 # Keys that are project-specific (stored per-project)
@@ -648,7 +648,7 @@ async def _memory_query_impl(key: str, query: str, ctx: Any = None) -> list[Text
             TextContent(
                 type="text",
                 text="❌ jsonpath_ng not installed.\n\n"
-                "Install with: `pip install jsonpath-ng`\n\n"
+                "Install with: `uv add jsonpath-ng`\n\n"
                 "For now, use memory_read() instead.",
             )
         ]

@@ -62,6 +62,9 @@ class FilterStats:
         persona_stats = self.by_persona[persona]
         persona_stats["requests"] += 1
         persona_stats["tools"].append(result.get("tool_count", 0))
+        # Prevent unbounded growth - keep last 1000 tool counts per persona
+        if len(persona_stats["tools"]) > 1000:
+            persona_stats["tools"] = persona_stats["tools"][-1000:]
 
         # Track tier usage
         methods = result.get("methods", [])

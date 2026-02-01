@@ -28,7 +28,7 @@ from mcp.types import TextContent
 from server.tool_registry import ToolRegistry
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 

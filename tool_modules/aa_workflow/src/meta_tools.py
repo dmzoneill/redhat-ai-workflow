@@ -11,7 +11,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import Context, FastMCP
+from fastmcp import Context, FastMCP
 from mcp.types import TextContent
 
 from server.tool_discovery import build_full_manifest, get_module_for_tool
@@ -380,7 +380,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             return [
                 TextContent(
                     type="text",
-                    text="⚠️ Tool filtering not available. Install: pip install sentence-transformers lancedb",
+                    text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",
                 )
             ]
 
@@ -532,7 +532,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             return [
                 TextContent(
                     type="text",
-                    text="⚠️ Tool filtering not available. Install: pip install sentence-transformers lancedb",
+                    text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",
                 )
             ]
 

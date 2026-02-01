@@ -9,7 +9,7 @@ Architecture:
 3. Result is read back or composited with OpenCL frame
 
 Dependencies:
-    pip install PyOpenGL PyOpenGL_accelerate freetype-py glfw
+    uv add PyOpenGL PyOpenGL_accelerate freetype-py glfw
 """
 
 import os
@@ -46,7 +46,7 @@ def _ensure_imports():
             _freetype = ft_mod
         except ImportError as e:
             raise ImportError(
-                "GPU text rendering requires: pip install PyOpenGL PyOpenGL_accelerate freetype-py glfw"
+                "GPU text rendering requires: uv add PyOpenGL PyOpenGL_accelerate freetype-py glfw"
             ) from e
 
 

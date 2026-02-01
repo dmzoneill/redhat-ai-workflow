@@ -47,6 +47,33 @@ class StreamingConfig:
     vad_enabled: bool = True  # Voice Activity Detection
 
 
+@dataclass
+class NPUStats:
+    """Real-time NPU inference statistics."""
+
+    inference_count: int = 0
+    total_inference_time: float = 0.0
+    total_audio_duration: float = 0.0
+    last_inference_time: float = 0.0
+    last_rtf: float = 0.0  # Real-time factor (< 1.0 means faster than real-time)
+    avg_rtf: float = 0.0
+    samples_processed: int = 0
+    start_time: float = field(default_factory=time.time)
+
+    @property
+    def inferences_per_second(self) -> float:
+        """Average inferences per second since start."""
+        elapsed = time.time() - self.start_time
+        return self.inference_count / elapsed if elapsed > 0 else 0.0
+
+    @property
+    def avg_latency_ms(self) -> float:
+        """Average inference latency in milliseconds."""
+        if self.inference_count == 0:
+            return 0.0
+        return (self.total_inference_time / self.inference_count) * 1000
+
+
 class NPUWhisperSTT:
     """
     Real-time Speech-to-Text using Whisper on Intel NPU.
@@ -56,6 +83,7 @@ class NPUWhisperSTT:
     - Streaming support with chunked processing
     - Voice Activity Detection (VAD) for smart segmentation
     - Automatic fallback to CPU if NPU unavailable
+    - Real-time inference statistics tracking
     """
 
     def __init__(self, device: str = "NPU", model_dir: Optional[Path] = None):
@@ -76,6 +104,9 @@ class NPUWhisperSTT:
         self._audio_buffer: deque = deque(maxlen=int(16000 * 30))  # 30s max
         self._last_process_time = 0.0
         self._silence_start = None
+
+        # Real inference statistics
+        self.stats = NPUStats()
 
     async def initialize(self) -> bool:
         """Initialize the Whisper pipeline."""
@@ -109,7 +140,7 @@ class NPUWhisperSTT:
                     raise
 
         except ImportError:
-            logger.error("openvino_genai not installed. Run: pip install openvino-genai")
+            logger.error("openvino_genai not installed. Run: uv add openvino-genai")
             return False
         except Exception as e:
             logger.error(f"Failed to initialize STT: {e}")
@@ -151,6 +182,16 @@ class NPUWhisperSTT:
             duration = len(audio) / 16000
             rtf = processing_time / duration if duration > 0 else 0
 
+            # Update real statistics
+            self.stats.inference_count += 1
+            self.stats.total_inference_time += processing_time
+            self.stats.total_audio_duration += duration
+            self.stats.last_inference_time = processing_time
+            self.stats.last_rtf = rtf
+            self.stats.samples_processed += len(audio)
+            if self.stats.total_audio_duration > 0:
+                self.stats.avg_rtf = self.stats.total_inference_time / self.stats.total_audio_duration
+
             # Extract text from WhisperDecodedResults
             # The result has a 'texts' attribute which is a list
             if hasattr(result, "texts") and result.texts:
@@ -158,7 +199,9 @@ class NPUWhisperSTT:
             else:
                 text = str(result).strip() if result else ""
 
-            logger.debug(f"Transcribed {duration:.1f}s in {processing_time:.2f}s (RTF: {rtf:.2f})")
+            logger.debug(
+                f"Transcribed {duration:.1f}s in {processing_time:.2f}s (RTF: {rtf:.2f}) [inf #{self.stats.inference_count}]"
+            )
 
             return TranscriptionResult(
                 text=text, is_partial=False, confidence=1.0, end_time=duration, processing_time=processing_time
@@ -291,6 +334,25 @@ class NPUWhisperSTT:
             "initialized": self._initialized,
             "model_dir": str(self.model_dir),
         }
+
+    def get_stats(self) -> dict:
+        """Get real-time inference statistics."""
+        return {
+            "inference_count": self.stats.inference_count,
+            "total_inference_time": self.stats.total_inference_time,
+            "total_audio_duration": self.stats.total_audio_duration,
+            "samples_processed": self.stats.samples_processed,
+            "last_inference_ms": self.stats.last_inference_time * 1000,
+            "last_rtf": self.stats.last_rtf,
+            "avg_rtf": self.stats.avg_rtf,
+            "avg_latency_ms": self.stats.avg_latency_ms,
+            "inferences_per_second": self.stats.inferences_per_second,
+            "device": self._actual_device or self.device,
+        }
+
+    def reset_stats(self):
+        """Reset inference statistics."""
+        self.stats = NPUStats()
 
 
 class RealtimeSTT:
@@ -429,3 +491,8 @@ async def transcribe_audio(audio: np.ndarray, sample_rate: int = 16000) -> str:
     engine = get_stt_engine()
     result = await engine.transcribe(audio, sample_rate)
     return result.text
+
+
+# ==================== BACKWARD COMPATIBILITY ====================
+# Alias for old class name used in voice_pipeline.py
+OpenVINOSTT = NPUWhisperSTT

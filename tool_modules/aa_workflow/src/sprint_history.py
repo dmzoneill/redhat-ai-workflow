@@ -55,6 +55,16 @@ class SprintIssue:
     issue_type: str = "Story"
     created: str = ""
 
+    # Maximum timeline entries to prevent unbounded memory growth
+    MAX_TIMELINE_ENTRIES: int = 50
+
+    def add_timeline_event(self, event: TimelineEvent) -> None:
+        """Add a timeline event, trimming old entries if needed."""
+        self.timeline.append(event)
+        if len(self.timeline) > self.MAX_TIMELINE_ENTRIES:
+            # Keep the most recent entries
+            self.timeline = self.timeline[-self.MAX_TIMELINE_ENTRIES :]
+
 
 @dataclass
 class CompletedSprint:

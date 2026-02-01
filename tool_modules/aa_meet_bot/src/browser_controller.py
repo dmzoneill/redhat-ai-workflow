@@ -27,7 +27,11 @@ from tool_modules.common import PROJECT_ROOT
 __project_root__ = PROJECT_ROOT
 
 from tool_modules.aa_meet_bot.src.config import get_config
-from tool_modules.aa_meet_bot.src.virtual_devices import InstanceDeviceManager, InstanceDevices
+from tool_modules.aa_meet_bot.src.virtual_devices import (
+    InstanceDeviceManager,
+    InstanceDevices,
+    cleanup_orphaned_meetbot_devices,
+)
 
 # Import centralized paths
 try:
@@ -130,14 +134,12 @@ class GoogleMeetController:
         self._caption_observer_running = False
         self._caption_poll_task: Optional[asyncio.Task] = None  # Track caption polling task
         self._playwright = None
-        self._ffmpeg_process = None  # For virtual camera feed
         self._audio_sink_name: Optional[str] = None  # Virtual audio sink for meeting output
 
         # Unique instance tracking
         GoogleMeetController._instance_counter += 1
         self._instance_id = f"meet-bot-{GoogleMeetController._instance_counter}-{id(self)}"
         self._browser_pid: Optional[int] = None
-        self._ffmpeg_pid: Optional[int] = None
         self._created_at = datetime.now()
         self._last_activity = datetime.now()
 
@@ -759,6 +761,74 @@ class GoogleMeetController:
         except Exception as e:
             logger.warning(f"[{self._instance_id}] Failed to move browser streams: {e}")
 
+    async def _start_video_stream(self, video_device: str, video_enabled: bool = False) -> bool:
+        """
+        Start video daemon streaming to the virtual camera device.
+
+        This must be called BEFORE launching Chrome so the v4l2loopback device
+        is actively streaming when Chrome enumerates cameras.
+
+        Args:
+            video_device: Path to v4l2loopback device (e.g., /dev/video0)
+            video_enabled: If True, start full AI video overlay.
+                          If False, start black screen (minimal CPU/GPU).
+
+        Returns:
+            True if video stream is ready, False otherwise.
+        """
+        try:
+            from scripts.common.dbus_base import get_client
+
+            client = get_client("video")
+            if not await client.connect():
+                logger.warning(f"[{self._instance_id}] Could not connect to video daemon")
+                return False
+
+            # Start black screen or full video based on video_enabled setting
+            if video_enabled:
+                # Full AI video overlay
+                audio_source = f"{self._devices.sink_name}.monitor" if self._devices else ""
+                result = await client.call_method(
+                    "start_video",
+                    [video_device, audio_source, "", 1920, 1080, False],
+                )
+            else:
+                # Black screen (minimal resources, device still active)
+                result = await client.call_method(
+                    "start_black_screen",
+                    [video_device, 1920, 1080],
+                )
+
+            await client.disconnect()
+
+            if not result or not result.get("success"):
+                logger.warning(f"[{self._instance_id}] Video daemon start failed: {result}")
+                return False
+
+            # Wait for the device to switch to CAPTURE mode
+            # With exclusive_caps=1, the device only shows as CAPTURE when actively streaming
+            # Chrome will only detect it as a camera when it's in CAPTURE mode
+            logger.info(f"[{self._instance_id}] Waiting for video device to become active...")
+            await asyncio.sleep(1.0)  # Give time for first frames to be written
+
+            # Verify the device is now in capture mode
+            import subprocess
+
+            result = subprocess.run(
+                ["v4l2-ctl", "--device", video_device, "--all"], capture_output=True, text=True, timeout=5
+            )
+            if "Video Capture" in result.stdout and "Video Output" not in result.stdout:
+                logger.info(f"[{self._instance_id}] Device is in CAPTURE mode - Chrome will detect it")
+            else:
+                logger.warning(f"[{self._instance_id}] Device may not be in pure CAPTURE mode")
+
+            logger.info(f"[{self._instance_id}] Video stream started on {video_device}")
+            return True
+
+        except Exception as e:
+            logger.warning(f"[{self._instance_id}] Failed to start video stream: {e}")
+            return False
+
     async def _copy_profile_data(self, source_dir: Path, dest_dir: Path) -> None:
         """Copy login cookies and session data from main profile to instance profile."""
         import shutil
@@ -804,8 +874,13 @@ class GoogleMeetController:
 
         logger.info(f"[{self._instance_id}] Profile data copied from main profile")
 
-    async def initialize(self) -> bool:
-        """Initialize the browser with stealth settings."""
+    async def initialize(self, video_enabled: bool = False) -> bool:
+        """Initialize the browser with stealth settings.
+
+        Args:
+            video_enabled: If True, start full AI video overlay. If False, start black screen.
+        """
+        self._video_enabled = video_enabled
         import subprocess
 
         try:
@@ -820,6 +895,18 @@ class GoogleMeetController:
                 return False
 
             logger.info(f"Starting browser with DISPLAY={display}")
+
+            # ========== CLEANUP ORPHANED DEVICES ==========
+            # Remove any stale MeetBot devices from previous sessions
+            # This prevents accumulation of orphaned sinks/sources/video devices
+            logger.info(f"[{self._instance_id}] Cleaning up orphaned MeetBot devices...")
+            cleanup_result = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
+            if cleanup_result.get("removed_modules") or cleanup_result.get("removed_video_devices"):
+                logger.info(
+                    f"[{self._instance_id}] Cleanup removed: "
+                    f"{len(cleanup_result.get('removed_modules', []))} audio modules, "
+                    f"{len(cleanup_result.get('removed_video_devices', []))} video devices"
+                )
 
             # ========== AUDIO PRE-ROUTING ==========
             # Create per-instance audio devices BEFORE launching Chrome
@@ -837,73 +924,15 @@ class GoogleMeetController:
             else:
                 logger.warning(f"[{self._instance_id}] Failed to create audio devices, falling back to legacy method")
 
-            # Start virtual camera feed - Chrome needs video data to recognize the device
-            # Use per-instance video device if available, otherwise fall back to shared device
+            # Get virtual camera device path for Chrome launch args
+            # The video_generator will stream to this device separately
             virtual_camera = None
             if self._devices and self._devices.video_device:
                 virtual_camera = self._devices.video_device
-                logger.info(f"[{self._instance_id}] Using per-instance video device: {virtual_camera}")
+                logger.info(f"[{self._instance_id}] Video device available: {virtual_camera}")
             elif Path(self.config.video.virtual_camera_device).exists():
                 virtual_camera = self.config.video.virtual_camera_device
                 logger.info(f"[{self._instance_id}] Using shared video device: {virtual_camera}")
-
-            if virtual_camera and Path(virtual_camera).exists():
-                logger.info(f"[{self._instance_id}] Starting virtual camera feed on {virtual_camera}...")
-                try:
-                    # Use pre-rendered idle video if available, otherwise generate it
-                    idle_video = self.config.data_dir / "idle_avatar.mp4"
-                    avatar_path = Path(self.config.avatar.face_image)
-
-                    # Generate idle video if it doesn't exist but avatar image does
-                    if not idle_video.exists() and avatar_path.exists():
-                        logger.info(f"[{self._instance_id}] Generating idle avatar video (one-time)...")
-                        await self._generate_idle_video(avatar_path, idle_video)
-
-                    if idle_video.exists():
-                        # Loop pre-rendered video - extremely low CPU (just file reading)
-                        ffmpeg_cmd = [
-                            "ffmpeg",
-                            "-re",  # Read at native framerate
-                            "-stream_loop",
-                            "-1",  # Loop video infinitely
-                            "-i",
-                            str(idle_video),
-                            "-f",
-                            "v4l2",
-                            "-pix_fmt",
-                            "yuv420p",
-                            virtual_camera,
-                        ]
-                        logger.info(f"[{self._instance_id}] Using pre-rendered idle video: {idle_video}")
-                    else:
-                        # Fallback: solid color at 1fps (minimal CPU)
-                        ffmpeg_cmd = [
-                            "ffmpeg",
-                            "-re",
-                            "-f",
-                            "lavfi",
-                            "-i",
-                            f"color=c=0x2d2d2d:s={self.config.video.width}x{self.config.video.height}:r=1",
-                            "-f",
-                            "v4l2",
-                            "-pix_fmt",
-                            "yuv420p",
-                            virtual_camera,
-                        ]
-                        logger.warning(f"[{self._instance_id}] No idle video or avatar, using solid color")
-
-                    self._ffmpeg_process = subprocess.Popen(
-                        ffmpeg_cmd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    self._ffmpeg_pid = self._ffmpeg_process.pid
-                    await asyncio.sleep(1)  # Give ffmpeg time to start
-                    logger.info(f"[{self._instance_id}] Virtual camera feed started (PID: {self._ffmpeg_pid})")
-                except Exception as e:
-                    logger.warning(f"[{self._instance_id}] Could not start virtual camera feed: {e}")
-            else:
-                logger.warning(f"[{self._instance_id}] No video device available, skipping camera feed")
 
             # Legacy fallback: create audio sink if per-instance devices failed
             if not self._devices:
@@ -953,28 +982,46 @@ class GoogleMeetController:
                 logger.info(f"[{self._instance_id}]   PULSE_SINK={self._devices.sink_name}")
                 logger.info(f"[{self._instance_id}]   PULSE_SOURCE={self._devices.source_name}")
 
+            # Build Chrome args - include video device if available
+            chrome_args = [
+                # Minimal flags - same as working simple test
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-gpu-sandbox",
+                "--disable-dev-shm-usage",
+                # Disable Chrome sync prompts (browser-level dialogs)
+                "--disable-sync",
+                "--disable-sync-preferences",
+                "--no-service-autorun",
+                "--password-store=basic",
+                # Disable the "Sign in to Chrome" prompt
+                "--disable-features=SyncPromo",
+                "--disable-signin-promo",
+                # Auto-approve mic permissions for fake devices
+                "--use-fake-ui-for-media-stream",
+            ]
+
+            # ========== VIDEO PRE-STREAMING ==========
+            # Start video daemon streaming BEFORE launching Chrome
+            # This ensures the v4l2loopback device is active when Chrome enumerates cameras
+            # Without an active stream, Chrome may not see the device as a valid camera
+            if virtual_camera and Path(virtual_camera).exists():
+                logger.info(f"[{self._instance_id}] Virtual camera available: {virtual_camera}")
+                video_ready = await self._start_video_stream(virtual_camera, self._video_enabled)
+                if video_ready:
+                    video_mode = "full AI overlay" if self._video_enabled else "black screen"
+                    logger.info(
+                        f"[{self._instance_id}] Video stream active ({video_mode}) - Chrome will see virtual camera"
+                    )
+                else:
+                    logger.warning(f"[{self._instance_id}] Video stream not ready - Chrome may not see virtual camera")
+
             self.browser = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=str(instance_profile_dir),
                 headless=False,  # Must be visible for virtual camera
-                args=[
-                    # Minimal flags - same as working simple test
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-infobars",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--disable-gpu-sandbox",
-                    "--disable-dev-shm-usage",
-                    # Disable Chrome sync prompts (browser-level dialogs)
-                    "--disable-sync",
-                    "--disable-sync-preferences",
-                    "--no-service-autorun",
-                    "--password-store=basic",
-                    # Disable the "Sign in to Chrome" prompt
-                    "--disable-features=SyncPromo",
-                    "--disable-signin-promo",
-                    # Auto-approve mic permissions for fake devices
-                    "--use-fake-ui-for-media-stream",
-                ],
+                args=chrome_args,
                 ignore_default_args=["--enable-automation"],
                 permissions=["camera", "microphone"],
                 env=browser_env,  # Critical: routes audio BEFORE any streams created
@@ -1025,7 +1072,7 @@ class GoogleMeetController:
             return True
 
         except ImportError as e:
-            error_msg = f"Playwright not installed: {e}. Run: pip install playwright && playwright install chromium"
+            error_msg = f"Playwright not installed: {e}. Run: uv add playwright && playwright install chromium"
             logger.error(error_msg)
             if self.state:
                 self.state.errors.append(error_msg)
@@ -1057,89 +1104,6 @@ class GoogleMeetController:
                 self._device_manager = None
                 self._devices = None
 
-            # Also clean up ffmpeg if it was started
-            if self._ffmpeg_process:
-                try:
-                    self._ffmpeg_process.terminate()
-                    self._ffmpeg_process.wait(timeout=5)
-                except Exception:
-                    pass
-                self._ffmpeg_process = None
-                self._ffmpeg_pid = None
-
-            return False
-
-    async def _generate_idle_video(self, avatar_path: Path, output_path: Path) -> bool:
-        """
-        Generate a 1-minute idle avatar video for looping.
-
-        This is a one-time operation that creates a pre-rendered video file.
-        Looping this file uses ~0.5% CPU vs ~25% for real-time generation.
-
-        Args:
-            avatar_path: Path to the avatar image
-            output_path: Where to save the generated video
-
-        Returns:
-            True if video was generated successfully
-        """
-        import subprocess
-
-        width = self.config.video.width
-        height = self.config.video.height
-        fps = 5  # Low fps for idle - saves space and CPU
-        duration = 60  # 1 minute loop
-
-        # Build ffmpeg command to create video from static image
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-y",  # Overwrite output
-            "-loop",
-            "1",
-            "-i",
-            str(avatar_path),
-            "-vf",
-            (
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
-            ),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",  # Fast encoding
-            "-crf",
-            "28",  # Reasonable quality, small file
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            str(fps),
-            "-t",
-            str(duration),
-            str(output_path),
-        ]
-
-        try:
-            logger.info(f"[{self._instance_id}] Running: {' '.join(ffmpeg_cmd)}")
-            result = subprocess.run(
-                ffmpeg_cmd, capture_output=True, text=True, timeout=120  # 2 minute timeout for generation
-            )
-
-            if result.returncode == 0 and output_path.exists():
-                file_size = output_path.stat().st_size / 1024 / 1024  # MB
-                logger.info(
-                    f"[{self._instance_id}] Generated idle video: {output_path} "
-                    f"({file_size:.1f} MB, {duration}s @ {fps}fps)"
-                )
-                return True
-            else:
-                logger.error(f"[{self._instance_id}] Failed to generate idle video: {result.stderr}")
-                return False
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"[{self._instance_id}] Idle video generation timed out")
-            return False
-        except Exception as e:
-            logger.error(f"[{self._instance_id}] Error generating idle video: {e}")
             return False
 
     async def _inject_stealth_scripts(self) -> None:
@@ -1469,8 +1433,30 @@ class GoogleMeetController:
             # It only produces sound when TTS writes audio to it
             await self._toggle_mute(mute=False)
 
-            # Always turn off camera for notes bot (we don't need video)
-            await self._toggle_camera(camera_on=False)
+            # Dismiss any popups that might block device selection
+            # (e.g., "Let people see you in Full HD", "Turn on 1080p", etc.)
+            logger.info("[JOIN] Dismissing any blocking popups...")
+            await self._dismiss_info_popups()
+
+            # Select MeetBot virtual devices before joining
+            # This ensures Google Meet uses our virtual devices instead of system defaults
+            logger.info("[JOIN] Selecting MeetBot virtual devices...")
+            await self._select_meetbot_devices()
+
+            # Also set devices programmatically via JavaScript MediaDevices API
+            # This is more reliable than clicking UI elements
+            logger.info("[JOIN] Setting devices programmatically via JS...")
+            await self._set_devices_via_js()
+
+            # Set camera state based on video_enabled setting
+            # If video is enabled, keep camera ON to show the AI overlay
+            # If video is disabled, turn camera OFF (we're streaming black anyway)
+            if self._video_enabled:
+                logger.info("[JOIN] Video enabled - keeping camera ON for AI overlay")
+                await self._toggle_camera(camera_on=True)
+            else:
+                logger.info("[JOIN] Video disabled - turning camera OFF")
+                await self._toggle_camera(camera_on=False)
 
             # Click join button - try multiple selectors
             logger.info("[JOIN] Looking for Join button...")
@@ -1563,14 +1549,22 @@ class GoogleMeetController:
 
                 # Handle device selection dialog if it appears
                 # This shows microphone and speaker dropdowns
+                # We use this opportunity to select the MeetBot virtual camera
+                # NOTE: Do NOT press Escape here - in Google Meet it can toggle camera!
                 try:
-                    # Look for the settings/gear icon in device dialog or dismiss it
                     device_dialog = self.page.locator('[aria-label="Settings"], [aria-label="Audio settings"]')
                     if await device_dialog.count() > 0:
                         logger.info("Device selection dialog detected")
-                        # Press Escape to dismiss it - fake devices should already be selected
-                        await self.page.keyboard.press("Escape")
-                        await asyncio.sleep(1)
+                        # Try to select the MeetBot camera before dismissing
+                        await self._select_meetbot_camera()
+                        # Click outside the dialog to close it instead of Escape
+                        # (Escape can toggle camera in Google Meet!)
+                        try:
+                            # Click on the main meeting area to close dialog
+                            await self.page.click("body", position={"x": 100, "y": 100})
+                            await asyncio.sleep(0.5)
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.debug(f"No device dialog or error: {e}")
 
@@ -1587,16 +1581,9 @@ class GoogleMeetController:
                 except Exception as e:
                     logger.debug(f"No second join button needed: {e}")
 
-                # Also try to close any other dialogs with X button
-                try:
-                    close_buttons = self.page.locator('[aria-label="Close"]')
-                    if await close_buttons.count() > 0:
-                        await close_buttons.first.click()
-                        await asyncio.sleep(1)
-                except Exception:
-                    pass
-
                 # Brief wait for meeting UI to stabilize
+                # NOTE: Removed generic "Close" button clicking - it was toggling camera!
+                # _dismiss_info_popups() handles safe popup dismissal
                 logger.info("[JOIN] Waiting 2s for meeting UI to stabilize...")
                 await asyncio.sleep(2)
 
@@ -1611,6 +1598,18 @@ class GoogleMeetController:
                 if self.config.auto_enable_captions:
                     logger.info("[JOIN] Auto-enabling captions...")
                     await self.enable_captions()
+
+                # IMPORTANT: Google Meet may turn off camera due to privacy settings
+                # Always ensure camera is ON after joining if video is enabled
+                if self._video_enabled:
+                    logger.info("[JOIN] Ensuring camera is ON after join...")
+                    await asyncio.sleep(1.0)  # Wait for Meet to settle
+
+                    # First, select the MeetBot camera via Video settings dropdown
+                    await self._select_camera_in_meeting()
+
+                    # Then turn on the camera
+                    await self._toggle_camera(camera_on=True)
 
                 logger.info(f"[JOIN] ========== SUCCESS: Joined meeting {meeting_id} ==========")
                 return True
@@ -1629,49 +1628,72 @@ class GoogleMeetController:
     async def enable_captions(self) -> bool:
         """Enable closed captions in the meeting.
 
-        Uses keyboard shortcut 'c' as the fastest and most reliable method.
+        NOTE: We do NOT use keyboard shortcut 'c' because in Google Meet:
+        - 'c' toggles the CAMERA, not captions!
+        - This was causing the bot to turn off video when trying to enable captions.
+        Instead, we click the CC button directly.
         """
         if not self.page or not self.state:
             return False
 
         try:
-            logger.info("Enabling captions via keyboard shortcut 'c'...")
+            logger.info("Enabling captions via CC button...")
 
-            # Method 1: Keyboard shortcut is fastest and most reliable
-            # Press 'c' to toggle captions - works immediately
-            await self.page.keyboard.press("c")
-            await asyncio.sleep(0.3)  # Brief wait for UI to respond
-
-            # Verify captions are enabled by checking for caption container
-            for _ in range(5):  # Check up to 5 times over 2.5 seconds
-                container = await self.page.query_selector('[aria-label="Captions"], .a4cQT, [jsname="dsyhDe"]')
-                if container:
+            # First check if captions are already on
+            try:
+                off_button = self.page.locator('button[aria-label="Turn off captions"]')
+                if await off_button.count() > 0:
+                    logger.info("[CAPTIONS] Captions already enabled (found 'Turn off captions' button)")
                     self.state.captions_enabled = True
-                    logger.info("Captions enabled successfully via keyboard shortcut")
                     return True
-                await asyncio.sleep(0.5)
+            except Exception:
+                pass
 
-            # Method 2: Try clicking the CC button directly
-            logger.info("Keyboard shortcut didn't work, trying CC button...")
-            cc_selectors = [
-                '[aria-label*="caption" i]',
-                '[aria-label*="subtitle" i]',
-                '[data-tooltip*="caption" i]',
-                'button[aria-label*="Turn on captions"]',
-                '[jsname="r8qRAd"]',
-            ]
+            # Find the "Turn on captions" button
+            try:
+                on_button = self.page.locator('button[aria-label="Turn on captions"]')
+                if await on_button.count() > 0:
+                    logger.info("[CAPTIONS] Found 'Turn on captions' button")
 
-            for selector in cc_selectors:
-                try:
-                    locator = self.page.locator(selector)
-                    if await locator.count() > 0:
-                        await locator.first.click()
-                        await asyncio.sleep(0.5)
+                    # Get the bounding box and click in the CENTER of the button
+                    # This avoids accidentally clicking dropdown arrows or adjacent buttons
+                    box = await on_button.first.bounding_box()
+                    if box:
+                        center_x = box["x"] + box["width"] / 2
+                        center_y = box["y"] + box["height"] / 2
+                        logger.info(f"[CAPTIONS] Clicking at center ({center_x}, {center_y})")
+                        await self.page.mouse.click(center_x, center_y)
+                    else:
+                        # Fallback to regular click
+                        await on_button.first.click()
+
+                    await asyncio.sleep(1.0)
+
+                    # Verify captions are now on
+                    off_button = self.page.locator('button[aria-label="Turn off captions"]')
+                    if await off_button.count() > 0:
+                        logger.info("[CAPTIONS] Captions enabled successfully")
                         self.state.captions_enabled = True
-                        logger.info(f"Captions enabled via button: {selector}")
+
+                        # WORKAROUND: Re-enable camera if it got turned off
+                        # Google Meet sometimes toggles camera when clicking nearby buttons
+                        if self._video_enabled:
+                            logger.info("[CAPTIONS] Checking camera state after captions...")
+                            await asyncio.sleep(0.5)
+                            camera_btn = self.page.locator('button[aria-label="Turn on camera"]')
+                            if await camera_btn.count() > 0:
+                                logger.warning("[CAPTIONS] Camera was turned OFF! Re-enabling...")
+                                await camera_btn.first.click()
+                                await asyncio.sleep(0.5)
+                                logger.info("[CAPTIONS] Camera re-enabled")
+
                         return True
-                except Exception:
-                    continue
+                    else:
+                        logger.warning("[CAPTIONS] Button clicked but captions may not be on")
+                        self.state.captions_enabled = True
+                        return True
+            except Exception as e:
+                logger.debug(f"[CAPTIONS] Direct button click failed: {e}")
 
             # Method 3: Try through the three-dots menu (slowest)
             logger.info("Trying to enable captions via menu...")
@@ -1696,6 +1718,75 @@ class GoogleMeetController:
         except Exception as e:
             logger.error(f"Failed to enable captions: {e}")
             return False
+
+    async def _select_camera_in_meeting(self) -> bool:
+        """Select MeetBot camera via Video settings dropdown in the meeting.
+
+        This is used AFTER joining when camera needs to be re-enabled.
+        The Video settings button opens a dropdown to select the camera.
+        """
+        if not self.page:
+            return False
+
+        # Retry up to 3 times with increasing delays
+        for attempt in range(3):
+            try:
+                if attempt > 0:
+                    logger.info(f"[CAMERA-SELECT] Retry attempt {attempt + 1}/3...")
+                    await asyncio.sleep(2.0)  # Wait before retry
+
+                logger.info("[CAMERA-SELECT] Opening Video settings dropdown...")
+
+                # Wait for the Video settings button to be visible and clickable
+                video_settings = self.page.locator('button[aria-label="Video settings"]')
+
+                try:
+                    # Wait up to 5 seconds for button to be visible
+                    await video_settings.first.wait_for(state="visible", timeout=5000)
+                except Exception:
+                    logger.warning(f"[CAMERA-SELECT] Video settings button not visible (attempt {attempt + 1})")
+                    continue
+
+                # Click with a shorter timeout
+                await video_settings.first.click(timeout=5000)
+                await asyncio.sleep(0.8)  # Wait for dropdown to open
+
+                # Look for MeetBot in the dropdown menu
+                meetbot_pattern = "MeetBot"
+
+                # Try to find and click the MeetBot option
+                menu_items = self.page.locator('[role="menuitem"], [role="menuitemradio"], li')
+                count = await menu_items.count()
+                logger.info(f"[CAMERA-SELECT] Found {count} menu items")
+
+                for i in range(count):
+                    try:
+                        item = menu_items.nth(i)
+                        text = await item.text_content(timeout=1000) or ""
+                        if meetbot_pattern.lower() in text.lower():
+                            logger.info(f"[CAMERA-SELECT] Found MeetBot option: {text}")
+                            await item.click(timeout=3000)
+                            await asyncio.sleep(0.5)
+                            logger.info("[CAMERA-SELECT] MeetBot camera selected")
+                            return True
+                    except Exception:
+                        continue
+
+                # Close dropdown if we didn't find MeetBot
+                logger.warning("[CAMERA-SELECT] MeetBot not found in dropdown, pressing Escape")
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+
+            except Exception as e:
+                logger.warning(f"[CAMERA-SELECT] Attempt {attempt + 1} failed: {e}")
+                # Try to close any open dropdown
+                try:
+                    await self.page.keyboard.press("Escape")
+                except Exception:
+                    pass
+
+        logger.error("[CAMERA-SELECT] Failed to select camera after 3 attempts")
+        return False
 
     async def _toggle_mute(self, mute: bool = True) -> bool:
         """Toggle microphone mute state."""
@@ -1770,6 +1861,428 @@ class GoogleMeetController:
             logger.error(f"Failed to toggle camera: {e}")
 
         return False
+
+    async def _set_devices_via_js(self) -> bool:
+        """
+        Programmatically set audio/video devices using JavaScript MediaDevices API.
+
+        This requests getUserMedia with specific device constraints, which tells
+        Chrome to use our MeetBot devices. This is more reliable than clicking
+        UI elements.
+
+        Returns:
+            True if devices were set successfully.
+        """
+        if not self.page:
+            return False
+
+        try:
+            # JavaScript to find MeetBot devices and request streams with them
+            js_set_devices = """
+            async () => {
+                const results = { camera: false, microphone: false, speaker: false, errors: [] };
+
+                try {
+                    // Get all devices
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+
+                    // Find MeetBot devices
+                    const meetbotCamera = devices.find(d => d.kind === 'videoinput' && d.label.includes('MeetBot'));
+                    const meetbotMic = devices.find(d => d.kind === 'audioinput' && d.label.includes('MeetBot'));
+                    const meetbotSpeaker = devices.find(d => d.kind === 'audiooutput' && d.label.includes('MeetBot'));
+
+                    console.log('[MeetBot] Found devices:', {
+                        camera: meetbotCamera?.label,
+                        mic: meetbotMic?.label,
+                        speaker: meetbotSpeaker?.label
+                    });
+
+                    // Request camera stream with MeetBot device
+                    if (meetbotCamera) {
+                        try {
+                            const videoStream = await navigator.mediaDevices.getUserMedia({
+                                video: { deviceId: { exact: meetbotCamera.deviceId } }
+                            });
+                            // Keep the stream active briefly so Chrome registers it as the selected device
+                            await new Promise(r => setTimeout(r, 500));
+                            videoStream.getTracks().forEach(t => t.stop());
+                            results.camera = true;
+                            console.log('[MeetBot] Camera set to:', meetbotCamera.label);
+                        } catch (e) {
+                            results.errors.push('Camera: ' + e.message);
+                        }
+                    }
+
+                    // Request microphone stream with MeetBot device
+                    if (meetbotMic) {
+                        try {
+                            const audioStream = await navigator.mediaDevices.getUserMedia({
+                                audio: { deviceId: { exact: meetbotMic.deviceId } }
+                            });
+                            await new Promise(r => setTimeout(r, 500));
+                            audioStream.getTracks().forEach(t => t.stop());
+                            results.microphone = true;
+                            console.log('[MeetBot] Microphone set to:', meetbotMic.label);
+                        } catch (e) {
+                            results.errors.push('Microphone: ' + e.message);
+                        }
+                    }
+
+                    // Set speaker output (if supported)
+                    if (meetbotSpeaker && typeof document.createElement('audio').setSinkId === 'function') {
+                        try {
+                            // Create a temporary audio element to set the sink
+                            const audio = document.createElement('audio');
+                            await audio.setSinkId(meetbotSpeaker.deviceId);
+                            results.speaker = true;
+                            console.log('[MeetBot] Speaker set to:', meetbotSpeaker.label);
+                        } catch (e) {
+                            results.errors.push('Speaker: ' + e.message);
+                        }
+                    }
+
+                } catch (e) {
+                    results.errors.push('General: ' + e.message);
+                }
+
+                return results;
+            }
+            """
+
+            result = await self.page.evaluate(js_set_devices)
+            logger.info(f"[DEVICES-JS] Programmatic device selection: {result}")
+
+            if result.get("errors"):
+                for err in result["errors"]:
+                    logger.warning(f"[DEVICES-JS] Error: {err}")
+
+            return result.get("camera") or result.get("microphone")
+
+        except Exception as e:
+            logger.warning(f"[DEVICES-JS] Failed to set devices via JS: {e}")
+            return False
+
+    async def _select_meetbot_devices(self) -> dict:
+        """
+        Select all MeetBot virtual devices (camera, microphone, speaker) in Google Meet.
+
+        This opens the device settings and selects our virtual devices to ensure
+        the meeting uses our controlled audio/video pipeline.
+
+        Returns:
+            Dict with results for each device type.
+        """
+        results = {"camera": False, "microphone": False, "speaker": False}
+
+        if not self.page:
+            return results
+
+        try:
+            # Get the device names we're looking for
+            mic_name = None
+            speaker_name = None
+            if self._devices:
+                # The source name is what appears as microphone in Chrome
+                mic_name = self._devices.source_name
+                # The sink name is what appears as speaker in Chrome
+                speaker_name = self._devices.sink_name
+                logger.info(f"[DEVICES] Looking for mic: {mic_name}, speaker: {speaker_name}")
+
+            # Step 1: Select the camera
+            logger.info("[DEVICES] Selecting MeetBot camera...")
+            results["camera"] = await self._select_meetbot_camera()
+
+            # Step 2: Select the microphone
+            if mic_name:
+                logger.info("[DEVICES] Selecting MeetBot microphone...")
+                results["microphone"] = await self._select_audio_device("microphone", mic_name)
+
+            # Step 3: Select the speaker
+            if speaker_name:
+                logger.info("[DEVICES] Selecting MeetBot speaker...")
+                results["speaker"] = await self._select_audio_device("speaker", speaker_name)
+
+            logger.info(f"[DEVICES] Selection results: {results}")
+            return results
+
+        except Exception as e:
+            logger.warning(f"[DEVICES] Failed to select devices: {e}")
+            return results
+
+    async def _select_audio_device(self, device_type: str, device_name: str) -> bool:
+        """
+        Select an audio device (microphone or speaker) in Google Meet's UI.
+
+        Args:
+            device_type: "microphone" or "speaker"
+            device_name: The PulseAudio device name to look for (e.g., "MeetBot_meet_bot_1_...")
+
+        Returns:
+            True if device was selected, False otherwise.
+        """
+        if not self.page:
+            return False
+
+        try:
+            # First, find the device in the browser's device list
+            kind = "audioinput" if device_type == "microphone" else "audiooutput"
+            js_find_device = f"""
+            async () => {{
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const matches = devices.filter(d => d.kind === '{kind}');
+                console.log('Available {device_type}s:', matches.map(d => d.label));
+                // Look for MeetBot device
+                const meetbot = matches.find(d => d.label.includes('MeetBot'));
+                return meetbot ? {{ label: meetbot.label, deviceId: meetbot.deviceId }} : null;
+            }}
+            """
+            device_info = await self.page.evaluate(js_find_device)
+
+            if not device_info:
+                logger.info(f"[AUDIO] MeetBot {device_type} not found in browser")
+                return False
+
+            device_label = device_info.get("label", "")
+            logger.info(f"[AUDIO] Found MeetBot {device_type}: {device_label}")
+
+            # Step 1: Open the appropriate dropdown using aria-label (stable attribute)
+            if device_type == "microphone":
+                dropdown_selector = 'button[aria-label^="Microphone:"]'
+            else:  # speaker
+                dropdown_selector = 'button[aria-label^="Speaker:"]'
+
+            try:
+                dropdown_btn = self.page.locator(dropdown_selector)
+                if await dropdown_btn.count() > 0:
+                    await dropdown_btn.first.click()
+                    logger.info(f"[AUDIO] Opened {device_type} dropdown via: {dropdown_selector}")
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.info(f"[AUDIO] Could not find {device_type} dropdown button")
+                    return False
+            except Exception as e:
+                logger.info(f"[AUDIO] Could not open {device_type} dropdown: {e}")
+                return False
+
+            # Step 2: Wait for dropdown menu to appear
+            await asyncio.sleep(0.3)
+
+            # Step 3: Find and click the MeetBot option using stable selectors
+            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5Ff"] contains device name
+            is_speaker = device_type == "speaker"
+            js_click_option = """
+            async (args) => {
+                const { searchText, excludeMic } = args;
+                // Find all menu items with role="menuitemradio" and data-device-id
+                const menuItems = document.querySelectorAll('li[role="menuitemradio"][data-device-id]');
+
+                for (const item of menuItems) {
+                    // Get the device name from span[jsname="K4r5Ff"]
+                    const nameSpan = item.querySelector('span[jsname="K4r5Ff"]');
+                    if (!nameSpan) continue;
+
+                    const deviceName = nameSpan.textContent || '';
+
+                    // Check if this is a MeetBot device
+                    if (!deviceName.includes(searchText)) continue;
+
+                    // For speaker, exclude microphone entries (those ending with _Mic)
+                    if (excludeMic && deviceName.includes('_Mic')) continue;
+
+                    // Check if visible
+                    const rect = item.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) {
+                        item.click();
+                        return { success: true, deviceName: deviceName, deviceId: item.getAttribute('data-device-id') };
+                    }
+                }
+
+                // Debug: list all visible menu items
+                const allNames = Array.from(menuItems).map(item => {
+                    const span = item.querySelector('span[jsname="K4r5Ff"]');
+                    return span ? span.textContent : 'no-name';
+                });
+
+                return { success: false, error: 'MeetBot device not found in menu', availableDevices: allNames };
+            }
+            """
+            js_result = await self.page.evaluate(js_click_option, {"searchText": "MeetBot", "excludeMic": is_speaker})
+            if js_result and js_result.get("success"):
+                logger.info(f"[AUDIO] Selected {device_type}: {js_result.get('deviceName')}")
+                await asyncio.sleep(0.5)
+                return True
+
+            logger.info(f"[AUDIO] {device_type} selection failed: {js_result}")
+
+            # Close dropdown if we couldn't select
+            await self.page.keyboard.press("Escape")
+            logger.info(f"[AUDIO] MeetBot {device_type} found but couldn't click in UI")
+            return False
+
+        except Exception as e:
+            logger.warning(f"[AUDIO] Failed to select {device_type}: {e}")
+            return False
+
+    async def _select_meetbot_camera(self) -> bool:
+        """
+        Select the MeetBot virtual camera in Google Meet's device settings.
+
+        Opens the camera dropdown in Google Meet's pre-join screen and selects
+        the MeetBot virtual camera.
+
+        Returns:
+            True if camera was selected, False otherwise.
+        """
+        if not self.page:
+            return False
+
+        try:
+            # First, get the MeetBot device name from v4l2
+            meetbot_device_name = None
+            if self._devices and self._devices.video_device:
+                import subprocess
+
+                result = subprocess.run(
+                    ["v4l2-ctl", "--device", self._devices.video_device, "--all"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split("\n"):
+                        if "Card type" in line:
+                            meetbot_device_name = line.split(":")[-1].strip()
+                            break
+
+            logger.info(f"[CAMERA] Looking for MeetBot device: {meetbot_device_name or 'any'}")
+
+            # Use JavaScript to find the MeetBot camera in the browser's device list
+            js_find_camera = """
+            async () => {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const cameras = devices.filter(d => d.kind === 'videoinput');
+                console.log('Available cameras:', cameras.map(c => c.label));
+                const meetbot = cameras.find(c => c.label.includes('MeetBot'));
+                return meetbot ? { label: meetbot.label, deviceId: meetbot.deviceId } : null;
+            }
+            """
+            meetbot_info = await self.page.evaluate(js_find_camera)
+
+            if not meetbot_info:
+                logger.info("[CAMERA] MeetBot camera not found in browser device list")
+                # Log available cameras for debugging
+                js_list_cameras = """
+                async () => {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    return devices.filter(d => d.kind === 'videoinput').map(c => c.label);
+                }
+                """
+                cameras = await self.page.evaluate(js_list_cameras)
+                logger.info(f"[CAMERA] Available cameras: {cameras}")
+                return False
+
+            camera_label = meetbot_info.get("label", "")
+            logger.info(f"[CAMERA] Found MeetBot in browser: {camera_label}")
+
+            # Step 1: Open camera dropdown using aria-label (stable attribute)
+            dropdown_selector = 'button[aria-label^="Camera:"]'
+            try:
+                dropdown_btn = self.page.locator(dropdown_selector)
+                if await dropdown_btn.count() > 0:
+                    await dropdown_btn.first.click()
+                    logger.info(f"[CAMERA] Opened camera dropdown via: {dropdown_selector}")
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.info("[CAMERA] Could not find camera dropdown button")
+                    return False
+            except Exception as e:
+                logger.info(f"[CAMERA] Could not open camera dropdown: {e}")
+                return False
+
+            # Step 2: Wait for dropdown menu to appear
+            await asyncio.sleep(0.3)
+
+            # Step 3: Find and click the MeetBot option using stable selectors
+            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5Ff"] contains device name
+            js_click_option = """
+            async (searchText) => {
+                // Find all menu items with role="menuitemradio" and data-device-id
+                const menuItems = document.querySelectorAll('li[role="menuitemradio"][data-device-id]');
+
+                for (const item of menuItems) {
+                    // Get the device name from span[jsname="K4r5Ff"]
+                    const nameSpan = item.querySelector('span[jsname="K4r5Ff"]');
+                    if (!nameSpan) continue;
+
+                    const deviceName = nameSpan.textContent || '';
+
+                    // Check if this is a MeetBot device
+                    if (!deviceName.includes(searchText)) continue;
+
+                    // Check if visible
+                    const rect = item.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) {
+                        item.click();
+                        return { success: true, deviceName: deviceName, deviceId: item.getAttribute('data-device-id') };
+                    }
+                }
+
+                // Debug: list all visible menu items
+                const allNames = Array.from(menuItems).map(item => {
+                    const span = item.querySelector('span[jsname="K4r5Ff"]');
+                    return span ? span.textContent : 'no-name';
+                });
+
+                return { success: false, error: 'MeetBot device not found in menu', availableDevices: allNames };
+            }
+            """
+            js_result = await self.page.evaluate(js_click_option, "MeetBot")
+            if js_result and js_result.get("success"):
+                logger.info(f"[CAMERA] Selected: {js_result.get('deviceName')}")
+                await asyncio.sleep(0.5)
+                return True
+
+            logger.info(f"[CAMERA] Selection failed: {js_result}")
+
+            # Step 3: Try using JavaScript to programmatically select the camera
+            # This uses the MediaDevices API to request the specific camera
+            logger.info("[CAMERA] Attempting programmatic camera selection via JS...")
+            js_select_camera = f"""
+            async () => {{
+                try {{
+                    // Get the MeetBot device
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const meetbot = devices.find(d => d.kind === 'videoinput' && d.label.includes('MeetBot'));
+                    if (!meetbot) return {{ success: false, error: 'MeetBot not found' }};
+
+                    // Request a stream with this specific device
+                    // This should trigger Google Meet to switch to this camera
+                    const stream = await navigator.mediaDevices.getUserMedia({{
+                        video: {{ deviceId: {{ exact: meetbot.deviceId }} }}
+                    }});
+
+                    // Stop the stream - we just wanted to trigger the switch
+                    stream.getTracks().forEach(t => t.stop());
+
+                    return {{ success: true, deviceId: meetbot.deviceId, label: meetbot.label }};
+                }} catch (e) {{
+                    return {{ success: false, error: e.message }};
+                }}
+            }}
+            """
+            js_result = await self.page.evaluate(js_select_camera)
+            if js_result and js_result.get("success"):
+                logger.info(f"[CAMERA] Programmatically selected: {js_result.get('label')}")
+                await asyncio.sleep(1)
+                return True
+            else:
+                logger.info(f"[CAMERA] Programmatic selection failed: {js_result}")
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"[CAMERA] Failed to select MeetBot camera: {e}")
+            return False
 
     async def _dismiss_chrome_sync_dialog(self) -> bool:
         """
@@ -1955,42 +2468,53 @@ class GoogleMeetController:
         return False
 
     async def _dismiss_info_popups(self) -> None:
-        """Dismiss info popups like 'Others may see your video differently'.
+        """Dismiss info popups like 'Others may see your video differently' or 'Full HD'.
 
-        These popups have a 'Got it' button that needs to be clicked.
+        These popups have buttons like 'Got it', 'Not now', etc. that need to be clicked.
+        IMPORTANT: Be very careful not to click buttons that toggle camera/mic!
         """
         if not self.page:
             return
 
         try:
-            # Common button texts for info popups
-            button_texts = [
+            # SAFE button texts - these are clearly for dismissing info popups
+            # DO NOT include "Close" as it can match toolbar buttons
+            safe_button_texts = [
+                "Not now",  # For "Turn on 1080p" popup - we don't want HD
                 "Got it",
-                "OK",
                 "Dismiss",
-                "Close",
+                "Skip",
+                "Maybe later",
             ]
 
-            for text in button_texts:
+            for text in safe_button_texts:
                 try:
-                    # Try exact text match
-                    button = self.page.locator(f'button:has-text("{text}")')
-                    if await button.count() > 0:
-                        await button.first.click()
-                        logger.info(f"Dismissed popup by clicking '{text}' button")
-                        await asyncio.sleep(0.5)
+                    # Only click buttons that are clearly in dialogs/popups
+                    # Use role="dialog" or role="alertdialog" to be safe
+                    button = self.page.locator(
+                        f'[role="dialog"] button:has-text("{text}"), [role="alertdialog"] button:has-text("{text}")'
+                    )
+                    count = await button.count()
+                    if count > 0:
+                        await button.first.click(timeout=1000)
+                        logger.info(f"Dismissed dialog popup by clicking '{text}' button")
+                        await asyncio.sleep(0.3)
+                        return  # Only dismiss one popup at a time
                 except Exception:
                     pass
 
-            # Also try aria-label based selectors
-            try:
-                got_it = self.page.locator('[aria-label="Got it"], [aria-label="Dismiss"]')
-                if await got_it.count() > 0:
-                    await got_it.first.click()
-                    logger.info("Dismissed popup via aria-label")
-                    await asyncio.sleep(0.5)
-            except Exception:
-                pass
+            # Fallback: try button text without dialog constraint, but only for very safe texts
+            for text in ["Got it", "Not now"]:
+                try:
+                    button = self.page.locator(f'button:has-text("{text}")')
+                    count = await button.count()
+                    if count > 0:
+                        await button.first.click(timeout=1000)
+                        logger.info(f"Dismissed popup by clicking '{text}' button")
+                        await asyncio.sleep(0.3)
+                        return
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.debug(f"Error dismissing info popups: {e}")
@@ -2268,7 +2792,17 @@ class GoogleMeetController:
                 await asyncio.sleep(0.5)  # Poll every 500ms
 
             except Exception as e:
-                if "Target closed" in str(e):
+                error_msg = str(e)
+                # Detect browser/page closure
+                if (
+                    "Target closed" in error_msg
+                    or "Target page, context or browser has been closed" in error_msg
+                    or "Browser has been closed" in error_msg
+                ):
+                    logger.warning(f"[Caption poll] Browser closed detected: {error_msg}")
+                    self._browser_closed = True
+                    if self.state:
+                        self.state.joined = False
                     break
                 logger.debug(f"Caption poll error: {e}")
                 await asyncio.sleep(1)
@@ -2412,8 +2946,9 @@ class GoogleMeetController:
 
             # If panel not open, click the People button to open it
             if not panel_open:
-                # The People button uses stable aria-labels
+                # Use only stable attributes (aria-*, data-*, role) - NOT generated class names
                 people_button_selectors = [
+                    "[data-avatar-count]",  # Badge showing participant avatars
                     '[aria-label="Show everyone"]',
                     '[aria-label="People"]',
                     '[data-tooltip="Show everyone"]',
@@ -2444,7 +2979,8 @@ class GoogleMeetController:
                     const uiKeywords = [
                         'mute', 'unmute', 'pin', 'unpin', 'remove', 'more options',
                         'more actions', 'turn off', 'turn on', 'present', 'presentation',
-                        'screen', 'camera', 'microphone', 'admit', 'deny', 'waiting'
+                        'screen', 'camera', 'microphone', 'admit', 'deny', 'waiting',
+                        'contributors', 'in the meeting', 'waiting to join'
                     ];
 
                     function isValidName(name) {
@@ -2452,12 +2988,16 @@ class GoogleMeetController:
                         const lower = name.toLowerCase();
                         if (uiKeywords.some(kw => lower.includes(kw))) return false;
                         if (['(you)', 'you', 'me'].includes(lower)) return false;
+                        // Filter out numbers only (like "2" for participant count)
+                        if (/^\\d+$/.test(name)) return false;
                         return true;
                     }
 
                     function cleanName(name) {
                         // Remove "(You)" suffix
                         name = name.replace(/\\s*\\(You\\)\\s*/g, '').trim();
+                        // Remove "Meeting host" suffix
+                        name = name.replace(/\\s*Meeting host\\s*/gi, '').trim();
                         return name;
                     }
 
@@ -2469,8 +3009,11 @@ class GoogleMeetController:
                         }
                     }
 
-                    // Method 1: Find participant list items by role="listitem" with aria-label
-                    // This is the most reliable - Google Meet uses aria-label for accessibility
+                    // ALL METHODS USE STABLE ATTRIBUTES ONLY (aria-*, data-*, role)
+                    // NEVER use generated class names like .zWGUib, .fdZ55, etc.
+
+                    // Method 1 (BEST): role="listitem" with aria-label contains the name
+                    // Example: <div role="listitem" aria-label="David O Neill" ...>
                     const listItems = document.querySelectorAll('[role="listitem"][aria-label]');
                     listItems.forEach(item => {
                         const name = item.getAttribute('aria-label');
@@ -2479,46 +3022,22 @@ class GoogleMeetController:
                         }
                     });
 
-                    // Method 2: Find elements with data-participant-id and extract aria-label
+                    // Method 2: data-participant-id elements have aria-label with name
                     if (participants.length === 0) {
-                        const participantItems = document.querySelectorAll('[data-participant-id]');
+                        const participantItems = document.querySelectorAll('[data-participant-id][aria-label]');
                         participantItems.forEach(item => {
-                            // First try aria-label on the item itself
-                            let name = item.getAttribute('aria-label');
-                            if (!name) {
-                                // Look for nested element with aria-label
-                                const labeled = item.querySelector('[aria-label]');
-                                if (labeled) {
-                                    name = labeled.getAttribute('aria-label');
-                                }
-                            }
+                            const name = item.getAttribute('aria-label');
                             if (name) {
                                 addParticipant(name);
                             }
                         });
                     }
 
-                    // Method 3: Find the participant list region and extract names
-                    if (participants.length === 0) {
-                        // Look for the "In call" region
-                        const region = document.querySelector('[role="region"][aria-label="In call"]');
-                        if (region) {
-                            // Find all list items within
-                            const items = region.querySelectorAll('[role="listitem"]');
-                            items.forEach(item => {
-                                const name = item.getAttribute('aria-label');
-                                if (name) {
-                                    addParticipant(name);
-                                }
-                            });
-                        }
-                    }
-
-                    // Method 4: Look for participant list by aria-label="Participants"
+                    // Method 3: Find participant list by aria-label="Participants"
                     if (participants.length === 0) {
                         const list = document.querySelector('[role="list"][aria-label="Participants"]');
                         if (list) {
-                            const items = list.querySelectorAll('[role="listitem"]');
+                            const items = list.querySelectorAll('[role="listitem"][aria-label]');
                             items.forEach(item => {
                                 const name = item.getAttribute('aria-label');
                                 if (name) {
@@ -2528,35 +3047,28 @@ class GoogleMeetController:
                         }
                     }
 
-                    // Method 5: Fallback - find any element with data-participant-id
-                    // and look for text content in a structured way
+                    // Method 4: Find the "In call" region and extract from listitems
                     if (participants.length === 0) {
-                        const items = document.querySelectorAll('[data-participant-id]');
-                        items.forEach(item => {
-                            // Try to find the name by looking at the DOM structure
-                            // Names are typically in a div with specific structure
-                            const walker = document.createTreeWalker(
-                                item,
-                                NodeFilter.SHOW_TEXT,
-                                {
-                                    acceptNode: (node) => {
-                                        const text = node.textContent?.trim();
-                                        if (text && text.length > 1 && text.length < 100) {
-                                            // Check if parent is not a button or icon
-                                            const parent = node.parentElement;
-                                            if (parent && !parent.closest('button') &&
-                                                !parent.closest('[aria-hidden="true"]')) {
-                                                return NodeFilter.FILTER_ACCEPT;
-                                            }
-                                        }
-                                        return NodeFilter.FILTER_REJECT;
-                                    }
+                        const region = document.querySelector('[role="region"][aria-label="In call"]');
+                        if (region) {
+                            const items = region.querySelectorAll('[role="listitem"][aria-label]');
+                            items.forEach(item => {
+                                const name = item.getAttribute('aria-label');
+                                if (name) {
+                                    addParticipant(name);
                                 }
-                            );
+                            });
+                        }
+                    }
 
-                            const firstText = walker.nextNode();
-                            if (firstText) {
-                                const name = firstText.textContent?.trim();
+                    // Method 5: data-participant-id without aria-label - check nested aria-label
+                    if (participants.length === 0) {
+                        const participantItems = document.querySelectorAll('[data-participant-id]');
+                        participantItems.forEach(item => {
+                            // Look for nested element with aria-label
+                            const labeled = item.querySelector('[aria-label]');
+                            if (labeled) {
+                                const name = labeled.getAttribute('aria-label');
                                 if (name) {
                                     addParticipant(name);
                                 }
@@ -2715,20 +3227,6 @@ class GoogleMeetController:
                 logger.warning(f"[{self._instance_id}] Error stopping playwright: {e}")
             self._playwright = None
 
-        # Stop virtual camera feed
-        if hasattr(self, "_ffmpeg_process") and self._ffmpeg_process:
-            try:
-                self._ffmpeg_process.terminate()
-                self._ffmpeg_process.wait(timeout=5)
-            except Exception:
-                try:
-                    self._ffmpeg_process.kill()
-                except Exception:
-                    pass
-            self._ffmpeg_process = None
-            self._ffmpeg_pid = None
-            logger.info(f"[{self._instance_id}] Virtual camera feed stopped")
-
         # Clean up per-instance audio devices (new method)
         if self._device_manager:
             await self._device_manager.cleanup(restore_browser_audio=restore_browser_audio)
@@ -2752,18 +3250,6 @@ class GoogleMeetController:
         """
         logger.warning(f"[{self._instance_id}] Force killing browser instance...")
         killed = False
-
-        # Kill ffmpeg process
-        if self._ffmpeg_pid:
-            try:
-                import os
-                import signal
-
-                os.kill(self._ffmpeg_pid, signal.SIGKILL)
-                logger.info(f"[{self._instance_id}] Killed ffmpeg PID {self._ffmpeg_pid}")
-                killed = True
-            except (ProcessLookupError, PermissionError) as e:
-                logger.debug(f"[{self._instance_id}] ffmpeg already dead or inaccessible: {e}")
 
         # Kill browser process
         if self._browser_pid:
@@ -2814,7 +3300,6 @@ class GoogleMeetController:
         return {
             "instance_id": self._instance_id,
             "browser_pid": self._browser_pid,
-            "ffmpeg_pid": self._ffmpeg_pid,
             "created_at": self._created_at.isoformat(),
             "last_activity": self._last_activity.isoformat(),
             "meeting_url": self.state.meeting_url if self.state else None,
@@ -2891,8 +3376,50 @@ class GoogleMeetController:
             return None
 
     def is_browser_closed(self) -> bool:
-        """Check if the browser has been closed."""
-        return getattr(self, "_browser_closed", False)
+        """Check if the browser has been closed.
+
+        Actively checks browser/context/page state in addition to the flag.
+        """
+        # Check flag first (set by error handlers)
+        if getattr(self, "_browser_closed", False):
+            logger.debug(f"[{self._instance_id}] is_browser_closed: _browser_closed flag is True")
+            return True
+
+        # Actively check if browser objects are still valid
+        try:
+            # Check if browser is connected
+            if self.browser is None:
+                logger.warning(f"[{self._instance_id}] is_browser_closed: browser is None")
+                self._browser_closed = True
+                return True
+            if not self.browser.is_connected():
+                logger.warning(f"[{self._instance_id}] is_browser_closed: browser.is_connected() returned False")
+                self._browser_closed = True
+                return True
+
+            # Check if context is still valid
+            if self.context is None:
+                logger.warning(f"[{self._instance_id}] is_browser_closed: context is None")
+                self._browser_closed = True
+                return True
+
+            # Check if page is closed
+            if self.page is None:
+                logger.warning(f"[{self._instance_id}] is_browser_closed: page is None")
+                self._browser_closed = True
+                return True
+            if self.page.is_closed():
+                logger.warning(f"[{self._instance_id}] is_browser_closed: page.is_closed() returned True")
+                self._browser_closed = True
+                return True
+
+        except Exception as e:
+            # Any error checking means browser is likely dead
+            logger.warning(f"[{self._instance_id}] is_browser_closed: exception during check: {e}")
+            self._browser_closed = True
+            return True
+
+        return False
 
     async def start_screenshot_loop(self, interval_seconds: int = 10) -> None:
         """

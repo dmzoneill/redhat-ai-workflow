@@ -86,6 +86,10 @@ class MeetingState:
     meeting_title: str = ""
     participant_count: int = 0
 
+    # Device paths for video generator to use (set by meetbot)
+    video_device: Optional[str] = None  # e.g., "/dev/video11"
+    audio_source: Optional[str] = None  # e.g., "meet_bot_abc123.monitor"
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -94,6 +98,8 @@ class MeetingState:
             "current_index": self.current_index,
             "meeting_title": self.meeting_title,
             "participant_count": self.participant_count,
+            "video_device": self.video_device,
+            "audio_source": self.audio_source,
         }
 
 
@@ -324,24 +330,38 @@ class AttendeeDataService:
 
     # ==================== Public API for Meet Bot ====================
 
-    async def set_meeting_status(self, status: str, title: str = "") -> None:
+    async def set_meeting_status(
+        self,
+        status: str,
+        title: str = "",
+        video_device: Optional[str] = None,
+        audio_source: Optional[str] = None,
+    ) -> None:
         """
-        Update the meeting status.
+        Update the meeting status and device info.
 
         Args:
             status: "scanning", "active", or "ended"
             title: Meeting title (optional)
+            video_device: v4l2loopback device path for video output (e.g., "/dev/video11")
+            audio_source: PulseAudio source for audio capture (e.g., "meet_bot_abc123.monitor")
         """
         async with self._lock:
             self._state.status = status
             if title:
                 self._state.meeting_title = title
+            if video_device:
+                self._state.video_device = video_device
+            if audio_source:
+                self._state.audio_source = audio_source
 
         await self._broadcast(
             {
                 "type": "meeting_status",
                 "status": status,
                 "title": title,
+                "video_device": video_device,
+                "audio_source": audio_source,
             }
         )
 
@@ -668,6 +688,10 @@ class AttendeeDataClient:
                     self._state.status = status
                     if "title" in data:
                         self._state.meeting_title = data["title"]
+                    if "video_device" in data and data["video_device"]:
+                        self._state.video_device = data["video_device"]
+                    if "audio_source" in data and data["audio_source"]:
+                        self._state.audio_source = data["audio_source"]
 
                 if self._on_status_change:
                     self._on_status_change(status)
@@ -691,6 +715,8 @@ class AttendeeDataClient:
                     self._state.current_index = state_data.get("current_index", 0)
                     self._state.meeting_title = state_data.get("meeting_title", "")
                     self._state.attendees = [EnrichedAttendee(**a) for a in state_data.get("attendees", [])]
+                    self._state.video_device = state_data.get("video_device")
+                    self._state.audio_source = state_data.get("audio_source")
 
             elif msg_type == "keepalive" or msg_type == "pong":
                 pass  # Ignore keepalives
@@ -733,6 +759,14 @@ class AttendeeDataClient:
         if self._state.attendees and 0 <= self._state.current_index < len(self._state.attendees):
             return self._state.attendees[self._state.current_index]
         return None
+
+    def get_video_device(self) -> Optional[str]:
+        """Get the video device path from the meetbot."""
+        return self._state.video_device
+
+    def get_audio_source(self) -> Optional[str]:
+        """Get the audio source name from the meetbot."""
+        return self._state.audio_source
 
     def is_connected(self) -> bool:
         """Check if connected to service."""

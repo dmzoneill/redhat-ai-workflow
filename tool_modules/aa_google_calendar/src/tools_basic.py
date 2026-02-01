@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
@@ -55,14 +55,21 @@ TOKEN_FILE = CONFIG_DIR / "token.json"
 SERVICE_ACCOUNT_FILE = CONFIG_DIR / "service_account.json"
 
 # Scopes required for calendar, gmail, slides, and drive access
+# NOTE: All Google tool modules should use this SAME scope list to share one token
 SCOPES = [
+    # Calendar
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly",
+    # Gmail
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.modify",
+    # Slides
     "https://www.googleapis.com/auth/presentations",
+    "https://www.googleapis.com/auth/presentations.readonly",
+    # Drive
     "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.readonly",
 ]
 
 # CONSTRAINTS
@@ -143,7 +150,7 @@ def get_calendar_service():
         return (
             None,
             "Google API libraries not installed. Run: "
-            "pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib",
+            "uv add google-api-python-client google-auth-httplib2 google-auth-oauthlib",
         )
 
     # Try OAuth token, refresh if needed, then service account

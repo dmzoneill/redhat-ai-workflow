@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 from typing import cast
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
@@ -69,7 +69,7 @@ async def _send_via_dbus(channel_id: str, text: str, thread_ts: str = "") -> dic
         if str(scripts_dir) not in sys.path:
             sys.path.insert(0, str(scripts_dir))
 
-        from slack_dbus import SlackAgentClient
+        from services.slack.dbus import SlackAgentClient
 
         client = SlackAgentClient()
         if await client.connect():
@@ -467,7 +467,7 @@ async def _query_via_dbus(method_name: str, *args) -> dict | None:
         if str(scripts_dir) not in sys.path:
             sys.path.insert(0, str(scripts_dir))
 
-        from slack_dbus import SlackAgentClient
+        from services.slack.dbus import SlackAgentClient
 
         client = SlackAgentClient()
         if await client.connect():

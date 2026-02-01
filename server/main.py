@@ -13,9 +13,6 @@ Usage:
     # Run with a persona config (recommended - stays under tool limits):
     python -m server --agent devops
 
-    # Run with web UI:
-    python -m server --tools git,jira --web --port 8765
-
     # Disable scheduler:
     python -m server --agent developer --no-scheduler
 """
@@ -27,7 +24,7 @@ import sys
 from pathlib import Path
 from typing import cast
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # Directory structure:
 # ai-workflow/
@@ -42,6 +39,7 @@ TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
 
 # Tool file naming conventions (shared with persona_loader)
 TOOLS_FILE = "tools.py"
+TOOLS_CORE_FILE = "tools_core.py"
 TOOLS_BASIC_FILE = "tools_basic.py"
 TOOLS_EXTRA_FILE = "tools_extra.py"
 
@@ -102,14 +100,14 @@ def get_tool_module(name: str):
             sys.path.remove(src_path)
 
 
-def setup_logging(web_mode: bool = False) -> logging.Logger:
-    """Configure logging based on mode.
+def setup_logging() -> logging.Logger:
+    """Configure logging for MCP server.
 
     Logs go to journalctl when running under systemd.
     Format excludes timestamp since journald adds its own.
+    Logs to stderr since stdout is reserved for JSON-RPC.
     """
-    # In web mode, log to stdout; in MCP mode, log to stderr (stdout is for JSON-RPC)
-    stream_handler = logging.StreamHandler(sys.stdout if web_mode else sys.stderr)
+    stream_handler = logging.StreamHandler(sys.stderr)
 
     logging.basicConfig(
         level=logging.INFO,
@@ -124,28 +122,59 @@ def _get_tools_file_path(tool_name: str) -> Path:
     Determine the correct tools file path for a tool module name.
 
     Args:
-        tool_name: Tool module name (e.g., "git", "git_basic", "git_extra")
+        tool_name: Tool module name (e.g., "git", "git_core", "git_basic", "git_extra")
 
     Returns:
         Path to the tools file
     """
-    if tool_name.endswith("_basic"):
+    if tool_name.endswith("_core"):
+        base_name = tool_name[:-5]  # Remove "_core"
+        module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
+        return module_dir / "src" / TOOLS_CORE_FILE
+    elif tool_name.endswith("_basic"):
         base_name = tool_name[:-6]  # Remove "_basic"
         module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-        return module_dir / "src" / "tools_basic.py"
+        return module_dir / "src" / TOOLS_BASIC_FILE
     elif tool_name.endswith("_extra"):
         base_name = tool_name[:-6]  # Remove "_extra"
         module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-        return module_dir / "src" / "tools_extra.py"
+        return module_dir / "src" / TOOLS_EXTRA_FILE
     else:
-        # For non-suffixed modules, load tools_basic.py (standard)
-        # Use tool_exec() or explicit _extra suffix for extra tools
+        # For non-suffixed modules, try tools_core.py first (new default),
+        # then tools_basic.py, then tools.py
         module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
-        tools_basic = module_dir / "src" / "tools_basic.py"
+        tools_core = module_dir / "src" / TOOLS_CORE_FILE
+        if tools_core.exists():
+            return tools_core
+        tools_basic = module_dir / "src" / TOOLS_BASIC_FILE
         if tools_basic.exists():
             return tools_basic
         # Fallback to legacy tools.py
-        return module_dir / "src" / "tools.py"
+        return module_dir / "src" / TOOLS_FILE
+
+
+def _get_tool_names_sync(server: FastMCP) -> set[str]:
+    """
+    Get tool names from FastMCP server synchronously.
+
+    FastMCP v3 stores tools in providers._components with keys like 'tool:name@'.
+    This helper extracts tool names without requiring async.
+
+    Args:
+        server: FastMCP server instance
+
+    Returns:
+        Set of tool names
+    """
+    tool_names = set()
+    for provider in server.providers:
+        if hasattr(provider, "_components"):
+            for key in provider._components:
+                if key.startswith("tool:"):
+                    # Extract name from 'tool:name@' format
+                    name = key.split(":")[1].split("@")[0]
+                    tool_names.add(name)
+    return tool_names
 
 
 def _load_single_tool_module(tool_name: str, server: FastMCP, tools_before: set[str] | None = None) -> list[str]:
@@ -181,8 +210,8 @@ def _load_single_tool_module(tool_name: str, server: FastMCP, tools_before: set[
     if hasattr(module, "register_tools"):
         module.register_tools(server)
 
-        # Detect which tools were added by this module
-        tools_after = {t.name for t in server._tool_manager._tools.values()}
+        # Detect which tools were added by this module (FastMCP v3 compatible)
+        tools_after = _get_tool_names_sync(server)
         new_tools = list(tools_after - (tools_before or set()))
 
         logger.info(f"Loaded {tool_name}: {len(new_tools)} tools")
@@ -254,8 +283,8 @@ def create_mcp_server(
             continue
 
         try:
-            # Get current tools before loading
-            tools_before = {t.name for t in server._tool_manager._tools.values()}
+            # Get current tools before loading (FastMCP v3 compatible)
+            tools_before = _get_tool_names_sync(server)
 
             new_tools = _load_single_tool_module(module_name, server, tools_before)
             if new_tools:
@@ -431,7 +460,7 @@ async def init_scheduler(server: FastMCP) -> bool:
 
     except ImportError as e:
         logger.warning(f"Scheduler dependencies not available: {e}")
-        logger.info("Install with: pip install apscheduler croniter")
+        logger.info("Install with: uv add apscheduler croniter")
         _log(f"ImportError: {e}")
         return False
     except Exception as e:
@@ -507,26 +536,6 @@ async def run_mcp_server(server: FastMCP, enable_scheduler: bool = True):
             await stop_scheduler()
 
 
-def run_web_server(server: FastMCP, host: str = "127.0.0.1", port: int = 8765):
-    """Run the web UI server for configuration and testing."""
-    import uvicorn
-
-    from .web import create_app
-
-    logger = logging.getLogger(__name__)
-
-    app = create_app(server)
-
-    logger.info(f"Starting Web UI at http://{host}:{port}")
-
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        log_level="info",
-    )
-
-
 def main():
     """Main entry point with tool selection."""
     # Get available modules for help text
@@ -571,22 +580,6 @@ Examples:
         help="Load all available tool modules (WARNING: may exceed Cursor's 128 tool limit)",
     )
     parser.add_argument(
-        "--web",
-        action="store_true",
-        help="Run web UI server instead of MCP stdio server",
-    )
-    parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Host for web server (default: 127.0.0.1)",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="Port for web server (default: 8765)",
-    )
-    parser.add_argument(
         "--name",
         default="",
         help="Server name (default: based on agent or 'aa_workflow')",
@@ -598,7 +591,7 @@ Examples:
     )
 
     args = parser.parse_args()
-    logger = setup_logging(web_mode=args.web)
+    logger = setup_logging()
 
     # Determine tools to load
     if args.agent:
@@ -636,12 +629,8 @@ Examples:
 
     try:
         server = create_mcp_server(name=server_name, tools=tools)
-
-        if args.web:
-            run_web_server(server, host=args.host, port=args.port)
-        else:
-            enable_scheduler = not args.no_scheduler
-            asyncio.run(run_mcp_server(server, enable_scheduler=enable_scheduler))
+        enable_scheduler = not args.no_scheduler
+        asyncio.run(run_mcp_server(server, enable_scheduler=enable_scheduler))
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
     except Exception as e:

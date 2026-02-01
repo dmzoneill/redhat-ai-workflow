@@ -59,6 +59,12 @@ class PendingConfirmation:
     future: asyncio.Future
 
 
+# Maximum number of running skills to track (prevents memory leaks from orphaned skills)
+MAX_RUNNING_SKILLS = 100
+# Maximum age for a running skill before it's considered stale (1 hour)
+MAX_SKILL_AGE_SECONDS = 3600
+
+
 class SkillWebSocketServer:
     """WebSocket server for real-time skill updates."""
 
@@ -203,8 +209,40 @@ class SkillWebSocketServer:
 
     # ==================== Skill Lifecycle Events ====================
 
+    def _cleanup_stale_skills(self) -> int:
+        """Remove stale skills that have been running too long.
+
+        This prevents memory leaks from skills that never completed/failed.
+
+        Returns:
+            Number of skills removed
+        """
+        now = datetime.now()
+        stale_ids = []
+
+        for skill_id, skill in self.running_skills.items():
+            age = (now - skill.started_at).total_seconds()
+            if age > MAX_SKILL_AGE_SECONDS:
+                stale_ids.append(skill_id)
+
+        for skill_id in stale_ids:
+            del self.running_skills[skill_id]
+            logger.warning(f"Removed stale skill {skill_id} (exceeded max age)")
+
+        # Also enforce max count by removing oldest if over limit
+        while len(self.running_skills) > MAX_RUNNING_SKILLS:
+            oldest_id = min(self.running_skills.keys(), key=lambda k: self.running_skills[k].started_at)
+            del self.running_skills[oldest_id]
+            logger.warning(f"Removed oldest skill {oldest_id} (exceeded max count)")
+            stale_ids.append(oldest_id)
+
+        return len(stale_ids)
+
     async def skill_started(self, skill_id: str, skill_name: str, total_steps: int, inputs: dict | None = None):
         """Notify that a skill has started."""
+        # Cleanup stale skills before adding new one
+        self._cleanup_stale_skills()
+
         self.running_skills[skill_id] = SkillState(
             skill_id=skill_id,
             skill_name=skill_name,

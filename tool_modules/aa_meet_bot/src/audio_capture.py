@@ -121,7 +121,13 @@ class PulseAudioCapture:
     """
     Captures audio from a PulseAudio/PipeWire source.
 
-    Uses parec for low-latency capture with configurable buffer sizes.
+    Supports two capture methods:
+    1. Direct source capture (for testing with physical mic)
+    2. Monitor-stream capture (for production - captures from app's sink-input)
+
+    The monitor-stream method is required because PipeWire's null-sink monitors
+    don't work properly (they output zeros). Instead, we capture directly from
+    the application's audio stream using parec --monitor-stream=<sink_input_index>.
     """
 
     def __init__(
@@ -129,19 +135,24 @@ class PulseAudioCapture:
         source_name: str,
         sample_rate: int = 16000,
         chunk_ms: int = 100,  # 100ms chunks for low latency
+        sink_input_index: Optional[int] = None,  # For monitor-stream method
     ):
         """
         Initialize audio capture.
 
         Args:
-            source_name: PulseAudio source name (e.g., "meet_bot_abc123.monitor")
+            source_name: PulseAudio source name (e.g., "alsa_input..." for mic)
+                        For monitor-stream method, this is just for logging.
             sample_rate: Target sample rate (will resample if needed)
             chunk_ms: Chunk size in milliseconds
+            sink_input_index: If provided, use parec --monitor-stream to capture
+                             directly from this sink-input (bypasses broken monitors)
         """
         self.source_name = source_name
         self.sample_rate = sample_rate
         self.chunk_ms = chunk_ms
         self.chunk_samples = int(sample_rate * chunk_ms / 1000)
+        self.sink_input_index = sink_input_index
 
         self._process: Optional[asyncio.subprocess.Process] = None
         self._running = False
@@ -153,22 +164,27 @@ class PulseAudioCapture:
             return True
 
         try:
-            # Try pw-record first (works better with PipeWire/SUSPENDED sources)
-            # Fall back to parec if pw-record not available
-            pw_record_available = await self._check_command("pw-record")
-
-            if pw_record_available:
-                # pw-record works better with PipeWire - activates SUSPENDED sources
+            # Choose capture method based on whether we have a sink-input index
+            if self.sink_input_index is not None:
+                # Method 1: Monitor-stream (for production - captures from app stream)
+                # This bypasses the broken null-sink monitor in PipeWire
                 cmd = [
-                    "pw-record",
-                    f"--target={self.source_name}",
-                    f"--rate={self.sample_rate}",
-                    "--channels=1",
-                    "--format=f32",
-                    "-",  # Output to stdout
+                    "parec",
+                    f"--monitor-stream={self.sink_input_index}",
+                    "--rate",
+                    str(self.sample_rate),
+                    "--channels",
+                    "1",
+                    "--format",
+                    "float32le",
+                    "--latency-msec",
+                    str(self.chunk_ms),
                 ]
+                logger.info(f"Using monitor-stream capture from sink-input {self.sink_input_index}")
             else:
-                # Fall back to parec
+                # Method 2: Direct source capture (for testing with physical mic)
+                # Use parec with --device for direct source capture
+                # pw-record doesn't work well with stdout in some cases
                 cmd = [
                     "parec",
                     "--device",
@@ -182,6 +198,7 @@ class PulseAudioCapture:
                     "--latency-msec",
                     str(self.chunk_ms),
                 ]
+                logger.info(f"Using direct source capture from {self.source_name}")
 
             logger.info(f"Starting audio capture: {' '.join(cmd)}")
 
@@ -196,7 +213,7 @@ class PulseAudioCapture:
             # Start reader task
             asyncio.create_task(self._read_loop())
 
-            logger.info(f"Audio capture started from {self.source_name}")
+            logger.info(f"Audio capture started")
             return True
 
         except Exception as e:
@@ -255,9 +272,15 @@ class PulseAudioCapture:
         if not self._running:
             return None
 
-        # Wait for enough data
+        # Wait for enough data with timeout
+        timeout = 2.0  # 2 second timeout for audio data
+        start_time = time.time()
         while self._buffer.available() < self.chunk_samples:
             if not self._running:
+                return None
+            if time.time() - start_time > timeout:
+                # Timeout waiting for audio data - source may be gone
+                logger.debug("Timeout waiting for audio chunk")
                 return None
             await asyncio.sleep(0.01)
 
@@ -421,10 +444,20 @@ class RealtimeSTTPipeline:
         try:
             logger.info(f"🎧 NPU STT: Starting audio processing loop (VAD threshold: {self.vad_threshold})")
 
+            consecutive_none_chunks = 0
+            max_none_chunks = 50  # ~5 seconds of no data = audio source gone
+
             while self._running:
                 chunk = await self._capture.read_chunk()
                 if chunk is None:
+                    consecutive_none_chunks += 1
+                    if consecutive_none_chunks >= max_none_chunks:
+                        logger.warning("🎧 NPU STT: Audio source appears to be gone (too many empty chunks)")
+                        self._running = False
+                        break
+                    await asyncio.sleep(0.1)  # Brief wait before retry
                     continue
+                consecutive_none_chunks = 0  # Reset on successful read
 
                 chunk_count += 1
                 rms = np.sqrt(np.mean(chunk.data**2))
@@ -566,3 +599,13 @@ async def create_meeting_stt_pipeline(
     )
 
     return pipeline
+
+
+# ==================== BACKWARD COMPATIBILITY ====================
+# Aliases for old class names used in voice_pipeline.py
+
+# AudioCapture is now PulseAudioCapture
+AudioCapture = PulseAudioCapture
+
+# AudioBuffer is now RingBuffer
+AudioBuffer = RingBuffer

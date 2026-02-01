@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
@@ -50,6 +50,7 @@ GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/issues"
 # Track recently created issues to avoid duplicates (in-memory cache)
 _recent_issues: dict[str, float] = {}
 _ISSUE_DEDUP_SECONDS = 3600  # Don't create duplicate issues within 1 hour
+_MAX_RECENT_ISSUES = 100  # Prevent unbounded memory growth
 
 
 def _get_github_token() -> str | None:
@@ -86,6 +87,14 @@ async def create_github_issue(
     # Check for duplicate
     fingerprint = _issue_fingerprint(tool, error)
     now = time.time()
+
+    # Cleanup: remove expired entries and enforce max size
+    global _recent_issues
+    _recent_issues = {k: v for k, v in _recent_issues.items() if now - v < _ISSUE_DEDUP_SECONDS}
+    if len(_recent_issues) > _MAX_RECENT_ISSUES:
+        # Keep only the most recent entries
+        sorted_items = sorted(_recent_issues.items(), key=lambda x: x[1], reverse=True)
+        _recent_issues = dict(sorted_items[:_MAX_RECENT_ISSUES])
 
     if fingerprint in _recent_issues:
         last_created = _recent_issues[fingerprint]

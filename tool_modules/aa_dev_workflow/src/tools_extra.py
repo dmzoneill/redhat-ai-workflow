@@ -7,7 +7,7 @@ Currently empty - basic tools are in tools_basic.py.
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 
 def register_tools(server: "FastMCP") -> int:

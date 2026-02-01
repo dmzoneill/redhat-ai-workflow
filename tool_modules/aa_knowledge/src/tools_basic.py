@@ -28,7 +28,7 @@ except ImportError:
     MEMORY_DIR = PROJECT_DIR / "memory"
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 

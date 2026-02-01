@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -64,6 +64,7 @@ _controller: Optional[GoogleMeetController] = None
 _device_manager: Optional[VirtualDeviceManager] = None
 _wake_word_manager: Optional[WakeWordManager] = None
 _approved_meetings: dict[str, dict] = {}  # meeting_id -> meeting info
+_MAX_APPROVED_MEETINGS = 50  # Prevent unbounded memory growth
 
 # Notes bot state
 _notes_bot: Optional[NotesBot] = None  # Legacy single-bot mode
@@ -223,6 +224,16 @@ async def _meet_bot_approve_meeting_impl(
         return f"❌ Invalid Google Meet URL: {meeting_url}"
 
     meeting_id = match.group(1)
+
+    # Cleanup old approved meetings if over limit
+    if len(_approved_meetings) >= _MAX_APPROVED_MEETINGS:
+        # Remove oldest approved meetings
+        sorted_meetings = sorted(
+            _approved_meetings.items(),
+            key=lambda x: x[1].get("approved_at", ""),
+        )
+        for old_id, _ in sorted_meetings[: len(_approved_meetings) - _MAX_APPROVED_MEETINGS + 1]:
+            _approved_meetings.pop(old_id, None)
 
     _approved_meetings[meeting_id] = {
         "url": meeting_url,
@@ -436,7 +447,7 @@ async def _meet_bot_test_avatar_impl() -> str:
         return "\n".join(lines)
 
     except ImportError:
-        return "❌ PIL not installed. Run: pip install pillow"
+        return "❌ PIL not installed. Run: uv add pillow"
     except Exception as e:
         return f"❌ Failed to check avatar image: {e}"
 

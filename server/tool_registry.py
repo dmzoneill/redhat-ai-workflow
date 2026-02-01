@@ -25,7 +25,7 @@ Usage:
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 
 class ToolRegistry:

@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context
+    from fastmcp import Context
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,9 @@ def get_default_persona() -> str:
 
 # Session stale timeout (hours) - sessions inactive for longer are cleaned up
 SESSION_STALE_HOURS = 24
+
+# Maximum entries in tool_filter_cache per session to prevent memory leaks
+MAX_FILTER_CACHE_SIZE = 50
 
 # Persistence file location - centralized in server.paths
 from server.paths import AA_CONFIG_DIR, WORKSPACE_STATES_FILE
@@ -314,14 +317,22 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
     Reads the global Cursor database to find issue references in chat messages.
     Returns all unique issue keys found in each chat, sorted and comma-separated.
 
+    Uses Python sqlite3 module directly for better performance (no subprocess overhead).
+
     Args:
-        chat_ids: Optional list of chat IDs to scan. If None, scans all chats.
+        chat_ids: Optional list of chat IDs to scan. If None, returns empty (too expensive).
 
     Returns:
         Dict mapping chat ID to comma-separated issue keys (e.g., "AAP-12345, AAP-12346")
     """
     import re
-    import subprocess
+    import sqlite3
+
+    # OPTIMIZATION: If no specific chat IDs provided, skip the expensive full scan
+    # The daemon should always provide specific IDs for targeted scanning
+    if not chat_ids:
+        logger.debug("get_cursor_chat_issue_keys: No chat_ids provided, skipping expensive full scan")
+        return {}
 
     try:
         global_db = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "state.vscdb"
@@ -329,49 +340,44 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
             logger.debug("Cursor global storage not found")
             return {}
 
-        # Build query - either for specific chats or all
-        if chat_ids:
-            # Query for specific chat IDs
-            like_clauses = " OR ".join(f"key LIKE 'bubbleId:{cid}:%'" for cid in chat_ids)
-            query = f"SELECT key, value FROM cursorDiskKV WHERE ({like_clauses}) AND value LIKE '%text%'"
-        else:
-            query = "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%' AND value LIKE '%AAP-%'"
+        # Use Python sqlite3 directly (faster than subprocess)
+        conn = sqlite3.connect(str(global_db), timeout=10)
+        cursor = conn.cursor()
 
-        result = subprocess.run(
-            ["sqlite3", str(global_db), query],
-            capture_output=True,
-            text=True,
-            timeout=30,  # Longer timeout for large DB
-        )
-
-        if result.returncode != 0:
-            logger.debug(f"Failed to query Cursor global DB: {result.stderr}")
-            return {}
-
-        # Parse results and collect all unique issue keys per chat
         chat_issue_sets: dict[str, set[str]] = {}
         issue_pattern = re.compile(r"AAP-\d{4,7}", re.IGNORECASE)
 
-        for line in result.stdout.strip().split("\n"):
-            if not line or "|" not in line:
-                continue
+        # Query each chat ID separately to avoid huge result sets
+        for cid in chat_ids:
             try:
-                key, value = line.split("|", 1)
-                # Extract chat ID from key: bubbleId:<chatId>:<bubbleId>
-                parts = key.split(":")
-                if len(parts) >= 2:
-                    chat_id = parts[1]
-                    data = json.loads(value)
-                    text = data.get("text", "")
-                    if text:
-                        matches = issue_pattern.findall(text)
-                        if matches:
-                            if chat_id not in chat_issue_sets:
-                                chat_issue_sets[chat_id] = set()
-                            for m in matches:
-                                chat_issue_sets[chat_id].add(m.upper())
-            except (json.JSONDecodeError, ValueError):
+                # Query for this specific chat's messages containing AAP-
+                cursor.execute(
+                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE ? AND value LIKE '%AAP-%' LIMIT 100",
+                    (f"bubbleId:{cid}:%",),
+                )
+
+                for key, value in cursor.fetchall():
+                    try:
+                        # Extract chat ID from key: bubbleId:<chatId>:<bubbleId>
+                        parts = key.split(":")
+                        if len(parts) >= 2:
+                            chat_id = parts[1]
+                            data = json.loads(value)
+                            text = data.get("text", "")
+                            if text:
+                                matches = issue_pattern.findall(text)
+                                if matches:
+                                    if chat_id not in chat_issue_sets:
+                                        chat_issue_sets[chat_id] = set()
+                                    for m in matches:
+                                        chat_issue_sets[chat_id].add(m.upper())
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+            except sqlite3.Error as e:
+                logger.debug(f"Error querying chat {cid}: {e}")
                 continue
+
+        conn.close()
 
         # Return sorted, comma-separated issue keys for each chat
         result_map = {}
@@ -382,12 +388,12 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
                 result_map[chat_id] = ", ".join(sorted_issues)
 
         if result_map:
-            logger.info(f"Found issue keys in {len(result_map)} chat(s)")
+            logger.debug(f"Found issue keys in {len(result_map)} chat(s)")
 
         return result_map
 
-    except subprocess.TimeoutExpired:
-        logger.warning("Timeout scanning Cursor DB for issue keys")
+    except sqlite3.Error as e:
+        logger.warning(f"SQLite error scanning for issue keys: {e}")
         return {}
     except Exception as e:
         logger.warning(f"Error scanning Cursor chats for issue keys: {e}")
@@ -660,14 +666,21 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
     - "Loaded persona: developer" (tool output)
     - "Persona:** `developer`" (session_start output)
 
+    Uses Python sqlite3 module directly for better performance.
+
     Args:
-        chat_ids: Optional list of chat IDs to scan. If None, scans all chats.
+        chat_ids: Optional list of chat IDs to scan. If None, returns empty (too expensive).
 
     Returns:
         Dict mapping chat ID to the last detected persona name.
     """
     import re
-    import subprocess
+    import sqlite3
+
+    # OPTIMIZATION: If no specific chat IDs provided, skip the expensive full scan
+    if not chat_ids:
+        logger.debug("get_cursor_chat_personas: No chat_ids provided, skipping expensive full scan")
+        return {}
 
     # Valid persona names (from personas/ directory)
     VALID_PERSONAS = {
@@ -694,22 +707,9 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
             logger.debug("Cursor global storage not found")
             return {}
 
-        # Build query - look for persona-related content
-        if chat_ids:
-            like_clauses = " OR ".join(f"key LIKE 'bubbleId:{cid}:%'" for cid in chat_ids)
-            query = f"""SELECT key, value FROM cursorDiskKV
-                       WHERE ({like_clauses})
-                       AND (value LIKE '%persona%' OR value LIKE '%agent=%' OR value LIKE '%Persona%')"""
-        else:
-            query = """SELECT key, value FROM cursorDiskKV
-                      WHERE key LIKE 'bubbleId:%'
-                      AND (value LIKE '%persona%' OR value LIKE '%agent=%' OR value LIKE '%Persona%')"""
-
-        result = subprocess.run(["sqlite3", str(global_db), query], capture_output=True, text=True, timeout=30)
-
-        if result.returncode != 0:
-            logger.debug(f"Failed to query Cursor global DB for personas: {result.stderr}")
-            return {}
+        # Use Python sqlite3 directly (faster than subprocess)
+        conn = sqlite3.connect(str(global_db), timeout=10)
+        cursor = conn.cursor()
 
         # Patterns to detect persona loads (ordered by specificity)
         patterns = [
@@ -726,58 +726,66 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
         ]
 
         # Collect all persona mentions per chat with their position (to find last one)
-        # Structure: {chat_id: [(position, persona), ...]}
         chat_personas: dict[str, list[tuple[int, str]]] = {}
 
-        for line in result.stdout.strip().split("\n"):
-            if not line or "|" not in line:
-                continue
+        # Query each chat ID separately
+        for cid in chat_ids:
             try:
-                key, value = line.split("|", 1)
-                # Extract chat ID and bubble ID from key: bubbleId:<chatId>:<bubbleId>
-                parts = key.split(":")
-                if len(parts) >= 3:
-                    chat_id = parts[1]
+                cursor.execute(
+                    """SELECT key, value FROM cursorDiskKV
+                       WHERE key LIKE ?
+                       AND (value LIKE '%persona%' OR value LIKE '%agent=%' OR value LIKE '%Persona%')
+                       LIMIT 50""",
+                    (f"bubbleId:{cid}:%",),
+                )
+
+                for key, value in cursor.fetchall():
                     try:
-                        # Use bubble ID as position indicator (higher = later in chat)
-                        bubble_id = int(parts[2]) if parts[2].isdigit() else 0
-                    except (ValueError, IndexError):
-                        bubble_id = 0
+                        parts = key.split(":")
+                        if len(parts) >= 3:
+                            chat_id = parts[1]
+                            try:
+                                bubble_id = int(parts[2]) if parts[2].isdigit() else 0
+                            except (ValueError, IndexError):
+                                bubble_id = 0
 
-                    data = json.loads(value)
-                    text = data.get("text", "")
-                    if not text:
+                            data = json.loads(value)
+                            text = data.get("text", "")
+                            if not text:
+                                continue
+
+                            for pattern in patterns:
+                                matches = pattern.findall(text)
+                                for match in matches:
+                                    persona = match.lower()
+                                    if persona in VALID_PERSONAS:
+                                        if chat_id not in chat_personas:
+                                            chat_personas[chat_id] = []
+                                        chat_personas[chat_id].append((bubble_id, persona))
+
+                    except (json.JSONDecodeError, ValueError):
                         continue
-
-                    # Try each pattern to find persona mentions
-                    for pattern in patterns:
-                        matches = pattern.findall(text)
-                        for match in matches:
-                            persona = match.lower()
-                            if persona in VALID_PERSONAS:
-                                if chat_id not in chat_personas:
-                                    chat_personas[chat_id] = []
-                                chat_personas[chat_id].append((bubble_id, persona))
-
-            except (json.JSONDecodeError, ValueError):
+            except sqlite3.Error as e:
+                logger.debug(f"Error querying chat {cid} for personas: {e}")
                 continue
+
+        conn.close()
 
         # Return the last (highest bubble_id) persona for each chat
         result_map = {}
         for chat_id, persona_list in chat_personas.items():
             if persona_list:
-                # Sort by bubble_id (position) and take the last one
                 persona_list.sort(key=lambda x: x[0])
                 last_persona = persona_list[-1][1]
                 result_map[chat_id] = last_persona
 
         if result_map:
-            logger.info(f"Detected personas in {len(result_map)} chat(s) from content")
+            logger.debug(f"Detected personas in {len(result_map)} chat(s) from content")
 
         return result_map
 
-    except subprocess.TimeoutExpired:
-        logger.warning("Timeout scanning Cursor DB for personas")
+    except sqlite3.Error as e:
+        logger.warning(f"SQLite error scanning for personas: {e}")
         return {}
     except Exception as e:
         logger.warning(f"Error scanning Cursor chats for personas: {e}")
@@ -795,14 +803,21 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
     - File paths: "/home/.../automation-analytics-backend/..."
     - **Project:** `automation-analytics-backend` (session_start output)
 
+    Uses Python sqlite3 module directly for better performance.
+
     Args:
-        chat_ids: Optional list of chat IDs to scan. If None, scans all chats.
+        chat_ids: Optional list of chat IDs to scan. If None, returns empty (too expensive).
 
     Returns:
         Dict mapping chat ID to the detected project name.
     """
     import re
-    import subprocess
+    import sqlite3
+
+    # OPTIMIZATION: If no specific chat IDs provided, skip the expensive full scan
+    if not chat_ids:
+        logger.debug("get_cursor_chat_projects: No chat_ids provided, skipping expensive full scan")
+        return {}
 
     # Load valid project names from config
     try:
@@ -830,111 +845,91 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
             logger.debug("Cursor global storage not found")
             return {}
 
-        # Build query - look for project-related content
-        # Search for any of the project names or common patterns
-        project_patterns_sql = " OR ".join(f"value LIKE '%{proj}%'" for proj in VALID_PROJECTS)
-
-        if chat_ids:
-            like_clauses = " OR ".join(f"key LIKE 'bubbleId:{cid}:%'" for cid in chat_ids)
-            query = f"""SELECT key, value FROM cursorDiskKV
-                       WHERE ({like_clauses})
-                       AND ({project_patterns_sql} OR value LIKE '%project=%' OR value LIKE '%Project:%')"""
-        else:
-            query = f"""SELECT key, value FROM cursorDiskKV
-                      WHERE key LIKE 'bubbleId:%'
-                      AND ({project_patterns_sql} OR value LIKE '%project=%' OR value LIKE '%Project:%')"""
-
-        result = subprocess.run(["sqlite3", str(global_db), query], capture_output=True, text=True, timeout=30)
-
-        if result.returncode != 0:
-            logger.debug(f"Failed to query Cursor global DB for projects: {result.stderr}")
-            return {}
+        # Use Python sqlite3 directly (faster than subprocess)
+        conn = sqlite3.connect(str(global_db), timeout=10)
+        cursor = conn.cursor()
 
         # Build regex patterns for each project
-        # Escape special characters in project names for regex
         project_patterns = []
         for proj in VALID_PROJECTS:
             escaped = re.escape(proj)
-            # Pattern 1: session_start(project="proj") or session_set_project(project="proj")
-            project_patterns.append(
-                (re.compile(rf'project\s*=\s*["\']({escaped})["\']', re.IGNORECASE), 10)  # High priority
-            )
-            # Pattern 2: **Project:** `proj` (markdown output)
+            project_patterns.append((re.compile(rf'project\s*=\s*["\']({escaped})["\']', re.IGNORECASE), 10))
             project_patterns.append((re.compile(rf"\*\*Project:\*\*\s*`({escaped})`", re.IGNORECASE), 9))
-            # Pattern 3: Project: proj (plain text)
             project_patterns.append((re.compile(rf'Project:\s*[`"\']?({escaped})[`"\']?', re.IGNORECASE), 8))
-            # Pattern 4: File path containing project name
             project_patterns.append(
                 (re.compile(rf"/(?:home|Users)/[^/]+/(?:src|projects?|repos?)/({escaped})/", re.IGNORECASE), 7)
             )
-            # Pattern 5: GitLab path (automation-analytics/automation-analytics-backend)
             project_patterns.append((re.compile(rf'[\w-]+/({escaped})(?:\s|$|["\'\]])', re.IGNORECASE), 6))
-            # Pattern 6: Direct mention of project name (word boundary)
             project_patterns.append((re.compile(rf"\b({escaped})\b", re.IGNORECASE), 5))
 
-        # Collect all project mentions per chat with their position and priority
-        # Structure: {chat_id: [(position, priority, project), ...]}
+        # Collect all project mentions per chat
         chat_projects: dict[str, list[tuple[int, int, str]]] = {}
 
-        for line in result.stdout.strip().split("\n"):
-            if not line or "|" not in line:
-                continue
+        # Query each chat ID separately
+        for cid in chat_ids:
             try:
-                key, value = line.split("|", 1)
-                # Extract chat ID and bubble ID from key: bubbleId:<chatId>:<bubbleId>
-                parts = key.split(":")
-                if len(parts) >= 3:
-                    chat_id = parts[1]
+                # Build a simple query for this chat - check for project-related content
+                cursor.execute(
+                    """SELECT key, value FROM cursorDiskKV
+                       WHERE key LIKE ?
+                       AND (value LIKE '%project=%' OR value LIKE '%Project:%')
+                       LIMIT 50""",
+                    (f"bubbleId:{cid}:%",),
+                )
+
+                for key, value in cursor.fetchall():
                     try:
-                        bubble_id = int(parts[2]) if parts[2].isdigit() else 0
-                    except (ValueError, IndexError):
-                        bubble_id = 0
+                        parts = key.split(":")
+                        if len(parts) >= 3:
+                            chat_id = parts[1]
+                            try:
+                                bubble_id = int(parts[2]) if parts[2].isdigit() else 0
+                            except (ValueError, IndexError):
+                                bubble_id = 0
 
-                    data = json.loads(value)
-                    text = data.get("text", "")
-                    if not text:
+                            data = json.loads(value)
+                            text = data.get("text", "")
+                            if not text:
+                                continue
+
+                            for pattern, priority in project_patterns:
+                                matches = pattern.findall(text)
+                                for match in matches:
+                                    project_name = match.lower()
+                                    for valid_proj in VALID_PROJECTS:
+                                        if valid_proj.lower() == project_name:
+                                            project_name = valid_proj
+                                            break
+
+                                    if project_name in VALID_PROJECTS:
+                                        if chat_id not in chat_projects:
+                                            chat_projects[chat_id] = []
+                                        chat_projects[chat_id].append((bubble_id, priority, project_name))
+
+                    except (json.JSONDecodeError, ValueError):
                         continue
-
-                    # Try each pattern to find project mentions
-                    for pattern, priority in project_patterns:
-                        matches = pattern.findall(text)
-                        for match in matches:
-                            # Normalize project name
-                            project_name = match.lower()
-                            # Find the canonical name (case-insensitive match)
-                            for valid_proj in VALID_PROJECTS:
-                                if valid_proj.lower() == project_name:
-                                    project_name = valid_proj
-                                    break
-
-                            if project_name in VALID_PROJECTS:
-                                if chat_id not in chat_projects:
-                                    chat_projects[chat_id] = []
-                                chat_projects[chat_id].append((bubble_id, priority, project_name))
-
-            except (json.JSONDecodeError, ValueError):
+            except sqlite3.Error as e:
+                logger.debug(f"Error querying chat {cid} for projects: {e}")
                 continue
+
+        conn.close()
 
         # Return the best project for each chat
-        # Priority: highest priority pattern, then most recent (highest bubble_id)
         result_map = {}
         for chat_id, project_list in chat_projects.items():
             if project_list:
-                # Sort by priority (desc), then by bubble_id (desc)
                 project_list.sort(key=lambda x: (x[1], x[0]), reverse=True)
                 best_project = project_list[0][2]
-                # Skip if it's just redhat-ai-workflow (the workspace default)
-                # Only return if we found a more specific project
                 if best_project != "redhat-ai-workflow":
                     result_map[chat_id] = best_project
 
         if result_map:
-            logger.info(f"Detected projects in {len(result_map)} chat(s) from content")
+            logger.debug(f"Detected projects in {len(result_map)} chat(s) from content")
 
         return result_map
 
-    except subprocess.TimeoutExpired:
-        logger.warning("Timeout scanning Cursor DB for projects")
+    except sqlite3.Error as e:
+        logger.warning(f"SQLite error scanning for projects: {e}")
         return {}
     except Exception as e:
         logger.warning(f"Error scanning Cursor chats for projects: {e}")
@@ -1367,6 +1362,24 @@ class ChatSession:
         """Clear the tool filter cache (e.g., when persona changes)."""
         self.tool_filter_cache.clear()
 
+    def add_to_filter_cache(self, key: str, tools: list[str]) -> None:
+        """Add an entry to the filter cache with size limiting.
+
+        Prevents unbounded memory growth by evicting oldest entries when
+        cache exceeds MAX_FILTER_CACHE_SIZE.
+
+        Args:
+            key: Cache key (typically message hash)
+            tools: List of tool names to cache
+        """
+        # Evict oldest entries if cache is full
+        while len(self.tool_filter_cache) >= MAX_FILTER_CACHE_SIZE:
+            # Remove first (oldest) entry - dict maintains insertion order in Python 3.7+
+            oldest_key = next(iter(self.tool_filter_cache))
+            del self.tool_filter_cache[oldest_key]
+
+        self.tool_filter_cache[key] = tools
+
 
 @dataclass
 class WorkspaceState:
@@ -1465,30 +1478,6 @@ class WorkspaceState:
         self.touch()
 
         logger.info(f"Created session {session_id} in workspace {self.workspace_uri} with project '{session_project}'")
-
-        # #region agent log
-        import json as _debug_json  # noqa: F811
-
-        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-            _debug_json.dumps(
-                {
-                    "location": "workspace_state.py:create_session",
-                    "message": "Created new session with per-session project",
-                    "data": {
-                        "session_id": session_id,
-                        "session_project": session_project,
-                        "is_auto_detected": session_auto_detected,
-                        "workspace_project": self.project,
-                        "explicit_project_arg": project,
-                    },
-                    "timestamp": __import__("time").time() * 1000,
-                    "sessionId": "debug-session",
-                    "hypothesisId": "per-session",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
 
         # Persist to disk after creating session
         WorkspaceRegistry.save_to_disk()
@@ -1615,8 +1604,8 @@ class WorkspaceState:
         """Get number of sessions in this workspace."""
         return len(self.sessions)
 
-    def sync_with_cursor_db(self) -> dict:
-        """Full sync with Cursor's database.
+    def sync_with_cursor_db(self, session_ids: list[str] | None = None, skip_content_scan: bool = False) -> dict:
+        """Sync with Cursor's database.
 
         This keeps our sessions in sync with Cursor:
         - Adds sessions that exist in Cursor but not in our system
@@ -1625,6 +1614,13 @@ class WorkspaceState:
         - Updates last_activity from Cursor's lastUpdatedAt
         - Updates tool_count based on persona
         - Scans chat content for Jira issue keys (AAP-XXXXX)
+
+        Args:
+            session_ids: Optional list of session IDs to sync. If provided, only
+                        these sessions will have their content scanned (expensive).
+                        Session adds/removes still happen for all sessions.
+            skip_content_scan: If True, skip all expensive content scanning.
+                              Useful for initial sync to get basic state quickly.
 
         Returns:
             Dict with counts: {"added": N, "removed": N, "renamed": N, "updated": N}
@@ -1645,13 +1641,22 @@ class WorkspaceState:
         # Get currently loaded tools count (for active session)
         current_tool_count = len(self._get_loaded_tools())
 
+        # Determine which sessions to scan for content (expensive operations)
+        # If session_ids provided, only scan those; if skip_content_scan, scan none
+        if skip_content_scan:
+            scan_ids = []
+        elif session_ids:
+            scan_ids = list(session_ids)
+        else:
+            scan_ids = []  # Default to no content scanning - too expensive
+
         # Extract all issue keys from chat names and content
         # Pattern: AAP-XXXXX (4-7 digits, case insensitive)
         import re
 
         issue_pattern = re.compile(r"AAP-\d{4,7}", re.IGNORECASE)
 
-        # First pass: extract all issue keys from chat names
+        # First pass: extract all issue keys from chat names (cheap, do for all)
         issue_keys_from_names: dict[str, set[str]] = {}
         for sid, chat in cursor_chat_map.items():
             name = chat.get("name") or ""
@@ -1659,15 +1664,21 @@ class WorkspaceState:
             if matches:
                 issue_keys_from_names[sid] = {m.upper() for m in matches}
 
-        # Second pass: scan chat content for all chats to get additional issue keys
-        # Always scan to find any new issue keys mentioned in content
-        issue_keys_from_content = get_cursor_chat_issue_keys(list(cursor_ids))
+        # Expensive content scanning - only for target sessions
+        # These query the 7GB global Cursor database
+        issue_keys_from_content: dict[str, str] = {}
+        personas_from_content: dict[str, str] = {}
+        projects_from_content: dict[str, str] = {}
 
-        # Third pass: scan chat content for persona loads (backup detection)
-        personas_from_content = get_cursor_chat_personas(list(cursor_ids))
+        if scan_ids:
+            # Second pass: scan chat content for issue keys (expensive)
+            issue_keys_from_content = get_cursor_chat_issue_keys(scan_ids)
 
-        # Fourth pass: scan chat content for project mentions
-        projects_from_content = get_cursor_chat_projects(list(cursor_ids))
+            # Third pass: scan chat content for persona loads (expensive)
+            personas_from_content = get_cursor_chat_personas(scan_ids)
+
+            # Fourth pass: scan chat content for project mentions (expensive)
+            projects_from_content = get_cursor_chat_projects(scan_ids)
 
         # Merge: combine keys from name and content, deduplicate and sort
         issue_keys: dict[str, str] = {}
@@ -1982,6 +1993,8 @@ class WorkspaceRegistry:
     """
 
     _workspaces: dict[str, WorkspaceState] = {}
+    _access_count: int = 0  # Counter for periodic cleanup
+    _CLEANUP_INTERVAL: int = 100  # Run cleanup every N accesses
 
     @classmethod
     async def get_for_ctx(cls, ctx: "Context", ensure_session: bool = True) -> WorkspaceState:
@@ -1994,48 +2007,20 @@ class WorkspaceRegistry:
         Returns:
             WorkspaceState for the current workspace
         """
-        # #region agent log
-        import json as _debug_json  # noqa: F811
+        logger.debug(f"get_for_ctx called, current registry has {len(cls._workspaces)} workspace(s)")
 
-        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-            _debug_json.dumps(
-                {
-                    "location": "workspace_state.py:get_for_ctx:entry",
-                    "message": "get_for_ctx called",
-                    "data": {
-                        "registry_count": len(cls._workspaces),
-                        "existing_workspaces": list(cls._workspaces.keys()),
-                    },
-                    "timestamp": __import__("time").time() * 1000,
-                    "sessionId": "debug-session",
-                    "hypothesisId": "A,E",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
-        logger.info(f"get_for_ctx called, current registry has {len(cls._workspaces)} workspace(s)")
+        # Periodic cleanup to prevent memory leaks
+        cls._access_count += 1
+        if cls._access_count >= cls._CLEANUP_INTERVAL:
+            cls._access_count = 0
+            cleaned = cls.cleanup_stale(max_age_hours=SESSION_STALE_HOURS)
+            if cleaned > 0:
+                logger.info(f"Periodic cleanup: removed {cleaned} stale workspace(s)")
+
         workspace_uri = await cls._get_workspace_uri(ctx)
-        logger.info(f"Resolved workspace_uri: {workspace_uri}")
+        logger.debug(f"Resolved workspace_uri: {workspace_uri}")
 
         is_new_workspace = workspace_uri not in cls._workspaces
-        # #region agent log
-        import json as _debug_json  # noqa: F811
-
-        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-            _debug_json.dumps(
-                {
-                    "location": "workspace_state.py:get_for_ctx:check_new",
-                    "message": "Checking if workspace is new",
-                    "data": {"workspace_uri": workspace_uri, "is_new_workspace": is_new_workspace},
-                    "timestamp": __import__("time").time() * 1000,
-                    "sessionId": "debug-session",
-                    "hypothesisId": "A,E",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
 
         if is_new_workspace:
             # Try to restore from disk first (in case server restarted)
@@ -2047,52 +2032,12 @@ class WorkspaceRegistry:
             if workspace_uri in cls._workspaces:
                 logger.info(f"Restored workspace {workspace_uri} from disk")
                 is_new_workspace = False
-                # #region agent log
-                restored_ws = cls._workspaces[workspace_uri]
-                import json as _debug_json  # noqa: F811
-
-                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-                    _debug_json.dumps(
-                        {
-                            "location": "workspace_state.py:get_for_ctx:restored",
-                            "message": "Restored workspace from disk",
-                            "data": {
-                                "workspace_uri": workspace_uri,
-                                "restored_project": restored_ws.project,
-                                "is_auto_detected": restored_ws.is_auto_detected,
-                                "session_count": len(restored_ws.sessions),
-                            },
-                            "timestamp": __import__("time").time() * 1000,
-                            "sessionId": "debug-session",
-                            "hypothesisId": "E",
-                        }
-                    )
-                    + "\n"
-                )
-                # #endregion
             else:
                 # Create new workspace state
                 state = WorkspaceState(workspace_uri=workspace_uri)
 
                 # Auto-detect project from workspace path
                 detected_project = cls._detect_project(workspace_uri)
-                # #region agent log
-                import json as _debug_json  # noqa: F811
-
-                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-                    _debug_json.dumps(
-                        {
-                            "location": "workspace_state.py:get_for_ctx:detect",
-                            "message": "Auto-detecting project",
-                            "data": {"workspace_uri": workspace_uri, "detected_project": detected_project},
-                            "timestamp": __import__("time").time() * 1000,
-                            "sessionId": "debug-session",
-                            "hypothesisId": "B",
-                        }
-                    )
-                    + "\n"
-                )
-                # #endregion
                 if detected_project:
                     state.project = detected_project
                     state.is_auto_detected = True
@@ -2104,31 +2049,7 @@ class WorkspaceRegistry:
                     f"registry now has {len(cls._workspaces)} workspace(s)"
                 )
         else:
-            logger.info(f"Found existing workspace state for {workspace_uri}")
-            existing_ws = cls._workspaces[workspace_uri]
-            # #region agent log
-            import json as _debug_json  # noqa: F811
-
-            open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-                _debug_json.dumps(
-                    {
-                        "location": "workspace_state.py:get_for_ctx:existing",
-                        "message": "Using existing workspace",
-                        "data": {
-                            "workspace_uri": workspace_uri,
-                            "project": existing_ws.project,
-                            "is_auto_detected": existing_ws.is_auto_detected,
-                            "active_session_id": existing_ws.active_session_id,
-                            "session_count": len(existing_ws.sessions),
-                        },
-                        "timestamp": __import__("time").time() * 1000,
-                        "sessionId": "debug-session",
-                        "hypothesisId": "A,C",
-                    }
-                )
-                + "\n"
-            )
-            # #endregion
+            logger.debug(f"Found existing workspace state for {workspace_uri}")
             cls._workspaces[workspace_uri].touch()
 
         workspace = cls._workspaces[workspace_uri]
@@ -2194,23 +2115,6 @@ class WorkspaceRegistry:
 
         config = load_config()
         if not config:
-            # #region agent log
-            import json as _debug_json  # noqa: F811
-
-            open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-                _debug_json.dumps(
-                    {
-                        "location": "workspace_state.py:_detect_project:no_config",
-                        "message": "No config loaded",
-                        "data": {"workspace_uri": workspace_uri},
-                        "timestamp": __import__("time").time() * 1000,
-                        "sessionId": "debug-session",
-                        "hypothesisId": "B",
-                    }
-                )
-                + "\n"
-            )
-            # #endregion
             return None
 
         # Convert file:// URI to path
@@ -2231,27 +2135,6 @@ class WorkspaceRegistry:
             return None
 
         repositories = config.get("repositories", {})
-        # #region agent log
-        import json as _debug_json  # noqa: F811
-
-        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-            _debug_json.dumps(
-                {
-                    "location": "workspace_state.py:_detect_project:checking",
-                    "message": "Checking repositories",
-                    "data": {
-                        "workspace_uri": workspace_uri,
-                        "workspace_path": str(workspace_path),
-                        "repo_names": list(repositories.keys()),
-                    },
-                    "timestamp": __import__("time").time() * 1000,
-                    "sessionId": "debug-session",
-                    "hypothesisId": "B",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
         for project_name, project_config in repositories.items():
             project_path_str = project_config.get("path", "")
             if not project_path_str:
@@ -2259,27 +2142,6 @@ class WorkspaceRegistry:
 
             try:
                 project_path = Path(project_path_str).expanduser().resolve()
-                # #region agent log
-                import json as _debug_json  # noqa: F811
-
-                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-                    _debug_json.dumps(
-                        {
-                            "location": "workspace_state.py:_detect_project:compare",
-                            "message": "Comparing paths",
-                            "data": {
-                                "project_name": project_name,
-                                "project_path": str(project_path),
-                                "workspace_path": str(workspace_path),
-                            },
-                            "timestamp": __import__("time").time() * 1000,
-                            "sessionId": "debug-session",
-                            "hypothesisId": "B",
-                        }
-                    )
-                    + "\n"
-                )
-                # #endregion
                 # Check if workspace is the project path or a subdirectory
                 workspace_path.relative_to(project_path)
                 return project_name
@@ -2508,11 +2370,15 @@ class WorkspaceRegistry:
         return sum(ws.session_count() for ws in cls._workspaces.values())
 
     @classmethod
-    def sync_all_with_cursor(cls) -> dict:
+    def sync_all_with_cursor(cls, skip_content_scan: bool = False) -> dict:
         """Full sync with Cursor's database for all workspaces.
 
         This should be called before exporting workspace state to ensure
         sessions are in sync with Cursor's database (adds, removes, renames, updates).
+
+        Args:
+            skip_content_scan: If True, skip expensive content scanning (issue keys,
+                              personas, projects). Useful for initial sync.
 
         Returns:
             Dict with total counts: {"added": N, "removed": N, "renamed": N, "updated": N}
@@ -2520,7 +2386,7 @@ class WorkspaceRegistry:
         totals = {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
 
         for workspace in cls._workspaces.values():
-            result = workspace.sync_with_cursor_db()
+            result = workspace.sync_with_cursor_db(skip_content_scan=skip_content_scan)
             totals["added"] += result["added"]
             totals["removed"] += result["removed"]
             totals["renamed"] += result["renamed"]
@@ -2542,6 +2408,53 @@ class WorkspaceRegistry:
         """Deprecated: Use sync_all_with_cursor() instead."""
         result = cls.sync_all_with_cursor()
         return result["renamed"]
+
+    @classmethod
+    def sync_sessions_with_cursor(cls, session_ids: list[str] | None = None) -> dict:
+        """Sync specific sessions with Cursor's database.
+
+        This is more efficient than sync_all_with_cursor when you only need
+        to update a subset of sessions (e.g., recently active ones).
+
+        Args:
+            session_ids: List of session IDs to sync. If None, syncs all sessions.
+
+        Returns:
+            Dict with total counts: {"added": N, "removed": N, "renamed": N, "updated": N}
+        """
+        if session_ids is None:
+            # Fall back to full sync
+            return cls.sync_all_with_cursor()
+
+        totals = {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
+
+        # Find which workspaces contain the target sessions
+        target_workspaces: dict[str, set[str]] = {}  # workspace_uri -> session_ids
+        for workspace in cls._workspaces.values():
+            matching_ids = set(session_ids) & set(workspace.sessions.keys())
+            if matching_ids:
+                target_workspaces[workspace.workspace_uri] = matching_ids
+
+        # Sync only the relevant workspaces, passing the target session IDs
+        for workspace_uri, target_ids in target_workspaces.items():
+            workspace = cls._workspaces.get(workspace_uri)
+            if workspace:
+                result = workspace.sync_with_cursor_db(session_ids=list(target_ids))
+                totals["added"] += result["added"]
+                totals["removed"] += result["removed"]
+                totals["renamed"] += result["renamed"]
+                totals["updated"] += result.get("updated", 0)
+
+        total_changes = sum(totals.values())
+        if total_changes > 0:
+            logger.debug(
+                f"Synced {len(session_ids)} sessions with Cursor DB: "
+                f"+{totals['added']} -{totals['removed']} ~{totals['renamed']} ↻{totals['updated']}"
+            )
+            # Persist changes to disk
+            cls.save_to_disk()
+
+        return totals
 
     @classmethod
     def remove(cls, workspace_uri: str) -> bool:
@@ -2686,44 +2599,10 @@ class WorkspaceRegistry:
             Number of sessions restored.
         """
         if not PERSIST_FILE.exists():
-            logger.info("load_from_disk: No persisted workspace state found")
-            # #region agent log
-            import json as _debug_json  # noqa: F811
-
-            open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-                _debug_json.dumps(
-                    {
-                        "location": "workspace_state.py:load_from_disk:no_file",
-                        "message": "No persist file found",
-                        "data": {"persist_file": str(PERSIST_FILE)},
-                        "timestamp": __import__("time").time() * 1000,
-                        "sessionId": "debug-session",
-                        "hypothesisId": "E",
-                    }
-                )
-                + "\n"
-            )
-            # #endregion
+            logger.debug("load_from_disk: No persisted workspace state found")
             return 0
 
-        logger.info(f"load_from_disk: Loading from {PERSIST_FILE}")
-        # #region agent log
-        import json as _debug_json  # noqa: F811
-
-        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-            _debug_json.dumps(
-                {
-                    "location": "workspace_state.py:load_from_disk:loading",
-                    "message": "Loading from disk",
-                    "data": {"persist_file": str(PERSIST_FILE)},
-                    "timestamp": __import__("time").time() * 1000,
-                    "sessionId": "debug-session",
-                    "hypothesisId": "E",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
+        logger.debug(f"load_from_disk: Loading from {PERSIST_FILE}")
 
         try:
             with open(PERSIST_FILE) as f:
@@ -2761,29 +2640,6 @@ class WorkspaceRegistry:
                 else:
                     # No project detected from URI, use persisted value
                     workspace.project = persisted_project
-
-                # #region agent log
-                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-                    json.dumps(
-                        {
-                            "location": "workspace_state.py:load_from_disk:restore_workspace",
-                            "message": "Restoring workspace from disk",
-                            "data": {
-                                "workspace_uri": workspace_uri,
-                                "persisted_project": persisted_project,
-                                "detected_project": detected_project,
-                                "final_project": workspace.project,
-                                "is_auto_detected": workspace.is_auto_detected,
-                                "active_session_id": workspace.active_session_id,
-                            },
-                            "timestamp": __import__("time").time() * 1000,
-                            "sessionId": "debug-session",
-                            "hypothesisId": "E",
-                        }
-                    )
-                    + "\n"
-                )
-                # #endregion
 
                 # Parse timestamps
                 if ws_data.get("created_at"):

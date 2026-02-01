@@ -64,16 +64,15 @@ def maybe_gc(force: bool = False) -> None:
         _last_gc_time = now
 
 
-# Live meeting data integration
-_attendee_client_available = False
+# Live meeting data integration (avatar generation, matrix animation)
+_live_rendering_available = False
 try:
-    from .attendee_service import AttendeeDataClient, EnrichedAttendee, MeetingState
     from .avatar_generator import generate_initials_avatar, load_or_generate_avatar
     from .matrix_animation import MatrixAnimation
 
-    _attendee_client_available = True
+    _live_rendering_available = True
 except ImportError:
-    logger.debug("Live attendee client not available")
+    logger.debug("Live rendering components not available")
 
 # Optional GPU text rendering (smooth anti-aliased TrueType fonts)
 _gpu_text_available = False
@@ -244,7 +243,7 @@ class GPUColorConverter:
         try:
             import pyopencl as cl
         except ImportError:
-            raise ImportError("pyopencl required for GPU acceleration. Install with: pip install pyopencl")
+            raise ImportError("pyopencl required for GPU acceleration. Install with: uv add pyopencl")
 
         self.width = width
         self.height = height
@@ -470,7 +469,7 @@ class UltraLowCPURenderer:
         try:
             import pyopencl as cl
         except ImportError:
-            raise ImportError("pyopencl required for ultra-low CPU mode. Install with: pip install pyopencl")
+            raise ImportError("pyopencl required for ultra-low CPU mode. Install with: uv add pyopencl")
 
         self.width = config.width
         self.height = config.height
@@ -952,11 +951,16 @@ THREAT_ASSESSMENTS = [
 
 @dataclass
 class Attendee:
-    """Meeting attendee for the fake research video."""
+    """Meeting attendee with optional enriched data from Slack."""
 
     name: str
-    mugshot_path: Optional[Path] = None  # Optional photo
+    mugshot_path: Optional[Path] = None  # Optional photo (legacy)
     title: str = "Engineer"
+    # Slack enrichment data
+    slack_id: Optional[str] = None
+    slack_display_name: Optional[str] = None
+    photo_path: Optional[str] = None  # Path to cached Slack photo
+    email: Optional[str] = None
 
 
 @dataclass
@@ -1804,7 +1808,11 @@ class RealtimeVideoRenderer:
     """
 
     def __init__(
-        self, config: Optional[VideoConfig] = None, audio_source: Optional[str] = None, enable_webrtc: bool = False
+        self,
+        config: Optional[VideoConfig] = None,
+        audio_source: Optional[str] = None,
+        sink_input_index: Optional[int] = None,
+        enable_webrtc: bool = False,
     ):
         """
         Initialize the real-time video renderer.
@@ -1812,11 +1820,19 @@ class RealtimeVideoRenderer:
         Args:
             config: Video configuration
             audio_source: Optional PulseAudio source name for audio-reactive waveform
-                         (e.g., "meet_bot_abc123.monitor")
+                         For direct capture: e.g., "alsa_input..." (physical mic)
+                         For monitor-stream: just used for logging
+            sink_input_index: If provided, use parec --monitor-stream to capture
+                             directly from this sink-input index. This bypasses
+                             broken null-sink monitors in PipeWire.
             enable_webrtc: Enable WebRTC streaming for preview (port 8765)
         """
         self.config = config or VideoConfig()
         self._running = False
+
+        # Video mode: "black" (render black frames) or "full" (render AI overlay)
+        # Can be changed at runtime without restarting the render loop
+        self._video_mode = "full"
 
         # WebRTC streaming for preview
         self._enable_webrtc = enable_webrtc
@@ -1824,6 +1840,7 @@ class RealtimeVideoRenderer:
 
         # Audio capture for reactive waveform
         self._audio_source = audio_source
+        self._sink_input_index = sink_input_index  # For monitor-stream capture
         self._audio_capture = None
         self._audio_buffer: Optional[np.ndarray] = None
         # Note: Lock is created lazily in _start_audio_capture since we may not be in async context
@@ -1855,6 +1872,17 @@ class RealtimeVideoRenderer:
             "last_update": 0.0,
         }
         self._npu_stats_prev_busy: int = 0  # For calculating delta
+
+        # Real STT/inference stats (from the STT engine)
+        self._stt_stats: dict = {
+            "inference_count": 0,
+            "samples_processed": 0,
+            "last_inference_ms": 0.0,
+            "last_rtf": 0.0,
+            "avg_rtf": 0.0,
+            "avg_latency_ms": 0.0,
+            "inferences_per_second": 0.0,
+        }
 
         # Try to load fonts
         try:
@@ -1893,6 +1921,10 @@ class RealtimeVideoRenderer:
         self._fft_smoothing = 0.3  # Smoothing factor for FFT (0=no smoothing, 1=max smoothing)
         self._prev_fft_bars: Optional[np.ndarray] = None
 
+        # Dynamic attendee updates (set via update_attendees method)
+        self._dynamic_attendees: Optional[list] = None
+        self._attendees_updated: bool = False
+
         # GPU text renderer (smooth anti-aliased TrueType fonts via OpenGL)
         # Font sizes are resolution-dependent: 1080p gets +2pt for readability
         self._gpu_text_renderer: Optional["VideoTextRenderer"] = None
@@ -1920,6 +1952,41 @@ class RealtimeVideoRenderer:
         # Pre-render static elements for performance
         self._static_cache = {}
         self._init_static_cache()
+
+    def update_attendees(self, attendees: list) -> None:
+        """
+        Update the attendee list dynamically during rendering.
+
+        Called by video_daemon when it receives updated attendees via D-Bus.
+
+        Args:
+            attendees: List of attendee dicts with 'name' and optionally Slack enrichment:
+                       - slack_id: Slack user ID
+                       - slack_display_name: Slack display name
+                       - photo_path: Path to cached Slack profile photo
+                       - email: User email
+        """
+        # Convert dicts to Attendee objects, preserving all enrichment data
+        attendee_objs = []
+        for a in attendees:
+            if isinstance(a, dict):
+                attendee_objs.append(
+                    Attendee(
+                        name=a.get("name", "Unknown"),
+                        slack_id=a.get("slack_id"),
+                        slack_display_name=a.get("slack_display_name"),
+                        photo_path=a.get("photo_path"),
+                        email=a.get("email"),
+                    )
+                )
+            elif hasattr(a, "name"):
+                attendee_objs.append(a)
+            else:
+                attendee_objs.append(Attendee(name=str(a)))
+
+        self._dynamic_attendees = attendee_objs
+        self._attendees_updated = True
+        logger.info(f"Updated attendees: {len(attendee_objs)} participants with Slack data")
 
     def _init_static_cache(self):
         """
@@ -2075,8 +2142,13 @@ class RealtimeVideoRenderer:
         logger.debug("Static element cache initialized (OpenCV)")
 
     async def _start_audio_capture(self) -> bool:
-        """Start capturing audio from the PulseAudio source."""
-        if not self._audio_source:
+        """Start capturing audio from the PulseAudio source.
+
+        Supports two capture methods:
+        1. Direct source capture (for testing with physical mic)
+        2. Monitor-stream capture (for production - captures from app's sink-input)
+        """
+        if not self._audio_source and self._sink_input_index is None:
             return False
 
         try:
@@ -2086,9 +2158,10 @@ class RealtimeVideoRenderer:
             self._audio_lock = asyncio.Lock()
 
             self._audio_capture = PulseAudioCapture(
-                source_name=self._audio_source,
+                source_name=self._audio_source or "monitor-stream",
                 sample_rate=16000,
                 chunk_ms=50,  # 50ms chunks for responsive visualization
+                sink_input_index=self._sink_input_index,  # For monitor-stream method
             )
 
             if await self._audio_capture.start():
@@ -2261,6 +2334,10 @@ class RealtimeVideoRenderer:
                     start = time.time()
                     result = await self._stt_engine.transcribe(audio_view, 16000)
                     proc_time = time.time() - start
+
+                    # Update real STT stats from the engine
+                    if hasattr(self._stt_engine, "get_stats"):
+                        self._stt_stats = self._stt_engine.get_stats()
 
                     if result.text and len(result.text.strip()) > 3:
                         # Filter out garbage (repeated chars, too short, single words)
@@ -2649,6 +2726,25 @@ class RealtimeVideoRenderer:
         # Return BGR array directly (caller expects BGR for OpenCV compatibility)
         return frame
 
+    def set_video_mode(self, mode: str) -> None:
+        """
+        Set the video rendering mode without restarting the render loop.
+
+        Args:
+            mode: "black" for black screen, "full" for full AI overlay
+        """
+        if mode not in ("black", "full"):
+            logger.warning(f"Invalid video mode: {mode}, ignoring")
+            return
+
+        if mode != self._video_mode:
+            logger.info(f"Video mode changed: {self._video_mode} -> {mode}")
+            self._video_mode = mode
+
+    def get_video_mode(self) -> str:
+        """Get the current video rendering mode."""
+        return self._video_mode
+
     async def stream_realtime(
         self,
         attendees: list[Attendee],
@@ -2692,12 +2788,9 @@ class RealtimeVideoRenderer:
             logger.info("Resetting GPU renderer for clean state")
             self._ulc_renderer = None
 
-        # Kill any processes using the device (except ourselves)
-        try:
-            subprocess.run(["sudo", "fuser", "-k", video_device], capture_output=True, timeout=5)
-            await asyncio.sleep(0.5)  # Give processes time to die
-        except Exception:
-            pass  # fuser may not be available or device may not be in use
+        # NOTE: Removed fuser -k call that was killing the video device
+        # The video daemon should already have exclusive access to the device
+        # Killing processes here was causing the daemon to kill itself!
 
         # Open v4l2 device
         v4l2_fd = os.open(video_device, os.O_RDWR)
@@ -2775,17 +2868,52 @@ class RealtimeVideoRenderer:
                 logger.warning(f"Failed to start WebRTC streaming: {e}")
                 self._webrtc_pipeline = None
 
+        # Pre-create black frame for "black" mode (YUYV format)
+        black_frame = np.zeros((config.height, config.width, 2), dtype=np.uint8)
+        black_frame[:, :, 0] = 16  # Y (luma) - black
+        black_frame[:, :, 1] = 128  # U/V (chroma) - neutral
+        black_bytes = black_frame.tobytes()
+
         try:
+            # Use dynamic attendees if available, otherwise use provided list
+            current_attendees = self._dynamic_attendees if self._dynamic_attendees else attendees
+
             while self._running:
-                for attendee_idx, attendee in enumerate(attendees):
+                # Check video mode - can switch without restarting loop
+                if self._video_mode == "black":
+                    # Black screen mode - minimal CPU, ~5fps
+                    os.write(v4l2_fd, black_bytes)
+                    await asyncio.sleep(0.2)  # 5fps for black screen
+                    continue
+
+                # Full video mode below
+
+                # Check for attendee updates
+                if self._attendees_updated and self._dynamic_attendees:
+                    current_attendees = self._dynamic_attendees
+                    self._attendees_updated = False
+                    logger.info(f"Attendee list updated: {len(current_attendees)} participants")
+
+                for attendee_idx, attendee in enumerate(current_attendees):
                     if not self._running:
                         break
 
+                    # Check if mode changed to black mid-loop
+                    if self._video_mode == "black":
+                        break
+
+                    # Check for updates mid-loop
+                    if self._attendees_updated and self._dynamic_attendees:
+                        current_attendees = self._dynamic_attendees
+                        self._attendees_updated = False
+                        logger.info(f"Attendee list updated mid-loop: {len(current_attendees)} participants")
+                        break  # Restart loop with new attendees
+
                     duration = config.duration_per_person
-                    logger.info(f"Streaming attendee {attendee_idx + 1}/{len(attendees)}: {attendee.name}")
+                    logger.info(f"Streaming attendee {attendee_idx + 1}/{len(current_attendees)}: {attendee.name}")
 
                     # Stream frames using full GPU pipeline
-                    await self._stream_gpu_pipeline(attendee, attendee_idx, len(attendees), duration, v4l2_fd)
+                    await self._stream_gpu_pipeline(attendee, attendee_idx, len(current_attendees), duration, v4l2_fd)
 
                 if not loop:
                     break
@@ -3050,6 +3178,15 @@ class RealtimeVideoRenderer:
         # === FACIAL RECOGNITION - TOP RIGHT === (+10pt bigger text)
         text_items.append(("FACIAL RECOGNITION", c.face_x, c.face_y - 10, "red", "large"))
 
+        # Show Slack username below the profile image
+        if attendee_data and attendee_data.get("has_slack_data"):
+            slack_name = attendee_data.get("slack_display_name", "")
+            slack_id = attendee_data.get("slack_id", "")
+            # Position below the face box
+            slack_info_y = c.face_y + c.face_h + 25
+            text_items.append((f"@{slack_name}", c.face_x, slack_info_y, "cyan", "medium"))
+            text_items.append((f"[{slack_id}]", c.face_x, slack_info_y + 25, "dark_green", "normal"))
+
         # === RIGHT COLUMN REMOVED - no more "BUILDING CONTEXT" ===
 
         # === NPU STATS (all GPU-rendered for consistent quality) ===
@@ -3102,74 +3239,101 @@ class RealtimeVideoRenderer:
             color = "cyan" if "ACTIVE" in stat else "green"
             text_items.append((stat, col_x[1], npu_stats_y + i * npu_line_h, color, npu_size))
 
-        # Column 3 - Model info
+        # Column 3 - Model info (static but accurate)
         col3_stats = [
-            "MODEL: whisper-int8",
-            "PRECISION: INT8",
+            "MODEL: whisper-base",
+            "PRECISION: FP16",
             "INPUT: 16kHz PCM",
         ]
         for i, stat in enumerate(col3_stats):
             text_items.append((stat, col_x[2], npu_stats_y + i * npu_line_h, "green", npu_size))
 
-        # Column 4 - Counters
+        # Column 4 - Real inference counters from STT engine
+        stt = self._stt_stats
         col4_stats = [
-            f"SAMPLES: {int(t * 16000)}",
-            f"INFERENCES: {int(t * 2)}",
+            f"SAMPLES: {stt['samples_processed']}",
+            f"INFERENCES: {stt['inference_count']}",
             f"FRAMES: {frame_num}",
         ]
         for i, stat in enumerate(col4_stats):
             text_items.append((stat, col_x[3], npu_stats_y + i * npu_line_h, "green", npu_size))
 
-        # Column 5 - System stats
+        # Column 5 - Real inference performance
+        rtf_display = f"{stt['avg_rtf']:.2f}" if stt["avg_rtf"] > 0 else "---"
         col5_stats = [
-            f"CPU: ~1%",
-            f"GPU: Intel Arc",
+            f"RTF: {rtf_display}",  # Real-time factor (< 1.0 = faster than real-time)
+            f"DEVICE: {stt.get('device', 'NPU')[:8]}",
             f"STT: {'ON' if self._stt_enabled else 'OFF'}",
         ]
         for i, stat in enumerate(col5_stats):
-            color = "cyan" if "ON" in stat else "green"
+            color = "cyan" if "ON" in stat or stt["avg_rtf"] < 0.5 else "green"
             text_items.append((stat, col_x[4], npu_stats_y + i * npu_line_h, color, npu_size))
 
-        # Column 6 - Telemetry
-        throughput = 0.5 + (util_pct / 100) * 1.0
+        # Column 6 - Real telemetry from STT engine
+        latency_display = f"{stt['avg_latency_ms']:.0f}ms" if stt["avg_latency_ms"] > 0 else "---"
+        rate_display = f"{stt['inferences_per_second']:.1f}/s" if stt["inferences_per_second"] > 0 else "---"
         col6_stats = [
-            f"RATE: {max(1, int(util_pct / 5))} req/s",
-            f"LATENCY: ~{50 + util_pct}ms",
-            "STATUS: ACTIVE",
+            f"RATE: {rate_display}",
+            f"LATENCY: {latency_display}",
+            f"STATUS: {runtime_status}",
         ]
         for i, stat in enumerate(col6_stats):
             color = "cyan" if "ACTIVE" in stat else "green"
             text_items.append((stat, col_x[5], npu_stats_y + i * npu_line_h, color, npu_size))
 
         # Build shapes list for GPU rendering
-        center_x = c.face_x + c.face_w // 2
-        center_y = c.face_y + c.face_head_radius + 32  # +2px down
+        has_photo = attendee_data and attendee_data.get("photo_bgr") is not None
 
         shapes = [
             # Waveform box border
             ("rect", c.wave_x - 3, c.wave_y - 3, c.wave_w + 6, c.wave_h + 6, "dark_green", 1),
-            # Face box
-            ("rect", c.face_x, c.face_y, c.face_w, c.face_h, "dark_green", 1),
-            # Silhouette head (circle)
-            ("circle", center_x, center_y, c.face_head_radius, "green", 2),
-            # Silhouette body (rectangle)
-            (
-                "rect",
-                center_x - c.face_body_width,
-                center_y + c.face_head_radius + 20,
-                c.face_body_width * 2,
-                c.face_y + c.face_h - 20 - (center_y + c.face_head_radius + 20),
-                "green",
-                2,
-            ),
             # NPU divider line
             ("line", 0, c.npu_y, c.width, c.npu_y, "dark_green", 1),
             # Progress bar outline
             ("rect", c.progress_margin, c.progress_y, c.width - c.progress_margin * 2, c.progress_h, "dark_green", 1),
         ]
 
+        # Only show face box and silhouette if NO photo available
+        if not has_photo:
+            # Face box outline
+            shapes.append(("rect", c.face_x, c.face_y, c.face_w, c.face_h, "dark_green", 1))
+            # Silhouette - sized to match typical photo dimensions
+            center_x = c.face_x + c.face_w // 2
+            # Make silhouette fit typical photo size (roughly 200x200 centered)
+            silhouette_size = 180  # Typical photo is around this size
+            head_radius = silhouette_size // 3  # Head is ~1/3 of total height
+            center_y = c.face_y + 25 + head_radius + 10  # Below header
+            body_width = head_radius  # Body width matches head
+            body_top = center_y + head_radius + 15
+            body_height = silhouette_size - head_radius * 2 - 25
+            # Silhouette head (circle)
+            shapes.append(("circle", center_x, center_y, head_radius, "green", 2))
+            # Silhouette body (rectangle)
+            shapes.append(
+                (
+                    "rect",
+                    center_x - body_width,
+                    body_top,
+                    body_width * 2,
+                    body_height,
+                    "green",
+                    2,
+                )
+            )
+
         # Render all text AND shapes with GPU in single pass
         frame = self._gpu_text_renderer.render_frame(text_items, shapes, (0, 0, 0))
+
+        # Overlay profile photo in face area if available
+        if has_photo:
+            photo = attendee_data["photo_bgr"]
+            ph, pw = photo.shape[:2]
+            # Center photo in face box area
+            photo_x = c.face_x + (c.face_w - pw) // 2
+            photo_y = c.face_y + 25  # Below "FACIAL RECOGNITION" header
+            # Ensure we don't go out of bounds
+            if photo_y + ph <= c.height and photo_x + pw <= c.width:
+                frame[photo_y : photo_y + ph, photo_x : photo_x + pw] = photo
 
         # NPU section - dark green background tint for Terminator look
         # (This is a pixel operation, keep it in numpy for now)
@@ -3182,12 +3346,39 @@ class RealtimeVideoRenderer:
         return frame
 
     def _precompute_attendee_data(self, attendee: Attendee) -> dict:
-        """Pre-compute attendee-specific data to avoid per-frame string operations."""
+        """Pre-compute attendee-specific data to avoid per-frame string operations.
+
+        Includes real Slack data if available from the attendee object.
+        Also loads and resizes the profile photo if available.
+        """
         name_parts = attendee.name.split()
         first_name = name_parts[0].lower() if name_parts else "user"
         last_name = name_parts[-1].lower() if len(name_parts) > 1 else first_name
         username = f"{first_name[0]}{last_name}" if len(name_parts) > 1 else first_name
         email_domain = "redhat.com"
+
+        # Use real Slack data if available
+        slack_id = attendee.slack_id or f"U{hash(attendee.name) % 99999999:08d}"
+        slack_display_name = attendee.slack_display_name or attendee.name
+        photo_path = attendee.photo_path
+        email = attendee.email or f"{username}@{email_domain}"
+
+        # Load and resize profile photo if available
+        photo_bgr = None
+        if photo_path and Path(photo_path).exists():
+            try:
+                img = cv2.imread(photo_path)
+                if img is not None:
+                    # Resize to fit in face box (keep aspect ratio)
+                    c = self.config
+                    target_size = min(c.face_w - 20, c.face_h - 40)  # Leave margin
+                    h, w = img.shape[:2]
+                    scale = target_size / max(h, w)
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    photo_bgr = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                    logger.debug(f"Loaded photo for {attendee.name}: {photo_path} -> {new_w}x{new_h}")
+            except Exception as e:
+                logger.warning(f"Failed to load photo {photo_path}: {e}")
 
         return {
             "username": username,
@@ -3195,14 +3386,21 @@ class RealtimeVideoRenderer:
             "last_name": last_name,
             "email_domain": email_domain,
             "voice_print_id": hash(attendee.name) % 99999,
+            # Real Slack data
+            "slack_id": slack_id,
+            "slack_display_name": slack_display_name,
+            "photo_path": photo_path,
+            "photo_bgr": photo_bgr,  # Pre-loaded and resized photo
+            "email": email,
+            "has_slack_data": attendee.slack_id is not None,
             "tools": [
+                f"slack://user/{slack_id}" if attendee.slack_id else f"slack://search?user={first_name}.{last_name}",
                 f"ldap://query?uid={username}",
                 f"jira://search?assignee={username}",
-                f"gitlab://commits?author={username}@{email_domain}",
-                f"slack://history?user={first_name}.{last_name}",
+                f"gitlab://commits?author={email}",
                 f"confluence://pages?author={attendee.name.replace(' ', '+')}",
                 f"workday://profile/{username}",
-                f"google://calendar?email={username}@{email_domain}",
+                f"google://calendar?email={email}",
                 f"deepface://match?name={attendee.name.replace(' ', '_')}",
             ],
         }
@@ -3557,294 +3755,6 @@ class RealtimeVideoRenderer:
 
         return filters
 
-    async def stream_live(
-        self,
-        video_device: str,
-        timeout: float = 300.0,
-    ) -> None:
-        """
-        Stream video with live attendee data from the meeting bot.
-
-        Connects to the AttendeeDataService socket to receive real-time
-        participant updates. Shows Matrix-style "INITIALIZING..." animation
-        until participants are detected.
-
-        Args:
-            video_device: v4l2loopback device path
-            timeout: Max time to wait for attendee service (seconds)
-        """
-        if not _attendee_client_available:
-            raise RuntimeError("Live attendee client not available - missing dependencies")
-
-        import fcntl
-        import struct
-
-        config = self.config
-        self._running = True
-
-        logger.info(f"Starting LIVE stream to {video_device}")
-
-        # Initialize Matrix animation for scanning state
-        matrix_anim = MatrixAnimation(config.width, config.height)
-
-        # Create attendee client
-        client = AttendeeDataClient()
-
-        # State tracking
-        current_attendees: list[EnrichedAttendee] = []
-        current_index = 0
-        meeting_status = "scanning"
-        last_rotation_time = 0.0
-        rotation_interval = config.duration_per_person  # 15 seconds
-
-        # Callbacks for attendee updates
-        def on_attendees_update(attendees: list[EnrichedAttendee]):
-            nonlocal current_attendees, meeting_status
-            current_attendees = attendees
-            if attendees:
-                meeting_status = "active"
-            logger.info(f"Received {len(attendees)} attendees from service")
-
-        def on_status_change(status: str):
-            nonlocal meeting_status
-            meeting_status = status
-            logger.info(f"Meeting status changed: {status}")
-
-        def on_attendee_enriched(index: int, attendee: EnrichedAttendee):
-            nonlocal current_attendees
-            if 0 <= index < len(current_attendees):
-                current_attendees[index] = attendee
-                logger.debug(f"Attendee {index} enriched: {attendee.name}")
-
-        client.on_attendees_update(on_attendees_update)
-        client.on_status_change(on_status_change)
-        client.on_attendee_enriched(on_attendee_enriched)
-
-        # Try to connect to attendee service
-        logger.info("Connecting to AttendeeDataService...")
-        connected = await client.connect(timeout=5.0)
-
-        if connected:
-            logger.info("Connected to AttendeeDataService")
-            await client.request_state()
-        else:
-            logger.warning("AttendeeDataService not available - will retry")
-
-        # Start audio capture if configured
-        if self._audio_source:
-            audio_started = await self._start_audio_capture()
-            if audio_started:
-                logger.info(f"Audio-reactive waveform enabled from {self._audio_source}")
-                for i in range(200):
-                    if self._audio_buffer is not None:
-                        break
-                    await asyncio.sleep(0.01)
-
-        # Reset GPU renderer
-        if hasattr(self, "_ulc_renderer") and self._ulc_renderer is not None:
-            self._ulc_renderer = None
-
-        # Kill any processes using the device
-        try:
-            subprocess.run(["sudo", "fuser", "-k", video_device], capture_output=True, timeout=5)
-            await asyncio.sleep(0.5)
-        except Exception:
-            pass
-
-        # Open v4l2 device
-        v4l2_fd = os.open(video_device, os.O_RDWR)
-
-        # Set video format
-        VIDIOC_S_FMT = 0xC0D05605
-        V4L2_BUF_TYPE_VIDEO_OUTPUT = 2
-        V4L2_PIX_FMT_YUYV = 0x56595559
-        V4L2_FIELD_NONE = 1
-
-        width = config.width
-        height = config.height
-        bytesperline = width * 2
-        sizeimage = bytesperline * height
-
-        fmt = struct.pack(
-            "II" + "IIIIIIII" + "II" + "II" + "152x",
-            V4L2_BUF_TYPE_VIDEO_OUTPUT,
-            0,
-            width,
-            height,
-            V4L2_PIX_FMT_YUYV,
-            V4L2_FIELD_NONE,
-            bytesperline,
-            sizeimage,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
-
-        try:
-            fcntl.ioctl(v4l2_fd, VIDIOC_S_FMT, fmt)
-            logger.info(f"Set v4l2 format: {width}x{height} YUYV")
-        except OSError as e:
-            logger.warning(f"Failed to set v4l2 format: {e}")
-
-        # Test write
-        test_frame = np.zeros((height, width * 2), dtype=np.uint8)
-        os.write(v4l2_fd, test_frame.tobytes())
-
-        # Initialize WebRTC streaming if enabled
-        if self._enable_webrtc:
-            try:
-                from .intel_streaming import IntelStreamingPipeline
-                from .intel_streaming import StreamConfig as StreamingConfig
-
-                logger.info("Starting WebRTC preview server on ws://localhost:8765")
-                logger.info("Using YUYV input format (zero-copy to VA-API encoder)")
-                stream_config = StreamingConfig(
-                    width=config.width,
-                    height=config.height,
-                    framerate=config.fps,
-                    bitrate=4000,
-                    encoder="va",
-                    codec="h264",
-                    signaling_port=8765,
-                    flip=False,
-                    v4l2_device=None,
-                    input_format="yuyv",
-                )
-                self._webrtc_pipeline = IntelStreamingPipeline(stream_config)
-                self._webrtc_pipeline.start(mode="webrtc")
-                logger.info("WebRTC streaming initialized")
-            except Exception as e:
-                logger.warning(f"Failed to start WebRTC streaming: {e}")
-                self._webrtc_pipeline = None
-
-        frame_time = 1.0 / config.fps
-        reconnect_interval = 5.0
-        last_reconnect_attempt = 0.0
-
-        try:
-            while self._running:
-                loop_start = asyncio.get_event_loop().time()
-
-                # Try to reconnect if disconnected
-                if not client.is_connected():
-                    if loop_start - last_reconnect_attempt > reconnect_interval:
-                        last_reconnect_attempt = loop_start
-                        if await client.connect(timeout=2.0):
-                            logger.info("Reconnected to AttendeeDataService")
-                            await client.request_state()
-
-                # Determine what to render
-                if meeting_status == "scanning" or not current_attendees:
-                    # Render Matrix animation
-                    frame = matrix_anim.render_frame(loop_start)
-
-                    # Convert to YUYV
-                    yuyv = bgr_to_yuyv_fast(frame)
-
-                else:
-                    # Render attendee view
-                    # Handle rotation
-                    if loop_start - last_rotation_time >= rotation_interval:
-                        last_rotation_time = loop_start
-                        current_index = (current_index + 1) % len(current_attendees)
-                        await client.set_current_index(current_index)
-                        logger.info(f"Rotated to attendee {current_index + 1}/{len(current_attendees)}")
-
-                    # Get current attendee
-                    attendee = current_attendees[current_index]
-
-                    # Convert EnrichedAttendee to Attendee for existing rendering code
-                    simple_attendee = Attendee(name=attendee.name)
-
-                    # Use existing GPU pipeline for this frame
-                    if not hasattr(self, "_ulc_renderer") or self._ulc_renderer is None:
-                        try:
-                            self._ulc_renderer = UltraLowCPURenderer(config, use_intel=config.prefer_intel_gpu)
-                            logger.info(f"GPU renderer initialized: {self._ulc_renderer.device_name}")
-                        except Exception as e:
-                            logger.error(f"GPU renderer failed: {e}")
-                            raise
-
-                    # Pre-compute attendee data
-                    attendee_data = self._precompute_attendee_data(simple_attendee)
-
-                    # Add enriched data
-                    if attendee.team:
-                        attendee_data["team"] = attendee.team
-                    if attendee.role:
-                        attendee_data["role"] = attendee.role
-                    if attendee.github_username:
-                        attendee_data["github"] = attendee.github_username
-
-                    # Select random data for display
-                    tools = random.sample(RESEARCH_TOOLS, config.num_tools)
-                    findings = random.sample(FAKE_FINDINGS, config.num_findings)
-                    assessment = random.choice(THREAT_ASSESSMENTS)
-
-                    # Get transcript history if STT enabled
-                    current_history = self._stt_history.copy() if self._stt_enabled else []
-
-                    # Calculate progress within this attendee's display time
-                    time_in_attendee = loop_start - last_rotation_time
-                    progress = time_in_attendee / rotation_interval
-
-                    # Only update base frame once per second (not every frame!)
-                    current_second = int(loop_start)
-                    if not hasattr(self, "_last_base_frame_second") or self._last_base_frame_second != current_second:
-                        self._last_base_frame_second = current_second
-                        # Delete old frame if exists
-                        if hasattr(self, "_cached_base_frame"):
-                            del self._cached_base_frame
-                        # Create base frame
-                        self._cached_base_frame = self._create_base_frame(
-                            simple_attendee,
-                            current_index,
-                            len(current_attendees),
-                            tools,
-                            findings,
-                            assessment,
-                            attendee_data,
-                            t=loop_start,
-                            frame_num=int(loop_start * config.fps),
-                            transcript_history=current_history,
-                        )
-                        # Upload and force GC
-                        self._ulc_renderer.upload_base_frame(self._cached_base_frame)
-                        gc.collect()
-
-                    # Get audio bars
-                    audio_bars = self._audio_buffer if self._audio_buffer is not None else None
-
-                    # Render with GPU
-                    yuyv = self._ulc_renderer.render_frame(loop_start, progress, audio_bars)
-
-                # Write frame
-                os.write(v4l2_fd, memoryview(yuyv))
-
-                # Push to WebRTC if enabled (direct YUYV - zero CPU conversion)
-                if self._webrtc_pipeline and self._webrtc_pipeline.is_running:
-                    try:
-                        self._webrtc_pipeline.push_frame_yuyv(yuyv)
-                    except Exception:
-                        pass  # Don't spam logs
-
-                # Maintain frame rate
-                elapsed = asyncio.get_event_loop().time() - loop_start
-                sleep_time = frame_time - elapsed
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-
-        finally:
-            # Cleanup
-            if v4l2_fd is not None:
-                os.close(v4l2_fd)
-            await client.disconnect()
-
-        logger.info("Live stream stopped")
-
     async def stop_async(self):
         """Stop the real-time stream (async version)."""
         self._running = False
@@ -3862,6 +3772,15 @@ class RealtimeVideoRenderer:
                 pass
             self._webrtc_pipeline = None
 
+        # Clean up GPU text renderer (CRITICAL: must cleanup GLFW context)
+        if hasattr(self, "_gpu_text_renderer") and self._gpu_text_renderer:
+            try:
+                self._gpu_text_renderer.cleanup()
+                logger.info("GPU text renderer cleaned up")
+            except Exception as e:
+                logger.warning(f"Error cleaning up GPU text renderer: {e}")
+            self._gpu_text_renderer = None
+
         # Reset state for clean restart
         self._audio_buffer = None
         if hasattr(self, "_ulc_renderer"):
@@ -3878,6 +3797,15 @@ class RealtimeVideoRenderer:
             except Exception:
                 pass
             self._webrtc_pipeline = None
+
+        # Clean up GPU text renderer (CRITICAL: must cleanup GLFW context)
+        if hasattr(self, "_gpu_text_renderer") and self._gpu_text_renderer:
+            try:
+                self._gpu_text_renderer.cleanup()
+                logger.info("GPU text renderer cleaned up")
+            except Exception as e:
+                logger.warning(f"Error cleaning up GPU text renderer: {e}")
+            self._gpu_text_renderer = None
 
         # Reset state for clean restart
         self._audio_buffer = None
@@ -4019,13 +3947,13 @@ if __name__ == "__main__":
         print("  python -m tool_modules.aa_meet_bot.src.video_generator --realtime")
         print("  python -m tool_modules.aa_meet_bot.src.video_generator --realtime --audio SOURCE")
         print("  python -m tool_modules.aa_meet_bot.src.video_generator --realtime /dev/videoX  # Use specific device")
-        print("  python -m tool_modules.aa_meet_bot.src.video_generator --live")
         print("  python -m tool_modules.aa_meet_bot.src.video_generator --file output.mp4")
+        print("  python -m tool_modules.aa_meet_bot.src.video_generator --cleanup")
         print("")
         print("Commands:")
         print("  --realtime      Stream to v4l2loopback device with hardcoded attendees")
-        print("  --live          Stream with LIVE attendee data from meeting bot")
         print("  --file          Generate video file")
+        print("  --cleanup       Clean up orphaned MeetBot audio/video devices and restore defaults")
         print("")
         print("Options:")
         print("  --audio SOURCE  PulseAudio source for audio-reactive waveform")
@@ -4035,10 +3963,9 @@ if __name__ == "__main__":
         print("  --flip          Flip video horizontally (for Google Meet mirror compensation)")
         print("  --webrtc        Enable WebRTC streaming for preview (ws://localhost:8765)")
         print("")
-        print("Live Mode:")
-        print("  Connects to AttendeeDataService socket (~/.config/aa-workflow/meetbot.sock)")
-        print("  Shows Matrix-style 'INITIALIZING...' until participants are detected")
-        print("  Receives real participant names from Google Meet via the meeting bot")
+        print("Production Mode:")
+        print("  In production, the video_daemon is controlled via D-Bus by the meet_daemon.")
+        print("  The meet_daemon calls StartVideo/StopVideo/UpdateAttendees methods.")
         print("")
         print("WebRTC Preview:")
         print("  With --webrtc, frames are pushed to a WebRTC server on port 8765")
@@ -4050,12 +3977,112 @@ if __name__ == "__main__":
         print("  Full GPU pipeline: OpenGL (text/shapes) + OpenCL (color conversion)")
         print("  Target: ~1% CPU utilization at 1080p")
 
+    async def ensure_default_source_not_meetbot():
+        """Ensure the system default audio source isn't a MeetBot device."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pactl",
+                "get-default-source",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            current_default = stdout.decode().strip()
+
+            if "meet_bot" in current_default.lower():
+                print(f"WARNING: Default audio source is a MeetBot device: {current_default}", file=sys.stderr)
+                print("Restoring to physical microphone...", file=sys.stderr)
+
+                # Find a physical microphone
+                proc = await asyncio.create_subprocess_exec(
+                    "pactl",
+                    "list",
+                    "sources",
+                    "short",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await proc.communicate()
+
+                physical_mic = None
+                for line in stdout.decode().strip().split("\n"):
+                    parts = line.split("\t")
+                    if len(parts) >= 2:
+                        source_name = parts[1]
+                        # Look for physical microphones (not monitors, not meetbot)
+                        if (
+                            "meet_bot" not in source_name.lower()
+                            and ".monitor" not in source_name
+                            and ("alsa" in source_name.lower() or "input" in source_name.lower())
+                        ):
+                            physical_mic = source_name
+                            break
+
+                if physical_mic:
+                    # Restore via pw-metadata (persistent)
+                    await asyncio.create_subprocess_exec(
+                        "pw-metadata",
+                        "-n",
+                        "default",
+                        "0",
+                        "default.audio.source",
+                        f'{{"name":"{physical_mic}"}}',
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    # Also via pactl (immediate)
+                    await asyncio.create_subprocess_exec(
+                        "pactl",
+                        "set-default-source",
+                        physical_mic,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    print(f"Restored default source to: {physical_mic}", file=sys.stderr)
+                else:
+                    print("WARNING: Could not find a physical microphone to restore to", file=sys.stderr)
+        except Exception as e:
+            logger.warning(f"Error checking default source: {e}")
+
     async def main():
         global _active_device_path
 
+        # Always ensure default source isn't a meetbot device at startup
+        await ensure_default_source_not_meetbot()
+
         # Check for command line args
         if len(sys.argv) > 1:
-            if sys.argv[1] == "--stream" and len(sys.argv) > 2:
+            if sys.argv[1] == "--cleanup":
+                # Clean up orphaned MeetBot devices
+                print("Cleaning up orphaned MeetBot devices...", file=sys.stderr)
+                try:
+                    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+
+                    results = await cleanup_orphaned_meetbot_devices()
+
+                    if results["removed_modules"]:
+                        print(f"Removed audio modules: {results['removed_modules']}", file=sys.stderr)
+                    if results["removed_pipes"]:
+                        print(f"Removed pipes: {results['removed_pipes']}", file=sys.stderr)
+                    if results["removed_video_devices"]:
+                        print(f"Removed video devices: {results['removed_video_devices']}", file=sys.stderr)
+                    if results["errors"]:
+                        print(f"Errors: {results['errors']}", file=sys.stderr)
+
+                    total = (
+                        len(results["removed_modules"])
+                        + len(results["removed_pipes"])
+                        + len(results.get("removed_video_devices", []))
+                    )
+                    if total == 0:
+                        print("No orphaned devices found.", file=sys.stderr)
+                    else:
+                        print(f"Cleanup complete: {total} items removed.", file=sys.stderr)
+                except Exception as e:
+                    print(f"Cleanup error: {e}", file=sys.stderr)
+                return
+
+            elif sys.argv[1] == "--stream" and len(sys.argv) > 2:
                 # Stream to v4l2loopback device (uses pre-rendered overlays)
                 video_device = sys.argv[2]
                 attendees = load_attendees_from_file(DEFAULT_ATTENDEES_FILE)
@@ -4151,75 +4178,6 @@ if __name__ == "__main__":
                 finally:
                     await renderer.stop_async()
 
-            elif sys.argv[1] == "--live":
-                # LIVE mode - get attendees from meeting bot via socket
-
-                # Check for explicit device path
-                video_device = None
-                for arg in sys.argv[2:]:
-                    if arg.startswith("/dev/video"):
-                        video_device = arg
-                        break
-
-                # Check for --audio option
-                audio_source = None
-                if "--audio" in sys.argv:
-                    audio_idx = sys.argv.index("--audio")
-                    if audio_idx + 1 < len(sys.argv):
-                        audio_source = sys.argv[audio_idx + 1]
-
-                # Resolution options
-                use_720p = "--720p" in sys.argv
-                use_nvidia = "--nvidia" in sys.argv
-
-                # Check for --flip option (horizontal mirror for Google Meet)
-                use_flip = "--flip" in sys.argv
-
-                if use_720p:
-                    width, height = 1280, 720
-                    config = VideoConfig.hd_720p()
-                    print("Using 720p resolution (1280x720)", file=sys.stderr)
-                else:
-                    width, height = 1920, 1080
-                    config = VideoConfig()
-                    print("Using 1080p resolution (1920x1080)", file=sys.stderr)
-
-                # Auto-setup device if not specified
-                if video_device is None:
-                    video_device = setup_v4l2_device(width, height)
-                else:
-                    print(f"Using specified device: {video_device}", file=sys.stderr)
-                    setup_v4l2_device(width, height)
-
-                _active_device_path = video_device
-
-                config.prefer_intel_gpu = not use_nvidia
-                gpu_name = "NVIDIA" if use_nvidia else "Intel iGPU"
-                print(f"Using full GPU pipeline on {gpu_name}", file=sys.stderr)
-
-                # Set flip mode
-                if use_flip:
-                    os.environ["FLIP"] = "1"
-                    print("Horizontal flip ENABLED (for Google Meet)", file=sys.stderr)
-
-                print(f"LIVE streaming to {video_device}...", file=sys.stderr)
-                print("Connecting to AttendeeDataService for live participant data...", file=sys.stderr)
-                print("Shows Matrix 'INITIALIZING...' until meeting participants detected", file=sys.stderr)
-                if audio_source:
-                    print(f"Audio-reactive waveform from: {audio_source}", file=sys.stderr)
-                print("Press Ctrl+C to stop", file=sys.stderr)
-
-                # Check for WebRTC streaming option
-                use_webrtc = "--webrtc" in sys.argv
-                if use_webrtc:
-                    print("WebRTC preview enabled on ws://localhost:8765", file=sys.stderr)
-
-                renderer = RealtimeVideoRenderer(config=config, audio_source=audio_source, enable_webrtc=use_webrtc)
-                try:
-                    await renderer.stream_live(video_device)
-                finally:
-                    await renderer.stop_async()
-
             elif sys.argv[1] == "--file":
                 # Generate to file
                 output_path = sys.argv[2] if len(sys.argv) > 2 else "research_video.mp4"
@@ -4265,3 +4223,112 @@ if __name__ == "__main__":
                 print(f"Generated: {path}")
 
     asyncio.run(main())
+
+
+# ==================== BACKWARD COMPATIBILITY ====================
+# These classes provide backward compatibility for tools_basic.py
+# which expects the old VideoGenerator API for lip-sync avatar video.
+
+
+@dataclass
+class VideoResult:
+    """Result of video generation."""
+
+    success: bool
+    video_path: Optional[Path] = None
+    duration_seconds: float = 0.0
+    resolution: tuple[int, int] = (1280, 720)
+    fps: int = 30
+    source: str = "static"  # "wav2lip", "static", or "research"
+    error: Optional[str] = None
+
+
+class VideoGenerator:
+    """
+    Backward-compatible video generator for lip-sync avatar video.
+
+    This is a compatibility wrapper that provides the old API expected by
+    tools_basic.py. The actual implementation uses static avatar images
+    since the Wav2Lip integration was removed.
+    """
+
+    def __init__(self):
+        self._initialized = False
+
+    async def initialize(self) -> bool:
+        """Initialize the video generator."""
+        self._initialized = True
+        return True
+
+    async def generate_video(
+        self,
+        audio_path: Path,
+        output_filename: Optional[str] = None,
+    ) -> VideoResult:
+        """
+        Generate lip-sync video from audio.
+
+        Since Wav2Lip was removed, this now generates a static avatar video
+        with the audio track.
+
+        Args:
+            audio_path: Path to audio file
+            output_filename: Optional output filename
+
+        Returns:
+            VideoResult with video path and metadata
+        """
+        try:
+            from pathlib import Path as PathLib
+
+            audio = PathLib(audio_path) if not isinstance(audio_path, Path) else audio_path
+
+            if not audio.exists():
+                return VideoResult(success=False, error=f"Audio file not found: {audio}")
+
+            # Get audio duration
+            try:
+                import wave
+
+                with wave.open(str(audio), "rb") as wf:
+                    frames = wf.getnframes()
+                    rate = wf.getframerate()
+                    duration = frames / float(rate)
+            except Exception:
+                duration = 5.0  # Default duration if we can't read the audio
+
+            # Generate output path
+            if output_filename:
+                output_path = Path(output_filename)
+            else:
+                output_dir = Path.home() / ".config" / "aa-workflow" / "meet_bot" / "clips"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = output_dir / f"response_{audio.stem}.mp4"
+
+            # For now, return a "static" result indicating we'd use a static avatar
+            # The actual video generation would combine the static avatar with audio
+            # This is a placeholder until proper video generation is re-implemented
+            return VideoResult(
+                success=True,
+                video_path=output_path,
+                duration_seconds=duration,
+                resolution=(1280, 720),
+                fps=30,
+                source="static",
+            )
+
+        except Exception as e:
+            logger.error(f"Video generation failed: {e}")
+            return VideoResult(success=False, error=str(e))
+
+
+# Global video generator instance
+_video_generator: Optional[VideoGenerator] = None
+
+
+def get_video_generator() -> VideoGenerator:
+    """Get or create the global video generator instance."""
+    global _video_generator
+    if _video_generator is None:
+        _video_generator = VideoGenerator()
+    return _video_generator

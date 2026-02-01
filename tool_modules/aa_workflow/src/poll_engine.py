@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -329,6 +329,7 @@ class PollEngine:
         # Deduplication: track triggered items to avoid re-triggering
         self._triggered_hashes: dict[str, datetime] = {}
         self._dedup_ttl = timedelta(hours=24)  # Don't re-trigger same item for 24h
+        self._max_triggered_hashes = 1000  # Prevent unbounded memory growth
 
     def configure(self, poll_sources: dict, poll_jobs: list[dict]):
         """Configure poll sources and jobs.
@@ -428,6 +429,12 @@ class PollEngine:
 
         # Clean up old entries
         self._triggered_hashes = {k: v for k, v in self._triggered_hashes.items() if now - v < self._dedup_ttl}
+
+        # Also enforce max size by removing oldest entries if over limit
+        if len(self._triggered_hashes) > self._max_triggered_hashes:
+            # Sort by timestamp and keep only the newest entries
+            sorted_hashes = sorted(self._triggered_hashes.items(), key=lambda x: x[1], reverse=True)
+            self._triggered_hashes = dict(sorted_hashes[: self._max_triggered_hashes])
 
         for item in items:
             # Create hash of item for deduplication

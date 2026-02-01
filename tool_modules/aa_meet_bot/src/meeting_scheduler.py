@@ -722,8 +722,21 @@ class MeetingScheduler:
 
         return False
 
-    async def join_meeting_url(self, meet_url: str, title: str = "Manual Join", mode: str = "notes") -> bool:
-        """Join a meeting directly by URL (quick join / manual join)."""
+    async def join_meeting_url(
+        self,
+        meet_url: str,
+        title: str = "Manual Join",
+        mode: str = "notes",
+        video_enabled: bool = False,
+    ) -> bool:
+        """Join a meeting directly by URL (quick join / manual join).
+
+        Args:
+            meet_url: Google Meet URL
+            title: Meeting title for display
+            mode: "notes" or "interactive"
+            video_enabled: If True, show full AI video overlay. If False, show black screen.
+        """
         if not self.notes_bot:
             logger.error("Cannot join meeting: notes_bot not initialized")
             return False
@@ -750,7 +763,7 @@ class MeetingScheduler:
         # Add to upcoming meetings for tracking
         self.state.upcoming_meetings.append(meeting)
 
-        logger.info(f"Quick join: {title} at {meet_url} (mode={mode})")
+        logger.info(f"Quick join: {title} at {meet_url} (mode={mode}, video_enabled={video_enabled})")
 
         success = await self.notes_bot.join_meeting(
             meet_url=meet_url,
@@ -761,6 +774,7 @@ class MeetingScheduler:
             organizer="manual",
             attendees=[],
             mode=mode,
+            video_enabled=video_enabled,
         )
 
         if success:

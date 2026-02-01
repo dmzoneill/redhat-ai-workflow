@@ -5,7 +5,7 @@ Provides tools for automating expense submission workflows.
 
 import logging
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from .tools_basic import register_tools
 

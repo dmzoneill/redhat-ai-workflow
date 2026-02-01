@@ -112,7 +112,7 @@ class CodeIndexWatcher:
         try:
             import watchfiles
         except ImportError:
-            logger.error("watchfiles not installed. Run: pip install watchfiles")
+            logger.error("watchfiles not installed. Run: uv add watchfiles")
             self._running = False
             return
 

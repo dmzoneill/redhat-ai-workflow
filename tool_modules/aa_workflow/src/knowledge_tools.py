@@ -28,7 +28,7 @@ except ImportError:
     MEMORY_DIR = PROJECT_DIR / "memory"
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
@@ -977,7 +977,7 @@ async def _knowledge_list_impl() -> list[TextContent]:
 
 def register_knowledge_tools(server: "FastMCP") -> int:
     """Register knowledge tools with the MCP server."""
-    from mcp.server.fastmcp import Context
+    from fastmcp import Context
 
     registry = ToolRegistry(server)
 

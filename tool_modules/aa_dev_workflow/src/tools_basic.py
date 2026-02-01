@@ -28,7 +28,7 @@ from server.utils import load_config, resolve_repo_path, run_cmd_full, truncate_
 
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path

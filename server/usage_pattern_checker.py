@@ -33,6 +33,7 @@ class UsagePatternChecker:
         self._pattern_cache = None
         self._cache_timestamp = None
         self._cache_ttl = cache_ttl
+        self._max_cache_entries = 100  # Prevent unbounded memory growth
 
     def check_before_call(
         self,
@@ -397,6 +398,12 @@ class UsagePatternChecker:
             self._pattern_cache = {}
             self._cache_timestamp = time.time()
             logger.debug("Pattern cache initialized")
+
+        # Enforce max cache size - remove oldest entries if over limit
+        if len(self._pattern_cache) >= self._max_cache_entries:
+            # Remove first (oldest) entry
+            oldest_key = next(iter(self._pattern_cache))
+            del self._pattern_cache[oldest_key]
 
         # Store in cache
         cache_key = (tool_name, min_confidence)
