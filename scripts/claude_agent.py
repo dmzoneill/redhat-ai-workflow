@@ -1559,6 +1559,7 @@ Please verify the image exists before proceeding."""
                 inputs=inputs,
                 debug=True,  # Enable debug for visibility
                 server=None,  # No MCP server needed - tools loaded dynamically
+                source="slack",  # Claude agent is typically invoked from Slack
             )
 
             # Execute and return result

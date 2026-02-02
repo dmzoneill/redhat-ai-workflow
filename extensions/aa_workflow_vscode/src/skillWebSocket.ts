@@ -23,6 +23,7 @@ export interface SkillState {
   status: 'running' | 'completed' | 'failed';
   steps: StepState[];
   startedAt: Date;
+  source: 'chat' | 'cron' | 'slack' | 'manual' | 'api';
 }
 
 export interface StepState {
@@ -287,6 +288,7 @@ export class SkillWebSocketClient {
           status: 'pending' as const,
         })),
       startedAt: new Date(),
+      source: (data.source as 'chat' | 'cron' | 'slack' | 'manual' | 'api') || 'chat',
     };
   }
 

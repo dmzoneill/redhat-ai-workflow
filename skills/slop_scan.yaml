@@ -1,0 +1,120 @@
+# Skill: Slop Scan
+# Run code quality analysis with Slop Bot
+
+name: slop_scan
+description: |
+  Run code quality analysis using the Slop Bot service.
+  Analyzes the codebase for code smells, complexity issues, and improvement opportunities.
+
+version: "1.0"
+
+inputs:
+  - name: codebase_path
+    type: string
+    required: false
+    default: ""
+    description: "Path to codebase to analyze (default: current workspace)"
+
+  - name: max_parallel
+    type: integer
+    required: false
+    default: 3
+    description: "Maximum concurrent analysis loops"
+
+steps:
+  - name: get_workspace_path
+    description: "Determine the codebase path to analyze"
+    compute: |
+      import os
+
+      codebase = inputs.get('codebase_path', '') or os.getcwd()
+      result = codebase
+    output: workspace_path
+
+  - name: run_slop_analysis
+    description: "Run Slop Bot analysis"
+    compute: |
+      import subprocess
+      import os
+
+      codebase = workspace_path
+      max_parallel = inputs.get('max_parallel', 3)
+
+      cmd = [
+          "python", "-m", "services.slop",
+          "--max-parallel", str(max_parallel),
+          "--codebase", codebase
+      ]
+
+      try:
+          proc = subprocess.run(
+              cmd,
+              cwd=codebase,
+              capture_output=True,
+              text=True,
+              timeout=1800
+          )
+          if proc.returncode == 0:
+              result = f"✅ Analysis complete\n{proc.stdout}"
+          else:
+              result = f"⚠️ Analysis finished with warnings\nstdout: {proc.stdout}\nstderr: {proc.stderr}"
+      except subprocess.TimeoutExpired:
+          result = "❌ Analysis timed out after 30 minutes"
+      except FileNotFoundError:
+          result = "❌ Slop service not found. Ensure services.slop module is available."
+      except Exception as e:
+          result = f"❌ Analysis failed: {str(e)}"
+    output: analysis_result
+
+  - name: get_stats
+    description: "Get analysis statistics from database"
+    compute: |
+      import subprocess
+      import os
+
+      db_path = os.path.expanduser("~/.config/aa-workflow/slop.db")
+
+      if not os.path.exists(db_path):
+          result = "No Slop database found. Run analysis first."
+      else:
+          query = """
+          SELECT 'Total findings: ' || COUNT(*) FROM findings WHERE status = 'open';
+          SELECT 'By severity:';
+          SELECT '  ' || severity || ': ' || COUNT(*) FROM findings WHERE status = 'open' GROUP BY severity;
+          SELECT 'By loop:';
+          SELECT '  ' || loop || ': ' || COUNT(*) FROM findings WHERE status = 'open' GROUP BY loop;
+          """
+
+          try:
+              proc = subprocess.run(
+                  ["sqlite3", db_path, query],
+                  capture_output=True,
+                  text=True,
+                  timeout=30
+              )
+              result = proc.stdout or "No findings in database"
+          except Exception as e:
+              result = f"Failed to query database: {str(e)}"
+    output: stats_output
+
+  - name: log_execution
+    description: "Log the execution to session"
+    tool: memory_session_log
+    args:
+      action: "Slop scan completed"
+      details: "Analyzed {{ workspace_path }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## Slop Bot Analysis Complete
+
+      ### Analysis Result
+      {{ analysis_result }}
+
+      ### Statistics
+      {{ stats_output }}
+
+      ---
+      View findings in VSCode or query the database at `~/.config/aa-workflow/slop.db`

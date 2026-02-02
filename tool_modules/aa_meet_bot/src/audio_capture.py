@@ -130,6 +130,9 @@ class PulseAudioCapture:
     the application's audio stream using parec --monitor-stream=<sink_input_index>.
     """
 
+    # Class-level tracking of all active capture processes for cleanup
+    _active_captures: dict[int, "PulseAudioCapture"] = {}
+
     def __init__(
         self,
         source_name: str,
@@ -155,8 +158,10 @@ class PulseAudioCapture:
         self.sink_input_index = sink_input_index
 
         self._process: Optional[asyncio.subprocess.Process] = None
+        self._process_pid: Optional[int] = None  # Track PID for cleanup
         self._running = False
         self._buffer = RingBuffer(max_seconds=30.0, sample_rate=sample_rate)
+        self._read_task: Optional[asyncio.Task] = None  # Track the read loop task
 
     async def start(self) -> bool:
         """Start audio capture."""
@@ -208,10 +213,16 @@ class PulseAudioCapture:
                 stderr=asyncio.subprocess.PIPE,
             )
 
+            # Track the PID for cleanup
+            self._process_pid = self._process.pid
+            if self._process_pid:
+                PulseAudioCapture._active_captures[self._process_pid] = self
+                logger.info(f"Audio capture process started with PID {self._process_pid}")
+
             self._running = True
 
-            # Start reader task
-            asyncio.create_task(self._read_loop())
+            # Start reader task (track it for cleanup)
+            self._read_task = asyncio.create_task(self._read_loop())
 
             logger.info(f"Audio capture started")
             return True
@@ -257,15 +268,79 @@ class PulseAudioCapture:
             self._running = False
 
     async def stop(self):
-        """Stop audio capture."""
+        """Stop audio capture and ensure process is fully terminated."""
+        logger.info(f"Stopping audio capture (PID: {self._process_pid})")
         self._running = False
-        if self._process:
-            self._process.terminate()
+
+        # Cancel the read task first
+        if self._read_task and not self._read_task.done():
+            self._read_task.cancel()
             try:
-                await asyncio.wait_for(self._process.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                self._process.kill()
-            self._process = None
+                await asyncio.wait_for(self._read_task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            self._read_task = None
+
+        # Terminate the process
+        if self._process:
+            pid = self._process_pid
+            try:
+                # Try graceful termination first
+                self._process.terminate()
+                try:
+                    await asyncio.wait_for(self._process.wait(), timeout=2.0)
+                    logger.info(f"Audio capture process {pid} terminated gracefully")
+                except asyncio.TimeoutError:
+                    # Force kill if terminate didn't work
+                    logger.warning(f"Audio capture process {pid} didn't terminate, killing...")
+                    self._process.kill()
+                    try:
+                        await asyncio.wait_for(self._process.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        # Last resort: use os.kill directly
+                        if pid:
+                            try:
+                                import signal
+                                os.kill(pid, signal.SIGKILL)
+                                logger.info(f"Sent SIGKILL to process {pid}")
+                            except (ProcessLookupError, PermissionError):
+                                pass  # Process already gone
+            except Exception as e:
+                logger.warning(f"Error stopping audio capture process: {e}")
+            finally:
+                self._process = None
+
+        # Remove from active captures tracking
+        if self._process_pid and self._process_pid in PulseAudioCapture._active_captures:
+            del PulseAudioCapture._active_captures[self._process_pid]
+            logger.info(f"Removed PID {self._process_pid} from active captures")
+
+        self._process_pid = None
+
+    @classmethod
+    async def kill_all_captures(cls) -> int:
+        """Kill all active audio capture processes. Returns count killed."""
+        killed = 0
+        pids_to_remove = list(cls._active_captures.keys())
+
+        for pid in pids_to_remove:
+            try:
+                import signal
+                os.kill(pid, signal.SIGKILL)
+                logger.info(f"Force-killed orphaned audio capture PID {pid}")
+                killed += 1
+            except (ProcessLookupError, PermissionError):
+                pass  # Process already gone
+
+            if pid in cls._active_captures:
+                del cls._active_captures[pid]
+
+        return killed
+
+    @classmethod
+    def get_active_pids(cls) -> list[int]:
+        """Get list of active capture process PIDs."""
+        return list(cls._active_captures.keys())
 
     async def read_chunk(self) -> Optional[AudioChunk]:
         """Read a chunk of audio."""
@@ -413,20 +488,37 @@ class RealtimeSTTPipeline:
             return False
 
     async def stop(self):
-        """Stop the STT pipeline."""
+        """Stop the STT pipeline and ensure all resources are cleaned up."""
+        logger.info("Stopping STT pipeline...")
         self._running = False
 
+        # Stop capture FIRST to ensure the parec process is killed
+        # This is critical - if we cancel the task first, the capture might not get stopped
+        if self._capture:
+            try:
+                await asyncio.wait_for(self._capture.stop(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Timeout stopping audio capture, forcing...")
+                # Force kill if stop times out
+                if self._capture._process_pid:
+                    try:
+                        import signal
+                        os.kill(self._capture._process_pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+            except Exception as e:
+                logger.warning(f"Error stopping audio capture: {e}")
+            finally:
+                self._capture = None
+
+        # Now cancel the processing task
         if self._task:
             self._task.cancel()
             try:
-                await self._task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(self._task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
             self._task = None
-
-        if self._capture:
-            await self._capture.stop()
-            self._capture = None
 
         logger.info("STT pipeline stopped")
 

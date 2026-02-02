@@ -84,7 +84,6 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._preferred_backend = preferred_backend
 
         self._orchestrator: Optional[SlopOrchestrator] = None
-        self._watcher_task: Optional[asyncio.Task] = None
         self._scan_in_progress = False
         self._last_scan_time: Optional[datetime] = None
         self._scan_count = 0
@@ -125,7 +124,6 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             "scan_in_progress": self._scan_in_progress,
             "scan_count": self._scan_count,
             "last_scan_time": self._last_scan_time.isoformat() if self._last_scan_time else None,
-            "watcher_active": self._watcher_task is not None and not self._watcher_task.done(),
         }
 
         if self._orchestrator:
@@ -140,7 +138,6 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         checks = {
             "running": self.is_running,
             "orchestrator_initialized": self._orchestrator is not None,
-            "watcher_active": self._watcher_task is not None and not self._watcher_task.done(),
         }
 
         # Check if we can access the database
@@ -173,7 +170,7 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             asyncio.create_task(self._run_analysis())
 
     async def run_daemon(self):
-        """Main daemon loop with file watcher triggering orchestrator."""
+        """Main daemon loop - runs analysis once then exits (for cron)."""
         self.start_time = time.time()
         self.is_running = True
 
@@ -189,110 +186,20 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         )
         await self._orchestrator.initialize()
 
-        # Start D-Bus if enabled
+        # Start D-Bus if enabled (for status queries)
         if self.enable_dbus:
             await self.start_dbus()
             logger.info("D-Bus interface started")
 
-        # Start file watcher
-        self._watcher_task = asyncio.create_task(self._file_watcher_loop())
-
-        # Wait for shutdown
-        try:
-            while not self._shutdown_event.is_set():
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            logger.info("Daemon cancelled")
+        # Run analysis once
+        await self._run_analysis()
 
         # Cleanup
-        if self._watcher_task:
-            self._watcher_task.cancel()
-            try:
-                await self._watcher_task
-            except asyncio.CancelledError:
-                pass
-
         if self._orchestrator:
             await self._orchestrator.stop_all()
 
         self.is_running = False
-        logger.info("Slop Bot daemon stopped")
-
-    async def _file_watcher_loop(self):
-        """Watch for file changes and trigger analysis."""
-        try:
-            import watchfiles
-        except ImportError:
-            logger.warning("watchfiles not installed - file watching disabled")
-            logger.info("Install with: pip install watchfiles")
-            return
-
-        watch_paths = self._get_watch_paths()
-        if not watch_paths:
-            logger.warning("No watch paths configured")
-            return
-
-        logger.info(f"Watching paths: {watch_paths}")
-
-        # Debounce settings
-        debounce_ms = 2000  # Wait 2 seconds after last change
-
-        try:
-            async for changes in watchfiles.awatch(
-                *watch_paths,
-                debounce=debounce_ms,
-                rust_timeout=5000,
-            ):
-                if self._shutdown_event.is_set():
-                    break
-
-                # Filter to relevant files
-                relevant_changes = [(change_type, path) for change_type, path in changes if self._should_analyze(path)]
-
-                if relevant_changes and not self._scan_in_progress:
-                    logger.info(f"Detected {len(relevant_changes)} file changes, triggering analysis")
-                    asyncio.create_task(self._run_analysis())
-
-        except asyncio.CancelledError:
-            logger.info("File watcher cancelled")
-        except Exception as e:
-            logger.exception(f"File watcher error: {e}")
-
-    def _get_watch_paths(self) -> list[str]:
-        """Get paths to watch for changes."""
-        # Default watch paths
-        base = Path(self._codebase_path)
-        default_paths = [
-            base / "server",
-            base / "scripts",
-            base / "services",
-            base / "tool_modules",
-        ]
-
-        return [str(p) for p in default_paths if p.exists()]
-
-    def _should_analyze(self, path: str) -> bool:
-        """Check if a file should trigger analysis."""
-        # Skip non-Python files for now
-        if not path.endswith(".py"):
-            return False
-
-        # Skip common exclusions
-        exclusions = [
-            "__pycache__",
-            ".git",
-            "node_modules",
-            ".venv",
-            "venv",
-            ".tox",
-            "dist",
-            "build",
-            ".egg",
-            "test_",
-            "_test.py",
-        ]
-
-        return not any(excl in path for excl in exclusions)
+        logger.info("Slop Bot daemon completed")
 
     async def _run_analysis(self):
         """Run full analysis with all loops."""

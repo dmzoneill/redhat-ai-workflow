@@ -153,9 +153,9 @@ class SlackPersonaSync:
         channel_name: str,
         oldest_ts: str,
         include_threads: bool = True,
-        request_delay: float = 2.5,
+        request_delay: float = 1.5,
         vector_store=None,
-        flush_threshold: int = 5000,
+        flush_threshold: int = 1000,
     ) -> list[dict[str, Any]]:
         """Fetch ALL messages from a channel within time window with CURSOR pagination.
 
@@ -168,9 +168,9 @@ class SlackPersonaSync:
             channel_name: Channel name
             oldest_ts: Oldest timestamp to fetch (4 years ago)
             include_threads: Whether to fetch thread replies
-            request_delay: Delay between API requests in seconds (default 2.5)
+            request_delay: Delay between API requests in seconds (default 1.5)
             vector_store: Optional vector store for mid-channel flushing
-            flush_threshold: Flush to DB every N messages (default 5000)
+            flush_threshold: Flush to DB every N messages (default 1000)
 
         Returns:
             List of message dicts (unflushed remainder)
@@ -183,6 +183,10 @@ class SlackPersonaSync:
 
         # Track thread fetches for progress
         thread_count = 0
+        
+        # Track date range for progress display
+        oldest_date_seen = None
+        newest_date_seen = None
 
         # Cursor-based pagination
         cursor = None
@@ -206,9 +210,12 @@ class SlackPersonaSync:
                     cursor=cursor,
                 )
 
-                # Progress output for each page
+                # Progress output for each page (with date range)
+                date_range = ""
+                if oldest_date_seen and newest_date_seen:
+                    date_range = f" [{oldest_date_seen.strftime('%Y-%m-%d')} → {newest_date_seen.strftime('%Y-%m-%d')}]"
                 print(
-                    f"\r    [{display_name}] page {page_count}: {len(messages)} msgs, {thread_count} threads fetched",
+                    f"\r    [{display_name}] page {page_count}: {len(messages)} msgs, {thread_count} threads{date_range}",
                     end="",
                     flush=True,
                 )
@@ -244,6 +251,11 @@ class SlackPersonaSync:
                     try:
                         dt = datetime.fromtimestamp(float(ts))
                         datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        # Track date range
+                        if oldest_date_seen is None or dt < oldest_date_seen:
+                            oldest_date_seen = dt
+                        if newest_date_seen is None or dt > newest_date_seen:
+                            newest_date_seen = dt
                     except Exception:
                         datetime_str = ""
 
@@ -270,9 +282,12 @@ class SlackPersonaSync:
                         reply_count = msg.get("reply_count", 0)
                         try:
                             thread_count += 1
-                            # Progress for thread fetch
+                            # Progress for thread fetch (with date range)
+                            date_range = ""
+                            if oldest_date_seen and newest_date_seen:
+                                date_range = f" [{oldest_date_seen.strftime('%Y-%m-%d')} → {newest_date_seen.strftime('%Y-%m-%d')}]"
                             print(
-                                f"\r    [{display_name}] page {page_count}: {len(messages)} msgs, fetching thread {thread_count} ({reply_count} replies)...",
+                                f"\r    [{display_name}] page {page_count}: {len(messages)} msgs, thread {thread_count} ({reply_count} replies){date_range}",
                                 end="",
                                 flush=True,
                             )
@@ -422,7 +437,7 @@ class SlackPersonaSync:
                 oldest_ts=oldest_ts,
                 include_threads=include_threads,
                 vector_store=vector_store,
-                flush_threshold=5000,
+                flush_threshold=1000,
             )
 
             # messages now only contains unflushed remainder

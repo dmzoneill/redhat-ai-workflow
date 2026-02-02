@@ -162,9 +162,10 @@ export class HtmlGenerator {
    * Load a JavaScript file from the webview/scripts directory
    */
   private loadJsFile(filename: string): string {
-    if (this.jsCache.has(filename)) {
-      return this.jsCache.get(filename)!;
-    }
+    // Disable caching during development - always reload from disk
+    // if (this.jsCache.has(filename)) {
+    //   return this.jsCache.get(filename)!;
+    // }
 
     try {
       const filePath = path.join(

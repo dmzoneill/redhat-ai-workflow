@@ -2368,6 +2368,7 @@ class SkillExecutor:
                     skill_name=skill_name,
                     total_steps=total_steps,
                     inputs=self.inputs,
+                    source=self.source,
                 )
             )
 

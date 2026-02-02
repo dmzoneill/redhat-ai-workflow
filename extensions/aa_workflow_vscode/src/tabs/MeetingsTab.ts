@@ -90,6 +90,7 @@ export class MeetingsTab extends BaseTab {
 
   async handleMessage(message: any): Promise<boolean> {
     const msgType = message.command || message.type;
+    logger.log(`[MeetingsTab] handleMessage: ${msgType}, message: ${JSON.stringify(message).substring(0, 200)}`);
 
     switch (msgType) {
       case "approveMeeting":
@@ -105,6 +106,7 @@ export class MeetingsTab extends BaseTab {
         return true;
 
       case "joinMeetingNow":
+        logger.log(`[MeetingsTab] joinMeetingNow: url=${message.meetUrl}, title=${message.title}, mode=${message.mode}, video=${message.videoEnabled}`);
         await this.joinMeeting(
           message.meetUrl,
           message.title,
@@ -173,7 +175,9 @@ export class MeetingsTab extends BaseTab {
     mode: string,
     videoEnabled: boolean
   ): Promise<void> {
+    logger.log(`[MeetingsTab] joinMeeting called: url=${meetUrl}, title=${title}, mode=${mode}, video=${videoEnabled}`);
     const result = await dbus.meet_join(meetUrl, title, mode, videoEnabled);
+    logger.log(`[MeetingsTab] joinMeeting result: success=${result.success}, error=${result.error}, data=${JSON.stringify(result.data)?.substring(0, 200)}`);
     if (!result.success) {
       logger.error(`Failed to join meeting: ${result.error}`);
     }

@@ -42,6 +42,7 @@ class SkillState:
     current_step: int = 0
     status: str = "running"  # running, completed, failed
     started_at: datetime = field(default_factory=datetime.now)
+    source: str = "chat"  # chat, cron, slack, manual, api
 
 
 @dataclass
@@ -238,7 +239,14 @@ class SkillWebSocketServer:
 
         return len(stale_ids)
 
-    async def skill_started(self, skill_id: str, skill_name: str, total_steps: int, inputs: dict | None = None):
+    async def skill_started(
+        self,
+        skill_id: str,
+        skill_name: str,
+        total_steps: int,
+        inputs: dict | None = None,
+        source: str = "chat",
+    ):
         """Notify that a skill has started."""
         # Cleanup stale skills before adding new one
         self._cleanup_stale_skills()
@@ -247,6 +255,7 @@ class SkillWebSocketServer:
             skill_id=skill_id,
             skill_name=skill_name,
             total_steps=total_steps,
+            source=source,
         )
 
         await self.broadcast(
@@ -256,10 +265,11 @@ class SkillWebSocketServer:
                 "skill_name": skill_name,
                 "total_steps": total_steps,
                 "inputs": inputs or {},
+                "source": source,
                 "timestamp": datetime.now().isoformat(),
             }
         )
-        logger.debug(f"Skill started: {skill_name} ({skill_id})")
+        logger.debug(f"Skill started: {skill_name} ({skill_id}) source={source}")
 
     async def skill_completed(self, skill_id: str, total_duration_ms: int | None = None):
         """Notify that a skill has completed successfully."""

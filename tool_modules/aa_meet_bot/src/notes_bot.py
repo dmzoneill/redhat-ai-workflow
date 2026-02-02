@@ -116,8 +116,19 @@ class NotesBot:
 
         Note: Browser is NOT started here - it's started lazily when joining a meeting.
         This allows the daemon to start quickly and sit idle without consuming resources.
+
+        IMPORTANT: Runs cleanup on startup to remove any orphaned devices from previous sessions.
         """
         try:
+            logger.info("=" * 60)
+            logger.info("INIT: Initializing notes bot...")
+            logger.info("=" * 60)
+
+            # FIRST: Clean up any orphaned devices from previous sessions
+            # This ensures we start with a clean slate
+            logger.info("INIT: Running startup cleanup for orphaned devices...")
+            await self._run_orphan_cleanup("INIT")
+
             # Initialize database
             if self.db is None:
                 self.db = await init_notes_db()
@@ -130,13 +141,86 @@ class NotesBot:
 
             # Don't initialize browser here - do it lazily when joining a meeting
             # This prevents the daemon from opening Chrome on startup
-            logger.info("Notes bot initialized")
+            logger.info("INIT: Notes bot initialized successfully")
             return True
 
         except Exception as e:
             logger.error(f"Failed to initialize notes bot: {e}")
             self.state.errors.append(str(e))
             return False
+
+    async def _run_orphan_cleanup(self, context: str = "") -> dict:
+        """Run comprehensive orphan cleanup.
+
+        This is called at multiple points:
+        - On bot initialization (startup)
+        - Before joining a meeting
+        - After leaving a meeting
+        - When browser window closes
+        - On bot shutdown
+
+        Args:
+            context: Label for logging (e.g., "INIT", "PRE-JOIN", "POST-LEAVE")
+
+        Returns:
+            Cleanup results dict
+        """
+        results = {
+            "audio_captures_killed": 0,
+            "modules_removed": 0,
+            "processes_killed": 0,
+            "pipes_removed": 0,
+            "video_devices_removed": 0,
+            "errors": [],
+        }
+
+        prefix = f"{context}: " if context else ""
+
+        # 1. Kill any orphaned audio capture processes from our tracking
+        try:
+            from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+            killed = await PulseAudioCapture.kill_all_captures()
+            results["audio_captures_killed"] = killed
+            if killed > 0:
+                logger.info(f"{prefix}Killed {killed} tracked audio capture processes")
+        except Exception as e:
+            results["errors"].append(f"Audio capture cleanup: {e}")
+
+        # 2. Run comprehensive orphan cleanup (modules, parec, pipes, video)
+        try:
+            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+
+            cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
+
+            results["modules_removed"] = len(cleanup_results.get("removed_modules", []))
+            results["processes_killed"] = len(cleanup_results.get("killed_processes", []))
+            results["pipes_removed"] = len(cleanup_results.get("removed_pipes", []))
+            results["video_devices_removed"] = len(cleanup_results.get("removed_video_devices", []))
+            results["errors"].extend(cleanup_results.get("errors", []))
+
+            total = (
+                results["modules_removed"]
+                + results["processes_killed"]
+                + results["pipes_removed"]
+                + results["video_devices_removed"]
+            )
+
+            if total > 0:
+                logger.info(
+                    f"{prefix}Orphan cleanup: "
+                    f"{results['modules_removed']} modules, "
+                    f"{results['processes_killed']} processes, "
+                    f"{results['pipes_removed']} pipes, "
+                    f"{results['video_devices_removed']} video devices"
+                )
+            else:
+                logger.info(f"{prefix}Orphan cleanup: No orphaned devices found")
+
+        except Exception as e:
+            results["errors"].append(f"Orphan cleanup: {e}")
+            logger.warning(f"{prefix}Error during orphan cleanup: {e}")
+
+        return results
 
     async def _ensure_browser(self, video_enabled: bool = False) -> bool:
         """Ensure browser controller is initialized (lazy initialization).
@@ -197,25 +281,36 @@ class NotesBot:
         Returns:
             True if successfully joined
         """
+        logger.info("=" * 60)
+        logger.info(f"JOIN: Starting to join meeting: {title or meet_url}")
+        logger.info("=" * 60)
+
+        # FIRST: Run cleanup before joining to ensure clean state
+        # This catches any orphaned devices from previous sessions or crashes
+        logger.info("JOIN: Running pre-join cleanup...")
+        await self._run_orphan_cleanup("PRE-JOIN")
+
         # Set NPU STT flag and video flag
         self._use_npu_stt = use_npu_stt
         self._video_enabled = video_enabled
         logger.info(
-            f"NPU STT: {'enabled' if use_npu_stt else 'disabled'}, Video: {'enabled' if video_enabled else 'disabled'}"
+            f"JOIN: NPU STT: {'enabled' if use_npu_stt else 'disabled'}, "
+            f"Video: {'enabled' if video_enabled else 'disabled'}"
         )
+
         # Ensure browser is initialized (lazy initialization)
         # Pass video_enabled so the browser controller can start the correct video mode
         if not await self._ensure_browser(video_enabled=video_enabled):
-            logger.error("Failed to initialize browser for meeting")
+            logger.error("JOIN: Failed to initialize browser for meeting")
             return False
 
         if self.state.status == "capturing":
             # Check if browser is still alive
             if self._controller and self._controller.is_browser_closed():
-                logger.warning("Browser was closed - cleaning up stale meeting state")
+                logger.warning("JOIN: Browser was closed - cleaning up stale meeting state")
                 await self._cleanup_stale_meeting()
             else:
-                logger.warning("Already in a meeting")
+                logger.warning("JOIN: Already in a meeting")
                 return False
 
         self.state.status = "joining"
@@ -1098,72 +1193,121 @@ class NotesBot:
             # Check if browser process is still alive (belt and suspenders)
             if self._controller and self._controller.browser:
                 try:
-                    # This will throw if browser process is dead
-                    contexts = self._controller.browser.contexts
-                    if not contexts:
-                        logger.warning("Browser health monitor: No browser contexts - browser likely closed")
+                    # Check if browser is still connected
+                    if not self._controller.browser.is_connected():
+                        logger.warning("Browser health monitor: Browser disconnected")
                         await self._cleanup_stale_meeting()
                         break
                 except Exception as e:
                     logger.warning(f"Browser health monitor: Browser check failed: {e}")
-                    await self._cleanup_stale_meeting()
-                    break
+                    # Don't cleanup on exception - could be a transient error
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_failures:
+                        logger.warning("Browser health monitor: Too many browser check failures - triggering cleanup")
+                        await self._cleanup_stale_meeting()
+                        break
 
         logger.info("Browser health monitor stopped")
 
     async def _cleanup_stale_meeting(self) -> None:
-        """Clean up state from a meeting where the browser was closed unexpectedly."""
-        logger.info("Cleaning up stale meeting state...")
+        """Clean up state from a meeting where the browser was closed unexpectedly.
 
-        # Cancel any running tasks
-        if self._flush_task:
-            self._flush_task.cancel()
-            try:
-                await asyncio.wait_for(self._flush_task, timeout=2)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-            self._flush_task = None
+        This is called when:
+        - Browser window is closed by user
+        - Browser crashes
+        - Meeting ends unexpectedly
+        - Health monitor detects browser is unresponsive
 
-        if hasattr(self, "_screenshot_task") and self._screenshot_task:
-            self._screenshot_task.cancel()
-            try:
-                await asyncio.wait_for(self._screenshot_task, timeout=2)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-            self._screenshot_task = None
+        CRITICAL: This must clean up ALL resources to prevent orphaned:
+        - PulseAudio modules (sinks/sources)
+        - Named pipes
+        - parec processes
+        - Video devices
+        - Background tasks
+        """
+        logger.info("=" * 60)
+        logger.info("CLEANUP: Starting stale meeting cleanup...")
+        logger.info("=" * 60)
 
-        if hasattr(self, "_browser_monitor_task") and self._browser_monitor_task:
-            self._browser_monitor_task.cancel()
-            try:
-                await asyncio.wait_for(self._browser_monitor_task, timeout=2)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-            self._browser_monitor_task = None
+        # Track what we're cleaning up
+        cleanup_errors = []
 
-        # Stop NPU STT pipeline
+        # 1. FIRST: Stop NPU STT pipeline - this kills the parec process
+        # This MUST happen before closing the controller to ensure the parec
+        # process is killed while we still have the PID reference
         if self._npu_stt_pipeline:
+            logger.info("CLEANUP: Stopping NPU STT pipeline...")
             try:
-                await self._npu_stt_pipeline.stop()
-                logger.info("NPU STT pipeline stopped")
+                await asyncio.wait_for(self._npu_stt_pipeline.stop(), timeout=5.0)
+                logger.info("CLEANUP: NPU STT pipeline stopped successfully")
+            except asyncio.TimeoutError:
+                logger.warning("CLEANUP: Timeout stopping NPU STT pipeline")
+                cleanup_errors.append("NPU STT timeout")
             except Exception as e:
-                logger.warning(f"Error stopping NPU STT: {e}")
-            self._npu_stt_pipeline = None
+                logger.warning(f"CLEANUP: Error stopping NPU STT: {e}")
+                cleanup_errors.append(f"NPU STT error: {e}")
+            finally:
+                self._npu_stt_pipeline = None
 
-        # Stop video daemon integration - CRITICAL for releasing resources
+        # 2. Kill any remaining audio capture processes from this session
+        try:
+            from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+            killed = await PulseAudioCapture.kill_all_captures()
+            if killed > 0:
+                logger.info(f"CLEANUP: Force-killed {killed} orphaned audio capture processes")
+        except Exception as e:
+            logger.warning(f"CLEANUP: Error killing audio captures: {e}")
+            cleanup_errors.append(f"Audio capture kill error: {e}")
+
+        # 3. Cancel all background tasks
+        tasks_to_cancel = [
+            ("flush_task", self._flush_task),
+            ("screenshot_task", getattr(self, "_screenshot_task", None)),
+            ("browser_monitor_task", getattr(self, "_browser_monitor_task", None)),
+            ("wake_word_check_task", getattr(self, "_wake_word_check_task", None)),
+            ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
+        ]
+
+        for task_name, task in tasks_to_cancel:
+            if task and not task.done():
+                logger.info(f"CLEANUP: Cancelling {task_name}...")
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                except Exception as e:
+                    cleanup_errors.append(f"{task_name} cancel error: {e}")
+
+        # Clear task references
+        self._flush_task = None
+        self._screenshot_task = None
+        self._browser_monitor_task = None
+        if hasattr(self, "_wake_word_check_task"):
+            self._wake_word_check_task = None
+        if hasattr(self, "_participant_poll_task"):
+            self._participant_poll_task = None
+
+        # 4. Stop video daemon integration
         if self._video_daemon_active:
+            logger.info("CLEANUP: Stopping video daemon integration...")
             try:
-                await self._stop_video_integration()
-                logger.info("Video daemon integration stopped")
+                await asyncio.wait_for(self._stop_video_integration(), timeout=5.0)
+                logger.info("CLEANUP: Video daemon stopped")
+            except asyncio.TimeoutError:
+                logger.warning("CLEANUP: Timeout stopping video daemon")
+                cleanup_errors.append("Video daemon timeout")
             except Exception as e:
-                logger.warning(f"Error stopping video integration: {e}")
+                logger.warning(f"CLEANUP: Error stopping video integration: {e}")
+                cleanup_errors.append(f"Video daemon error: {e}")
 
-        # Flush any remaining buffer
+        # 5. Flush any remaining transcript buffer
         try:
             await self._flush_buffer()
         except Exception as e:
-            logger.warning(f"Failed to flush buffer during cleanup: {e}")
+            logger.warning(f"CLEANUP: Failed to flush buffer: {e}")
 
-        # Update meeting record as ended (browser closed)
+        # 6. Update meeting record as ended
         if self.db and self.state.meeting_id:
             try:
                 await self.db.update_meeting(
@@ -1171,44 +1315,60 @@ class NotesBot:
                     status="completed",
                     actual_end=datetime.now(),
                 )
+                logger.info(f"CLEANUP: Meeting {self.state.meeting_id} marked as completed")
             except Exception as e:
-                logger.warning(f"Failed to update meeting record: {e}")
+                logger.warning(f"CLEANUP: Failed to update meeting record: {e}")
 
-        # Close the controller - restore browser audio since this is an unexpected close
+        # 7. Close the browser controller - this cleans up per-instance audio devices
+        # restore_browser_audio=True because the meeting died unexpectedly
         if self._controller:
+            logger.info("CLEANUP: Closing browser controller...")
             try:
-                # restore_browser_audio=True because the meeting died unexpectedly
-                # This ensures the user's Chrome gets its mic back
-                await asyncio.wait_for(self._controller.close(restore_browser_audio=True), timeout=5)
-            except (asyncio.TimeoutError, Exception) as e:
-                logger.warning(f"Error closing controller: {e}")
-            self._controller = None
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=True), timeout=10.0)
+                logger.info("CLEANUP: Browser controller closed")
+            except asyncio.TimeoutError:
+                logger.warning("CLEANUP: Timeout closing controller, force killing...")
+                try:
+                    await self._controller.force_kill()
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning(f"CLEANUP: Error closing controller: {e}")
+                cleanup_errors.append(f"Controller close error: {e}")
+            finally:
+                self._controller = None
 
-        # Clean up any orphaned audio devices and parec processes
-        # This catches anything that wasn't properly cleaned up
-        try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+        # 8. FINAL: Clean up ANY remaining orphaned devices system-wide
+        # This is the safety net that catches anything we missed
+        cleanup_result = await self._run_orphan_cleanup("CLEANUP")
+        if cleanup_result.get("errors"):
+            cleanup_errors.extend(cleanup_result["errors"])
 
-            results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
-            if results.get("removed_modules") or results.get("killed_processes") or results.get("removed_pipes"):
-                logger.info(
-                    f"Orphan cleanup: {len(results.get('removed_modules', []))} modules, "
-                    f"{len(results.get('killed_processes', []))} processes, "
-                    f"{len(results.get('removed_pipes', []))} pipes"
-                )
-        except Exception as e:
-            logger.warning(f"Error during orphan cleanup: {e}")
-
-        # Reset state
+        # 9. Reset state
         self.state.status = "idle"
         self.state.meeting_id = None
         self.state.meet_url = ""
         self.state.title = ""
-        logger.info("Stale meeting state cleaned up - ready for new meeting")
+        self.state.caption_id_to_index.clear()
+        self.state.transcript_buffer.clear()
+
+        # Log summary
+        logger.info("=" * 60)
+        if cleanup_errors:
+            logger.warning(f"CLEANUP: Completed with {len(cleanup_errors)} errors:")
+            for err in cleanup_errors:
+                logger.warning(f"  - {err}")
+        else:
+            logger.info("CLEANUP: Completed successfully - all resources released")
+        logger.info("CLEANUP: Ready for new meeting")
+        logger.info("=" * 60)
 
     async def leave_meeting(self, generate_summary: bool = True) -> dict:
         """
         Leave the meeting and finalize notes.
+
+        This is the NORMAL exit path (user requested leave).
+        For unexpected exits (browser closed), see _cleanup_stale_meeting().
 
         Args:
             generate_summary: Whether to generate an AI summary (future feature)
@@ -1219,42 +1379,84 @@ class NotesBot:
         if self.state.status != "capturing":
             return {"error": "Not in a meeting"}
 
+        logger.info("=" * 60)
+        logger.info("LEAVE: Starting graceful meeting exit...")
+        logger.info("=" * 60)
+
         self.state.status = "leaving"
 
-        # Cancel flush task
-        if self._flush_task:
-            self._flush_task.cancel()
-            try:
-                await self._flush_task
-            except asyncio.CancelledError:
-                pass
-
-        # Cancel screenshot task
-        if hasattr(self, "_screenshot_task") and self._screenshot_task:
-            self._screenshot_task.cancel()
-            try:
-                await self._screenshot_task
-            except asyncio.CancelledError:
-                pass
-
-        # Stop NPU STT pipeline if running
+        # 1. FIRST: Stop NPU STT pipeline - this kills the parec process
+        # Must happen before closing controller to ensure clean shutdown
         if self._npu_stt_pipeline:
-            logger.info("🧠 Stopping NPU STT pipeline...")
-            await self._npu_stt_pipeline.stop()
-            self._npu_stt_pipeline = None
+            logger.info("LEAVE: Stopping NPU STT pipeline...")
+            try:
+                await asyncio.wait_for(self._npu_stt_pipeline.stop(), timeout=5.0)
+                logger.info("LEAVE: NPU STT pipeline stopped")
+            except asyncio.TimeoutError:
+                logger.warning("LEAVE: Timeout stopping NPU STT pipeline")
+            except Exception as e:
+                logger.warning(f"LEAVE: Error stopping NPU STT: {e}")
+            finally:
+                self._npu_stt_pipeline = None
 
-        # Stop video daemon integration
+        # 2. Kill any remaining audio capture processes
+        try:
+            from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+            killed = await PulseAudioCapture.kill_all_captures()
+            if killed > 0:
+                logger.info(f"LEAVE: Killed {killed} audio capture processes")
+        except Exception as e:
+            logger.warning(f"LEAVE: Error killing audio captures: {e}")
+
+        # 3. Cancel background tasks
+        tasks_to_cancel = [
+            ("flush_task", self._flush_task),
+            ("screenshot_task", getattr(self, "_screenshot_task", None)),
+            ("browser_monitor_task", getattr(self, "_browser_monitor_task", None)),
+            ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
+        ]
+
+        for task_name, task in tasks_to_cancel:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+        self._flush_task = None
+        self._screenshot_task = None
+        self._browser_monitor_task = None
+        if hasattr(self, "_participant_poll_task"):
+            self._participant_poll_task = None
+
+        # 4. Stop video daemon integration
         if self._video_daemon_active:
-            await self._stop_video_integration()
+            logger.info("LEAVE: Stopping video daemon...")
+            try:
+                await asyncio.wait_for(self._stop_video_integration(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("LEAVE: Timeout stopping video daemon")
+            except Exception as e:
+                logger.warning(f"LEAVE: Error stopping video daemon: {e}")
 
-        # Final buffer flush
-        await self._flush_buffer()
+        # 5. Final buffer flush
+        try:
+            await self._flush_buffer()
+        except Exception as e:
+            logger.warning(f"LEAVE: Failed to flush buffer: {e}")
 
-        # Leave the meeting
+        # 6. Leave the meeting (browser automation)
         if self._controller:
-            await self._controller.leave_meeting()
+            logger.info("LEAVE: Leaving meeting via browser...")
+            try:
+                await asyncio.wait_for(self._controller.leave_meeting(), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning("LEAVE: Timeout leaving meeting")
+            except Exception as e:
+                logger.warning(f"LEAVE: Error leaving meeting: {e}")
 
-        # Update meeting record
+        # 7. Build result before cleanup
         result = {
             "meeting_id": self.state.meeting_id,
             "title": self.state.title,
@@ -1271,18 +1473,29 @@ class NotesBot:
                 result["duration_minutes"] = round(duration.total_seconds() / 60, 1)
 
             # Update meeting status
-            await self.db.update_meeting(
-                self.state.meeting_id,
-                status="completed",
-                actual_end=now,
-            )
+            try:
+                await self.db.update_meeting(
+                    self.state.meeting_id,
+                    status="completed",
+                    actual_end=now,
+                )
+            except Exception as e:
+                logger.warning(f"LEAVE: Failed to update meeting record: {e}")
 
-            # TODO: Generate AI summary if requested
-            # if generate_summary:
-            #     summary = await self._generate_summary()
-            #     await self.db.update_meeting(self.state.meeting_id, summary=summary)
+        # 8. Close browser controller (this cleans up per-instance devices)
+        # restore_browser_audio=False for normal exit (user's Chrome wasn't affected)
+        if self._controller:
+            logger.info("LEAVE: Closing browser controller...")
+            try:
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=False), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning("LEAVE: Timeout closing controller")
+            except Exception as e:
+                logger.warning(f"LEAVE: Error closing controller: {e}")
+            finally:
+                self._controller = None
 
-        # Emit toast notification for meeting left
+        # 9. Emit toast notification
         try:
             from tool_modules.aa_workflow.src.notification_emitter import notify_meeting_left
 
@@ -1294,23 +1507,16 @@ class NotesBot:
         except Exception:
             pass
 
-        # Clean up any orphaned audio devices and parec processes
-        try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+        # 10. FINAL: Clean up any orphaned devices (safety net)
+        await self._run_orphan_cleanup("POST-LEAVE")
 
-            cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
-            if cleanup_results.get("removed_modules") or cleanup_results.get("killed_processes"):
-                logger.info(
-                    f"Post-meeting cleanup: {len(cleanup_results.get('removed_modules', []))} modules, "
-                    f"{len(cleanup_results.get('killed_processes', []))} processes removed"
-                )
-        except Exception as e:
-            logger.warning(f"Error during post-meeting cleanup: {e}")
-
-        # Reset state
+        # 11. Reset state
         self.state = NotesBotState()
 
-        logger.info(f"Left meeting. Captured {result['captions_captured']} captions.")
+        logger.info("=" * 60)
+        logger.info(f"LEAVE: Meeting ended. Captured {result['captions_captured']} captions.")
+        logger.info("=" * 60)
+
         return result
 
     async def get_status(self) -> dict:
@@ -1348,48 +1554,95 @@ class NotesBot:
         logger.info(f"Wake word detection {'enabled' if enabled else 'disabled'}")
 
     async def close(self) -> None:
-        """Clean up resources."""
-        logger.info("Closing notes bot...")
+        """Clean up all resources.
 
-        # Cancel flush task if running
-        if self._flush_task and not self._flush_task.done():
-            self._flush_task.cancel()
+        This is the final cleanup method called when the bot is being destroyed.
+        It ensures ALL resources are released, including:
+        - Background tasks
+        - NPU STT pipeline (and its parec processes)
+        - Browser controller (and its audio devices)
+        - Any orphaned devices system-wide
+        """
+        logger.info("=" * 60)
+        logger.info("CLOSE: Shutting down notes bot...")
+        logger.info("=" * 60)
+
+        # 1. Stop NPU STT pipeline FIRST (kills parec processes)
+        if self._npu_stt_pipeline:
+            logger.info("CLOSE: Stopping NPU STT pipeline...")
             try:
-                await asyncio.wait_for(self._flush_task, timeout=2.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-            self._flush_task = None
+                await asyncio.wait_for(self._npu_stt_pipeline.stop(), timeout=5.0)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning(f"CLOSE: Error stopping NPU STT: {e}")
+            finally:
+                self._npu_stt_pipeline = None
 
-        # Cancel screenshot task if running
-        if self._screenshot_task and not self._screenshot_task.done():
-            self._screenshot_task.cancel()
-            try:
-                await asyncio.wait_for(self._screenshot_task, timeout=2.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-            self._screenshot_task = None
+        # 2. Kill any remaining audio capture processes
+        try:
+            from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+            killed = await PulseAudioCapture.kill_all_captures()
+            if killed > 0:
+                logger.info(f"CLOSE: Killed {killed} orphaned audio capture processes")
+        except Exception as e:
+            logger.warning(f"CLOSE: Error killing audio captures: {e}")
 
-        # Leave meeting if in one (this also flushes buffer)
+        # 3. Cancel all background tasks
+        tasks_to_cancel = [
+            ("flush_task", self._flush_task),
+            ("screenshot_task", getattr(self, "_screenshot_task", None)),
+            ("browser_monitor_task", getattr(self, "_browser_monitor_task", None)),
+            ("wake_word_check_task", getattr(self, "_wake_word_check_task", None)),
+            ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
+        ]
+
+        for task_name, task in tasks_to_cancel:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+        self._flush_task = None
+        self._screenshot_task = None
+
+        # 4. Leave meeting if in one (this also flushes buffer)
         if self.state.status == "capturing":
+            logger.info("CLOSE: Leaving active meeting...")
             try:
-                await asyncio.wait_for(self.leave_meeting(), timeout=10.0)
+                await asyncio.wait_for(self.leave_meeting(), timeout=15.0)
             except asyncio.TimeoutError:
-                logger.warning("Timeout leaving meeting during close")
-
-        # Close browser controller
-        if self._controller:
-            try:
-                await asyncio.wait_for(self._controller.close(), timeout=15.0)
-            except asyncio.TimeoutError:
-                logger.warning("Timeout closing browser controller")
+                logger.warning("CLOSE: Timeout leaving meeting, forcing cleanup...")
+                await self._cleanup_stale_meeting()
             except Exception as e:
-                logger.warning(f"Error closing browser controller: {e}")
-            self._controller = None
+                logger.warning(f"CLOSE: Error leaving meeting: {e}")
+                await self._cleanup_stale_meeting()
+
+        # 5. Close browser controller if still open
+        if self._controller:
+            logger.info("CLOSE: Closing browser controller...")
+            try:
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=True), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning("CLOSE: Timeout closing controller, force killing...")
+                try:
+                    await self._controller.force_kill()
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning(f"CLOSE: Error closing browser controller: {e}")
+            finally:
+                self._controller = None
+
+        # 6. FINAL: Clean up any remaining orphaned devices system-wide
+        await self._run_orphan_cleanup("SHUTDOWN")
 
         # Note: Don't close the database here - it may be shared
         # The caller (scheduler/manager) is responsible for database cleanup
 
-        logger.info("Notes bot closed")
+        logger.info("=" * 60)
+        logger.info("CLOSE: Notes bot shutdown complete")
+        logger.info("=" * 60)
 
     def _extract_meeting_id(self, url: str) -> str:
         """Extract meeting ID from URL for use as title."""
@@ -1421,6 +1674,7 @@ class NotesBotManager:
     Features:
     - Automatic leave when scheduled end time passes (with grace period)
     - Background monitor task to check for expired meetings
+    - Automatic cleanup of orphaned devices on startup and periodically
     """
 
     def __init__(self):
@@ -1431,6 +1685,99 @@ class NotesBotManager:
         self._lock = asyncio.Lock()
         self._monitor_task: Optional[asyncio.Task] = None
         self._monitor_interval: int = 60  # Check every 60 seconds
+        self._initialized: bool = False
+
+    async def initialize(self) -> None:
+        """Initialize the manager and run startup cleanup.
+
+        IMPORTANT: This should be called before using the manager.
+        It cleans up any orphaned devices from previous sessions.
+        """
+        if self._initialized:
+            return
+
+        logger.info("=" * 60)
+        logger.info("MANAGER INIT: Initializing NotesBotManager...")
+        logger.info("=" * 60)
+
+        # Run startup cleanup to remove any orphaned devices
+        logger.info("MANAGER INIT: Running startup cleanup...")
+        await self._run_full_cleanup("MANAGER-INIT")
+
+        self._initialized = True
+        logger.info("MANAGER INIT: NotesBotManager initialized")
+
+    async def _run_full_cleanup(self, context: str = "") -> dict:
+        """Run comprehensive cleanup of all orphaned resources.
+
+        Args:
+            context: Label for logging
+
+        Returns:
+            Cleanup results
+        """
+        results = {
+            "audio_captures_killed": 0,
+            "modules_removed": 0,
+            "processes_killed": 0,
+            "pipes_removed": 0,
+            "video_devices_removed": 0,
+            "errors": [],
+        }
+
+        prefix = f"{context}: " if context else ""
+
+        # 1. Kill any tracked audio capture processes
+        try:
+            from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+            killed = await PulseAudioCapture.kill_all_captures()
+            results["audio_captures_killed"] = killed
+            if killed > 0:
+                logger.info(f"{prefix}Killed {killed} tracked audio captures")
+        except Exception as e:
+            results["errors"].append(f"Audio capture cleanup: {e}")
+
+        # 2. Get active instance IDs (if any sessions exist)
+        active_ids = set()
+        async with self._lock:
+            for session in self._sessions.values():
+                if session.bot._controller:
+                    active_ids.add(session.bot._controller._instance_id)
+
+        # 3. Run comprehensive orphan cleanup
+        try:
+            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+
+            cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=active_ids)
+
+            results["modules_removed"] = len(cleanup_results.get("removed_modules", []))
+            results["processes_killed"] = len(cleanup_results.get("killed_processes", []))
+            results["pipes_removed"] = len(cleanup_results.get("removed_pipes", []))
+            results["video_devices_removed"] = len(cleanup_results.get("removed_video_devices", []))
+            results["errors"].extend(cleanup_results.get("errors", []))
+
+            total = (
+                results["modules_removed"]
+                + results["processes_killed"]
+                + results["pipes_removed"]
+                + results["video_devices_removed"]
+            )
+
+            if total > 0:
+                logger.info(
+                    f"{prefix}Cleanup: {results['modules_removed']} modules, "
+                    f"{results['processes_killed']} processes, "
+                    f"{results['pipes_removed']} pipes, "
+                    f"{results['video_devices_removed']} video devices"
+                )
+            else:
+                logger.info(f"{prefix}Cleanup: No orphaned devices found")
+
+        except Exception as e:
+            results["errors"].append(f"Orphan cleanup: {e}")
+            logger.warning(f"{prefix}Error during cleanup: {e}")
+
+        return results
 
     async def _get_db(self) -> MeetingNotesDB:
         """Get or create shared database instance."""
@@ -1569,23 +1916,46 @@ class NotesBotManager:
             await self._force_kill_session(session_id)
 
     async def _force_kill_session(self, session_id: str) -> None:
-        """Force kill a hung session."""
+        """Force kill a hung session and clean up all resources."""
         async with self._lock:
             if session_id not in self._sessions:
                 return
 
             session = self._sessions[session_id]
+            logger.info(f"Force-killing session {session_id}...")
+
+            # Stop NPU STT pipeline first (kills parec processes)
+            if session.bot._npu_stt_pipeline:
+                try:
+                    await asyncio.wait_for(session.bot._npu_stt_pipeline.stop(), timeout=3.0)
+                except (asyncio.TimeoutError, Exception):
+                    pass
+                session.bot._npu_stt_pipeline = None
+
+            # Kill any audio capture processes
+            try:
+                from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+                await PulseAudioCapture.kill_all_captures()
+            except Exception:
+                pass
 
             # Force kill the browser
             if session.bot._controller:
                 await session.bot._controller.force_kill()
 
-            # Clean up
+            # Clean up session tracking
             del self._sessions[session_id]
             if session_id in self._bots:
                 del self._bots[session_id]
 
             logger.info(f"Force-killed session {session_id}")
+
+        # Run orphan cleanup outside the lock
+        try:
+            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+            await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
+        except Exception as e:
+            logger.warning(f"Error during post-force-kill cleanup: {e}")
 
     async def join_meeting(
         self,
@@ -1616,7 +1986,19 @@ class NotesBotManager:
         Returns:
             Tuple of (session_id, success, errors)
         """
+        # Ensure manager is initialized (runs startup cleanup on first call)
+        if not self._initialized:
+            await self.initialize()
+
         session_id = self._generate_session_id(meet_url)
+
+        logger.info("=" * 60)
+        logger.info(f"MANAGER JOIN: Joining meeting {session_id}")
+        logger.info("=" * 60)
+
+        # Run pre-join cleanup to ensure clean state
+        logger.info("MANAGER JOIN: Running pre-join cleanup...")
+        await self._run_full_cleanup("PRE-JOIN")
 
         async with self._lock:
             # Check if already in this meeting
@@ -1626,6 +2008,7 @@ class NotesBotManager:
                     return session_id, False, ["Already in this meeting"]
                 else:
                     # Clean up old session
+                    logger.info(f"MANAGER JOIN: Cleaning up stale session {session_id}")
                     await existing.bot.close()
                     del self._sessions[session_id]
                     if session_id in self._bots:
@@ -1635,12 +2018,12 @@ class NotesBotManager:
             db = await self._get_db()
             bot = NotesBot(db=db)
 
-            # Initialize the bot
+            # Initialize the bot (this also runs cleanup)
             if not await bot.initialize():
                 errors = bot.state.errors or ["Failed to initialize bot"]
                 return session_id, False, errors
 
-            # Join the meeting
+            # Join the meeting (this also runs pre-join cleanup)
             success = await bot.join_meeting(
                 meet_url=meet_url,
                 title=title,
@@ -1801,43 +2184,57 @@ class NotesBotManager:
         return True
 
     async def close(self) -> None:
-        """Clean up all resources."""
-        logger.info("Closing bot manager...")
+        """Clean up all resources.
+
+        This is the final shutdown method. It:
+        1. Stops the monitor task
+        2. Leaves all active meetings
+        3. Runs final orphan cleanup
+        4. Closes the database
+        """
+        logger.info("=" * 60)
+        logger.info("MANAGER CLOSE: Shutting down bot manager...")
+        logger.info("=" * 60)
 
         # Stop monitor first
         try:
             await asyncio.wait_for(self._stop_monitor(), timeout=5.0)
         except asyncio.TimeoutError:
-            logger.warning("Timeout stopping monitor")
+            logger.warning("MANAGER CLOSE: Timeout stopping monitor")
 
-        # Leave all meetings
+        # Leave all meetings (each will run its own cleanup)
         try:
             await asyncio.wait_for(self.leave_all(), timeout=30.0)
         except asyncio.TimeoutError:
-            logger.warning("Timeout leaving all meetings")
+            logger.warning("MANAGER CLOSE: Timeout leaving all meetings")
 
-        # Final cleanup of any orphaned audio devices
+        # Kill any remaining audio capture processes
+        logger.info("MANAGER CLOSE: Killing any remaining audio captures...")
         try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
-
-            results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
-            if results["removed_modules"] or results["removed_pipes"]:
-                logger.info(
-                    f"Final cleanup: removed {len(results['removed_modules'])} modules, "
-                    f"{len(results['removed_pipes'])} pipes"
-                )
+            from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+            killed = await PulseAudioCapture.kill_all_captures()
+            if killed > 0:
+                logger.info(f"MANAGER CLOSE: Killed {killed} audio capture processes")
         except Exception as e:
-            logger.warning(f"Error during final device cleanup: {e}")
+            logger.warning(f"MANAGER CLOSE: Error killing audio captures: {e}")
+
+        # Final cleanup of any orphaned devices
+        logger.info("MANAGER CLOSE: Running final orphan cleanup...")
+        await self._run_full_cleanup("SHUTDOWN")
 
         # Close database
         if self._db:
             try:
                 await self._db.close()
             except Exception as e:
-                logger.warning(f"Error closing database: {e}")
+                logger.warning(f"MANAGER CLOSE: Error closing database: {e}")
             self._db = None
 
-        logger.info("Bot manager closed")
+        self._initialized = False
+
+        logger.info("=" * 60)
+        logger.info("MANAGER CLOSE: Bot manager shutdown complete")
+        logger.info("=" * 60)
 
 
 # Global instances
@@ -1875,5 +2272,10 @@ def get_bot_manager() -> NotesBotManager:
 
 
 async def init_bot_manager() -> NotesBotManager:
-    """Initialize and return the bot manager."""
-    return get_bot_manager()
+    """Initialize and return the bot manager.
+
+    This runs startup cleanup to remove any orphaned devices from previous sessions.
+    """
+    manager = get_bot_manager()
+    await manager.initialize()
+    return manager

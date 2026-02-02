@@ -1027,6 +1027,11 @@ class GoogleMeetController:
                 env=browser_env,  # Critical: routes audio BEFORE any streams created
             )
 
+            # CRITICAL: Register disconnect handler to detect when browser is closed
+            # This triggers cleanup immediately when user closes the browser window
+            self.browser.on("close", self._on_browser_close)
+            logger.info(f"[{self._instance_id}] Registered browser close handler")
+
             # Try to get browser PID
             try:
                 # Playwright doesn't expose PID directly, but we can find it
@@ -1334,6 +1339,33 @@ class GoogleMeetController:
         """
         logger.info(f"[JOIN] ========== Starting join_meeting ==========")
         logger.info(f"[JOIN] URL: {meet_url}")
+
+        # Check if browser needs reinitialization
+        needs_reinit = False
+        if not self.page:
+            logger.warning(f"[JOIN] page is None")
+            needs_reinit = True
+        elif self.page.is_closed():
+            logger.warning(f"[JOIN] page.is_closed() is True")
+            needs_reinit = True
+        elif getattr(self, "_browser_closed", False):
+            logger.warning(f"[JOIN] _browser_closed flag is True")
+            needs_reinit = True
+
+        if needs_reinit:
+            logger.warning(f"[JOIN] Browser needs reinitialization...")
+            # Reset the closed flag
+            self._browser_closed = False
+            # Close any existing browser resources
+            await self.close()
+            # Reinitialize the browser
+            if not await self.initialize(video_enabled=getattr(self, "_video_enabled", False)):
+                error_msg = "Failed to reinitialize browser after closure"
+                logger.error(f"[JOIN] ERROR: {error_msg}")
+                if self.state:
+                    self.state.errors.append(error_msg)
+                return False
+            logger.info(f"[JOIN] Browser reinitialized successfully")
 
         if not self.page:
             error_msg = "Browser not initialized - page is None"
@@ -3242,6 +3274,64 @@ class GoogleMeetController:
 
         logger.info(f"[{self._instance_id}] Browser closed")
 
+    def _on_browser_close(self) -> None:
+        """Handle browser close event from Playwright.
+
+        This is called IMMEDIATELY when the browser window is closed by the user.
+        It sets the _browser_closed flag and triggers async cleanup.
+
+        CRITICAL: This is a sync callback, so we schedule the async cleanup.
+        """
+        logger.warning(f"[{self._instance_id}] *** BROWSER CLOSE EVENT DETECTED ***")
+        self._browser_closed = True
+
+        # Update state to reflect browser is gone
+        if self.state:
+            self.state.joined = False
+
+        # Schedule async cleanup - this runs the device cleanup
+        # We use asyncio.create_task but need to get the event loop
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._handle_browser_close_async())
+        except RuntimeError:
+            # No running event loop - cleanup will happen via health monitor
+            logger.warning(f"[{self._instance_id}] No event loop for async cleanup, relying on health monitor")
+
+    async def _handle_browser_close_async(self) -> None:
+        """Async handler for browser close - cleans up devices immediately."""
+        logger.info(f"[{self._instance_id}] Running immediate device cleanup after browser close...")
+
+        # Clean up audio devices - RESTORE browser audio since this is unexpected
+        if self._device_manager:
+            try:
+                await self._device_manager.cleanup(restore_browser_audio=True)
+                logger.info(f"[{self._instance_id}] Device cleanup completed")
+            except Exception as e:
+                logger.warning(f"[{self._instance_id}] Device cleanup error: {e}")
+            finally:
+                self._device_manager = None
+                self._devices = None
+
+        # Also run orphan cleanup to catch anything else
+        try:
+            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+            results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
+            if results.get("removed_modules") or results.get("killed_processes"):
+                logger.info(
+                    f"[{self._instance_id}] Orphan cleanup: "
+                    f"{len(results.get('removed_modules', []))} modules, "
+                    f"{len(results.get('killed_processes', []))} processes"
+                )
+        except Exception as e:
+            logger.warning(f"[{self._instance_id}] Orphan cleanup error: {e}")
+
+        # Unregister this instance
+        if self._instance_id in GoogleMeetController._instances:
+            del GoogleMeetController._instances[self._instance_id]
+
+        logger.info(f"[{self._instance_id}] Browser close cleanup complete")
+
     async def force_kill(self) -> bool:
         """Force kill this browser instance and its processes.
 
@@ -3378,32 +3468,15 @@ class GoogleMeetController:
     def is_browser_closed(self) -> bool:
         """Check if the browser has been closed.
 
-        Actively checks browser/context/page state in addition to the flag.
+        Checks browser/page state. Returns True only if we're certain the browser is closed.
         """
-        # Check flag first (set by error handlers)
+        # Check flag first (set by error handlers when we catch closure exceptions)
         if getattr(self, "_browser_closed", False):
             logger.debug(f"[{self._instance_id}] is_browser_closed: _browser_closed flag is True")
             return True
 
-        # Actively check if browser objects are still valid
+        # Check if page exists and is closed
         try:
-            # Check if browser is connected
-            if self.browser is None:
-                logger.warning(f"[{self._instance_id}] is_browser_closed: browser is None")
-                self._browser_closed = True
-                return True
-            if not self.browser.is_connected():
-                logger.warning(f"[{self._instance_id}] is_browser_closed: browser.is_connected() returned False")
-                self._browser_closed = True
-                return True
-
-            # Check if context is still valid
-            if self.context is None:
-                logger.warning(f"[{self._instance_id}] is_browser_closed: context is None")
-                self._browser_closed = True
-                return True
-
-            # Check if page is closed
             if self.page is None:
                 logger.warning(f"[{self._instance_id}] is_browser_closed: page is None")
                 self._browser_closed = True

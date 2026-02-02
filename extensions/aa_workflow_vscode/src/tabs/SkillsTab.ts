@@ -35,8 +35,12 @@ interface RunningSkill {
   progress: number;
   currentStep: string;
   startedAt: string;
-  source: "chat" | "cron" | "slack" | "manual";
+  source: "chat" | "cron" | "slack" | "manual" | "api";
   elapsed: number;
+  /** Track which update source added this skill to prevent duplicates */
+  addedBy?: "websocket" | "filewatcher" | "dbus";
+  /** Timestamp when this skill was added (for deduplication window) */
+  addedAt?: number;
 }
 
 interface SkillExecution {
@@ -154,8 +158,22 @@ export class SkillsTab extends BaseTab {
     }
   }
 
+  /**
+   * Add or update a running skill from WebSocket events.
+   * WebSocket is the primary/authoritative source for real-time updates.
+   */
   private addOrUpdateRunningSkill(skill: SkillState): void {
-    const existing = this.runningSkills.find(s => s.executionId === skill.skillId);
+    const now = Date.now();
+    
+    // Check for existing by executionId (most reliable)
+    const existingById = this.runningSkills.find(s => s.executionId === skill.skillId);
+    
+    // Check for existing by skillName that's running (fallback for ID mismatch)
+    const existingByName = this.runningSkills.find(s =>
+      s.skillName === skill.skillName && s.status === "running"
+    );
+    
+    const existing = existingById || existingByName;
 
     const progress = skill.totalSteps > 0
       ? Math.round((skill.currentStep / skill.totalSteps) * 100)
@@ -164,11 +182,20 @@ export class SkillsTab extends BaseTab {
     const elapsed = Date.now() - skill.startedAt.getTime();
 
     if (existing) {
+      // Update existing entry
+      // Always update executionId to WebSocket's ID (authoritative)
+      existing.executionId = skill.skillId;
       existing.status = skill.status === "running" ? "running" : skill.status === "completed" ? "completed" : "failed";
       existing.progress = progress;
       existing.currentStep = skill.currentStepName || `Step ${skill.currentStep}`;
       existing.elapsed = elapsed;
+      existing.addedBy = "websocket"; // WebSocket takes ownership
+      // Update source if we now have a real source from WebSocket
+      if (skill.source && skill.source !== "manual") {
+        existing.source = skill.source;
+      }
     } else {
+      // Add new entry - WebSocket is authoritative
       this.runningSkills.push({
         executionId: skill.skillId,
         skillName: skill.skillName,
@@ -176,9 +203,67 @@ export class SkillsTab extends BaseTab {
         progress,
         currentStep: skill.currentStepName || `Step ${skill.currentStep}`,
         startedAt: skill.startedAt.toISOString(),
-        source: "manual",
+        source: skill.source || "chat",
         elapsed,
+        addedBy: "websocket",
+        addedAt: now,
       });
+      logger.log(`Added running skill from WebSocket: ${skill.skillName} (${skill.skillId})`);
+    }
+    
+    // Clean up any duplicates that might have snuck in from race conditions
+    this.deduplicateRunningSkills();
+  }
+  
+  /**
+   * Remove duplicate running skills, keeping the one with the most authoritative source.
+   * Priority: websocket > filewatcher > dbus
+   */
+  private deduplicateRunningSkills(): void {
+    const seen = new Map<string, RunningSkill>();
+    const toRemove: string[] = [];
+    
+    for (const skill of this.runningSkills) {
+      if (skill.status !== "running") continue;
+      
+      const key = skill.skillName;
+      const existing = seen.get(key);
+      
+      if (existing) {
+        // Duplicate found - decide which to keep
+        const existingPriority = this.getSourcePriority(existing.addedBy);
+        const newPriority = this.getSourcePriority(skill.addedBy);
+        
+        if (newPriority > existingPriority) {
+          // New one is more authoritative, remove the old one
+          toRemove.push(existing.executionId);
+          seen.set(key, skill);
+          logger.warn(`Dedup: Keeping ${skill.skillName} from ${skill.addedBy}, removing from ${existing.addedBy}`);
+        } else {
+          // Old one is more authoritative, remove the new one
+          toRemove.push(skill.executionId);
+          logger.warn(`Dedup: Keeping ${skill.skillName} from ${existing.addedBy}, removing from ${skill.addedBy}`);
+        }
+      } else {
+        seen.set(key, skill);
+      }
+    }
+    
+    if (toRemove.length > 0) {
+      this.runningSkills = this.runningSkills.filter(s => !toRemove.includes(s.executionId));
+      logger.log(`Removed ${toRemove.length} duplicate running skills`);
+    }
+  }
+  
+  /**
+   * Get priority for deduplication. Higher = more authoritative.
+   */
+  private getSourcePriority(source?: string): number {
+    switch (source) {
+      case "websocket": return 3;
+      case "filewatcher": return 2;
+      case "dbus": return 1;
+      default: return 0;
     }
   }
 
@@ -287,23 +372,53 @@ export class SkillsTab extends BaseTab {
     }
   }
 
+  /**
+   * Update running skills from D-Bus polling.
+   * D-Bus is the lowest priority source - only add if not already tracked.
+   */
   private updateRunningSkills(): void {
     if (this.currentExecution && this.currentExecution.status === "running") {
+      const now = Date.now();
+      const skillName = this.currentExecution.skill_name;
+      
+      // Check if already tracked by any source
       const existing = this.runningSkills.find(
-        (s) => s.skillName === this.currentExecution!.skill_name
+        (s) => s.skillName === skillName && s.status === "running"
       );
-      if (!existing) {
-        this.runningSkills.push({
-          executionId: `exec-${Date.now()}`,
-          skillName: this.currentExecution.skill_name,
-          status: "running",
-          progress: this.currentExecution.progress || 0,
-          currentStep: this.currentExecution.current_step || "",
-          startedAt: this.currentExecution.started_at || new Date().toISOString(),
-          source: "manual",
-          elapsed: 0,
-        });
+      
+      if (existing) {
+        // Update progress/step but DON'T change ownership or executionId
+        existing.progress = this.currentExecution.progress || existing.progress;
+        existing.currentStep = this.currentExecution.current_step || existing.currentStep;
+      } else {
+        // Only add if not recently added by another source (within 2 seconds)
+        const recentlyAdded = this.runningSkills.some(
+          rs => rs.skillName === skillName && 
+                rs.addedAt && 
+                (now - rs.addedAt) < 2000
+        );
+        
+        if (!recentlyAdded) {
+          this.runningSkills.push({
+            executionId: (this.currentExecution as any).execution_id || `exec-${Date.now()}`,
+            skillName: skillName,
+            status: "running",
+            progress: this.currentExecution.progress || 0,
+            currentStep: this.currentExecution.current_step || "",
+            startedAt: this.currentExecution.started_at || new Date().toISOString(),
+            source: (this.currentExecution as any).source || "chat",
+            elapsed: 0,
+            addedBy: "dbus",
+            addedAt: now,
+          });
+          logger.log(`Added running skill from D-Bus: ${skillName}`);
+        } else {
+          logger.log(`Skipping duplicate from D-Bus (recently added): ${skillName}`);
+        }
       }
+      
+      // Run deduplication
+      this.deduplicateRunningSkills();
     }
   }
 
@@ -1491,6 +1606,7 @@ export class SkillsTab extends BaseTab {
       .source-badge.cron { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
       .source-badge.slack { background: rgba(16, 185, 129, 0.2); color: #10b981; }
       .source-badge.manual { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+      .source-badge.api { background: rgba(236, 72, 153, 0.2); color: #ec4899; }
 
       .running-skill-elapsed {
         font-size: 0.8rem;
@@ -1621,18 +1737,91 @@ export class SkillsTab extends BaseTab {
         return true;
 
       case "runningSkillsUpdate":
-        // Update running skills from the skill execution watcher
+        // Update running skills from the skill execution watcher (file-based)
+        // File watcher is secondary to WebSocket - only add skills not already tracked by WebSocket
         if (message.runningSkills && Array.isArray(message.runningSkills)) {
-          this.runningSkills = message.runningSkills.map((s: any) => ({
-            executionId: s.executionId || `exec-${Date.now()}`,
-            skillName: s.skillName,
-            status: s.status === "running" ? "running" : s.status === "success" ? "completed" : "failed",
-            progress: s.totalSteps > 0 ? Math.round((s.currentStepIndex / s.totalSteps) * 100) : 0,
-            currentStep: `Step ${s.currentStepIndex + 1}/${s.totalSteps}`,
-            startedAt: s.startTime || new Date().toISOString(),
-            source: (s.source as "chat" | "cron" | "slack" | "manual") || "manual",
-            elapsed: s.elapsedMs || 0,
-          }));
+          const now = Date.now();
+          
+          for (const s of message.runningSkills) {
+            const execId = s.executionId || `exec-${Date.now()}`;
+            
+            // Check if already tracked by executionId
+            const existingById = this.runningSkills.find(rs => rs.executionId === execId);
+            
+            // Check if already tracked by skillName (running)
+            const existingByName = this.runningSkills.find(
+              rs => rs.skillName === s.skillName && rs.status === "running"
+            );
+            
+            const existing = existingById || existingByName;
+
+            const newStatus = s.status === "running" ? "running" : s.status === "success" ? "completed" : "failed";
+            const newProgress = s.totalSteps > 0 ? Math.round((s.currentStepIndex / s.totalSteps) * 100) : 0;
+            const newSource = (s.source as "chat" | "cron" | "slack" | "manual" | "api") || "chat";
+
+            if (existing) {
+              // Update existing entry, but DON'T overwrite WebSocket-owned skills' executionId
+              // WebSocket is authoritative for IDs
+              if (existing.addedBy !== "websocket") {
+                existing.executionId = execId;
+                existing.addedBy = "filewatcher";
+              }
+              existing.status = newStatus;
+              existing.progress = newProgress;
+              existing.currentStep = `Step ${s.currentStepIndex + 1}/${s.totalSteps}`;
+              existing.elapsed = s.elapsedMs || 0;
+              // Update source if file has a real source
+              if (newSource !== "manual") {
+                existing.source = newSource;
+              }
+            } else {
+              // Only add if not recently added (within 2 seconds) - prevents race condition duplicates
+              const recentlyAdded = this.runningSkills.some(
+                rs => rs.skillName === s.skillName && 
+                      rs.addedAt && 
+                      (now - rs.addedAt) < 2000
+              );
+              
+              if (!recentlyAdded) {
+                // Add new entry from file watcher
+                this.runningSkills.push({
+                  executionId: execId,
+                  skillName: s.skillName,
+                  status: newStatus,
+                  progress: newProgress,
+                  currentStep: `Step ${s.currentStepIndex + 1}/${s.totalSteps}`,
+                  startedAt: s.startTime || new Date().toISOString(),
+                  source: newSource,
+                  elapsed: s.elapsedMs || 0,
+                  addedBy: "filewatcher",
+                  addedAt: now,
+                });
+                logger.log(`Added running skill from file watcher: ${s.skillName} (${execId})`);
+              } else {
+                logger.log(`Skipping duplicate from file watcher (recently added): ${s.skillName}`);
+              }
+            }
+          }
+
+          // Remove skills that are no longer in the file (completed/removed)
+          // But only remove file-watcher-owned skills, not WebSocket-owned ones
+          const fileSkillIds = new Set(message.runningSkills.map((s: any) => s.executionId));
+          const fileSkillNames = new Set(message.runningSkills.map((s: any) => s.skillName));
+          this.runningSkills = this.runningSkills.filter(rs => {
+            // Keep if still in file by ID or name
+            if (fileSkillIds.has(rs.executionId)) return true;
+            if (fileSkillNames.has(rs.skillName) && rs.status === "running") return true;
+            // Keep completed/failed for a bit (they'll be cleaned up by timeout)
+            if (rs.status !== "running") return true;
+            // Keep WebSocket-owned skills even if not in file (WebSocket is authoritative)
+            if (rs.addedBy === "websocket") return true;
+            // Remove stale running skills not in file
+            return false;
+          });
+
+          // Final deduplication pass
+          this.deduplicateRunningSkills();
+
           logger.log(`Updated running skills: ${this.runningSkills.length} skills`);
           this.notifyNeedsRender();
         }

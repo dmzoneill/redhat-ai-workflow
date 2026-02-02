@@ -518,17 +518,39 @@ class ConfigDaemon(DaemonDBusBase):
                     except Exception as e:
                         logger.debug(f"Failed to parse {legacy_file}: {e}")
 
-                # For workflow module, also scan *_tools.py files
+                # For workflow module, analyze tools_core.py and tools_basic.py imports
+                # to determine which source files belong to which tier
                 if module_name == "workflow" and tier_counts["basic"] == 0 and tier_counts["core"] == 0:
-                    for py_file in src_dir.glob("*_tools.py"):
+                    # Determine which tool files are imported by each tier file
+                    core_imports = self._get_workflow_tier_imports(src_dir / "tools_core.py")
+                    basic_imports = self._get_workflow_tier_imports(src_dir / "tools_basic.py")
+
+                    # Scan all Python files that might contain tools
+                    for py_file in src_dir.glob("*.py"):
+                        # Skip the tier files themselves and __init__.py
+                        if py_file.name in ("tools_core.py", "tools_basic.py", "tools_extra.py", "__init__.py"):
+                            continue
+
                         try:
                             parsed_tools = self._parse_tools_from_file(py_file)
+                            if not parsed_tools:
+                                continue
+
+                            # Determine tier based on which file imports this module
+                            file_stem = py_file.stem  # e.g., "memory_tools", "skill_engine"
+                            if file_stem in core_imports:
+                                tier = "core"
+                            elif file_stem in basic_imports:
+                                tier = "basic"
+                            else:
+                                tier = "extra"  # Not imported by core or basic
+
                             for tool in parsed_tools:
-                                tool["tier"] = "basic"
+                                tool["tier"] = tier
                             tools.extend(parsed_tools)
+                            tier_counts[tier] += len(parsed_tools)
                         except Exception as e:
                             logger.debug(f"Failed to parse {py_file}: {e}")
-                    tier_counts["basic"] = len(tools)
 
             # Try to get module description from README
             readme = module_dir / "README.md"
@@ -601,6 +623,38 @@ class ConfigDaemon(DaemonDBusBase):
                     )
 
         return tools
+
+    def _get_workflow_tier_imports(self, tier_file: Path) -> set[str]:
+        """Parse a workflow tier file to find which modules it imports for tool registration.
+
+        Looks for patterns like:
+        - from .memory_tools import register_memory_tools
+        - from .skill_engine import register_skill_tools
+
+        Returns set of module stems (e.g., {'memory_tools', 'skill_engine'})
+        """
+        imports = set()
+        if not tier_file.exists():
+            return imports
+
+        try:
+            source = tier_file.read_text()
+            tree = ast.parse(source)
+        except (SyntaxError, OSError):
+            return imports
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                # Handle both ".memory_tools" and "memory_tools"
+                if module.startswith("."):
+                    module = module[1:]
+                # Check if any imported name contains "register" (tool registration function)
+                has_register = any("register" in alias.name.lower() for alias in node.names)
+                if has_register and module:
+                    imports.add(module)
+
+        return imports
 
     def _get_decorator_name(self, decorator: ast.expr) -> str:
         """Extract decorator name from AST node."""

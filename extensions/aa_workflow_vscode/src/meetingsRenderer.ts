@@ -815,7 +815,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
                   </label>
                   <span style="font-size: 0.75rem; color: var(--text-secondary);" title="When enabled, shows AI research overlay on virtual camera">(disabled by default)</span>
                 </div>
-                <button class="btn btn-sm btn-primary" id="quickJoinBtn">🎥 Join Meeting</button>
+                <button class="btn btn-sm btn-primary" id="quickJoinBtn" data-action="quickJoin">🎥 Join Meeting</button>
               </div>
             </div>
 
@@ -1630,20 +1630,21 @@ export function getMeetingsTabScript(): string {
             return;
           }
 
-          // Handle action buttons
-          if (target.tagName === 'BUTTON' && target.dataset.action) {
-            const action = target.dataset.action;
-            const mode = target.dataset.mode || 'notes'; // Default to notes
-            const meetingId = target.dataset.id;
+          // Handle action buttons (use closest to handle clicks on button content like emojis)
+          const button = target.closest('button[data-action]');
+          if (button) {
+            const action = button.dataset.action;
+            const mode = button.dataset.mode || 'notes'; // Default to notes
+            const meetingId = button.dataset.id;
 
             if (action === 'approve') {
               // Optimistic UI update - immediately show approved state
-              const row = target.closest('.upcoming-meeting-row');
-              const controlsDiv = target.closest('.upcoming-meeting-controls');
-              const meetUrl = target.dataset.url || '';
+              const row = button.closest('.upcoming-meeting-row');
+              const controlsDiv = button.closest('.upcoming-meeting-controls');
+              const meetUrl = button.dataset.url || '';
 
               // Replace approve button with approved badge (clickable to toggle back)
-              target.outerHTML = '<span class="status-badge approved" data-action="unapprove" data-id="' + meetingId + '" data-url="' + meetUrl + '" title="Click to skip this meeting">✓ Approved</span>';
+              button.outerHTML = '<span class="status-badge approved" data-action="unapprove" data-id="' + meetingId + '" data-url="' + meetUrl + '" title="Click to skip this meeting">✓ Approved</span>';
               if (row) {
                 row.classList.add('approved');
                 row.dataset.meetingId = meetingId; // Store for potential revert
@@ -1653,7 +1654,7 @@ export function getMeetingsTabScript(): string {
               vscode.postMessage({ type: 'approveMeeting', meetingId: meetingId, meetUrl: meetUrl, mode: mode });
             } else if (action === 'join') {
               // Pass button element for loading state
-              joinMeetingNow(target.dataset.url, target.dataset.title, target);
+              joinMeetingNow(button.dataset.url, button.dataset.title, button);
             }
           }
         });

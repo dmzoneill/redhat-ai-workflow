@@ -6,12 +6,13 @@ This module provides the minimal set of workflow tools needed by ALL personas:
 - Skill execution: skill_run, skill_list
 - Memory: memory_read, memory_write, memory_session_log
 - Meta: tool_list, tool_exec
+- Infra: vpn_connect, kube_login (required for auto-healing)
 
 For additional tools (knowledge, project, scheduler, sprint), use:
 - workflow_basic: Loads core + basic tools
 - tool_exec("knowledge_search", {...}): Call specific tools on-demand
 
-Total: ~18 core tools (down from 54 in basic)
+Total: ~20 core tools (down from 54 in basic)
 """
 
 import logging
@@ -30,12 +31,14 @@ if str(_TOOLS_DIR) not in sys.path:
 # Import registration functions from sub-modules
 # Support both package import and direct loading
 try:
+    from .infra_tools import register_infra_tools
     from .memory_tools import register_memory_tools
     from .persona_tools import register_persona_tools
     from .resources import register_resources
     from .session_tools import register_prompts, register_session_tools
     from .skill_engine import register_skill_tools
 except ImportError:
+    from infra_tools import register_infra_tools
     from memory_tools import register_memory_tools
     from persona_tools import register_persona_tools
     from resources import register_resources
@@ -75,15 +78,16 @@ def register_tools(server: "FastMCP") -> int:
     """
     Register CORE workflow tools with the MCP server.
 
-    Core tools (~18 tools):
+    Core tools (~20 tools):
     - persona_tools: 2 tools (persona_load, persona_list)
     - session_tools: 5 tools (session_start, session_info, session_list, session_switch, session_rename)
     - skill_engine: 2 tools (skill_run, skill_list)
     - memory_tools: 9 tools (memory_read, memory_write, memory_list, memory_append, memory_delete,
                              memory_session_log, memory_search, memory_backup, memory_restore)
+    - infra_tools: 2 tools (vpn_connect, kube_login) - required for auto-healing
 
     Note: This is a subset of the full workflow module. For additional tools
-    (knowledge, project, scheduler, sprint, meta, infra), load workflow_basic.
+    (knowledge, project, scheduler, sprint, meta), load workflow_basic.
 
     Args:
         server: FastMCP server instance
@@ -117,6 +121,7 @@ def register_tools(server: "FastMCP") -> int:
     tool_count += register_prompts(server)
     tool_count += register_resources(server, load_config)
     tool_count += register_skill_tools(server, create_github_issue, ask_question_fn)
+    tool_count += register_infra_tools(server)  # vpn_connect, kube_login for auto-healing
 
     logger.info(f"Registered {tool_count} core workflow tools")
     return tool_count

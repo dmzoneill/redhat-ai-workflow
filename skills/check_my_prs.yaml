@@ -270,21 +270,25 @@ steps:
         failed = []
         needs_rebase = []
 
-        if first_mr_status:
-          status = first_mr_status.get('status', 'unknown')
+        # Check if first_mr_status exists (may be skipped if gitlab_mr_view failed)
+        first_mr = first_mr_status if 'first_mr_status' in dir() and first_mr_status else None
+        if first_mr:
+          status = first_mr.get('status', 'unknown')
           if status == 'needs_response':
-            needs_response.append(first_mr_status)
+            needs_response.append(first_mr)
           elif status == 'approved':
-            approved.append(first_mr_status)
+            approved.append(first_mr)
           elif status == 'pipeline_failed':
-            failed.append(first_mr_status)
+            failed.append(first_mr)
           elif status == 'needs_rebase':
-            needs_rebase.append(first_mr_status)
+            needs_rebase.append(first_mr)
           else:
-            awaiting.append(first_mr_status)
+            awaiting.append(first_mr)
 
         # Add remaining MRs as "awaiting" (not analyzed in detail)
-        for mr in my_mrs[1:]:
+        # If first_mr wasn't analyzed, include all MRs
+        start_idx = 1 if first_mr else 0
+        for mr in my_mrs[start_idx:]:
           awaiting.append({'iid': mr.get('iid'), 'title': mr.get('title', ''), 'status': 'not_checked'})
 
         # Show MRs needing response first (most important)
@@ -307,12 +311,14 @@ steps:
           for mr in needs_rebase:
             mr_id = linkify_mr_ids(f"!{mr['iid']}", slack_format=is_slack)
             title = linkify_jira_keys(mr.get('title', ''), slack_format=is_slack)
-            if rebase_result:
+            has_rebase = 'rebase_result' in dir() and rebase_result
+            if has_rebase:
               lines.append(f"- {mr_id}: {title} 🔄 **Rebased!**")
               lines.append(f"  - *See rebase results below*")
             else:
               lines.append(f"- {mr_id}: {title} ⚠️ Has merge conflicts")
-              lines.append(f"  - Run: `skill_run(\"rebase_pr\", '{{\"mr_id\": {mr[\"iid\"]}}}')`")
+              mr_iid = mr["iid"]
+              lines.append(f"  - Run: `skill_run(\"rebase_pr\", '{{\"mr_id\": {mr_iid}}}')`")
           lines.append("")
 
         if failed:

@@ -378,6 +378,12 @@ function formatInferenceResult(data) {
 
 document.addEventListener('click', function(e) {
   const target = e.target;
+  
+  // Debug: log all clicks to extension output
+  const debugActionBtn = target.closest('[data-action]');
+  if (debugActionBtn) {
+    log('[base.js] Click on data-action element: ' + debugActionBtn.dataset.action);
+  }
 
   // Handle view toggle buttons (Sessions and Personas tabs)
   if (target.id === 'sessionViewCard') {
@@ -398,6 +404,80 @@ document.addEventListener('click', function(e) {
   if (target.id === 'personaViewTable') {
     e.preventDefault();
     vscode.postMessage({ command: 'changePersonaViewMode', value: 'table' });
+    return;
+  }
+
+  // Handle meetings subtab buttons (data-tab attribute)
+  const meetingsSubtab = target.closest('.meetings-subtab[data-tab]');
+  if (meetingsSubtab) {
+    const tabName = meetingsSubtab.dataset.tab;
+    log('[base.js] Meetings subtab clicked: ' + tabName);
+    
+    // Update tab buttons
+    document.querySelectorAll('.meetings-subtab').forEach(btn => {
+      btn.classList.remove('active');
+      if (btn.dataset.tab === tabName) {
+        btn.classList.add('active');
+      }
+    });
+
+    // Update content panels
+    document.querySelectorAll('.subtab-content').forEach(panel => {
+      panel.classList.remove('active');
+    });
+    const targetPanel = document.getElementById('subtab-' + tabName);
+    if (targetPanel) {
+      targetPanel.classList.add('active');
+    }
+    return;
+  }
+
+  // Handle meetings mode selector buttons (in upcoming meetings list)
+  const modeBtn = target.closest('.meeting-mode-selector .mode-btn[data-mode]');
+  if (modeBtn) {
+    const meetingId = modeBtn.dataset.id;
+    const mode = modeBtn.dataset.mode;
+    log('[base.js] Meeting mode button clicked: meetingId=' + meetingId + ', mode=' + mode);
+    
+    // Update UI for this meeting's mode selector
+    const selector = modeBtn.closest('.meeting-mode-selector');
+    if (selector) {
+      selector.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.mode === mode) btn.classList.add('active');
+      });
+    }
+    
+    // Send to backend
+    vscode.postMessage({ type: 'setMeetingMode', meetingId: meetingId, mode: mode });
+    return;
+  }
+
+  // Handle meetings status badge clicks (approved/skipped toggle)
+  const statusBadge = target.closest('.upcoming-meeting-controls .status-badge[data-action]');
+  if (statusBadge) {
+    const action = statusBadge.dataset.action;
+    const meetingId = statusBadge.dataset.id;
+    const meetUrl = statusBadge.dataset.url || '';
+    const mode = statusBadge.dataset.mode || 'notes';
+    const row = statusBadge.closest('.upcoming-meeting-row');
+    log('[base.js] Status badge clicked: action=' + action + ', meetingId=' + meetingId);
+
+    if (action === 'unapprove') {
+      // Toggle from approved to skipped
+      statusBadge.outerHTML = '<span class="status-badge skipped" data-action="approve" data-id="' + meetingId + '" data-url="' + meetUrl + '" data-mode="notes" title="Click to approve this meeting">✗ Skipped</span>';
+      if (row) {
+        row.classList.remove('approved');
+      }
+      vscode.postMessage({ type: 'unapproveMeeting', meetingId: meetingId });
+    } else if (action === 'approve') {
+      // Toggle from skipped/failed back to approved
+      statusBadge.outerHTML = '<span class="status-badge approved" data-action="unapprove" data-id="' + meetingId + '" title="Click to skip this meeting">✓ Approved</span>';
+      if (row) {
+        row.classList.add('approved');
+      }
+      vscode.postMessage({ type: 'approveMeeting', meetingId: meetingId, meetUrl: meetUrl, mode: mode });
+    }
     return;
   }
 
@@ -515,6 +595,114 @@ document.addEventListener('click', function(e) {
       case 'saveConfig':
         vscode.postMessage({ command: 'saveInferenceConfig' });
         break;
+
+      // Cron actions
+      case 'runCronJobNow': {
+        const jobName = actionBtn.dataset.job;
+        if (jobName) {
+          vscode.postMessage({ command: 'runCronJobNow', jobName: jobName });
+        }
+        break;
+      }
+      case 'toggleCronJob': {
+        const cronJobName = actionBtn.dataset.job;
+        const enabled = actionBtn.checked;
+        if (cronJobName !== undefined) {
+          vscode.postMessage({ command: 'toggleCronJob', jobName: cronJobName, enabled: enabled });
+        }
+        break;
+      }
+      case 'toggleScheduler':
+        vscode.postMessage({ command: 'toggleScheduler' });
+        break;
+
+      // Meeting actions
+      case 'join': {
+        const meetUrl = actionBtn.dataset.url;
+        const meetTitle = actionBtn.dataset.title;
+        const meetMode = actionBtn.dataset.mode || 'notes';
+        // Get video enabled from the quick join checkbox
+        const videoCheckbox = document.getElementById('quickJoinVideo');
+        const videoEnabled = videoCheckbox ? videoCheckbox.checked : false;
+        log('Join meeting: ' + meetUrl + ', title: ' + meetTitle + ', mode: ' + meetMode + ', video: ' + videoEnabled);
+        vscode.postMessage({ type: 'joinMeetingNow', meetUrl: meetUrl, title: meetTitle, mode: meetMode, videoEnabled: videoEnabled });
+        break;
+      }
+      case 'approve': {
+        const approveId = actionBtn.dataset.id;
+        const approveUrl = actionBtn.dataset.url || '';
+        const approveMode = actionBtn.dataset.mode || 'notes';
+        vscode.postMessage({ type: 'approveMeeting', meetingId: approveId, meetUrl: approveUrl, mode: approveMode });
+        break;
+      }
+      case 'leave': {
+        const leaveSession = actionBtn.dataset.session;
+        vscode.postMessage({ type: 'leaveMeeting', sessionId: leaveSession || '' });
+        break;
+      }
+      case 'toggle-audio': {
+        const audioSession = actionBtn.dataset.session || '';
+        const isListening = actionBtn.classList.contains('listening');
+        
+        // Optimistic UI update
+        if (isListening) {
+          actionBtn.classList.remove('listening');
+          actionBtn.innerHTML = '🔇 Listen';
+        } else {
+          actionBtn.classList.add('listening');
+          actionBtn.innerHTML = '🔊 Mute';
+        }
+        
+        // Send to backend
+        vscode.postMessage({
+          type: isListening ? 'muteAudio' : 'unmuteAudio',
+          sessionId: audioSession
+        });
+        break;
+      }
+      case 'quickJoin': {
+        const quickJoinInput = document.getElementById('quickJoinUrl');
+        const quickJoinModeRadio = document.querySelector('input[name="quickJoinMode"]:checked');
+        const quickJoinMode = quickJoinModeRadio ? quickJoinModeRadio.value : 'notes';
+        const quickJoinVideoCheckbox = document.getElementById('quickJoinVideo');
+        const quickJoinVideoEnabled = quickJoinVideoCheckbox ? quickJoinVideoCheckbox.checked : false;
+        
+        if (quickJoinInput && quickJoinInput.value.trim()) {
+          const quickJoinUrl = quickJoinInput.value.trim();
+          log('Quick Join: ' + quickJoinUrl + ', mode: ' + quickJoinMode + ', video: ' + quickJoinVideoEnabled);
+          vscode.postMessage({ type: 'joinMeetingNow', meetUrl: quickJoinUrl, title: 'Manual Join', mode: quickJoinMode, videoEnabled: quickJoinVideoEnabled });
+          quickJoinInput.value = '';
+        } else {
+          log('Quick Join: No URL provided');
+        }
+        break;
+      }
+
+      // Service actions (Meet Bot controls)
+      case 'serviceStart': {
+        const service = actionBtn.dataset.service;
+        if (service) {
+          log('Service start: ' + service);
+          vscode.postMessage({ type: 'serviceStart', service: service });
+        }
+        break;
+      }
+      case 'serviceStop': {
+        const service = actionBtn.dataset.service;
+        if (service) {
+          log('Service stop: ' + service);
+          vscode.postMessage({ type: 'serviceStop', service: service });
+        }
+        break;
+      }
+      case 'serviceLogs': {
+        const service = actionBtn.dataset.service;
+        if (service) {
+          log('Service logs: ' + service);
+          vscode.postMessage({ type: 'serviceLogs', service: service });
+        }
+        break;
+      }
     }
     return;
   }
@@ -620,11 +808,12 @@ document.addEventListener('click', function(e) {
     return;
   }
 
-  // Handle memory category clicks
-  const memoryCategory = target.closest('.memory-category');
+  // Handle memory category/tab clicks
+  const memoryCategory = target.closest('.memory-category, .memory-tab[data-category]');
   if (memoryCategory) {
     const category = memoryCategory.dataset.category;
     if (category) {
+      log('[base.js] Memory category clicked: ' + category);
       vscode.postMessage({ command: 'selectMemoryCategory', category });
     }
     return;
@@ -693,12 +882,21 @@ document.addEventListener('input', function(e) {
   }
 });
 
-// Handle change events for dropdowns
+// Handle change events for dropdowns and toggles
 document.addEventListener('change', function(e) {
   const target = e.target;
 
   if (target.id === 'sessionGroupBy') {
     vscode.postMessage({ command: 'changeSessionGroupBy', value: target.value });
+    return;
+  }
+
+  // Handle cron job toggle (checkbox with data-action="toggleCronJob")
+  if (target.dataset && target.dataset.action === 'toggleCronJob') {
+    const jobName = target.dataset.job;
+    if (jobName) {
+      vscode.postMessage({ command: 'toggleCronJob', jobName: jobName, enabled: target.checked });
+    }
     return;
   }
 });

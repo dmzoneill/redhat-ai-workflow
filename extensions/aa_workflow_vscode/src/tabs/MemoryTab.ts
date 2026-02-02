@@ -51,13 +51,6 @@ interface ToolFix {
   verified?: boolean;
 }
 
-interface CurrentWork {
-  active_issue?: string;
-  active_branch?: string;
-  active_project?: string;
-  last_action?: string;
-  last_action_time?: string;
-}
 
 interface VectorDatabase {
   name: string;
@@ -81,7 +74,6 @@ export class MemoryTab extends BaseTab {
   private sessionLogs: SessionLog[] = [];
   private learnedPatterns: LearnedPattern[] = [];
   private toolFixes: ToolFix[] = [];
-  private currentWork: CurrentWork | null = null;
   private selectedCategory: string = "state";
   private selectedFile: string | null = null;
   private fileContent: string | null = null;
@@ -116,16 +108,6 @@ export class MemoryTab extends BaseTab {
         const health = data.health || data;
         this.totalSize = health.totalSize || health.total_size || "";
         logger.log(`Memory total size: ${this.totalSize}`);
-      }
-
-      // Load current work via D-Bus
-      logger.log("Calling memory_getCurrentWork()...");
-      const workResult = await dbus.memory_getCurrentWork();
-      logger.log(`memory_getCurrentWork() result: success=${workResult.success}, error=${workResult.error || 'none'}`);
-      if (workResult.success && workResult.data) {
-        const data = workResult.data as any;
-        this.currentWork = data.work || data.current_work || data;
-        logger.log(`Current work loaded: ${this.currentWork?.active_issue || 'none'}`);
       }
 
       // Load memory files for selected category
@@ -312,20 +294,15 @@ export class MemoryTab extends BaseTab {
 
   getContent(): string {
     return `
-      <!-- Current Work -->
-      <div class="section">
-        <div class="section-title">🎯 Current Work</div>
-        ${this.getCurrentWorkHtml()}
-      </div>
-
       <!-- Memory Browser -->
-      <div class="section">
-        <div class="section-title">🧠 Memory Browser</div>
+      <div class="section memory-browser-section">
+        <div class="memory-browser-header">
+          <div class="memory-tabs">
+            ${this.getCategoriesHtml()}
+          </div>
+        </div>
         <div class="memory-browser">
           <div class="memory-sidebar">
-            <div class="memory-categories">
-              ${this.getCategoriesHtml()}
-            </div>
             <div class="memory-files">
               ${this.getFilesListHtml()}
             </div>
@@ -380,54 +357,22 @@ export class MemoryTab extends BaseTab {
     `;
   }
 
-  private getCurrentWorkHtml(): string {
-    if (!this.currentWork || !this.currentWork.active_issue) {
-      return this.getEmptyStateHtml("🎯", "No active work");
-    }
-
-    return `
-      <div class="current-work-card">
-        <div class="current-work-header">
-          <div class="current-work-issue">${this.escapeHtml(this.currentWork.active_issue)}</div>
-          ${this.currentWork.active_project ? `<div class="current-work-project">${this.escapeHtml(this.currentWork.active_project)}</div>` : ""}
-        </div>
-        ${this.currentWork.active_branch ? `
-          <div class="current-work-row">
-            <span>Branch</span>
-            <span class="mono">${this.escapeHtml(this.currentWork.active_branch)}</span>
-          </div>
-        ` : ""}
-        ${this.currentWork.last_action ? `
-          <div class="current-work-row">
-            <span>Last Action</span>
-            <span>${this.escapeHtml(this.currentWork.last_action)}</span>
-          </div>
-        ` : ""}
-        ${this.currentWork.last_action_time ? `
-          <div class="current-work-row">
-            <span>When</span>
-            <span>${this.formatRelativeTime(this.currentWork.last_action_time)}</span>
-          </div>
-        ` : ""}
-      </div>
-    `;
-  }
-
   private getCategoriesHtml(): string {
     const categories = [
-      { id: "state", label: "State", icon: "📊" },
-      { id: "learned", label: "Learned", icon: "📚" },
-      { id: "session", label: "Sessions", icon: "💬" },
-      { id: "style", label: "Style", icon: "🎨" },
+      { id: "state", label: "State", icon: "📊", description: "Project state & context" },
+      { id: "learned", label: "Learned", icon: "🧠", description: "Patterns & knowledge" },
+      { id: "session", label: "Sessions", icon: "💬", description: "Session history" },
+      { id: "style", label: "Style", icon: "🎨", description: "Code style preferences" },
     ];
 
     return categories
       .map(
         (cat) => `
-        <button class="memory-category ${this.selectedCategory === cat.id ? "active" : ""}"
-                data-category="${cat.id}">
-          <span>${cat.icon}</span>
-          <span>${cat.label}</span>
+        <button class="memory-tab ${this.selectedCategory === cat.id ? "active" : ""}"
+                data-category="${cat.id}"
+                title="${cat.description}">
+          <span class="memory-tab-icon">${cat.icon}</span>
+          <span class="memory-tab-label">${cat.label}</span>
         </button>
       `
       )
@@ -435,11 +380,14 @@ export class MemoryTab extends BaseTab {
   }
 
   private getFilesListHtml(): string {
+    const fileCount = this.memoryFiles.length;
+    const header = `<div class="memory-files-header">${fileCount} file${fileCount !== 1 ? 's' : ''}</div>`;
+    
     if (this.memoryFiles.length === 0) {
-      return '<div class="memory-files-empty">No files</div>';
+      return header + '<div class="memory-files-empty">No files in this category</div>';
     }
 
-    return this.memoryFiles
+    const files = this.memoryFiles
       .map(
         (file) => `
         <div class="memory-file ${this.selectedFile === file.path ? "selected" : ""}"
@@ -450,6 +398,8 @@ export class MemoryTab extends BaseTab {
       `
       )
       .join("");
+    
+    return header + `<div class="memory-files-list">${files}</div>`;
   }
 
   private getFileContentHtml(): string {
@@ -591,44 +541,50 @@ export class MemoryTab extends BaseTab {
 
   getScript(): string {
     return `
-      // Category selection
-      document.querySelectorAll('.memory-category').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const category = btn.dataset.category;
+      // Use event delegation for memory tab - attach to document to survive re-renders
+      document.addEventListener('click', (e) => {
+        // Memory category tab selection
+        const memoryTab = e.target.closest('.memory-tab');
+        if (memoryTab) {
+          const category = memoryTab.dataset.category;
           if (category) {
+            console.log('[MemoryTab] Category clicked:', category);
             vscode.postMessage({ command: 'selectMemoryCategory', category });
           }
-        });
-      });
+          return;
+        }
 
-      // File selection
-      document.querySelectorAll('.memory-file').forEach(item => {
-        item.addEventListener('click', () => {
-          const file = item.dataset.file;
+        // File selection
+        const memoryFile = e.target.closest('.memory-file');
+        if (memoryFile) {
+          const file = memoryFile.dataset.file;
           if (file) {
+            console.log('[MemoryTab] File clicked:', file);
             vscode.postMessage({ command: 'selectMemoryFile', file });
           }
-        });
-      });
+          return;
+        }
 
-      // Edit file
-      document.querySelectorAll('[data-action="editMemoryFile"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const file = btn.dataset.file;
+        // Edit file button
+        const editBtn = e.target.closest('[data-action="editMemoryFile"]');
+        if (editBtn) {
+          const file = editBtn.dataset.file;
           if (file) {
+            console.log('[MemoryTab] Edit clicked:', file);
             vscode.postMessage({ command: 'editMemoryFile', file });
           }
-        });
-      });
+          return;
+        }
 
-      // Collapsible sections
-      document.querySelectorAll('.collapsible .section-title').forEach(title => {
-        title.addEventListener('click', () => {
-          const section = title.closest('.collapsible');
+        // Collapsible sections
+        const collapseTitle = e.target.closest('.collapsible .section-title');
+        if (collapseTitle) {
+          const section = collapseTitle.closest('.collapsible');
           if (section) {
             section.classList.toggle('collapsed');
           }
-        });
+          return;
+        }
       });
     `;
   }

@@ -131,11 +131,11 @@ export class PersonasTab extends BaseTab {
       <!-- Persona Controls -->
       <div class="section">
         <div class="persona-controls">
+          <div class="persona-count">${this.personas.length} persona(s)</div>
           <div class="view-toggle">
             <button id="personaViewCard" class="toggle-btn ${this.viewMode === "card" ? "active" : ""}">🗂️ Cards</button>
             <button id="personaViewTable" class="toggle-btn ${this.viewMode === "table" ? "active" : ""}">📋 Table</button>
           </div>
-          <div class="persona-count">${this.personas.length} persona(s)</div>
         </div>
       </div>
 

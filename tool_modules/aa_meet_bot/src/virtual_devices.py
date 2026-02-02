@@ -1284,6 +1284,114 @@ async def cleanup_orphaned_meetbot_devices(active_instance_ids: set[str] | None 
     return results
 
 
+async def _find_parec_via_pgrep() -> list[tuple[int, str]]:
+    """Find parec processes using pgrep."""
+    results = []
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep", "-a", "parec",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+
+        if proc.returncode == 0 and stdout:
+            for line in stdout.decode().strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) >= 2:
+                    try:
+                        results.append((int(parts[0]), parts[1]))
+                    except ValueError:
+                        continue
+    except Exception as e:
+        logger.debug(f"pgrep method failed: {e}")
+    return results
+
+
+async def _find_parec_via_ps() -> list[tuple[int, str]]:
+    """Find parec processes using ps aux."""
+    results = []
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ps", "aux",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+
+        if proc.returncode == 0 and stdout:
+            for line in stdout.decode().strip().split("\n"):
+                if "parec" in line and "grep" not in line:
+                    parts = line.split()
+                    if len(parts) >= 11:
+                        try:
+                            results.append((int(parts[1]), " ".join(parts[10:])))
+                        except ValueError:
+                            continue
+    except Exception as e:
+        logger.debug(f"ps aux method failed: {e}")
+    return results
+
+
+def _find_parec_via_proc(existing_pids: set[int]) -> list[tuple[int, str]]:
+    """Find parec processes by scanning /proc."""
+    import glob
+    results = []
+    try:
+        for proc_dir in glob.glob("/proc/[0-9]*/cmdline"):
+            try:
+                with open(proc_dir, "r") as f:
+                    cmdline = f.read().replace("\x00", " ").strip()
+                    if "parec" in cmdline:
+                        pid = int(proc_dir.split("/")[2])
+                        if pid not in existing_pids:
+                            results.append((pid, cmdline))
+            except (IOError, ValueError, IndexError):
+                continue
+    except Exception as e:
+        logger.debug(f"/proc method failed: {e}")
+    return results
+
+
+def _extract_instance_id_from_cmdline(cmd_line: str) -> Optional[str]:
+    """Extract MeetBot instance ID from parec command line."""
+    if "meet_bot_" not in cmd_line:
+        return None
+
+    import re
+    match = re.search(r"meet_bot_([a-zA-Z0-9_]+)", cmd_line)
+    if match:
+        instance_id = match.group(1)
+        # Remove trailing .monitor if present
+        if instance_id.endswith("_monitor"):
+            instance_id = instance_id[:-8]
+        return instance_id
+    return None
+
+
+async def _kill_process(pid: int) -> bool:
+    """Kill a process with SIGTERM, then SIGKILL if needed. Returns True if killed."""
+    import signal
+    try:
+        os.kill(pid, signal.SIGTERM)
+        await asyncio.sleep(0.1)
+        # Check if still alive
+        try:
+            os.kill(pid, 0)
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # Died from SIGTERM
+        return True
+    except ProcessLookupError:
+        return False  # Already gone
+    except PermissionError:
+        raise
+    except Exception:
+        raise
+
+
 async def _cleanup_orphaned_parec_processes(active_safe_ids: set[str]) -> dict:
     """
     Kill orphaned parec processes that are targeting MeetBot sinks.
@@ -1299,71 +1407,38 @@ async def _cleanup_orphaned_parec_processes(active_safe_ids: set[str]) -> dict:
     """
     results = {"killed": [], "errors": []}
 
-    try:
-        # Find all parec processes
-        proc = await asyncio.create_subprocess_exec(
-            "pgrep",
-            "-a",
-            "parec",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
+    # Collect parec processes from multiple sources
+    parec_pids = await _find_parec_via_pgrep()
 
-        if proc.returncode != 0 or not stdout:
-            # No parec processes found
-            return results
+    if not parec_pids:
+        parec_pids = await _find_parec_via_ps()
 
-        # Parse output: "PID command args..."
-        for line in stdout.decode().strip().split("\n"):
-            if not line:
-                continue
+    # Add any missed processes from /proc
+    existing_pids = {p[0] for p in parec_pids}
+    parec_pids.extend(_find_parec_via_proc(existing_pids))
 
-            parts = line.split(None, 1)
-            if len(parts) < 2:
-                continue
+    # Process each parec
+    for pid, cmd_line in parec_pids:
+        # Check if targeting MeetBot
+        if "meet_bot" not in cmd_line.lower() and "--monitor-stream" not in cmd_line:
+            continue
 
-            pid_str, cmd_line = parts
-            pid = int(pid_str)
+        instance_id = _extract_instance_id_from_cmdline(cmd_line)
 
-            # Check if this parec is targeting a MeetBot sink
-            if "meet_bot" not in cmd_line.lower():
-                continue
+        # Skip if instance is active
+        if instance_id and active_safe_ids and instance_id in active_safe_ids:
+            logger.debug(f"Skipping active parec process {pid} for instance {instance_id}")
+            continue
 
-            # Extract instance ID from the command line
-            # Patterns: --device meet_bot_<id>.monitor or --monitor-stream=<N>
-            instance_id = None
-            if "meet_bot_" in cmd_line:
-                # Extract instance ID from sink name
-                import re
-
-                match = re.search(r"meet_bot_([a-zA-Z0-9_]+)", cmd_line)
-                if match:
-                    instance_id = match.group(1)
-                    # Remove trailing .monitor if present
-                    if instance_id.endswith("_monitor"):
-                        instance_id = instance_id[:-8]
-
-            # Check if this instance is still active
-            if instance_id and active_safe_ids and instance_id in active_safe_ids:
-                logger.debug(f"Skipping active parec process {pid} for instance {instance_id}")
-                continue
-
-            # Kill the orphaned process
-            try:
-                os.kill(pid, 15)  # SIGTERM
+        # Kill the orphaned process
+        try:
+            if await _kill_process(pid):
                 results["killed"].append(f"parec {pid} (instance: {instance_id or 'unknown'})")
                 logger.info(f"Killed orphaned parec process {pid} targeting MeetBot sink")
-            except ProcessLookupError:
-                # Process already gone
-                pass
-            except PermissionError as e:
-                results["errors"].append(f"Permission denied killing parec {pid}: {e}")
-            except Exception as e:
-                results["errors"].append(f"Failed to kill parec {pid}: {e}")
-
-    except Exception as e:
-        results["errors"].append(f"Error finding parec processes: {e}")
+        except PermissionError as e:
+            results["errors"].append(f"Permission denied killing parec {pid}: {e}")
+        except Exception as e:
+            results["errors"].append(f"Failed to kill parec {pid}: {e}")
 
     return results
 

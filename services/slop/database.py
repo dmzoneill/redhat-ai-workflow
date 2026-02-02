@@ -48,7 +48,7 @@ class SlopDatabase:
     """SQLite database for slop findings."""
 
     SCHEMA = """
-    -- Findings table
+    -- Findings table with unique constraint to prevent duplicates
     CREATE TABLE IF NOT EXISTS findings (
         id TEXT PRIMARY KEY,
         loop TEXT NOT NULL,
@@ -61,10 +61,13 @@ class SlopDatabase:
         tool TEXT DEFAULT '',
         raw_output TEXT DEFAULT '{}',
         detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         status TEXT DEFAULT 'open',
         acknowledged_at TIMESTAMP,
         fixed_at TIMESTAMP,
-        git_commit TEXT
+        git_commit TEXT,
+        -- Prevent duplicate findings for same file/line/category/description
+        UNIQUE(file, line, category, description)
     );
 
     -- Indexes for common queries
@@ -74,6 +77,7 @@ class SlopDatabase:
     CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
     CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status);
     CREATE INDEX IF NOT EXISTS idx_findings_detected ON findings(detected_at);
+    CREATE INDEX IF NOT EXISTS idx_findings_last_seen ON findings(last_seen_at);
 
     -- Scan history table
     CREATE TABLE IF NOT EXISTS scan_history (
@@ -146,7 +150,7 @@ class SlopDatabase:
 
     async def add_finding(self, finding: dict) -> str:
         """
-        Add a finding to the database.
+        Add a finding to the database, or update last_seen_at if it already exists.
 
         Args:
             finding: Finding dict with required fields:
@@ -168,11 +172,19 @@ class SlopDatabase:
         if isinstance(raw_output, dict):
             raw_output = json.dumps(raw_output)
 
+        now = datetime.now().isoformat()
+
+        # Use INSERT OR IGNORE to skip duplicates, then update last_seen_at
+        # The UNIQUE constraint on (file, line, category, description) prevents duplicates
         await self._db.execute(
             """
-            INSERT OR REPLACE INTO findings
-            (id, loop, file, line, category, severity, description, suggestion, tool, raw_output, detected_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO findings
+            (id, loop, file, line, category, severity, description, suggestion, tool, raw_output, detected_at, last_seen_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(file, line, category, description) DO UPDATE SET
+                last_seen_at = excluded.last_seen_at,
+                severity = excluded.severity,
+                suggestion = excluded.suggestion
             """,
             (
                 finding_id,
@@ -185,7 +197,8 @@ class SlopDatabase:
                 finding.get("suggestion", ""),
                 finding.get("tool", ""),
                 raw_output,
-                datetime.now().isoformat(),
+                now,
+                now,
                 "open",
             ),
         )
