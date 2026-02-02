@@ -183,7 +183,7 @@ class SlackPersonaSync:
 
         # Track thread fetches for progress
         thread_count = 0
-        
+
         # Track date range for progress display
         oldest_date_seen = None
         newest_date_seen = None

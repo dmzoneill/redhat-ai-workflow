@@ -164,15 +164,15 @@ export class SkillsTab extends BaseTab {
    */
   private addOrUpdateRunningSkill(skill: SkillState): void {
     const now = Date.now();
-    
+
     // Check for existing by executionId (most reliable)
     const existingById = this.runningSkills.find(s => s.executionId === skill.skillId);
-    
+
     // Check for existing by skillName that's running (fallback for ID mismatch)
     const existingByName = this.runningSkills.find(s =>
       s.skillName === skill.skillName && s.status === "running"
     );
-    
+
     const existing = existingById || existingByName;
 
     const progress = skill.totalSteps > 0
@@ -210,11 +210,11 @@ export class SkillsTab extends BaseTab {
       });
       logger.log(`Added running skill from WebSocket: ${skill.skillName} (${skill.skillId})`);
     }
-    
+
     // Clean up any duplicates that might have snuck in from race conditions
     this.deduplicateRunningSkills();
   }
-  
+
   /**
    * Remove duplicate running skills, keeping the one with the most authoritative source.
    * Priority: websocket > filewatcher > dbus
@@ -222,18 +222,18 @@ export class SkillsTab extends BaseTab {
   private deduplicateRunningSkills(): void {
     const seen = new Map<string, RunningSkill>();
     const toRemove: string[] = [];
-    
+
     for (const skill of this.runningSkills) {
       if (skill.status !== "running") continue;
-      
+
       const key = skill.skillName;
       const existing = seen.get(key);
-      
+
       if (existing) {
         // Duplicate found - decide which to keep
         const existingPriority = this.getSourcePriority(existing.addedBy);
         const newPriority = this.getSourcePriority(skill.addedBy);
-        
+
         if (newPriority > existingPriority) {
           // New one is more authoritative, remove the old one
           toRemove.push(existing.executionId);
@@ -248,13 +248,13 @@ export class SkillsTab extends BaseTab {
         seen.set(key, skill);
       }
     }
-    
+
     if (toRemove.length > 0) {
       this.runningSkills = this.runningSkills.filter(s => !toRemove.includes(s.executionId));
       logger.log(`Removed ${toRemove.length} duplicate running skills`);
     }
   }
-  
+
   /**
    * Get priority for deduplication. Higher = more authoritative.
    */
@@ -380,12 +380,12 @@ export class SkillsTab extends BaseTab {
     if (this.currentExecution && this.currentExecution.status === "running") {
       const now = Date.now();
       const skillName = this.currentExecution.skill_name;
-      
+
       // Check if already tracked by any source
       const existing = this.runningSkills.find(
         (s) => s.skillName === skillName && s.status === "running"
       );
-      
+
       if (existing) {
         // Update progress/step but DON'T change ownership or executionId
         existing.progress = this.currentExecution.progress || existing.progress;
@@ -393,11 +393,11 @@ export class SkillsTab extends BaseTab {
       } else {
         // Only add if not recently added by another source (within 2 seconds)
         const recentlyAdded = this.runningSkills.some(
-          rs => rs.skillName === skillName && 
-                rs.addedAt && 
+          rs => rs.skillName === skillName &&
+                rs.addedAt &&
                 (now - rs.addedAt) < 2000
         );
-        
+
         if (!recentlyAdded) {
           this.runningSkills.push({
             executionId: (this.currentExecution as any).execution_id || `exec-${Date.now()}`,
@@ -416,7 +416,7 @@ export class SkillsTab extends BaseTab {
           logger.log(`Skipping duplicate from D-Bus (recently added): ${skillName}`);
         }
       }
-      
+
       // Run deduplication
       this.deduplicateRunningSkills();
     }
@@ -1741,18 +1741,18 @@ export class SkillsTab extends BaseTab {
         // File watcher is secondary to WebSocket - only add skills not already tracked by WebSocket
         if (message.runningSkills && Array.isArray(message.runningSkills)) {
           const now = Date.now();
-          
+
           for (const s of message.runningSkills) {
             const execId = s.executionId || `exec-${Date.now()}`;
-            
+
             // Check if already tracked by executionId
             const existingById = this.runningSkills.find(rs => rs.executionId === execId);
-            
+
             // Check if already tracked by skillName (running)
             const existingByName = this.runningSkills.find(
               rs => rs.skillName === s.skillName && rs.status === "running"
             );
-            
+
             const existing = existingById || existingByName;
 
             const newStatus = s.status === "running" ? "running" : s.status === "success" ? "completed" : "failed";
@@ -1777,11 +1777,11 @@ export class SkillsTab extends BaseTab {
             } else {
               // Only add if not recently added (within 2 seconds) - prevents race condition duplicates
               const recentlyAdded = this.runningSkills.some(
-                rs => rs.skillName === s.skillName && 
-                      rs.addedAt && 
+                rs => rs.skillName === s.skillName &&
+                      rs.addedAt &&
                       (now - rs.addedAt) < 2000
               );
-              
+
               if (!recentlyAdded) {
                 // Add new entry from file watcher
                 this.runningSkills.push({

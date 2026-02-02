@@ -378,7 +378,7 @@ function formatInferenceResult(data) {
 
 document.addEventListener('click', function(e) {
   const target = e.target;
-  
+
   // Debug: log all clicks to extension output
   const debugActionBtn = target.closest('[data-action]');
   if (debugActionBtn) {
@@ -412,7 +412,7 @@ document.addEventListener('click', function(e) {
   if (meetingsSubtab) {
     const tabName = meetingsSubtab.dataset.tab;
     log('[base.js] Meetings subtab clicked: ' + tabName);
-    
+
     // Update tab buttons
     document.querySelectorAll('.meetings-subtab').forEach(btn => {
       btn.classList.remove('active');
@@ -438,7 +438,7 @@ document.addEventListener('click', function(e) {
     const meetingId = modeBtn.dataset.id;
     const mode = modeBtn.dataset.mode;
     log('[base.js] Meeting mode button clicked: meetingId=' + meetingId + ', mode=' + mode);
-    
+
     // Update UI for this meeting's mode selector
     const selector = modeBtn.closest('.meeting-mode-selector');
     if (selector) {
@@ -447,7 +447,7 @@ document.addEventListener('click', function(e) {
         if (btn.dataset.mode === mode) btn.classList.add('active');
       });
     }
-    
+
     // Send to backend
     vscode.postMessage({ type: 'setMeetingMode', meetingId: meetingId, mode: mode });
     return;
@@ -643,7 +643,7 @@ document.addEventListener('click', function(e) {
       case 'toggle-audio': {
         const audioSession = actionBtn.dataset.session || '';
         const isListening = actionBtn.classList.contains('listening');
-        
+
         // Optimistic UI update
         if (isListening) {
           actionBtn.classList.remove('listening');
@@ -652,7 +652,7 @@ document.addEventListener('click', function(e) {
           actionBtn.classList.add('listening');
           actionBtn.innerHTML = '🔊 Mute';
         }
-        
+
         // Send to backend
         vscode.postMessage({
           type: isListening ? 'muteAudio' : 'unmuteAudio',
@@ -666,7 +666,7 @@ document.addEventListener('click', function(e) {
         const quickJoinMode = quickJoinModeRadio ? quickJoinModeRadio.value : 'notes';
         const quickJoinVideoCheckbox = document.getElementById('quickJoinVideo');
         const quickJoinVideoEnabled = quickJoinVideoCheckbox ? quickJoinVideoCheckbox.checked : false;
-        
+
         if (quickJoinInput && quickJoinInput.value.trim()) {
           const quickJoinUrl = quickJoinInput.value.trim();
           log('Quick Join: ' + quickJoinUrl + ', mode: ' + quickJoinMode + ', video: ' + quickJoinVideoEnabled);

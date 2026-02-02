@@ -382,7 +382,7 @@ export class MemoryTab extends BaseTab {
   private getFilesListHtml(): string {
     const fileCount = this.memoryFiles.length;
     const header = `<div class="memory-files-header">${fileCount} file${fileCount !== 1 ? 's' : ''}</div>`;
-    
+
     if (this.memoryFiles.length === 0) {
       return header + '<div class="memory-files-empty">No files in this category</div>';
     }
@@ -398,7 +398,7 @@ export class MemoryTab extends BaseTab {
       `
       )
       .join("");
-    
+
     return header + `<div class="memory-files-list">${files}</div>`;
   }
 

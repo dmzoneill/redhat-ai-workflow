@@ -3316,6 +3316,7 @@ class GoogleMeetController:
         # Also run orphan cleanup to catch anything else
         try:
             from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+
             results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
             if results.get("removed_modules") or results.get("killed_processes"):
                 logger.info(

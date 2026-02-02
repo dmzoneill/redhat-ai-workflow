@@ -179,6 +179,7 @@ class NotesBot:
         # 1. Kill any orphaned audio capture processes from our tracking
         try:
             from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+
             killed = await PulseAudioCapture.kill_all_captures()
             results["audio_captures_killed"] = killed
             if killed > 0:
@@ -1252,6 +1253,7 @@ class NotesBot:
         # 2. Kill any remaining audio capture processes from this session
         try:
             from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+
             killed = await PulseAudioCapture.kill_all_captures()
             if killed > 0:
                 logger.info(f"CLEANUP: Force-killed {killed} orphaned audio capture processes")
@@ -1402,6 +1404,7 @@ class NotesBot:
         # 2. Kill any remaining audio capture processes
         try:
             from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+
             killed = await PulseAudioCapture.kill_all_captures()
             if killed > 0:
                 logger.info(f"LEAVE: Killed {killed} audio capture processes")
@@ -1580,6 +1583,7 @@ class NotesBot:
         # 2. Kill any remaining audio capture processes
         try:
             from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+
             killed = await PulseAudioCapture.kill_all_captures()
             if killed > 0:
                 logger.info(f"CLOSE: Killed {killed} orphaned audio capture processes")
@@ -1730,6 +1734,7 @@ class NotesBotManager:
         # 1. Kill any tracked audio capture processes
         try:
             from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+
             killed = await PulseAudioCapture.kill_all_captures()
             results["audio_captures_killed"] = killed
             if killed > 0:
@@ -1935,6 +1940,7 @@ class NotesBotManager:
             # Kill any audio capture processes
             try:
                 from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+
                 await PulseAudioCapture.kill_all_captures()
             except Exception:
                 pass
@@ -1953,6 +1959,7 @@ class NotesBotManager:
         # Run orphan cleanup outside the lock
         try:
             from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+
             await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
         except Exception as e:
             logger.warning(f"Error during post-force-kill cleanup: {e}")
@@ -2212,6 +2219,7 @@ class NotesBotManager:
         logger.info("MANAGER CLOSE: Killing any remaining audio captures...")
         try:
             from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
+
             killed = await PulseAudioCapture.kill_all_captures()
             if killed > 0:
                 logger.info(f"MANAGER CLOSE: Killed {killed} audio capture processes")

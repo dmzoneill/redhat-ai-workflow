@@ -1289,7 +1289,9 @@ async def _find_parec_via_pgrep() -> list[tuple[int, str]]:
     results = []
     try:
         proc = await asyncio.create_subprocess_exec(
-            "pgrep", "-a", "parec",
+            "pgrep",
+            "-a",
+            "parec",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -1315,7 +1317,8 @@ async def _find_parec_via_ps() -> list[tuple[int, str]]:
     results = []
     try:
         proc = await asyncio.create_subprocess_exec(
-            "ps", "aux",
+            "ps",
+            "aux",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -1338,6 +1341,7 @@ async def _find_parec_via_ps() -> list[tuple[int, str]]:
 def _find_parec_via_proc(existing_pids: set[int]) -> list[tuple[int, str]]:
     """Find parec processes by scanning /proc."""
     import glob
+
     results = []
     try:
         for proc_dir in glob.glob("/proc/[0-9]*/cmdline"):
@@ -1361,6 +1365,7 @@ def _extract_instance_id_from_cmdline(cmd_line: str) -> Optional[str]:
         return None
 
     import re
+
     match = re.search(r"meet_bot_([a-zA-Z0-9_]+)", cmd_line)
     if match:
         instance_id = match.group(1)
@@ -1374,6 +1379,7 @@ def _extract_instance_id_from_cmdline(cmd_line: str) -> Optional[str]:
 async def _kill_process(pid: int) -> bool:
     """Kill a process with SIGTERM, then SIGKILL if needed. Returns True if killed."""
     import signal
+
     try:
         os.kill(pid, signal.SIGTERM)
         await asyncio.sleep(0.1)

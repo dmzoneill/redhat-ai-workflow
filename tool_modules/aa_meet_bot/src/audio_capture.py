@@ -301,6 +301,7 @@ class PulseAudioCapture:
                         if pid:
                             try:
                                 import signal
+
                                 os.kill(pid, signal.SIGKILL)
                                 logger.info(f"Sent SIGKILL to process {pid}")
                             except (ProcessLookupError, PermissionError):
@@ -326,6 +327,7 @@ class PulseAudioCapture:
         for pid in pids_to_remove:
             try:
                 import signal
+
                 os.kill(pid, signal.SIGKILL)
                 logger.info(f"Force-killed orphaned audio capture PID {pid}")
                 killed += 1
@@ -503,6 +505,7 @@ class RealtimeSTTPipeline:
                 if self._capture._process_pid:
                     try:
                         import signal
+
                         os.kill(self._capture._process_pid, signal.SIGKILL)
                     except (ProcessLookupError, PermissionError):
                         pass
