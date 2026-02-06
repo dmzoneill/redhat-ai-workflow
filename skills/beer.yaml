@@ -46,36 +46,6 @@ steps:
     args:
       persona_name: "developer"
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_eod_code
-    description: "Search for code related to end of day activities"
-    tool: code_search
-    args:
-      query: "end of day wrap-up commits PRs standup"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: eod_code_raw
-    on_error: continue
-
-  - name: parse_eod_code
-    description: "Parse EOD code search results"
-    condition: "eod_code_raw"
-    compute: |
-      code_result = eod_code_raw if eod_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: eod_code_search
-    on_error: continue
-
   # ==================== KNOWLEDGE INTEGRATION ====================
 
   - name: get_project_patterns

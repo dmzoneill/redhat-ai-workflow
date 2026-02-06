@@ -197,36 +197,6 @@ steps:
     output: summary_raw
     on_error: auto_heal
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_konflux_code
-    description: "Search for code related to Konflux builds"
-    tool: code_search
-    args:
-      query: "Konflux build pipeline {{ inputs.namespace }} {{ inputs.application or '' }}"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: konflux_code_raw
-    on_error: continue
-
-  - name: parse_konflux_code
-    description: "Parse Konflux code search results"
-    condition: "konflux_code_raw"
-    compute: |
-      code_result = konflux_code_raw if konflux_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: konflux_code_search
-    on_error: continue
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_konflux_failures

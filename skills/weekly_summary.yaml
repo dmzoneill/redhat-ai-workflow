@@ -543,37 +543,6 @@ steps:
       result = "\n".join(lines)
     output: formatted_summary
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_weekly_code
-    description: "Search for code related to weekly activity"
-    condition: "analysis and analysis.get('issues_worked')"
-    tool: code_search
-    args:
-      query: "weekly summary {{ analysis.issues_worked[0] if analysis.issues_worked else '' }} activity"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: weekly_code_raw
-    on_error: continue
-
-  - name: parse_weekly_code
-    description: "Parse weekly code search results"
-    condition: "weekly_code_raw"
-    compute: |
-      code_result = weekly_code_raw if weekly_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: weekly_code_search
-    on_error: continue
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_weekly_failures

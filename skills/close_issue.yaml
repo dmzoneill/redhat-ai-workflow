@@ -220,42 +220,6 @@ steps:
     output: mr_list
     on_error: auto_heal  # GitLab API - may need auth refresh
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_related_code
-    description: "Search for code related to this issue"
-    condition: "{{ not status_check.already_done }}"
-    tool: code_search
-    args:
-      query: "{{ inputs.issue_key }} {{ issue.summary if issue else '' }}"
-      project: "automation-analytics-backend"
-      limit: 5
-    output: related_code_raw
-    on_error: continue
-
-  - name: parse_related_code
-    description: "Parse related code search results"
-    condition: "related_code_raw"
-    compute: |
-      code_result = related_code_raw if related_code_raw else {}
-
-      related_files = []
-      if isinstance(code_result, dict) and code_result.get('results'):
-          for r in code_result.get('results', [])[:5]:
-              related_files.append({
-                  'file': r.get('file_path', ''),
-                  'score': r.get('score', 0),
-                  'preview': r.get('code_chunk', '')[:100] if r.get('code_chunk') else '',
-              })
-
-      result = {
-          'files': related_files,
-          'count': len(related_files),
-          'has_related_code': len(related_files) > 0,
-      }
-    output: related_code_analysis
-    on_error: continue
-
   # Step 6: Extract MR details
   - name: parse_mr
     condition: "{{ not status_check.already_done and mr_list }}"

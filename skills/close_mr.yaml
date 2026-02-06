@@ -186,39 +186,6 @@ steps:
     output: mr_removal_result
     on_error: continue
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_mr_code
-    description: "Search for code related to the closed MR"
-    tool: code_search
-    args:
-      query: "{{ mr_info.title if mr_info else '' }} {{ mr_info.jira_key if mr_info else '' }}"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: mr_code_raw
-    on_error: continue
-
-  - name: parse_mr_code
-    description: "Parse MR code search results"
-    condition: "mr_code_raw"
-    compute: |
-      code_result = mr_code_raw if mr_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('results'):
-          for r in code_result.get('results', [])[:3]:
-              related_code.append({
-                  'file': r.get('file_path', ''),
-                  'score': r.get('score', 0),
-              })
-
-      result = {
-          'code': related_code,
-          'count': len(related_code),
-      }
-    output: mr_code_analysis
-    on_error: continue
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_close_failures

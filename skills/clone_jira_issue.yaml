@@ -221,40 +221,6 @@ steps:
         created: "auto-added"
     on_error: continue
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_related_code
-    description: "Search for code related to the source issue"
-    condition: "source_info.exists"
-    tool: code_search
-    args:
-      query: "{{ inputs.issue_key }} {{ source_info.summary[:50] if source_info else '' }}"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: clone_code_raw
-    on_error: continue
-
-  - name: parse_clone_code
-    description: "Parse clone code search results"
-    condition: "clone_code_raw"
-    compute: |
-      code_result = clone_code_raw if clone_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('results'):
-          for r in code_result.get('results', [])[:3]:
-              related_code.append({
-                  'file': r.get('file_path', ''),
-                  'score': r.get('score', 0),
-              })
-
-      result = {
-          'code': related_code,
-          'count': len(related_code),
-      }
-    output: clone_code_analysis
-    on_error: continue
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_clone_failures

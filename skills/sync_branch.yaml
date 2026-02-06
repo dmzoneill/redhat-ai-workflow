@@ -429,37 +429,6 @@ steps:
     output: push_result
     on_error: auto_heal  # Git remote - may need auth/network
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_branch_code
-    description: "Search for code related to this branch"
-    condition: "branch_status and branch_status.branch"
-    tool: code_search
-    args:
-      query: "Git branch {{ branch_status.branch }} rebase sync {{ resolved_repo.default_branch or 'main' }}"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: branch_code_raw
-    on_error: continue
-
-  - name: parse_branch_code
-    description: "Parse branch code search results"
-    condition: "branch_code_raw"
-    compute: |
-      code_result = branch_code_raw if branch_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: branch_code_search
-    on_error: continue
-
   # ==================== MEMORY INTEGRATION ====================
 
   - name: log_sync

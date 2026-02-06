@@ -60,36 +60,6 @@ inputs:
     description: "Use Slack link format"
 
 steps:
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_view_code
-    description: "Search for code related to memory viewing"
-    tool: code_search
-    args:
-      query: "memory view {{ inputs.section or 'all' }} patterns sessions"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: view_code_raw
-    on_error: continue
-
-  - name: parse_view_code
-    description: "Parse view code search results"
-    condition: "view_code_raw"
-    compute: |
-      code_result = view_code_raw if view_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: view_code_search
-    on_error: continue
-
   # ==================== LOAD MEMORY ====================
 
   - name: load_all_memory

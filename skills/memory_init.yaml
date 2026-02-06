@@ -34,36 +34,6 @@ inputs:
     description: "Keep learned patterns even if reset_learned is true"
 
 steps:
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_init_code
-    description: "Search for code related to memory initialization"
-    tool: code_search
-    args:
-      query: "memory initialization reset state patterns"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: init_code_raw
-    on_error: continue
-
-  - name: parse_init_code
-    description: "Parse init code search results"
-    condition: "init_code_raw"
-    compute: |
-      code_result = init_code_raw if init_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: init_code_search
-    on_error: continue
-
   - name: check_confirmation
     description: "Verify user confirmed the action"
     compute: |

@@ -647,36 +647,6 @@ steps:
     output: slack_release_notification
     on_error: continue
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_release_code
-    description: "Search for code related to this production release"
-    tool: code_search
-    args:
-      query: "production release {{ inputs.commit_sha[:12] }} automation-analytics-backend deploy"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: release_code_raw
-    on_error: continue
-
-  - name: parse_release_code
-    description: "Parse release code search results"
-    condition: "release_code_raw"
-    compute: |
-      code_result = release_code_raw if release_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: release_code_search
-    on_error: continue
-
   # ==================== MEMORY INTEGRATION ====================
 
   - name: log_release

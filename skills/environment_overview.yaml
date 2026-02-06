@@ -211,36 +211,6 @@ steps:
       }
     output: pod_analysis
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_environment_code
-    description: "Search for code related to this environment"
-    tool: code_search
-    args:
-      query: "Kubernetes environment {{ inputs.environment }} namespace {{ inputs.namespace }}"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: environment_code_raw
-    on_error: continue
-
-  - name: parse_environment_code
-    description: "Parse environment code search results"
-    condition: "environment_code_raw"
-    compute: |
-      code_result = environment_code_raw if environment_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: environment_code_search
-    on_error: continue
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_env_overview_failures

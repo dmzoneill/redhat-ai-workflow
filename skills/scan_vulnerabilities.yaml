@@ -258,42 +258,6 @@ steps:
       }
     output: policy_result
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_security_code
-    description: "Search for security-related code if vulnerabilities found"
-    condition: "vuln_analysis and vuln_analysis.critical > 0 and vuln_analysis.cves"
-    tool: code_search
-    args:
-      query: "security vulnerability CVE dependency {{ vuln_analysis.cves[0] if vuln_analysis.cves else '' }}"
-      project: "automation-analytics-backend"
-      limit: 5
-    output: security_code_raw
-    on_error: continue
-
-  - name: parse_security_code
-    description: "Parse security code search results"
-    condition: "security_code_raw"
-    compute: |
-      code_result = security_code_raw if security_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('results'):
-          for r in code_result.get('results', [])[:5]:
-              related_code.append({
-                  'file': r.get('file_path', ''),
-                  'score': r.get('score', 0),
-                  'preview': r.get('code_chunk', '')[:100] if r.get('code_chunk') else '',
-              })
-
-      result = {
-          'code': related_code,
-          'count': len(related_code),
-          'has_related_code': len(related_code) > 0,
-      }
-    output: security_code_analysis
-    on_error: continue
-
   # ==================== MEMORY ====================
 
   - name: log_scan

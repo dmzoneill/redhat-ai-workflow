@@ -742,40 +742,6 @@ steps:
     output: prefs_update_result
     on_error: continue
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_review_code
-    description: "Search for code related to MRs being reviewed"
-    condition: "first_mr_info and first_mr_info.get('iid', 0) > 0"
-    tool: code_search
-    args:
-      query: "{{ first_mr_info.title if first_mr_info else '' }} code review"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: review_code_raw
-    on_error: continue
-
-  - name: parse_review_code
-    description: "Parse review code search results"
-    condition: "review_code_raw"
-    compute: |
-      code_result = review_code_raw if review_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('results'):
-          for r in code_result.get('results', [])[:3]:
-              related_code.append({
-                  'file': r.get('file_path', ''),
-                  'score': r.get('score', 0),
-              })
-
-      result = {
-          'code': related_code,
-          'count': len(related_code),
-      }
-    output: review_code_analysis
-    on_error: continue
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_batch_review_failures

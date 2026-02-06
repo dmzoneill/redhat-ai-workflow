@@ -783,37 +783,6 @@ steps:
     output: shared_context_result
     on_error: continue
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_recent_code
-    description: "Search for code related to recent commits"
-    condition: "commit_info and commit_info.get('issue_keys')"
-    tool: code_search
-    args:
-      query: "recent commits {{ commit_info.issue_keys[0] if commit_info.issue_keys else '' }} standup"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: recent_code_raw
-    on_error: continue
-
-  - name: parse_recent_code
-    description: "Parse recent code search results"
-    condition: "recent_code_raw"
-    compute: |
-      code_result = recent_code_raw if recent_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: recent_code_search
-    on_error: continue
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_standup_failures

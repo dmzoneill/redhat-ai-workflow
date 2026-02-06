@@ -383,39 +383,6 @@ steps:
     output: env_update_result
     on_error: continue
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_alert_code
-    description: "Search for code related to this alert"
-    tool: code_search
-    args:
-      query: "{{ inputs.alert_name }} prometheus alert monitoring"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: alert_code_raw
-    on_error: continue
-
-  - name: parse_alert_code
-    description: "Parse alert code search results"
-    condition: "alert_code_raw"
-    compute: |
-      code_result = alert_code_raw if alert_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('results'):
-          for r in code_result.get('results', [])[:3]:
-              related_code.append({
-                  'file': r.get('file_path', ''),
-                  'score': r.get('score', 0),
-              })
-
-      result = {
-          'code': related_code,
-          'count': len(related_code),
-      }
-    output: alert_code_analysis
-    on_error: continue
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_silence_failures
