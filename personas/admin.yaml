@@ -1,6 +1,9 @@
 # Admin Persona Configuration
 # For administrative tasks: expenses, scheduling, team communication
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: admin
 description: Administrative tasks - expenses, calendar, team communication
 persona: personas/admin.md
@@ -8,23 +11,21 @@ persona: personas/admin.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
-  - knowledge       # 6 tools - Project knowledge management
-  - project         # 5 tools - Project configuration
-  - scheduler       # 7 tools - Cron job management
-  - concur          # 9 tools - Expense automation (Concur, GOMO)
-  - slack           # 12 tools - Team notifications, channel management
-  - slack_style     # 3 tools - Slack message export for style analysis
-  - style           # 5 tools - Style analysis and persona generation
-  - slack_persona   # 4 tools - Slack persona vector sync and search
-  - jira_core       # 6 tools - Issue viewing for context
-
-# Total: ~75 tools
+  - workflow_core   # Core (session, persona, skill, memory)
+  - knowledge       # Project knowledge management
+  - project         # Project configuration
+  - scheduler       # Cron job management
+  - sso             # Red Hat SSO authentication
+  - concur          # Expense automation (Concur, GOMO)
+  - slack           # Team notifications, channel management
+  - slack_style     # Slack message export for style analysis
+  - style           # Style analysis and persona generation
+  - slack_persona   # Slack persona vector sync and search
+  - jira_core       # Issue viewing for context
 
 skills:
   # Expense management
-  - submit_expenses       # Submit monthly expenses (GOMO → Concur)
-  - expense_status        # Check expense report status
+  - submit_expense        # Submit monthly expenses (GOMO → Concur)
 
   # Daily routines
   - coffee                # ☕ Morning briefing

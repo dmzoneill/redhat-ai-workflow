@@ -2,14 +2,12 @@ name: infra
 description: Infrastructure automation and cloud management
 
 tools:
-  - workflow_core    # 18 tools - Core workflow (session, persona, skill, memory)
-  - ansible_core     # 8 tools - Ansible automation
-  - aws_core         # 6 tools - AWS cloud operations
-  - gcloud           # 13 tools - Google Cloud (small enough to load full)
-  - systemd_core     # 7 tools - Service management
-  - ssh              # 10 tools - Remote access
-
-# Total: ~62 tools
+  - workflow_core    # Core workflow (session, persona, skill, memory)
+  - ansible_core     # Ansible automation
+  - aws_core         # AWS cloud operations
+  - gcloud           # Google Cloud (small enough to load full)
+  - systemd_core     # Service management
+  - ssh              # Remote access
 
 # Note: For advanced tools, use tool_exec():
 # - ansible_basic: Full playbook management, galaxy, vault

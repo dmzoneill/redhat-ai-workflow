@@ -20,7 +20,8 @@
         mcp-server mcp-developer mcp-devops mcp-incident mcp-release mcp-slack mcp-all mcp-custom \
         integration-test integration-test-agent integration-test-fix integration-test-dry \
         skill-test skill-test-list skill-test-dry \
-        docs-serve docs-check list-skills list-tools \
+        docs-serve docs-check list-skills list-tools list-modules \
+        validate-personas generate-personas generate-personas-dry \
         sync-ai-rules sync-ai-rules-dry sync-ai-rules-verbose \
         sync-commands sync-commands-dry sync-commands-reverse \
         sync-config-example sync-config-example-fix \
@@ -101,8 +102,14 @@ help:
 	@printf "\033[1mDocumentation:\033[0m\n"
 	@printf "  \033[32mmake list-skills\033[0m        List all available skills\n"
 	@printf "  \033[32mmake list-tools\033[0m         List all MCP tool modules\n"
+	@printf "  \033[32mmake list-modules\033[0m       List modules and skills (detailed)\n"
 	@printf "  \033[32mmake docs-serve\033[0m         Serve docs locally (port 8000)\n"
 	@printf "  \033[32mmake docs-check\033[0m         Check for missing skill docs\n"
+	@printf "\n"
+	@printf "\033[1mPersona Management:\033[0m\n"
+	@printf "  \033[32mmake validate-personas\033[0m  Validate persona YAML files\n"
+	@printf "  \033[32mmake generate-personas\033[0m  Regenerate all persona YAML files\n"
+	@printf "  \033[32mmake generate-personas-dry\033[0m  Preview persona changes\n"
 	@printf "\n"
 	@printf "\033[1mProject Tools (ptools):\033[0m\n"
 	@printf "  \033[32mmake sync-ai-rules\033[0m      Sync AI rules to .cursorrules, CLAUDE.md, AGENTS.md + commands\n"
@@ -416,6 +423,26 @@ list-tools:
 			printf "  \033[32m%-20s\033[0m %s tools\n" "$$name" "$$count"; \
 		fi; \
 	done
+
+# =============================================================================
+# PERSONA MANAGEMENT
+# =============================================================================
+
+validate-personas:
+	@printf "\033[36mValidating persona YAML files...\033[0m\n"
+	$(PYTHON) scripts/generate_persona_yaml.py --validate
+
+generate-personas:
+	@printf "\033[36mRegenerating persona YAML files...\033[0m\n"
+	$(PYTHON) scripts/generate_persona_yaml.py --regenerate-all
+
+generate-personas-dry:
+	@printf "\033[36mPreviewing persona changes (dry-run)...\033[0m\n"
+	$(PYTHON) scripts/generate_persona_yaml.py --regenerate-all --dry-run
+
+list-modules:
+	@printf "\033[36mListing available tool modules and skills...\033[0m\n"
+	$(PYTHON) scripts/generate_persona_yaml.py --list
 
 config-validate:
 	@printf "\033[36mValidating config.json...\033[0m\n"

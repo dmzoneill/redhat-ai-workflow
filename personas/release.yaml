@@ -1,6 +1,9 @@
 # Release Persona Configuration
 # Specifies which MCP tool modules this persona needs
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: release
 description: Release management and deployments
 persona: personas/release.md
@@ -8,13 +11,11 @@ persona: personas/release.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
-  - konflux_basic   # 22 tools - Pipelines, components, snapshots, status
-  - quay            # 8 tools - Container images
-  - git_core        # 8 tools - Git operations for app-interface changes
-  - appinterface    # 7 tools - App-interface config management
-
-# Total: ~63 tools
+  - workflow_core   # Core (session, persona, skill, memory)
+  - konflux_basic   # Pipelines, components, snapshots, status
+  - quay            # Container images
+  - git_core        # Git operations for app-interface changes
+  - appinterface    # App-interface config management
 
 # Note: jira_core available via tool_exec() if needed
 
