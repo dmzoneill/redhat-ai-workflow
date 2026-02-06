@@ -1243,7 +1243,16 @@ def register_tools(server: "FastMCP") -> int:
 
         return [TextContent(type="text", text=output)]
 
-    # ==================== Browser Automation Tools ====================
+    _register_browser_tools(registry)
+
+    return registry.count
+
+
+def _register_browser_tools(registry) -> None:  # noqa: C901
+    """Register browser automation tools."""
+    from mcp.types import TextContent
+
+    from server.auto_heal_decorator import auto_heal
 
     @auto_heal()
     @registry.tool()
@@ -1521,5 +1530,3 @@ def register_tools(server: "FastMCP") -> int:
                     ),
                 )
             ]
-
-    return registry.count
