@@ -3,22 +3,22 @@
 Google Meet Bot Daemon
 
 A standalone service that monitors calendars and auto-joins meetings.
-Designed to run as a systemd user service, similar to slack_daemon.py.
+Designed to run as a systemd user service.
 
 Features:
 - Calendar polling for upcoming meetings
 - Automatic meeting join with configurable buffer
 - Note-taking during meetings
-- Single instance enforcement (lock file)
 - D-Bus IPC for external control
 - Graceful shutdown handling
+- Systemd watchdog support
 
 Usage:
-    python scripts/meet_daemon.py                # Run daemon
-    python scripts/meet_daemon.py --status       # Check if running
-    python scripts/meet_daemon.py --stop         # Stop running daemon
-    python scripts/meet_daemon.py --list         # List upcoming meetings
-    python scripts/meet_daemon.py --dbus         # Enable D-Bus IPC
+    python -m services.meet                # Run daemon
+    python -m services.meet --status       # Check if running
+    python -m services.meet --stop         # Stop running daemon
+    python -m services.meet --list         # List upcoming meetings
+    python -m services.meet --dbus         # Enable D-Bus IPC
 
 Systemd:
     systemctl --user start bot-meet
@@ -30,95 +30,32 @@ D-Bus:
     Path: /com/aiworkflow/BotMeet
 """
 
-import argparse
 import asyncio
-import fcntl
 import logging
 import os
-import signal
-import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from services.base.dbus import DaemonDBusBase, get_client  # noqa: E402
-from services.base.sleep_wake import SleepWakeAwareDaemon  # noqa: E402
-
-LOCK_FILE = Path("/tmp/meet-daemon.lock")
-PID_FILE = Path("/tmp/meet-daemon.pid")
+from services.base.daemon import BaseDaemon
+from services.base.dbus import DaemonDBusBase
+from services.base.sleep_wake import SleepWakeAwareDaemon
 
 # Import centralized paths - meet daemon owns its own state file
 from server.paths import MEET_STATE_FILE
 
-# Configure logging for journalctl
-# When running under systemd, stdout/stderr automatically go to journald
-# Use stderr for logs (stdout may be used for structured output)
-# Format without timestamp - journald adds its own timestamps
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stderr),
-    ],
-)
 logger = logging.getLogger(__name__)
 
 # Suppress noisy Google API cache warning
 logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 
 
-class SingleInstance:
-    """Ensures only one instance of the daemon runs at a time."""
-
-    def __init__(self):
-        self._lock_file = None
-        self._acquired = False
-
-    def acquire(self) -> bool:
-        """Try to acquire the lock. Returns True if successful."""
-        try:
-            self._lock_file = open(LOCK_FILE, "w")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            # Write PID
-            PID_FILE.write_text(str(os.getpid()))
-            self._acquired = True
-            return True
-        except OSError:
-            return False
-
-    def release(self):
-        """Release the lock."""
-        if self._lock_file:
-            try:
-                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                self._lock_file.close()
-            except Exception:
-                pass
-        if PID_FILE.exists():
-            try:
-                PID_FILE.unlink()
-            except Exception:
-                pass
-        self._acquired = False
-
-    def get_running_pid(self) -> int | None:
-        """Get PID of running instance, or None if not running."""
-        if PID_FILE.exists():
-            try:
-                pid = int(PID_FILE.read_text().strip())
-                # Check if process exists
-                os.kill(pid, 0)
-                return pid
-            except (ValueError, OSError):
-                pass
-        return None
-
-
-class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
+class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     """Main Google Meet bot daemon with D-Bus support."""
+
+    # BaseDaemon configuration
+    name = "meet"
+    description = "Google Meet Bot Daemon"
 
     # D-Bus configuration
     service_name = "com.aiworkflow.BotMeet"
@@ -126,13 +63,13 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
     interface_name = "com.aiworkflow.BotMeet"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = False):
-        super().__init__()
-        self.verbose = verbose
-        self.enable_dbus = enable_dbus
-        self._shutdown_event = asyncio.Event()
+        BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
+        DaemonDBusBase.__init__(self)
+        SleepWakeAwareDaemon.__init__(self)
         self._scheduler = None
         self._meetings_joined = 0
         self._meetings_completed = 0
+        self._state_writer_task = None
 
         # Register custom D-Bus method handlers
         self.register_handler("list_meetings", self._handle_list_meetings)
@@ -238,14 +175,11 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
             checks["recent_poll"] = False
             checks["no_excessive_errors"] = True
 
-        # Check uptime (at least 10 seconds)
-        if self.start_time:
-            checks["uptime_ok"] = (now - self.start_time) > 10
-        else:
-            checks["uptime_ok"] = False
-
-        # Overall health
-        healthy = all(checks.values())
+        # Overall health - only check core requirements
+        # Note: We don't require uptime_ok or recent_poll for health
+        # Those are informational, not critical for watchdog
+        core_checks = ["running", "scheduler_initialized"]
+        healthy = all(checks.get(k, False) for k in core_checks)
 
         # Build message
         if healthy:
@@ -705,11 +639,13 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
 
     # ==================== Daemon Lifecycle ====================
 
-    async def start(self):
-        """Initialize and start the daemon."""
-        from tool_modules.aa_meet_bot.src.meeting_scheduler import init_scheduler
+    # ==================== Lifecycle ====================
 
-        self.start_time = datetime.now().timestamp()
+    async def startup(self):
+        """Initialize daemon resources."""
+        await super().startup()
+
+        from tool_modules.aa_meet_bot.src.meeting_scheduler import init_scheduler
 
         print("=" * 60)
         print("🎥 Google Meet Bot Daemon")
@@ -729,7 +665,7 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
         except Exception as e:
             print(f"❌ Failed to initialize scheduler: {e}")
             logger.error(f"Initialization error: {e}")
-            return
+            raise
 
         # List monitored calendars
         calendars = await self._scheduler.list_calendars()
@@ -769,6 +705,8 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
         self._state_writer_task = asyncio.create_task(self._state_writer_loop())
         print("✅ State writer started")
 
+        logger.info("Meet daemon ready")
+
         print()
         print("-" * 60)
         print("Daemon running. Press Ctrl+C to stop.")
@@ -777,7 +715,8 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
             print(f"D-Bus: {self.service_name}")
         print("-" * 60)
 
-        # Wait for shutdown signal
+    async def run_daemon(self):
+        """Main daemon loop - wait for shutdown."""
         await self._shutdown_event.wait()
 
     async def _state_writer_loop(self):
@@ -901,23 +840,22 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
         except Exception as e:
             logger.debug(f"Failed to write meet state: {e}")
 
-    async def stop(self):
-        """Stop the daemon gracefully."""
-        if not self.is_running:
-            return
+    async def shutdown(self):
+        """Clean up daemon resources."""
+        logger.info("Meet daemon shutting down...")
 
         print()
         print("Stopping daemon...")
 
         # Stop state writer task
-        if hasattr(self, "_state_writer_task") and self._state_writer_task:
+        if self._state_writer_task and not self._state_writer_task.done():
             self._state_writer_task.cancel()
             try:
                 await self._state_writer_task
             except asyncio.CancelledError:
                 pass
 
-        # Stop sleep monitor first (from SleepWakeAwareDaemon mixin)
+        # Stop sleep monitor (from SleepWakeAwareDaemon mixin)
         try:
             await asyncio.wait_for(self.stop_sleep_monitor(), timeout=5.0)
         except asyncio.TimeoutError:
@@ -934,41 +872,15 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
                 print("⚠️  Scheduler stop timed out")
 
         # Stop D-Bus
-        try:
-            await asyncio.wait_for(self.stop_dbus(), timeout=5.0)
-        except asyncio.TimeoutError:
-            logger.warning("D-Bus stop timed out")
+        if self.enable_dbus:
+            try:
+                await asyncio.wait_for(self.stop_dbus(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("D-Bus stop timed out")
 
         self.is_running = False
+        await super().shutdown()
         print("✅ Meet Bot Daemon stopped")
-
-    def setup_signal_handlers(self, loop=None):
-        """Setup signal handlers for graceful shutdown.
-
-        Args:
-            loop: The asyncio event loop. If None, uses get_running_loop().
-        """
-        if loop is None:
-            loop = asyncio.get_running_loop()
-
-        self._signal_count = 0
-
-        def signal_handler():
-            self._signal_count += 1
-            if self._signal_count == 1:
-                logger.info("Received shutdown signal, shutting down gracefully...")
-                self._shutdown_event.set()
-                self.request_shutdown()
-            elif self._signal_count >= 2:
-                logger.warning("Received shutdown signal again, forcing exit...")
-                print("\n⚠️  Forced exit (received multiple signals)")
-                import os
-
-                os._exit(1)
-
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, signal_handler)
-
 
 async def list_meetings():
     """List upcoming meetings without starting the daemon."""
@@ -1010,147 +922,5 @@ async def list_meetings():
         logger.error(f"Failed to list meetings: {e}")
 
 
-async def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Google Meet Bot Daemon",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    python scripts/meet_daemon.py              # Start daemon
-    python scripts/meet_daemon.py --dbus       # Start with D-Bus IPC
-    python scripts/meet_daemon.py --status     # Check status
-    python scripts/meet_daemon.py --stop       # Stop daemon
-    python scripts/meet_daemon.py --list       # List upcoming meetings
-
-Systemd:
-    systemctl --user start bot-meet
-    systemctl --user status bot-meet
-
-D-Bus Control:
-    python -c "import asyncio; from scripts.common.dbus_base import get_client; \\
-        c = get_client('meet'); asyncio.run(c.connect()); print(asyncio.run(c.get_status()))"
-""",
-    )
-
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Verbose output",
-    )
-    parser.add_argument(
-        "--dbus",
-        action="store_true",
-        help="Enable D-Bus IPC interface",
-    )
-    parser.add_argument(
-        "--status",
-        action="store_true",
-        help="Show status of running daemon and exit",
-    )
-    parser.add_argument(
-        "--stop",
-        action="store_true",
-        help="Stop running daemon and exit",
-    )
-    parser.add_argument(
-        "--list",
-        action="store_true",
-        help="List upcoming meetings and exit",
-    )
-
-    args = parser.parse_args()
-
-    # Handle --list
-    if args.list:
-        await list_meetings()
-        return
-
-    # Check for single-instance commands
-    instance = SingleInstance()
-
-    # Handle --status: Try D-Bus first, fall back to PID check
-    if args.status:
-        # Try D-Bus status first
-        try:
-            client = get_client("meet")
-            if await client.connect():
-                status = await client.get_status()
-                await client.disconnect()
-                print("✅ Meet bot daemon is running (via D-Bus)")
-                print(f"   Uptime: {status.get('uptime', 0):.0f}s")
-                print(f"   Current meeting: {status.get('current_meeting', 'None')}")
-                print(f"   Upcoming: {status.get('upcoming_count', 0)}")
-                print(f"   Completed today: {status.get('completed_today', 0)}")
-                return
-        except Exception:
-            pass
-
-        # Fall back to PID check
-        pid = instance.get_running_pid()
-        if pid:
-            print(f"✅ Meet bot daemon is running (PID: {pid})")
-            print(f"   Lock file: {LOCK_FILE}")
-            print(f"   PID file: {PID_FILE}")
-            print("   Logs: journalctl --user -u bot-meet -f")
-            print("   (D-Bus not available - run with --dbus for IPC)")
-        else:
-            print("❌ Meet bot daemon is not running")
-        return
-
-    # Handle --stop: Try D-Bus first, fall back to SIGTERM
-    if args.stop:
-        # Try D-Bus shutdown first
-        try:
-            client = get_client("meet")
-            if await client.connect():
-                result = await client.shutdown()
-                await client.disconnect()
-                if result.get("success"):
-                    print("✅ Shutdown signal sent via D-Bus")
-                    return
-        except Exception:
-            pass
-
-        # Fall back to SIGTERM
-        pid = instance.get_running_pid()
-        if pid:
-            print(f"Stopping daemon (PID: {pid})...")
-            try:
-                os.kill(pid, signal.SIGTERM)
-                print("✅ Stop signal sent")
-            except OSError as e:
-                print(f"❌ Failed to stop: {e}")
-        else:
-            print("❌ Meet bot daemon is not running")
-        return
-
-    # Try to acquire the lock
-    if not instance.acquire():
-        existing_pid = instance.get_running_pid()
-        print(f"⚠️  Another instance is already running (PID: {existing_pid})")
-        print()
-        print("Use --status to check status or --stop to stop it.")
-        return
-
-    daemon = MeetDaemon(verbose=args.verbose, enable_dbus=args.dbus)
-    daemon.setup_signal_handlers()
-
-    try:
-        await daemon.start()
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        logger.error(f"Daemon error: {e}")
-        import traceback
-
-        logger.error(traceback.format_exc())
-    finally:
-        await daemon.stop()
-        instance.release()
-        print("🔓 Lock released")
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    MeetDaemon.main()

@@ -300,7 +300,10 @@ def register_tools(server: "FastMCP") -> int:
 
     # Detect Claude Code and set up AskUserQuestion integration
     try:
-        from .claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
+        from .claude_code_integration import (
+            create_ask_question_wrapper,
+            get_claude_code_capabilities,
+        )
 
         capabilities = get_claude_code_capabilities()
         logger.info(f"Claude Code detection: {capabilities}")
@@ -315,7 +318,7 @@ def register_tools(server: "FastMCP") -> int:
         logger.debug("Claude Code integration module not available")
         ask_question_fn = None
 
-    # Register CORE tools only (19 tools + 9 sprint tools)
+    # Register CORE tools only (19 tools + 9 sprint tools + unified memory)
     tool_count += register_chat_context_tools(server)
     tool_count += register_memory_tools(server)
     tool_count += register_persona_tools(server)
@@ -326,6 +329,15 @@ def register_tools(server: "FastMCP") -> int:
     tool_count += register_infra_tools(server)
     tool_count += register_meta_tools(server, create_github_issue)
     tool_count += register_sprint_tools(server)
+
+    # Register unified memory abstraction tools
+    try:
+        from .memory_unified import register_tools as register_unified_memory_tools
+
+        tool_count += register_unified_memory_tools(server)
+        logger.info("✅ Unified memory abstraction tools registered")
+    except ImportError as e:
+        logger.warning(f"Unified memory tools not available: {e}")
 
     logger.info(f"Registered {tool_count} core workflow tools")
     return tool_count

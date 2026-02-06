@@ -408,16 +408,16 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
             <span class="placeholder-text">Click "Start" to preview video output</span>
             <span class="placeholder-hint">WebRTC: Hardware-accelerated, low latency (~50ms)</span>
           </div>
-          <video id="video-preview-webrtc" class="video-preview-frame" style="display: none;" autoplay playsinline muted></video>
-          <img id="video-preview-frame" class="video-preview-frame" style="display: none;" alt="Video Preview" />
+          <video id="video-preview-webrtc" class="video-preview-frame d-none" autoplay playsinline muted></video>
+          <img id="video-preview-frame" class="video-preview-frame d-none" alt="Video Preview" />
         </div>
         <div class="video-preview-status">
           <span id="video-preview-status-text">Status: Stopped</span>
           <span id="video-preview-fps">FPS: --</span>
           <span id="video-preview-resolution">Resolution: --</span>
-          <span id="video-preview-latency" style="display: none;">Latency: --</span>
+          <span id="video-preview-latency" class="d-none">Latency: --</span>
         </div>
-        <div class="video-preview-info" style="margin-top: 8px; font-size: 0.75rem; color: var(--text-secondary);">
+        <div class="video-preview-info text-sm text-secondary mt-8">
           <strong>WebRTC</strong>: Zero-copy Intel GPU encoding → H.264 → Browser (~6W, &lt;50ms latency)<br>
           <strong>MJPEG</strong>: Hardware JPEG encoding → HTTP stream (~8W, ~100ms latency)<br>
           <strong>Snapshot</strong>: Periodic frame capture via ffmpeg (~35W, ~500ms latency)
@@ -453,9 +453,9 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
 
     <!-- Actions -->
     <div class="integration-actions">
-      <button class="btn btn-sm" onclick="setupDevices()">🔧 Setup Devices</button>
-      <button class="btn btn-sm" onclick="testVirtualCamera()">📷 Test Camera</button>
-      <button class="btn btn-sm" onclick="testVirtualAudio()">🔊 Test Audio</button>
+      <button class="btn btn-sm" data-action="setupDevices">🔧 Setup Devices</button>
+      <button class="btn btn-sm" data-action="testVirtualCamera">📷 Test Camera</button>
+      <button class="btn btn-sm" data-action="testVirtualAudio">🔊 Test Audio</button>
     </div>
   `;
 }
@@ -467,10 +467,10 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
  */
 export function getUpcomingMeetingsHtml(state: MeetBotState): string {
   if (!state.upcomingMeetings || state.upcomingMeetings.length === 0) {
-    return `<div class="no-meeting" style="padding: 40px; text-align: center;">
-      <div class="no-meeting-icon">📅</div>
-      <div class="no-meeting-text">No upcoming meetings</div>
-      <div class="no-meeting-hint">Meetings from monitored calendars will appear here</div>
+    return `<div class="empty-state">
+      <div class="empty-state-icon">📅</div>
+      <div class="empty-state-text">No upcoming meetings</div>
+      <div class="hint-text">Meetings from monitored calendars will appear here</div>
     </div>`;
   }
 
@@ -576,9 +576,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
           <span class="caption-text">${escapeHtml(caption.text)}</span>
         </div>
       `).join("")
-    : `<div style="color: var(--text-secondary); text-align: center; padding: 20px;">
-        Captions will appear here when in a meeting
-      </div>`;
+    : `<div class="placeholder-centered">Captions will appear here when in a meeting</div>`;
 
   // Get active meetings (use new array or fall back to single meeting)
   const activeMeetings = state.currentMeetings || (state.currentMeeting ? [state.currentMeeting] : []);
@@ -709,31 +707,27 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
           <span class="status">${cal.autoJoin ? "auto-join" : "manual"}</span>
         </div>
       `).join("")
-    : `<div style="color: var(--text-secondary); font-size: 0.85rem; padding: 8px;">
-        No calendars configured
-      </div>`;
+    : `<div class="placeholder-text">No calendars configured</div>`;
 
   // Generate recent notes list
   const notesHtml = state.recentNotes?.length > 0
     ? state.recentNotes.map(note => `
-        <div class="note-item" onclick="viewNote(${note.id})">
+        <div class="note-item" data-action="viewNote" data-note-id="${note.id}">
           <div class="note-title">${escapeHtml(note.title)}</div>
           <div class="note-meta">
             ${note.date} • ${note.duration} min • ${note.transcriptCount} entries
           </div>
         </div>
       `).join("")
-    : `<div style="color: var(--text-secondary); font-size: 0.85rem; padding: 8px;">
-        No meeting notes yet
-      </div>`;
+    : `<div class="placeholder-text">No meeting notes yet</div>`;
 
   return `
     <div class="meetings-container">
       <!-- Meet Bot Header with Controls -->
-      <div class="section" style="margin-bottom: 8px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <h2 class="section-title" style="margin: 0;">🎥 Meet Bot</h2>
-          <div style="display: flex; gap: 8px;">
+      <div class="section mb-8">
+        <div class="flex-between">
+          <h2 class="section-title m-0">🎥 Meet Bot</h2>
+          <div class="d-flex gap-8">
             <button class="btn btn-xs btn-ghost" data-action="serviceStart" data-service="meet">▶ Start</button>
             <button class="btn btn-xs btn-ghost" data-action="serviceStop" data-service="meet">⏹ Stop</button>
             <button class="btn btn-xs btn-ghost" data-action="serviceLogs" data-service="meet">📋 Logs</button>
@@ -767,26 +761,25 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
             <div class="section">
               <h2 class="section-title">📊 Bot Status</h2>
               <div class="card" id="bot-status-card">
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                  <div class="status-indicator ${state.status === "idle" ? "idle" : state.status === "error" ? "" : "listening"}"
-                       id="bot-status-indicator"
-                       style="${state.status === "error" ? "background: var(--error);" : ""}"></div>
-                  <span style="font-weight: 600;" id="bot-status-text">${(state.status || "unknown").charAt(0).toUpperCase() + (state.status || "unknown").slice(1)}</span>
+                <div class="d-flex items-center gap-8 mb-12">
+                  <div class="status-indicator ${state.status === "idle" ? "idle" : state.status === "error" ? "bg-error" : "listening"}"
+                       id="bot-status-indicator"></div>
+                  <span class="font-semibold" id="bot-status-text">${(state.status || "unknown").charAt(0).toUpperCase() + (state.status || "unknown").slice(1)}</span>
                 </div>
-                ${state.error ? `<div style="color: var(--error); font-size: 0.8rem; margin-bottom: 12px;">${escapeHtml(state.error)}</div>` : ""}
+                ${state.error ? `<div class="text-error text-sm mb-12">${escapeHtml(state.error)}</div>` : ""}
                 <!-- Inline Stats -->
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; padding-top: 8px; border-top: 1px solid var(--border);">
+                <div class="stats-grid">
                   <div>
-                    <div style="font-size: 1.2rem; font-weight: 600;" id="stat-calendars">${state.monitoredCalendars?.length || 0}</div>
-                    <div style="font-size: 0.7rem; color: var(--text-secondary);">Calendars</div>
+                    <div class="stat-value" id="stat-calendars">${state.monitoredCalendars?.length || 0}</div>
+                    <div class="stat-label">Calendars</div>
                   </div>
                   <div>
-                    <div style="font-size: 1.2rem; font-weight: 600;" id="stat-upcoming">${upcomingCount}</div>
-                    <div style="font-size: 0.7rem; color: var(--text-secondary);">Upcoming</div>
+                    <div class="stat-value" id="stat-upcoming">${upcomingCount}</div>
+                    <div class="stat-label">Upcoming</div>
                   </div>
                   <div>
-                    <div style="font-size: 1.2rem; font-weight: 600;" id="stat-recorded">${historyCount}</div>
-                    <div style="font-size: 0.7rem; color: var(--text-secondary);">Recorded</div>
+                    <div class="stat-value" id="stat-recorded">${historyCount}</div>
+                    <div class="stat-label">Recorded</div>
                   </div>
                 </div>
               </div>
@@ -795,25 +788,25 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
             <!-- Quick Join -->
             <div class="section">
               <h2 class="section-title">🚀 Quick Join</h2>
-              <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div class="d-flex flex-col gap-8">
                 <input type="text" class="response-input" id="quickJoinUrl" placeholder="Paste Google Meet URL...">
-                <div style="display: flex; gap: 8px; align-items: center;">
-                  <label style="font-size: 0.85rem; color: var(--text-secondary);">Mode:</label>
-                  <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
-                    <input type="radio" name="quickJoinMode" value="notes" ${isNotesMode ? 'checked' : ''} style="margin: 0;">
-                    <span style="font-size: 0.85rem;">📝 Notes</span>
+                <div class="form-row">
+                  <label class="form-label">Mode:</label>
+                  <label class="input-label">
+                    <input type="radio" name="quickJoinMode" value="notes" ${isNotesMode ? 'checked' : ''}>
+                    <span class="text-base">📝 Notes</span>
                   </label>
-                  <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
-                    <input type="radio" name="quickJoinMode" value="interactive" ${!isNotesMode ? 'checked' : ''} style="margin: 0;">
-                    <span style="font-size: 0.85rem;">🎤 Interactive</span>
+                  <label class="input-label">
+                    <input type="radio" name="quickJoinMode" value="interactive" ${!isNotesMode ? 'checked' : ''}>
+                    <span class="text-base">🎤 Interactive</span>
                   </label>
                 </div>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                  <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
-                    <input type="checkbox" id="quickJoinVideo" style="margin: 0;">
-                    <span style="font-size: 0.85rem;">📹 Enable Video Overlay</span>
+                <div class="form-row">
+                  <label class="input-label">
+                    <input type="checkbox" id="quickJoinVideo">
+                    <span class="text-base">📹 Enable Video Overlay</span>
                   </label>
-                  <span style="font-size: 0.75rem; color: var(--text-secondary);" title="When enabled, shows AI research overlay on virtual camera">(disabled by default)</span>
+                  <span class="text-sm text-secondary" title="When enabled, shows AI research overlay on virtual camera">(disabled by default)</span>
                 </div>
                 <button class="btn btn-sm btn-primary" id="quickJoinBtn" data-action="quickJoin">🎥 Join Meeting</button>
               </div>
@@ -826,7 +819,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
                 <div class="status-indicator ${state.schedulerRunning ? "listening" : "idle"}"></div>
                 <span>${state.schedulerRunning ? "Running" : "Stopped"}</span>
                 <button class="meeting-btn ${state.schedulerRunning ? "reject" : "approve"}"
-                        onclick="${state.schedulerRunning ? "stopScheduler()" : "startScheduler()"}">
+                        data-action="${state.schedulerRunning ? "stopScheduler" : "startScheduler"}">
                   ${state.schedulerRunning ? "Stop" : "Start"}
                 </button>
               </div>
@@ -838,7 +831,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
               <div class="calendar-list">
                 ${calendarsHtml}
               </div>
-              <p style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 8px;">
+              <p class="hint-text mt-8">
                 Configure calendars in <code>config.json</code>
               </p>
             </div>
@@ -847,25 +840,25 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
             <div class="section">
               <h2 class="section-title">🔧 Test Actions</h2>
               ${state.currentMeetings && state.currentMeetings.length > 0 ? `
-                <div style="margin-bottom: 12px;">
-                  <label style="font-size: 0.8rem; color: var(--text-secondary); display: block; margin-bottom: 4px;">
+                <div class="mb-12">
+                  <label class="form-label d-block mb-4">
                     Target Meeting:
                   </label>
-                  <select id="test-target-meeting" class="meeting-select" style="width: 100%; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-primary); font-size: 0.85rem;">
+                  <select id="test-target-meeting" class="meeting-select w-full">
                     ${state.currentMeetings.map((m: any) => `
                       <option value="${m.sessionId || m.id || ''}">${escapeHtml(m.title || 'Untitled Meeting')}</option>
                     `).join('')}
                   </select>
                 </div>
               ` : `
-                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px;">
+                <p class="text-sm text-secondary mb-12">
                   No active meetings. Join a meeting to test actions.
                 </p>
               `}
-              <div style="display: flex; flex-direction: column; gap: 8px;">
-                <button class="btn btn-sm" onclick="testTTS()" ${!state.currentMeetings?.length ? 'disabled' : ''}>🔊 Test Voice</button>
-                <button class="btn btn-sm" onclick="testAvatar()" ${!state.currentMeetings?.length ? 'disabled' : ''}>🎬 Test Avatar</button>
-                <button class="btn btn-sm" onclick="preloadJira()" ${!state.currentMeetings?.length ? 'disabled' : ''}>📋 Preload Jira</button>
+              <div class="d-flex flex-col gap-8">
+                <button class="btn btn-sm" data-action="testTTS" ${!state.currentMeetings?.length ? 'disabled' : ''}>🔊 Test Voice</button>
+                <button class="btn btn-sm" data-action="testAvatar" ${!state.currentMeetings?.length ? 'disabled' : ''}>🎬 Test Avatar</button>
+                <button class="btn btn-sm" data-action="preloadJira" ${!state.currentMeetings?.length ? 'disabled' : ''}>📋 Preload Jira</button>
               </div>
             </div>
           </div>
@@ -880,9 +873,9 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
 
       <!-- Upcoming Meetings Tab -->
       <div class="subtab-content" id="subtab-upcoming">
-        <div class="section" style="margin-bottom: 16px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h2 class="section-title" style="margin: 0;">📅 Upcoming Meetings</h2>
+        <div class="section mb-16">
+          <div class="flex-between">
+            <h2 class="section-title m-0">📅 Upcoming Meetings</h2>
             ${state.nextMeeting ? `
               <div class="countdown-display" id="countdown-display" data-start-time="${state.nextMeeting.startTime || ''}">
                 <span class="countdown-label">Next meeting in:</span>
@@ -890,7 +883,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
               </div>
             ` : ''}
           </div>
-          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px;">
+          <p class="text-secondary text-base mt-4">
             Pre-approve meetings to auto-join, or join immediately
           </p>
         </div>
@@ -901,12 +894,12 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
 
       <!-- History Tab - Enhanced with notes, issues, and bot events -->
       <div class="subtab-content" id="subtab-history">
-        <div class="section" style="margin-bottom: 16px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h2 class="section-title" style="margin: 0;">📝 Meeting History</h2>
-            <div style="display: flex; gap: 8px;">
-              <input type="text" class="response-input" id="historySearch" placeholder="Search meetings..." style="width: 200px;">
-              <button class="btn btn-sm" onclick="searchNotes()">🔍 Search</button>
+        <div class="section mb-16">
+          <div class="flex-between">
+            <h2 class="section-title m-0">📝 Meeting History</h2>
+            <div class="d-flex gap-8">
+              <input type="text" class="response-input w-200" id="historySearch" placeholder="Search meetings...">
+              <button class="btn btn-sm" data-action="searchNotes">🔍 Search</button>
             </div>
           </div>
         </div>
@@ -924,17 +917,17 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
                 ${note.linkedIssues ? `<span>🎫 ${note.linkedIssues} issues</span>` : ''}
               </div>
               <div class="history-item-actions">
-                <button class="btn-small" onclick="viewNote(${note.id})">📄 View Notes</button>
-                <button class="btn-small" onclick="viewTranscript(${note.id})">📝 Transcript</button>
-                <button class="btn-small" onclick="viewBotLog(${note.id})">🤖 Bot Log</button>
-                ${note.linkedIssues ? `<button class="btn-small" onclick="viewLinkedIssues(${note.id})">🎫 Issues</button>` : ''}
+                <button class="btn-small" data-action="viewNote" data-note-id="${note.id}">📄 View Notes</button>
+                <button class="btn-small" data-action="viewTranscript" data-note-id="${note.id}">📝 Transcript</button>
+                <button class="btn-small" data-action="viewBotLog" data-note-id="${note.id}">🤖 Bot Log</button>
+                ${note.linkedIssues ? `<button class="btn-small" data-action="viewLinkedIssues" data-note-id="${note.id}">🎫 Issues</button>` : ''}
               </div>
             </div>
           `).join('') : `
-            <div class="no-meeting" style="padding: 40px; text-align: center;">
-              <div class="no-meeting-icon">📝</div>
-              <div class="no-meeting-text">No meeting notes yet</div>
-              <div class="no-meeting-hint">Meeting transcripts and notes will appear here after the bot joins meetings</div>
+            <div class="empty-state">
+              <div class="empty-state-icon">📝</div>
+              <div class="empty-state-text">No meeting notes yet</div>
+              <div class="hint-text">Meeting transcripts and notes will appear here after the bot joins meetings</div>
             </div>
           `}
         </div>
@@ -948,37 +941,37 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
             <div class="settings-row">
               <label>Default Bot Mode</label>
               <div class="mode-toggle-inline">
-                <button class="mode-btn-inline ${isNotesMode ? "active" : ""}" onclick="setDefaultMode('notes')">📝 Notes</button>
-                <button class="mode-btn-inline ${!isNotesMode ? "active" : ""}" onclick="setDefaultMode('interactive')">🎤 Interactive</button>
+                <button class="mode-btn-inline ${isNotesMode ? "active" : ""}" data-action="setDefaultMode" data-mode="notes">📝 Notes</button>
+                <button class="mode-btn-inline ${!isNotesMode ? "active" : ""}" data-action="setDefaultMode" data-mode="interactive">🎤 Interactive</button>
               </div>
-              <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">
+              <p class="hint-text mt-4">
                 Default mode for new meetings. Can be changed per-meeting in Upcoming tab.
               </p>
             </div>
-            <div class="settings-row" style="margin-top: 16px;">
+            <div class="settings-row mt-16">
               <label>Auto-join Buffer</label>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <input type="number" class="response-input" id="joinBuffer" value="2" min="0" max="10" style="width: 60px;">
-                <span style="font-size: 0.85rem; color: var(--text-secondary);">minutes before meeting start</span>
+              <div class="form-row">
+                <input type="number" class="response-input w-60" id="joinBuffer" value="2" min="0" max="10">
+                <span class="text-base text-secondary">minutes before meeting start</span>
               </div>
             </div>
-            <div class="settings-row" style="margin-top: 16px;">
+            <div class="settings-row mt-16">
               <label>Auto-leave Buffer</label>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <input type="number" class="response-input" id="leaveBuffer" value="1" min="0" max="10" style="width: 60px;">
-                <span style="font-size: 0.85rem; color: var(--text-secondary);">minutes after meeting end</span>
+              <div class="form-row">
+                <input type="number" class="response-input w-60" id="leaveBuffer" value="1" min="0" max="10">
+                <span class="text-base text-secondary">minutes after meeting end</span>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="section" style="margin-top: 16px;">
+        <div class="section mt-16">
           <h2 class="section-title">🔗 Jira Integration</h2>
           <div class="card">
             <div class="settings-row">
               <label>Jira Project</label>
               <input type="text" class="response-input" id="jiraProject" value="AAP" placeholder="e.g., AAP">
-              <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">
+              <p class="hint-text mt-4">
                 Default project for linking meeting action items to Jira issues.
               </p>
             </div>
@@ -986,7 +979,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
         </div>
 
         <!-- Technical Integrations Section -->
-        <div class="section" style="margin-top: 16px;">
+        <div class="section mt-16">
           <h2 class="section-title">🔧 Technical Integrations</h2>
 
           ${renderTechnicalIntegrations(state)}
@@ -1001,54 +994,72 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
  */
 export function getMeetingsTabScript(): string {
   return `
-    // Sub-tab switching
-    function switchMeetingsTab(tabName) {
-      // Update tab buttons
-      document.querySelectorAll('.meetings-subtab').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.dataset.tab === tabName) {
-          btn.classList.add('active');
+    // Use centralized event delegation system - handlers survive content updates
+    (function() {
+      const meetingsContainer = document.getElementById('meetings');
+      if (!meetingsContainer) return;
+      
+      console.log('[MeetingsTab] Initializing with centralized event delegation...');
+      
+      // Use extraClickInit flag for the complex click handler that needs to be attached once
+      // The TabEventDelegation system handles data-action clicks, but meetings has many
+      // custom click handlers that need the traditional approach
+      const needsInit = !meetingsContainer.dataset.meetingsExtraInit;
+      if (needsInit) {
+        meetingsContainer.dataset.meetingsExtraInit = 'true';
+      }
+
+      // Sub-tab switching
+      function switchMeetingsTab(tabName) {
+        // Update tab buttons
+        meetingsContainer.querySelectorAll('.meetings-subtab').forEach(btn => {
+          btn.classList.remove('active');
+          if (btn.dataset.tab === tabName) {
+            btn.classList.add('active');
+          }
+        });
+
+        // Update content panels
+        meetingsContainer.querySelectorAll('.subtab-content').forEach(panel => {
+          panel.classList.remove('active');
+        });
+        const targetPanel = document.getElementById('subtab-' + tabName);
+        if (targetPanel) {
+          targetPanel.classList.add('active');
         }
-      });
-
-      // Update content panels
-      document.querySelectorAll('.subtab-content').forEach(panel => {
-        panel.classList.remove('active');
-      });
-      const targetPanel = document.getElementById('subtab-' + tabName);
-      if (targetPanel) {
-        targetPanel.classList.add('active');
       }
-    }
+      
+      // Expose for external calls
+      window.switchMeetingsTab = switchMeetingsTab;
 
-    // Meetings Tab Functions
-    function approveMeeting(meetingId, meetUrl) {
-      vscode.postMessage({ type: 'approveMeeting', meetingId, meetUrl });
-    }
-
-    function rejectMeeting(meetingId) {
-      vscode.postMessage({ type: 'rejectMeeting', meetingId });
-    }
-
-    function joinMeeting(meetingId) {
-      vscode.postMessage({ type: 'joinMeeting', meetingId });
-    }
-
-    function joinMeetingNow(meetUrl, title, buttonElement) {
-      // Show loading state on button if provided
-      if (buttonElement) {
-        buttonElement.disabled = true;
-        buttonElement.classList.add('loading');
-        buttonElement.innerHTML = '⏳ Joining...';
+      // Meetings Tab Functions
+      function approveMeeting(meetingId, meetUrl) {
+        vscode.postMessage({ type: 'approveMeeting', meetingId, meetUrl });
       }
 
-      // Get video enabled checkbox state (defaults to false/unchecked)
-      // This uses the Quick Join video toggle as a global setting
-      const videoCheckbox = document.getElementById('quickJoinVideo');
-      const videoEnabled = videoCheckbox ? videoCheckbox.checked : false;
+      function rejectMeeting(meetingId) {
+        vscode.postMessage({ type: 'rejectMeeting', meetingId });
+      }
 
-      // Switch to Current Meeting tab immediately
-      switchMeetingsTab('current');
+      function joinMeeting(meetingId) {
+        vscode.postMessage({ type: 'joinMeeting', meetingId });
+      }
+
+      function joinMeetingNow(meetUrl, title, buttonElement) {
+        // Show loading state on button if provided
+        if (buttonElement) {
+          buttonElement.disabled = true;
+          buttonElement.classList.add('loading');
+          buttonElement.innerHTML = '⏳ Joining...';
+        }
+
+        // Get video enabled checkbox state (defaults to false/unchecked)
+        // This uses the Quick Join video toggle as a global setting
+        const videoCheckbox = document.getElementById('quickJoinVideo');
+        const videoEnabled = videoCheckbox ? videoCheckbox.checked : false;
+
+        // Switch to Current Meeting tab immediately
+        switchMeetingsTab('current');
 
       // Send join request to backend
       vscode.postMessage({ type: 'joinMeetingNow', meetUrl, title, videoEnabled: videoEnabled });
@@ -1534,7 +1545,8 @@ export function getMeetingsTabScript(): string {
     }
 
     // Handle messages from extension
-    window.addEventListener('message', event => {
+    // Only attach once using the needsInit flag
+    if (needsInit) window.addEventListener('message', event => {
       const message = event.data;
       if (message.type === 'videoPreviewFrame') {
         updateVideoPreviewFrame(message.dataUrl, message.resolution);
@@ -1580,102 +1592,6 @@ export function getMeetingsTabScript(): string {
       scrollTranscription();
     });
 
-    // Initialize meetings tab event listeners
-    function initMeetingsTab() {
-      // Sub-tab buttons
-      ['current', 'upcoming', 'history', 'settings'].forEach(tab => {
-        const btn = document.getElementById('subtab-btn-' + tab);
-        if (btn) {
-          btn.addEventListener('click', () => switchMeetingsTab(tab));
-        }
-      });
-
-      // Event delegation for upcoming meetings list buttons (including mode selectors)
-      const upcomingList = document.querySelector('.upcoming-meetings-list');
-      if (upcomingList) {
-        upcomingList.addEventListener('click', function(e) {
-          const target = e.target;
-
-          // Handle mode selector buttons
-          if (target.classList.contains('mode-btn') && target.dataset.mode) {
-            const meetingId = target.dataset.id;
-            const mode = target.dataset.mode;
-            setMeetingMode(meetingId, mode);
-            return;
-          }
-
-          // Handle status badge clicks (approved/missed toggle)
-          if (target.classList.contains('status-badge') && target.dataset.action) {
-            const action = target.dataset.action;
-            const meetingId = target.dataset.id;
-            const row = target.closest('.upcoming-meeting-row');
-
-            if (action === 'unapprove') {
-              // Toggle from approved to skipped
-              target.outerHTML = '<span class="status-badge skipped" data-action="approve" data-id="' + meetingId + '" data-url="' + (target.dataset.url || '') + '" data-mode="notes" title="Click to approve this meeting">✗ Skipped</span>';
-              if (row) {
-                row.classList.remove('approved');
-              }
-              // Send to backend
-              vscode.postMessage({ type: 'unapproveMeeting', meetingId: meetingId });
-            } else if (action === 'approve') {
-              // Toggle from skipped/failed back to approved
-              target.outerHTML = '<span class="status-badge approved" data-action="unapprove" data-id="' + meetingId + '" title="Click to skip this meeting">✓ Approved</span>';
-              if (row) {
-                row.classList.add('approved');
-              }
-              // Send to backend
-              vscode.postMessage({ type: 'approveMeeting', meetingId: meetingId, meetUrl: target.dataset.url, mode: target.dataset.mode || 'notes' });
-            }
-            return;
-          }
-
-          // Handle action buttons (use closest to handle clicks on button content like emojis)
-          const button = target.closest('button[data-action]');
-          if (button) {
-            const action = button.dataset.action;
-            const mode = button.dataset.mode || 'notes'; // Default to notes
-            const meetingId = button.dataset.id;
-
-            if (action === 'approve') {
-              // Optimistic UI update - immediately show approved state
-              const row = button.closest('.upcoming-meeting-row');
-              const controlsDiv = button.closest('.upcoming-meeting-controls');
-              const meetUrl = button.dataset.url || '';
-
-              // Replace approve button with approved badge (clickable to toggle back)
-              button.outerHTML = '<span class="status-badge approved" data-action="unapprove" data-id="' + meetingId + '" data-url="' + meetUrl + '" title="Click to skip this meeting">✓ Approved</span>';
-              if (row) {
-                row.classList.add('approved');
-                row.dataset.meetingId = meetingId; // Store for potential revert
-              }
-
-              // Send to backend
-              vscode.postMessage({ type: 'approveMeeting', meetingId: meetingId, meetUrl: meetUrl, mode: mode });
-            } else if (action === 'join') {
-              // Pass button element for loading state
-              joinMeetingNow(button.dataset.url, button.dataset.title, button);
-            }
-          }
-        });
-      }
-
-      // Event delegation for active meetings buttons
-      const activeMeetingsGrid = document.querySelector('.active-meetings-grid');
-      if (activeMeetingsGrid) {
-        activeMeetingsGrid.addEventListener('click', function(e) {
-          const target = e.target;
-          if (target.tagName === 'BUTTON') {
-            const action = target.dataset.action;
-            if (action === 'leave') {
-              leaveMeeting(target.dataset.session);
-            } else if (action === 'toggle-audio') {
-              toggleMeetingAudio(target);
-            }
-          }
-        });
-      }
-
       // Toggle meeting audio (mute/unmute)
       function toggleMeetingAudio(button) {
         const isListening = button.classList.contains('listening');
@@ -1697,48 +1613,124 @@ export function getMeetingsTabScript(): string {
         });
       }
 
-      // Leave all button
-      const leaveAllBtn = document.getElementById('btn-leave-all');
-      if (leaveAllBtn) {
-        leaveAllBtn.addEventListener('click', leaveAllMeetings);
-      }
+      // Container-level click delegation for ALL meetings interactions
+      // Only attach once using the needsInit flag
+      if (needsInit) meetingsContainer.addEventListener('click', function(e) {
+        const target = e.target;
+        
+        // Sub-tab buttons
+        const subtabBtn = target.closest('.meetings-subtab');
+        if (subtabBtn && subtabBtn.dataset.tab) {
+          switchMeetingsTab(subtabBtn.dataset.tab);
+          return;
+        }
+        
+        // Handle mode selector buttons
+        if (target.classList.contains('mode-btn') && target.dataset.mode) {
+          const meetingId = target.dataset.id;
+          const mode = target.dataset.mode;
+          setMeetingMode(meetingId, mode);
+          return;
+        }
 
-      // Copy transcript button
-      const copyBtn = document.getElementById('btn-copy-transcript');
-      if (copyBtn) {
-        copyBtn.addEventListener('click', copyTranscript);
-      }
+        // Handle status badge clicks (approved/missed toggle)
+        if (target.classList.contains('status-badge') && target.dataset.action) {
+          const action = target.dataset.action;
+          const meetingId = target.dataset.id;
+          const row = target.closest('.upcoming-meeting-row');
 
-      // Clear captions button
-      const clearBtn = document.getElementById('btn-clear-captions');
-      if (clearBtn) {
-        clearBtn.addEventListener('click', clearCaptions);
-      }
+          if (action === 'unapprove') {
+            // Toggle from approved to skipped
+            target.outerHTML = '<span class="status-badge skipped" data-action="approve" data-id="' + meetingId + '" data-url="' + (target.dataset.url || '') + '" data-mode="notes" title="Click to approve this meeting">✗ Skipped</span>';
+            if (row) {
+              row.classList.remove('approved');
+            }
+            // Send to backend
+            vscode.postMessage({ type: 'unapproveMeeting', meetingId: meetingId });
+          } else if (action === 'approve') {
+            // Toggle from skipped/failed back to approved
+            target.outerHTML = '<span class="status-badge approved" data-action="unapprove" data-id="' + meetingId + '" title="Click to skip this meeting">✓ Approved</span>';
+            if (row) {
+              row.classList.add('approved');
+            }
+            // Send to backend
+            vscode.postMessage({ type: 'approveMeeting', meetingId: meetingId, meetUrl: target.dataset.url, mode: target.dataset.mode || 'notes' });
+          }
+          return;
+        }
 
-      // Quick Join button
-      const quickJoinBtn = document.getElementById('quickJoinBtn');
-      if (quickJoinBtn) {
-        quickJoinBtn.addEventListener('click', quickJoin);
-        console.log('[initMeetingsTab] Quick Join button listener attached');
-      } else {
-        console.log('[initMeetingsTab] Quick Join button NOT found');
-      }
+        // Handle action buttons (use closest to handle clicks on button content like emojis)
+        const button = target.closest('button[data-action]');
+        if (button) {
+          const action = button.dataset.action;
+          const mode = button.dataset.mode || 'notes'; // Default to notes
+          const meetingId = button.dataset.id;
 
-      // Start observing captions feed
+          if (action === 'approve') {
+            // Optimistic UI update - immediately show approved state
+            const row = button.closest('.upcoming-meeting-row');
+            const controlsDiv = button.closest('.upcoming-meeting-controls');
+            const meetUrl = button.dataset.url || '';
+
+            // Replace approve button with approved badge (clickable to toggle back)
+            button.outerHTML = '<span class="status-badge approved" data-action="unapprove" data-id="' + meetingId + '" data-url="' + meetUrl + '" title="Click to skip this meeting">✓ Approved</span>';
+            if (row) {
+              row.classList.add('approved');
+              row.dataset.meetingId = meetingId; // Store for potential revert
+            }
+
+            // Send to backend
+            vscode.postMessage({ type: 'approveMeeting', meetingId: meetingId, meetUrl: meetUrl, mode: mode });
+          } else if (action === 'join') {
+            // Pass button element for loading state
+            joinMeetingNow(button.dataset.url, button.dataset.title, button);
+          } else if (action === 'leave') {
+            leaveMeeting(button.dataset.session);
+          } else if (action === 'toggle-audio') {
+            toggleMeetingAudio(button);
+          }
+          return;
+        }
+        
+        // Handle specific button IDs
+        if (target.id === 'btn-leave-all' || target.closest('#btn-leave-all')) {
+          leaveAllMeetings();
+          return;
+        }
+        if (target.id === 'btn-copy-transcript' || target.closest('#btn-copy-transcript')) {
+          copyTranscript();
+          return;
+        }
+        if (target.id === 'btn-clear-captions' || target.closest('#btn-clear-captions')) {
+          clearCaptions();
+          return;
+        }
+        if (target.id === 'quickJoinBtn' || target.closest('#quickJoinBtn')) {
+          quickJoin();
+          return;
+        }
+        if (target.id === 'btn-start-preview' || target.closest('#btn-start-preview')) {
+          startVideoPreview();
+          return;
+        }
+        if (target.id === 'btn-stop-preview' || target.closest('#btn-stop-preview')) {
+          stopVideoPreview();
+          return;
+        }
+        if (target.id === 'btn-flip-preview' || target.closest('#btn-flip-preview')) {
+          toggleVideoFlip();
+          return;
+        }
+      });
+      
+      // Start observing captions feed for auto-scroll
       const feed = document.getElementById('transcriptionFeed');
       if (feed) {
         captionsObserver.observe(feed, { childList: true, subtree: true });
         scrollTranscription();
       }
-    }
-
-    // Initialize when DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initMeetingsTab);
-    } else {
-      // DOM already loaded, init immediately
-      setTimeout(initMeetingsTab, 50);
-    }
+      
+      console.log('[MeetingsTab] Container-level event delegation initialized');
 
     // ==================== LIVE COUNTDOWN TIMER ====================
     let countdownInterval = null;
@@ -1808,8 +1800,9 @@ export function getMeetingsTabScript(): string {
     // Start the countdown timer when the page loads
     setTimeout(startCountdownTimer, 100);
 
-    // Handle Enter key in inputs
-    document.addEventListener('keydown', function(e) {
+    // Handle Enter key in inputs (scoped to meetings container)
+    // Only attach once using the needsInit flag
+    if (needsInit) meetingsContainer.addEventListener('keydown', function(e) {
       if (e.key === 'Enter') {
         if (e.target.id === 'manualResponse') {
           sendManualResponse();
@@ -1820,7 +1813,8 @@ export function getMeetingsTabScript(): string {
     });
 
     // Handle messages from extension (for meeting approval/join responses)
-    window.addEventListener('message', function(event) {
+    // Only attach once using the needsInit flag
+    if (needsInit) window.addEventListener('message', function(event) {
       const message = event.data;
 
       // Handle meeting approval response
@@ -1870,7 +1864,7 @@ export function getMeetingsTabScript(): string {
           if (panel) {
             const noMeeting = panel.querySelector('.no-meeting');
             if (noMeeting) {
-              noMeeting.innerHTML = '<div class="no-meeting-icon" style="color: var(--error);">❌</div>' +
+              noMeeting.innerHTML = '<div class="no-meeting-icon text-error">❌</div>' +
                 '<div class="no-meeting-text">Failed to join meeting</div>' +
                 '<div class="no-meeting-hint">' + (message.error || 'Unknown error') + '</div>';
             }
@@ -2036,7 +2030,7 @@ export function getMeetingsTabScript(): string {
             '</div>';
           }).join('');
         } else {
-          calendarsContainer.innerHTML = '<div style="color: var(--text-secondary); font-size: 0.85rem; padding: 8px;">No calendars configured</div>';
+          calendarsContainer.innerHTML = '<div class="placeholder-text">No calendars configured</div>';
         }
       }
 
@@ -2063,27 +2057,9 @@ export function getMeetingsTabScript(): string {
         .replace(/'/g, '&#039;');
     }
 
-    // Wire up video preview buttons (CSP blocks inline onclick handlers)
-    document.addEventListener('DOMContentLoaded', function() {
-      const startBtn = document.getElementById('btn-start-preview');
-      const stopBtn = document.getElementById('btn-stop-preview');
-      const flipBtn = document.getElementById('btn-flip-preview');
-
-      if (startBtn) startBtn.addEventListener('click', startVideoPreview);
-      if (stopBtn) stopBtn.addEventListener('click', stopVideoPreview);
-      if (flipBtn) flipBtn.addEventListener('click', toggleVideoFlip);
-    });
-
-    // Also try immediate wiring in case DOMContentLoaded already fired
-    (function() {
-      const startBtn = document.getElementById('btn-start-preview');
-      const stopBtn = document.getElementById('btn-stop-preview');
-      const flipBtn = document.getElementById('btn-flip-preview');
-
-      if (startBtn) startBtn.addEventListener('click', startVideoPreview);
-      if (stopBtn) stopBtn.addEventListener('click', stopVideoPreview);
-      if (flipBtn) flipBtn.addEventListener('click', toggleVideoFlip);
-    })();
+    // Video preview buttons are now handled by container-level click delegation above
+    
+    })(); // End of IIFE for meetings container delegation
   `;
 }
 

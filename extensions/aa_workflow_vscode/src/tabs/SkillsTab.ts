@@ -37,6 +37,7 @@ interface RunningSkill {
   startedAt: string;
   source: "chat" | "cron" | "slack" | "manual" | "api";
   elapsed: number;
+  totalSteps?: number;
   /** Track which update source added this skill to prevent duplicates */
   addedBy?: "websocket" | "filewatcher" | "dbus";
   /** Timestamp when this skill was added (for deduplication window) */
@@ -89,6 +90,10 @@ export class SkillsTab extends BaseTab {
   private workflowViewMode: "horizontal" | "vertical" = "horizontal";
   private wsClient: SkillWebSocketClient | null = null;
   private wsDisposables: vscode.Disposable[] = [];
+  
+  // Throttling: skills list rarely changes, don't refresh more than once per 30 seconds
+  private lastSkillsListLoad: number = 0;
+  private static readonly SKILLS_LIST_MIN_INTERVAL_MS = 30000; // 30 seconds
 
   constructor() {
     super({
@@ -189,6 +194,7 @@ export class SkillsTab extends BaseTab {
       existing.progress = progress;
       existing.currentStep = skill.currentStepName || `Step ${skill.currentStep}`;
       existing.elapsed = elapsed;
+      existing.totalSteps = skill.totalSteps;
       existing.addedBy = "websocket"; // WebSocket takes ownership
       // Update source if we now have a real source from WebSocket
       if (skill.source && skill.source !== "manual") {
@@ -205,6 +211,7 @@ export class SkillsTab extends BaseTab {
         startedAt: skill.startedAt.toISOString(),
         source: skill.source || "chat",
         elapsed,
+        totalSteps: skill.totalSteps,
         addedBy: "websocket",
         addedAt: now,
       });
@@ -213,6 +220,36 @@ export class SkillsTab extends BaseTab {
 
     // Clean up any duplicates that might have snuck in from race conditions
     this.deduplicateRunningSkills();
+
+    // Auto-set watchingExecutionId if user is viewing this skill's workflow
+    // This ensures progress circles update when a skill starts running while viewing it
+    logger.log(`addOrUpdateRunningSkill: checking auto-watch - watchingExecutionId=${this.watchingExecutionId}, selectedSkill=${this.selectedSkill}, skill.skillName=${skill.skillName}, skillView=${this.skillView}, status=${skill.status}`);
+    if (!this.watchingExecutionId &&
+        this.selectedSkill === skill.skillName &&
+        this.skillView === "workflow" &&
+        skill.status === "running") {
+      this.watchingExecutionId = skill.skillId;
+      // Initialize detailedExecution for real-time updates
+      this.detailedExecution = {
+        executionId: skill.skillId,
+        skillName: skill.skillName,
+        status: "running",
+        currentStepIndex: skill.currentStep,
+        totalSteps: skill.totalSteps,
+        steps: [],
+        startTime: skill.startedAt.toISOString(),
+      };
+      logger.log(`Auto-set watchingExecutionId for ${skill.skillName} (${skill.skillId}) - user viewing workflow`);
+    }
+
+    // Update detailedExecution if we're watching THIS skill
+    // This keeps the workflow view in sync with WebSocket updates
+    if (this.watchingExecutionId === skill.skillId && this.detailedExecution) {
+      this.detailedExecution.currentStepIndex = skill.currentStep;
+      this.detailedExecution.totalSteps = skill.totalSteps;
+      this.detailedExecution.status = skill.status;
+      logger.log(`addOrUpdateRunningSkill: Updated detailedExecution for watched skill ${skill.skillName} - step ${skill.currentStep}/${skill.totalSteps}`);
+    }
   }
 
   /**
@@ -282,9 +319,60 @@ export class SkillsTab extends BaseTab {
   }
 
   private updateSkillStep(skillId: string, step: any): void {
+    logger.log(`updateSkillStep: skillId=${skillId}, step=${JSON.stringify(step)}`);
     const skill = this.runningSkills.find(s => s.executionId === skillId);
     if (skill) {
-      skill.currentStep = step.name || `Step ${step.index}`;
+      skill.currentStep = step?.name || `Step ${step?.index}`;
+    }
+
+    // Auto-set watchingExecutionId if user is viewing this skill's workflow but hasn't explicitly selected it
+    // This handles the race condition where step updates arrive before addOrUpdateRunningSkill
+    logger.log(`updateSkillStep: checking auto-watch - watchingExecutionId=${this.watchingExecutionId}, skill=${skill?.skillName}, selectedSkill=${this.selectedSkill}, skillView=${this.skillView}`);
+    if (!this.watchingExecutionId && skill &&
+        this.selectedSkill === skill.skillName &&
+        this.skillView === "workflow") {
+      this.watchingExecutionId = skillId;
+      this.detailedExecution = {
+        executionId: skillId,
+        skillName: skill.skillName,
+        status: "running",
+        currentStepIndex: step.index || 0,
+        totalSteps: skill.totalSteps || 0,
+        steps: [],
+        startTime: skill.startedAt,
+      };
+      logger.log(`Auto-set watchingExecutionId in updateSkillStep for ${skill.skillName} (${skillId})`);
+    }
+
+    // Also update detailedExecution.steps if we're watching this execution
+    // This ensures the workflow circles update in real-time via WebSocket
+    if (this.watchingExecutionId === skillId && this.detailedExecution) {
+      const stepIndex = step.index;
+      if (stepIndex !== undefined && stepIndex >= 0) {
+        // Ensure steps array is large enough
+        if (!this.detailedExecution.steps) {
+          this.detailedExecution.steps = [];
+        }
+        // Expand array if needed
+        while (this.detailedExecution.steps.length <= stepIndex) {
+          this.detailedExecution.steps.push({ name: `Step ${this.detailedExecution.steps.length + 1}`, status: "pending" });
+        }
+        // Update the step status
+        // Map "completed" from WebSocket to "success" for our ExecutionStep interface
+        const mappedStatus = step.status === "completed" ? "success" : step.status;
+        this.detailedExecution.steps[stepIndex] = {
+          ...this.detailedExecution.steps[stepIndex],
+          status: mappedStatus as "pending" | "running" | "success" | "failed" | "skipped",
+          name: step.name || this.detailedExecution.steps[stepIndex].name,
+          duration: step.endTime && step.startTime ? new Date(step.endTime).getTime() - new Date(step.startTime).getTime() : undefined,
+          error: step.error,
+        };
+        // Update current step index
+        if (step.status === "running") {
+          this.detailedExecution.currentStepIndex = stepIndex;
+        }
+        logger.log(`WebSocket: Updated detailedExecution step ${stepIndex} to ${step.status}`);
+      }
     }
   }
 
@@ -312,38 +400,45 @@ export class SkillsTab extends BaseTab {
   }
 
   async loadData(): Promise<void> {
-    logger.log("loadData() starting...");
-    try {
-      // Load skills list via D-Bus
-      logger.log("Calling config_getSkillsList()...");
-      const skillsResult = await dbus.config_getSkillsList();
-      logger.log(`config_getSkillsList() result: success=${skillsResult.success}, error=${skillsResult.error || 'none'}`);
-      if (skillsResult.success && skillsResult.data) {
-        const data = skillsResult.data as any;
-        this.skills = data.skills || [];
-        this.categorizeSkills();
-        logger.log(`Loaded ${this.skills.length} skills`);
-      } else if (skillsResult.error) {
-        this.lastError = `Skills list failed: ${skillsResult.error}`;
-        logger.warn(this.lastError);
+    const now = Date.now();
+    const timeSinceLastLoad = now - this.lastSkillsListLoad;
+    
+    // Throttle skills list loading - it rarely changes
+    const shouldLoadSkillsList = timeSinceLastLoad >= SkillsTab.SKILLS_LIST_MIN_INTERVAL_MS || this.skills.length === 0;
+    
+    if (shouldLoadSkillsList) {
+      logger.log("loadData() starting - loading skills list...");
+      try {
+        // Load skills list via D-Bus
+        const skillsResult = await dbus.config_getSkillsList();
+        if (skillsResult.success && skillsResult.data) {
+          const data = skillsResult.data as any;
+          this.skills = data.skills || [];
+          this.categorizeSkills();
+          this.lastSkillsListLoad = now;
+          logger.log(`Loaded ${this.skills.length} skills`);
+        } else if (skillsResult.error) {
+          this.lastError = `Skills list failed: ${skillsResult.error}`;
+          logger.warn(this.lastError);
+        }
+      } catch (error) {
+        this.lastError = error instanceof Error ? error.message : String(error);
+        logger.error("Error loading skills list", error);
       }
+    } else {
+      logger.log(`loadData() skipping skills list - last load ${Math.round(timeSinceLastLoad / 1000)}s ago (min interval: ${SkillsTab.SKILLS_LIST_MIN_INTERVAL_MS / 1000}s)`);
+    }
 
-      // Load current skill execution via D-Bus
-      logger.log("Calling stats_getSkillExecution()...");
+    // Always load current execution status (this is lightweight and changes frequently)
+    try {
       const execResult = await dbus.stats_getSkillExecution();
-      logger.log(`stats_getSkillExecution() result: success=${execResult.success}, error=${execResult.error || 'none'}`);
       if (execResult.success && execResult.data) {
         const data = execResult.data as any;
         this.currentExecution = data.execution || null;
         this.updateRunningSkills();
-        logger.log(`Current execution: ${this.currentExecution?.skill_name || 'none'}`);
-      } else if (execResult.error) {
-        logger.warn(`Skill execution failed: ${execResult.error}`);
       }
-      logger.log("loadData() complete");
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
-      logger.error("Error loading data", error);
+      logger.warn(`Skill execution check failed: ${error}`);
     }
   }
 
@@ -644,6 +739,7 @@ export class SkillsTab extends BaseTab {
     ).join("");
 
     // Get execution status for this skill
+    logger.log(`getSkillWorkflowView: detailedExecution?.skillName=${this.detailedExecution?.skillName}, skill.name=${skill.name}, watchingExecutionId=${this.watchingExecutionId}`);
     const isExecuting = this.detailedExecution?.skillName === skill.name;
     const execStatus = isExecuting ? this.detailedExecution!.status : "ready";
     const execStep = isExecuting ? `${this.detailedExecution!.currentStepIndex + 1}/${this.detailedExecution!.totalSteps}` : "";
@@ -750,12 +846,18 @@ export class SkillsTab extends BaseTab {
    */
   private getExecutionStepStatus(index: number): ExecutionStep | null {
     if (!this.detailedExecution || !this.detailedExecution.steps) {
+      logger.log(`getExecutionStepStatus(${index}): No detailedExecution or steps`);
       return null;
     }
     if (this.detailedExecution.skillName !== this.selectedSkill) {
+      logger.log(`getExecutionStepStatus(${index}): skillName mismatch - detailedExecution.skillName='${this.detailedExecution.skillName}' vs selectedSkill='${this.selectedSkill}'`);
       return null;
     }
-    return this.detailedExecution.steps[index] || null;
+    const step = this.detailedExecution.steps[index] || null;
+    if (step) {
+      logger.log(`getExecutionStepStatus(${index}): Found step with status='${step.status}'`);
+    }
+    return step;
   }
 
   /**
@@ -897,8 +999,14 @@ export class SkillsTab extends BaseTab {
       `;
     }
 
-    // Format the skill data as YAML-like display
-    const yamlContent = JSON.stringify(skillData, null, 2);
+    // Use raw YAML content if available (from D-Bus), otherwise format as YAML-like
+    let yamlContent: string;
+    if (skillData._raw_yaml) {
+      yamlContent = skillData._raw_yaml;
+    } else {
+      // Fallback: format as YAML-like (not perfect but better than JSON)
+      yamlContent = this.formatAsYaml(skillData);
+    }
 
     return `
       <div class="skill-yaml-view">
@@ -909,6 +1017,64 @@ export class SkillsTab extends BaseTab {
         <pre class="yaml-content"><code>${this.escapeHtml(yamlContent)}</code></pre>
       </div>
     `;
+  }
+
+  /**
+   * Format data as YAML-like string (simple formatter for display)
+   */
+  private formatAsYaml(data: any, indent: number = 0): string {
+    const spaces = "  ".repeat(indent);
+    const lines: string[] = [];
+
+    if (data === null || data === undefined) {
+      return "null";
+    }
+
+    if (typeof data !== "object") {
+      return String(data);
+    }
+
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        if (typeof item === "object" && item !== null) {
+          lines.push(`${spaces}-`);
+          const subYaml = this.formatAsYaml(item, indent + 1);
+          lines.push(subYaml);
+        } else {
+          lines.push(`${spaces}- ${item}`);
+        }
+      }
+      return lines.join("\n");
+    }
+
+    // Object
+    for (const [key, value] of Object.entries(data)) {
+      // Skip internal fields
+      if (key.startsWith("_")) continue;
+
+      if (value === null || value === undefined) {
+        lines.push(`${spaces}${key}: null`);
+      } else if (typeof value === "object") {
+        if (Array.isArray(value) && value.length === 0) {
+          lines.push(`${spaces}${key}: []`);
+        } else if (typeof value === "object" && Object.keys(value).length === 0) {
+          lines.push(`${spaces}${key}: {}`);
+        } else {
+          lines.push(`${spaces}${key}:`);
+          lines.push(this.formatAsYaml(value, indent + 1));
+        }
+      } else if (typeof value === "string" && (value.includes("\n") || value.includes(":"))) {
+        // Multi-line or special strings
+        lines.push(`${spaces}${key}: |`);
+        for (const line of value.split("\n")) {
+          lines.push(`${spaces}  ${line}`);
+        }
+      } else {
+        lines.push(`${spaces}${key}: ${value}`);
+      }
+    }
+
+    return lines.join("\n");
   }
 
   getStyles(): string {
@@ -1637,57 +1803,100 @@ export class SkillsTab extends BaseTab {
     `;
 
   getScript(): string {
+    // Use centralized event delegation system - handlers survive content updates
     return `
-      // Skill search
-      const skillSearch = document.getElementById('skillSearch');
-      if (skillSearch) {
-        skillSearch.addEventListener('input', (e) => {
-          const query = e.target.value.toLowerCase();
-          document.querySelectorAll('.skill-item').forEach(item => {
-            const name = item.querySelector('.skill-item-name')?.textContent?.toLowerCase() || '';
-            const desc = item.querySelector('.skill-item-desc')?.textContent?.toLowerCase() || '';
-            item.style.display = (name.includes(query) || desc.includes(query)) ? '' : 'none';
+      (function() {
+        // Register click handler - can be called multiple times safely
+        TabEventDelegation.registerClickHandler('skills', function(action, element, e) {
+          const skillName = element.dataset.skill;
+          const executionId = element.dataset.executionId;
+          
+          switch(action) {
+            case 'runSkill':
+              if (skillName) {
+                vscode.postMessage({ command: 'runSkill', skillName });
+              }
+              break;
+            case 'openSkillFile':
+              if (skillName) {
+                vscode.postMessage({ command: 'openSkillFile', skillName });
+              }
+              break;
+            case 'clearStaleSkills':
+              vscode.postMessage({ command: 'clearStaleSkills' });
+              break;
+            case 'clearSkillExecution':
+              if (executionId) {
+                vscode.postMessage({ command: 'clearSkillExecution', executionId });
+              }
+              break;
+          }
+        });
+
+        // Additional click handling for non-data-action elements
+        const skillsContainer = document.getElementById('skills');
+        if (skillsContainer && !skillsContainer.dataset.extraClickInit) {
+          skillsContainer.dataset.extraClickInit = 'true';
+          
+          skillsContainer.addEventListener('click', function(e) {
+            const target = e.target;
+            // Skip if already handled by data-action
+            if (target.closest('[data-action]')) return;
+            
+            const skillItem = target.closest('.skill-item');
+            const viewToggle = target.closest('.toggle-btn[data-view]');
+            const workflowViewBtn = target.closest('.toggle-btn[data-workflow-view]');
+            const skillCallBadge = target.closest('.skill-call-badge');
+            const runningSkillItem = target.closest('.running-skill-item');
+            
+            // Skill view toggle (Info/Workflow/YAML)
+            if (viewToggle && viewToggle.dataset.view) {
+              vscode.postMessage({ command: 'setSkillView', view: viewToggle.dataset.view });
+              return;
+            }
+            
+            // Workflow view mode toggle (Horizontal/Vertical)
+            if (workflowViewBtn && workflowViewBtn.dataset.workflowView) {
+              vscode.postMessage({ command: 'setWorkflowViewMode', mode: workflowViewBtn.dataset.workflowView });
+              return;
+            }
+            
+            // Skill call badge clicks (navigate to called skill)
+            if (skillCallBadge && skillCallBadge.dataset.skill) {
+              vscode.postMessage({ command: 'loadSkill', skillName: skillCallBadge.dataset.skill });
+              return;
+            }
+            
+            // Running skill item clicks (open flowchart) - but not if clicking clear button
+            if (runningSkillItem && !target.closest('.clear-skill-btn')) {
+              const executionId = runningSkillItem.dataset.executionId;
+              if (executionId) {
+                vscode.postMessage({ command: 'openRunningSkillFlowchart', executionId });
+              }
+              return;
+            }
+            
+            // Skill item clicks (for selection)
+            if (skillItem && skillItem.dataset.skill) {
+              vscode.postMessage({ command: 'loadSkill', skillName: skillItem.dataset.skill });
+              return;
+            }
           });
-        });
-      }
 
-      // Skill selection
-      document.querySelectorAll('.skill-item').forEach(item => {
-        item.addEventListener('click', () => {
-          const skillName = item.dataset.skill;
-          if (skillName) {
-            vscode.postMessage({ command: 'loadSkill', skillName });
-          }
-        });
-      });
-
-      // View toggle
-      document.querySelectorAll('.toggle-btn[data-view]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const view = btn.dataset.view;
-          vscode.postMessage({ command: 'setSkillView', view });
-        });
-      });
-
-      // Run skill button
-      document.querySelectorAll('[data-action="runSkill"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const skillName = btn.dataset.skill;
-          if (skillName) {
-            vscode.postMessage({ command: 'runSkill', skillName });
-          }
-        });
-      });
-
-      // Open skill file button
-      document.querySelectorAll('[data-action="openSkillFile"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const skillName = btn.dataset.skill;
-          if (skillName) {
-            vscode.postMessage({ command: 'openSkillFile', skillName });
-          }
-        });
-      });
+          // Input delegation for search (client-side filtering)
+          skillsContainer.addEventListener('input', function(e) {
+            if (e.target.id === 'skillSearch') {
+              const query = e.target.value.toLowerCase();
+              skillsContainer.querySelectorAll('.skill-item').forEach(item => {
+                const name = item.querySelector('.skill-item-name')?.textContent?.toLowerCase() || '';
+                const desc = item.querySelector('.skill-item-desc')?.textContent?.toLowerCase() || '';
+                const skillName = (item.dataset.skill || '').toLowerCase();
+                item.style.display = (name.includes(query) || desc.includes(query) || skillName.includes(query)) ? '' : 'none';
+              });
+            }
+          });
+        }
+      })();
     `;
   }
 
@@ -1895,58 +2104,97 @@ export class SkillsTab extends BaseTab {
     // Build the command to run in chat
     const command = `skill_run("${skill}")`;
 
+    // Copy to clipboard first (always works)
+    await vscode.env.clipboard.writeText(command);
+    logger.log(`Copied to clipboard: ${command}`);
+
     try {
-      // Import chatUtils functions
-      const { sendEnter, sendPaste, sleep } = await import("../chatUtils");
+      // Try to use the registered VS Code command if available
+      const hasCommand = await vscode.commands.getCommands(true).then(
+        cmds => cmds.includes("aa-workflow.runSkillByName")
+      );
 
-      // Step 1: Copy command to clipboard
-      logger.log(`Step 1: Copying command to clipboard: ${command}`);
-      await vscode.env.clipboard.writeText(command);
+      if (hasCommand) {
+        logger.log("Using aa-workflow.runSkillByName command");
+        await vscode.commands.executeCommand("aa-workflow.runSkillByName", skill);
+        return;
+      }
 
-      // Step 2: Create new composer tab
-      logger.log("Step 2: Creating new composer tab...");
+      // Fallback: Try to create a new composer and paste
+      logger.log("Trying composer approach...");
+      
+      // Create new composer tab
       await vscode.commands.executeCommand("composer.createNewComposerTab");
-      await sleep(500);
+      
+      // Wait a bit for the composer to open
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Step 3: Press Enter to accept the "new chat" prompt
-      logger.log("Step 3: Pressing Enter to accept prompt...");
-      const enterResult1 = sendEnter();
-      logger.log(`Enter result: ${enterResult1}`);
-      await sleep(600);
-
-      // Step 4: Focus the composer input
-      logger.log("Step 4: Focusing composer...");
+      // Try to focus and use editor.action.clipboardPasteAction
       await vscode.commands.executeCommand("composer.focusComposer");
-      await sleep(300);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Try to paste using VS Code's paste command
+      try {
+        await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+        logger.log("Pasted via editor.action.clipboardPasteAction");
+      } catch (pasteError) {
+        logger.warn("editor.action.clipboardPasteAction failed, trying ydotool...");
+        
+        // Try ydotool as last resort
+        try {
+          const { sendPaste, sendEnter, sleep } = await import("../chatUtils");
+          sendPaste();
+          await sleep(300);
+          sendEnter();
+        } catch (ydotoolError) {
+          logger.warn("ydotool also failed");
+        }
+      }
 
-      // Step 5: Paste the command (Ctrl+V via ydotool)
-      logger.log("Step 5: Pasting command (Ctrl+V)...");
-      const pasteResult = sendPaste();
-      logger.log(`Paste result: ${pasteResult}`);
-      await sleep(400);
-
-      // Step 6: Press Enter to submit
-      logger.log("Step 6: Pressing Enter to submit...");
-      const enterResult2 = sendEnter();
-      logger.log(`Enter result: ${enterResult2}`);
-
-      vscode.window.showInformationMessage(`🚀 Running skill: ${skill}`);
+      vscode.window.showInformationMessage(
+        `🚀 Skill command copied! Paste in chat: ${command}`
+      );
     } catch (e) {
       logger.error(`Failed to run skill: ${e}`);
 
-      // Fallback: Copy to clipboard and show instructions
-      await vscode.env.clipboard.writeText(command);
-      vscode.window.showWarningMessage(
-        `Could not auto-launch chat. Command copied to clipboard: ${command}. Open a new chat and paste.`
+      // Show message with the copied command
+      vscode.window.showInformationMessage(
+        `📋 Command copied to clipboard: ${command}. Open a new chat and paste (Ctrl+V).`
       );
     }
   }
 
   private async openSkillFile(skillName: string): Promise<void> {
     const skill = this.skills.find((s) => s.name === skillName);
-    if (skill && skill.file) {
-      const doc = await vscode.workspace.openTextDocument(skill.file);
-      await vscode.window.showTextDocument(doc);
+    
+    // Try multiple sources for the file path
+    let filePath: string | undefined;
+    
+    if (skill?.file) {
+      filePath = skill.file;
+    } else if (this.selectedSkillData?.file) {
+      filePath = this.selectedSkillData.file;
+    } else {
+      // Fallback: construct path from workspace and skill name
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (workspaceFolders && workspaceFolders.length > 0) {
+        const workspaceRoot = workspaceFolders[0].uri.fsPath;
+        filePath = `${workspaceRoot}/skills/${skillName}.yaml`;
+      }
+    }
+
+    if (filePath) {
+      try {
+        const doc = await vscode.workspace.openTextDocument(filePath);
+        await vscode.window.showTextDocument(doc);
+        logger.log(`Opened skill file: ${filePath}`);
+      } catch (e) {
+        logger.error(`Failed to open skill file: ${filePath}`, e);
+        vscode.window.showErrorMessage(`Could not open skill file: ${filePath}`);
+      }
+    } else {
+      logger.warn(`No file path found for skill: ${skillName}`);
+      vscode.window.showWarningMessage(`Could not find file path for skill: ${skillName}`);
     }
   }
 
@@ -2006,34 +2254,118 @@ export class SkillsTab extends BaseTab {
       return;
     }
 
-    // Set the execution ID we're watching BEFORE loading skill
+    // Set the execution ID we're watching BEFORE anything else
     // This ensures execution updates are accepted
     this.watchingExecutionId = executionId;
 
-    // Load the skill definition
-    await this.loadSkill(runningSkill.skillName);
+    // Calculate current step index from progress percentage
+    // progress is 0-100, totalSteps tells us how many steps
+    const totalSteps = runningSkill.totalSteps || 0;
+    const currentStepIndex = totalSteps > 0 
+      ? Math.floor((runningSkill.progress / 100) * totalSteps)
+      : 0;
+    
+    // Initialize detailedExecution BEFORE loadSkill
+    // This ensures the workflow view has data even during async operations
+    // loadSkill will NOT clear this because watchingExecutionId is already set
+    this.detailedExecution = {
+      executionId: executionId,
+      skillName: runningSkill.skillName,
+      status: runningSkill.status,
+      currentStepIndex: currentStepIndex,
+      totalSteps: totalSteps,
+      steps: [],
+      startTime: runningSkill.startedAt,
+    };
+    logger.log(`selectRunningSkill: Initialized detailedExecution for ${runningSkill.skillName} (${executionId}) at step ${currentStepIndex}/${totalSteps} (progress: ${runningSkill.progress}%)`);
 
     // Switch to workflow view to show the flowchart
     this.skillView = "workflow";
 
-    // Set the execution ID in the watcher so it sends us updates
+    // Load the skill definition (async - may trigger re-renders)
+    await this.loadSkill(runningSkill.skillName);
+
+    // After loadSkill, pre-populate the steps array from the skill definition
+    // This is critical - without this, getExecutionStepStatus returns null for all steps
+    if (this.selectedSkillData?.steps && this.detailedExecution) {
+      const skillSteps = this.selectedSkillData.steps;
+      this.detailedExecution.steps = skillSteps.map((step: any, index: number) => {
+        // Determine status based on currentStepIndex:
+        // - Steps before currentStepIndex are completed (success)
+        // - Step at currentStepIndex is running
+        // - Steps after currentStepIndex are pending
+        let status: "pending" | "running" | "success" | "failed" | "skipped" = "pending";
+        if (index < currentStepIndex) {
+          status = "success";
+        } else if (index === currentStepIndex) {
+          status = "running";
+        }
+        return {
+          name: step.name || `Step ${index + 1}`,
+          description: step.description,
+          tool: step.tool,
+          status: status,
+        };
+      });
+      logger.log(`selectRunningSkill: Pre-populated ${this.detailedExecution.steps.length} steps from skill definition, steps 0-${currentStepIndex - 1} marked success, step ${currentStepIndex} running`);
+    }
+
+    // Also set the execution ID in the watcher so it sends us updates
     const watcher = getSkillExecutionWatcher();
-    if (watcher) {
+    if (watcher && this.detailedExecution) {
       watcher.selectExecution(executionId);
 
-      // Get the current execution state immediately
+      // Try to get more detailed state from watcher if available
       const execState = watcher.getSelectedExecution();
       if (execState) {
-        this.detailedExecution = {
-          executionId: execState.executionId,
-          skillName: execState.skillName,
-          status: execState.status,
-          currentStepIndex: execState.currentStepIndex,
-          totalSteps: execState.totalSteps,
-          steps: [], // Will be populated by next update
-          startTime: execState.startTime,
-          endTime: execState.endTime,
-        };
+        // Update currentStepIndex from watcher (may be more up-to-date)
+        if (execState.currentStepIndex > this.detailedExecution.currentStepIndex) {
+          // Mark steps between old and new currentStepIndex as success
+          for (let i = this.detailedExecution.currentStepIndex; i < execState.currentStepIndex; i++) {
+            if (this.detailedExecution.steps[i]) {
+              this.detailedExecution.steps[i].status = "success";
+            }
+          }
+          this.detailedExecution.currentStepIndex = execState.currentStepIndex;
+          // Mark new current step as running
+          if (this.detailedExecution.steps[execState.currentStepIndex]) {
+            this.detailedExecution.steps[execState.currentStepIndex].status = "running";
+          }
+        }
+        
+        // Extract step statuses from events (these override our defaults)
+        type StepStatus = "pending" | "running" | "success" | "failed" | "skipped";
+        const stepStatuses = new Map<number, { status: StepStatus; duration?: number; error?: string }>();
+        for (const event of execState.events) {
+          if (event.stepIndex !== undefined) {
+            if (event.type === 'step_complete') {
+              stepStatuses.set(event.stepIndex, {
+                status: 'success',
+                duration: event.data?.duration,
+              });
+            } else if (event.type === 'step_failed') {
+              stepStatuses.set(event.stepIndex, {
+                status: 'failed',
+                error: event.data?.error,
+              });
+            } else if (event.type === 'step_skipped') {
+              stepStatuses.set(event.stepIndex, { status: 'skipped' });
+            }
+            // Don't override with 'running' from step_start - our currentStepIndex logic handles that
+          }
+        }
+        
+        // Update detailedExecution.steps with status info from events
+        if (stepStatuses.size > 0) {
+          for (const [index, info] of stepStatuses) {
+            if (this.detailedExecution.steps[index]) {
+              this.detailedExecution.steps[index].status = info.status;
+              if (info.duration) this.detailedExecution.steps[index].duration = info.duration;
+              if (info.error) this.detailedExecution.steps[index].error = info.error;
+            }
+          }
+          logger.log(`selectRunningSkill: Applied ${stepStatuses.size} step statuses from watcher events`);
+        }
       }
     }
 

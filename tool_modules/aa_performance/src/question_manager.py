@@ -235,7 +235,7 @@ class QuestionManager:
             elif "blockers" in q_categories:
                 # Tag events with blocker labels
                 labels = event.get("labels", [])
-                if any(l in ["blocked", "blocker", "needs-help"] for l in labels):
+                if any(label in ["blocked", "blocker", "needs-help"] for label in labels):
                     should_tag = True
             else:
                 # Check if any competency matches

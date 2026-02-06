@@ -306,3 +306,5 @@ def register_tools(server: "FastMCP") -> int:
         lines.extend(["", f"**[Open in Kibana]({link})**"])
 
         return [TextContent(type="text", text="\n".join(lines))]
+
+    return registry.count  # Return number of tools registered

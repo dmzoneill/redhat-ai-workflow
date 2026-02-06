@@ -59,6 +59,8 @@ export class SlopTab extends BaseTab {
   private findings: SlopFinding[] = [];
   private filter: { loop?: string; severity?: string; status?: string } = {};
   private findingsLimit = 50;
+  private loadRetryCount = 0;
+  private maxRetries = 3;
 
   constructor() {
     super({
@@ -69,6 +71,11 @@ export class SlopTab extends BaseTab {
   }
 
   getBadge(): { text: string; class?: string } | null {
+    // Show error indicator if we have an error
+    if (this.lastError && !this.state) {
+      return { text: "!", class: "error" };
+    }
+
     if (!this.state) return null;
 
     // Show running loops count
@@ -89,14 +96,31 @@ export class SlopTab extends BaseTab {
   }
 
   async loadData(): Promise<void> {
+    logger.log("loadData() starting...");
+    let hasAnyData = false;
+    let errors: string[] = [];
+
     try {
-      // Get loop status
+      // Get loop status - this is the primary data source
+      logger.log("Calling slop_getLoopStatus()...");
       const statusResult = await dbus.slop_getLoopStatus();
       if (statusResult.success && statusResult.data) {
         this.state = statusResult.data as SlopState;
+        hasAnyData = true;
+        logger.log("Loop status loaded successfully");
+      } else if (statusResult.error) {
+        errors.push(`Loop status: ${statusResult.error}`);
+        logger.warn(`Failed to get loop status: ${statusResult.error}`);
       }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      errors.push(`Loop status: ${msg}`);
+      logger.error("Exception getting loop status", error);
+    }
 
-      // Get findings
+    // Get findings - continue even if loop status failed
+    try {
+      logger.log("Calling slop_getFindings()...");
       const findingsResult = await dbus.slop_getFindings(
         this.filter.loop,
         this.filter.severity,
@@ -105,20 +129,71 @@ export class SlopTab extends BaseTab {
       );
       if (findingsResult.success && findingsResult.data) {
         this.findings = (findingsResult.data as any).findings || [];
-      }
-
-      // Get stats
-      const statsResult = await dbus.slop_getStats();
-      if (statsResult.success && statsResult.data && this.state) {
-        this.state.stats = statsResult.data as SlopStats;
+        hasAnyData = true;
+        logger.log(`Loaded ${this.findings.length} findings`);
+      } else if (findingsResult.error) {
+        errors.push(`Findings: ${findingsResult.error}`);
+        logger.warn(`Failed to get findings: ${findingsResult.error}`);
       }
     } catch (error) {
-      logger.error("Error loading data", error);
-      this.state = null;
+      const msg = error instanceof Error ? error.message : String(error);
+      errors.push(`Findings: ${msg}`);
+      logger.error("Exception getting findings", error);
     }
+
+    // Get stats - continue even if previous calls failed
+    try {
+      logger.log("Calling slop_getStats()...");
+      const statsResult = await dbus.slop_getStats();
+      if (statsResult.success && statsResult.data) {
+        if (this.state) {
+          this.state.stats = statsResult.data as SlopStats;
+        } else {
+          // Create minimal state with just stats
+          this.state = {
+            running: false,
+            max_parallel: 1,
+            loops: {},
+            priority_order: [],
+            stats: statsResult.data as SlopStats,
+          };
+        }
+        hasAnyData = true;
+        logger.log("Stats loaded successfully");
+      } else if (statsResult.error) {
+        errors.push(`Stats: ${statsResult.error}`);
+        logger.warn(`Failed to get stats: ${statsResult.error}`);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      errors.push(`Stats: ${msg}`);
+      logger.error("Exception getting stats", error);
+    }
+
+    // Update error state
+    if (errors.length > 0 && !hasAnyData) {
+      this.lastError = errors.join("; ");
+      this.loadRetryCount++;
+      logger.error(`All D-Bus calls failed (attempt ${this.loadRetryCount}/${this.maxRetries}): ${this.lastError}`);
+    } else {
+      // Clear error if we got any data
+      if (hasAnyData) {
+        this.lastError = null;
+        this.loadRetryCount = 0;
+      }
+    }
+
+    // Notify that we need a re-render
+    logger.log(`loadData() complete - hasData: ${hasAnyData}, errors: ${errors.length}`);
+    this.notifyNeedsRender();
   }
 
   getContent(): string {
+    // Show error state if we have an error and no data
+    if (this.lastError && !this.state) {
+      return this.getErrorWithRetryHtml();
+    }
+
     if (!this.state) {
       return this.getLoadingHtml("Loading slop data...");
     }
@@ -218,7 +293,7 @@ export class SlopTab extends BaseTab {
           </div>
         </div>
         <div class="card-content">${this.escapeHtml(loop.description)}</div>
-        <div class="progress-bar" style="margin: 12px 0;">
+        <div class="progress-bar my-12">
           <div class="progress-fill ${borderColor || "purple"}" style="width: ${progress}%"></div>
         </div>
         <div class="loop-stats">
@@ -275,7 +350,7 @@ export class SlopTab extends BaseTab {
     const loops = this.state?.priority_order || [];
 
     return `
-      <div class="controls" style="margin-bottom: 12px;">
+      <div class="controls mb-12">
         <select data-filter="loop">
           <option value="">All Loops</option>
           ${loops.map((l) => `<option value="${l}" ${this.filter.loop === l ? "selected" : ""}>${this.getLoopEmoji(l)} ${l.toUpperCase()}</option>`).join("")}
@@ -292,15 +367,15 @@ export class SlopTab extends BaseTab {
 
   private getFindingsTableHtml(): string {
     return `
-      <table class="table">
+      <table class="table slop-findings-table">
         <thead>
           <tr>
-            <th style="width: 100px;">Severity</th>
-            <th style="width: 80px;">Loop</th>
-            <th style="width: 200px;">File</th>
+            <th class="col-severity">Severity</th>
+            <th class="col-loop">Loop</th>
+            <th class="col-file">File</th>
             <th>Description</th>
-            <th style="width: 80px;">Status</th>
-            <th style="width: 120px;">Actions</th>
+            <th class="col-status">Status</th>
+            <th class="col-actions">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -392,7 +467,7 @@ export class SlopTab extends BaseTab {
             return `
               <div class="severity-row">
                 <span class="severity-label">${this.getSeverityIcon(s)} ${s.charAt(0).toUpperCase() + s.slice(1)}</span>
-                <div class="progress-bar" style="flex: 1;">
+                <div class="progress-bar flex-1">
                   <div class="progress-fill ${colors[s]}" style="width: ${pct}%"></div>
                 </div>
                 <span class="severity-count">${count} (${pct}%)</span>
@@ -413,6 +488,30 @@ export class SlopTab extends BaseTab {
   private truncateText(text: string, maxLength: number): string {
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength) + "...";
+  }
+
+  /**
+   * Generate error state HTML with retry button
+   */
+  private getErrorWithRetryHtml(): string {
+    const retryInfo = this.loadRetryCount > 0
+      ? `<div class="error-retry-info">Attempt ${this.loadRetryCount}/${this.maxRetries}</div>`
+      : "";
+
+    return `
+      <div class="error-state">
+        <div class="error-state-icon">⚠️</div>
+        <div class="error-state-title">Failed to load Slop data</div>
+        <div class="error-state-message">${this.escapeHtml(this.lastError || "Unknown error")}</div>
+        ${retryInfo}
+        <div class="error-state-actions">
+          <button class="btn btn-sm btn-primary" data-action="retryLoad">🔄 Retry</button>
+        </div>
+        <div class="error-state-hint">
+          Check if the Slop daemon is running: <code>systemctl --user status bot-slop.service</code>
+        </div>
+      </div>
+    `;
   }
 
   getStyles(): string {
@@ -494,100 +593,121 @@ export class SlopTab extends BaseTab {
       .link:hover {
         text-decoration: underline;
       }
+
+      /* Error state styling */
+      .error-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 24px;
+        text-align: center;
+        gap: 12px;
+      }
+      .error-state-icon {
+        font-size: 48px;
+        opacity: 0.8;
+      }
+      .error-state-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: var(--error);
+      }
+      .error-state-message {
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+        max-width: 400px;
+        word-break: break-word;
+      }
+      .error-retry-info {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        opacity: 0.7;
+      }
+      .error-state-actions {
+        margin-top: 8px;
+      }
+      .error-state-hint {
+        margin-top: 16px;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        opacity: 0.7;
+      }
+      .error-state-hint code {
+        background: var(--bg-secondary);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: monospace;
+      }
     `;
   }
 
   getScript(): string {
+    // Use centralized event delegation system - handlers survive content updates
     return `
-      // Scan now
-      document.querySelectorAll('[data-action="scanNow"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          vscode.postMessage({ command: 'slopScanNow' });
-        });
-      });
-
-      // Stop all
-      document.querySelectorAll('[data-action="stopAll"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          vscode.postMessage({ command: 'slopStopAll' });
-        });
-      });
-
-      // Run specific loop
-      document.querySelectorAll('[data-action="runLoop"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const loop = btn.dataset.loop;
-          if (loop) {
-            vscode.postMessage({ command: 'slopRunLoop', loop });
+      (function() {
+        // Register click handler - can be called multiple times safely
+        TabEventDelegation.registerClickHandler('slop', function(action, element, e) {
+          switch(action) {
+            case 'scanNow':
+              vscode.postMessage({ command: 'slopScanNow' });
+              break;
+            case 'stopAll':
+              vscode.postMessage({ command: 'slopStopAll' });
+              break;
+            case 'runLoop':
+              if (element.dataset.loop) {
+                vscode.postMessage({ command: 'slopRunLoop', loop: element.dataset.loop });
+              }
+              break;
+            case 'stopLoop':
+              if (element.dataset.loop) {
+                vscode.postMessage({ command: 'slopStopLoop', loop: element.dataset.loop });
+              }
+              break;
+            case 'openFile':
+              e.preventDefault();
+              vscode.postMessage({
+                command: 'openFile',
+                file: element.dataset.file,
+                line: parseInt(element.dataset.line || '0')
+              });
+              break;
+            case 'acknowledge':
+              if (element.dataset.id) {
+                vscode.postMessage({ command: 'slopAcknowledge', findingId: element.dataset.id });
+              }
+              break;
+            case 'markFixed':
+              if (element.dataset.id) {
+                vscode.postMessage({ command: 'slopMarkFixed', findingId: element.dataset.id });
+              }
+              break;
+            case 'markFalsePositive':
+              if (element.dataset.id) {
+                vscode.postMessage({ command: 'slopMarkFalsePositive', findingId: element.dataset.id });
+              }
+              break;
+            case 'loadMoreFindings':
+              vscode.postMessage({ command: 'slopLoadMoreFindings' });
+              break;
+            case 'retryLoad':
+              vscode.postMessage({ command: 'slopRetryLoad' });
+              break;
           }
         });
-      });
 
-      // Stop specific loop
-      document.querySelectorAll('[data-action="stopLoop"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const loop = btn.dataset.loop;
-          if (loop) {
-            vscode.postMessage({ command: 'slopStopLoop', loop });
+        // Register change handler for filter selects
+        TabEventDelegation.registerChangeHandler('slop', function(element, e) {
+          if (element.matches('select[data-filter]')) {
+            vscode.postMessage({
+              command: 'slopFilterChange',
+              filter: element.dataset.filter,
+              value: element.value
+            });
           }
         });
-      });
-
-      // Filter changes
-      document.querySelectorAll('select[data-filter]').forEach(select => {
-        select.addEventListener('change', () => {
-          const filter = select.dataset.filter;
-          const value = select.value;
-          vscode.postMessage({ command: 'slopFilterChange', filter, value });
-        });
-      });
-
-      // Open file
-      document.querySelectorAll('[data-action="openFile"]').forEach(link => {
-        link.addEventListener('click', (e) => {
-          e.preventDefault();
-          const file = link.dataset.file;
-          const line = parseInt(link.dataset.line || '0');
-          vscode.postMessage({ command: 'openFile', file, line });
-        });
-      });
-
-      // Acknowledge finding
-      document.querySelectorAll('[data-action="acknowledge"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const id = btn.dataset.id;
-          if (id) {
-            vscode.postMessage({ command: 'slopAcknowledge', findingId: id });
-          }
-        });
-      });
-
-      // Mark fixed
-      document.querySelectorAll('[data-action="markFixed"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const id = btn.dataset.id;
-          if (id) {
-            vscode.postMessage({ command: 'slopMarkFixed', findingId: id });
-          }
-        });
-      });
-
-      // Mark false positive
-      document.querySelectorAll('[data-action="markFalsePositive"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const id = btn.dataset.id;
-          if (id) {
-            vscode.postMessage({ command: 'slopMarkFalsePositive', findingId: id });
-          }
-        });
-      });
-
-      // Load more findings
-      document.querySelectorAll('[data-action="loadMoreFindings"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          vscode.postMessage({ command: 'slopLoadMoreFindings' });
-        });
-      });
+      })();
     `;
   }
 
@@ -630,6 +750,12 @@ export class SlopTab extends BaseTab {
 
       case "slopLoadMoreFindings":
         this.findingsLimit += 50;
+        await this.refresh();
+        return true;
+
+      case "slopRetryLoad":
+        this.loadRetryCount = 0;
+        this.lastError = null;
         await this.refresh();
         return true;
 

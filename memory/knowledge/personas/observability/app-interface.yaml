@@ -1,0 +1,21 @@
+metadata:
+  project: app-interface
+  persona: observability
+  last_updated: '2026-02-02T06:00:30.751589'
+  last_scanned: '2026-02-02T06:00:30.751570'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: 'This repository serves as a central coordination point for hosted services
+
+    operated by the Application SRE team. Once the appropriate parties accept changes
+    to this repository, many or all portions of the contract defined herein are automated.'
+  key_modules: []
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding: []
+  testing: []
+  deployment: []
+gotchas: []
+learned_from_tasks: []

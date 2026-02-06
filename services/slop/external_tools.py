@@ -318,6 +318,7 @@ class ExternalTools:
 
         logger.info(f"Running {tool} on {path}")
 
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -341,9 +342,17 @@ class ExternalTools:
                 return []
 
         except asyncio.TimeoutError:
+            # Kill the subprocess on timeout to prevent zombie processes
+            if proc is not None:
+                proc.kill()
+                await proc.wait()
             logger.error(f"{tool} timed out after {timeout}s")
             return []
         except Exception as e:
+            # Ensure cleanup on any error
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.wait()
             logger.exception(f"{tool} error: {e}")
             return []
 

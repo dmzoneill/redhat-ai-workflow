@@ -21,10 +21,18 @@ from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
 
-from tool_modules.aa_meet_bot.src.browser_controller import CaptionEntry, GoogleMeetController
+from tool_modules.aa_meet_bot.src.browser_controller import (
+    CaptionEntry,
+    GoogleMeetController,
+)
 from tool_modules.aa_meet_bot.src.config import get_config
 from tool_modules.aa_meet_bot.src.llm_responder import LLMResponder
-from tool_modules.aa_meet_bot.src.notes_database import MeetingNote, MeetingNotesDB, TranscriptEntry, init_notes_db
+from tool_modules.aa_meet_bot.src.notes_database import (
+    MeetingNote,
+    MeetingNotesDB,
+    TranscriptEntry,
+    init_notes_db,
+)
 from tool_modules.aa_meet_bot.src.wake_word import WakeWordEvent, WakeWordManager
 
 # D-Bus client for video daemon communication
@@ -189,7 +197,9 @@ class NotesBot:
 
         # 2. Run comprehensive orphan cleanup (modules, parec, pipes, video)
         try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+            from tool_modules.aa_meet_bot.src.virtual_devices import (
+                cleanup_orphaned_meetbot_devices,
+            )
 
             cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
 
@@ -367,7 +377,9 @@ class NotesBot:
 
             # Emit toast notification for meeting joined
             try:
-                from tool_modules.aa_workflow.src.notification_emitter import notify_meeting_joined
+                from tool_modules.aa_workflow.src.notification_emitter import (
+                    notify_meeting_joined,
+                )
 
                 notify_meeting_joined(self.state.title, mode)
             except Exception:
@@ -470,7 +482,7 @@ class NotesBot:
             return
 
         detector = self._wake_word_manager.text_detector
-        logger.info(f"🎯 Pause checker started - waiting for speech pause...")
+        logger.info("🎯 Pause checker started - waiting for speech pause...")
 
         # Wait for pause (check every 200ms for faster response)
         check_count = 0
@@ -527,7 +539,7 @@ class NotesBot:
             logger.info(
                 f"🎤 Interactive mode: LLM responder initialized for meeting '{meeting_title}' (ID: {meeting_id})"
             )
-            logger.info(f"🎤 Interactive mode: Conversation history will be maintained throughout this meeting")
+            logger.info("🎤 Interactive mode: Conversation history will be maintained throughout this meeting")
 
             # Set up wake word callback for voice responses
             logger.info(f"🎤 Interactive mode: Listening for wake word '{self.config.wake_word}'")
@@ -727,7 +739,6 @@ class NotesBot:
         Does rapid initial polls (every 2s for first 10s) to quickly get
         participants, then slows to every 15 seconds (matching video rotation).
         """
-        import json
 
         poll_count = 0
         rapid_poll_count = 5  # First 5 polls are rapid (every 2s = 10s total)
@@ -1110,7 +1121,7 @@ class NotesBot:
                 wait_time = duration + 0.5  # Extra 500ms for PA latency
                 logger.info(f"🔊 Playing audio ({duration:.1f}s), waiting {wait_time:.1f}s...")
                 await asyncio.sleep(wait_time)
-                logger.info(f"🔊 Finished speaking")
+                logger.info("🔊 Finished speaking")
             else:
                 logger.warning("Failed to write audio to pipe")
 
@@ -1500,7 +1511,9 @@ class NotesBot:
 
         # 9. Emit toast notification
         try:
-            from tool_modules.aa_workflow.src.notification_emitter import notify_meeting_left
+            from tool_modules.aa_workflow.src.notification_emitter import (
+                notify_meeting_left,
+            )
 
             notify_meeting_left(
                 result.get("title", "Meeting"),
@@ -1751,7 +1764,9 @@ class NotesBotManager:
 
         # 3. Run comprehensive orphan cleanup
         try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+            from tool_modules.aa_meet_bot.src.virtual_devices import (
+                cleanup_orphaned_meetbot_devices,
+            )
 
             cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=active_ids)
 
@@ -1958,7 +1973,9 @@ class NotesBotManager:
 
         # Run orphan cleanup outside the lock
         try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+            from tool_modules.aa_meet_bot.src.virtual_devices import (
+                cleanup_orphaned_meetbot_devices,
+            )
 
             await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
         except Exception as e:

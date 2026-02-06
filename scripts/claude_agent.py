@@ -49,6 +49,16 @@ except ImportError:
     ContextResolver = None
     ResolvedContext = None
 
+# Import context injector for knowledge gathering
+try:
+    from scripts.context_injector import ContextInjector, GatheredContext
+
+    CONTEXT_INJECTOR_AVAILABLE = True
+except ImportError:
+    CONTEXT_INJECTOR_AVAILABLE = False
+    ContextInjector = None
+    GatheredContext = None
+
 try:
     from scripts.skill_hooks import SkillHooks
 
@@ -1746,6 +1756,11 @@ class ClaudeAgent:
         self.use_tool_filtering = TOOL_FILTER_AVAILABLE
         self.persona = "developer"  # Default persona, can be changed per session
 
+        # Context injection configuration
+        self.use_context_injection = CONTEXT_INJECTOR_AVAILABLE
+        self.context_injector: Optional[Any] = None  # Lazy init
+        self.default_project = "automation-analytics-backend"
+
         # Conversation history tracking
         # Key: conversation_id (e.g., "channel_id:user_id" or "thread_ts")
         # Value: list of message dicts [{"role": "user/assistant", "content": "..."}]
@@ -1972,6 +1987,13 @@ use tools to get real data. dont guess. for jira issues (any project - AAP-12345
     ) -> str:
         """
         Process a message using Claude.
+
+        This method:
+        1. Gathers context from multiple knowledge sources (Slack, code, Jira, memory)
+        2. Builds an enriched system prompt with the gathered context
+        3. Calls Claude with the enriched prompt and available tools
+        4. Executes any tool calls Claude requests
+        5. Returns the final response
         """
         # Load conversation history
         history = []
@@ -1986,6 +2008,35 @@ use tools to get real data. dont guess. for jira issues (any project - AAP-12345
                 resolved_ctx = resolver.from_message(message)
             except Exception as e:
                 logger.warning(f"Failed to resolve context: {e}")
+
+        # ============================================================
+        # CONTEXT INJECTION - Gather knowledge from multiple sources
+        # ============================================================
+        gathered_context: Optional[Any] = None  # Type is GatheredContext when available
+        if self.use_context_injection and CONTEXT_INJECTOR_AVAILABLE:
+            try:
+                # Lazy init context injector
+                if self.context_injector is None:
+                    self.context_injector = ContextInjector(project=self.default_project)
+
+                # Gather context from all sources
+                gathered_context = await self.context_injector.gather_context_async(
+                    query=message,
+                    include_slack=True,  # Always search Slack conversations
+                    include_code=True,  # Always search codebase
+                    include_jira=True,  # Look up any detected Jira keys
+                    include_memory=True,  # Check current work context
+                )
+
+                if gathered_context.has_context():
+                    logger.info(
+                        f"Context injection: {gathered_context.total_results} results "
+                        f"from {len([s for s in gathered_context.sources if s.found])} sources "
+                        f"in {gathered_context.total_latency_ms:.0f}ms"
+                    )
+            except Exception as e:
+                logger.warning(f"Context injection failed: {e}")
+                gathered_context = None
 
         # Get available tools (with optional NPU-powered filtering)
         all_tools = self.tool_registry.list_tools()
@@ -2027,11 +2078,22 @@ use tools to get real data. dont guess. for jira issues (any project - AAP-12345
         enriched_message = self._build_context_message(message, context, resolved_ctx, filter_result)
         messages = history + [{"role": "user", "content": enriched_message}]
 
+        # ============================================================
+        # BUILD SYSTEM PROMPT WITH INJECTED CONTEXT
+        # ============================================================
+        system_prompt = self.system_prompt
+        if gathered_context and gathered_context.has_context():
+            # Inject gathered context into system prompt
+            system_prompt = self._inject_context_into_prompt(
+                base_prompt=self.system_prompt,
+                gathered_context=gathered_context,
+            )
+
         # Call Claude
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            system=self.system_prompt,
+            system=system_prompt,
             tools=tools,
             messages=messages,
         )
@@ -2052,6 +2114,34 @@ use tools to get real data. dont guess. for jira issues (any project - AAP-12345
             self._save_conversation_history(conversation_id, message, result)
 
         return result
+
+    def _inject_context_into_prompt(
+        self,
+        base_prompt: str,
+        gathered_context: Any,  # GatheredContext
+    ) -> str:
+        """
+        Inject gathered context into the system prompt.
+
+        The context is added as a separate section that Claude can reference
+        when formulating responses.
+        """
+        if not gathered_context or not gathered_context.formatted:
+            return base_prompt
+
+        # Add context injection instructions
+        context_instructions = """
+
+KNOWLEDGE CONTEXT:
+The following context has been gathered from past Slack conversations, the codebase,
+Jira issues, and memory. Use this information to provide informed, accurate responses.
+Reference specific sources when relevant (e.g., "based on the Slack conversation..." or
+"looking at the code in..."). If the context doesn't contain relevant information for
+the question, you can still use your tools to look up additional details.
+
+"""
+
+        return base_prompt + context_instructions + gathered_context.formatted
 
 
 # Convenience function

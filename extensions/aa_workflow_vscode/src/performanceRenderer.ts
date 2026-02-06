@@ -341,7 +341,7 @@ function renderGapsAlert(gaps: string[], competencies: Record<string, Competency
 function renderQuestions(questions: QuestionSummary[] | undefined): string {
   if (!questions || questions.length === 0) {
     return `
-      <div class="empty-state" style="padding: 24px;">
+      <div class="empty-state p-24">
         <div class="empty-state-text">Questions will appear after first data collection.</div>
       </div>
     `;
@@ -376,7 +376,7 @@ function renderQuestions(questions: QuestionSummary[] | undefined): string {
 
 function renderHighlights(highlights: string[]): string {
   if (highlights.length === 0) {
-    return '<div class="empty-state" style="padding: 16px;"><div class="empty-state-text">Highlights will appear as you complete work.</div></div>';
+    return '<div class="empty-state p-16"><div class="empty-state-text">Highlights will appear as you complete work.</div></div>';
   }
 
   return highlights
@@ -387,133 +387,8 @@ function renderHighlights(highlights: string[]): string {
 
 // ==================== MAIN EXPORT ====================
 
-export function getPerformanceTabContent(state: PerformanceState): string {
-  // Note: All styles are now in unified.css
-  const quarterProgress = Math.round((state.day_of_quarter / 90) * 100);
-
-  return `
-    <div class="performance-container">
-      <!-- Header -->
-      <div class="performance-header">
-        <div>
-          <div class="performance-title">📊 ${escapeHtml(state.quarter)} Quarterly Connection</div>
-          <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">
-            Day ${state.day_of_quarter} of 90
-          </div>
-        </div>
-        <div class="performance-meta">
-          <div class="quarter-progress">
-            <div class="quarter-progress-bar">
-              <div class="quarter-progress-fill" style="width: ${quarterProgress}%;"></div>
-            </div>
-            <span class="quarter-progress-text">${quarterProgress}% of quarter</span>
-          </div>
-          <div class="overall-score">${state.overall_percentage}%</div>
-        </div>
-      </div>
-
-      <!-- Sunburst Chart -->
-      <div class="sunburst-container">
-        ${generateSunburstSVG(state)}
-      </div>
-
-      <!-- Meta Categories Legend -->
-      <div class="meta-categories">
-        <div class="meta-category">
-          <div class="meta-category-dot" style="background: #3b82f6;"></div>
-          <span>Technical Excellence</span>
-        </div>
-        <div class="meta-category">
-          <div class="meta-category-dot" style="background: #8b5cf6;"></div>
-          <span>Leadership & Influence</span>
-        </div>
-        <div class="meta-category">
-          <div class="meta-category-dot" style="background: #10b981;"></div>
-          <span>Delivery & Impact</span>
-        </div>
-      </div>
-
-      <!-- Competency Progress -->
-      <div class="competency-section">
-        <div class="section-title">📈 Competency Progress</div>
-        ${renderCompetencyBars(state.competencies)}
-        ${renderGapsAlert(state.gaps, state.competencies)}
-      </div>
-
-      <!-- Quarterly Questions -->
-      <div class="questions-section">
-        <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
-          <span>📋 Quarterly Questions</span>
-          <button class="action-btn" data-action="evaluateAll">Re-evaluate All</button>
-        </div>
-        ${renderQuestions(state.questions_summary)}
-      </div>
-
-      <!-- Highlights -->
-      <div class="highlights-section">
-        <div class="section-title">✨ Recent Highlights</div>
-        ${renderHighlights(state.highlights)}
-      </div>
-
-      <!-- Manual Entry -->
-      <div class="manual-entry-section">
-        <div class="section-title">📝 Log Manual Activity</div>
-        <div class="manual-entry-form">
-          <select class="manual-entry-select" id="activityCategory">
-            <option value="speaking">Speaking</option>
-            <option value="presentation">Presentation</option>
-            <option value="demo">Demo</option>
-            <option value="mentorship">Mentorship</option>
-            <option value="blog">Blog Post</option>
-            <option value="other">Other</option>
-          </select>
-          <input type="text" class="manual-entry-input" id="activityDescription" placeholder="Description of activity...">
-          <button class="manual-entry-btn" data-action="logActivity">Log</button>
-        </div>
-      </div>
-
-      <!-- Action Buttons -->
-      <div class="action-buttons">
-        <button class="action-btn primary" data-action="collectDaily">🔄 Collect Today's Data</button>
-        <button class="action-btn" data-action="backfill">📅 Backfill Missing</button>
-        <button class="action-btn" data-action="exportReport">📄 Export Report</button>
-      </div>
-    </div>
-
-    <script>
-      (function() {
-        // Action button handlers
-        document.querySelectorAll('[data-action]').forEach(btn => {
-          btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const action = this.getAttribute('data-action');
-            const questionId = this.getAttribute('data-question');
-
-            if (action === 'logActivity') {
-              const category = document.getElementById('activityCategory').value;
-              const description = document.getElementById('activityDescription').value;
-              if (description && vscode) {
-                vscode.postMessage({
-                  command: 'performanceAction',
-                  action: 'logActivity',
-                  category: category,
-                  description: description
-                });
-                document.getElementById('activityDescription').value = '';
-              }
-            } else if (vscode) {
-              vscode.postMessage({
-                command: 'performanceAction',
-                action: action,
-                questionId: questionId
-              });
-            }
-          });
-        });
-      })();
-    </script>
-  `;
-}
+// NOTE: getPerformanceTabContent() was removed as dead code.
+// The PerformanceTab class in tabs/PerformanceTab.ts provides the actual implementation.
 
 export function getEmptyPerformanceState(): PerformanceState {
   return {

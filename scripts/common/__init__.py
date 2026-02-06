@@ -1,7 +1,12 @@
 # Common utilities for skills and @me command system
 
 # @me Command System exports
-from scripts.common.command_parser import CommandParser, ParsedCommand, TriggerType, parse_command
+from scripts.common.command_parser import (
+    CommandParser,
+    ParsedCommand,
+    TriggerType,
+    parse_command,
+)
 from scripts.common.command_registry import (
     CommandHelp,
     CommandInfo,
@@ -11,7 +16,11 @@ from scripts.common.command_registry import (
     get_registry,
     list_commands,
 )
-from scripts.common.context_extractor import ContextExtractor, ConversationContext, extract_context
+from scripts.common.context_extractor import (
+    ContextExtractor,
+    ConversationContext,
+    extract_context,
+)
 from scripts.common.response_router import (
     CommandContext,
     ResponseConfig,

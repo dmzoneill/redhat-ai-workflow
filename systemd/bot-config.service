@@ -7,7 +7,13 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
-Type=simple
+# Type=notify allows daemon to signal readiness and supports watchdog
+Type=notify
+NotifyAccess=main
+# Watchdog: systemd restarts if no ping received within 15s
+# Daemon pings every ~7s and verifies D-Bus health before each ping
+WatchdogSec=15
+
 WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
 # XDG runtime for D-Bus
 Environment=XDG_RUNTIME_DIR=/run/user/1000
@@ -16,7 +22,7 @@ ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.co
 
 # Restart policy
 Restart=on-failure
-RestartSec=10
+RestartSec=5
 
 # Graceful shutdown
 TimeoutStopSec=10

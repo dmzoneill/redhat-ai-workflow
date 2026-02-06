@@ -8,12 +8,9 @@ These tools allow Claude to:
 - View sprint history
 """
 
-import json
 import logging
 from datetime import datetime
-from typing import Any
 
-from fastmcp import Context
 
 # Support both package import and direct loading
 try:
@@ -31,12 +28,10 @@ try:
     from .sprint_history import (
         SprintIssue,
         TimelineEvent,
-        add_timeline_event,
         load_sprint_history,
         load_sprint_state,
         save_sprint_state,
     )
-    from .sprint_prioritizer import get_priority_summary, prioritize_issues
 except ImportError:
     from sprint_bot import (
         SprintBotConfig,
@@ -52,12 +47,10 @@ except ImportError:
     from sprint_history import (
         SprintIssue,
         TimelineEvent,
-        add_timeline_event,
         load_sprint_history,
         load_sprint_state,
         save_sprint_state,
     )
-    from sprint_prioritizer import get_priority_summary, prioritize_issues
 
 logger = logging.getLogger(__name__)
 

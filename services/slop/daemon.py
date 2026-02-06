@@ -170,7 +170,7 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             asyncio.create_task(self._run_analysis())
 
     async def run_daemon(self):
-        """Main daemon loop - runs analysis once then exits (for cron)."""
+        """Main daemon loop - stays alive and responds to D-Bus scan requests."""
         self.start_time = time.time()
         self.is_running = True
 
@@ -186,20 +186,38 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         )
         await self._orchestrator.initialize()
 
-        # Start D-Bus if enabled (for status queries)
+        # Start D-Bus if enabled (for status queries and scan_now)
         if self.enable_dbus:
             await self.start_dbus()
-            logger.info("D-Bus interface started")
+            logger.info("D-Bus interface started - waiting for scan_now requests")
 
-        # Run analysis once
+        # Run initial analysis on startup
+        logger.info("Running initial analysis...")
         await self._run_analysis()
 
-        # Cleanup
+        # Stay alive and wait for D-Bus requests (scan_now, etc.)
+        # The daemon responds to:
+        # - scan_now: Trigger a new scan
+        # - scan_loops: Run specific loops
+        # - get_findings: Query findings
+        # - acknowledge/mark_fixed/mark_false_positive: Update status
+        logger.info("Daemon ready - waiting for D-Bus commands")
+        while not self._shutdown_event.is_set():
+            # Wait for shutdown signal, checking every 60 seconds
+            try:
+                await asyncio.wait_for(self._shutdown_event.wait(), timeout=60.0)
+            except asyncio.TimeoutError:
+                # Just a heartbeat - daemon is still alive
+                logger.debug(f"Daemon alive - {self._scan_count} scans completed")
+                continue
+
+        # Cleanup on shutdown
+        logger.info("Shutdown requested, cleaning up...")
         if self._orchestrator:
             await self._orchestrator.stop_all()
 
         self.is_running = False
-        logger.info("Slop Bot daemon completed")
+        logger.info("Slop Bot daemon stopped")
 
     async def _run_analysis(self):
         """Run full analysis with all loops."""
@@ -293,7 +311,12 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         if not self._orchestrator:
             return {"error": "Orchestrator not initialized"}
 
-        return self._orchestrator.get_status()
+        # Get orchestrator status and merge with daemon-level stats
+        status = self._orchestrator.get_status()
+        status["scan_in_progress"] = self._scan_in_progress
+        status["scan_count"] = self._scan_count
+        status["last_scan_time"] = self._last_scan_time.isoformat() if self._last_scan_time else None
+        return status
 
     async def _handle_get_findings(
         self,

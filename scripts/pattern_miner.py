@@ -27,11 +27,19 @@ def mine_patterns_from_failures():
     if not failures_file.exists():
         return []
 
-    with open(failures_file) as f:
-        failures = yaml.safe_load(f) or {}
+    try:
+        with open(failures_file) as f:
+            failures = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError) as e:
+        print(f"Warning: Could not load failures file: {e}")
+        return []
 
-    with open(patterns_file) as f:
-        patterns = yaml.safe_load(f) or {}
+    try:
+        with open(patterns_file) as f:
+            patterns = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError) as e:
+        print(f"Warning: Could not load patterns file: {e}")
+        patterns = {}
 
     # Group failures by error text similarity
     error_groups = []

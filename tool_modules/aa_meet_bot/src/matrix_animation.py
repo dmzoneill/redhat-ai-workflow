@@ -7,7 +7,6 @@ with "INITIALIZING..." text displayed in the center.
 
 import random
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 

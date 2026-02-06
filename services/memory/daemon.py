@@ -17,11 +17,13 @@ Features:
 - D-Bus IPC for external queries
 - Read/Write/Append operations
 - Graceful shutdown handling
+- Systemd watchdog support
 
 Usage:
-    python scripts/memory_daemon.py                # Run daemon
-    python scripts/memory_daemon.py --status       # Check if running
-    python scripts/memory_daemon.py --stop         # Stop running daemon
+    python -m services.memory                # Run daemon
+    python -m services.memory --status       # Check if running
+    python -m services.memory --stop         # Stop running daemon
+    python -m services.memory --dbus         # Enable D-Bus IPC
 
 Systemd:
     systemctl --user start bot-memory
@@ -33,90 +35,31 @@ D-Bus:
     Path: /com/aiworkflow/Memory
 """
 
-import argparse
-import asyncio
-import fcntl
 import json
 import logging
-import os
-import signal
-import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from services.base.dbus import DaemonDBusBase, get_client  # noqa: E402
-
-LOCK_FILE = Path("/tmp/memory-daemon.lock")
-PID_FILE = Path("/tmp/memory-daemon.pid")
+from services.base.daemon import BaseDaemon
+from services.base.dbus import DaemonDBusBase
 
 # Memory directory
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 MEMORY_DIR = PROJECT_ROOT / "memory"
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stderr),
-    ],
-)
 logger = logging.getLogger(__name__)
 
 
-class SingleInstance:
-    """Ensures only one instance of the daemon runs at a time."""
-
-    def __init__(self):
-        self._lock_file = None
-        self._acquired = False
-
-    def acquire(self) -> bool:
-        """Try to acquire the lock. Returns True if successful."""
-        try:
-            self._lock_file = open(LOCK_FILE, "w")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            PID_FILE.write_text(str(os.getpid()))
-            self._acquired = True
-            return True
-        except OSError:
-            return False
-
-    def release(self):
-        """Release the lock."""
-        if self._lock_file:
-            try:
-                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                self._lock_file.close()
-            except Exception:
-                pass
-        if PID_FILE.exists():
-            try:
-                PID_FILE.unlink()
-            except Exception:
-                pass
-        self._acquired = False
-
-    def get_running_pid(self) -> int | None:
-        """Get PID of running instance, or None if not running."""
-        if PID_FILE.exists():
-            try:
-                pid = int(PID_FILE.read_text().strip())
-                os.kill(pid, 0)
-                return pid
-            except (ValueError, OSError):
-                pass
-        return None
-
-
-class MemoryDaemon(DaemonDBusBase):
+class MemoryDaemon(DaemonDBusBase, BaseDaemon):
     """Memory daemon with D-Bus support - owns all memory/state files."""
+
+    # BaseDaemon configuration
+    name = "memory"
+    description = "Memory Daemon - Centralized memory/state service"
 
     # D-Bus configuration
     service_name = "com.aiworkflow.Memory"
@@ -124,10 +67,8 @@ class MemoryDaemon(DaemonDBusBase):
     interface_name = "com.aiworkflow.Memory"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = False):
-        super().__init__()
-        self.verbose = verbose
-        self.enable_dbus = enable_dbus
-        self._shutdown_event = asyncio.Event()
+        BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
+        DaemonDBusBase.__init__(self)
 
         # Caches
         self._file_cache: dict[str, dict] = {}  # path -> {content, mtime}
@@ -627,8 +568,10 @@ class MemoryDaemon(DaemonDBusBase):
 
     # ==================== Lifecycle ====================
 
-    async def run(self):
-        """Main daemon loop."""
+    async def startup(self):
+        """Initialize daemon resources."""
+        await super().startup()
+
         logger.info("Memory daemon starting...")
 
         # Pre-load caches
@@ -646,85 +589,48 @@ class MemoryDaemon(DaemonDBusBase):
             except Exception as e:
                 logger.error(f"Failed to start D-Bus: {e}")
 
-        logger.info("Memory daemon running")
+        self.is_running = True
+        logger.info("Memory daemon ready")
 
-        # Wait for shutdown
+    async def run_daemon(self):
+        """Main daemon loop - wait for shutdown."""
         await self._shutdown_event.wait()
 
-        # Cleanup
+    async def shutdown(self):
+        """Clean up daemon resources."""
+        logger.info("Memory daemon shutting down...")
+
+        # Cancel file watchers
         for watcher in self._watchers:
             watcher.cancel()
 
+        # Stop D-Bus
         if self.enable_dbus:
             await self.stop_dbus()
 
+        self.is_running = False
+        await super().shutdown()
         logger.info("Memory daemon stopped")
 
-    def shutdown(self):
-        """Signal the daemon to shut down."""
-        logger.info("Shutdown requested")
-        self._shutdown_event.set()
+    async def health_check(self) -> dict:
+        """Perform a health check on the memory daemon."""
+        self._last_health_check = time.time()
 
+        checks = {
+            "running": self.is_running,
+            "memory_dir_exists": MEMORY_DIR.exists(),
+            "cache_populated": len(self._file_cache) > 0,
+        }
 
-def main():
-    parser = argparse.ArgumentParser(description="Memory Daemon")
-    parser.add_argument("--status", action="store_true", help="Check if daemon is running")
-    parser.add_argument("--stop", action="store_true", help="Stop running daemon")
-    parser.add_argument("--dbus", action="store_true", help="Enable D-Bus IPC")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
-    args = parser.parse_args()
+        healthy = all(checks.values())
 
-    instance = SingleInstance()
-
-    if args.status:
-        pid = instance.get_running_pid()
-        if pid:
-            print(f"Memory daemon is running (PID: {pid})")
-            sys.exit(0)
-        else:
-            print("Memory daemon is not running")
-            sys.exit(1)
-
-    if args.stop:
-        pid = instance.get_running_pid()
-        if pid:
-            try:
-                os.kill(pid, signal.SIGTERM)
-                print(f"Sent SIGTERM to PID {pid}")
-                sys.exit(0)
-            except OSError as e:
-                print(f"Failed to stop daemon: {e}")
-                sys.exit(1)
-        else:
-            print("Memory daemon is not running")
-            sys.exit(1)
-
-    # Try to acquire lock
-    if not instance.acquire():
-        pid = instance.get_running_pid()
-        print(f"Memory daemon already running (PID: {pid})")
-        sys.exit(1)
-
-    # Create daemon
-    daemon = MemoryDaemon(verbose=args.verbose, enable_dbus=args.dbus)
-
-    async def run_with_signals():
-        """Run daemon with proper asyncio signal handling."""
-        loop = asyncio.get_running_loop()
-
-        def signal_handler():
-            daemon.shutdown()
-
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, signal_handler)
-
-        await daemon.run()
-
-    try:
-        asyncio.run(run_with_signals())
-    finally:
-        instance.release()
+        return {
+            "healthy": healthy,
+            "checks": checks,
+            "message": "Memory daemon is healthy" if healthy else "Memory daemon has issues",
+            "timestamp": self._last_health_check,
+        }
 
 
 if __name__ == "__main__":
-    main()
+    MemoryDaemon.main()

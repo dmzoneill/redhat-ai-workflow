@@ -1,0 +1,379 @@
+# Skill: Red Hat Reward Zone
+# Send and receive recognition awards on the internal Reward Zone platform
+#
+# This skill automates interactions with https://rewardzone.redhat.com
+# for sending nominations/awards to colleagues and viewing received awards.
+#
+# Uses the aa_sso module for authentication (Playwright-based).
+
+name: reward_zone
+description: |
+  Send and receive recognition awards on Red Hat Reward Zone.
+
+  This skill provides automated workflows for:
+  1. Sending nominations/awards to colleagues
+  2. Viewing received awards and recognition
+  3. Checking nomination points balance
+
+  **Prerequisites:**
+  - Red Hat SSO access (Kerberos ID + PIN/token)
+  - redhatter service running (provides credentials)
+
+  **Award Categories:**
+  - RH Multiplier - For collaboration and teamwork
+  - Team Advocate - For supporting team members
+  - Customer Focus - For customer-centric actions
+
+  **Common Uses:**
+  - "Send an award to [colleague]"
+  - "Give recognition to [name] for [reason]"
+  - "Check my reward zone points"
+  - "View my received awards"
+  - "Nominate [person] for team advocate"
+
+version: "2.0"
+
+inputs:
+  - name: action
+    type: string
+    required: true
+    description: |
+      Action to perform: "send", "view_received", "check_points", or "view_sent"
+
+  - name: recipient
+    type: string
+    required: false
+    default: ""
+    description: "Recipient's name or email (required for 'send' action)"
+
+  - name: category
+    type: string
+    required: false
+    default: "RH Multiplier"
+    description: |
+      Award category: "RH Multiplier", "Team Advocate", or "Customer Focus"
+
+  - name: points
+    type: integer
+    required: false
+    default: 25
+    description: "Number of points to award (typically 25, 50, 75, or 100)"
+
+  - name: message
+    type: string
+    required: false
+    default: ""
+    description: "Recognition message explaining why the person deserves the award"
+
+  - name: dry_run
+    type: boolean
+    required: false
+    default: false
+    description: "Preview the action without submitting"
+
+  - name: headless
+    type: boolean
+    required: false
+    default: true
+    description: "Run browser in headless mode (set false for debugging)"
+
+# Default values
+defaults:
+  reward_zone_url: "https://rewardzone.redhat.com/dash/0"
+  timeout_ms: 30000
+
+# Error patterns for auto-remediation
+error_patterns:
+  - pattern: "redhatter service"
+    fix: "Start redhatter service: systemctl --user start redhatter"
+    auto_fix: false
+    category: credentials
+
+  - pattern: "Auth token not found"
+    fix: "Ensure redhatter service is running"
+    auto_fix: false
+    category: credentials
+
+  - pattern: "Insufficient points"
+    fix: "Not enough nomination points available"
+    auto_fix: false
+    category: validation
+
+  - pattern: "Recipient not found"
+    fix: "Could not find the specified recipient in the system"
+    auto_fix: false
+    category: validation
+
+  - pattern: "Timeout"
+    fix: "Page took too long to load"
+    auto_fix: true
+    auto_fix_action: "Increase timeout, retry navigation"
+    category: navigation
+
+steps:
+  # ==================== VALIDATE INPUTS ====================
+
+  - name: validate_inputs
+    description: "Validate required inputs based on action"
+    compute: |
+      action = inputs.get("action", "").lower()
+      recipient = inputs.get("recipient", "")
+      message = inputs.get("message", "")
+      category = inputs.get("category", "RH Multiplier")
+      points = inputs.get("points", 25)
+
+      valid_actions = ["send", "view_received", "check_points", "view_sent"]
+      valid_categories = ["RH Multiplier", "Team Advocate", "Customer Focus"]
+
+      errors = []
+
+      if action not in valid_actions:
+          errors.append(f"Invalid action '{action}'. Must be one of: {', '.join(valid_actions)}")
+
+      if action == "send":
+          if not recipient:
+              errors.append("Recipient is required for 'send' action")
+          if not message:
+              errors.append("Message is required for 'send' action")
+          if category not in valid_categories:
+              errors.append(f"Invalid category '{category}'. Must be one of: {', '.join(valid_categories)}")
+          if points not in [25, 50, 75, 100]:
+              errors.append(f"Points must be 25, 50, 75, or 100 (got {points})")
+
+      result = {
+          "valid": len(errors) == 0,
+          "errors": errors,
+          "action": action,
+          "recipient": recipient,
+          "message": message,
+          "category": category,
+          "points": points,
+      }
+    output: validation
+
+  - name: abort_if_invalid
+    description: "Abort if validation failed"
+    condition: "not validation.valid"
+    then:
+      - return: |
+          ## ❌ Validation Failed
+
+          {% for error in validation.errors %}
+          - {{ error }}
+          {% endfor %}
+
+          ### Usage Examples
+
+          **Send an award:**
+          ```
+          skill_run('reward_zone', '{"action": "send", "recipient": "John Smith", "message": "Great work on the project!", "category": "Team Advocate", "points": 50}')
+          ```
+
+          **Check points balance:**
+          ```
+          skill_run('reward_zone', '{"action": "check_points"}')
+          ```
+
+          **View received awards:**
+          ```
+          skill_run('reward_zone', '{"action": "view_received"}')
+          ```
+
+  # ==================== AUTHENTICATE VIA SSO ====================
+
+  - name: authenticate_sso
+    description: "Authenticate to Reward Zone using aa_sso module"
+    tool: sso_authenticate
+    args:
+      strategy: "reward_zone"
+      headless: "{{ inputs.headless }}"
+    output: sso_result
+    on_error: continue
+
+  - name: check_auth_result
+    description: "Check if authentication succeeded"
+    compute: |
+      sso_text = str(sso_result) if sso_result else ""
+      
+      success = "✅" in sso_text or "successful" in sso_text.lower()
+      
+      # Extract final URL if present
+      import re
+      url_match = re.search(r'Final URL:\s*(\S+)', sso_text)
+      final_url = url_match.group(1) if url_match else ""
+      
+      on_dashboard = "rewardzone.redhat.com/dash" in final_url if final_url else False
+      
+      result = {
+          "success": success,
+          "on_dashboard": on_dashboard,
+          "final_url": final_url,
+          "raw_output": sso_text[:500],
+      }
+    output: auth_status
+
+  - name: handle_auth_failure
+    description: "Handle authentication failure"
+    condition: "not auth_status.success"
+    then:
+      - return: |
+          ## ❌ Authentication Failed
+
+          Could not authenticate to Reward Zone.
+
+          {{ auth_status.raw_output }}
+
+          ### Troubleshooting
+
+          1. **Check redhatter service:**
+             ```bash
+             curl http://localhost:8009/health
+             ```
+
+          2. **Run with visible browser for debugging:**
+             ```
+             skill_run('reward_zone', '{"action": "{{ validation.action }}", "headless": false}')
+             ```
+
+          3. **Check credentials:**
+             - Ensure your Kerberos ID is correct
+             - Verify your PIN + token is working
+
+  # ==================== DRY RUN CHECK ====================
+
+  - name: dry_run_exit
+    description: "Exit early for dry run"
+    condition: "inputs.dry_run and auth_status.success"
+    then:
+      - return: |
+          ## 🧪 Dry Run: Reward Zone
+
+          **Authentication:** ✅ Successful
+          **Final URL:** {{ auth_status.final_url }}
+
+          ### Action Details
+
+          | Field | Value |
+          |-------|-------|
+          | **Action** | {{ validation.action }} |
+          {% if validation.action == "send" %}
+          | **Recipient** | {{ validation.recipient }} |
+          | **Category** | {{ validation.category }} |
+          | **Points** | {{ validation.points }} |
+          | **Message** | {{ validation.message }} |
+          {% endif %}
+
+          ---
+          *Run without `dry_run=true` to execute the action*
+
+  # ==================== PERFORM ACTIONS ====================
+  # Note: The actual page interactions would go here
+  # For now, we return guidance for manual completion
+
+  - name: action_guidance
+    description: "Provide guidance for completing the action"
+    condition: "auth_status.success"
+    then:
+      - return: |
+          ## ✅ Authenticated to Reward Zone
+
+          **Status:** Successfully logged in
+          **URL:** {{ auth_status.final_url }}
+
+          ### Next Steps for: {{ validation.action }}
+
+          {% if validation.action == "send" %}
+          #### Send Award
+
+          The browser is now authenticated. Complete these steps:
+
+          1. **Navigate to:** Nominations / Send Rewards
+          2. **Click:** "Continue" under Create Nomination
+          3. **Search for:** {{ validation.recipient }}
+          4. **Select category:** {{ validation.category }}
+          5. **Enter points:** {{ validation.points }}
+          6. **Add message:**
+             ```
+             {{ validation.message }}
+             ```
+          7. **Submit** the nomination
+
+          {% elif validation.action == "check_points" %}
+          #### Check Points
+
+          Look for "Nomination Points" on the dashboard.
+          This shows how many points you have available to give.
+
+          {% elif validation.action == "view_received" %}
+          #### View Received Awards
+
+          1. Navigate to "Recognition Received" or "My Awards"
+          2. View your recognition history
+
+          {% elif validation.action == "view_sent" %}
+          #### View Sent Awards
+
+          1. Navigate to "Nominations Sent" or "My Nominations"
+          2. View awards you've given to others
+
+          {% endif %}
+
+          ---
+
+          *Full automation of page interactions is in development.*
+
+  # ==================== LOG SESSION ====================
+
+  - name: log_reward_zone_action
+    description: "Log action to session"
+    tool: memory_session_log
+    args:
+      action: "Reward Zone {{ validation.action }}"
+      details: "Auth: {{ auth_status.success }}, {% if validation.action == 'send' %}Recipient: {{ validation.recipient }}, Points: {{ validation.points }}{% else %}Action completed{% endif %}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## 🏆 Reward Zone
+
+      **Action:** {{ validation.action }}
+      **Authentication:** {{ "✅ Success" if auth_status.success else "❌ Failed" }}
+      {% if validation.action == "send" %}
+      **Recipient:** {{ validation.recipient }}
+      **Category:** {{ validation.category }}
+      **Points:** {{ validation.points }}
+      {% endif %}
+
+      ---
+
+      ### Quick Commands
+
+      **Send an award:**
+      ```
+      skill_run('reward_zone', '{"action": "send", "recipient": "Name", "message": "Reason for recognition", "category": "Team Advocate", "points": 50}')
+      ```
+
+      **Check points:**
+      ```
+      skill_run('reward_zone', '{"action": "check_points"}')
+      ```
+
+      **View received:**
+      ```
+      skill_run('reward_zone', '{"action": "view_received"}')
+      ```
+
+      **Debug mode (visible browser):**
+      ```
+      skill_run('reward_zone', '{"action": "check_points", "headless": false}')
+      ```
+
+  - name: context
+    value:
+      action: "{{ validation.action }}"
+      recipient: "{{ validation.recipient }}"
+      category: "{{ validation.category }}"
+      points: "{{ validation.points }}"
+      authenticated: "{{ auth_status.success }}"
+      final_url: "{{ auth_status.final_url }}"

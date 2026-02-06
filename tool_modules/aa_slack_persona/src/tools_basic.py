@@ -7,9 +7,7 @@ MCP tools for:
 - slack_persona_context: Get context for a query (for persona injection)
 """
 
-import asyncio
 import logging
-from typing import Any
 
 from fastmcp import FastMCP
 

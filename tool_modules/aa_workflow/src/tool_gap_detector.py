@@ -28,15 +28,15 @@ Usage in any skill's compute block:
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable
 
 import yaml
 
+from tool_modules.common import PROJECT_ROOT
+
 logger = logging.getLogger(__name__)
 
 # Storage path - use project memory/ directory
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 TOOL_GAP_FILE = PROJECT_ROOT / "memory" / "learned" / "tool_requests.yaml"
 
 

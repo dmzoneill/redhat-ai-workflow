@@ -10,13 +10,13 @@ last_coffee:
     stage: 0
   failed_pipelines: 0
   feedback_waiting: 0
-  pr_count: 2
+  pr_count: 8
   review_assignments: 0
-  timestamp: '2026-01-26T10:10:56.778457'
-last_updated: '2026-01-28T17:31:34.613502'
+  timestamp: '2026-02-05T17:20:43.297948'
+last_updated: '2026-02-05T17:33:42.677716'
 prepared_standup:
-  date: '2026-01-29'
-  generated_at: '2026-01-28T17:31:34.613469'
+  date: '2026-02-06'
+  generated_at: '2026-02-05T17:33:42.677674'
   notes: '**Yesterday:**
 
     - (no commits today)
@@ -24,9 +24,7 @@ prepared_standup:
 
     **Today:**
 
-    - Continue [!1502](https://gitlab.cee.redhat.com/automation-analytics/automation-analytics-backend/-/merge_requests/1502):
-    [AAP-61939](https://issues.redhat.com/browse/AAP-61939) - fix(deps): update aiohttp
-    to 3.13.3 for [CVE-2025](https://issues.redhat.com/browse/CVE-2025)
+    - (check Jira board)
 
 
     **Blockers:**

@@ -32,6 +32,8 @@ import numpy as np
 
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
+    from tool_modules.aa_meet_bot.src.llm_responder import LLMResponder
+    from tool_modules.aa_meet_bot.src.tts_engine import TTSEngine
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -55,7 +57,7 @@ class VoicePipelineStats:
     wake_word_triggers: int = 0
     responses_generated: int = 0
     total_latency_ms: float = 0.0
-    min_latency_ms: float = float("inf")
+    min_latency_ms: float = float("in")
     max_latency_ms: float = 0.0
     errors: int = 0
 
@@ -195,15 +197,15 @@ class VoicePipeline:
 
         self._running = True
         self._capture_task = asyncio.create_task(self._capture_loop())
-        logger.info(f"[VOICE] ========================================")
-        logger.info(f"[VOICE] 🎧 VOICE PIPELINE STARTED")
+        logger.info("[VOICE] ========================================")
+        logger.info("[VOICE] 🎧 VOICE PIPELINE STARTED")
         logger.info(f'[VOICE] 🔑 Wake word: "{self.config.wake_word}"')
         logger.info(f"[VOICE] 🎤 Listening on sink: {self.sink_name}")
         logger.info(f"[VOICE] 🔊 Output pipe: {self.pipe_path}")
         logger.info(f"[VOICE] 🧠 STT: {self.config.stt_model} on {self.config.stt_device}")
         logger.info(f"[VOICE] 💬 LLM: {self.config.llm_backend}")
         logger.info(f"[VOICE] 🔈 TTS: {self.config.tts_backend}")
-        logger.info(f"[VOICE] ========================================")
+        logger.info("[VOICE] ========================================")
 
     async def stop(self) -> None:
         """Stop the voice pipeline."""
@@ -225,9 +227,9 @@ class VoicePipeline:
 
         self._executor.shutdown(wait=False)
 
-        logger.info(f"[VOICE] ========================================")
-        logger.info(f"[VOICE] 🛑 VOICE PIPELINE STOPPED")
-        logger.info(f"[VOICE] 📊 Stats:")
+        logger.info("[VOICE] ========================================")
+        logger.info("[VOICE] 🛑 VOICE PIPELINE STOPPED")
+        logger.info("[VOICE] 📊 Stats:")
         logger.info(f"[VOICE]    Utterances processed: {self.stats.total_utterances}")
         logger.info(f"[VOICE]    Wake word triggers: {self.stats.wake_word_triggers}")
         logger.info(f"[VOICE]    Responses generated: {self.stats.responses_generated}")
@@ -237,7 +239,7 @@ class VoicePipeline:
             logger.info(f"[VOICE]    Min latency: {self.stats.min_latency_ms:.0f}ms")
             logger.info(f"[VOICE]    Max latency: {self.stats.max_latency_ms:.0f}ms")
         logger.info(f"[VOICE]    Errors: {self.stats.errors}")
-        logger.info(f"[VOICE] ========================================")
+        logger.info("[VOICE] ========================================")
 
     async def _capture_loop(self) -> None:
         """Main capture and processing loop."""
@@ -338,7 +340,7 @@ class VoicePipeline:
                 )
 
             # Generate LLM response
-            logger.info(f"[VOICE] 🧠 Sending to Gemini LLM...")
+            logger.info("[VOICE] 🧠 Sending to Gemini LLM...")
             llm_start = time.time()
             llm_response = await self._llm.generate_response(
                 command,
@@ -360,7 +362,7 @@ class VoicePipeline:
                 self.config.on_response(response_text)
 
             # Synthesize speech (before unmuting)
-            logger.info(f"[VOICE] 🔊 Synthesizing TTS (Piper)...")
+            logger.info("[VOICE] 🔊 Synthesizing TTS (Piper)...")
             tts_start = time.time()
             tts_result = await self._tts.synthesize(response_text)
             tts_time_ms = (time.time() - tts_start) * 1000
@@ -377,18 +379,18 @@ class VoicePipeline:
 
             # Unmute microphone before speaking
             if self._controller:
-                logger.info(f"[VOICE] 🎙️ Unmuting microphone...")
+                logger.info("[VOICE] 🎙️ Unmuting microphone...")
                 await self._controller.unmute_and_speak()
 
             try:
                 # Play audio
-                logger.info(f"[VOICE] 📢 Playing audio to meeting...")
+                logger.info("[VOICE] 📢 Playing audio to meeting...")
                 await self._audio_output.play_tts_result(tts_result)
             finally:
                 # Always re-mute after speaking
                 if self._controller:
                     await self._controller.mute()
-                    logger.info(f"[VOICE] 🔇 Re-muted microphone")
+                    logger.info("[VOICE] 🔇 Re-muted microphone")
 
             # Record stats
             latency = (time.time() - start_time) * 1000
@@ -474,7 +476,7 @@ class VoicePipeline:
             "wake_word_triggers": self.stats.wake_word_triggers,
             "responses_generated": self.stats.responses_generated,
             "avg_latency_ms": self.stats.avg_latency_ms,
-            "min_latency_ms": self.stats.min_latency_ms if self.stats.min_latency_ms != float("inf") else 0,
+            "min_latency_ms": self.stats.min_latency_ms if self.stats.min_latency_ms != float("in") else 0,
             "max_latency_ms": self.stats.max_latency_ms,
             "errors": self.stats.errors,
             "running": self._running,

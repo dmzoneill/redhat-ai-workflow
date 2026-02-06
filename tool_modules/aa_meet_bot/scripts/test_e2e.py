@@ -96,7 +96,7 @@ async def test_wake_word():
         event = manager.process_caption(speaker, text)
         if event:
             events.append(event)
-            print(f"  🎯 WAKE WORD DETECTED!")
+            print("  🎯 WAKE WORD DETECTED!")
             print(f"     Command: '{event.command_text}'")
 
     print(f"\n✅ Detected {len(events)} wake word events")

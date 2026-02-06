@@ -7,7 +7,13 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
-Type=simple
+# Type=notify allows daemon to signal readiness and supports watchdog
+Type=notify
+NotifyAccess=main
+# Watchdog: systemd restarts if no ping received within 60s
+# Slack daemon has heavy initialization (loading models, warming up NPU)
+WatchdogSec=60
+
 WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
 # Environment variables for Claude (Vertex AI)
 Environment=CLAUDE_CODE_USE_VERTEX=1
@@ -23,8 +29,10 @@ ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.sl
 
 # Restart policy
 Restart=on-failure
-RestartSec=30
+RestartSec=5
 
+# Startup timeout - slack daemon loads models which takes time
+TimeoutStartSec=120
 # Graceful shutdown
 TimeoutStopSec=30
 KillMode=mixed

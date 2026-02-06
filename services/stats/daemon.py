@@ -14,35 +14,24 @@ D-Bus Service: com.aiworkflow.BotStats
 Object Path: /com/aiworkflow/BotStats
 
 Usage:
-    python scripts/stats_daemon.py           # Run daemon
-    python scripts/stats_daemon.py --status  # Check if running
+    python -m services.stats           # Run daemon
+    python -m services.stats --status  # Check if running
+    python -m services.stats --dbus    # Enable D-Bus IPC
 
 Systemd:
     systemctl --user start bot-stats
     systemctl --user status bot-stats
 """
 
-import argparse
-import asyncio
-import fcntl
 import json
 import logging
-import os
-import signal
-import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from services.base.dbus import DaemonDBusBase  # noqa: E402
-
-# Lock and PID files
-LOCK_FILE = Path("/tmp/stats-daemon.lock")
-PID_FILE = Path("/tmp/stats-daemon.pid")
+from services.base.daemon import BaseDaemon
+from services.base.dbus import DaemonDBusBase
 
 # Stats files
 AA_CONFIG_DIR = Path.home() / ".config" / "aa-workflow"
@@ -59,62 +48,15 @@ def get_performance_summary_path() -> Path:
     return AA_CONFIG_DIR / "performance" / str(year) / f"q{quarter}" / "performance" / "summary.json"
 
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stderr)],
-)
 logger = logging.getLogger(__name__)
 
 
-class SingleInstance:
-    """Ensures only one instance of the daemon runs at a time."""
-
-    def __init__(self):
-        self._lock_file = None
-        self._acquired = False
-
-    def acquire(self) -> bool:
-        """Try to acquire the lock. Returns True if successful."""
-        try:
-            self._lock_file = open(LOCK_FILE, "w")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            PID_FILE.write_text(str(os.getpid()))
-            self._acquired = True
-            return True
-        except OSError:
-            return False
-
-    def release(self):
-        """Release the lock."""
-        if self._lock_file:
-            try:
-                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                self._lock_file.close()
-            except Exception:
-                pass
-        if PID_FILE.exists():
-            try:
-                PID_FILE.unlink()
-            except Exception:
-                pass
-        self._acquired = False
-
-    def get_running_pid(self) -> int | None:
-        """Get PID of running instance, or None if not running."""
-        if PID_FILE.exists():
-            try:
-                pid = int(PID_FILE.read_text().strip())
-                os.kill(pid, 0)
-                return pid
-            except (ValueError, OSError):
-                pass
-        return None
-
-
-class StatsDaemon(DaemonDBusBase):
+class StatsDaemon(DaemonDBusBase, BaseDaemon):
     """Stats daemon with D-Bus support."""
+
+    # BaseDaemon configuration
+    name = "stats"
+    description = "Stats Daemon - Agent statistics via D-Bus"
 
     # D-Bus configuration
     service_name = "com.aiworkflow.BotStats"
@@ -122,10 +64,8 @@ class StatsDaemon(DaemonDBusBase):
     interface_name = "com.aiworkflow.BotStats"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = True):
-        super().__init__()
-        self.verbose = verbose
-        self.enable_dbus = enable_dbus
-        self._shutdown_event = asyncio.Event()
+        BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
+        DaemonDBusBase.__init__(self)
         self._stats_cache: dict[str, Any] = {}
         self._last_modified: dict[str, float] = {}
 
@@ -246,13 +186,13 @@ class StatsDaemon(DaemonDBusBase):
             logger.error(f"Failed to load {filepath}: {e}")
             return self._stats_cache.get(key)
 
-    # ==================== Main Loop ====================
+    # ==================== Lifecycle ====================
 
-    async def run(self):
-        """Main daemon run loop."""
+    async def startup(self):
+        """Initialize daemon resources."""
+        await super().startup()
+
         logger.info("Stats daemon starting...")
-        self.is_running = True
-        self.start_time = datetime.now().timestamp()
 
         # Ensure config directory exists
         AA_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -267,74 +207,43 @@ class StatsDaemon(DaemonDBusBase):
         if self.enable_dbus:
             await self.start_dbus()
 
-        logger.info("Stats daemon running")
+        self.is_running = True
+        logger.info("Stats daemon ready")
 
-        try:
-            # Wait for shutdown
-            await self._shutdown_event.wait()
-        finally:
-            if self.enable_dbus:
-                await self.stop_dbus()
-            self.is_running = False
-            logger.info("Stats daemon stopped")
+    async def run_daemon(self):
+        """Main daemon loop - wait for shutdown."""
+        await self._shutdown_event.wait()
 
-    def shutdown(self):
-        """Request graceful shutdown."""
-        self._shutdown_event.set()
+    async def shutdown(self):
+        """Clean up daemon resources."""
+        logger.info("Stats daemon shutting down...")
 
+        if self.enable_dbus:
+            await self.stop_dbus()
 
-async def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(description="Stats Daemon")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-    parser.add_argument("--status", action="store_true", help="Check daemon status")
-    parser.add_argument("--stop", action="store_true", help="Stop running daemon")
-    parser.add_argument("--no-dbus", action="store_true", help="Disable D-Bus")
-    args = parser.parse_args()
+        self.is_running = False
+        await super().shutdown()
+        logger.info("Stats daemon stopped")
 
-    single = SingleInstance()
+    async def health_check(self) -> dict:
+        """Perform a health check on the stats daemon."""
+        self._last_health_check = time.time()
 
-    if args.status:
-        pid = single.get_running_pid()
-        if pid:
-            print(f"Stats daemon is running (PID: {pid})")
-            sys.exit(0)
-        else:
-            print("Stats daemon is not running")
-            sys.exit(1)
+        checks = {
+            "running": self.is_running,
+            "config_dir_exists": AA_CONFIG_DIR.exists(),
+            "cache_entries": len(self._stats_cache) > 0,
+        }
 
-    if args.stop:
-        pid = single.get_running_pid()
-        if pid:
-            os.kill(pid, signal.SIGTERM)
-            print(f"Sent SIGTERM to PID {pid}")
-        else:
-            print("Stats daemon is not running")
-        sys.exit(0)
+        healthy = all(checks.values())
 
-    # Try to acquire lock
-    if not single.acquire():
-        pid = single.get_running_pid()
-        logger.error(f"Another instance is running (PID: {pid})")
-        sys.exit(1)
-
-    daemon = StatsDaemon(verbose=args.verbose, enable_dbus=not args.no_dbus)
-
-    # Setup signal handlers using asyncio (properly wakes up event loop)
-    loop = asyncio.get_running_loop()
-
-    def signal_handler():
-        logger.info("Received shutdown signal, shutting down...")
-        daemon.shutdown()
-
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, signal_handler)
-
-    try:
-        await daemon.run()
-    finally:
-        single.release()
+        return {
+            "healthy": healthy,
+            "checks": checks,
+            "message": "Stats daemon is healthy" if healthy else "Stats daemon has issues",
+            "timestamp": self._last_health_check,
+        }
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    StatsDaemon.main()

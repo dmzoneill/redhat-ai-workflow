@@ -2,6 +2,7 @@
  * Base JavaScript for Command Center Webview
  *
  * Common utilities and functions shared across all tabs.
+ * Tab-specific event handlers are now in their respective Tab files.
  */
 
 // VS Code API instance
@@ -46,7 +47,22 @@ function showReconnectBanner() {
   const banner = document.createElement('div');
   banner.id = 'reconnectBanner';
   banner.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; background: #f59e0b; color: #000; padding: 12px 20px; text-align: center; font-weight: 600; z-index: 9999; display: flex; justify-content: center; align-items: center; gap: 16px;';
-  banner.innerHTML = '⚠️ Command Center is disconnected from the extension. <button onclick="location.reload()" style="background: #000; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-weight: 600;">Reload Panel</button> <span style="font-weight: normal; font-size: 0.9em;">or close this tab and reopen via Command Palette</span>';
+  
+  const textSpan = document.createElement('span');
+  textSpan.textContent = '⚠️ Command Center is disconnected from the extension. ';
+  
+  const reloadBtn = document.createElement('button');
+  reloadBtn.textContent = 'Reload Panel';
+  reloadBtn.style.cssText = 'background: #000; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-weight: 600;';
+  reloadBtn.addEventListener('click', () => location.reload());
+  
+  const helpSpan = document.createElement('span');
+  helpSpan.style.cssText = 'font-weight: normal; font-size: 0.9em;';
+  helpSpan.textContent = ' or close this tab and reopen via Command Palette';
+  
+  banner.appendChild(textSpan);
+  banner.appendChild(reloadBtn);
+  banner.appendChild(helpSpan);
   document.body.insertBefore(banner, document.body.firstChild);
   document.body.style.paddingTop = '60px';
 }
@@ -371,534 +387,163 @@ function formatInferenceResult(data) {
 }
 
 // ============================================
-// Event Delegation for Dynamic Content
+// Centralized Event Delegation System
 // ============================================
-// This handles clicks on elements that may be replaced by tabContentUpdate
-// Since we can't use new Function() due to CSP, we use event delegation instead
+// This system allows tabs to register handlers that survive content updates.
+// Handlers are stored by tab ID and can be re-registered without duplicates.
 
-document.addEventListener('click', function(e) {
-  const target = e.target;
-
-  // Debug: log all clicks to extension output
-  const debugActionBtn = target.closest('[data-action]');
-  if (debugActionBtn) {
-    log('[base.js] Click on data-action element: ' + debugActionBtn.dataset.action);
+const TabEventDelegation = (function() {
+  // Store handlers by tab ID -> event type -> handler function
+  const handlers = new Map();
+  
+  // Track if global listeners are set up
+  let initialized = false;
+  
+  /**
+   * Register a click handler for a tab.
+   * Can be called multiple times - will replace the previous handler.
+   * 
+   * @param {string} tabId - The tab container ID (e.g., 'sessions', 'slack')
+   * @param {function} handler - Handler function(action, element, event)
+   */
+  function registerClickHandler(tabId, handler) {
+    if (!handlers.has(tabId)) {
+      handlers.set(tabId, {});
+    }
+    handlers.get(tabId).click = handler;
+    console.log(`[TabEventDelegation] Registered click handler for #${tabId}`);
   }
-
-  // Handle view toggle buttons (Sessions and Personas tabs)
-  if (target.id === 'sessionViewCard') {
-    e.preventDefault();
-    vscode.postMessage({ command: 'changeSessionViewMode', value: 'card' });
-    return;
+  
+  /**
+   * Register a change handler for a tab (for selects, inputs).
+   * 
+   * @param {string} tabId - The tab container ID
+   * @param {function} handler - Handler function(element, event)
+   */
+  function registerChangeHandler(tabId, handler) {
+    if (!handlers.has(tabId)) {
+      handlers.set(tabId, {});
+    }
+    handlers.get(tabId).change = handler;
+    console.log(`[TabEventDelegation] Registered change handler for #${tabId}`);
   }
-  if (target.id === 'sessionViewTable') {
-    e.preventDefault();
-    vscode.postMessage({ command: 'changeSessionViewMode', value: 'table' });
-    return;
+  
+  /**
+   * Register a keypress handler for a tab.
+   * 
+   * @param {string} tabId - The tab container ID
+   * @param {function} handler - Handler function(element, event)
+   */
+  function registerKeypressHandler(tabId, handler) {
+    if (!handlers.has(tabId)) {
+      handlers.set(tabId, {});
+    }
+    handlers.get(tabId).keypress = handler;
+    console.log(`[TabEventDelegation] Registered keypress handler for #${tabId}`);
   }
-  if (target.id === 'personaViewCard') {
-    e.preventDefault();
-    vscode.postMessage({ command: 'changePersonaViewMode', value: 'card' });
-    return;
-  }
-  if (target.id === 'personaViewTable') {
-    e.preventDefault();
-    vscode.postMessage({ command: 'changePersonaViewMode', value: 'table' });
-    return;
-  }
-
-  // Handle meetings subtab buttons (data-tab attribute)
-  const meetingsSubtab = target.closest('.meetings-subtab[data-tab]');
-  if (meetingsSubtab) {
-    const tabName = meetingsSubtab.dataset.tab;
-    log('[base.js] Meetings subtab clicked: ' + tabName);
-
-    // Update tab buttons
-    document.querySelectorAll('.meetings-subtab').forEach(btn => {
-      btn.classList.remove('active');
-      if (btn.dataset.tab === tabName) {
-        btn.classList.add('active');
+  
+  /**
+   * Initialize global event listeners (called once).
+   */
+  function init() {
+    if (initialized) return;
+    initialized = true;
+    
+    // Global click delegation
+    document.addEventListener('click', function(e) {
+      const actionBtn = e.target.closest('[data-action]');
+      if (!actionBtn) return;
+      
+      const action = actionBtn.dataset.action;
+      
+      // Find which tab container this belongs to
+      const tabContent = actionBtn.closest('.tab-content');
+      if (!tabContent) {
+        console.log(`[TabEventDelegation] Click on ${action} - no tab container found`);
+        return;
+      }
+      
+      const tabId = tabContent.id;
+      const tabHandlers = handlers.get(tabId);
+      
+      if (tabHandlers && tabHandlers.click) {
+        console.log(`[TabEventDelegation] Dispatching click '${action}' to #${tabId}`);
+        tabHandlers.click(action, actionBtn, e);
+      } else {
+        console.log(`[TabEventDelegation] No click handler for #${tabId}, action: ${action}`);
       }
     });
-
-    // Update content panels
-    document.querySelectorAll('.subtab-content').forEach(panel => {
-      panel.classList.remove('active');
+    
+    // Global change delegation
+    document.addEventListener('change', function(e) {
+      const target = e.target;
+      if (!target.matches('select, input[type="checkbox"], input[type="radio"]')) return;
+      
+      const tabContent = target.closest('.tab-content');
+      if (!tabContent) return;
+      
+      const tabId = tabContent.id;
+      const tabHandlers = handlers.get(tabId);
+      
+      if (tabHandlers && tabHandlers.change) {
+        console.log(`[TabEventDelegation] Dispatching change to #${tabId}`);
+        tabHandlers.change(target, e);
+      }
     });
-    const targetPanel = document.getElementById('subtab-' + tabName);
-    if (targetPanel) {
-      targetPanel.classList.add('active');
-    }
-    return;
-  }
-
-  // Handle meetings mode selector buttons (in upcoming meetings list)
-  const modeBtn = target.closest('.meeting-mode-selector .mode-btn[data-mode]');
-  if (modeBtn) {
-    const meetingId = modeBtn.dataset.id;
-    const mode = modeBtn.dataset.mode;
-    log('[base.js] Meeting mode button clicked: meetingId=' + meetingId + ', mode=' + mode);
-
-    // Update UI for this meeting's mode selector
-    const selector = modeBtn.closest('.meeting-mode-selector');
-    if (selector) {
-      selector.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.dataset.mode === mode) btn.classList.add('active');
-      });
-    }
-
-    // Send to backend
-    vscode.postMessage({ type: 'setMeetingMode', meetingId: meetingId, mode: mode });
-    return;
-  }
-
-  // Handle meetings status badge clicks (approved/skipped toggle)
-  const statusBadge = target.closest('.upcoming-meeting-controls .status-badge[data-action]');
-  if (statusBadge) {
-    const action = statusBadge.dataset.action;
-    const meetingId = statusBadge.dataset.id;
-    const meetUrl = statusBadge.dataset.url || '';
-    const mode = statusBadge.dataset.mode || 'notes';
-    const row = statusBadge.closest('.upcoming-meeting-row');
-    log('[base.js] Status badge clicked: action=' + action + ', meetingId=' + meetingId);
-
-    if (action === 'unapprove') {
-      // Toggle from approved to skipped
-      statusBadge.outerHTML = '<span class="status-badge skipped" data-action="approve" data-id="' + meetingId + '" data-url="' + meetUrl + '" data-mode="notes" title="Click to approve this meeting">✗ Skipped</span>';
-      if (row) {
-        row.classList.remove('approved');
+    
+    // Global keypress delegation
+    document.addEventListener('keypress', function(e) {
+      const target = e.target;
+      if (!target.matches('input, textarea')) return;
+      
+      const tabContent = target.closest('.tab-content');
+      if (!tabContent) return;
+      
+      const tabId = tabContent.id;
+      const tabHandlers = handlers.get(tabId);
+      
+      if (tabHandlers && tabHandlers.keypress) {
+        tabHandlers.keypress(target, e);
       }
-      vscode.postMessage({ type: 'unapproveMeeting', meetingId: meetingId });
-    } else if (action === 'approve') {
-      // Toggle from skipped/failed back to approved
-      statusBadge.outerHTML = '<span class="status-badge approved" data-action="unapprove" data-id="' + meetingId + '" title="Click to skip this meeting">✓ Approved</span>';
-      if (row) {
-        row.classList.add('approved');
-      }
-      vscode.postMessage({ type: 'approveMeeting', meetingId: meetingId, meetUrl: meetUrl, mode: mode });
-    }
-    return;
-  }
-
-  // Handle data-action buttons
-  const actionBtn = target.closest('[data-action]');
-  if (actionBtn) {
-    const action = actionBtn.dataset.action;
-    log('data-action button clicked: ' + action);
-    const sessionId = actionBtn.dataset.sessionId;
-    const persona = actionBtn.dataset.persona;
-    const skill = actionBtn.dataset.skill;
-    const executionId = actionBtn.dataset.executionId;
-
-    switch (action) {
-      // Session actions
-      case 'newSession':
-        vscode.postMessage({ command: 'newSession' });
-        break;
-      case 'openSession':
-        if (sessionId) vscode.postMessage({ command: 'openSession', sessionId });
-        break;
-      case 'openChatSession':
-        if (sessionId) {
-          const sessionName = actionBtn.dataset.sessionName;
-          vscode.postMessage({ command: 'openChatSession', sessionId, sessionName });
-        }
-        break;
-      case 'copySessionId':
-        if (sessionId) vscode.postMessage({ command: 'copySessionId', sessionId });
-        break;
-      case 'closeSession':
-        if (sessionId) vscode.postMessage({ command: 'closeSession', sessionId });
-        break;
-      case 'refreshSessions':
-        vscode.postMessage({ command: 'refreshSessions' });
-        break;
-
-      // Persona actions
-      case 'loadPersona':
-        if (persona) vscode.postMessage({ command: 'loadPersona', persona });
-        break;
-      case 'startPersonaChat':
-        if (persona) vscode.postMessage({ command: 'startPersonaChat', persona });
-        break;
-      case 'viewPersonaDetails':
-        if (persona) vscode.postMessage({ command: 'viewPersonaDetails', persona });
-        break;
-      case 'refreshPersonas':
-        vscode.postMessage({ command: 'refreshPersonas' });
-        break;
-
-      // Tool actions
-      case 'refreshTools':
-        vscode.postMessage({ command: 'refreshTools' });
-        break;
-
-      // Skill actions
-      case 'runSkill':
-        if (skill) vscode.postMessage({ command: 'runSkill', skillName: skill });
-        break;
-      case 'openSkillFile':
-        if (skill) vscode.postMessage({ command: 'openSkillFile', skillName: skill });
-        break;
-      case 'clearStaleSkills':
-        vscode.postMessage({ command: 'clearStaleSkills' });
-        break;
-      case 'clearSkillExecution':
-        if (executionId) vscode.postMessage({ command: 'clearSkillExecution', executionId });
-        break;
-
-      // Inference actions
-      case 'runInferenceTest':
-        log('runInferenceTest action triggered');
-        const testMessage = document.getElementById('inferenceTestMessage');
-        const testPersona = document.getElementById('inferenceTestPersona');
-        const testSkill = document.getElementById('inferenceTestSkill');
-        log('testMessage element found: ' + (testMessage ? 'yes' : 'no'));
-        log('testMessage value: ' + (testMessage ? testMessage.value : 'null'));
-        if (testMessage && testMessage.value) {
-          log('Sending runInferenceTest message with: ' + testMessage.value);
-          vscode.postMessage({
-            command: 'runInferenceTest',
-            message: testMessage.value,
-            persona: testPersona ? testPersona.value : '',
-            skill: testSkill ? testSkill.value : ''
-          });
-        } else {
-          log('No message value found - not sending');
-        }
-        break;
-      case 'copyInferenceResult':
-        const resultArea = document.getElementById('inferenceResultArea');
-        if (resultArea && resultArea.textContent) {
-          navigator.clipboard.writeText(resultArea.textContent).catch(err => {
-            console.error('Failed to copy:', err);
-          });
-        }
-        break;
-      case 'clearTestResults':
-        const inferenceResults = document.getElementById('inferenceResultArea');
-        if (inferenceResults) {
-          inferenceResults.style.display = 'none';
-          inferenceResults.innerHTML = '';
-        }
-        break;
-      case 'testOllama':
-        const ollamaInstance = actionBtn.dataset.instance;
-        if (ollamaInstance) {
-          vscode.postMessage({ command: 'testOllamaInstance', instance: ollamaInstance });
-        }
-        break;
-      case 'resetConfig':
-        vscode.postMessage({ command: 'resetInferenceConfig' });
-        break;
-      case 'saveConfig':
-        vscode.postMessage({ command: 'saveInferenceConfig' });
-        break;
-
-      // Cron actions
-      case 'runCronJobNow': {
-        const jobName = actionBtn.dataset.job;
-        if (jobName) {
-          vscode.postMessage({ command: 'runCronJobNow', jobName: jobName });
-        }
-        break;
-      }
-      case 'toggleCronJob': {
-        const cronJobName = actionBtn.dataset.job;
-        const enabled = actionBtn.checked;
-        if (cronJobName !== undefined) {
-          vscode.postMessage({ command: 'toggleCronJob', jobName: cronJobName, enabled: enabled });
-        }
-        break;
-      }
-      case 'toggleScheduler':
-        vscode.postMessage({ command: 'toggleScheduler' });
-        break;
-
-      // Meeting actions
-      case 'join': {
-        const meetUrl = actionBtn.dataset.url;
-        const meetTitle = actionBtn.dataset.title;
-        const meetMode = actionBtn.dataset.mode || 'notes';
-        // Get video enabled from the quick join checkbox
-        const videoCheckbox = document.getElementById('quickJoinVideo');
-        const videoEnabled = videoCheckbox ? videoCheckbox.checked : false;
-        log('Join meeting: ' + meetUrl + ', title: ' + meetTitle + ', mode: ' + meetMode + ', video: ' + videoEnabled);
-        vscode.postMessage({ type: 'joinMeetingNow', meetUrl: meetUrl, title: meetTitle, mode: meetMode, videoEnabled: videoEnabled });
-        break;
-      }
-      case 'approve': {
-        const approveId = actionBtn.dataset.id;
-        const approveUrl = actionBtn.dataset.url || '';
-        const approveMode = actionBtn.dataset.mode || 'notes';
-        vscode.postMessage({ type: 'approveMeeting', meetingId: approveId, meetUrl: approveUrl, mode: approveMode });
-        break;
-      }
-      case 'leave': {
-        const leaveSession = actionBtn.dataset.session;
-        vscode.postMessage({ type: 'leaveMeeting', sessionId: leaveSession || '' });
-        break;
-      }
-      case 'toggle-audio': {
-        const audioSession = actionBtn.dataset.session || '';
-        const isListening = actionBtn.classList.contains('listening');
-
-        // Optimistic UI update
-        if (isListening) {
-          actionBtn.classList.remove('listening');
-          actionBtn.innerHTML = '🔇 Listen';
-        } else {
-          actionBtn.classList.add('listening');
-          actionBtn.innerHTML = '🔊 Mute';
-        }
-
-        // Send to backend
-        vscode.postMessage({
-          type: isListening ? 'muteAudio' : 'unmuteAudio',
-          sessionId: audioSession
-        });
-        break;
-      }
-      case 'quickJoin': {
-        const quickJoinInput = document.getElementById('quickJoinUrl');
-        const quickJoinModeRadio = document.querySelector('input[name="quickJoinMode"]:checked');
-        const quickJoinMode = quickJoinModeRadio ? quickJoinModeRadio.value : 'notes';
-        const quickJoinVideoCheckbox = document.getElementById('quickJoinVideo');
-        const quickJoinVideoEnabled = quickJoinVideoCheckbox ? quickJoinVideoCheckbox.checked : false;
-
-        if (quickJoinInput && quickJoinInput.value.trim()) {
-          const quickJoinUrl = quickJoinInput.value.trim();
-          log('Quick Join: ' + quickJoinUrl + ', mode: ' + quickJoinMode + ', video: ' + quickJoinVideoEnabled);
-          vscode.postMessage({ type: 'joinMeetingNow', meetUrl: quickJoinUrl, title: 'Manual Join', mode: quickJoinMode, videoEnabled: quickJoinVideoEnabled });
-          quickJoinInput.value = '';
-        } else {
-          log('Quick Join: No URL provided');
-        }
-        break;
-      }
-
-      // Service actions (Meet Bot controls)
-      case 'serviceStart': {
-        const service = actionBtn.dataset.service;
-        if (service) {
-          log('Service start: ' + service);
-          vscode.postMessage({ type: 'serviceStart', service: service });
-        }
-        break;
-      }
-      case 'serviceStop': {
-        const service = actionBtn.dataset.service;
-        if (service) {
-          log('Service stop: ' + service);
-          vscode.postMessage({ type: 'serviceStop', service: service });
-        }
-        break;
-      }
-      case 'serviceLogs': {
-        const service = actionBtn.dataset.service;
-        if (service) {
-          log('Service logs: ' + service);
-          vscode.postMessage({ type: 'serviceLogs', service: service });
-        }
-        break;
-      }
-    }
-    return;
-  }
-
-  // Handle quick test buttons for inference
-  const quickTestBtn = target.closest('[data-quick-test]');
-  if (quickTestBtn) {
-    const testMsg = quickTestBtn.dataset.quickTest;
-    const msgInput = document.getElementById('inferenceTestMessage');
-    if (msgInput && testMsg) {
-      msgInput.value = testMsg;
-      // Trigger the inference test
-      const testPersona = document.getElementById('inferenceTestPersona');
-      const testSkill = document.getElementById('inferenceTestSkill');
-      vscode.postMessage({
-        command: 'runInferenceTest',
-        message: testMsg,
-        persona: testPersona ? testPersona.value : '',
-        skill: testSkill ? testSkill.value : ''
-      });
-    }
-    return;
-  }
-
-  // Handle running skill item clicks (open flowchart)
-  // But not if clicking the clear button
-  const runningSkillItem = target.closest('.running-skill-item');
-  if (runningSkillItem && !target.closest('.clear-skill-btn')) {
-    const executionId = runningSkillItem.dataset.executionId;
-    if (executionId) {
-      vscode.postMessage({ command: 'openRunningSkillFlowchart', executionId });
-    }
-    return;
-  }
-
-  // Handle skill item clicks (for selection)
-  const skillItem = target.closest('.skill-item');
-  if (skillItem) {
-    const skillName = skillItem.dataset.skill;
-    if (skillName) {
-      vscode.postMessage({ command: 'loadSkill', skillName: skillName });
-    }
-    return;
-  }
-
-  // Handle skill view toggle buttons (Info/Workflow/YAML)
-  const skillViewBtn = target.closest('.toggle-btn[data-view]');
-  if (skillViewBtn) {
-    const view = skillViewBtn.dataset.view;
-    if (view) {
-      vscode.postMessage({ command: 'setSkillView', view });
-    }
-    return;
-  }
-
-  // Handle workflow view mode toggle (Horizontal/Vertical)
-  const workflowViewBtn = target.closest('.toggle-btn[data-workflow-view]');
-  if (workflowViewBtn) {
-    const mode = workflowViewBtn.dataset.workflowView;
-    if (mode) {
-      vscode.postMessage({ command: 'setWorkflowViewMode', mode });
-    }
-    return;
-  }
-
-  // Handle skill call badge clicks (navigate to called skill)
-  const skillCallBadge = target.closest('.skill-call-badge');
-  if (skillCallBadge) {
-    const skillName = skillCallBadge.dataset.skill;
-    if (skillName) {
-      vscode.postMessage({ command: 'loadSkill', skillName });
-    }
-    return;
-  }
-
-  // Handle persona card clicks (for selection)
-  const personaCard = target.closest('.persona-card');
-  if (personaCard && target.tagName !== 'BUTTON') {
-    const persona = personaCard.dataset.persona;
-    if (persona) {
-      vscode.postMessage({ command: 'selectPersona', persona });
-    }
-    return;
-  }
-
-  // Handle tool module item clicks (for selection)
-  const toolModuleItem = target.closest('.tools-module-item');
-  if (toolModuleItem) {
-    const moduleName = toolModuleItem.dataset.module;
-    if (moduleName) {
-      vscode.postMessage({ command: 'selectToolModule', module: moduleName });
-    }
-    return;
-  }
-
-  // Handle tool item clicks (for selection)
-  const toolItem = target.closest('.tool-item');
-  if (toolItem) {
-    const toolName = toolItem.dataset.tool;
-    if (toolName) {
-      vscode.postMessage({ command: 'selectTool', tool: toolName });
-    }
-    return;
-  }
-
-  // Handle memory category/tab clicks
-  const memoryCategory = target.closest('.memory-category, .memory-tab[data-category]');
-  if (memoryCategory) {
-    const category = memoryCategory.dataset.category;
-    if (category) {
-      log('[base.js] Memory category clicked: ' + category);
-      vscode.postMessage({ command: 'selectMemoryCategory', category });
-    }
-    return;
-  }
-
-  // Handle memory file clicks
-  const memoryFile = target.closest('.memory-file');
-  if (memoryFile) {
-    const file = memoryFile.dataset.file;
-    if (file) {
-      vscode.postMessage({ command: 'selectMemoryFile', file });
-    }
-    return;
-  }
-
-  // Handle memory file edit button
-  const editMemoryBtn = target.closest('[data-action="editMemoryFile"]');
-  if (editMemoryBtn) {
-    const file = editMemoryBtn.dataset.file;
-    if (file) {
-      vscode.postMessage({ command: 'editMemoryFile', file });
-    }
-    return;
-  }
-
-  // Handle collapsible section toggles
-  const collapsibleTitle = target.closest('.collapsible .section-title');
-  if (collapsibleTitle) {
-    const section = collapsibleTitle.closest('.collapsible');
-    if (section) {
-      section.classList.toggle('collapsed');
-    }
-    return;
-  }
-});
-
-// Handle input events for search boxes
-document.addEventListener('input', function(e) {
-  const target = e.target;
-
-  if (target.id === 'sessionSearch') {
-    vscode.postMessage({ command: 'searchSessions', query: target.value });
-    return;
-  }
-  if (target.id === 'personaSearch') {
-    vscode.postMessage({ command: 'searchPersonas', query: target.value });
-    return;
-  }
-  if (target.id === 'skillSearch') {
-    // Client-side filtering for skills
-    const query = target.value.toLowerCase();
-    document.querySelectorAll('.skill-item').forEach(function(item) {
-      const nameEl = item.querySelector('.skill-item-name');
-      const descEl = item.querySelector('.skill-item-desc');
-      const name = nameEl ? nameEl.textContent.toLowerCase() : '';
-      const desc = descEl ? descEl.textContent.toLowerCase() : '';
-      // Also check the skill name from data attribute
-      const skillName = (item.dataset.skill || '').toLowerCase();
-      item.style.display = (name.includes(query) || desc.includes(query) || skillName.includes(query)) ? '' : 'none';
     });
-    return;
+    
+    console.log('[TabEventDelegation] Initialized global event listeners');
   }
-  if (target.id === 'toolSearch') {
-    vscode.postMessage({ command: 'searchTools', query: target.value });
-    return;
+  
+  /**
+   * Check if a tab has handlers registered.
+   */
+  function hasHandlers(tabId) {
+    return handlers.has(tabId);
   }
-});
-
-// Handle change events for dropdowns and toggles
-document.addEventListener('change', function(e) {
-  const target = e.target;
-
-  if (target.id === 'sessionGroupBy') {
-    vscode.postMessage({ command: 'changeSessionGroupBy', value: target.value });
-    return;
+  
+  /**
+   * Get debug info about registered handlers.
+   */
+  function getDebugInfo() {
+    const info = {};
+    handlers.forEach((h, tabId) => {
+      info[tabId] = Object.keys(h);
+    });
+    return info;
   }
+  
+  // Auto-initialize
+  init();
+  
+  return {
+    registerClickHandler,
+    registerChangeHandler,
+    registerKeypressHandler,
+    hasHandlers,
+    getDebugInfo,
+    init
+  };
+})();
 
-  // Handle cron job toggle (checkbox with data-action="toggleCronJob")
-  if (target.dataset && target.dataset.action === 'toggleCronJob') {
-    const jobName = target.dataset.job;
-    if (jobName) {
-      vscode.postMessage({ command: 'toggleCronJob', jobName: jobName, enabled: target.checked });
-    }
-    return;
-  }
-});
+// Expose globally for tab scripts
+window.TabEventDelegation = TabEventDelegation;
 
-console.log('[DEBUG] Event delegation initialized');
+console.log('[DEBUG] Base.js loaded with centralized event delegation system');
+console.log('[DEBUG] TabEventDelegation available:', typeof TabEventDelegation !== 'undefined');
+console.log('[DEBUG] TabEventDelegation methods:', TabEventDelegation ? Object.keys(TabEventDelegation) : 'N/A');

@@ -7,9 +7,9 @@ Provides tools for:
 - project_detect: Auto-detect project settings from a directory
 """
 
+import json
 import logging
 import subprocess
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -89,7 +89,7 @@ def _detect_default_branch(project_path: Path) -> str:
     """Detect default branch from git."""
     try:
         result = subprocess.run(
-            ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+            ["git", "symbolic-re", "refs/remotes/origin/HEAD"],
             cwd=project_path,
             capture_output=True,
             text=True,
@@ -164,7 +164,7 @@ def _detect_lint_command(project_path: Path, language: str) -> str:
                 commands.append("black --check .")
             if "flake8" in content or (project_path / ".flake8").exists():
                 commands.append("flake8 .")
-            if "ruff" in content or (project_path / "ruff.toml").exists():
+            if "ruf" in content or (project_path / "ruff.toml").exists():
                 commands.append("ruff check .")
             if commands:
                 return " && ".join(commands)
@@ -501,7 +501,7 @@ async def _project_add_impl(
         return [
             TextContent(
                 type="text",
-                text=f"❌ Validation errors:\n\n" + "\n".join(f"- {e}" for e in errors),
+                text="❌ Validation errors:\n\n" + "\n".join(f"- {e}" for e in errors),
             )
         ]
 
@@ -659,7 +659,7 @@ async def _project_update_impl(
         return [
             TextContent(
                 type="text",
-                text=f"❌ Validation errors:\n\n" + "\n".join(f"- {e}" for e in errors),
+                text="❌ Validation errors:\n\n" + "\n".join(f"- {e}" for e in errors),
             )
         ]
 

@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 import re
-import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,7 +21,7 @@ from tool_modules.common import PROJECT_ROOT
 __project_root__ = PROJECT_ROOT
 
 from tool_modules.aa_meet_bot.src.config import get_config
-from tool_modules.aa_meet_bot.src.llm_responder import JiraContext, get_llm_responder
+from tool_modules.aa_meet_bot.src.llm_responder import get_llm_responder
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +196,6 @@ class JiraPreloader:
     async def _jql_search(self, jql: str, max_results: int = 50) -> List[JiraIssue]:
         """Execute a JQL search using the Jira REST API directly."""
         try:
-            import base64
             import os
             import urllib.parse
             import urllib.request

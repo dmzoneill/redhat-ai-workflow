@@ -2,7 +2,115 @@
 
 The Memory System provides persistent context storage that survives across Claude sessions. It stores active work state, learned patterns, error fixes, and session history.
 
-## Overview
+## Memory Abstraction Layer (NEW)
+
+The Memory Abstraction Layer provides a **unified interface** for querying multiple data sources. Instead of calling individual tools for each source, LLMs can use a single `memory_query` tool that automatically routes queries to the appropriate sources.
+
+### Architecture Overview
+
+```mermaid
+graph TB
+    subgraph Interface["MemoryInterface"]
+        QUERY[memory_query]
+        SEARCH[memory_search]
+        STORE[memory_store]
+    end
+
+    subgraph Routing["Query Router"]
+        CLASSIFIER[Intent Classifier]
+        ROUTER[Source Router]
+    end
+
+    subgraph Adapters["Source Adapters"]
+        YAML[YAML Adapter]
+        CODE[Code Search]
+        SLACK[Slack Vector]
+        INSCOPE[InScope AI]
+        JIRA[Jira Adapter]
+    end
+
+    subgraph Sources["Data Sources"]
+        YAML_FILES[memory/*.yaml]
+        LANCE_CODE[LanceDB Code]
+        LANCE_SLACK[LanceDB Slack]
+        INSCOPE_API[InScope API]
+        JIRA_CLI[rh-issue CLI]
+    end
+
+    QUERY --> CLASSIFIER
+    CLASSIFIER --> ROUTER
+    ROUTER --> YAML & CODE & SLACK & INSCOPE & JIRA
+
+    YAML --> YAML_FILES
+    CODE --> LANCE_CODE
+    SLACK --> LANCE_SLACK
+    INSCOPE --> INSCOPE_API
+    JIRA --> JIRA_CLI
+```
+
+### Key Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| MemoryInterface | `services/memory_abstraction/interface.py` | Main entry point |
+| IntentClassifier | `services/memory_abstraction/classifier.py` | Classify query intent |
+| QueryRouter | `services/memory_abstraction/router.py` | Route to adapters |
+| ResultMerger | `services/memory_abstraction/merger.py` | Combine results |
+| ResultFormatter | `services/memory_abstraction/formatter.py` | LLM-friendly output |
+
+### Source Adapters
+
+Adapters are discovered automatically from `tool_modules/aa_*/src/adapter.py`:
+
+| Adapter | Module | Capabilities | Intent Keywords |
+|---------|--------|--------------|-----------------|
+| yaml | aa_memory_yaml | query, search, store | "working on", "current", "pattern" |
+| code | aa_code_search | query, search | "function", "class", "code" |
+| slack | aa_slack_persona | query, search | "discussed", "slack", "message" |
+| inscope | aa_inscope | query | "rds", "clowder", "konflux" |
+| jira | aa_jira | query | "issue", "ticket", "AAP-" |
+
+### Usage
+
+```python
+# Auto-select sources based on intent
+result = await memory.query("What am I working on?")
+# -> Routes to yaml adapter (status_check intent)
+
+result = await memory.query("Where is the billing calculation?")
+# -> Routes to code adapter (code_lookup intent)
+
+result = await memory.query("What did we discuss about RDS?")
+# -> Routes to slack and inscope adapters
+
+# Explicit sources
+result = await memory.query(
+    "billing code",
+    sources=["code", "slack"]
+)
+```
+
+### Creating New Adapters
+
+```python
+from services.memory_abstraction import memory_adapter, BaseAdapter
+
+@memory_adapter(
+    name="my_source",
+    display_name="My Source",
+    capabilities={"query", "search"},
+    intent_keywords=["my", "source"],
+    priority=50,
+)
+class MySourceAdapter(BaseAdapter):
+    async def query(self, question, filter):
+        # Implementation
+        ...
+```
+
+## Legacy Overview
+
+The original memory system remains available for backward compatibility:
 
 ```mermaid
 graph TB
@@ -17,7 +125,7 @@ graph TB
         READ[memory_read]
         WRITE[memory_write]
         UPDATE[memory_update]
-        QUERY[memory_query]
+        QUERY_LEGACY[memory_query JSONPath]
         APPEND[memory_append]
     end
 
@@ -31,7 +139,7 @@ graph TB
     READ --> STATE & LEARNED & KNOWLEDGE & SESSIONS
     WRITE --> STATE & LEARNED
     UPDATE --> STATE & LEARNED
-    QUERY --> STATE & LEARNED & KNOWLEDGE
+    QUERY_LEGACY --> STATE & LEARNED & KNOWLEDGE
     APPEND --> STATE & LEARNED
 
     STATE --> CLAUDE & SKILLS & DAEMONS & EXTENSION

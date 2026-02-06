@@ -133,8 +133,8 @@ export class PersonasTab extends BaseTab {
         <div class="persona-controls">
           <div class="persona-count">${this.personas.length} persona(s)</div>
           <div class="view-toggle">
-            <button id="personaViewCard" class="toggle-btn ${this.viewMode === "card" ? "active" : ""}">🗂️ Cards</button>
-            <button id="personaViewTable" class="toggle-btn ${this.viewMode === "table" ? "active" : ""}">📋 Table</button>
+            <button id="personaViewCard" data-action="viewCard" class="toggle-btn ${this.viewMode === "card" ? "active" : ""}">🗂️ Cards</button>
+            <button id="personaViewTable" data-action="viewTable" class="toggle-btn ${this.viewMode === "table" ? "active" : ""}">📋 Table</button>
           </div>
         </div>
       </div>
@@ -296,11 +296,64 @@ export class PersonasTab extends BaseTab {
   }
 
   getScript(): string {
-    // Event delegation in base.js handles all click/input/change events
-    // This script is only needed for initial page load, not for dynamic updates
+    // Use event delegation on the #personas container so handlers survive content updates
     return `
-      // PersonasTab: Event handlers are managed via event delegation in base.js
-      // No per-tab script needed - this avoids CSP issues with dynamic script execution
+      (function() {
+        // Register click handler - can be called multiple times safely
+        TabEventDelegation.registerClickHandler('personas', function(action, element, e) {
+          const persona = element.dataset.persona;
+          
+          switch(action) {
+            case 'loadPersona':
+              if (persona) vscode.postMessage({ command: 'loadPersona', persona });
+              break;
+            case 'startPersonaChat':
+              if (persona) vscode.postMessage({ command: 'startPersonaChat', persona });
+              break;
+            case 'viewPersonaDetails':
+              if (persona) vscode.postMessage({ command: 'viewPersonaDetails', persona });
+              break;
+            case 'refreshPersonas':
+              vscode.postMessage({ command: 'refreshPersonas' });
+              break;
+            case 'viewCard':
+              vscode.postMessage({ command: 'changePersonaViewMode', value: 'card' });
+              break;
+            case 'viewTable':
+              vscode.postMessage({ command: 'changePersonaViewMode', value: 'table' });
+              break;
+          }
+        });
+
+        // Additional click handling for non-data-action elements
+        const personasContainer = document.getElementById('personas');
+        if (personasContainer && !personasContainer.dataset.extraClickInit) {
+          personasContainer.dataset.extraClickInit = 'true';
+          
+          personasContainer.addEventListener('click', function(e) {
+            const target = e.target;
+            // Skip if already handled by data-action
+            if (target.closest('[data-action]')) return;
+            
+            // Persona card clicks (for selection, but not on buttons)
+            const personaCard = target.closest('.persona-card');
+            if (personaCard && target.tagName !== 'BUTTON') {
+              const persona = personaCard.dataset.persona;
+              if (persona) {
+                vscode.postMessage({ command: 'selectPersona', persona });
+              }
+              return;
+            }
+          });
+
+          // Input delegation for search
+          personasContainer.addEventListener('input', function(e) {
+            if (e.target.id === 'personaSearch') {
+              vscode.postMessage({ command: 'searchPersonas', query: e.target.value });
+            }
+          });
+        }
+      })();
     `;
   }
 

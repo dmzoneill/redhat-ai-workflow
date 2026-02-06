@@ -35,11 +35,10 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +66,7 @@ def maybe_gc(force: bool = False) -> None:
 # Live meeting data integration (avatar generation, matrix animation)
 _live_rendering_available = False
 try:
-    from .avatar_generator import generate_initials_avatar, load_or_generate_avatar
-    from .matrix_animation import MatrixAnimation
+    pass
 
     _live_rendering_available = True
 except ImportError:
@@ -1168,17 +1166,17 @@ class ResearchVideoGenerator:
         cmd = [
             "ffmpeg",
             "-y",
-            "-f",
+            "-",
             "lavfi",
             "-i",
             f"color=c={self.config.background_color}:s={self.config.width}x{self.config.height}:r={self.config.fps}:d={total_duration}",
-            "-vf",
+            "-v",
             filter_complex,
             "-c:v",
             "libx264",
             "-preset",
             "ultrafast",
-            "-crf",
+            "-cr",
             "23",
             "-pix_fmt",
             "yuv420p",
@@ -1223,7 +1221,7 @@ class ResearchVideoGenerator:
         config = self.config
         total_attendees = len(attendees)
 
-        logger.info(f"🎬 Starting real-time research video stream")
+        logger.info("🎬 Starting real-time research video stream")
         logger.info(f"📋 {total_attendees} attendees to analyze")
         logger.info(f"📺 Output: {video_device} @ {config.width}x{config.height} {config.fps}fps")
 
@@ -1269,7 +1267,6 @@ class ResearchVideoGenerator:
             attendees: List of attendees to "research"
             loop: Whether to loop through attendees continuously
         """
-        import sys
 
         config = self.config
         total_attendees = len(attendees)
@@ -1315,7 +1312,7 @@ class ResearchVideoGenerator:
         filters = []
 
         # Header
-        filters.append(f"drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15")
+        filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15")
         filters.append(
             f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
             f":fontcolor={config.text_color}:x=30:y=55"
@@ -1331,22 +1328,22 @@ class ResearchVideoGenerator:
         filters.append(
             f"drawtext=text='TARGET\\: {escaped_name}'"
             f":fontsize=56:fontcolor={config.highlight_color}:x=30:y=140"
-            f":enable='lt(mod(t,4),1)'"
+            ":enable='lt(mod(t,4),1)'"
         )
         filters.append(
             f"drawtext=text='TARGET\\: {escaped_name} .'"
             f":fontsize=56:fontcolor={config.highlight_color}:x=30:y=140"
-            f":enable='between(mod(t,4),1,2)'"
+            ":enable='between(mod(t,4),1,2)'"
         )
         filters.append(
             f"drawtext=text='TARGET\\: {escaped_name} ..'"
             f":fontsize=56:fontcolor={config.highlight_color}:x=30:y=140"
-            f":enable='between(mod(t,4),2,3)'"
+            ":enable='between(mod(t,4),2,3)'"
         )
         filters.append(
             f"drawtext=text='TARGET\\: {escaped_name} ...'"
             f":fontsize=56:fontcolor={config.highlight_color}:x=30:y=140"
-            f":enable='gte(mod(t,4),3)'"
+            ":enable='gte(mod(t,4),3)'"
         )
 
         # Tools - 1 second each
@@ -1372,7 +1369,7 @@ class ResearchVideoGenerator:
         # Assessment
         filters.append(
             f"drawtext=text='{self._escape_text(assessment)}'"
-            f":fontsize=28:fontcolor=cyan"
+            ":fontsize=28:fontcolor=cyan"
             f":x=30:y={config.height - 100}:enable='gte(t,{duration - 3})'"
         )
 
@@ -1381,17 +1378,17 @@ class ResearchVideoGenerator:
         cmd = [
             "ffmpeg",
             "-y",
-            "-f",
+            "-",
             "lavfi",
             "-i",
             f"color=c={config.background_color}:s={config.width}x{config.height}:r={config.fps}:d={duration}",
-            "-vf",
+            "-v",
             filter_graph,
             "-c:v",
             "libx264",
             "-preset",
             "ultrafast",
-            "-f",
+            "-",
             "matroska",
             "-",  # stdout
         ]
@@ -1427,7 +1424,7 @@ class ResearchVideoGenerator:
         filters = []
 
         # Header with attendee count
-        filters.append(f"drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15")
+        filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15")
         filters.append(
             f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
             f":fontcolor={config.text_color}:x=30:y=55"
@@ -1454,7 +1451,7 @@ class ResearchVideoGenerator:
 
         # Section 1: JIRA ISSUE TRACKER
         sec1_y = right_col_top + 5
-        filters.append(f"drawtext=text='[ JIRA ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec1_y}")
+        filters.append("drawtext=text='[ JIRA ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec1_y}")
         jira_items = [
             "VELOCITY: 42",
             "BLOCKERS: 3",
@@ -1469,7 +1466,7 @@ class ResearchVideoGenerator:
 
         # Section 2: SLACK SIGINT MODULE
         sec2_y = sec1_y + section_height
-        filters.append(f"drawtext=text='[ SLACK ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec2_y}")
+        filters.append("drawtext=text='[ SLACK ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec2_y}")
         slack_items = [
             "CHANNELS: 847",
             "DM: ACTIVE",
@@ -1484,7 +1481,7 @@ class ResearchVideoGenerator:
 
         # Section 3: SEMANTIC VECTOR SEARCH
         sec3_y = sec2_y + section_height
-        filters.append(f"drawtext=text='[ SEMANTIC ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec3_y}")
+        filters.append("drawtext=text='[ SEMANTIC ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec3_y}")
         semantic_items = [
             "VECTORS: 4.2M",
             "COSINE: 0.847",
@@ -1499,7 +1496,7 @@ class ResearchVideoGenerator:
 
         # Section 4: COMMS INTERCEPT ANALYSIS
         sec4_y = sec3_y + section_height
-        filters.append(f"drawtext=text='[ COMMS ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec4_y}")
+        filters.append("drawtext=text='[ COMMS ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec4_y}")
         comms_items = [
             "EMAIL: 12.4K",
             "CALENDAR: LIVE",
@@ -1544,12 +1541,10 @@ class ResearchVideoGenerator:
         # Waveform box border
         filters.append(f"drawbox=x={wave_x}:y={wave_y}:w={wave_w}:h={wave_h}" f":color={config.text_color}:t=2")
         # Caption above the waveform
-        filters.append(
-            f"drawtext=text='VOICE ANALYSIS':fontsize=14:fontcolor=cyan" f":x={wave_x + 240}:y={wave_y - 18}"
-        )
+        filters.append("drawtext=text='VOICE ANALYSIS':fontsize=14:fontcolor=cyan" f":x={wave_x + 240}:y={wave_y - 18}")
         # Additional label below
         filters.append(
-            f"drawtext=text='[ AUDIO ]':fontsize=11:fontcolor=gray" f":x={wave_x + 270}:y={wave_y + wave_h + 5}"
+            "drawtext=text='[ AUDIO ]':fontsize=11:fontcolor=gray" f":x={wave_x + 270}:y={wave_y + wave_h + 5}"
         )
 
         # Target name with animated dots (cycles: name, name ., name .., name ...)
@@ -1559,25 +1554,25 @@ class ResearchVideoGenerator:
         filters.append(
             f"drawtext=text='TARGET\\: {escaped_name}'"
             f":fontsize=36:fontcolor={config.highlight_color}:x=20:y=100"
-            f":enable='lt(mod(t,4),1)'"
+            ":enable='lt(mod(t,4),1)'"
         )
         # State 1: one dot (1 <= t mod 4 < 2)
         filters.append(
             f"drawtext=text='TARGET\\: {escaped_name} .'"
             f":fontsize=36:fontcolor={config.highlight_color}:x=20:y=100"
-            f":enable='between(mod(t,4),1,2)'"
+            ":enable='between(mod(t,4),1,2)'"
         )
         # State 2: two dots (2 <= t mod 4 < 3)
         filters.append(
             f"drawtext=text='TARGET\\: {escaped_name} ..'"
             f":fontsize=36:fontcolor={config.highlight_color}:x=20:y=100"
-            f":enable='between(mod(t,4),2,3)'"
+            ":enable='between(mod(t,4),2,3)'"
         )
         # State 3: three dots (3 <= t mod 4 < 4)
         filters.append(
             f"drawtext=text='TARGET\\: {escaped_name} ...'"
             f":fontsize=36:fontcolor={config.highlight_color}:x=20:y=100"
-            f":enable='gte(mod(t,4),3)'"
+            ":enable='gte(mod(t,4),3)'"
         )
 
         # Tools - appear one at a time, 1 second apart, and STAY on screen
@@ -1595,14 +1590,14 @@ class ResearchVideoGenerator:
             finding_start = findings_start_time + j * 1.0
             filters.append(
                 f"drawtext=text='{self._escape_text(finding)}'"
-                f":fontsize=16:fontcolor=yellow"
+                ":fontsize=16:fontcolor=yellow"
                 f":x=240:y={310 + j * 24}:enable='gte(t,{finding_start})'"
             )
 
         # Assessment at end (last 2 seconds)
         filters.append(
             f"drawtext=text='{self._escape_text(assessment)}'"
-            f":fontsize=20:fontcolor=cyan"
+            ":fontsize=20:fontcolor=cyan"
             f":x=240:y={310 + len(findings) * 24 + 20}:enable='gte(t,{duration - 2})'"
         )
 
@@ -1616,15 +1611,15 @@ class ResearchVideoGenerator:
             "ffmpeg",
             "-y",
             "-re",  # Real-time output
-            "-f",
+            "-",
             "lavfi",
             "-i",
             f"color=c={config.background_color}:s={config.width}x{config.height}:r={config.fps}:d={duration}",
-            "-vf",
+            "-v",
             filter_graph,
             "-t",
             str(duration),
-            "-f",
+            "-",
             "v4l2",
             "-pix_fmt",
             "yuyv422",
@@ -1648,7 +1643,7 @@ class ResearchVideoGenerator:
         total_attendees = len(attendees)
 
         # Header - scaled for 720p
-        filters.append(f"drawtext=text='AI RESEARCH MODULE v2.1':fontsize=18:fontcolor=gray:x=20:y=10")
+        filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=18:fontcolor=gray:x=20:y=10")
         filters.append(
             f"drawtext=text='SCANNING {total_attendees} ATTENDEES...':fontsize=24:fontcolor={config.text_color}:x=20:y=35"
         )
@@ -1692,7 +1687,7 @@ class ResearchVideoGenerator:
 
         # "ANALYZING SPEECH PATTERN" label
         filters.append(
-            f"drawtext=text='VOICE ANALYSIS':fontsize=11:fontcolor=cyan" f":x={wave_x + 250}:y={wave_y + wave_h + 4}"
+            "drawtext=text='VOICE ANALYSIS':fontsize=11:fontcolor=cyan" f":x={wave_x + 250}:y={wave_y + wave_h + 4}"
         )
 
         # Animated waveform bars
@@ -1744,7 +1739,7 @@ class ResearchVideoGenerator:
                 finding_end = min(finding_start + config.finding_display_time + 1, end_time)
                 filters.append(
                     f"drawtext=text='{self._escape_text(finding)}'"
-                    f":fontsize=12:fontcolor=yellow"
+                    ":fontsize=12:fontcolor=yellow"
                     f":x=220:y={210 + (j % 3) * 18}:enable='between(t,{finding_start},{finding_end})'"
                 )
 
@@ -1752,7 +1747,7 @@ class ResearchVideoGenerator:
             assessment = random.choice(THREAT_ASSESSMENTS)
             filters.append(
                 f"drawtext=text='{self._escape_text(assessment)}'"
-                f":fontsize=16:fontcolor=cyan"
+                ":fontsize=16:fontcolor=cyan"
                 f":x=220:y={config.height - 200}:enable='between(t,{end_time - 3},{end_time})'"
             )
 
@@ -1878,8 +1873,8 @@ class RealtimeVideoRenderer:
             "inference_count": 0,
             "samples_processed": 0,
             "last_inference_ms": 0.0,
-            "last_rtf": 0.0,
-            "avg_rtf": 0.0,
+            "last_rt": 0.0,
+            "avg_rt": 0.0,
             "avg_latency_ms": 0.0,
             "inferences_per_second": 0.0,
         }
@@ -1888,9 +1883,9 @@ class RealtimeVideoRenderer:
         try:
             from PIL import ImageFont
 
-            self.font_small = ImageFont.truetype("/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf", 14)
-            self.font_medium = ImageFont.truetype("/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf", 18)
-            self.font_large = ImageFont.truetype("/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf", 24)
+            self.font_small = ImageFont.truetype("/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt", 14)
+            self.font_medium = ImageFont.truetype("/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt", 18)
+            self.font_large = ImageFont.truetype("/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt", 24)
         except Exception:
             from PIL import ImageFont
 
@@ -2839,7 +2834,7 @@ class RealtimeVideoRenderer:
         # Test write to verify device is ready
         test_frame = np.zeros((config.height, config.width * 2), dtype=np.uint8)
         os.write(v4l2_fd, test_frame.tobytes())
-        logger.info(f"v4l2 output initialized")
+        logger.info("v4l2 output initialized")
 
         # Initialize WebRTC streaming if enabled
         if self._enable_webrtc:
@@ -3259,14 +3254,14 @@ class RealtimeVideoRenderer:
             text_items.append((stat, col_x[3], npu_stats_y + i * npu_line_h, "green", npu_size))
 
         # Column 5 - Real inference performance
-        rtf_display = f"{stt['avg_rtf']:.2f}" if stt["avg_rtf"] > 0 else "---"
+        rtf_display = f"{stt['avg_rtf']:.2f}" if stt["avg_rt"] > 0 else "---"
         col5_stats = [
             f"RTF: {rtf_display}",  # Real-time factor (< 1.0 = faster than real-time)
             f"DEVICE: {stt.get('device', 'NPU')[:8]}",
             f"STT: {'ON' if self._stt_enabled else 'OFF'}",
         ]
         for i, stat in enumerate(col5_stats):
-            color = "cyan" if "ON" in stat or stt["avg_rtf"] < 0.5 else "green"
+            color = "cyan" if "ON" in stat or stt["avg_rt"] < 0.5 else "green"
             text_items.append((stat, col_x[4], npu_stats_y + i * npu_line_h, color, npu_size))
 
         # Column 6 - Real telemetry from STT engine
@@ -3751,7 +3746,7 @@ class RealtimeVideoRenderer:
         filters = []
 
         # Header
-        filters.append(f"drawtext=text='[ AI RESEARCH MODULE v2.1 ]':fontsize=32:fontcolor=cyan:x=30:y=15")
+        filters.append("drawtext=text='[ AI RESEARCH MODULE v2.1 ]':fontsize=32:fontcolor=cyan:x=30:y=15")
 
         return filters
 
@@ -3926,7 +3921,10 @@ if __name__ == "__main__":
     _project_root = Path(__file__).parent.parent.parent.parent.parent
     sys.path.insert(0, str(_project_root))
 
-    from scripts.common.video_device import cleanup_device, get_active_device, set_active_fd, setup_v4l2_device
+    from scripts.common.video_device import (
+        cleanup_device,
+        setup_v4l2_device,
+    )
 
     # Global state for cleanup (uses shared module now)
     _active_device_path = None
@@ -4056,7 +4054,9 @@ if __name__ == "__main__":
                 # Clean up orphaned MeetBot devices
                 print("Cleaning up orphaned MeetBot devices...", file=sys.stderr)
                 try:
-                    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+                    from tool_modules.aa_meet_bot.src.virtual_devices import (
+                        cleanup_orphaned_meetbot_devices,
+                    )
 
                     results = await cleanup_orphaned_meetbot_devices()
 

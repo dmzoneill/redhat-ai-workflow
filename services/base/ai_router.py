@@ -264,13 +264,24 @@ IMPORTANT: Return your response as valid JSON with this structure:
         {{
             "file": "path/to/file.py",
             "line": 123,
+            "category": "unused_imports|dead_code|bare_except|security|...",
             "description": "Description of the issue",
             "severity": "critical|high|medium|low",
-            "suggestion": "How to fix it"
+            "suggestion": "Actionable fix (e.g., 'Remove import on line 42')"
         }}
     ],
     "done": true  // Set to true when you've found all issues or confirmed none exist
 }}
+
+Category guidelines:
+- unused_imports: Import statements that are never used
+- unused_variables: Variables assigned but never read
+- dead_code: Functions/classes never called, unreachable code
+- bare_except: Using 'except:' without specifying exception type
+- empty_except: Exception handlers that do nothing (pass)
+- security: Hardcoded secrets, injection vulnerabilities
+- race_conditions: Concurrent access without synchronization
+- memory_leaks: Unbounded caches, unclosed resources
 
 If no issues found, return: {{"findings": [], "done": true}}
 """
@@ -284,10 +295,24 @@ If no issues found, return: {{"findings": [], "done": true}}
                 env={**os.environ},
             )
 
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(full_prompt.encode()),
-                timeout=cmd_timeout,
-            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(full_prompt.encode()),
+                    timeout=cmd_timeout,
+                )
+            except asyncio.TimeoutError:
+                # Kill the subprocess on timeout to prevent zombie processes
+                proc.kill()
+                await proc.wait()
+                latency_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+                logger.error(f"{selected_backend} analysis timed out after {cmd_timeout}s")
+                return LLMResponse(
+                    text="",
+                    backend=selected_backend,
+                    latency_ms=latency_ms,
+                    success=False,
+                    error=f"Timeout after {cmd_timeout}s",
+                )
 
             latency_ms = int((datetime.now() - start_time).total_seconds() * 1000)
 
@@ -333,17 +358,6 @@ If no issues found, return: {{"findings": [], "done": true}}
                 backend=selected_backend,
                 latency_ms=latency_ms,
                 success=True,
-            )
-
-        except asyncio.TimeoutError:
-            latency_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-            logger.error(f"{selected_backend} analysis timed out after {cmd_timeout}s")
-            return LLMResponse(
-                text="",
-                backend=selected_backend,
-                latency_ms=latency_ms,
-                success=False,
-                error=f"Timeout after {cmd_timeout}s",
             )
 
         except Exception as e:

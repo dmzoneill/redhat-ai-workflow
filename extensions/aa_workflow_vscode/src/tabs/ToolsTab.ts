@@ -301,41 +301,47 @@ export class ToolsTab extends BaseTab {
   }
 
   getScript(): string {
+    // Use centralized event delegation system - handlers survive content updates
     return `
-      // Search tools
-      const toolSearch = document.getElementById('toolSearch');
-      if (toolSearch) {
-        toolSearch.addEventListener('input', (e) => {
-          vscode.postMessage({ command: 'searchTools', query: e.target.value });
-        });
-      }
-
-      // Refresh tools
-      document.querySelectorAll('[data-action="refreshTools"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          vscode.postMessage({ command: 'refreshTools' });
-        });
-      });
-
-      // Select module
-      document.querySelectorAll('.tools-module-item').forEach(item => {
-        item.addEventListener('click', () => {
-          const moduleName = item.dataset.module;
-          if (moduleName) {
-            vscode.postMessage({ command: 'selectToolModule', module: moduleName });
+      (function() {
+        // Register click handler - can be called multiple times safely
+        TabEventDelegation.registerClickHandler('tools', function(action, element, e) {
+          if (action === 'refreshTools') {
+            vscode.postMessage({ command: 'refreshTools' });
           }
         });
-      });
 
-      // Select tool
-      document.querySelectorAll('.tool-item').forEach(item => {
-        item.addEventListener('click', () => {
-          const toolName = item.dataset.tool;
-          if (toolName) {
-            vscode.postMessage({ command: 'selectTool', tool: toolName });
-          }
-        });
-      });
+        // Additional click handling for non-data-action elements
+        const toolsContainer = document.getElementById('tools');
+        if (toolsContainer && !toolsContainer.dataset.extraClickInit) {
+          toolsContainer.dataset.extraClickInit = 'true';
+          
+          toolsContainer.addEventListener('click', function(e) {
+            const target = e.target;
+            // Skip if already handled by data-action
+            if (target.closest('[data-action]')) return;
+            
+            const moduleItem = target.closest('.tools-module-item');
+            if (moduleItem && moduleItem.dataset.module) {
+              vscode.postMessage({ command: 'selectToolModule', module: moduleItem.dataset.module });
+              return;
+            }
+            
+            const toolItem = target.closest('.tool-item');
+            if (toolItem && toolItem.dataset.tool) {
+              vscode.postMessage({ command: 'selectTool', tool: toolItem.dataset.tool });
+              return;
+            }
+          });
+
+          // Input delegation for search
+          toolsContainer.addEventListener('input', function(e) {
+            if (e.target.id === 'toolSearch') {
+              vscode.postMessage({ command: 'searchTools', query: e.target.value });
+            }
+          });
+        }
+      })();
     `;
   }
 

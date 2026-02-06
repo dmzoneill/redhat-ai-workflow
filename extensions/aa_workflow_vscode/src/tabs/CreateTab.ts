@@ -326,102 +326,10 @@ export class CreateTab extends BaseTab {
   }
 
   getScript(): string {
+    // Use centralized event delegation system - handlers survive content updates
     return `
-      // Create Tab initialization
       (function() {
-        // Ralph toggle
-        const ralphToggle = document.getElementById('ralphToggle');
-        const ralphOptions = document.getElementById('ralphOptions');
-        if (ralphToggle) {
-          ralphToggle.addEventListener('click', function() {
-            this.classList.toggle('active');
-            if (ralphOptions) {
-              ralphOptions.classList.toggle('visible', this.classList.contains('active'));
-            }
-          });
-        }
-
-        // Max iterations slider
-        const maxIterSlider = document.getElementById('ralphMaxIterations');
-        const maxIterValue = document.getElementById('ralphMaxIterationsValue');
-        if (maxIterSlider && maxIterValue) {
-          maxIterSlider.addEventListener('input', function() {
-            maxIterValue.textContent = this.value;
-          });
-        }
-
-        // Context item selection
-        document.querySelectorAll('.create-context-item').forEach(item => {
-          item.addEventListener('click', function(e) {
-            if (e.target.tagName !== 'INPUT') {
-              const checkbox = this.querySelector('input[type="checkbox"]');
-              if (checkbox) checkbox.checked = !checkbox.checked;
-            }
-            this.classList.toggle('selected', this.querySelector('input')?.checked);
-          });
-        });
-
-        // Persona selection
-        document.querySelectorAll('.create-persona-chip').forEach(chip => {
-          chip.addEventListener('click', function() {
-            document.querySelectorAll('.create-persona-chip').forEach(c => c.classList.remove('selected'));
-            this.classList.add('selected');
-            const personaId = this.getAttribute('data-persona-id');
-            vscode.postMessage({ command: 'createSelectPersona', personaId: personaId });
-          });
-        });
-
-        // Action buttons
-        document.querySelectorAll('[data-action]').forEach(btn => {
-          btn.addEventListener('click', function() {
-            const action = this.getAttribute('data-action');
-            handleCreateAction(action, this);
-          });
-        });
-
-        function handleCreateAction(action, element) {
-          switch (action) {
-            case 'autoContext':
-              const issueKey = document.getElementById('issueKeyInput')?.value;
-              if (issueKey) {
-                vscode.postMessage({ command: 'createAutoContext', issueKey: issueKey });
-              }
-              break;
-            case 'searchSlack':
-              const slackQuery = document.getElementById('slackSearchQuery')?.value;
-              if (slackQuery) {
-                vscode.postMessage({ command: 'createSearchSlack', query: slackQuery });
-              }
-              break;
-            case 'searchCode':
-              const codeQuery = document.getElementById('codeSearchQuery')?.value;
-              if (codeQuery) {
-                vscode.postMessage({ command: 'createSearchCode', query: codeQuery });
-              }
-              break;
-            case 'toggleRalph':
-              // Handled above
-              break;
-            case 'stopLoop':
-              const sessionId = element.getAttribute('data-session-id');
-              if (sessionId) {
-                vscode.postMessage({ command: 'createStopLoop', sessionId: sessionId });
-              }
-              break;
-            case 'createSession':
-              vscode.postMessage({ command: 'createSession', config: gatherConfig() });
-              break;
-            case 'clearAll':
-              clearAllSelections();
-              break;
-            case 'saveTemplate':
-              vscode.postMessage({ command: 'createSaveTemplate', config: gatherConfig() });
-              break;
-            case 'importGemini':
-              vscode.postMessage({ command: 'createImportGemini' });
-              break;
-          }
-        }
+        const createContainer = document.getElementById('create');
 
         function gatherConfig() {
           return {
@@ -437,11 +345,126 @@ export class CreateTab extends BaseTab {
         }
 
         function clearAllSelections() {
-          document.getElementById('issueKeyInput').value = '';
-          document.querySelectorAll('.create-persona-chip').forEach(c => c.classList.remove('selected'));
-          document.querySelectorAll('.create-context-item input[type="checkbox"]').forEach(cb => {
-            cb.checked = false;
-            cb.closest('.create-context-item')?.classList.remove('selected');
+          const issueInput = document.getElementById('issueKeyInput');
+          if (issueInput) issueInput.value = '';
+          if (createContainer) {
+            createContainer.querySelectorAll('.create-persona-chip').forEach(c => c.classList.remove('selected'));
+            createContainer.querySelectorAll('.create-context-item input[type="checkbox"]').forEach(cb => {
+              cb.checked = false;
+              cb.closest('.create-context-item')?.classList.remove('selected');
+            });
+          }
+        }
+
+        // Register click handler - can be called multiple times safely
+        TabEventDelegation.registerClickHandler('create', function(action, element, e) {
+          switch (action) {
+            case 'autoContext': {
+              const issueKey = document.getElementById('issueKeyInput')?.value;
+              if (issueKey) {
+                vscode.postMessage({ command: 'createAutoContext', issueKey: issueKey });
+              }
+              break;
+            }
+            case 'searchSlack': {
+              const slackQuery = document.getElementById('slackSearchQuery')?.value;
+              if (slackQuery) {
+                vscode.postMessage({ command: 'createSearchSlack', query: slackQuery });
+              }
+              break;
+            }
+            case 'searchCode': {
+              const codeQuery = document.getElementById('codeSearchQuery')?.value;
+              if (codeQuery) {
+                vscode.postMessage({ command: 'createSearchCode', query: codeQuery });
+              }
+              break;
+            }
+            case 'toggleRalph': {
+              const ralphToggle = document.getElementById('ralphToggle');
+              const ralphOptions = document.getElementById('ralphOptions');
+              if (ralphToggle) {
+                ralphToggle.classList.toggle('active');
+                if (ralphOptions) {
+                  ralphOptions.classList.toggle('visible', ralphToggle.classList.contains('active'));
+                }
+              }
+              break;
+            }
+            case 'stopLoop': {
+              const sessionId = element.getAttribute('data-session-id');
+              if (sessionId) {
+                vscode.postMessage({ command: 'createStopLoop', sessionId: sessionId });
+              }
+              break;
+            }
+            case 'createSession':
+              vscode.postMessage({ command: 'createSession', config: gatherConfig() });
+              break;
+            case 'clearAll':
+              clearAllSelections();
+              break;
+            case 'saveTemplate':
+              vscode.postMessage({ command: 'createSaveTemplate', config: gatherConfig() });
+              break;
+            case 'importGemini':
+              vscode.postMessage({ command: 'createImportGemini' });
+              break;
+          }
+        });
+
+        // Additional click handling for non-data-action elements
+        if (createContainer && !createContainer.dataset.extraClickInit) {
+          createContainer.dataset.extraClickInit = 'true';
+          
+          createContainer.addEventListener('click', function(e) {
+            const target = e.target;
+            // Skip if already handled by data-action
+            if (target.closest('[data-action]')) return;
+            
+            // Ralph toggle (also has data-action but we handle it specially)
+            if (target.id === 'ralphToggle' || target.closest('#ralphToggle')) {
+              const ralphToggle = document.getElementById('ralphToggle');
+              const ralphOptions = document.getElementById('ralphOptions');
+              if (ralphToggle) {
+                ralphToggle.classList.toggle('active');
+                if (ralphOptions) {
+                  ralphOptions.classList.toggle('visible', ralphToggle.classList.contains('active'));
+                }
+              }
+              return;
+            }
+            
+            // Context item selection
+            const contextItem = target.closest('.create-context-item');
+            if (contextItem) {
+              if (target.tagName !== 'INPUT') {
+                const checkbox = contextItem.querySelector('input[type="checkbox"]');
+                if (checkbox) checkbox.checked = !checkbox.checked;
+              }
+              contextItem.classList.toggle('selected', contextItem.querySelector('input')?.checked);
+              return;
+            }
+            
+            // Persona chip selection
+            const personaChip = target.closest('.create-persona-chip');
+            if (personaChip) {
+              createContainer.querySelectorAll('.create-persona-chip').forEach(c => c.classList.remove('selected'));
+              personaChip.classList.add('selected');
+              const personaId = personaChip.getAttribute('data-persona-id');
+              vscode.postMessage({ command: 'createSelectPersona', personaId: personaId });
+              return;
+            }
+          });
+
+          // Input delegation for slider
+          createContainer.addEventListener('input', function(e) {
+            if (e.target.id === 'ralphMaxIterations') {
+              const maxIterValue = document.getElementById('ralphMaxIterationsValue');
+              if (maxIterValue) {
+                maxIterValue.textContent = e.target.value;
+              }
+            }
           });
         }
       })();

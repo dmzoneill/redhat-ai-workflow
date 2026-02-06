@@ -40,7 +40,7 @@ interface OllamaInstance {
 }
 
 export class ServicesTab extends BaseTab {
-  private services: ServiceInfo[] = [];
+  private serviceList: ServiceInfo[] = [];
   private slackStatus: SlackStatus | null = null;
   private ollamaInstances: OllamaInstance[] = [];
   private onlineCount = 0;
@@ -54,7 +54,7 @@ export class ServicesTab extends BaseTab {
     });
 
     // Initialize service list
-    this.services = [
+    this.serviceList = [
       {
         name: "sprint",
         displayName: "Sprint Bot",
@@ -159,7 +159,7 @@ export class ServicesTab extends BaseTab {
       this.onlineCount = 0;
       this.offlineCount = 0;
 
-      this.services.forEach((service) => {
+      this.serviceList.forEach((service) => {
         const isOnline = statusResults[service.name as keyof typeof statusResults];
         service.status = isOnline ? "online" : "offline";
         service.lastChecked = new Date().toISOString();
@@ -188,11 +188,17 @@ export class ServicesTab extends BaseTab {
           };
         }
       }
+
+      // Clear error on success
+      this.lastError = null;
       logger.log("loadData() complete");
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
       logger.error("Error loading data", error);
+      // Don't reset services - preserve partial data
     }
+
+    this.notifyNeedsRender();
   }
 
   getContent(): string {
@@ -213,7 +219,7 @@ export class ServicesTab extends BaseTab {
           </div>
           <div class="stat-card blue">
             <div class="stat-icon">⟳</div>
-            <div class="stat-value">${this.services.length}</div>
+            <div class="stat-value">${this.serviceList.length}</div>
             <div class="stat-label">Total</div>
           </div>
         </div>
@@ -223,7 +229,7 @@ export class ServicesTab extends BaseTab {
       <div class="section">
         <div class="section-title">Daemons</div>
         <div class="grid-3">
-          ${this.services.map((service) => this.getServiceCardHtml(service)).join("")}
+          ${this.serviceList.map((service) => this.getServiceCardHtml(service)).join("")}
         </div>
       </div>
 
@@ -360,43 +366,37 @@ export class ServicesTab extends BaseTab {
   }
 
   getScript(): string {
+    // Use centralized event delegation system - handlers survive content updates
     return `
-      // Service control buttons
-      document.querySelectorAll('[data-action="startService"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const service = btn.dataset.service;
-          if (service) {
-            vscode.postMessage({ command: 'serviceControl', action: 'start', service });
+      (function() {
+        // Register click handler - can be called multiple times safely
+        TabEventDelegation.registerClickHandler('services', function(action, element, e) {
+          const service = element.dataset.service;
+          
+          switch(action) {
+            case 'startService':
+              if (service) {
+                vscode.postMessage({ command: 'serviceControl', action: 'start', service });
+              }
+              break;
+            case 'stopService':
+              if (service) {
+                vscode.postMessage({ command: 'serviceControl', action: 'stop', service });
+              }
+              break;
+            case 'restartService':
+              if (service) {
+                vscode.postMessage({ command: 'serviceControl', action: 'restart', service });
+              }
+              break;
+            case 'testOllama':
+              if (element.dataset.instance) {
+                vscode.postMessage({ command: 'testOllamaInstance', instance: element.dataset.instance });
+              }
+              break;
           }
         });
-      });
-
-      document.querySelectorAll('[data-action="stopService"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const service = btn.dataset.service;
-          if (service) {
-            vscode.postMessage({ command: 'serviceControl', action: 'stop', service });
-          }
-        });
-      });
-
-      document.querySelectorAll('[data-action="restartService"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const service = btn.dataset.service;
-          if (service) {
-            vscode.postMessage({ command: 'serviceControl', action: 'restart', service });
-          }
-        });
-      });
-
-      document.querySelectorAll('[data-action="testOllama"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const instance = btn.dataset.instance;
-          if (instance) {
-            vscode.postMessage({ command: 'testOllamaInstance', instance });
-          }
-        });
-      });
+      })();
     `;
   }
 
@@ -422,7 +422,7 @@ export class ServicesTab extends BaseTab {
   }
 
   private async controlService(action: string, serviceName: string): Promise<void> {
-    const service = this.services.find((s) => s.name === serviceName);
+    const service = this.serviceList.find((s) => s.name === serviceName);
     if (!service) return;
 
     try {

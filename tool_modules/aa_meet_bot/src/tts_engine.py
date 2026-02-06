@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -746,7 +745,7 @@ class TTSEngine:
             )
 
             if success:
-                logger.info(f"Successfully wrote audio to pipe")
+                logger.info("Successfully wrote audio to pipe")
                 return duration
             else:
                 return 0.0

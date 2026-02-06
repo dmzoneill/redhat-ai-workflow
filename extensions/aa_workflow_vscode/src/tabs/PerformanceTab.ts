@@ -397,35 +397,33 @@ export class PerformanceTab extends BaseTab {
   }
 
   getScript(): string {
+    // Use centralized event delegation system - handlers survive content updates
     return `
-      // Performance Tab initialization
       (function() {
-        document.querySelectorAll('[data-action]').forEach(btn => {
-          btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const action = this.getAttribute('data-action');
-            const questionId = this.getAttribute('data-question');
+        // Register click handler - can be called multiple times safely
+        TabEventDelegation.registerClickHandler('performance', function(action, element, e) {
+          e.stopPropagation();
+          const questionId = element.getAttribute('data-question');
 
-            if (action === 'logActivity') {
-              const category = document.getElementById('activityCategory')?.value;
-              const description = document.getElementById('activityDescription')?.value;
-              if (description) {
-                vscode.postMessage({
-                  command: 'performanceAction',
-                  action: 'logActivity',
-                  category: category,
-                  description: description
-                });
-                document.getElementById('activityDescription').value = '';
-              }
-            } else {
+          if (action === 'logActivity') {
+            const category = document.getElementById('activityCategory')?.value;
+            const description = document.getElementById('activityDescription')?.value;
+            if (description) {
               vscode.postMessage({
                 command: 'performanceAction',
-                action: action,
-                questionId: questionId
+                action: 'logActivity',
+                category: category,
+                description: description
               });
+              document.getElementById('activityDescription').value = '';
             }
-          });
+          } else {
+            vscode.postMessage({
+              command: 'performanceAction',
+              action: action,
+              questionId: questionId
+            });
+          }
         });
       })();
     `;
@@ -439,10 +437,203 @@ export class PerformanceTab extends BaseTab {
         if (message.data) {
           this.state = { ...this.state, ...message.data };
         }
+        this.notifyNeedsRender();
+        return true;
+
+      // === NEW: Action handler for performance operations ===
+      case "performanceAction":
+        await this.handlePerformanceAction(message.action, message);
         return true;
 
       default:
         return false;
+    }
+  }
+
+  // === Action handlers ===
+
+  private async handlePerformanceAction(action: string, message: any): Promise<void> {
+    logger.log(`Performance action: ${action}`);
+
+    switch (action) {
+      case "collectDaily":
+        await this.collectDailyData();
+        break;
+
+      case "backfill":
+        await this.backfillMissingData();
+        break;
+
+      case "exportReport":
+        await this.exportReport();
+        break;
+
+      case "logActivity":
+        await this.logActivity(message.category, message.description);
+        break;
+
+      case "evaluateAll":
+        await this.evaluateAllQuestions();
+        break;
+
+      case "viewSummary":
+        await this.viewQuestionSummary(message.questionId);
+        break;
+
+      case "addNote":
+        await this.addNoteToQuestion(message.questionId);
+        break;
+
+      case "evaluate":
+        await this.evaluateQuestion(message.questionId);
+        break;
+
+      default:
+        logger.warn(`Unknown performance action: ${action}`);
+    }
+  }
+
+  private async collectDailyData(): Promise<void> {
+    vscode.window.showInformationMessage("Collecting today's performance data...");
+    try {
+      const result = await dbus.stats_collectDaily();
+      if (result.success) {
+        vscode.window.showInformationMessage("✅ Daily data collected successfully");
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Failed to collect data: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error collecting data: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async backfillMissingData(): Promise<void> {
+    vscode.window.showInformationMessage("Backfilling missing data...");
+    try {
+      const result = await dbus.stats_backfill();
+      if (result.success) {
+        const data = result.data as any;
+        vscode.window.showInformationMessage(`✅ Backfilled ${data?.days_processed || 0} days`);
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Failed to backfill: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error backfilling: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async exportReport(): Promise<void> {
+    try {
+      const result = await dbus.stats_exportReport(this.state.quarter);
+      if (result.success && result.data) {
+        const data = result.data as any;
+        if (data.path) {
+          vscode.window.showInformationMessage(`Report exported to: ${data.path}`);
+          // Open the file
+          const uri = vscode.Uri.file(data.path);
+          await vscode.commands.executeCommand("vscode.open", uri);
+        } else {
+          vscode.window.showInformationMessage("Report exported successfully");
+        }
+      } else {
+        vscode.window.showErrorMessage(`Failed to export: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error exporting: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async logActivity(category: string, description: string): Promise<void> {
+    if (!description) {
+      vscode.window.showWarningMessage("Please enter a description");
+      return;
+    }
+
+    try {
+      const result = await dbus.stats_logActivity(category, description);
+      if (result.success) {
+        vscode.window.showInformationMessage(`✅ Activity logged: ${category}`);
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Failed to log activity: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error logging activity: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async evaluateAllQuestions(): Promise<void> {
+    vscode.window.showInformationMessage("Re-evaluating all questions...");
+    try {
+      const result = await dbus.stats_evaluateAll();
+      if (result.success) {
+        vscode.window.showInformationMessage("✅ All questions re-evaluated");
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Failed to evaluate: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error evaluating: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async viewQuestionSummary(questionId: string): Promise<void> {
+    if (!questionId) return;
+
+    try {
+      const result = await dbus.stats_getQuestionSummary(questionId);
+      if (result.success && result.data) {
+        const data = result.data as any;
+        // Show in a webview or information message
+        const summary = data.summary || "No summary available";
+        vscode.window.showInformationMessage(summary, { modal: true });
+      } else {
+        vscode.window.showErrorMessage(`Failed to get summary: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error getting summary: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async addNoteToQuestion(questionId: string): Promise<void> {
+    if (!questionId) return;
+
+    const note = await vscode.window.showInputBox({
+      prompt: "Enter a note for this question",
+      placeHolder: "Your note...",
+    });
+
+    if (!note) return;
+
+    try {
+      const result = await dbus.stats_addNote(questionId, note);
+      if (result.success) {
+        vscode.window.showInformationMessage("✅ Note added");
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Failed to add note: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error adding note: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async evaluateQuestion(questionId: string): Promise<void> {
+    if (!questionId) return;
+
+    vscode.window.showInformationMessage(`Evaluating question ${questionId}...`);
+    try {
+      const result = await dbus.stats_evaluateQuestion(questionId);
+      if (result.success) {
+        vscode.window.showInformationMessage("✅ Question evaluated");
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Failed to evaluate: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error evaluating: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

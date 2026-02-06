@@ -526,7 +526,7 @@ steps:
     args:
       target: "{{ channel_info.channel_id or channel_info.channel_name }}"
       text: "{{ formatted_msg.text }}"
-      thread_ts: "{{ inputs.thread_ts or '' }}"
+      thread_ts: "{{ inputs.thread_ts | default('', true) }}"
     output: post_result
     on_error: auto_heal  # Slack API - may need auth
 

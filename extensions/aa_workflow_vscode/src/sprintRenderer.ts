@@ -566,13 +566,13 @@ function renderIssueCard(issue: SprintIssue, jiraUrl: string, ignored: boolean =
         <span class="issue-badge priority ${isMajor ? "major" : ""} ${ignoredClass}">${priorityIcon} ${escapeHtml(issue.priority)}</span>
       </div>
       <div class="issue-col-status">
-        <span class="issue-badge status ${ignoredClass}" style="background: ${ignored ? "#6b728020" : jiraStatusColor + "20"}; color: ${ignored ? "#6b7280" : jiraStatusColor};">
+        <span class="issue-badge status ${ignoredClass} ${ignored ? "ignored" : ""}" data-status-color="${ignored ? "" : jiraStatusColor}">
           ${escapeHtml(displayStatus)}
         </span>
       </div>
       <div class="issue-col-actions">
         ${ignored ? `
-          <span style="font-size: 0.75rem; color: var(--text-muted);">No actions</span>
+          <span class="text-sm text-muted">No actions</span>
         ` : `
           <div class="issue-actions">
             ${showStartIssue ? `<button class="issue-btn start" data-action="startIssue" data-issue="${escapeHtml(issue.key)}" title="Start this issue immediately (bypasses all checks)">▶ Force Start</button>` : ""}
@@ -633,9 +633,9 @@ function renderToolRequests(requests: ToolGapRequest[]): string {
     return `
       <div class="tool-requests">
         <h3 class="section-title">🔧 Tool Requests</h3>
-        <div class="sprint-empty" style="padding: 24px;">
+        <div class="empty-state p-24">
           <div>No tool gaps recorded yet.</div>
-          <div style="font-size: 0.85rem; margin-top: 8px;">
+          <div class="text-base mt-8">
             When skills need tools that don't exist, they'll appear here.
           </div>
         </div>
@@ -887,7 +887,7 @@ export function renderTraceViewer(issueKey: string): string {
     <div class="trace-viewer">
       <div class="trace-header">
         <h3>Execution Trace: ${escapeHtml(issueKey)}</h3>
-        <span class="trace-state" style="background-color: ${stateColor};">${escapeHtml(trace.current_state)}</span>
+        <span class="trace-state state-${stateColor}">${escapeHtml(trace.current_state)}</span>
         <button class="trace-close" data-action="closeTrace">✕</button>
       </div>
 
@@ -984,8 +984,8 @@ export function getSprintTabContent(
   return `
     <div class="sprint-container">
       <!-- Sprint Bot Header -->
-      <div class="section" style="margin-bottom: 8px;">
-        <h2 class="section-title" style="margin: 0;">🎯 Sprint Bot</h2>
+      <div class="section mb-8">
+        <h2 class="section-title m-0">🎯 Sprint Bot</h2>
       </div>
 
       <!-- Sprint Headers - Current and Next -->
@@ -1041,28 +1041,28 @@ export function getSprintTabContent(
 
           <!-- Manual Start/Stop Button - Styled like Meetings tab -->
           ${state.manuallyStarted ? `
-            <div class="bot-status-pill running" style="margin-left: 16px;">
+            <div class="bot-status-pill running ml-16">
               <span class="status-dot online"></span>
               <span>Running</span>
               <button class="btn btn-xs btn-danger" data-action="stopBot" title="Stop the bot immediately">Stop</button>
             </div>
           ` : `
-            <button class="btn btn-sm btn-success" style="margin-left: 16px;" data-action="startBot" title="Start processing approved issues now (ignores schedule)">
+            <button class="btn btn-sm btn-success ml-16" data-action="startBot" title="Start processing approved issues now (ignores schedule)">
               ▶ Start
             </button>
           `}
 
           <!-- Status Indicator -->
-          <span class="bot-status-indicator" style="margin-left: 12px; font-size: 0.85rem; color: var(--text-muted);">
+          <span class="bot-status-indicator ml-12 text-base text-muted">
             ${state.manuallyStarted
-              ? '<span style="color: #10b981;">● Running (manual)</span>'
+              ? '<span class="text-success">● Running (manual)</span>'
               : state.automaticMode
-                ? '<span style="color: #3b82f6;">○ Scheduled (Mon-Fri 9-5)</span>'
-                : '<span style="color: #6b7280;">○ Idle</span>'
+                ? '<span class="text-info">○ Scheduled (Mon-Fri 9-5)</span>'
+                : '<span class="text-muted">○ Idle</span>'
             }
           </span>
 
-          <div style="flex: 1;"></div>
+          <div class="flex-spacer"></div>
 
           <!-- Background Toggle -->
           <div class="bot-toggle" title="When enabled, new issue chats open in background and you stay in your current chat">
@@ -1071,7 +1071,7 @@ export function getSprintTabContent(
           </div>
 
           <!-- Jira Hygiene Button -->
-          <button class="btn btn-sm btn-warning" style="margin-left: 16px;" data-action="runHygiene" title="Check for missing story points, descriptions, etc.">
+          <button class="btn btn-sm btn-warning ml-16" data-action="runHygiene" title="Check for missing story points, descriptions, etc.">
             🧹 Jira Hygiene
           </button>
         </div>
@@ -1218,107 +1218,148 @@ export function getSprintTabContent(
  * This should be included in the main script section of the webview
  */
 export function getSprintTabScript(): string {
+  // Use centralized event delegation system - handlers survive content updates
   return `
-    // Sprint Tab Functions
-    function initSprintTab() {
-      console.log('[SprintTab] Initializing sprint tab...');
+    (function() {
+      const sprintContainer = document.getElementById('sprint');
 
-      // Subtab switching
-      document.querySelectorAll('.sprint-subtab').forEach(tab => {
-        tab.addEventListener('click', function() {
-          const subtab = this.getAttribute('data-subtab');
+      console.log('[SprintTab] Initializing sprint tab with centralized event delegation...');
 
-          // Update tab buttons
-          document.querySelectorAll('.sprint-subtab').forEach(t => t.classList.remove('active'));
-          this.classList.add('active');
-
-          // Update content
-          document.querySelectorAll('.sprint-subtab-content').forEach(c => c.classList.remove('active'));
-          document.getElementById('subtab-' + subtab)?.classList.add('active');
-        });
-      });
-
-      // Timeline toggle
-      document.querySelectorAll('.timeline-toggle').forEach(toggle => {
-        toggle.addEventListener('click', function() {
-          const issueKey = this.getAttribute('data-issue');
-          const events = document.getElementById('timeline-' + issueKey);
-          if (events) {
-            events.classList.toggle('expanded');
-            this.textContent = events.classList.contains('expanded')
-              ? '▼ ' + this.textContent.substring(2)
-              : '▶ ' + this.textContent.substring(2);
+      // Register click handler - can be called multiple times safely
+      TabEventDelegation.registerClickHandler('sprint', function(action, element, e) {
+        e.stopPropagation();
+        const issueKey = element.getAttribute('data-issue');
+        const chatId = element.getAttribute('data-chat-id');
+        
+        console.log('[SprintTab] Action clicked:', { action, issueKey, chatId });
+        
+        // Handle toggle history specially
+        if (action === 'toggleHistory') {
+          const content = document.getElementById('sprintHistoryContent');
+          if (content) {
+            content.classList.toggle('expanded');
+            const arrow = element.querySelector('span:last-child');
+            if (arrow) {
+              arrow.textContent = content.classList.contains('expanded') ? '▼' : '▶';
+            }
           }
-        });
-      });
-
-      // History toggle
-      document.querySelector('[data-action="toggleHistory"]')?.addEventListener('click', function() {
-        const content = document.getElementById('sprintHistoryContent');
-        if (content) {
-          content.classList.toggle('expanded');
-          const arrow = this.querySelector('span:last-child');
-          if (arrow) {
-            arrow.textContent = content.classList.contains('expanded') ? '▼' : '▶';
-          }
+          return;
         }
-      });
-
-      // Issue actions (including Test Chat button)
-      document.querySelectorAll('.sprint-container .issue-btn').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          const action = this.getAttribute('data-action');
-          const issueKey = this.getAttribute('data-issue');
-          const chatId = this.getAttribute('data-chat-id');
-
-          console.log('[SprintTab] Button clicked:', { action, issueKey, chatId });
-
-          if (action && vscode) {
-            console.log('[SprintTab] Posting message:', { command: 'sprintAction', action });
-            vscode.postMessage({
-              command: 'sprintAction',
-              action: action,
-              issueKey: issueKey,
-              chatId: chatId
-            });
-          }
-        });
-      });
-
-      // Automatic mode toggle
-      document.querySelector('.bot-toggle-switch[data-action="toggleAutomatic"]')?.addEventListener('click', function() {
-        this.classList.toggle('active');
+        
+        // All other actions go to backend
         if (vscode) {
           vscode.postMessage({
             command: 'sprintAction',
-            action: 'toggleAutomatic',
-            enabled: this.classList.contains('active')
+            action: action,
+            issueKey: issueKey,
+            chatId: chatId
           });
         }
       });
 
-      // Background tasks toggle
-      document.querySelector('.bot-toggle-switch[data-action="toggleBackgroundTasks"]')?.addEventListener('click', function() {
-        this.classList.toggle('active');
-        if (vscode) {
-          vscode.postMessage({
-            command: 'sprintAction',
-            action: 'toggleBackgroundTasks',
-            enabled: this.classList.contains('active')
-          });
-        }
-      });
+      // Additional click handling for non-data-action elements
+      if (sprintContainer && !sprintContainer.dataset.extraClickInit) {
+        sprintContainer.dataset.extraClickInit = 'true';
+        
+        sprintContainer.addEventListener('click', function(e) {
+          const target = e.target;
+          // Skip if already handled by data-action
+          if (target.closest('[data-action]')) return;
+          
+          // Subtab switching
+          const subtab = target.closest('.sprint-subtab');
+          if (subtab) {
+            const subtabId = subtab.getAttribute('data-subtab');
+            
+            // Update tab buttons
+            sprintContainer.querySelectorAll('.sprint-subtab').forEach(t => t.classList.remove('active'));
+            subtab.classList.add('active');
+            
+            // Update content
+            sprintContainer.querySelectorAll('.sprint-subtab-content').forEach(c => c.classList.remove('active'));
+            const content = document.getElementById('subtab-' + subtabId);
+            if (content) content.classList.add('active');
+            return;
+          }
+          
+          // Trace tab switching (Timeline/Diagram)
+          const traceTab = target.closest('.trace-tab');
+          if (traceTab) {
+            const traceTabId = traceTab.getAttribute('data-trace-tab');
+            
+            // Update trace tab buttons
+            document.querySelectorAll('.trace-tab').forEach(t => t.classList.remove('active'));
+            traceTab.classList.add('active');
+            
+            // Update trace tab content
+            document.querySelectorAll('.trace-tab-content').forEach(c => c.classList.remove('active'));
+            const traceContent = document.getElementById('trace-' + traceTabId);
+            if (traceContent) traceContent.classList.add('active');
+            console.log('[SprintTab] Trace tab switched to:', traceTabId);
+            return;
+          }
+          
+          // Timeline toggle
+          const timelineToggle = target.closest('.timeline-toggle');
+          if (timelineToggle) {
+            const issueKey = timelineToggle.getAttribute('data-issue');
+            const events = document.getElementById('timeline-' + issueKey);
+            if (events) {
+              events.classList.toggle('expanded');
+              timelineToggle.textContent = events.classList.contains('expanded')
+                ? '▼ ' + timelineToggle.textContent.substring(2)
+                : '▶ ' + timelineToggle.textContent.substring(2);
+            }
+            return;
+          }
+          
+          // Issue action buttons (legacy .issue-btn without data-action)
+          const issueBtn = target.closest('.issue-btn');
+          if (issueBtn) {
+            e.stopPropagation();
+            const action = issueBtn.getAttribute('data-action');
+            const issueKey = issueBtn.getAttribute('data-issue');
+            const chatId = issueBtn.getAttribute('data-chat-id');
+            
+            console.log('[SprintTab] Button clicked:', { action, issueKey, chatId });
+            
+            if (action && vscode) {
+              vscode.postMessage({
+                command: 'sprintAction',
+                action: action,
+                issueKey: issueKey,
+                chatId: chatId
+              });
+            }
+            return;
+          }
+          
+          // Bot toggle switches
+          const toggleSwitch = target.closest('.bot-toggle-switch');
+          if (toggleSwitch) {
+            const action = toggleSwitch.getAttribute('data-action');
+            toggleSwitch.classList.toggle('active');
+            
+            if (action === 'toggleAutomatic' && vscode) {
+              vscode.postMessage({
+                command: 'sprintAction',
+                action: 'toggleAutomatic',
+                enabled: toggleSwitch.classList.contains('active')
+              });
+            } else if (action === 'toggleBackgroundTasks' && vscode) {
+              vscode.postMessage({
+                command: 'sprintAction',
+                action: 'toggleBackgroundTasks',
+                enabled: toggleSwitch.classList.contains('active')
+              });
+            }
+            return;
+          }
+        });
+      }
 
-      console.log('[SprintTab] Sprint tab initialized');
-    }
-
-    // Initialize when DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initSprintTab);
-    } else {
-      initSprintTab();
-    }
+      console.log('[SprintTab] Sprint tab initialized with centralized event delegation');
+    })();
   `;
 }
 

@@ -376,18 +376,27 @@ def wrap_server_tools_runtime(server) -> int:
 
     Call this AFTER all tools have been registered with the server.
 
+    NOTE: This uses FastMCP's internal _components API because:
+    1. We need to modify tool handlers in-place
+    2. The public API doesn't expose handler modification
+    3. This is a runtime patching operation that needs direct access
+
+    TODO: When FastMCP provides a public API for tool handler modification,
+    migrate to that approach.
+
     Returns:
         Number of tools wrapped.
     """
     count = 0
 
     # Access the server's internal tool registry
-    # FastMCP v3 stores tools in providers._components with keys like 'tool:name@'
+    # FastMCP v3 stores tools in providers._components with keys like 'tool:name@version'
     for provider in server.providers:
-        if not hasattr(provider, "_components"):
+        components = getattr(provider, "_components", None)
+        if components is None:
             continue
 
-        for key, tool_info in provider._components.items():
+        for key, tool_info in components.items():
             if not key.startswith("tool:"):
                 continue
 

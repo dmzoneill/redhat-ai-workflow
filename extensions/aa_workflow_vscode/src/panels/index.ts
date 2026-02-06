@@ -11,17 +11,18 @@ export {
   UtilityMessageHandler,
   CommandMessageHandler,
   SessionMessageHandler,
-  SprintMessageHandler,
-  MeetingMessageHandler,
+  // NOTE: SprintMessageHandler removed - SprintTab handles sprintAction directly
+  // NOTE: MeetingMessageHandler removed - MeetingsTab handles meeting messages directly
   SlackMessageHandler,
-  SkillMessageHandler,
+  // NOTE: SkillMessageHandler removed - SkillsTab handles skill messages directly
   ServiceMessageHandler,
-  CronMessageHandler,
+  // NOTE: CronMessageHandler removed - CronTab handles cron messages directly
   MeetingHistoryMessageHandler,
   VideoPreviewMessageHandler,
   MeetingAudioMessageHandler,
   InferenceMessageHandler,
-  PersonaMessageHandler,
+  SlackPersonaTestHandler,
+  // NOTE: PersonaMessageHandler removed - PersonasTab handles persona messages directly
   WorkspaceMessageHandler,
   TabMessageHandler,
   CreateSessionMessageHandler,

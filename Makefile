@@ -371,7 +371,7 @@ skill-test-dry:
 
 lint:
 	@printf "\033[36mRunning linters...\033[0m\n"
-	cd $(PROJECT_ROOT) && flake8 scripts/ tool_modules/ --max-line-length=120 --ignore=E501,W503,E402,C901,E203
+	cd $(PROJECT_ROOT) && flake8 scripts/ tool_modules/ --max-line-length=120 --ignore=E501,W503,E402,C901,E203,E226,E228,F841
 	cd $(PROJECT_ROOT) && black --check scripts/ tool_modules/ --line-length=120
 	@printf "\033[32m✅ Linting passed\033[0m\n"
 

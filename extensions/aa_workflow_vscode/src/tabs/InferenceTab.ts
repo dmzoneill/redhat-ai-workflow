@@ -154,7 +154,7 @@ export class InferenceTab extends BaseTab {
       <!-- Inference Context Inspector -->
       <div class="section">
         <div class="section-title">🧪 Inference Context Inspector</div>
-        <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 12px;">
+        <p class="text-secondary text-sm mb-12">
           Preview the full context that would be sent to Claude for any message. Shows persona, memory, tools, and semantic knowledge.
         </p>
         <div class="card">
@@ -178,7 +178,7 @@ export class InferenceTab extends BaseTab {
                 </select>
               </div>
             </div>
-            <div class="form-actions" style="display: flex; gap: 8px; margin-top: 12px;">
+            <div class="form-actions d-flex gap-8 mt-12">
               <button class="btn btn-primary" data-action="runInferenceTest" ${this.isRunningTest ? "disabled" : ""}>
                 ${this.isRunningTest ? "⏳ Running..." : "🔍 Run Inference"}
               </button>
@@ -187,13 +187,13 @@ export class InferenceTab extends BaseTab {
           </div>
 
           <!-- Results Area -->
-          <div class="inference-result-area" id="inferenceResultArea" style="margin-top: 16px; ${this.testResult ? "" : "display: none;"}">
+          <div class="inference-result-area mt-16 ${this.testResult ? "" : "d-none"}" id="inferenceResultArea">
             ${this.testResult ? this.renderInferenceResult(this.testResult) : ""}
           </div>
 
           <!-- Quick Tests -->
-          <div class="quick-tests" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--vscode-widget-border);">
-            <span style="font-size: 12px; color: var(--text-muted);">Quick Tests:</span>
+          <div class="quick-tests mt-16 pt-12 border-t">
+            <span class="text-sm text-muted">Quick Tests:</span>
             <button class="btn btn-sm btn-ghost" data-quick-test="hello">hello</button>
             <button class="btn btn-sm btn-ghost" data-quick-test="MR 1459">MR 1459</button>
             <button class="btn btn-sm btn-ghost" data-quick-test="AAP-12345">AAP-12345</button>
@@ -319,22 +319,22 @@ export class InferenceTab extends BaseTab {
       spawn_error_fallback: "❌ Error",
     };
     const layerBadges = methods
-      .map((m) => `<span class="layer-badge" style="background: rgba(139,92,246,0.2); padding: 2px 8px; border-radius: 12px; font-size: 11px;">${layerNames[m] || m}</span>`)
+      .map((m) => `<span class="layer-badge">${layerNames[m] || m}</span>`)
       .join(" → ");
 
     // Error banner if any
     const errorBanner = data.error
-      ? `<div style="background: var(--vscode-inputValidation-errorBackground); padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; color: var(--vscode-errorForeground);">⚠️ ${this.escapeHtml(data.error)}</div>`
+      ? `<div class="error-banner mb-12">⚠️ ${this.escapeHtml(data.error)}</div>`
       : "";
 
     let html = errorBanner;
 
     // Summary header
     const finalToolCount = (data.tools || []).length;
-    html += `<div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--vscode-widget-border);">
-      <span style="font-size: 1.3em; font-weight: bold; color: var(--vscode-testing-iconPassed);">✅ ${finalToolCount} tools</span>
-      <span style="color: var(--vscode-descriptionForeground);">${data.latency_ms || 0}ms • ${(data.reduction_pct || 0).toFixed(1)}% reduction</span>
-      <span style="margin-left: auto;">${layerBadges}</span>
+    html += `<div class="d-flex items-baseline gap-12 mb-16 pb-12 border-b">
+      <span class="text-xl font-bold text-success">✅ ${finalToolCount} tools</span>
+      <span class="text-secondary">${data.latency_ms || 0}ms • ${(data.reduction_pct || 0).toFixed(1)}% reduction</span>
+      <span class="ml-auto">${layerBadges}</span>
     </div>`;
 
     // === 1. SYSTEM PROMPT / PERSONA SECTION ===
@@ -344,50 +344,50 @@ export class InferenceTab extends BaseTab {
     const personaAutoDetected = data.persona_auto_detected || false;
     const personaReason = data.persona_detection_reason || "passed_in";
 
-    html += `<div class="context-section" style="margin-bottom: 16px; padding: 12px; background: rgba(34,197,94,0.1); border-radius: 8px; border-left: 3px solid #22c55e;">
-      <div style="font-weight: bold; margin-bottom: 8px;">${personaIcons[data.persona] || "👤"} System Prompt (Persona: ${this.escapeHtml(data.persona)})
-        ${personaAutoDetected ? `<span style="background: rgba(34,197,94,0.3); padding: 2px 6px; border-radius: 8px; font-size: 10px; font-weight: normal;">🔍 Auto-detected via ${this.escapeHtml(personaReason)}</span>` : ""}
+    html += `<div class="context-section green">
+      <div class="section-header">${personaIcons[data.persona] || "👤"} System Prompt (Persona: ${this.escapeHtml(data.persona)})
+        ${personaAutoDetected ? `<span class="chip green text-2xs font-normal">🔍 Auto-detected via ${this.escapeHtml(personaReason)}</span>` : ""}
       </div>
       ${personaCategories.length > 0
-        ? `<div style="font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 8px;">Tool Categories: <span style="color: var(--vscode-foreground);">${personaCategories.map((c) => this.escapeHtml(c)).join(", ")}</span></div>`
-        : `<div style="font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 8px;">Tool Categories: <span style="opacity: 0.5;">none configured</span></div>`}
-      ${personaPrompt ? `<div style="font-size: 11px; font-style: italic; color: var(--vscode-descriptionForeground); padding: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; max-height: 80px; overflow-y: auto;">"${this.escapeHtml(personaPrompt.substring(0, 300))}${personaPrompt.length > 300 ? '..."' : '"'}</div>` : ""}
+        ? `<div class="text-sm text-secondary mb-8">Tool Categories: <span class="text-primary">${personaCategories.map((c) => this.escapeHtml(c)).join(", ")}</span></div>`
+        : `<div class="text-sm text-secondary mb-8">Tool Categories: <span class="opacity-50">none configured</span></div>`}
+      ${personaPrompt ? `<div class="text-2xs text-secondary p-8 rounded scroll-container short" style="font-style: italic;">"${this.escapeHtml(personaPrompt.substring(0, 300))}${personaPrompt.length > 300 ? '..."' : '"'}</div>` : ""}
     </div>`;
 
     // === 2. MEMORY STATE SECTION (with inline environment status) ===
     const kubeconfigs = env.kubeconfigs || {};
     const activeIssues = mem.active_issues || [];
-    html += `<div class="context-section" style="margin-bottom: 16px; padding: 12px; background: rgba(168,85,247,0.1); border-radius: 8px; border-left: 3px solid #a855f7;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <span style="font-weight: bold;">🧠 Memory State</span>
-        <span style="font-size: 11px; display: flex; gap: 8px;">
+    html += `<div class="context-section purple">
+      <div class="flex-between mb-8">
+        <span class="font-bold">🧠 Memory State</span>
+        <span class="text-2xs d-flex gap-8">
           <span>${env.vpn_connected ? "🟢" : "🔴"} VPN</span>
           <span>${kubeconfigs.stage ? "🟢" : "⚪"} Stage</span>
           <span>${kubeconfigs.prod ? "🟢" : "⚪"} Prod</span>
           <span>${kubeconfigs.ephemeral ? "🟢" : "⚪"} Eph</span>
         </span>
       </div>
-      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 12px;">
-        <div><span style="color: var(--vscode-descriptionForeground);">Current Repo:</span> <code>${this.escapeHtml(mem.current_repo || "none")}</code></div>
-        <div><span style="color: var(--vscode-descriptionForeground);">Current Branch:</span> <code>${this.escapeHtml(mem.current_branch || "none")}</code></div>
+      <div class="d-grid grid-cols-2 gap-8 text-sm">
+        <div><span class="text-secondary">Current Repo:</span> <code>${this.escapeHtml(mem.current_repo || "none")}</code></div>
+        <div><span class="text-secondary">Current Branch:</span> <code>${this.escapeHtml(mem.current_branch || "none")}</code></div>
       </div>
       ${activeIssues.length > 0
-        ? `<div style="margin-top: 8px;"><span style="color: var(--vscode-descriptionForeground); font-size: 12px;">Active Issues:</span>
-          <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
-            ${activeIssues.map((i) => `<span style="background: rgba(168,85,247,0.2); padding: 2px 6px; border-radius: 4px; font-size: 11px;">${this.escapeHtml(typeof i === "string" ? i : i.key)}</span>`).join("")}
+        ? `<div class="mt-8"><span class="text-secondary text-sm">Active Issues:</span>
+          <div class="d-flex flex-wrap gap-4 mt-4">
+            ${activeIssues.map((i) => `<span class="chip purple">${this.escapeHtml(typeof i === "string" ? i : i.key)}</span>`).join("")}
           </div></div>`
-        : `<div style="margin-top: 8px; font-size: 11px; color: var(--vscode-descriptionForeground);">No active issues</div>`}
-      ${mem.notes ? `<div style="margin-top: 8px; font-size: 11px; padding: 6px; background: rgba(0,0,0,0.1); border-radius: 4px;"><strong>Notes:</strong> ${this.escapeHtml(mem.notes)}</div>` : ""}
+        : `<div class="mt-8 text-2xs text-secondary">No active issues</div>`}
+      ${mem.notes ? `<div class="mt-8 text-2xs p-6 rounded dark-bg"><strong>Notes:</strong> ${this.escapeHtml(mem.notes)}</div>` : ""}
     </div>`;
 
     // === 3. SESSION LOG SECTION ===
     const sessionLog = data.session_log || [];
     if (sessionLog.length > 0) {
-      html += `<div class="context-section" style="margin-bottom: 16px; padding: 12px; background: rgba(99,102,241,0.1); border-radius: 8px; border-left: 3px solid #6366f1;">
-        <div style="font-weight: bold; margin-bottom: 8px;">📝 Session Log (Recent Actions)</div>
-        <div style="font-size: 11px; display: flex; flex-direction: column; gap: 4px; max-height: 100px; overflow-y: auto;">
-          ${sessionLog.map((a) => `<div style="padding: 4px 8px; background: rgba(0,0,0,0.1); border-radius: 4px;">
-            <span style="color: var(--vscode-descriptionForeground);">${this.escapeHtml((a.time || "").substring(11, 19))}</span> ${this.escapeHtml(a.action)}
+      html += `<div class="context-section indigo">
+        <div class="section-header">📝 Session Log (Recent Actions)</div>
+        <div class="text-2xs d-flex flex-col gap-4 scroll-container">
+          ${sessionLog.map((a) => `<div class="action-log-item">
+            <span class="text-secondary">${this.escapeHtml((a.time || "").substring(11, 19))}</span> ${this.escapeHtml(a.action)}
           </div>`).join("")}
         </div>
       </div>`;
@@ -400,21 +400,21 @@ export class InferenceTab extends BaseTab {
       if (skillDesc.length > 500) {
         skillDesc = skillDesc.substring(0, 500) + "...";
       }
-      html += `<div class="context-section" style="margin-bottom: 16px; padding: 12px; background: rgba(139,92,246,0.1); border-radius: 8px; border-left: 3px solid #8b5cf6;">
-        <div style="font-weight: bold; margin-bottom: 8px;">🎯 Detected Skill: ${this.escapeHtml(ctx.skill.name)}</div>
-        ${skillDesc ? `<div style="font-size: 12px; margin-bottom: 8px; max-height: 120px; overflow-y: auto; padding: 8px; background: rgba(0,0,0,0.1); border-radius: 4px;">${this.escapeHtml(skillDesc)}</div>` : ""}
+      html += `<div class="context-section violet">
+        <div class="section-header">🎯 Detected Skill: ${this.escapeHtml(ctx.skill.name)}</div>
+        ${skillDesc ? `<div class="text-sm mb-8 scroll-container tall p-8 rounded dark-bg">${this.escapeHtml(skillDesc)}</div>` : ""}
         ${ctx.skill.inputs && ctx.skill.inputs.length > 0
-          ? `<div style="font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 6px;">Inputs: ${ctx.skill.inputs.map((i) => `<code style="background: rgba(139,92,246,0.2); padding: 1px 4px; border-radius: 3px;">${i.name || i}${i.required ? "*" : ""}</code>`).join(", ")}</div>`
+          ? `<div class="text-sm text-secondary mb-6">Inputs: ${ctx.skill.inputs.map((i) => `<code class="code-inline purple">${i.name || i}${i.required ? "*" : ""}</code>`).join(", ")}</div>`
           : ""}
-        <div style="font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 6px;">Tools used by skill:</div>
-        <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
-          ${(ctx.skill.tools || []).map((t) => `<span class="tool-chip" style="background: rgba(139,92,246,0.2); padding: 2px 6px; border-radius: 4px; font-size: 11px;">${t}</span>`).join("")}
+        <div class="text-sm text-secondary mb-6">Tools used by skill:</div>
+        <div class="d-flex flex-wrap gap-4 mb-8">
+          ${(ctx.skill.tools || []).map((t) => `<span class="chip purple">${t}</span>`).join("")}
         </div>
         ${memOps.reads.length > 0 || memOps.writes.length > 0
-          ? `<div style="font-size: 11px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(139,92,246,0.2);">
-            <div style="color: var(--vscode-descriptionForeground); margin-bottom: 4px;">Memory Operations:</div>
-            ${memOps.reads.length > 0 ? `<div style="margin-bottom: 4px;">📖 Reads: ${memOps.reads.map((r: any) => `<code style="background: rgba(34,197,94,0.2); padding: 1px 4px; border-radius: 3px; font-size: 10px;">${r.key || r.tool || "unknown"}</code>`).join(" ")}</div>` : ""}
-            ${memOps.writes.length > 0 ? `<div>✏️ Writes: ${memOps.writes.map((w: any) => `<code style="background: rgba(245,158,11,0.2); padding: 1px 4px; border-radius: 3px; font-size: 10px;">${w.key || w.tool || "unknown"}</code>`).join(" ")}</div>` : ""}
+          ? `<div class="text-2xs mt-8 pt-8 border-t">
+            <div class="text-secondary mb-4">Memory Operations:</div>
+            ${memOps.reads.length > 0 ? `<div class="mb-4">📖 Reads: ${memOps.reads.map((r: any) => `<code class="code-inline green text-2xs">${r.key || r.tool || "unknown"}</code>`).join(" ")}</div>` : ""}
+            ${memOps.writes.length > 0 ? `<div>✏️ Writes: ${memOps.writes.map((w: any) => `<code class="code-inline orange text-2xs">${w.key || w.tool || "unknown"}</code>`).join(" ")}</div>` : ""}
           </div>`
           : ""}
       </div>`;
@@ -423,12 +423,12 @@ export class InferenceTab extends BaseTab {
     // === 5. LEARNED PATTERNS SECTION ===
     const learnedPatterns = data.learned_patterns || [];
     if (learnedPatterns.length > 0) {
-      html += `<div class="context-section" style="margin-bottom: 16px; padding: 12px; background: rgba(236,72,153,0.1); border-radius: 8px; border-left: 3px solid #ec4899;">
-        <div style="font-weight: bold; margin-bottom: 8px;">💡 Learned Patterns</div>
-        <div style="font-size: 11px; display: flex; flex-direction: column; gap: 6px;">
-          ${learnedPatterns.map((p) => `<div style="padding: 6px 8px; background: rgba(0,0,0,0.1); border-radius: 4px;">
-            <div style="color: var(--vscode-errorForeground);">Pattern: ${this.escapeHtml((p.pattern || "").substring(0, 50))}</div>
-            <div style="color: var(--vscode-testing-iconPassed);">Fix: ${this.escapeHtml((p.fix || "").substring(0, 100))}</div>
+      html += `<div class="context-section pink">
+        <div class="section-header">💡 Learned Patterns</div>
+        <div class="text-2xs d-flex flex-col gap-6">
+          ${learnedPatterns.map((p) => `<div class="pattern-item">
+            <div class="text-error">Pattern: ${this.escapeHtml((p.pattern || "").substring(0, 50))}</div>
+            <div class="text-success">Fix: ${this.escapeHtml((p.fix || "").substring(0, 100))}</div>
           </div>`).join("")}
         </div>
       </div>`;
@@ -437,11 +437,11 @@ export class InferenceTab extends BaseTab {
     // === 6. TOOLS LIST ===
     const tools = data.tools || [];
     if (tools.length > 0) {
-      html += `<div class="context-section" style="margin-bottom: 16px; padding: 12px; background: rgba(59,130,246,0.1); border-radius: 8px; border-left: 3px solid #3b82f6;">
-        <div style="font-weight: bold; margin-bottom: 8px;">🔧 Filtered Tools (${tools.length})</div>
-        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-          ${tools.slice(0, 30).map((t) => `<span style="background: rgba(59,130,246,0.2); padding: 2px 6px; border-radius: 4px; font-size: 11px;">${this.escapeHtml(t)}</span>`).join("")}
-          ${tools.length > 30 ? `<span style="padding: 2px 6px; font-size: 11px; color: var(--vscode-descriptionForeground);">+${tools.length - 30} more</span>` : ""}
+      html += `<div class="context-section blue">
+        <div class="section-header">🔧 Filtered Tools (${tools.length})</div>
+        <div class="d-flex flex-wrap gap-4">
+          ${tools.slice(0, 30).map((t) => `<span class="chip blue">${this.escapeHtml(t)}</span>`).join("")}
+          ${tools.length > 30 ? `<span class="chip text-secondary">+${tools.length - 30} more</span>` : ""}
         </div>
       </div>`;
     }
@@ -505,57 +505,9 @@ export class InferenceTab extends BaseTab {
   }
 
   getScript(): string {
+    // Use centralized event delegation system - handlers survive content updates
     return `
-      // Inference Tab initialization
       (function() {
-        // Config change handlers
-        ['inferenceEngine', 'fallbackStrategy', 'maxCategories'].forEach(id => {
-          const el = document.getElementById(id);
-          if (el) {
-            el.addEventListener('change', function() {
-              vscode.postMessage({
-                command: 'inferenceConfigChange',
-                field: id,
-                value: this.value
-              });
-            });
-          }
-        });
-
-        // Toggle handlers
-        ['enableFiltering', 'enableNpu', 'enableCache'].forEach(id => {
-          const el = document.getElementById(id);
-          if (el) {
-            el.addEventListener('change', function() {
-              vscode.postMessage({
-                command: 'inferenceConfigChange',
-                field: id,
-                value: this.checked
-              });
-            });
-          }
-        });
-
-        // Action buttons
-        document.querySelectorAll('[data-action]').forEach(btn => {
-          btn.addEventListener('click', function() {
-            const action = this.getAttribute('data-action');
-            handleInferenceAction(action, this);
-          });
-        });
-
-        // Quick test buttons
-        document.querySelectorAll('[data-quick-test]').forEach(btn => {
-          btn.addEventListener('click', function() {
-            const testMsg = this.getAttribute('data-quick-test');
-            const msgInput = document.getElementById('inferenceTestMessage');
-            if (msgInput && testMsg) {
-              msgInput.value = testMsg;
-              runInferenceTest();
-            }
-          });
-        });
-
         function runInferenceTest() {
           const message = document.getElementById('inferenceTestMessage')?.value || '';
           const persona = document.getElementById('inferenceTestPersona')?.value || '';
@@ -570,12 +522,13 @@ export class InferenceTab extends BaseTab {
           }
         }
 
-        function handleInferenceAction(action, element) {
+        // Register click handler - can be called multiple times safely
+        TabEventDelegation.registerClickHandler('inference', function(action, element, e) {
           switch (action) {
             case 'runInferenceTest':
               runInferenceTest();
               break;
-            case 'copyInferenceResult':
+            case 'copyInferenceResult': {
               const resultArea = document.getElementById('inferenceResultArea');
               if (resultArea && resultArea.textContent) {
                 navigator.clipboard.writeText(resultArea.textContent).then(() => {
@@ -585,19 +538,22 @@ export class InferenceTab extends BaseTab {
                 });
               }
               break;
-            case 'clearTestResults':
+            }
+            case 'clearTestResults': {
               const results = document.getElementById('inferenceResultArea');
               if (results) {
                 results.style.display = 'none';
                 results.innerHTML = '';
               }
               break;
-            case 'testOllama':
+            }
+            case 'testOllama': {
               const instance = element.getAttribute('data-instance');
               if (instance) {
                 vscode.postMessage({ command: 'testOllamaInstance', instance: instance });
               }
               break;
+            }
             case 'resetConfig':
               vscode.postMessage({ command: 'resetInferenceConfig' });
               break;
@@ -605,6 +561,51 @@ export class InferenceTab extends BaseTab {
               vscode.postMessage({ command: 'saveInferenceConfig' });
               break;
           }
+        });
+
+        // Register keypress handler for Enter key
+        TabEventDelegation.registerKeypressHandler('inference', function(element, e) {
+          if (element.id === 'inferenceTestMessage' && e.key === 'Enter') {
+            runInferenceTest();
+          }
+        });
+
+        // Register change handler for config selects and toggles
+        TabEventDelegation.registerChangeHandler('inference', function(element, e) {
+          const configFields = ['inferenceEngine', 'fallbackStrategy', 'maxCategories'];
+          const toggleFields = ['enableFiltering', 'enableNpu', 'enableCache'];
+          
+          if (configFields.includes(element.id)) {
+            vscode.postMessage({
+              command: 'inferenceConfigChange',
+              field: element.id,
+              value: element.value
+            });
+          } else if (toggleFields.includes(element.id)) {
+            vscode.postMessage({
+              command: 'inferenceConfigChange',
+              field: element.id,
+              value: element.checked
+            });
+          }
+        });
+
+        // Additional click handling for quick-test buttons (not data-action)
+        const inferenceContainer = document.getElementById('inference');
+        if (inferenceContainer && !inferenceContainer.dataset.extraClickInit) {
+          inferenceContainer.dataset.extraClickInit = 'true';
+          
+          inferenceContainer.addEventListener('click', function(e) {
+            const quickTestBtn = e.target.closest('[data-quick-test]');
+            if (quickTestBtn) {
+              const testMsg = quickTestBtn.getAttribute('data-quick-test');
+              const msgInput = document.getElementById('inferenceTestMessage');
+              if (msgInput && testMsg) {
+                msgInput.value = testMsg;
+                runInferenceTest();
+              }
+            }
+          });
         }
       })();
     `;
@@ -646,8 +647,144 @@ export class InferenceTab extends BaseTab {
         }
         return true;
 
+      // === NEW: Action handlers for inference operations ===
+      case "runInferenceTest":
+        await this.runInferenceTest(message.message, message.persona, message.skill);
+        return true;
+
+      case "testOllamaInstance":
+        await this.testOllamaInstance(message.instance);
+        return true;
+
+      case "resetInferenceConfig":
+        await this.resetConfig();
+        return true;
+
+      case "saveInferenceConfig":
+        await this.saveConfig();
+        return true;
+
       default:
         return false;
+    }
+  }
+
+  // === Action handlers ===
+
+  private async runInferenceTest(testMessage: string, persona?: string, skill?: string): Promise<void> {
+    if (!testMessage) {
+      vscode.window.showWarningMessage("Please enter a test message");
+      return;
+    }
+
+    this.isRunningTest = true;
+    this.notifyNeedsRender();
+
+    try {
+      logger.log(`Running inference test: message="${testMessage}", persona="${persona || 'auto'}", skill="${skill || 'auto'}"`);
+      
+      // Call D-Bus to run the inference test
+      const result = await dbus.config_getInferenceContext(testMessage);
+      
+      if (result.success && result.data) {
+        const data = result.data as any;
+        this.testResult = data.context || data;
+        logger.log(`Inference test complete: ${this.testResult?.tool_count || 0} tools`);
+      } else {
+        this.testResult = {
+          tools: [],
+          tool_count: 0,
+          reduction_pct: 0,
+          methods: [],
+          persona: persona || "unknown",
+          skill_detected: null,
+          latency_ms: 0,
+          message_preview: testMessage,
+          error: result.error || "Failed to run inference test",
+        };
+        logger.error(`Inference test failed: ${result.error}`);
+      }
+    } catch (error) {
+      this.testResult = {
+        tools: [],
+        tool_count: 0,
+        reduction_pct: 0,
+        methods: [],
+        persona: persona || "unknown",
+        skill_detected: null,
+        latency_ms: 0,
+        message_preview: testMessage,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      logger.error("Inference test error", error);
+    }
+
+    this.isRunningTest = false;
+    this.notifyNeedsRender();
+  }
+
+  private async testOllamaInstance(instanceName: string): Promise<void> {
+    const instance = this.ollamaInstances.find(i => i.name === instanceName);
+    if (!instance) {
+      vscode.window.showErrorMessage(`Unknown Ollama instance: ${instanceName}`);
+      return;
+    }
+
+    try {
+      logger.log(`Testing Ollama instance: ${instanceName} at ${instance.url}`);
+      vscode.window.showInformationMessage(`Testing ${instanceName}...`);
+
+      // Simple health check via curl
+      const { stdout, stderr } = await execAsync(
+        `curl -s -o /dev/null -w "%{http_code}" ${instance.url}/api/tags 2>/dev/null || echo "000"`,
+        { timeout: 5000 }
+      );
+      
+      const statusCode = stdout.trim();
+      if (statusCode === "200") {
+        vscode.window.showInformationMessage(`✅ ${instanceName} is healthy`);
+        // Update instance status
+        instance.status = "online";
+      } else {
+        vscode.window.showWarningMessage(`⚠️ ${instanceName} returned status ${statusCode}`);
+        instance.status = "offline";
+      }
+      
+      this.notifyNeedsRender();
+    } catch (error) {
+      vscode.window.showErrorMessage(`❌ ${instanceName} test failed: ${error instanceof Error ? error.message : String(error)}`);
+      instance.status = "offline";
+      this.notifyNeedsRender();
+    }
+  }
+
+  private async resetConfig(): Promise<void> {
+    this.config = {
+      primaryEngine: "npu",
+      fallbackStrategy: "keyword_match",
+      maxCategories: 3,
+      enableFiltering: true,
+      enableNpu: true,
+      enableCache: true,
+    };
+    vscode.window.showInformationMessage("Inference configuration reset to defaults");
+    this.notifyNeedsRender();
+  }
+
+  private async saveConfig(): Promise<void> {
+    try {
+      logger.log(`Saving inference config: ${JSON.stringify(this.config)}`);
+      
+      // Save config via D-Bus
+      const result = await dbus.config_setConfig("inference", JSON.stringify(this.config));
+      
+      if (result.success) {
+        vscode.window.showInformationMessage("✅ Inference configuration saved");
+      } else {
+        vscode.window.showErrorMessage(`Failed to save config: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to save config: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

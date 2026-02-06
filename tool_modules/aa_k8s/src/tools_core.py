@@ -27,7 +27,6 @@ from tool_modules.common import PROJECT_ROOT
 __project_root__ = PROJECT_ROOT
 
 import importlib.util
-import sys
 from pathlib import Path
 
 from server.auto_heal_decorator import auto_heal

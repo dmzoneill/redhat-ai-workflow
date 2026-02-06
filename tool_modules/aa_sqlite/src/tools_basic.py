@@ -18,6 +18,7 @@ Database tools:
 """
 
 import logging
+import re
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -31,6 +32,29 @@ from server.tool_registry import ToolRegistry
 from server.utils import run_cmd, truncate_output
 
 logger = logging.getLogger(__name__)
+
+# Valid SQLite identifier pattern (table/column names)
+# Allows alphanumeric, underscore, and quoted identifiers
+_SAFE_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str | None:
+    """Validate a SQLite identifier (table/column name) to prevent SQL injection.
+
+    Args:
+        name: The identifier to validate
+        kind: Description for error message (e.g., "table", "column")
+
+    Returns:
+        None if valid, error message string if invalid
+    """
+    if not name:
+        return f"❌ {kind.capitalize()} name cannot be empty"
+    if not _SAFE_IDENTIFIER_PATTERN.match(name):
+        return f"❌ Invalid {kind} name: must start with letter/underscore and contain only alphanumeric/underscore characters"
+    if len(name) > 128:
+        return f"❌ {kind.capitalize()} name too long (max 128 characters)"
+    return None
 
 
 @auto_heal()
@@ -58,7 +82,14 @@ async def _sqlite_query_impl(
 
 @auto_heal()
 async def _sqlite_tables_impl(database: str) -> str:
-    """List tables in database."""
+    """List all tables in a SQLite database.
+
+    Args:
+        database: Path to the SQLite database file (supports ~ expansion)
+
+    Returns:
+        Markdown-formatted list of tables, or error message if database not found
+    """
     db_path = Path(database).expanduser()
     if not db_path.exists():
         return f"❌ Database not found: {database}"
@@ -73,12 +104,26 @@ async def _sqlite_tables_impl(database: str) -> str:
 
 @auto_heal()
 async def _sqlite_schema_impl(database: str, table: str = "") -> str:
-    """Show table schema."""
+    """Show the CREATE TABLE schema for database tables.
+
+    Args:
+        database: Path to the SQLite database file (supports ~ expansion)
+        table: Optional specific table name (shows all tables if empty)
+
+    Returns:
+        SQL CREATE TABLE statements, or error message on failure
+    """
     db_path = Path(database).expanduser()
     if not db_path.exists():
         return f"❌ Database not found: {database}"
 
-    query = f".schema {table}" if table else ".schema"
+    # Validate table name if provided to prevent injection
+    if table:
+        if error := _validate_identifier(table, "table"):
+            return error
+        query = f".schema {table}"
+    else:
+        query = ".schema"
     cmd = ["sqlite3", str(db_path), query]
 
     success, output = await run_cmd(cmd, timeout=30)
@@ -89,10 +134,22 @@ async def _sqlite_schema_impl(database: str, table: str = "") -> str:
 
 @auto_heal()
 async def _sqlite_describe_impl(database: str, table: str) -> str:
-    """Describe table structure."""
+    """Describe the column structure of a table using PRAGMA table_info.
+
+    Args:
+        database: Path to the SQLite database file (supports ~ expansion)
+        table: Name of the table to describe
+
+    Returns:
+        Column information (name, type, nullable, default, primary key)
+    """
     db_path = Path(database).expanduser()
     if not db_path.exists():
         return f"❌ Database not found: {database}"
+
+    # Validate table name to prevent injection
+    if error := _validate_identifier(table, "table"):
+        return error
 
     cmd = ["sqlite3", str(db_path), "-header", "-column", f"PRAGMA table_info({table});"]
 
@@ -104,12 +161,26 @@ async def _sqlite_describe_impl(database: str, table: str) -> str:
 
 @auto_heal()
 async def _sqlite_dump_impl(database: str, table: str = "") -> str:
-    """Dump database to SQL."""
+    """Dump database or table to SQL statements.
+
+    Args:
+        database: Path to the SQLite database file (supports ~ expansion)
+        table: Optional specific table to dump (dumps all if empty)
+
+    Returns:
+        SQL dump (CREATE TABLE + INSERT statements), truncated to 5000 chars
+    """
     db_path = Path(database).expanduser()
     if not db_path.exists():
         return f"❌ Database not found: {database}"
 
-    query = f".dump {table}" if table else ".dump"
+    # Validate table name if provided to prevent injection
+    if table:
+        if error := _validate_identifier(table, "table"):
+            return error
+        query = f".dump {table}"
+    else:
+        query = ".dump"
     cmd = ["sqlite3", str(db_path), query]
 
     success, output = await run_cmd(cmd, timeout=120)
@@ -125,7 +196,21 @@ async def _sqlite_import_csv_impl(
     csv_file: str,
     skip_header: bool = True,
 ) -> str:
-    """Import CSV into table."""
+    """Import a CSV file into a SQLite table.
+
+    Args:
+        database: Path to the SQLite database file (supports ~ expansion)
+        table: Target table name (will be created if doesn't exist)
+        csv_file: Path to the CSV file to import
+        skip_header: If True, treat first row as headers (default: True)
+
+    Returns:
+        Success message or error details
+    """
+    # Validate table name to prevent injection
+    if error := _validate_identifier(table, "table"):
+        return error
+
     db_path = Path(database).expanduser()
     csv_path = Path(csv_file).expanduser()
 
@@ -147,7 +232,16 @@ async def _sqlite_import_csv_impl(
 
 @auto_heal()
 async def _sqlite_vacuum_impl(database: str) -> str:
-    """Optimize database."""
+    """Optimize and compact a SQLite database by running VACUUM.
+
+    Rebuilds the database file, reclaiming unused space and defragmenting.
+
+    Args:
+        database: Path to the SQLite database file (supports ~ expansion)
+
+    Returns:
+        Success message or error details
+    """
     db_path = Path(database).expanduser()
     if not db_path.exists():
         return f"❌ Database not found: {database}"
@@ -162,7 +256,16 @@ async def _sqlite_vacuum_impl(database: str) -> str:
 
 @auto_heal()
 async def _sqlite_integrity_check_impl(database: str) -> str:
-    """Check database integrity."""
+    """Run integrity check on a SQLite database.
+
+    Verifies database structure and reports any corruption or errors.
+
+    Args:
+        database: Path to the SQLite database file (supports ~ expansion)
+
+    Returns:
+        'ok' if database is healthy, or list of integrity errors found
+    """
     db_path = Path(database).expanduser()
     if not db_path.exists():
         return f"❌ Database not found: {database}"
@@ -179,7 +282,19 @@ async def _sqlite_integrity_check_impl(database: str) -> str:
 
 @auto_heal()
 async def _sqlite_count_impl(database: str, table: str) -> str:
-    """Count rows in table."""
+    """Count the number of rows in a table.
+
+    Args:
+        database: Path to the SQLite database file (supports ~ expansion)
+        table: Name of the table to count rows in
+
+    Returns:
+        Row count in format "tablename: N rows"
+    """
+    # Validate table name to prevent injection
+    if error := _validate_identifier(table, "table"):
+        return error
+
     db_path = Path(database).expanduser()
     if not db_path.exists():
         return f"❌ Database not found: {database}"

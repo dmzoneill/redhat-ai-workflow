@@ -3,6 +3,10 @@
  *
  * Manages all tabs in the Command Center panel.
  * Handles tab registration, switching, and message routing.
+ * 
+ * Architecture: TabManager injects Services into Tabs so they can use
+ * Services instead of calling D-Bus directly. This eliminates duplicate
+ * business logic between Tabs and Services.
  */
 
 import * as vscode from "vscode";
@@ -25,6 +29,7 @@ import {
   SlopTab,
 } from "../tabs";
 import { createLogger } from "../logger";
+import type { ServiceContainer } from "../services";
 
 const logger = createLogger("TabManager");
 
@@ -38,10 +43,25 @@ export class TabManager {
   private activeTabId: string = "overview";
   private context: TabManagerContext | null = null;
   private _onNeedsRender: (() => void) | null = null;
+  private _services: ServiceContainer = {};
 
   constructor() {
     // Register default tabs
     this.registerDefaultTabs();
+  }
+  
+  /**
+   * Set the service container for all tabs.
+   * This should be called after services are initialized in CommandCenterPanel.
+   * Tabs can then use this.services.* instead of calling D-Bus directly.
+   */
+  setServices(services: ServiceContainer): void {
+    this._services = services;
+    // Inject services into all existing tabs
+    this.tabs.forEach((tab) => {
+      tab.setServices(services);
+    });
+    logger.log(`Services injected into ${this.tabs.size} tabs`);
   }
 
   /**
@@ -105,6 +125,10 @@ export class TabManager {
     // Set the render callback if we have one
     if (this._onNeedsRender) {
       tab.setRenderCallback(this._onNeedsRender);
+    }
+    // Inject services if we have them
+    if (Object.keys(this._services).length > 0) {
+      tab.setServices(this._services);
     }
   }
 

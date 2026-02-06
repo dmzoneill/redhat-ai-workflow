@@ -17,7 +17,13 @@ from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_ephemeral
 from server.tool_registry import ToolRegistry
-from server.utils import ensure_cluster_auth, get_kubeconfig, get_section_config, run_cmd, truncate_output
+from server.utils import (
+    ensure_cluster_auth,
+    get_kubeconfig,
+    get_section_config,
+    run_cmd,
+    truncate_output,
+)
 
 logger = logging.getLogger(__name__)
 

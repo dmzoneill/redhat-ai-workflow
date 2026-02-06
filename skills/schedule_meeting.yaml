@@ -209,55 +209,22 @@ steps:
       }
     output: existing_events
 
-  # ==================== FIND FREE SLOTS ====================
-
-  - name: find_free_slots
-    description: "Find available time slots"
-    condition: "calendar_check.available"
-    tool: google_calendar_find_meeting
-    args:
-      duration_minutes: "{{ inputs.duration_minutes }}"
-      days_ahead: "{{ inputs.days_ahead }}"
-    output: free_slots_raw
-    on_error: auto_heal
-
-  - name: parse_free_slots
-    description: "Parse available time slots"
-    condition: "calendar_check.available"
-    compute: |
-      slots_text = str(free_slots_raw) if free_slots_raw else ""
-
-      # Extract suggested times
-      import re
-      suggestions = []
-
-      # Look for datetime patterns
-      datetime_patterns = re.findall(r'(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2})', slots_text)
-      for dt in datetime_patterns[:10]:
-          suggestions.append(dt)
-
-      result = {
-          "slots": suggestions,
-          "count": len(suggestions),
-          "raw": slots_text[:500] if slots_text else "No slots found",
-      }
-    output: available_slots
-
   # ==================== CHECK ATTENDEE AVAILABILITY ====================
+  # Use google_calendar_check_mutual_availability which finds free slots AND checks attendee
 
   - name: check_attendee_availability
-    description: "Check if attendees are free"
+    description: "Check mutual availability and find free slots"
     condition: "calendar_check.available and inputs.attendees"
     tool: google_calendar_check_mutual_availability
     args:
-      attendees: "{{ inputs.attendees }}"
-      duration_minutes: "{{ inputs.duration_minutes }}"
+      attendee_email: "{{ inputs.attendees }}"
       days_ahead: "{{ inputs.days_ahead }}"
+      duration_minutes: "{{ inputs.duration_minutes }}"
     output: attendee_availability_raw
     on_error: auto_heal
 
   - name: parse_attendee_availability
-    description: "Parse attendee availability"
+    description: "Parse attendee availability and extract free slots"
     condition: "calendar_check.available and inputs.attendees"
     compute: |
       avail_text = str(attendee_availability_raw) if attendee_availability_raw else ""
@@ -265,9 +232,56 @@ steps:
       # Check for common availability
       has_mutual = "available" in avail_text.lower() and "no mutual" not in avail_text.lower()
 
+      # Extract suggested times from the availability response
+      import re
+      suggestions = []
+
+      # Look for datetime patterns like "2026-02-10 15:00" or "Mon 2026-02-10 15:00"
+      datetime_patterns = re.findall(r'(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})', avail_text)
+      for date, time in datetime_patterns[:10]:
+          suggestions.append(f"{date} {time}")
+
       result = {
           "has_mutual_time": has_mutual,
+          "slots": suggestions,
+          "count": len(suggestions),
           "raw": avail_text[:500] if avail_text else "Could not check",
+      }
+    output: mutual_availability
+    on_error: continue
+
+  # ==================== FALLBACK: FIND SLOTS WITHOUT ATTENDEE ====================
+
+  - name: find_my_free_slots
+    description: "Find my free slots if no attendee specified"
+    condition: "calendar_check.available and not inputs.attendees"
+    tool: google_calendar_check_mutual_availability
+    args:
+      attendee_email: "primary"
+      days_ahead: "{{ inputs.days_ahead }}"
+      duration_minutes: "{{ inputs.duration_minutes }}"
+    output: my_availability_raw
+    on_error: continue
+
+  - name: parse_my_availability
+    description: "Parse my availability for free slots"
+    condition: "calendar_check.available and not inputs.attendees"
+    compute: |
+      avail_text = str(my_availability_raw) if my_availability_raw else ""
+
+      import re
+      suggestions = []
+
+      # Look for datetime patterns
+      datetime_patterns = re.findall(r'(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})', avail_text)
+      for date, time in datetime_patterns[:10]:
+          suggestions.append(f"{date} {time}")
+
+      result = {
+          "has_mutual_time": len(suggestions) > 0,
+          "slots": suggestions,
+          "count": len(suggestions),
+          "raw": avail_text[:500] if avail_text else "No slots found",
       }
     output: mutual_availability
     on_error: continue
@@ -278,7 +292,8 @@ steps:
     description: "Select best meeting time"
     condition: "calendar_check.available"
     compute: |
-      slots = available_slots.get("slots", [])
+      # Get slots from mutual_availability (works for both with/without attendees)
+      slots = mutual_availability.get("slots", []) if mutual_availability else []
 
       if inputs.preferred_time:
           # User specified a preference - use that as hint
@@ -300,31 +315,32 @@ steps:
     output: meeting_time
 
   # ==================== SCHEDULE MEETING ====================
+  # Use google_calendar_quick_meeting which handles everything
 
   - name: create_meeting
-    description: "Create the calendar event"
-    condition: "calendar_check.available and meeting_time.selected_time"
-    tool: google_calendar_schedule_meeting
-    args:
-      title: "{{ inputs.title }}"
-      start_time: "{{ meeting_time.selected_time }}"
-      duration_minutes: "{{ inputs.duration_minutes }}"
-      attendees: "{{ inputs.attendees or '' }}"
-      description: "{{ inputs.description or '' }}"
-    output: meeting_result
-    on_error: auto_heal
-
-  # ==================== QUICK MEETING FALLBACK ====================
-
-  - name: quick_meeting_fallback
-    description: "Try quick meeting if schedule_meeting failed"
-    condition: "calendar_check.available and not meeting_result and meeting_time.selected_time"
+    description: "Create the calendar event using quick_meeting"
+    condition: "calendar_check.available and meeting_time.selected_time and inputs.attendees"
     tool: google_calendar_quick_meeting
     args:
       title: "{{ inputs.title }}"
+      attendee_email: "{{ inputs.attendees }}"
       when: "{{ meeting_time.selected_time }}"
       duration_minutes: "{{ inputs.duration_minutes }}"
-    output: quick_meeting_result
+    output: meeting_result
+    on_error: auto_heal
+
+  # ==================== MEETING WITHOUT ATTENDEE ====================
+
+  - name: create_meeting_no_attendee
+    description: "Create calendar event without attendee (just block time)"
+    condition: "calendar_check.available and meeting_time.selected_time and not inputs.attendees"
+    tool: google_calendar_quick_meeting
+    args:
+      title: "{{ inputs.title }}"
+      attendee_email: ""
+      when: "{{ meeting_time.selected_time }}"
+      duration_minutes: "{{ inputs.duration_minutes }}"
+    output: meeting_result
     on_error: auto_heal
 
   # ==================== MEMORY ====================
@@ -349,12 +365,12 @@ steps:
       if "scheduled_meetings" not in patterns:
           patterns["scheduled_meetings"] = []
 
-      # Record this meeting
+      # Record this meeting - meeting_time is a dict, use .get() for safe access
       meeting_record = {
           "title": inputs.title,
           "duration_minutes": inputs.duration_minutes,
           "has_attendees": bool(inputs.attendees),
-          "auto_selected_time": meeting_time.auto_selected if meeting_time else False,
+          "auto_selected_time": meeting_time.get("auto_selected", False) if isinstance(meeting_time, dict) else False,
           "timestamp": datetime.now().isoformat(),
       }
 

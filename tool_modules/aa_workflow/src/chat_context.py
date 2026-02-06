@@ -229,7 +229,6 @@ def get_chat_project() -> str:
     Returns:
         Project name
     """
-    global _chat_state
 
     # First try WorkspaceRegistry default workspace
     try:
@@ -263,7 +262,6 @@ def set_chat_project(project: str) -> bool:
     Returns:
         True if project is valid, False otherwise
     """
-    global _chat_state
 
     info = _get_project_info(project)
     if not info:
@@ -287,7 +285,6 @@ def set_chat_project(project: str) -> bool:
 
 def set_chat_issue(issue_key: str) -> None:
     """Set the active Jira issue (sync)."""
-    global _chat_state
     _chat_state["issue_key"] = issue_key
 
     try:
@@ -315,7 +312,6 @@ def get_chat_issue() -> str | None:
 
 def set_chat_branch(branch: str) -> None:
     """Set the active git branch (sync)."""
-    global _chat_state
     _chat_state["branch"] = branch
 
     try:

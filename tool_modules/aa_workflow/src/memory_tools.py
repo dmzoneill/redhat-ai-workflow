@@ -1,11 +1,15 @@
 """Memory Tools - Persistent context storage across sessions.
 
+NOTE: For unified memory access across multiple sources (YAML, code search,
+Slack, InScope, Jira), use the new memory_query tool from memory_unified.py.
+These tools remain for backward compatibility and direct YAML file access.
+
 Provides tools for reading, writing, and managing persistent memory:
 - memory_read: Read memory files
 - memory_write: Write complete memory files
 - memory_update: Update specific fields
 - memory_append: Append to lists
-- memory_query: Query with JSONPath expressions
+- memory_query: Query with JSONPath expressions (DEPRECATED: use memory_unified.memory_query)
 - memory_session_log: Log session actions
 - memory_stats: Get memory health and usage statistics
 - check_known_issues: Search for known fixes
@@ -20,6 +24,10 @@ Project-specific paths are stored under:
 
 This module is workspace-aware: project-specific paths use the workspace's
 project from WorkspaceRegistry when ctx is available.
+
+For the new unified memory interface, see:
+- services/memory_abstraction/ - Core abstraction layer
+- tool_modules/aa_workflow/src/memory_unified.py - Unified MCP tools
 """
 
 from datetime import datetime
@@ -30,6 +38,7 @@ import yaml
 from fastmcp import Context
 from mcp.types import TextContent
 
+from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 
 # Support both package import and direct loading
@@ -69,7 +78,9 @@ def _resolve_memory_path(key: str) -> Path:
     # Check if this is a project-specific key
     if key_normalized in PROJECT_SPECIFIC_KEYS:
         try:
-            from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+            from tool_modules.aa_workflow.src.chat_context import (
+                get_project_work_state_path,
+            )
 
             return get_project_work_state_path()
         except ImportError:
@@ -118,7 +129,9 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
 
         # Fall back to sync version
         try:
-            from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+            from tool_modules.aa_workflow.src.chat_context import (
+                get_project_work_state_path,
+            )
 
             return get_project_work_state_path()
         except ImportError:
@@ -1012,6 +1025,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         # Use workspace-aware path resolution for project-specific keys
         return await _memory_read_impl(key, ctx)
 
+    @auto_heal()
     @registry.tool()
     async def memory_write(ctx: Context, key: str, content: str) -> list[TextContent]:
         """
@@ -1031,6 +1045,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         """
         return await _memory_write_impl(key, content, ctx)
 
+    @auto_heal()
     @registry.tool()
     async def memory_update(ctx: Context, key: str, path: str, value: str) -> list[TextContent]:
         """
@@ -1048,6 +1063,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         """
         return await _memory_update_impl(key, path, value, ctx)
 
+    @auto_heal()
     @registry.tool()
     async def memory_append(ctx: Context, key: str, list_path: str, item: str) -> list[TextContent]:
         """
@@ -1089,6 +1105,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         """
         return await _memory_query_impl(key, query, ctx)
 
+    @auto_heal()
     @registry.tool()
     async def memory_session_log(ctx: Context, action: str, details: str = "") -> list[TextContent]:
         """
@@ -1123,6 +1140,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         """
         return await _check_known_issues_impl(tool_name, error_text)
 
+    @auto_heal()
     @registry.tool()
     async def learn_tool_fix(
         ctx: Context,

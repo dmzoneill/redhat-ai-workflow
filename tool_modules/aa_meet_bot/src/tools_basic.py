@@ -31,31 +31,43 @@ except ImportError:
 
 from server.tool_registry import ToolRegistry
 from tool_modules.aa_meet_bot.src.audio_output import AudioOutputManager
-from tool_modules.aa_meet_bot.src.browser_controller import CaptionEntry, GoogleMeetController
-from tool_modules.aa_meet_bot.src.config import MeetBotConfig, get_config
-from tool_modules.aa_meet_bot.src.jira_preloader import JiraPreloader, get_jira_preloader, preload_jira_context
-from tool_modules.aa_meet_bot.src.llm_responder import LLMResponder, generate_meeting_response, get_llm_responder
-from tool_modules.aa_meet_bot.src.meeting_scheduler import MeetingScheduler, get_scheduler, init_scheduler
+from tool_modules.aa_meet_bot.src.browser_controller import (
+    CaptionEntry,
+    GoogleMeetController,
+)
+from tool_modules.aa_meet_bot.src.config import get_config
+from tool_modules.aa_meet_bot.src.jira_preloader import (
+    get_jira_preloader,
+)
+from tool_modules.aa_meet_bot.src.llm_responder import (
+    get_llm_responder,
+)
+from tool_modules.aa_meet_bot.src.meeting_scheduler import (
+    MeetingScheduler,
+    init_scheduler,
+)
 from tool_modules.aa_meet_bot.src.notes_bot import (
     NotesBot,
     NotesBotManager,
     get_bot_manager,
-    get_notes_bot,
-    init_notes_bot,
 )
 from tool_modules.aa_meet_bot.src.notes_database import (
-    MeetingNote,
     MeetingNotesDB,
-    MonitoredCalendar,
-    TranscriptEntry,
-    get_notes_db,
     init_notes_db,
 )
-from tool_modules.aa_meet_bot.src.tts_engine import GPTSoVITSEngine, TTSResult, get_tts_engine
-from tool_modules.aa_meet_bot.src.video_generator import VideoGenerator, VideoResult, get_video_generator
-from tool_modules.aa_meet_bot.src.virtual_devices import VirtualDeviceManager, VirtualDeviceStatus
-from tool_modules.aa_meet_bot.src.voice_pipeline import VoicePipeline, VoicePipelineManager, get_pipeline_manager
-from tool_modules.aa_meet_bot.src.wake_word import WakeWordEvent, WakeWordManager
+from tool_modules.aa_meet_bot.src.tts_engine import (
+    get_tts_engine,
+)
+from tool_modules.aa_meet_bot.src.video_generator import (
+    get_video_generator,
+)
+from tool_modules.aa_meet_bot.src.virtual_devices import (
+    VirtualDeviceManager,
+)
+from tool_modules.aa_meet_bot.src.voice_pipeline import (
+    get_pipeline_manager,
+)
+from tool_modules.aa_meet_bot.src.wake_word import WakeWordManager
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +140,6 @@ async def _meet_bot_status_impl() -> str:
     lines.append("")
 
     # Meeting status
-    global _controller
     if _controller and _controller.state and _controller.state.joined:
         state = _controller.state
         lines.append("## Active Meeting")
@@ -314,7 +325,10 @@ async def _meet_bot_join_meeting_impl(
         if enable_voice:
             # Start the voice interaction pipeline
             try:
-                from tool_modules.aa_meet_bot.src.voice_pipeline import VoicePipelineConfig, get_pipeline_manager
+                from tool_modules.aa_meet_bot.src.voice_pipeline import (
+                    VoicePipelineConfig,
+                    get_pipeline_manager,
+                )
 
                 config = get_config()
                 pipe_path = controller.get_pipe_path()
@@ -350,12 +364,11 @@ async def _meet_bot_join_meeting_impl(
         return f"✅ **Joined meeting!**\n\nMeeting ID: {controller.state.meeting_id}\nCaptions: {'Enabled' if controller.state.captions_enabled else 'Disabled'}\nVoice Interaction: {voice_status}\n\nListening for wake word..."
     else:
         errors = controller.state.errors if controller.state else ["Unknown error"]
-        return f"❌ Failed to join meeting\n\nErrors:\n" + "\n".join(f"- {e}" for e in errors)
+        return "❌ Failed to join meeting\n\nErrors:\n" + "\n".join(f"- {e}" for e in errors)
 
 
 async def _meet_bot_leave_meeting_impl() -> str:
     """Leave the current meeting."""
-    global _controller
 
     if not _controller or not _controller.state or not _controller.state.joined:
         return "❌ Not currently in a meeting"
@@ -391,7 +404,6 @@ async def _meet_bot_get_captions_impl(
     Args:
         last_n: Number of recent captions to return
     """
-    global _controller
 
     if not _controller or not _controller.state:
         return "❌ Not in a meeting"
@@ -468,7 +480,7 @@ async def _meet_bot_synthesize_speech_impl(
 
     if result.success:
         return (
-            f"✅ **Speech synthesized!**\n\n"
+            "✅ **Speech synthesized!**\n\n"
             f'- **Text:** "{text}"\n'
             f"- **Output:** `{result.audio_path}`\n"
             f"- **Duration:** {result.duration_seconds:.2f}s\n"
@@ -500,7 +512,7 @@ async def _meet_bot_generate_video_impl(
 
     if result.success:
         return (
-            f"✅ **Video generated!**\n\n"
+            "✅ **Video generated!**\n\n"
             f"- **Source:** {result.source}\n"
             f"- **Output:** `{result.video_path}`\n"
             f"- **Duration:** {result.duration_seconds:.2f}s\n"
@@ -770,7 +782,6 @@ async def _meet_notes_start_scheduler_impl() -> str:
 
 async def _meet_notes_stop_scheduler_impl() -> str:
     """Stop the meeting scheduler."""
-    global _scheduler
 
     if _scheduler is None or not _scheduler.state.running:
         return "⚠️ Scheduler is not running."
@@ -850,7 +861,7 @@ async def _meet_notes_add_calendar_impl(
             "",
             f"- **Calendar ID:** `{calendar_id}`",
             f"- **Auto-join:** {'Yes' if auto_join else 'No'}",
-            f"- **Mode:** Notes (capture only)",
+            "- **Mode:** Notes (capture only)",
             "",
             "The scheduler will now monitor this calendar for meetings.",
         ]
@@ -937,11 +948,11 @@ async def _meet_notes_join_now_impl(
             end_info = f"- **Auto-leave:** {scheduled_end.strftime('%H:%M')} (+{grace_period_minutes}min grace)\n"
 
         return (
-            f"✅ **Joined Meeting**\n\n"
+            "✅ **Joined Meeting**\n\n"
             f"- **Title:** {title or session_id}\n"
             f"- **URL:** {meet_url}\n"
             f"- **Session ID:** `{session_id}`\n"
-            f"- **Mode:** Notes (capture only)\n"
+            "- **Mode:** Notes (capture only)\n"
             f"{end_info}"
             f"- **Active Meetings:** {active_count}\n\n"
             f"Capturing captions... Use `meet_notes_leave('{session_id}')` when done."
@@ -949,12 +960,11 @@ async def _meet_notes_join_now_impl(
     else:
         if not errors:
             errors = ["Unknown error - check browser controller logs"]
-        return f"❌ Failed to join meeting\n\nErrors:\n" + "\n".join(f"- {e}" for e in errors)
+        return "❌ Failed to join meeting\n\nErrors:\n" + "\n".join(f"- {e}" for e in errors)
 
 
 async def _meet_notes_leave_impl(session_id: str = "") -> str:
     """Leave a meeting by session ID, or leave all if no ID provided."""
-    global _bot_manager
 
     manager = await _get_bot_manager()
 
@@ -989,7 +999,7 @@ async def _meet_notes_leave_impl(session_id: str = "") -> str:
 
     active_count = manager.get_active_count()
     return (
-        f"✅ **Left Meeting**\n\n"
+        "✅ **Left Meeting**\n\n"
         f"- **Title:** {result.get('title', 'Unknown')}\n"
         f"- **Session ID:** `{session_id}`\n"
         f"- **Duration:** {result.get('duration_minutes', 0)} minutes\n"
@@ -1134,13 +1144,15 @@ async def _meet_notes_force_cleanup_impl() -> str:
 
 async def _meet_notes_cleanup_audio_impl() -> str:
     """Clean up orphaned MeetBot audio devices."""
-    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices, get_meetbot_device_count
+    from tool_modules.aa_meet_bot.src.virtual_devices import (
+        cleanup_orphaned_meetbot_devices,
+        get_meetbot_device_count,
+    )
 
     # Get counts before cleanup
     before = await get_meetbot_device_count()
 
     # Get active instance IDs from the bot manager
-    global _bot_manager
     active_ids = set()
     if _bot_manager:
         for session in _bot_manager._sessions.values():
@@ -1205,7 +1217,10 @@ async def _meet_notes_cleanup_audio_impl() -> str:
 
 async def _meet_notes_cleanup_all_devices_impl() -> str:
     """Force cleanup ALL MeetBot audio/video devices, ignoring active sessions."""
-    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices, get_meetbot_device_count
+    from tool_modules.aa_meet_bot.src.virtual_devices import (
+        cleanup_orphaned_meetbot_devices,
+        get_meetbot_device_count,
+    )
 
     # Get counts before cleanup
     before = await get_meetbot_device_count()
@@ -1461,7 +1476,6 @@ async def _meet_notes_export_state_impl() -> str:
     """Export current state to JSON for the VS Code extension UI."""
     import json
     from datetime import timedelta
-    from pathlib import Path
     from zoneinfo import ZoneInfo
 
     db = await _get_notes_db()
@@ -1538,11 +1552,9 @@ async def _meet_notes_export_state_impl() -> str:
     upcoming_meetings.sort(key=lambda x: x.get("startTime", ""))
 
     # Get scheduler status
-    global _scheduler
     scheduler_running = _scheduler is not None and _scheduler.state.running
 
     # Get current meetings status (supports multiple concurrent meetings)
-    global _bot_manager
     current_meetings = []
     all_captions = []
 
@@ -1716,7 +1728,7 @@ async def _meet_send_message_impl(
             logger.info("Re-muted microphone after TTS message")
 
         if success:
-            return f"✅ Message sent to meeting: \"{text[:50]}{'...' if len(text) > 50 else ''}\""
+            return "✅ Message sent to meeting: \"{text[:50]}{'...' if len(text) > 50 else ''}\""
         else:
             return "❌ Failed to play audio to meeting"
 
@@ -1832,7 +1844,6 @@ async def _periodic_cleanup_task() -> None:
             await asyncio.sleep(300)  # 5 minutes
 
             # Get active instance IDs from the bot manager
-            global _bot_manager
             active_ids = set()
             if _bot_manager:
                 for session in _bot_manager._sessions.values():

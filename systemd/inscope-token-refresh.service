@@ -1,0 +1,17 @@
+[Unit]
+Description=InScope Token Refresh Service
+After=network.target redhatter.service
+
+[Service]
+Type=oneshot
+User=%i
+ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python /home/daoneill/src/redhat-ai-workflow/scripts/inscope_auto_login.py --headless
+StandardOutput=journal
+StandardError=journal
+
+# Restart on failure
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

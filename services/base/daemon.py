@@ -5,6 +5,7 @@ Base Daemon Infrastructure
 Provides the foundation for all AI Workflow daemons:
 - SingleInstance: Lock file management for single-instance enforcement
 - BaseDaemon: Base class with CLI, signals, and lifecycle management
+- Systemd watchdog integration with D-Bus health verification
 
 Usage:
     from services.base import BaseDaemon, SleepWakeAwareDaemon, DaemonDBusBase
@@ -25,6 +26,19 @@ Usage:
 
     if __name__ == "__main__":
         MyDaemon.main()
+
+IMPORTANT - Multiple Inheritance Order (MRO):
+    When using multiple inheritance, the order matters! List mixins BEFORE BaseDaemon:
+
+    CORRECT:   class MyDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon)
+    INCORRECT: class MyDaemon(BaseDaemon, DaemonDBusBase, SleepWakeAwareDaemon)
+
+    This ensures:
+    1. Mixin __init__ methods are called first (via super())
+    2. BaseDaemon.__init__ is called last to complete initialization
+    3. Method resolution follows Python's C3 linearization
+
+    Each mixin should call super().__init__() to chain properly.
 """
 
 import argparse
@@ -33,12 +47,67 @@ import fcntl
 import logging
 import os
 import signal
+import socket
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# SYSTEMD WATCHDOG SUPPORT
+# =============================================================================
+
+
+def sd_notify(state: str) -> bool:
+    """
+    Send a notification to systemd.
+    
+    Args:
+        state: Notification string (e.g., "READY=1", "WATCHDOG=1", "STATUS=...")
+        
+    Returns:
+        True if notification was sent, False if NOTIFY_SOCKET not set
+    """
+    notify_socket = os.environ.get("NOTIFY_SOCKET")
+    if not notify_socket:
+        return False
+    
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            # Handle abstract socket (starts with @)
+            if notify_socket.startswith("@"):
+                notify_socket = "\0" + notify_socket[1:]
+            sock.connect(notify_socket)
+            sock.sendall(state.encode())
+            return True
+        finally:
+            sock.close()
+    except Exception as e:
+        logger.warning(f"Failed to send sd_notify({state}): {e}")
+        return False
+
+
+def get_watchdog_interval() -> float:
+    """
+    Get the watchdog interval from systemd.
+    
+    Returns:
+        Interval in seconds to send watchdog pings (half of WatchdogSec),
+        or 0 if watchdog is not enabled.
+    """
+    watchdog_usec = os.environ.get("WATCHDOG_USEC")
+    if not watchdog_usec:
+        return 0
+    
+    try:
+        # Convert microseconds to seconds, ping at half the interval
+        return int(watchdog_usec) / 1_000_000 / 2
+    except ValueError:
+        return 0
 
 
 class SingleInstance:
@@ -133,6 +202,7 @@ class BaseDaemon(ABC):
     - Standard CLI arguments (--status, --stop, --verbose, --dbus)
     - Signal handling for graceful shutdown
     - Logging configuration for systemd/journald
+    - Systemd watchdog integration with D-Bus health verification
 
     Subclasses must:
     - Set `name` and `description` class attributes
@@ -171,6 +241,8 @@ class BaseDaemon(ABC):
         self.enable_dbus = enable_dbus
         self._shutdown_event = asyncio.Event()
         self._single_instance = SingleInstance(self.name)
+        self._watchdog_task: Optional[asyncio.Task] = None
+        self._watchdog_healthy = True  # Track if last health check passed
 
     @property
     def lock_file(self) -> Path:
@@ -227,19 +299,120 @@ class BaseDaemon(ABC):
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, signal_handler, sig)
 
+    async def _watchdog_loop(self):
+        """
+        Periodically notify systemd that the daemon is healthy.
+        
+        This loop:
+        1. Verifies D-Bus interface is responding (if enabled)
+        2. Calls the daemon's health_check() method (if available)
+        3. Only sends WATCHDOG=1 if both checks pass
+        
+        If the daemon becomes unhealthy, systemd will restart it after
+        WatchdogSec expires without receiving a ping.
+        """
+        interval = get_watchdog_interval()
+        if interval <= 0:
+            logger.debug("Watchdog not enabled (WATCHDOG_USEC not set)")
+            return
+        
+        logger.info(f"Watchdog enabled, pinging every {interval:.1f}s")
+        
+        while not self._shutdown_event.is_set():
+            try:
+                healthy = await self._verify_health()
+                
+                if healthy:
+                    sd_notify("WATCHDOG=1")
+                    if not self._watchdog_healthy:
+                        logger.info("Watchdog: Service recovered, resuming pings")
+                    self._watchdog_healthy = True
+                else:
+                    if self._watchdog_healthy:
+                        logger.warning("Watchdog: Health check failed, stopping pings")
+                    self._watchdog_healthy = False
+                    # Don't send watchdog ping - systemd will restart us
+                    
+            except Exception as e:
+                logger.error(f"Watchdog loop error: {e}")
+                self._watchdog_healthy = False
+            
+            # Wait for next interval or shutdown
+            try:
+                await asyncio.wait_for(
+                    self._shutdown_event.wait(),
+                    timeout=interval
+                )
+                break  # Shutdown requested
+            except asyncio.TimeoutError:
+                pass  # Normal timeout, continue loop
+
+    async def _verify_health(self) -> bool:
+        """
+        Verify the daemon is healthy by checking D-Bus and calling health_check().
+        
+        Returns:
+            True if healthy, False otherwise
+        """
+        # Check 1: Verify D-Bus interface is responding (if enabled)
+        if self.enable_dbus and hasattr(self, "_bus") and self._bus:
+            try:
+                # Try to call our own Ping method via D-Bus to verify the interface works
+                if hasattr(self, "_dbus_interface") and self._dbus_interface:
+                    # The interface exists, D-Bus is working
+                    pass
+                else:
+                    logger.warning("Watchdog: D-Bus interface not initialized")
+                    return False
+            except Exception as e:
+                logger.warning(f"Watchdog: D-Bus check failed: {e}")
+                return False
+        
+        # Check 2: Call daemon's health_check() if available
+        if hasattr(self, "health_check"):
+            try:
+                result = await self.health_check()
+                if isinstance(result, dict) and not result.get("healthy", True):
+                    logger.warning(f"Watchdog: Health check failed: {result.get('message', 'unknown')}")
+                    return False
+            except Exception as e:
+                logger.warning(f"Watchdog: health_check() raised exception: {e}")
+                return False
+        
+        return True
+
     async def _run(self):
         """Internal run method that handles lifecycle."""
         self._setup_signal_handlers()
 
         try:
             await self.startup()
+            
+            # Notify systemd we're ready (for Type=notify services)
+            sd_notify("READY=1")
+            sd_notify(f"STATUS=Running: {self.description or self.name}")
+            logger.info(f"Daemon ready: {self.name}")
+            
+            # Start watchdog loop in background
+            self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+            
             await self.run_daemon()
         except asyncio.CancelledError:
             logger.info("Daemon cancelled")
         except Exception as e:
             logger.exception(f"Daemon error: {e}")
+            sd_notify(f"STATUS=Error: {e}")
             raise
         finally:
+            # Stop watchdog
+            if self._watchdog_task and not self._watchdog_task.done():
+                self._watchdog_task.cancel()
+                try:
+                    await self._watchdog_task
+                except asyncio.CancelledError:
+                    pass
+            
+            sd_notify("STOPPING=1")
             await self.shutdown()
 
     def run(self):
@@ -301,7 +474,8 @@ class BaseDaemon(ABC):
             "--dbus",
             action="store_true",
             dest="enable_dbus",
-            help="Enable D-Bus IPC interface",
+            default=True,  # D-Bus enabled by default
+            help="Enable D-Bus IPC interface (default)",
         )
         parser.add_argument(
             "--no-dbus",

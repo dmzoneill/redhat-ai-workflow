@@ -77,8 +77,8 @@ inputs:
   - name: priority
     type: string
     required: false
-    default: "Medium"
-    description: "Priority: 'Highest', 'High', 'Medium', 'Low', 'Lowest'"
+    default: "normal"
+    description: "Priority: 'blocker', 'critical', 'major', 'normal', 'minor' (or: 'highest', 'high', 'medium', 'low', 'lowest')"
 
   - name: link_to
     type: string

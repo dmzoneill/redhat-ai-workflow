@@ -5,7 +5,11 @@ Provides consistent Slack message formatting across skills.
 
 from typing import Optional
 
-from scripts.common.config_loader import get_jira_url, get_team_group_handle, get_team_group_id
+from scripts.common.config_loader import (
+    get_jira_url,
+    get_team_group_handle,
+    get_team_group_id,
+)
 
 
 def build_team_mention(group_id: Optional[str] = None, group_handle: Optional[str] = None) -> str:

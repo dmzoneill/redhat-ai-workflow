@@ -14,6 +14,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from server.timeouts import Timeouts
+
 
 def load_config() -> dict[str, Any]:
     """Load config.json configuration.
@@ -85,7 +87,7 @@ def get_token_from_kubeconfig(
             env=env,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeouts.QUICK,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -106,7 +108,7 @@ def get_token_from_kubeconfig(
             env=env,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeouts.QUICK,
         )
         if result.stdout.strip():
             return result.stdout.strip()
@@ -128,7 +130,7 @@ def get_token_from_kubeconfig(
             env=env,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeouts.QUICK,
         )
         return result.stdout.strip()
     except Exception:

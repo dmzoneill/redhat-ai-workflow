@@ -8,7 +8,6 @@ All config loading delegates to the canonical implementation in:
 server/utils.py
 """
 
-import json
 import os
 import sys
 from pathlib import Path

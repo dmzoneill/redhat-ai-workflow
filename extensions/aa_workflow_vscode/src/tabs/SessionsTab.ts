@@ -199,8 +199,8 @@ export class SessionsTab extends BaseTab {
               <input type="text" placeholder="🔍 Search chats..." id="sessionSearch" value="${this.escapeHtml(this.searchQuery)}" />
             </div>
             <div class="view-toggle">
-              <button id="sessionViewCard" class="toggle-btn ${this.viewMode === "card" ? "active" : ""}">🗂️ Cards</button>
-              <button id="sessionViewTable" class="toggle-btn ${this.viewMode === "table" ? "active" : ""}">📋 Table</button>
+              <button id="sessionViewCard" data-action="viewCard" class="toggle-btn ${this.viewMode === "card" ? "active" : ""}">🗂️ Cards</button>
+              <button id="sessionViewTable" data-action="viewTable" class="toggle-btn ${this.viewMode === "table" ? "active" : ""}">📋 Table</button>
             </div>
             <div class="session-count">${this.sessions.length} session(s) • Auto-refresh 5s</div>
           </div>
@@ -413,11 +413,73 @@ export class SessionsTab extends BaseTab {
   }
 
   getScript(): string {
-    // Event delegation in base.js handles all click/input/change events
-    // This script is only needed for initial page load, not for dynamic updates
+    // Use centralized event delegation system - handlers survive content updates
+    // and can be re-registered without duplicates
     return `
-      // SessionsTab: Event handlers are managed via event delegation in base.js
-      // No per-tab script needed - this avoids CSP issues with dynamic script execution
+      (function() {
+        console.log('[SessionsTab] Script running, TabEventDelegation available:', typeof TabEventDelegation !== 'undefined');
+        
+        // Register click handler for sessions tab
+        TabEventDelegation.registerClickHandler('sessions', function(action, element, e) {
+          console.log('[SessionsTab] Click handler called with action:', action);
+          const sessionId = element.dataset.sessionId;
+          
+          switch(action) {
+            case 'newSession':
+              vscode.postMessage({ command: 'newSession' });
+              break;
+            case 'openSession':
+              if (sessionId) vscode.postMessage({ command: 'openSession', sessionId });
+              break;
+            case 'openChatSession':
+              if (sessionId) {
+                const sessionName = element.dataset.sessionName;
+                vscode.postMessage({ command: 'openChatSession', sessionId, sessionName });
+              }
+              break;
+            case 'copySessionId':
+              if (sessionId) vscode.postMessage({ command: 'copySessionId', sessionId });
+              break;
+            case 'closeSession':
+              if (sessionId) vscode.postMessage({ command: 'closeSession', sessionId });
+              break;
+            case 'refreshSessions':
+              vscode.postMessage({ command: 'refreshSessions' });
+              break;
+            case 'viewCard':
+              vscode.postMessage({ command: 'changeSessionViewMode', value: 'card' });
+              break;
+            case 'viewTable':
+              vscode.postMessage({ command: 'changeSessionViewMode', value: 'table' });
+              break;
+          }
+        });
+
+        // Register change handler for dropdowns
+        TabEventDelegation.registerChangeHandler('sessions', function(element, e) {
+          if (element.id === 'sessionGroupBy') {
+            vscode.postMessage({ command: 'changeSessionGroupBy', value: element.value });
+          }
+        });
+
+        // Register keypress handler for search (Enter key)
+        TabEventDelegation.registerKeypressHandler('sessions', function(element, e) {
+          if (element.id === 'sessionSearch' && e.key === 'Enter') {
+            vscode.postMessage({ command: 'searchSessions', query: element.value });
+          }
+        });
+
+        // Also handle input event for live search (debounced)
+        const sessionsContainer = document.getElementById('sessions');
+        if (sessionsContainer && !sessionsContainer.dataset.inputInit) {
+          sessionsContainer.dataset.inputInit = 'true';
+          sessionsContainer.addEventListener('input', function(e) {
+            if (e.target.id === 'sessionSearch') {
+              vscode.postMessage({ command: 'searchSessions', query: e.target.value });
+            }
+          });
+        }
+      })();
     `;
   }
 
@@ -475,6 +537,23 @@ export class SessionsTab extends BaseTab {
         await this.closeSession(message.sessionId);
         return true;
 
+      // === NEW: Workspace handlers (Phase 3.5) ===
+      case "viewWorkspaceTools":
+        await this.viewWorkspaceTools(message.workspaceUri);
+        return true;
+
+      case "switchToWorkspace":
+        await this.switchToWorkspace(message.workspaceUri);
+        return true;
+
+      case "changeWorkspacePersona":
+        await this.changeWorkspacePersona(message.workspaceUri, message.persona);
+        return true;
+
+      case "removeWorkspace":
+        await this.removeWorkspace(message.workspaceUri);
+        return true;
+
       default:
         return false;
     }
@@ -507,5 +586,104 @@ export class SessionsTab extends BaseTab {
       logger.error("Failed to close session", result.error);
     }
     await this.refresh();
+  }
+
+  // === NEW: Workspace handlers (Phase 3.5) ===
+
+  private async viewWorkspaceTools(workspaceUri: string): Promise<void> {
+    if (!workspaceUri) return;
+
+    try {
+      logger.log(`Viewing tools for workspace: ${workspaceUri}`);
+      const result = await dbus.workspace_getTools(workspaceUri);
+      if (result.success && result.data) {
+        const data = result.data as any;
+        const tools = data.tools || [];
+        
+        // Show tools in a quick pick or information message
+        if (tools.length > 0) {
+          const toolList = tools.slice(0, 20).map((t: any) => t.name || t).join(', ');
+          const more = tools.length > 20 ? ` (+${tools.length - 20} more)` : '';
+          vscode.window.showInformationMessage(`Workspace Tools: ${toolList}${more}`);
+        } else {
+          vscode.window.showInformationMessage("No tools loaded for this workspace");
+        }
+      } else {
+        vscode.window.showErrorMessage(`Failed to get workspace tools: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error getting workspace tools: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async switchToWorkspace(workspaceUri: string): Promise<void> {
+    if (!workspaceUri) return;
+
+    try {
+      logger.log(`Switching to workspace: ${workspaceUri}`);
+      const result = await dbus.workspace_switch(workspaceUri);
+      if (result.success) {
+        vscode.window.showInformationMessage(`Switched to workspace`);
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Failed to switch workspace: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error switching workspace: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async changeWorkspacePersona(workspaceUri: string, persona: string): Promise<void> {
+    if (!workspaceUri) return;
+
+    try {
+      // If no persona provided, show a quick pick
+      let selectedPersona = persona;
+      if (!selectedPersona) {
+        const personas = Array.from(this.personaCache.keys());
+        selectedPersona = await vscode.window.showQuickPick(personas, {
+          placeHolder: "Select a persona for this workspace",
+        }) || "";
+      }
+
+      if (!selectedPersona) return;
+
+      logger.log(`Changing workspace ${workspaceUri} persona to: ${selectedPersona}`);
+      const result = await dbus.workspace_setPersona(workspaceUri, selectedPersona);
+      if (result.success) {
+        vscode.window.showInformationMessage(`Workspace persona changed to: ${selectedPersona}`);
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Failed to change persona: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error changing persona: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async removeWorkspace(workspaceUri: string): Promise<void> {
+    if (!workspaceUri) return;
+
+    try {
+      // Confirm removal
+      const confirm = await vscode.window.showWarningMessage(
+        `Remove workspace from tracking?`,
+        { modal: true },
+        "Remove"
+      );
+
+      if (confirm !== "Remove") return;
+
+      logger.log(`Removing workspace: ${workspaceUri}`);
+      const result = await dbus.workspace_remove(workspaceUri);
+      if (result.success) {
+        vscode.window.showInformationMessage("Workspace removed");
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Failed to remove workspace: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error removing workspace: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }

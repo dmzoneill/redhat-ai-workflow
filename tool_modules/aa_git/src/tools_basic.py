@@ -443,7 +443,10 @@ async def _git_checkout_impl(
 def _load_commit_config():
     """Load commit configuration from config.json."""
     try:
-        from scripts.common.config_loader import format_commit_message, get_commit_format
+        from scripts.common.config_loader import (
+            format_commit_message,
+            get_commit_format,
+        )
 
         commit_cfg = get_commit_format()
         valid_types = commit_cfg["types"]

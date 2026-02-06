@@ -1,0 +1,651 @@
+# Skill: Sync PTO with Calendar
+# Fetches PTO dates from Workday and declines meetings on those days
+#
+# This skill automates the tedious task of declining meetings when you're on PTO.
+# It uses browser automation to scrape Workday for approved PTO, then uses
+# Google Calendar API to decline any meetings scheduled on those days.
+
+name: sync_pto_calendar
+description: |
+  Sync your Workday PTO with Google Calendar by declining meetings on PTO days.
+
+  This skill:
+  1. Opens Workday and navigates to your Time Off page
+  2. Extracts approved PTO dates
+  3. Finds meetings on those days in your Google Calendar
+  4. Declines meetings with an automatic "On PTO" message
+
+  **Prerequisites:**
+  - Google Calendar API configured (OAuth token)
+  - Workday SSO access (uses browser automation)
+
+  **Usage:**
+  - Run with `dry_run: true` first to preview what would be declined
+  - Use `days_ahead` to limit how far into the future to check
+  - Use `decline_message` to customize the decline response
+
+version: "1.0"
+
+inputs:
+  - name: dry_run
+    type: boolean
+    required: false
+    default: true
+    description: "Preview mode - show what would be declined without actually declining"
+
+  - name: days_ahead
+    type: integer
+    required: false
+    default: 90
+    description: "How many days ahead to check for PTO (default: 90)"
+
+  - name: decline_message
+    type: string
+    required: false
+    default: "I'll be out of office on PTO. Please reschedule if needed."
+    description: "Message to include when declining meetings"
+
+  - name: skip_all_day
+    type: boolean
+    required: false
+    default: false
+    description: "Skip all-day events (holidays, etc.) - only decline timed meetings"
+
+  - name: skip_organizer_self
+    type: boolean
+    required: false
+    default: true
+    description: "Skip meetings you organized (you may want to cancel these manually)"
+
+  - name: workday_url
+    type: string
+    required: false
+    default: "https://wd5.myworkday.com/redhat/d/home.htmld"
+    description: "Workday home URL"
+
+# Workday navigation patterns
+workday_patterns:
+  time_off_link: "Time Off"
+  my_time_off_link: "My Time Off"
+  approved_status: "Approved"
+  date_format: "%Y-%m-%d"
+
+steps:
+  # ==================== LOAD MEETINGS PERSONA ====================
+
+  - name: load_meetings_persona
+    description: "Load meetings persona for Google Calendar tools"
+    tool: persona_load
+    args:
+      persona_name: "meetings"
+
+  # ==================== CHECK GOOGLE CALENDAR STATUS ====================
+
+  - name: check_calendar_status
+    description: "Verify Google Calendar API is accessible"
+    tool: google_calendar_status
+    output: calendar_status_raw
+    on_error: continue
+
+  - name: parse_calendar_status
+    description: "Check if calendar is ready"
+    compute: |
+      status_text = str(calendar_status_raw) if calendar_status_raw else ""
+
+      if "❌" in status_text or "not connected" in status_text.lower():
+          result = {
+              "available": False,
+              "error": "Google Calendar not configured. Run setup first.",
+          }
+      else:
+          result = {"available": True, "error": None}
+    output: calendar_check
+
+  - name: abort_if_no_calendar
+    description: "Stop if calendar not available"
+    condition: "not calendar_check.available"
+    then:
+      - return: |
+          ## ❌ Google Calendar Not Available
+
+          {{ calendar_check.error }}
+
+          ### Setup Instructions
+
+          1. Configure Google Calendar OAuth credentials
+          2. Run `google_calendar_status()` to complete authentication
+
+  # ==================== FETCH PTO FROM WORKDAY ====================
+
+  - name: init_pto_data
+    description: "Initialize PTO data structure"
+    compute: |
+      result = {
+          "pto_dates": [],
+          "fetch_error": None,
+          "workday_accessible": False,
+      }
+    output: pto_data
+
+  - name: navigate_to_workday
+    description: "Open Workday in browser"
+    tool: browser_navigate
+    args:
+      url: "{{ inputs.workday_url }}"
+    output: workday_nav_result
+    on_error: continue
+
+  - name: wait_for_workday_load
+    description: "Wait for Workday to load"
+    tool: browser_wait_for
+    args:
+      selector: "body"
+      timeout: 30000
+    output: workday_wait_result
+    on_error: continue
+
+  - name: take_workday_snapshot
+    description: "Take snapshot of Workday page"
+    tool: browser_snapshot
+    output: workday_snapshot
+    on_error: continue
+
+  - name: check_workday_auth
+    description: "Check if we're authenticated to Workday"
+    compute: |
+      snapshot_text = str(workday_snapshot) if workday_snapshot else ""
+
+      # Check for common auth indicators
+      needs_auth = any(x in snapshot_text.lower() for x in [
+          "sign in", "login", "authenticate", "sso", "username", "password"
+      ])
+
+      is_home = any(x in snapshot_text.lower() for x in [
+          "home", "workday", "inbox", "time off", "my tasks"
+      ])
+
+      result = {
+          "needs_auth": needs_auth and not is_home,
+          "is_home": is_home,
+          "snapshot_preview": snapshot_text[:500] if snapshot_text else "No snapshot",
+      }
+    output: workday_auth_check
+
+  - name: abort_if_auth_needed
+    description: "Stop if Workday needs authentication"
+    condition: "workday_auth_check.needs_auth"
+    then:
+      - return: |
+          ## ⚠️ Workday Authentication Required
+
+          Please log in to Workday manually first, then run this skill again.
+
+          **Steps:**
+          1. Open Workday in your browser: {{ inputs.workday_url }}
+          2. Complete SSO authentication
+          3. Run this skill again
+
+          **Snapshot preview:**
+          ```
+          {{ workday_auth_check.snapshot_preview }}
+          ```
+
+  # ==================== NAVIGATE TO TIME OFF PAGE ====================
+
+  - name: click_time_off_menu
+    description: "Click on Time Off in Workday menu"
+    condition: "workday_auth_check.is_home"
+    tool: browser_click
+    args:
+      selector: "text=Time Off"
+    output: time_off_click_result
+    on_error: continue
+
+  - name: wait_for_time_off_page
+    description: "Wait for Time Off page to load"
+    condition: "workday_auth_check.is_home"
+    tool: browser_wait_for
+    args:
+      selector: "text=My Time Off"
+      timeout: 15000
+    output: time_off_wait_result
+    on_error: continue
+
+  - name: click_my_time_off
+    description: "Click on My Time Off link"
+    condition: "workday_auth_check.is_home"
+    tool: browser_click
+    args:
+      selector: "text=My Time Off"
+    output: my_time_off_click_result
+    on_error: continue
+
+  - name: wait_for_time_off_list
+    description: "Wait for time off list to load"
+    condition: "workday_auth_check.is_home"
+    tool: browser_wait_for
+    args:
+      selector: "[data-automation-id='timeOffBalance'], [data-automation-id='timeOffRequests'], table"
+      timeout: 15000
+    output: time_off_list_wait_result
+    on_error: continue
+
+  - name: take_time_off_snapshot
+    description: "Take snapshot of Time Off page"
+    condition: "workday_auth_check.is_home"
+    tool: browser_snapshot
+    output: time_off_snapshot
+    on_error: continue
+
+  # ==================== PARSE PTO DATES ====================
+
+  - name: parse_pto_dates
+    description: "Extract PTO dates from Workday page"
+    compute: |
+      import re
+      from datetime import datetime, timedelta
+
+      snapshot_text = str(time_off_snapshot) if 'time_off_snapshot' in dir() and time_off_snapshot else ""
+
+      pto_dates = []
+      today = datetime.now().date()
+      max_date = today + timedelta(days=inputs.get('days_ahead', 90))
+
+      # Look for date patterns in the snapshot
+      # Common formats: YYYY-MM-DD, MM/DD/YYYY, DD-Mon-YYYY
+      date_patterns = [
+          r'(\d{4}-\d{2}-\d{2})',  # 2024-01-15
+          r'(\d{1,2}/\d{1,2}/\d{4})',  # 1/15/2024 or 01/15/2024
+          r'(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{4})',  # 15-Jan-2024
+      ]
+
+      # Look for approved time off entries
+      # Workday typically shows: Date | Type | Status
+      lines = snapshot_text.split('\n')
+
+      for i, line in enumerate(lines):
+          line_lower = line.lower()
+
+          # Check if this line or nearby lines mention "approved"
+          context = ' '.join(lines[max(0, i-2):min(len(lines), i+3)]).lower()
+          is_approved = 'approved' in context
+
+          if not is_approved:
+              continue
+
+          # Try to extract dates from this line
+          for pattern in date_patterns:
+              matches = re.findall(pattern, line, re.IGNORECASE)
+              for match in matches:
+                  try:
+                      # Parse the date
+                      if '-' in match and len(match) == 10:
+                          dt = datetime.strptime(match, '%Y-%m-%d').date()
+                      elif '/' in match:
+                          dt = datetime.strptime(match, '%m/%d/%Y').date()
+                      elif '-' in match:
+                          dt = datetime.strptime(match, '%d-%b-%Y').date()
+                      else:
+                          continue
+
+                      # Only include future dates within range
+                      if today <= dt <= max_date:
+                          if dt not in pto_dates:
+                              pto_dates.append(dt)
+                  except ValueError:
+                      continue
+
+      # Sort dates
+      pto_dates.sort()
+
+      # Update pto_data
+      pto_data['pto_dates'] = [d.isoformat() for d in pto_dates]
+      pto_data['workday_accessible'] = bool(snapshot_text)
+
+      result = {
+          "dates": [d.isoformat() for d in pto_dates],
+          "count": len(pto_dates),
+          "snapshot_preview": snapshot_text[:1000] if snapshot_text else "No snapshot available",
+      }
+    output: parsed_pto
+
+  - name: handle_no_pto
+    description: "Handle case where no PTO was found"
+    condition: "parsed_pto.count == 0"
+    then:
+      - return: |
+          ## 📅 No Upcoming PTO Found
+
+          No approved PTO dates were found in Workday for the next {{ inputs.days_ahead }} days.
+
+          **Possible reasons:**
+          - No PTO requests are approved
+          - PTO dates are outside the search range
+          - Workday page structure changed (check snapshot below)
+
+          **Workday Snapshot Preview:**
+          ```
+          {{ parsed_pto.snapshot_preview }}
+          ```
+
+          **To manually specify PTO dates**, you can use the calendar tools directly:
+          ```
+          google_calendar_list_events(days=30)
+          ```
+
+  # ==================== GET CALENDAR EVENTS ON PTO DAYS ====================
+
+  - name: get_calendar_events
+    description: "Get calendar events for the next N days"
+    condition: "parsed_pto.count > 0"
+    tool: google_calendar_list_events
+    args:
+      days: "{{ inputs.days_ahead }}"
+      max_results: 100
+    output: calendar_events_raw
+    on_error: continue
+
+  - name: find_meetings_on_pto
+    description: "Find meetings that fall on PTO days"
+    condition: "parsed_pto.count > 0"
+    compute: |
+      import re
+      from datetime import datetime
+
+      events_text = str(calendar_events_raw) if calendar_events_raw else ""
+      pto_dates = set(parsed_pto.get('dates', []))
+
+      meetings_to_decline = []
+      meetings_skipped = []
+
+      # Parse calendar events
+      # Format from google_calendar_list_events:
+      # - **Mon 2024-01-15 09:00** - Meeting Title 📹
+      event_pattern = r'\*\*(\w+ \d{4}-\d{2}-\d{2} \d{2}:\d{2})\*\* - (.+?)(?:\s*📹)?$'
+
+      for line in events_text.split('\n'):
+          match = re.search(event_pattern, line)
+          if not match:
+              continue
+
+          datetime_str = match.group(1)
+          title = match.group(2).strip()
+
+          # Extract date
+          date_match = re.search(r'(\d{4}-\d{2}-\d{2})', datetime_str)
+          if not date_match:
+              continue
+
+          event_date = date_match.group(1)
+
+          # Check if this date is a PTO day
+          if event_date not in pto_dates:
+              continue
+
+          # Check skip conditions
+          skip_reason = None
+
+          if inputs.get('skip_all_day', False) and 'all day' in line.lower():
+              skip_reason = "all-day event"
+
+          # Note: We can't easily detect organizer from list output
+          # Would need to fetch individual event details
+
+          if skip_reason:
+              meetings_skipped.append({
+                  "date": event_date,
+                  "title": title,
+                  "reason": skip_reason,
+              })
+          else:
+              meetings_to_decline.append({
+                  "date": event_date,
+                  "title": title,
+                  "datetime_str": datetime_str,
+              })
+
+      result = {
+          "to_decline": meetings_to_decline,
+          "skipped": meetings_skipped,
+          "decline_count": len(meetings_to_decline),
+          "skip_count": len(meetings_skipped),
+      }
+    output: meetings_analysis
+
+  # ==================== DRY RUN OUTPUT ====================
+
+  - name: dry_run_output
+    description: "Show what would be declined in dry run mode"
+    condition: "inputs.dry_run and parsed_pto.count > 0"
+    then:
+      - return: |
+          ## 🧪 Dry Run: PTO Calendar Sync
+
+          ### 📅 PTO Dates Found ({{ parsed_pto.count }})
+
+          {% for date in parsed_pto.dates %}
+          - {{ date }}
+          {% endfor %}
+
+          ### 📋 Meetings to Decline ({{ meetings_analysis.decline_count }})
+
+          {% if meetings_analysis.to_decline %}
+          | Date | Meeting |
+          |------|---------|
+          {% for m in meetings_analysis.to_decline %}
+          | {{ m.date }} | {{ m.title }} |
+          {% endfor %}
+
+          **Decline message:** "{{ inputs.decline_message }}"
+          {% else %}
+          ✅ No meetings found on PTO days!
+          {% endif %}
+
+          {% if meetings_analysis.skipped %}
+          ### ⏭️ Meetings Skipped ({{ meetings_analysis.skip_count }})
+
+          | Date | Meeting | Reason |
+          |------|---------|--------|
+          {% for m in meetings_analysis.skipped %}
+          | {{ m.date }} | {{ m.title }} | {{ m.reason }} |
+          {% endfor %}
+          {% endif %}
+
+          ---
+
+          **To actually decline these meetings, run:**
+          ```
+          skill_run('sync_pto_calendar', '{"dry_run": false}')
+          ```
+
+  # ==================== DECLINE MEETINGS ====================
+
+  - name: decline_meetings_loop
+    description: "Decline meetings on each PTO day"
+    condition: "not inputs.dry_run and parsed_pto.count > 0"
+    compute: |
+      # Store PTO dates for the decline loop
+      result = {
+          "dates_to_process": parsed_pto.get('dates', []),
+          "decline_message": inputs.get('decline_message', 'On PTO - unable to attend'),
+          "skip_all_day": inputs.get('skip_all_day', False),
+          "skip_organizer_self": inputs.get('skip_organizer_self', True),
+      }
+    output: decline_config
+
+  # Decline meetings for each PTO date (up to 5 dates in sequence)
+  - name: decline_date_1
+    description: "Decline meetings on first PTO date"
+    condition: "not inputs.dry_run and decline_config.dates_to_process|length > 0"
+    tool: google_calendar_decline_meetings_on_date
+    args:
+      date: "{{ decline_config.dates_to_process[0] }}"
+      message: "{{ decline_config.decline_message }}"
+      dry_run: false
+      skip_all_day: "{{ decline_config.skip_all_day }}"
+      skip_organizer_self: "{{ decline_config.skip_organizer_self }}"
+    output: decline_result_1
+    on_error: continue
+
+  - name: decline_date_2
+    description: "Decline meetings on second PTO date"
+    condition: "not inputs.dry_run and decline_config.dates_to_process|length > 1"
+    tool: google_calendar_decline_meetings_on_date
+    args:
+      date: "{{ decline_config.dates_to_process[1] }}"
+      message: "{{ decline_config.decline_message }}"
+      dry_run: false
+      skip_all_day: "{{ decline_config.skip_all_day }}"
+      skip_organizer_self: "{{ decline_config.skip_organizer_self }}"
+    output: decline_result_2
+    on_error: continue
+
+  - name: decline_date_3
+    description: "Decline meetings on third PTO date"
+    condition: "not inputs.dry_run and decline_config.dates_to_process|length > 2"
+    tool: google_calendar_decline_meetings_on_date
+    args:
+      date: "{{ decline_config.dates_to_process[2] }}"
+      message: "{{ decline_config.decline_message }}"
+      dry_run: false
+      skip_all_day: "{{ decline_config.skip_all_day }}"
+      skip_organizer_self: "{{ decline_config.skip_organizer_self }}"
+    output: decline_result_3
+    on_error: continue
+
+  - name: decline_date_4
+    description: "Decline meetings on fourth PTO date"
+    condition: "not inputs.dry_run and decline_config.dates_to_process|length > 3"
+    tool: google_calendar_decline_meetings_on_date
+    args:
+      date: "{{ decline_config.dates_to_process[3] }}"
+      message: "{{ decline_config.decline_message }}"
+      dry_run: false
+      skip_all_day: "{{ decline_config.skip_all_day }}"
+      skip_organizer_self: "{{ decline_config.skip_organizer_self }}"
+    output: decline_result_4
+    on_error: continue
+
+  - name: decline_date_5
+    description: "Decline meetings on fifth PTO date"
+    condition: "not inputs.dry_run and decline_config.dates_to_process|length > 4"
+    tool: google_calendar_decline_meetings_on_date
+    args:
+      date: "{{ decline_config.dates_to_process[4] }}"
+      message: "{{ decline_config.decline_message }}"
+      dry_run: false
+      skip_all_day: "{{ decline_config.skip_all_day }}"
+      skip_organizer_self: "{{ decline_config.skip_organizer_self }}"
+    output: decline_result_5
+    on_error: continue
+
+  - name: aggregate_decline_results
+    description: "Aggregate all decline results"
+    condition: "not inputs.dry_run and parsed_pto.count > 0"
+    compute: |
+      results = []
+      for i in range(1, 6):
+          var_name = f'decline_result_{i}'
+          if var_name in dir() and eval(var_name):
+              results.append(str(eval(var_name)))
+
+      result = {
+          "all_results": results,
+          "count": len(results),
+          "remaining": max(0, len(decline_config.get('dates_to_process', [])) - 5),
+      }
+    output: decline_result
+
+  # ==================== LOG SESSION ====================
+
+  - name: log_pto_sync
+    description: "Log PTO sync to session"
+    tool: memory_session_log
+    args:
+      action: "PTO Calendar Sync"
+      details: "PTO dates: {{ parsed_pto.count }}, Meetings to decline: {{ meetings_analysis.decline_count if meetings_analysis else 0 }}, Dry run: {{ inputs.dry_run }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## 📅 PTO Calendar Sync
+
+      {% if not calendar_check.available %}
+      ### ❌ Calendar Not Available
+
+      {{ calendar_check.error }}
+
+      {% elif parsed_pto.count == 0 %}
+      ### No PTO Found
+
+      No approved PTO dates found in Workday for the next {{ inputs.days_ahead }} days.
+
+      {% elif inputs.dry_run %}
+      ### 🧪 Dry Run Complete
+
+      **PTO Dates:** {{ parsed_pto.count }}
+      {% for date in parsed_pto.dates %}
+      - {{ date }}
+      {% endfor %}
+
+      **Meetings to Decline:** {{ meetings_analysis.decline_count if meetings_analysis else 0 }}
+      **Meetings Skipped:** {{ meetings_analysis.skip_count if meetings_analysis else 0 }}
+
+      Run with `dry_run: false` to actually decline meetings.
+
+      {% else %}
+      ### ✅ Sync Complete
+
+      **PTO Dates Processed:** {{ parsed_pto.count }}
+      {% for date in parsed_pto.dates %}
+      - {{ date }}
+      {% endfor %}
+
+      **Decline Results:**
+      {% if decline_result and decline_result.all_results %}
+      {% for result in decline_result.all_results %}
+      {{ result }}
+      {% endfor %}
+      {% else %}
+      No meetings needed to be declined.
+      {% endif %}
+
+      {% if decline_result and decline_result.remaining > 0 %}
+      ⚠️ **{{ decline_result.remaining }} more PTO dates** were not processed.
+      Run the skill again to process remaining dates.
+      {% endif %}
+      {% endif %}
+
+      ---
+
+      ### Quick Commands
+
+      **Preview (dry run):**
+      ```
+      skill_run('sync_pto_calendar', '{"dry_run": true}')
+      ```
+
+      **Execute:**
+      ```
+      skill_run('sync_pto_calendar', '{"dry_run": false}')
+      ```
+
+      **Custom message:**
+      ```
+      skill_run('sync_pto_calendar', '{"dry_run": false, "decline_message": "On vacation - back Jan 20"}')
+      ```
+
+      **Skip all-day events:**
+      ```
+      skill_run('sync_pto_calendar', '{"dry_run": false, "skip_all_day": true}')
+      ```
+
+  - name: context
+    value:
+      pto_dates: "{{ parsed_pto.dates if parsed_pto else [] }}"
+      pto_count: "{{ parsed_pto.count if parsed_pto else 0 }}"
+      meetings_to_decline: "{{ meetings_analysis.decline_count if meetings_analysis else 0 }}"
+      meetings_skipped: "{{ meetings_analysis.skip_count if meetings_analysis else 0 }}"
+      dry_run: "{{ inputs.dry_run }}"
+      dates_processed: "{{ decline_result.count if decline_result else 0 }}"

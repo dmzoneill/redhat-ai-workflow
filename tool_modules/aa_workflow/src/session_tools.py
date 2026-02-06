@@ -17,6 +17,7 @@ import yaml
 from fastmcp import Context
 from mcp.types import TextContent
 
+from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
@@ -36,6 +37,171 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ==================== BOOTSTRAP CONTEXT ====================
+
+
+async def _get_bootstrap_context(project: str | None, session_name: str | None) -> dict | None:
+    """Get bootstrap context using the memory abstraction layer.
+
+    Queries memory to get:
+    - Intent classification based on project/session context
+    - Suggested persona based on current work
+    - Active issues and recommended actions
+    - Related Slack discussions
+    - Related code context
+
+    Args:
+        project: Current project name
+        session_name: Optional session name (may contain intent hints)
+
+    Returns:
+        Bootstrap context dict or None if unavailable
+    """
+    try:
+        from services.memory_abstraction import get_memory_interface
+    except ImportError:
+        logger.debug("Memory abstraction not available for bootstrap")
+        return None
+
+    try:
+        memory = get_memory_interface()
+
+        # Build query based on available context
+        query_parts = []
+        if project:
+            query_parts.append(f"project {project}")
+        if session_name:
+            query_parts.append(session_name)
+        query_parts.append("current work status")
+
+        query = " ".join(query_parts)
+
+        # Query only FAST sources for bootstrap (local operations only)
+        # Slow sources (external APIs like inscope, jira, gitlab, gmail, gdrive, calendar)
+        # are available via memory_query but not included in bootstrap to keep startup fast
+        # Fast sources: yaml (local files), code (local vector), slack (local vector)
+        fast_sources = ["yaml", "code", "slack"]
+
+        result = await memory.query(
+            question=query,
+            sources=fast_sources,  # Only fast local sources
+        )
+
+        # Extract bootstrap context from result
+        # Note: slow_sources_available tells the AI what additional sources can be queried
+        bootstrap = {
+            "intent": result.intent.to_dict(),
+            "current_work": {},
+            "suggested_persona": None,
+            "persona_confidence": 0.0,
+            "recommended_actions": [],
+            "related_slack": [],  # Recent relevant Slack discussions
+            "related_code": [],  # Related code snippets
+            "sources_queried": result.sources_queried,
+            "slow_sources_available": [
+                "inscope",  # InScope AI documentation (2-120s)
+                "jira",  # Jira issue details
+                "gitlab",  # GitLab MRs/pipelines
+                "github",  # GitHub PRs/issues
+                "calendar",  # Google Calendar events
+                "gmail",  # Gmail messages
+                "gdrive",  # Google Drive files
+            ],
+        }
+
+        # Extract context from each source type
+        for item in result.items:
+            source = item.source
+
+            if source == "yaml":
+                # Extract current work from yaml results
+                if "current_work" in item.metadata.get("key", ""):
+                    if "Active Issues:" in item.content:
+                        issues = []
+                        for line in item.content.split("\n"):
+                            if line.startswith("- ") and ":" in line:
+                                issue_key = line.split(":")[0].replace("- ", "").strip()
+                                if issue_key.startswith("AAP-") or issue_key.startswith("APPSRE-"):
+                                    issues.append(issue_key)
+                        bootstrap["current_work"]["active_issues"] = issues
+
+            elif source == "slack":
+                # Extract relevant Slack discussions (limit to top 3)
+                if len(bootstrap["related_slack"]) < 3:
+                    slack_item = {
+                        "summary": item.summary,
+                        "channel": item.metadata.get("channel", "unknown"),
+                        "timestamp": item.metadata.get("timestamp", ""),
+                        "relevance": item.relevance,
+                    }
+                    bootstrap["related_slack"].append(slack_item)
+
+            elif source == "code":
+                # Extract related code snippets (limit to top 3)
+                if len(bootstrap["related_code"]) < 3:
+                    code_item = {
+                        "summary": item.summary,
+                        "file": item.metadata.get("file_path", item.metadata.get("path", "unknown")),
+                        "relevance": item.relevance,
+                    }
+                    bootstrap["related_code"].append(code_item)
+
+        # Determine suggested persona based on intent
+        intent = result.intent.intent
+        persona_map = {
+            "code_lookup": ("developer", 0.85),
+            "troubleshooting": ("incident", 0.9),
+            "status_check": ("developer", 0.7),
+            "documentation": ("researcher", 0.8),
+            "issue_context": ("developer", 0.85),
+        }
+
+        if intent in persona_map:
+            persona, confidence = persona_map[intent]
+            bootstrap["suggested_persona"] = persona
+            bootstrap["persona_confidence"] = confidence
+
+        # Generate recommended actions based on intent
+        # Note: Actions that require slow sources should use memory_query explicitly
+        action_map = {
+            "code_lookup": [
+                "Use code_search to find relevant code",
+                "Check memory for similar patterns",
+            ],
+            "troubleshooting": [
+                "Check learned/patterns for known fixes",
+                "Load incident persona for debugging tools",
+                "Use memory_query(sources=['jira']) for issue details",
+            ],
+            "status_check": [
+                "Review active issues in current_work",
+                "Use memory_query(sources=['gitlab']) for MR status",
+            ],
+            "issue_context": [
+                "Use memory_query(sources=['jira']) for issue details",
+                "Use memory_query(sources=['gitlab']) for related MRs",
+            ],
+            "documentation": [
+                "Use memory_query(sources=['inscope']) for documentation",
+                "Check knowledge base in memory/knowledge/",
+            ],
+        }
+
+        bootstrap["recommended_actions"] = action_map.get(
+            intent,
+            [
+                "Use memory_query for more context",
+                "Slow sources available: inscope, jira, gitlab, github, calendar, gmail, gdrive",
+            ],
+        )
+
+        return bootstrap
+
+    except Exception as e:
+        logger.warning(f"Failed to get bootstrap context: {e}")
+        return None
+
+
 # ==================== TOOL IMPLEMENTATIONS ====================
 
 
@@ -48,7 +214,9 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
     """
     # Import here to avoid circular imports
     try:
-        from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+        from tool_modules.aa_workflow.src.chat_context import (
+            get_project_work_state_path,
+        )
     except ImportError:
         try:
             from .chat_context import get_project_work_state_path
@@ -389,9 +557,9 @@ def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
 def _load_chat_context(lines: list[str]) -> str:
     """Load and display chat context (project, issue, branch) - sync version."""
     try:
-        from .chat_context import get_chat_project, get_chat_state
+        from .chat_context import get_chat_state
     except ImportError:
-        from chat_context import get_chat_project, get_chat_state
+        from chat_context import get_chat_state
 
     state = get_chat_state()
     project = state["project"]
@@ -614,10 +782,10 @@ async def _session_start_impl(
                 # Session not found - list available sessions
                 available = list(workspace.sessions.keys())
                 lines = [
-                    f"# ⚠️ Session Not Found\n",
+                    "# ⚠️ Session Not Found\n",
                     f"Session `{resume_session_id}` does not exist.\n",
                     f"**Available sessions:** {', '.join(f'`{s}`' for s in available) or 'none'}\n",
-                    f"Creating a new session instead...\n",
+                    "Creating a new session instead...\n",
                     "---\n",
                 ]
                 # Fall through to create new session
@@ -800,6 +968,91 @@ async def _session_start_impl(
     lines.append("Use `check_known_issues(tool, error)` when tools fail.")
     lines.append("")
 
+    # Bootstrap context: Query memory abstraction for intent classification and suggested persona
+    bootstrap_context = await _get_bootstrap_context(detected_project, name)
+    if bootstrap_context:
+        lines.append("## 🎯 Bootstrap Context\n")
+
+        # Show intent classification
+        intent = bootstrap_context.get("intent", {})
+        if intent:
+            intent_name = intent.get("intent", "general")
+            confidence = intent.get("confidence", 0)
+            confidence_pct = int(confidence * 100)
+            lines.append(f"**Detected Intent:** {intent_name} ({confidence_pct}% confidence)")
+
+        # Show suggested persona with auto-load logic
+        suggested_persona = bootstrap_context.get("suggested_persona")
+        current_persona = chat_session.persona if ctx else (agent or "researcher")
+
+        if suggested_persona and suggested_persona != current_persona:
+            confidence = bootstrap_context.get("persona_confidence", 0)
+            if confidence >= 0.8:
+                # Auto-load the suggested persona
+                lines.append(f"**Auto-loading Persona:** {suggested_persona} (confidence: {int(confidence * 100)}%)")
+                try:
+                    from server.persona_loader import get_loader
+
+                    loader = get_loader()
+                    if loader:
+                        await loader.switch_persona(suggested_persona)
+                        if ctx:
+                            chat_session.persona = suggested_persona
+                        lines.append(f"  ✅ Switched from {current_persona} to {suggested_persona}")
+                except Exception as e:
+                    lines.append(f"  ⚠️ Failed to auto-load: {e}")
+            else:
+                lines.append(
+                    f"**Suggested Persona:** {suggested_persona} (confidence: {int(confidence * 100)}% - below auto-load threshold)"
+                )
+
+        # Show current work summary
+        current_work = bootstrap_context.get("current_work", {})
+        if current_work:
+            active_issues = current_work.get("active_issues", [])
+            if active_issues:
+                lines.append(f"**Active Issues:** {', '.join(active_issues[:3])}")
+
+        # Show recommended next actions
+        actions = bootstrap_context.get("recommended_actions", [])
+        if actions:
+            lines.append("**Recommended Actions:**")
+            for action in actions[:3]:
+                lines.append(f"  - {action}")
+
+        # Show related Slack discussions if any
+        related_slack = bootstrap_context.get("related_slack", [])
+        if related_slack:
+            lines.append("")
+            lines.append("**Related Slack Discussions:**")
+            for slack_item in related_slack[:3]:
+                channel = slack_item.get("channel", "unknown")
+                summary = slack_item.get("summary", "")[:80]
+                relevance = int(slack_item.get("relevance", 0) * 100)
+                lines.append(f"  - #{channel}: {summary}... ({relevance}% relevant)")
+
+        # Show related code context if any
+        related_code = bootstrap_context.get("related_code", [])
+        if related_code:
+            lines.append("")
+            lines.append("**Related Code:**")
+            for code_item in related_code[:3]:
+                file_path = code_item.get("file", "unknown")
+                # Shorten path for display
+                if "/" in file_path:
+                    file_path = "/".join(file_path.split("/")[-3:])
+                summary = code_item.get("summary", "")[:60]
+                relevance = int(code_item.get("relevance", 0) * 100)
+                lines.append(f"  - `{file_path}`: {summary}... ({relevance}%)")
+
+        # Show which sources were queried
+        sources_queried = bootstrap_context.get("sources_queried", [])
+        if sources_queried:
+            lines.append("")
+            lines.append(f"*Sources queried: {', '.join(sources_queried)}*")
+
+        lines.append("")
+
     # Log session start (if function provided)
     if memory_session_log_fn:
         project_info = f", Project: {detected_project}" if detected_project else ""
@@ -807,7 +1060,9 @@ async def _session_start_impl(
 
     # Export workspace state for VS Code extension
     try:
-        from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
+        from tool_modules.aa_workflow.src.workspace_exporter import (
+            export_workspace_state_async,
+        )
 
         logger.info("session_start: About to export workspace state")
         result = await export_workspace_state_async(ctx)
@@ -988,6 +1243,7 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
         """
         return await _session_start_impl(ctx, agent, project, name, memory_session_log_fn, session_id)
 
+    @auto_heal()
     @registry.tool()
     async def session_set_project(ctx: Context, project: str, session_id: str = "") -> list[TextContent]:
         """Set the project for the current or specified session.
@@ -1027,7 +1283,7 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 return [
                     TextContent(
                         type="text",
-                        text=f"# Invalid Project\n\n"
+                        text="# Invalid Project\n\n"
                         f"Project `{project}` not found in config.json.\n\n"
                         f"**Available projects:** {available}",
                     )
@@ -1053,7 +1309,7 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 return [
                     TextContent(
                         type="text",
-                        text=f"# Session Not Found\n\n" f"Session `{target_session_id}` not found in workspace.",
+                        text="# Session Not Found\n\n" f"Session `{target_session_id}` not found in workspace.",
                     )
                 ]
 
@@ -1085,13 +1341,25 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
             logger.info(f"Updated session {target_session_id} project: {old_project} -> {project}")
 
-            # Emit notification
+            # Emit notification for toast
             try:
                 from .notification_emitter import notify_session_updated
 
                 notify_session_updated(target_session_id, f"Project changed to {project}")
             except Exception:
                 pass
+
+            # Trigger session daemon to reload from disk so UI updates
+            try:
+                from services.base.dbus import get_client
+
+                client = get_client("session")
+                await client.connect()
+                await client.call_method("refresh_now", [])
+                await client.disconnect()
+                logger.debug("Triggered session daemon refresh after project update")
+            except Exception as e:
+                logger.debug(f"Could not trigger session daemon refresh: {e}")
 
         except Exception as e:
             import traceback
@@ -1135,7 +1403,11 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             jira_attach_session(issue_key="AAP-12345", include_transcript=True)
             jira_attach_session(issue_key="AAP-12345", session_id="abc123")
         """
-        from server.workspace_state import WorkspaceRegistry, format_session_context_for_jira, get_cursor_chat_content
+        from server.workspace_state import (
+            WorkspaceRegistry,
+            format_session_context_for_jira,
+            get_cursor_chat_content,
+        )
 
         lines = []
 
@@ -1147,9 +1419,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 return [
                     TextContent(
                         type="text",
-                        text=f"# Invalid Issue Key\n\n"
+                        text="# Invalid Issue Key\n\n"
                         f"`{issue_key}` is not a valid Jira issue key.\n"
-                        f"Expected format: AAP-12345",
+                        "Expected format: AAP-12345",
                     )
                 ]
 
@@ -1173,9 +1445,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 return [
                     TextContent(
                         type="text",
-                        text=f"# Session Not Found\n\n"
+                        text="# Session Not Found\n\n"
                         f"Session `{target_session_id}` not found.\n"
-                        f"Use `session_list()` to see available sessions.",
+                        "Use `session_list()` to see available sessions.",
                     )
                 ]
 
@@ -1291,7 +1563,7 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 return [
                     TextContent(
                         type="text",
-                        text=f"# Session Not Found\n\n" f"Session `{target_session_id}` not found.",
+                        text="# Session Not Found\n\n" f"Session `{target_session_id}` not found.",
                     )
                 ]
 

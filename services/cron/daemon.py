@@ -164,14 +164,16 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             checks["jobs_scheduled"] = False
             checks["acceptable_failure_rate"] = True
 
-        # Check uptime (at least 10 seconds)
+        # Check uptime (informational, not required for health)
         if self.start_time:
             checks["uptime_ok"] = (now - self.start_time) > 10
         else:
             checks["uptime_ok"] = False
 
-        # Overall health
-        healthy = all(checks.values())
+        # Overall health - only core checks required
+        # uptime_ok is informational, not required for watchdog
+        core_checks = ["running", "scheduler_initialized", "scheduler_running"]
+        healthy = all(checks.get(k, False) for k in core_checks)
 
         # Build message
         if healthy:
@@ -413,11 +415,10 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
     # ==================== Daemon Lifecycle ====================
 
-    async def run_daemon(self):
-        """Main daemon logic (BaseDaemon interface)."""
+    async def startup(self):
+        """Initialize daemon resources."""
+        await super().startup()
         from tool_modules.aa_workflow.src.scheduler import get_scheduler, init_scheduler, start_scheduler
-
-        self.start_time = datetime.now().timestamp()
 
         print("=" * 60)
         print("Cron Scheduler Daemon")
@@ -443,8 +444,7 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             print("Scheduler is DISABLED in config.json")
             print("   Set schedules.enabled=true to enable")
             print()
-            print("Exiting...")
-            return
+            raise RuntimeError("Scheduler is disabled in config.json")
 
         # List jobs
         cron_jobs = scheduler.config.get_cron_jobs()
@@ -479,13 +479,14 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         print()
         print("-" * 60)
-        print("Daemon running. Press Ctrl+C to stop.")
+        print("Daemon ready.")
         print("Logs: journalctl --user -u bot-cron -f")
         if self.enable_dbus:
             print(f"D-Bus: {self.service_name}")
         print("-" * 60)
 
-        # Wait for shutdown signal
+    async def run_daemon(self):
+        """Main daemon loop - wait for shutdown."""
         await self._shutdown_event.wait()
 
     async def _state_writer_loop(self):
@@ -648,110 +649,18 @@ def list_jobs():
         print()
 
 
-async def main():
+def main():
     """Main entry point."""
-    parser = CronDaemon.create_argument_parser()
-    args = parser.parse_args()
-
-    # Handle --list-jobs
-    if args.list_jobs:
+    import sys
+    
+    # Handle --list-jobs before BaseDaemon.main() takes over
+    if "--list-jobs" in sys.argv:
         list_jobs()
         return
-
-    # Check for single-instance commands
-    instance = SingleInstance("cron")
-
-    # Handle --status
-    if args.status:
-        try:
-            client = get_client("cron")
-            if await client.connect():
-                status = await client.get_status()
-                await client.disconnect()
-                print("Cron daemon is running (via D-Bus)")
-                print(f"   Uptime: {status.get('uptime', 0):.0f}s")
-                print(f"   Jobs: {status.get('job_count', 0)}")
-                print(f"   Executed: {status.get('jobs_executed', 0)}")
-                print(f"   Failed: {status.get('jobs_failed', 0)}")
-                print(f"   Mode: {status.get('execution_mode', 'unknown')}")
-                return
-        except Exception:
-            pass
-
-        pid = instance.get_running_pid()
-        if pid:
-            print(f"Cron daemon is running (PID: {pid})")
-            print(f"   Lock file: {instance.lock_path}")
-            print(f"   PID file: {instance.pid_path}")
-            print("   Logs: journalctl --user -u bot-cron -f")
-            print("   (D-Bus not available - run with --dbus for IPC)")
-        else:
-            print("Cron daemon is not running")
-        return
-
-    # Handle --stop
-    if args.stop:
-        try:
-            client = get_client("cron")
-            if await client.connect():
-                result = await client.shutdown()
-                await client.disconnect()
-                if result.get("success"):
-                    print("Shutdown signal sent via D-Bus")
-                    return
-        except Exception:
-            pass
-
-        pid = instance.get_running_pid()
-        if pid:
-            print(f"Stopping daemon (PID: {pid})...")
-            try:
-                os.kill(pid, signal.SIGTERM)
-                print("Stop signal sent")
-            except OSError as e:
-                print(f"Failed to stop: {e}")
-        else:
-            print("Cron daemon is not running")
-        return
-
-    # Configure logging
-    CronDaemon.configure_logging(verbose=args.verbose)
-
-    # Try to acquire the lock
-    if not instance.acquire():
-        existing_pid = instance.get_running_pid()
-        print(f"Another instance is already running (PID: {existing_pid})")
-        print()
-        print("Use --status to check status or --stop to stop it.")
-        return
-
-    daemon = CronDaemon(verbose=args.verbose, enable_dbus=args.enable_dbus)
-
-    try:
-        # Setup signal handlers
-        loop = asyncio.get_running_loop()
-
-        def signal_handler():
-            logger.info("Received shutdown signal, shutting down...")
-            daemon._shutdown_event.set()
-            daemon.request_shutdown()
-
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, signal_handler)
-
-        await daemon.run_daemon()
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        logger.error(f"Daemon error: {e}")
-        import traceback
-
-        logger.error(traceback.format_exc())
-    finally:
-        await daemon.shutdown()
-        instance.release()
-        print("Lock released")
+    
+    # Use BaseDaemon.main() for standard daemon lifecycle
+    CronDaemon.main()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

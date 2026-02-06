@@ -4,7 +4,8 @@ This module provides the minimal set of workflow tools needed by ALL personas:
 - Session management: session_start, session_info
 - Persona management: persona_load, persona_list
 - Skill execution: skill_run, skill_list
-- Memory: memory_read, memory_write, memory_session_log
+- Memory (YAML): memory_read, memory_write, memory_session_log
+- Memory (Unified): memory_ask, memory_search, memory_list_adapters, memory_health
 - Meta: tool_list, tool_exec
 - Infra: vpn_connect, kube_login (required for auto-healing)
 
@@ -12,7 +13,7 @@ For additional tools (knowledge, project, scheduler, sprint), use:
 - workflow_basic: Loads core + basic tools
 - tool_exec("knowledge_search", {...}): Call specific tools on-demand
 
-Total: ~20 core tools (down from 54 in basic)
+Total: ~25 core tools (down from 54 in basic)
 """
 
 import logging
@@ -101,9 +102,15 @@ def register_tools(server: "FastMCP") -> int:
     ask_question_fn = None
     try:
         try:
-            from .claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
+            from .claude_code_integration import (
+                create_ask_question_wrapper,
+                get_claude_code_capabilities,
+            )
         except ImportError:
-            from claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
+            from claude_code_integration import (
+                create_ask_question_wrapper,
+                get_claude_code_capabilities,
+            )
 
         capabilities = get_claude_code_capabilities()
         logger.info(f"Claude Code detection: {capabilities}")
@@ -122,6 +129,17 @@ def register_tools(server: "FastMCP") -> int:
     tool_count += register_resources(server, load_config)
     tool_count += register_skill_tools(server, create_github_issue, ask_question_fn)
     tool_count += register_infra_tools(server)  # vpn_connect, kube_login for auto-healing
+
+    # Register unified memory abstraction tools (memory_ask, memory_search, etc.)
+    try:
+        try:
+            from .memory_unified import register_tools as register_unified_memory_tools
+        except ImportError:
+            from memory_unified import register_tools as register_unified_memory_tools
+        tool_count += register_unified_memory_tools(server)
+        logger.info("✅ Unified memory abstraction tools registered")
+    except ImportError as e:
+        logger.warning(f"Unified memory tools not available: {e}")
 
     logger.info(f"Registered {tool_count} core workflow tools")
     return tool_count

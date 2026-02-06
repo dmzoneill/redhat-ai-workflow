@@ -1,0 +1,25 @@
+metadata:
+  project: aapautomationanalytics-dbt
+  persona: release
+  last_updated: '2026-02-05T06:00:25.985963'
+  last_scanned: '2026-02-05T06:00:25.985940'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: "AAP Automation Analytics provides telemetry data from Ansible Automation\
+    \ Platform (AAP) \ninstallations, migrated from legacy RedShift infrastructure\
+    \ to Dataverse/Snowflake."
+  key_modules:
+  - path: models/
+    purpose: Models module
+    notes: Auto-detected from project structure
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding: []
+  testing: []
+  deployment:
+  - pattern: GitLab CI/CD
+    notes: Pipeline defined in .gitlab-ci.yml
+gotchas: []
+learned_from_tasks: []

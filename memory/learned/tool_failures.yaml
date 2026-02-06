@@ -46,344 +46,13 @@ auto_fixes:
     success_rate: 0.95
 failure_history: []
 failures:
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:15:05.138471'
-  tool: gitlab_mr_list
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:18:51.837740'
-  tool: gitlab_mr_list
-- error_snippet: "Tool returned failure marker: ...\u274C Failed to get alerts: HTTP\
-    \ 403: \n<!DOCTYPE html>\n<html lang=\"en\" "
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:22:42.056227'
-  tool: alertmanager_alerts
-- error_snippet: "Tool returned failure marker: ...\u274C Failed to get alerts: HTTP\
-    \ 403: \n<!DOCTYPE html>\n<html lang=\"en\" "
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:26:36.079494'
-  tool: alertmanager_alerts
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:31:02.348267'
-  tool: gitlab_mr_list
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:33:23.509028'
-  tool: gitlab_mr_list
-- error_snippet: "Tool returned failure marker: ...\u274C Failed to get alerts: HTTP\
-    \ 403: \n<!DOCTYPE html>\n<html lang=\"en\" "
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:34:16.068397'
-  tool: alertmanager_alerts
-- error_snippet: "Tool returned failure marker: ...\u274C Failed to get alerts: HTTP\
-    \ 403: \n<!DOCTYPE html>\n<html lang=\"en\" "
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:35:46.717009'
-  tool: alertmanager_alerts
-- error_snippet: "Tool returned failure marker: ...\u274C Failed to get alerts: HTTP\
-    \ 403: \n<!DOCTYPE html>\n<html lang=\"en\" "
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:36:44.205638'
-  tool: alertmanager_alerts
-- error_snippet: "Tool returned failure marker: ...\u274C Failed to get alerts: HTTP\
-    \ 403: \n<!DOCTYPE html>\n<html lang=\"en\" "
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T16:39:37.070930'
-  tool: alertmanager_alerts
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T21:50:00.028240'
-  tool: gitlab_mr_list
-- error_snippet: "\u274C Search failed: WARNING: HTTP error 400 for GET https://issues.redhat.com/rest/api/2/search\n\
-    WARNING"
-  error_type: network
-  fix_applied: vpn_connect
-  success: true
-  timestamp: '2026-01-18T21:51:34.668554'
-  tool: _jira_search_impl
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T21:53:21.047201'
-  tool: gitlab_mr_list
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T21:59:39.596483'
-  tool: gitlab_mr_list
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T22:01:44.166912'
-  tool: gitlab_mr_list
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-18T22:27:25.339629'
-  tool: gitlab_mr_list
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-19T09:12:50.351934'
-  tool: gitlab_mr_list
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-19T09:15:18.481237'
-  tool: gitlab_mr_list
-- error_snippet: "\u274C Search failed: ERROR: Request exception: HTTPSConnectionPool(host='issues.redhat.com',\
-    \ port=443): "
-  error_type: network
-  fix_applied: vpn_connect
-  success: true
-  timestamp: '2026-01-19T19:33:15.942639'
-  tool: _jira_search_impl
-- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
-    \  \nCVP-2401      | Task      | Closed  "
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-20T21:01:14.807758'
-  tool: jira_my_issues
-- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
-    \  \nCVP-2401      | Task      | Closed  "
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-20T21:04:02.478201'
-  tool: jira_my_issues
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-21T14:41:00.274820'
-  tool: gitlab_mr_list
-- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
-    \  \nCVP-2401      | Task          | Clos"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-21T21:00:41.176528'
-  tool: jira_my_issues
-- error_snippet: "\u274C Failed to add comment: ERROR: Request exception: HTTPSConnectionPool(host='issues.redhat.com',\
-    \ por"
-  error_type: network
-  fix_applied: vpn_connect
-  success: true
-  timestamp: '2026-01-22T15:33:35.294224'
-  tool: _jira_add_comment_impl
-- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
-    \  \nCVP-2401      | Task          | Clos"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-22T21:01:31.653123'
-  tool: jira_my_issues
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T10:04:37.037929'
-  tool: gitlab_mr_list
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T10:05:01.546442'
-  tool: gitlab_mr_list
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T10:05:26.051298'
-  tool: gitlab_mr_list
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T10:05:35.078069'
-  tool: gitlab_mr_list
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T10:06:02.897481'
-  tool: gitlab_mr_list
-- error_snippet: "Tool returned failure marker: ...\u274C Failed:           \n   ERROR\
-    \  \n          \n  Get \"https://gitlab.ce"
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T10:06:07.272174'
-  tool: gitlab_mr_list
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T10:08:19.646198'
-  tool: gitlab_mr_list
-- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
-    AAP-58403 - chore(ci): u"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T10:08:34.442929'
-  tool: gitlab_mr_list
-- error_snippet: "\u274C Failed: Error: failed to list PipelineRuns from namespace\
-    \ aap-pdf-generator-tenant: the server has"
-  error_type: auth
-  fix_applied: kube_login
-  success: true
-  timestamp: '2026-01-26T19:35:07.402154'
-  tool: _tkn_pipelinerun_list_impl
-- error_snippet: 'HTTP 401 - authentication required: ...<none>
-
-    automation-analytics-tenants-metrics-29401080-cv6z4   '
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T23:57:18.349986'
-  tool: kubectl_get_pods
-- error_snippet: 'Authentication failed - token may be expired: ...n quay.io/cloudservices/automation-analytics-api:
-    u'
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T23:58:14.284061'
-  tool: kubectl_get_events
-- error_snippet: 'Authentication failed - token may be expired: ...n quay.io/cloudservices/automation-analytics-api:
-    u'
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-26T23:59:01.021567'
-  tool: kubectl_describe_pod
-- error_snippet: "\u274C Failed: Error from server (BadRequest): container \"automation-analytics-tenants-metrics\"\
-    \ in pod \"a"
-  error_type: auth
-  fix_applied: kube_login
-  success: true
-  timestamp: '2026-01-26T23:59:28.338271'
-  tool: _kubectl_logs_impl
-- error_snippet: "\u274C Failed: Error from server (BadRequest): container \"automation-analytics-tenants-metrics\"\
-    \ in pod \"a"
-  error_type: auth
-  fix_applied: kube_login
-  success: true
-  timestamp: '2026-01-27T00:00:33.331622'
-  tool: _kubectl_logs_impl
-- error_snippet: "\u274C Failed: Error from server (BadRequest): container \"automation-analytics-tenants-metrics\"\
-    \ in pod \"a"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: false
-  timestamp: '2026-01-27T00:00:44.373278'
-  tool: kubectl_logs
-- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
-    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-27T00:02:11.179416'
-  tool: alertmanager_alerts
-- error_snippet: "\u274C Direct search failed: HTTP 403: \n<!DOCTYPE html>\n<html\
-    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: false
-  timestamp: '2026-01-27T00:02:39.327549'
-  tool: kibana_search_logs
 - error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
     \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
   error_type: auth
   fix_applied: kube_login
   source: skill_engine
   success: false
-  timestamp: '2026-01-27T15:33:04.124482'
+  timestamp: '2026-01-30T20:08:53.760399'
   tool: alertmanager_alerts
 - error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
     \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
@@ -391,7 +60,7 @@ failures:
   fix_applied: kube_login
   source: skill_engine
   success: false
-  timestamp: '2026-01-27T17:27:12.705346'
+  timestamp: '2026-01-30T21:03:53.255418'
   tool: alertmanager_alerts
 - error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
     \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
@@ -399,37 +68,399 @@ failures:
   fix_applied: kube_login
   source: skill_engine
   success: false
-  timestamp: '2026-01-27T19:12:08.149043'
+  timestamp: '2026-01-30T21:08:56.503376'
   tool: alertmanager_alerts
-- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
-    \  \nCVP-2401      | Task          | Clos"
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-01-27T21:02:02.571143'
-  tool: jira_my_issues
-- error_snippet: "\u274C Failed to get issue: ERROR: Request exception: HTTPSConnectionPool(host='issues.redhat.com',\
-    \ port="
-  error_type: network
-  fix_applied: vpn_connect
-  success: true
-  timestamp: '2026-01-27T21:04:12.111403'
-  tool: _jira_view_issue_json_impl
-- error_snippet: "\u274C Failed to get issue: ERROR: Request exception: HTTPSConnectionPool(host='issues.redhat.com',\
-    \ port="
-  error_type: network
-  fix_applied: vpn_connect
-  success: true
-  timestamp: '2026-01-27T21:04:54.675947'
-  tool: _jira_view_issue_json_impl
 - error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
     \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
   error_type: auth
   fix_applied: kube_login
   source: skill_engine
   success: false
-  timestamp: '2026-01-28T00:01:46.150781'
+  timestamp: '2026-01-30T22:04:08.305076'
+  tool: alertmanager_alerts
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-01-30T22:06:06.354156'
+  tool: alertmanager_alerts
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-01-31T00:00:29.950402'
+  tool: alertmanager_alerts
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-01-31T11:25:01.121233'
+  tool: alertmanager_alerts
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-01-31T11:28:48.685183'
+  tool: alertmanager_alerts
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-01-31T11:32:19.278243'
+  tool: alertmanager_alerts
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-01-31T11:36:31.627748'
+  tool: alertmanager_alerts
+- error_snippet: "content=[TextContent(type='text', text='\u274C Failed:         \
+    \  \\n   ERROR  \\n          \\n  Get \"https:/"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-01T19:41:23.604127'
+  tool: gitlab_mr_list
+- error_snippet: "content=[TextContent(type='text', text='\u274C Failed:         \
+    \  \\n   ERROR  \\n          \\n  Get \"https:/"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T20:53:18.047477'
+  tool: gitlab_mr_list
+- error_snippet: "content=[TextContent(type='text', text='\u274C Failed:         \
+    \  \\n   ERROR  \\n          \\n  Get \"https:/"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T20:53:21.234938'
+  tool: gitlab_mr_list
+- error_snippet: "content=[TextContent(type='text', text='\u274C Failed:         \
+    \  \\n   ERROR  \\n          \\n  Get \"https:/"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T20:53:24.491031'
+  tool: gitlab_mr_list
+- error_snippet: "content=[TextContent(type='text', text='\u274C Failed:         \
+    \  \\n   ERROR  \\n          \\n  Get \"https:/"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T20:53:27.766624'
+  tool: gitlab_mr_list
+- error_snippet: "content=[TextContent(type='text', text='\u274C Failed:         \
+    \  \\n   ERROR  \\n          \\n  Get \"https:/"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T20:53:35.400613'
+  tool: gitlab_mr_list
+- error_snippet: "content=[TextContent(type='text', text='\u274C Failed:         \
+    \  \\n   ERROR  \\n          \\n  Get \"https:/"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T20:53:38.586531'
+  tool: gitlab_mr_list
+- error_snippet: "content=[TextContent(type='text', text='\u274C Failed:         \
+    \  \\n   ERROR  \\n          \\n  Get \"https:/"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T20:54:01.043771'
+  tool: gitlab_mr_list
+- error_snippet: "content=[TextContent(type='text', text='\u274C Failed:         \
+    \  \\n   ERROR  \\n          \\n  Get \"https:/"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T20:54:04.313472'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-01T21:03:55.711797'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:05:02.132126'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:05:05.436600'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \nCould not send\
+    \ telemetry data: Post \"https://gitlab.cee.r"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:05:09.049839'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \nCould not send\
+    \ telemetry data: Post \"https://gitlab.cee.r"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:05:12.425252'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/projects/auto"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:05:20.239246'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/projects/auto"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:05:23.543404'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:05:46.255045'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:06:28.873506'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:06:32.058368'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:06:35.323943'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:06:38.586120'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/projects/auto"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:06:46.042169'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/projects/auto"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:06:49.314493'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:07:12.491147'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-01T21:07:15.708932'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-01T21:09:00.215160'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-01T21:11:21.564494'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T14:55:22.442659'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T14:55:25.576120'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T14:55:28.923724'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T14:55:32.222984'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/projects/auto"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T14:55:39.984026'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/projects/auto"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T14:55:43.426762'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T14:56:22.997932'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T14:56:26.457291'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T15:02:40.580444'
+  tool: alertmanager_alerts
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T15:09:54.756430'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T15:09:58.154465'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T15:10:01.541109'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T15:10:04.769278'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/projects/auto"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T15:10:17.805132'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/projects/auto"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T15:10:21.079537'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-02T15:10:59.240258'
   tool: alertmanager_alerts
 - error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
     : dial t"
@@ -437,7 +468,7 @@ failures:
   fix_applied: vpn_connect
   source: skill_engine
   success: true
-  timestamp: '2026-01-28T08:31:05.815712'
+  timestamp: '2026-02-02T15:41:52.659449'
   tool: gitlab_mr_list
 - error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
     AAP-58403 - chore(ci): u"
@@ -445,7 +476,32 @@ failures:
   fix_applied: kube_login
   source: skill_engine
   success: true
-  timestamp: '2026-01-28T08:33:34.947661'
+  timestamp: '2026-02-02T15:43:09.893309'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-02T17:03:46.350573'
+  tool: gitlab_mr_list
+- error_snippet: 'HTTP 403 - access forbidden: ...07-04 00:00:00, job_events_fk
+
+    2026-02-02 17:04:47,403|tower_analytic'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-02T17:08:04.241981'
+  tool: kubectl_logs
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-02T17:08:12.250049'
   tool: gitlab_mr_list
 - error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
     \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
@@ -453,7 +509,7 @@ failures:
   fix_applied: kube_login
   source: skill_engine
   success: false
-  timestamp: '2026-01-28T08:35:18.644386'
+  timestamp: '2026-02-02T17:10:15.129673'
   tool: alertmanager_alerts
 - error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
     \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
@@ -461,22 +517,31 @@ failures:
   fix_applied: kube_login
   source: skill_engine
   success: false
-  timestamp: '2026-01-28T08:37:01.125110'
+  timestamp: '2026-02-02T17:12:19.032149'
   tool: alertmanager_alerts
-- error_snippet: "\u274C Failed: E0128 19:09:21.834904  316399 memcache.go:265] \"\
-    Unhandled Error\" err=\"couldn't get current"
-  error_type: auth
-  fix_applied: kube_login
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
   success: true
-  timestamp: '2026-01-28T19:09:32.090011'
-  tool: _kubectl_get_events_impl
+  timestamp: '2026-02-02T18:19:29.987039'
+  tool: gitlab_mr_list
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-02T18:23:19.978885'
+  tool: gitlab_mr_list
 - error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
     \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
   error_type: auth
   fix_applied: kube_login
   source: skill_engine
   success: false
-  timestamp: '2026-01-28T19:10:47.776772'
+  timestamp: '2026-02-02T18:25:16.452511'
   tool: alertmanager_alerts
 - error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
     \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
@@ -484,7 +549,59 @@ failures:
   fix_applied: kube_login
   source: skill_engine
   success: false
-  timestamp: '2026-01-29T00:00:00.008178'
+  timestamp: '2026-02-02T18:27:11.677806'
+  tool: alertmanager_alerts
+- error_snippet: 'HTTP 401 - authentication required: ...adObject operation: Not Found
+
+    2026-02-02 18:40:50,401|tower_a'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-02T19:01:55.757396'
+  tool: kubectl_logs
+- error_snippet: 'HTTP 401 - authentication required: ...adObject operation: Not Found
+
+    2026-02-02 18:40:50,401|tower_a'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-02T19:08:27.905116'
+  tool: kubectl_logs
+- error_snippet: 'HTTP 401 - authentication required: ...cluster mapping for next
+    day
+
+    2026-02-02 19:55:49,401|tower_an'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-02T20:06:39.038297'
+  tool: kubectl_logs
+- error_snippet: 'HTTP 401 - authentication required: ...17143603, 6483835, 18722517,
+    6339865, 11553486, 14018792, 174'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-02T23:58:23.273989'
+  tool: kubectl_logs
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-03T08:31:09.434827'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T08:31:45.228446'
   tool: alertmanager_alerts
 - error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
     \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
@@ -492,8 +609,245 @@ failures:
   fix_applied: kube_login
   source: skill_engine
   success: false
-  timestamp: '2026-01-29T15:13:22.734966'
+  timestamp: '2026-02-03T08:32:20.258783'
   tool: alertmanager_alerts
+- error_snippet: "1 validation error for call[gitlab_mr_list]\nper_page\n  Unexpected\
+    \ keyword argument [type=unexpected_"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T09:44:45.466006'
+  tool: gitlab_mr_list
+- error_snippet: 'HTTP 401 - authentication required: ...07-02 00:00:00, job_events_fk
+
+    2026-02-03 09:38:28,401|tower_a'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-03T09:45:58.245504'
+  tool: kubectl_logs
+- error_snippet: 'HTTP 401 - authentication required: ...07-02 00:00:00, job_events_fk
+
+    2026-02-03 09:38:28,401|tower_a'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-03T09:48:05.580446'
+  tool: kubectl_logs
+- error_snippet: 'HTTP 401 - authentication required: ...07-02 00:00:00, job_events_fk
+
+    2026-02-03 09:38:28,401|tower_a'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-03T09:53:48.899798'
+  tool: kubectl_logs
+- error_snippet: "\u274C Failed to get tag: time=\"2026-02-03T10:36:08Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T10:37:51.884614'
+  tool: quay_get_tag
+- error_snippet: "\u274C Failed to get tag: time=\"2026-02-03T10:42:19Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T10:43:42.564009'
+  tool: quay_get_tag
+- error_snippet: "\u274C Failed to get tag: time=\"2026-02-03T10:48:44Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T10:50:17.784167'
+  tool: quay_get_tag
+- error_snippet: "\u274C Failed to get tag: time=\"2026-02-03T10:53:28Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T10:54:56.820958'
+  tool: quay_get_tag
+- error_snippet: "\u274C Failed to get tag: time=\"2026-02-03T10:58:25Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T10:59:50.061466'
+  tool: quay_get_tag
+- error_snippet: "\u274C Failed to get tag: time=\"2026-02-03T11:03:11Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T11:04:35.042830'
+  tool: quay_get_tag
+- error_snippet: "\u274C Failed to get tag: time=\"2026-02-03T11:10:53Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T11:12:17.282684'
+  tool: quay_get_tag
+- error_snippet: "\u274C Failed to get tag: time=\"2026-02-03T11:16:09Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-03T11:17:37.127472'
+  tool: quay_get_tag
+- error_snippet: 'HTTP 401 - authentication required: ...811, 19064230, 19866598,
+    16519610, 12782413, 13627401, 187738'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-03T14:02:10.461635'
+  tool: kubectl_logs
+- error_snippet: 'HTTP 401 - authentication required: ...811, 19064230, 19866598,
+    16519610, 12782413, 13627401, 187738'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-03T14:07:01.537093'
+  tool: kubectl_logs
+- error_snippet: 'HTTP 401 - authentication required: ...adObject operation: Not Found
+
+    2026-02-03 15:06:34,401|tower_a'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-03T15:07:10.053753'
+  tool: kubectl_logs
+- error_snippet: 'HTTP 403 - access forbidden: ...adObject operation: Not Found
+
+    2026-02-03 15:41:18,403|tower_analytic'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-03T16:02:27.937127'
+  tool: kubectl_logs
+- error_snippet: 'HTTP 403 - access forbidden: ...adObject operation: Not Found
+
+    2026-02-03 18:09:13,403|tower_analytic'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-03T18:18:43.263150'
+  tool: kubectl_logs
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-04T21:01:26.900531'
+  tool: jira_my_issues
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-05T08:30:40.722962'
+  tool: gitlab_mr_list
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-05T08:31:30.382362'
+  tool: gitlab_mr_list
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-05T16:07:46.243088'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-05T16:30:07.361796'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-05T16:37:22.063881'
+  tool: gitlab_mr_list
+- error_snippet: "1 validation error for call[gitlab_mr_list]\nper_page\n  Unexpected\
+    \ keyword argument [type=unexpected_"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-05T17:03:15.380570'
+  tool: gitlab_mr_list
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-05T17:06:11.229554'
+  tool: gitlab_mr_list
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-05T17:17:18.015874'
+  tool: gitlab_mr_list
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-05T17:20:10.794381'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/projects/auto"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-05T17:32:33.442892'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed:           \n   ERROR  \n          \n  Get \"https://gitlab.cee.redhat.com/api/v4/user\"\
+    : dial t"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-05T17:33:28.576277'
+  tool: gitlab_mr_list
 learned_fixes:
 - error_pattern: name 'skill_engine' is not defined
   fix: Added run_skill = self._create_nested_skill_runner() to safe_globals in _exec_compute_internal().
@@ -521,7 +875,7 @@ learned_fixes:
   tool: gitlab_mr_create
   verified: true
 stats:
-  auto_fixed: 46
+  auto_fixed: 78
   daily:
     '2026-01-18':
       auto_fixed: 1
@@ -542,8 +896,8 @@ stats:
       auto_fixed: 1
       total: 1
   last_updated: null
-  manual_required: 11
-  total_failures: 57
+  manual_required: 86
+  total_failures: 164
   weekly:
     2026-W03:
       auto_fixed: 3

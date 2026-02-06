@@ -16,24 +16,22 @@ Features:
 - User classification (safe/concerned/unknown) for response modulation
 - Rich terminal UI with status display
 - Graceful shutdown handling
+- Systemd watchdog support
 
 Usage:
-    python scripts/slack_daemon.py                    # Run with Claude
-    python scripts/slack_daemon.py --dry-run          # Process but don't respond
-    python scripts/slack_daemon.py --verbose          # Detailed logging
+    python -m services.slack                    # Run with Claude
+    python -m services.slack --dry-run          # Process but don't respond
+    python -m services.slack --verbose          # Detailed logging
+    python -m services.slack --dbus             # Enable D-Bus IPC
 
 Configuration:
     All settings are read from config.json under the "slack" key.
     Environment variables can override config.json values.
 """
 
-import argparse
 import asyncio
-import fcntl
 import logging
 import os
-import signal
-import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -44,10 +42,9 @@ from typing import TYPE_CHECKING, Any
 _service_dir = os.path.dirname(os.path.abspath(__file__))
 _services_dir = os.path.dirname(_service_dir)  # services/
 _PROJECT_ROOT = os.path.dirname(_services_dir)  # project root
-sys.path.insert(0, _PROJECT_ROOT)
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "tool_modules", "aa_git"))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "tool_modules", "aa_gitlab"))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "tool_modules", "aa_jira"))
+
+# Add tool_modules to path for src imports
+import sys
 sys.path.insert(0, os.path.join(_PROJECT_ROOT, "tool_modules", "aa_slack"))
 
 from dotenv import load_dotenv
@@ -58,6 +55,8 @@ from scripts.common.command_registry import CommandRegistry, CommandType, get_re
 from scripts.common.config_loader import load_config
 from scripts.common.context_extractor import ContextExtractor, ConversationContext
 from scripts.common.response_router import CommandContext, ResponseFormatter, ResponseMode, ResponseRouter, get_router
+from services.base.daemon import BaseDaemon
+from services.base.dbus import DaemonDBusBase
 from services.base.sleep_wake import SleepWakeMonitor
 
 # Import PROJECT_ROOT after path setup
@@ -67,9 +66,6 @@ if TYPE_CHECKING:
     from src.listener import PendingMessage, SlackListener
     from src.persistence import SlackStateDB
     from src.slack_client import SlackSession
-
-LOCK_FILE = Path("/tmp/slack-daemon.lock")
-PID_FILE = Path("/tmp/slack-daemon.pid")
 
 # Desktop notifications (optional)
 NOTIFY_AVAILABLE = False
@@ -83,82 +79,6 @@ try:
     Notify.init("AI Workflow Slack Persona")
 except (ImportError, ValueError):
     pass
-
-
-class SingleInstance:
-    """
-    Ensures only one instance of the daemon runs at a time.
-
-    Uses a lock file with fcntl for atomic locking.
-    If another instance is running, provides methods to communicate with it.
-    """
-
-    def __init__(self):
-        self._lock_file = None
-        self._acquired = False
-
-    def acquire(self) -> bool:
-        """
-        Try to acquire the lock.
-
-        Returns True if we got the lock (we're the only instance).
-        Returns False if another instance is running.
-        """
-        try:
-            self._lock_file = open(LOCK_FILE, "w")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-            # Write our PID
-            PID_FILE.write_text(str(os.getpid()))
-            self._acquired = True
-            return True
-        except OSError:
-            # Lock is held by another process
-            if self._lock_file:
-                self._lock_file.close()
-                self._lock_file = None
-            return False
-
-    def release(self):
-        """Release the lock."""
-        if self._lock_file:
-            try:
-                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                self._lock_file.close()
-            except Exception:
-                pass
-            self._lock_file = None
-
-        # Clean up files
-        try:
-            LOCK_FILE.unlink(missing_ok=True)
-            PID_FILE.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-        self._acquired = False
-
-    def get_running_pid(self) -> int | None:
-        """Get the PID of the running instance, if any."""
-        try:
-            if PID_FILE.exists():
-                pid = int(PID_FILE.read_text().strip())
-                # Check if process is actually running
-                os.kill(pid, 0)
-                return pid
-        except (ValueError, OSError):
-            pass
-        return None
-
-    def is_running(self) -> bool:
-        """Check if another instance is running."""
-        return self.get_running_pid() is not None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.release()
 
 
 # Setup
@@ -2188,13 +2108,22 @@ class ResponseGenerator:
 # =============================================================================
 
 
-class SlackDaemon:
+class SlackDaemon(DaemonDBusBase, BaseDaemon):
     """
     Main autonomous Slack agent daemon.
 
     All message understanding and tool execution goes through ClaudeAgent.
     The daemon is just a Slack interface - all intelligence is in Claude.
     """
+
+    # BaseDaemon configuration
+    name = "slack"
+    description = "Slack Persona Daemon"
+
+    # D-Bus configuration
+    service_name = "com.aiworkflow.BotSlack"
+    object_path = "/com/aiworkflow/BotSlack"
+    interface_name = "com.aiworkflow.BotSlack"
 
     def __init__(
         self,
@@ -2206,11 +2135,12 @@ class SlackDaemon:
         enable_notify: bool = True,
         debug_mode: bool = False,
     ):
+        BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
+        DaemonDBusBase.__init__(self)
+
         self.dry_run = dry_run
-        self.verbose = verbose
         self.poll_interval_min = poll_interval_min
         self.poll_interval_max = poll_interval_max
-        self.enable_dbus = enable_dbus
         self.enable_notify = enable_notify
         self.debug_mode = debug_mode
 
@@ -2236,12 +2166,10 @@ class SlackDaemon:
         self.listener: SlackListener | None = None
 
         self._running = False
-        self._shutdown_event = asyncio.Event()
         self._pending_reviews: list[dict] = []  # Messages awaiting review
         self._max_pending_reviews = 50  # Prevent unbounded memory growth
-        self._start_time: float | None = None
 
-        # D-Bus support
+        # D-Bus support (legacy handler)
         self._dbus_handler = None
         if enable_dbus:
             try:
@@ -2335,20 +2263,68 @@ class SlackDaemon:
             logger.error(f"Error handling system wake: {e}")
             print(f"   ⚠️  Wake handling error: {e}\n")
 
-    async def start(self):
-        """Initialize and start the daemon."""
+    # ==================== D-Bus Interface Methods ====================
+
+    async def get_service_stats(self) -> dict:
+        """Return slack-specific statistics."""
+        stats = {
+            "messages_processed": 0,
+            "messages_pending": 0,
+            "listener_running": self.listener._running if self.listener else False,
+        }
+
+        if self.listener:
+            listener_stats = self.listener.stats
+            stats["polls"] = listener_stats.get("polls", 0)
+            stats["messages_seen"] = listener_stats.get("messages_seen", 0)
+            stats["messages_processed"] = listener_stats.get("messages_processed", 0)
+
+        if self.state_db:
+            try:
+                pending = await self.state_db.get_pending_messages(limit=100)
+                stats["messages_pending"] = len(pending)
+            except Exception:
+                pass
+
+        return stats
+
+    async def get_service_status(self) -> dict:
+        """Return detailed service status."""
+        base = self.get_base_stats()
+        service = await self.get_service_stats()
+        return {**base, **service}
+
+    # ==================== Lifecycle ====================
+
+    async def start_dbus(self):
+        """
+        Override base class start_dbus to use the custom SlackPersonaDBusInterface.
+        
+        This provides the full Slack-specific D-Bus API (GetMyChannels, GetPending, etc.)
+        instead of just the basic daemon methods.
+        """
+        if self._dbus_handler:
+            await self._dbus_handler.start_dbus()
+            self._dbus_handler.is_running = True
+            self._dbus_handler.start_time = self.start_time
+            print("✅ D-Bus IPC enabled (com.aiworkflow.BotSlack)")
+            return True
+        return False
+
+    async def stop_dbus(self):
+        """Override base class stop_dbus to use the custom handler."""
+        if self._dbus_handler:
+            self._dbus_handler.is_running = False
+            await self._dbus_handler.stop_dbus()
+
+    async def startup(self):
+        """Initialize daemon resources."""
+        await super().startup()
+
         from src.listener import SlackListener
         from src.persistence import SlackStateDB
 
         self.ui.print_header(debug_mode=self.debug_mode)
-        self._start_time = time.time()
-
-        # Initialize D-Bus if enabled
-        if self._dbus_handler:
-            await self._dbus_handler.start_dbus()
-            self._dbus_handler.is_running = True
-            self._dbus_handler.start_time = self._start_time
-            print("✅ D-Bus IPC enabled (com.aiworkflow.BotSlack)")
 
         # Start sleep/wake monitor
         self._sleep_monitor = SleepWakeMonitor(on_wake_callback=self._on_system_wake)
@@ -2357,7 +2333,7 @@ class SlackDaemon:
 
         # Initialize Slack session with automatic credential refresh
         if not await self._init_slack_auth():
-            return
+            raise RuntimeError("Failed to initialize Slack authentication")
 
         # Initialize state database - centralized in server.paths
         try:
@@ -2400,8 +2376,71 @@ class SlackDaemon:
         # Desktop notification
         self.notifier.started()
 
-        # Main processing loop
+        logger.info("Slack daemon ready")
+
+    async def run_daemon(self):
+        """Main daemon loop."""
         await self._main_loop()
+
+    async def health_check(self) -> dict:
+        """Perform a health check on the slack daemon."""
+        self._last_health_check = time.time()
+
+        checks = {
+            "running": self._running,
+            "listener_active": self.listener is not None and self.listener._running if self.listener else False,
+            "session_valid": self.session is not None,
+            "state_db_connected": self.state_db is not None,
+        }
+
+        healthy = all(checks.values())
+
+        return {
+            "healthy": healthy,
+            "checks": checks,
+            "message": "Slack daemon is healthy" if healthy else "Slack daemon has issues",
+            "timestamp": self._last_health_check,
+        }
+
+    async def _watchdog_loop_internal(self, interval: float):
+        """Periodically notify systemd that the daemon is healthy.
+        
+        Verifies D-Bus interface is responding before sending ping.
+        """
+        from services.base.daemon import sd_notify
+        
+        logger.info(f"Watchdog enabled, pinging every {interval:.1f}s")
+        
+        while self._running:
+            try:
+                # Verify D-Bus is working (if enabled)
+                healthy = True
+                if self._dbus_handler:
+                    if not (hasattr(self._dbus_handler, "_bus") and self._dbus_handler._bus):
+                        logger.warning("Watchdog: D-Bus not connected")
+                        healthy = False
+                
+                # Verify listener is running
+                if healthy and self.listener:
+                    try:
+                        stats = self.listener.stats
+                        if not stats:
+                            logger.warning("Watchdog: Listener not responding")
+                            healthy = False
+                    except Exception as e:
+                        logger.warning(f"Watchdog: Listener check failed: {e}")
+                        healthy = False
+                
+                if healthy:
+                    sd_notify("WATCHDOG=1")
+                else:
+                    logger.warning("Watchdog: Health check failed, not sending ping")
+                    
+            except Exception as e:
+                logger.error(f"Watchdog loop error: {e}")
+            
+            # Wait for next interval
+            await asyncio.sleep(interval)
 
     async def _main_loop(self):
         """Main processing loop."""
@@ -2876,8 +2915,10 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
         except Exception as e:
             logger.warning(f"Failed to send notification: {e}")
 
-    async def stop(self):
-        """Stop the daemon gracefully."""
+    async def shutdown(self):
+        """Clean up daemon resources."""
+        logger.info("Slack daemon shutting down...")
+        
         self._running = False
 
         # Desktop notification
@@ -2893,9 +2934,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
             except asyncio.TimeoutError:
                 logger.warning("Sleep monitor stop timed out")
 
-        if self._dbus_handler:
-            self._dbus_handler.is_running = False
-            await self._dbus_handler.stop_dbus()
+        # D-Bus is stopped by super().shutdown() via stop_dbus() override
 
         if self.listener:
             await self.listener.stop()
@@ -2909,6 +2948,9 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
         # Get final listener stats for shutdown summary
         listener_stats = self.listener.stats if self.listener else {}
         self.ui.print_shutdown(listener_stats)
+
+        await super().shutdown()
+        logger.info("Slack daemon stopped")
 
     async def _init_slack_auth(self) -> bool:
         """Initialize Slack session with automatic credential refresh on failure."""
@@ -3172,159 +3214,5 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
             loop.add_signal_handler(sig, signal_handler)
 
 
-async def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Autonomous Slack Persona Daemon",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Interaction Methods:
-  1. Direct CLI:     python slack_daemon.py [options]
-  2. Makefile:       make slack-daemon | make slack-daemon-bg
-  3. D-Bus Control:  make slack-status | make slack-pending | make slack-approve ID=xxx
-  4. MCP Skill:      skill_run("slack_daemon_control", '{"action": "status"}')
-
-Single Instance:
-  Only one daemon can run at a time (uses lock file).
-  If already running, commands are redirected to the existing instance via D-Bus.
-""",
-    )
-
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Process messages but don't send responses",
-    )
-    # NOTE: --llm flag removed - Claude is now REQUIRED for operation
-    # The Slack daemon is just a Slack interface; all intelligence is in Claude
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Verbose output",
-    )
-    parser.add_argument(
-        "--poll-min",
-        type=float,
-        default=5.0,
-        help="Minimum polling interval in seconds (default: 5)",
-    )
-    parser.add_argument(
-        "--poll-max",
-        type=float,
-        default=15.0,
-        help="Maximum polling interval in seconds (default: 15)",
-    )
-    parser.add_argument(
-        "--dbus",
-        action="store_true",
-        help="Enable D-Bus IPC interface",
-    )
-    parser.add_argument(
-        "--no-notify",
-        action="store_true",
-        help="Disable desktop notifications",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Debug mode: redirect all responses to your self-DM instead of original recipients",
-    )
-    parser.add_argument(
-        "--status",
-        action="store_true",
-        help="Show status of running daemon and exit",
-    )
-    parser.add_argument(
-        "--stop",
-        action="store_true",
-        help="Stop running daemon and exit",
-    )
-
-    args = parser.parse_args()
-
-    # Check for single-instance commands first
-    instance = SingleInstance()
-
-    # Handle --status: just check if running
-    if args.status:
-        pid = instance.get_running_pid()
-        if pid:
-            print(f"✅ Daemon is running (PID: {pid})")
-            print(f"   Lock file: {LOCK_FILE}")
-            print(f"   PID file: {PID_FILE}")
-            print("\nUse 'make slack-status' for detailed stats via D-Bus")
-        else:
-            print("❌ Daemon is not running")
-        return
-
-    # Handle --stop: signal the running daemon
-    if args.stop:
-        pid = instance.get_running_pid()
-        if pid:
-            print(f"Stopping daemon (PID: {pid})...")
-            try:
-                os.kill(pid, signal.SIGTERM)
-                print("✅ Stop signal sent")
-            except OSError as e:
-                print(f"❌ Failed to stop: {e}")
-        else:
-            print("❌ Daemon is not running")
-        return
-
-    # Try to acquire the lock
-    if not instance.acquire():
-        existing_pid = instance.get_running_pid()
-        print(f"⚠️  Another instance is already running (PID: {existing_pid})")
-        print()
-        print("To interact with the running daemon:")
-        print("  make slack-status        # Get status")
-        print("  make slack-pending       # List pending messages")
-        print("  make slack-approve-all   # Approve all pending")
-        print("  make slack-daemon-stop   # Stop the daemon")
-        print()
-        print("Or use D-Bus directly:")
-        print("  python scripts/slack_control.py status")
-        return
-
-    # Setup logging for journalctl
-    # When running under systemd, stderr automatically goes to journald
-    # Format without timestamp - journald adds its own timestamps
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.StreamHandler(sys.stderr)],
-    )
-
-    # Reduce noise
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-
-    # Debug mode: CLI flag overrides config.json setting
-    debug_mode = args.debug or get_slack_config("debug", False)
-
-    daemon = SlackDaemon(
-        dry_run=args.dry_run,
-        verbose=args.verbose,
-        poll_interval_min=args.poll_min,
-        poll_interval_max=args.poll_max,
-        enable_dbus=args.dbus,
-        enable_notify=not args.no_notify,
-        debug_mode=debug_mode,
-    )
-
-    daemon.setup_signal_handlers()
-
-    try:
-        await daemon.start()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        await daemon.stop()
-        instance.release()
-        print("🔓 Lock released")
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    SlackDaemon.main()

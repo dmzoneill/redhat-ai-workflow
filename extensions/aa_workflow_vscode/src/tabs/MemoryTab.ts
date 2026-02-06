@@ -540,52 +540,68 @@ export class MemoryTab extends BaseTab {
   }
 
   getScript(): string {
+    // Use centralized event delegation system - handlers survive content updates
     return `
-      // Use event delegation for memory tab - attach to document to survive re-renders
-      document.addEventListener('click', (e) => {
-        // Memory category tab selection
-        const memoryTab = e.target.closest('.memory-tab');
-        if (memoryTab) {
-          const category = memoryTab.dataset.category;
-          if (category) {
-            console.log('[MemoryTab] Category clicked:', category);
-            vscode.postMessage({ command: 'selectMemoryCategory', category });
+      (function() {
+        // Register click handler for data-action elements
+        TabEventDelegation.registerClickHandler('memory', function(action, element, e) {
+          switch(action) {
+            case 'editMemoryFile':
+              if (element.dataset.file) {
+                console.log('[MemoryTab] Edit clicked:', element.dataset.file);
+                vscode.postMessage({ command: 'editMemoryFile', file: element.dataset.file });
+              }
+              break;
+            case 'refreshMemory':
+              vscode.postMessage({ command: 'refreshMemory' });
+              break;
           }
-          return;
-        }
+        });
 
-        // File selection
-        const memoryFile = e.target.closest('.memory-file');
-        if (memoryFile) {
-          const file = memoryFile.dataset.file;
-          if (file) {
-            console.log('[MemoryTab] File clicked:', file);
-            vscode.postMessage({ command: 'selectMemoryFile', file });
-          }
-          return;
-        }
+        // Additional click handling for non-data-action elements
+        const memoryContainer = document.getElementById('memory');
+        if (memoryContainer && !memoryContainer.dataset.extraClickInit) {
+          memoryContainer.dataset.extraClickInit = 'true';
+          
+          memoryContainer.addEventListener('click', function(e) {
+            const target = e.target;
+            // Skip if already handled by data-action
+            if (target.closest('[data-action]')) return;
+            
+            // Memory category tab selection
+            const memoryTab = target.closest('.memory-tab');
+            if (memoryTab) {
+              const category = memoryTab.dataset.category;
+              if (category) {
+                console.log('[MemoryTab] Category clicked:', category);
+                vscode.postMessage({ command: 'selectMemoryCategory', category });
+              }
+              return;
+            }
 
-        // Edit file button
-        const editBtn = e.target.closest('[data-action="editMemoryFile"]');
-        if (editBtn) {
-          const file = editBtn.dataset.file;
-          if (file) {
-            console.log('[MemoryTab] Edit clicked:', file);
-            vscode.postMessage({ command: 'editMemoryFile', file });
-          }
-          return;
-        }
+            // File selection
+            const memoryFile = target.closest('.memory-file');
+            if (memoryFile) {
+              const file = memoryFile.dataset.file;
+              if (file) {
+                console.log('[MemoryTab] File clicked:', file);
+                vscode.postMessage({ command: 'selectMemoryFile', file });
+              }
+              return;
+            }
 
-        // Collapsible sections
-        const collapseTitle = e.target.closest('.collapsible .section-title');
-        if (collapseTitle) {
-          const section = collapseTitle.closest('.collapsible');
-          if (section) {
-            section.classList.toggle('collapsed');
-          }
-          return;
+            // Collapsible sections
+            const collapseTitle = target.closest('.collapsible .section-title');
+            if (collapseTitle) {
+              const section = collapseTitle.closest('.collapsible');
+              if (section) {
+                section.classList.toggle('collapsed');
+              }
+              return;
+            }
+          });
         }
-      });
+      })();
     `;
   }
 

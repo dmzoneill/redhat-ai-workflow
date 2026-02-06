@@ -2,7 +2,9 @@
  * Cron Tab
  *
  * Displays cron job status, schedule, and execution history.
- * Uses D-Bus to communicate with the Cron daemon.
+ *
+ * Architecture: Uses CronService (via this.services.cron) for business logic.
+ * Falls back to direct D-Bus calls for operations not yet in the service.
  */
 
 import { BaseTab, TabConfig, dbus, createLogger } from "./BaseTab";
@@ -57,6 +59,11 @@ export class CronTab extends BaseTab {
   }
 
   getBadge(): { text: string; class?: string } | null {
+    // Show error indicator if we have an error and no data
+    if (this.lastError && !this.state) {
+      return { text: "!", class: "error" };
+    }
+
     if (!this.state) return null;
 
     const runningJobs = this.state.jobs.filter(
@@ -75,19 +82,34 @@ export class CronTab extends BaseTab {
   }
 
   async loadData(): Promise<void> {
+    logger.log("loadData() starting...");
     try {
       const result = await dbus.cron_getState();
       if (result.success && result.data) {
         const data = result.data as any;
         this.state = data.state || data;
+        this.lastError = null;
+        logger.log(`Loaded ${this.state?.jobs?.length || 0} cron jobs`);
+      } else if (result.error) {
+        this.lastError = result.error;
+        logger.warn(`Failed to get cron state: ${result.error}`);
       }
     } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
       logger.error("Error loading data", error);
-      this.state = null;
+      // Don't reset state - preserve partial data
     }
+
+    logger.log("loadData() complete");
+    this.notifyNeedsRender();
   }
 
   getContent(): string {
+    // Show error state if we have an error and no data
+    if (this.lastError && !this.state) {
+      return this.getErrorHtml(`Failed to load cron data: ${this.lastError}`);
+    }
+
     if (!this.state) {
       return this.getLoadingHtml("Loading cron data...");
     }
@@ -289,47 +311,39 @@ export class CronTab extends BaseTab {
   }
 
   getScript(): string {
+    // Use centralized event delegation system - handlers survive content updates
     return `
-      // Toggle scheduler
-      document.querySelectorAll('[data-action="toggleScheduler"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          vscode.postMessage({ command: 'toggleScheduler' });
-        });
-      });
-
-      // Refresh cron
-      document.querySelectorAll('[data-action="refreshCron"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          vscode.postMessage({ command: 'refreshCron' });
-        });
-      });
-
-      // Run job now
-      document.querySelectorAll('[data-action="runCronJobNow"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const jobName = btn.dataset.job;
-          if (jobName) {
-            vscode.postMessage({ command: 'runCronJobNow', jobName });
+      (function() {
+        // Register click handler - can be called multiple times safely
+        TabEventDelegation.registerClickHandler('cron', function(action, element, e) {
+          switch(action) {
+            case 'toggleScheduler':
+              vscode.postMessage({ command: 'toggleScheduler' });
+              break;
+            case 'refreshCron':
+              vscode.postMessage({ command: 'refreshCron' });
+              break;
+            case 'runCronJobNow':
+              if (element.dataset.job) {
+                vscode.postMessage({ command: 'runCronJobNow', jobName: element.dataset.job });
+              }
+              break;
+            case 'loadMoreHistory':
+              vscode.postMessage({ command: 'loadMoreCronHistory', limit: 50 });
+              break;
+            case 'toggleCronJob':
+              // This is handled by change event, but include for completeness
+              break;
           }
         });
-      });
 
-      // Toggle job enabled
-      document.querySelectorAll('[data-action="toggleCronJob"]').forEach(input => {
-        input.addEventListener('change', () => {
-          const jobName = input.dataset.job;
-          if (jobName) {
-            vscode.postMessage({ command: 'toggleCronJob', jobName, enabled: input.checked });
+        // Register change handler for toggle checkboxes
+        TabEventDelegation.registerChangeHandler('cron', function(element, e) {
+          if (element.dataset.action === 'toggleCronJob' && element.dataset.job) {
+            vscode.postMessage({ command: 'toggleCronJob', jobName: element.dataset.job, enabled: element.checked });
           }
         });
-      });
-
-      // Load more history
-      document.querySelectorAll('[data-action="loadMoreHistory"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          vscode.postMessage({ command: 'loadMoreCronHistory', limit: 50 });
-        });
-      });
+      })();
     `;
   }
 
@@ -366,27 +380,47 @@ export class CronTab extends BaseTab {
   private async toggleScheduler(): Promise<void> {
     if (!this.state) return;
 
-    const result = await dbus.cron_toggleScheduler(!this.state.enabled);
-
-    if (!result.success) {
-      logger.error(`Failed to toggle scheduler: ${result.error}`);
+    // Use CronService if available (preferred), otherwise fall back to D-Bus
+    if (this.services.cron) {
+      logger.log("Using CronService.toggleScheduler()");
+      await this.services.cron.toggleScheduler();
+    } else {
+      logger.log("Falling back to D-Bus for toggleScheduler");
+      const result = await dbus.cron_toggleScheduler(!this.state.enabled);
+      if (!result.success) {
+        logger.error(`Failed to toggle scheduler: ${result.error}`);
+      }
     }
 
     await this.refresh();
   }
 
   private async toggleCronJob(jobName: string, enabled: boolean): Promise<void> {
-    const result = await dbus.cron_toggleJob(jobName, enabled);
-    if (!result.success) {
-      logger.error(`Failed to toggle job: ${result.error}`);
+    // Use CronService if available (preferred), otherwise fall back to D-Bus
+    if (this.services.cron) {
+      logger.log("Using CronService.toggleJob()");
+      await this.services.cron.toggleJob(jobName, enabled);
+    } else {
+      logger.log("Falling back to D-Bus for toggleCronJob");
+      const result = await dbus.cron_toggleJob(jobName, enabled);
+      if (!result.success) {
+        logger.error(`Failed to toggle job: ${result.error}`);
+      }
     }
     await this.refresh();
   }
 
   private async runCronJobNow(jobName: string): Promise<void> {
-    const result = await dbus.cron_runJob(jobName);
-    if (!result.success) {
-      logger.error(`Failed to run job: ${result.error}`);
+    // Use CronService if available (preferred), otherwise fall back to D-Bus
+    if (this.services.cron) {
+      logger.log("Using CronService.runJobNow()");
+      await this.services.cron.runJobNow(jobName);
+    } else {
+      logger.log("Falling back to D-Bus for runCronJobNow");
+      const result = await dbus.cron_runJob(jobName);
+      if (!result.success) {
+        logger.error(`Failed to run job: ${result.error}`);
+      }
     }
     await this.refresh();
   }

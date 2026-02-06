@@ -6,6 +6,7 @@ Events include:
 - Step progress (started, completed, failed)
 - Auto-heal triggers
 - Confirmation requests/responses
+- Memory query events (started, completed, intent_classified)
 
 The server runs on localhost:9876 by default.
 """
@@ -18,6 +19,8 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+
+from server.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +80,10 @@ class SkillWebSocketServer:
         self.running_skills: dict[str, SkillState] = {}
         self._server = None
         self._started = False
+        # Locks for thread-safe access to shared state
+        self._clients_lock = asyncio.Lock()
+        self._confirmations_lock = asyncio.Lock()
+        self._skills_lock = asyncio.Lock()
 
     async def start(self):
         """Start the WebSocket server."""
@@ -112,39 +119,44 @@ class SkillWebSocketServer:
 
     async def _handler(self, websocket: WebSocketServerProtocol):
         """Handle a WebSocket connection."""
-        self.clients.add(websocket)
-        client_count = len(self.clients)
+        async with self._clients_lock:
+            self.clients.add(websocket)
+            client_count = len(self.clients)
         logger.info(f"WebSocket client connected ({client_count} total)")
 
         try:
             # Send connection confirmation with current state
+            async with self._skills_lock:
+                running_skills_data = [
+                    {
+                        "skill_id": s.skill_id,
+                        "skill_name": s.skill_name,
+                        "total_steps": s.total_steps,
+                        "current_step": s.current_step,
+                        "status": s.status,
+                    }
+                    for s in self.running_skills.values()
+                ]
+            async with self._confirmations_lock:
+                pending_confirmations_data = [
+                    {
+                        "id": c.id,
+                        "skill_id": c.skill_id,
+                        "step_index": c.step_index,
+                        "prompt": c.prompt,
+                        "options": c.options,
+                        "claude_suggestion": c.claude_suggestion,
+                        "timeout_seconds": c.timeout_seconds,
+                        "created_at": c.created_at.isoformat(),
+                    }
+                    for c in self.pending_confirmations.values()
+                ]
             await websocket.send(
                 json.dumps(
                     {
                         "type": "connected",
-                        "running_skills": [
-                            {
-                                "skill_id": s.skill_id,
-                                "skill_name": s.skill_name,
-                                "total_steps": s.total_steps,
-                                "current_step": s.current_step,
-                                "status": s.status,
-                            }
-                            for s in self.running_skills.values()
-                        ],
-                        "pending_confirmations": [
-                            {
-                                "id": c.id,
-                                "skill_id": c.skill_id,
-                                "step_index": c.step_index,
-                                "prompt": c.prompt,
-                                "options": c.options,
-                                "claude_suggestion": c.claude_suggestion,
-                                "timeout_seconds": c.timeout_seconds,
-                                "created_at": c.created_at.isoformat(),
-                            }
-                            for c in self.pending_confirmations.values()
-                        ],
+                        "running_skills": running_skills_data,
+                        "pending_confirmations": pending_confirmations_data,
                     }
                 )
             )
@@ -155,8 +167,10 @@ class SkillWebSocketServer:
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
-            self.clients.discard(websocket)
-            logger.info(f"WebSocket client disconnected ({len(self.clients)} total)")
+            async with self._clients_lock:
+                self.clients.discard(websocket)
+                remaining = len(self.clients)
+            logger.info(f"WebSocket client disconnected ({remaining} total)")
 
     async def _handle_message(self, websocket: WebSocketServerProtocol, message: str):
         """Handle incoming message from client."""
@@ -166,8 +180,9 @@ class SkillWebSocketServer:
 
             if msg_type == "confirmation_response":
                 conf_id = data["id"]
-                if conf_id in self.pending_confirmations:
-                    confirmation = self.pending_confirmations[conf_id]
+                async with self._confirmations_lock:
+                    confirmation = self.pending_confirmations.get(conf_id)
+                if confirmation is not None:
                     if not confirmation.future.done():
                         confirmation.future.set_result(
                             {
@@ -196,12 +211,15 @@ class SkillWebSocketServer:
 
     async def broadcast(self, event: dict):
         """Broadcast event to all connected clients."""
-        if not self.clients:
-            return
+        async with self._clients_lock:
+            if not self.clients:
+                return
+            # Copy clients to avoid holding lock during I/O
+            clients_copy = list(self.clients)
 
         message = json.dumps(event, default=str)
         # Send to all clients, ignore failures
-        results = await asyncio.gather(*[client.send(message) for client in self.clients], return_exceptions=True)
+        results = await asyncio.gather(*[client.send(message) for client in clients_copy], return_exceptions=True)
 
         # Log any errors
         for _i, result in enumerate(results):
@@ -210,7 +228,7 @@ class SkillWebSocketServer:
 
     # ==================== Skill Lifecycle Events ====================
 
-    def _cleanup_stale_skills(self) -> int:
+    async def _cleanup_stale_skills(self) -> int:
         """Remove stale skills that have been running too long.
 
         This prevents memory leaks from skills that never completed/failed.
@@ -221,21 +239,22 @@ class SkillWebSocketServer:
         now = datetime.now()
         stale_ids = []
 
-        for skill_id, skill in self.running_skills.items():
-            age = (now - skill.started_at).total_seconds()
-            if age > MAX_SKILL_AGE_SECONDS:
-                stale_ids.append(skill_id)
+        async with self._skills_lock:
+            for skill_id, skill in self.running_skills.items():
+                age = (now - skill.started_at).total_seconds()
+                if age > MAX_SKILL_AGE_SECONDS:
+                    stale_ids.append(skill_id)
 
-        for skill_id in stale_ids:
-            del self.running_skills[skill_id]
-            logger.warning(f"Removed stale skill {skill_id} (exceeded max age)")
+            for skill_id in stale_ids:
+                del self.running_skills[skill_id]
+                logger.warning(f"Removed stale skill {skill_id} (exceeded max age)")
 
-        # Also enforce max count by removing oldest if over limit
-        while len(self.running_skills) > MAX_RUNNING_SKILLS:
-            oldest_id = min(self.running_skills.keys(), key=lambda k: self.running_skills[k].started_at)
-            del self.running_skills[oldest_id]
-            logger.warning(f"Removed oldest skill {oldest_id} (exceeded max count)")
-            stale_ids.append(oldest_id)
+            # Also enforce max count by removing oldest if over limit
+            while len(self.running_skills) > MAX_RUNNING_SKILLS:
+                oldest_id = min(self.running_skills.keys(), key=lambda k: self.running_skills[k].started_at)
+                del self.running_skills[oldest_id]
+                logger.warning(f"Removed oldest skill {oldest_id} (exceeded max count)")
+                stale_ids.append(oldest_id)
 
         return len(stale_ids)
 
@@ -249,14 +268,15 @@ class SkillWebSocketServer:
     ):
         """Notify that a skill has started."""
         # Cleanup stale skills before adding new one
-        self._cleanup_stale_skills()
+        await self._cleanup_stale_skills()
 
-        self.running_skills[skill_id] = SkillState(
-            skill_id=skill_id,
-            skill_name=skill_name,
-            total_steps=total_steps,
-            source=source,
-        )
+        async with self._skills_lock:
+            self.running_skills[skill_id] = SkillState(
+                skill_id=skill_id,
+                skill_name=skill_name,
+                total_steps=total_steps,
+                source=source,
+            )
 
         await self.broadcast(
             {
@@ -273,8 +293,9 @@ class SkillWebSocketServer:
 
     async def skill_completed(self, skill_id: str, total_duration_ms: int | None = None):
         """Notify that a skill has completed successfully."""
-        if skill_id in self.running_skills:
-            self.running_skills[skill_id].status = "completed"
+        async with self._skills_lock:
+            if skill_id in self.running_skills:
+                self.running_skills[skill_id].status = "completed"
 
         await self.broadcast(
             {
@@ -291,8 +312,9 @@ class SkillWebSocketServer:
 
     async def skill_failed(self, skill_id: str, error: str, total_duration_ms: int | None = None):
         """Notify that a skill has failed."""
-        if skill_id in self.running_skills:
-            self.running_skills[skill_id].status = "failed"
+        async with self._skills_lock:
+            if skill_id in self.running_skills:
+                self.running_skills[skill_id].status = "failed"
 
         await self.broadcast(
             {
@@ -311,14 +333,16 @@ class SkillWebSocketServer:
     async def _remove_skill_delayed(self, skill_id: str, delay: float):
         """Remove a skill from running_skills after a delay."""
         await asyncio.sleep(delay)
-        self.running_skills.pop(skill_id, None)
+        async with self._skills_lock:
+            self.running_skills.pop(skill_id, None)
 
     # ==================== Step Events ====================
 
     async def step_started(self, skill_id: str, step_index: int, step_name: str, description: str = ""):
         """Notify that a step has started."""
-        if skill_id in self.running_skills:
-            self.running_skills[skill_id].current_step = step_index
+        async with self._skills_lock:
+            if skill_id in self.running_skills:
+                self.running_skills[skill_id].current_step = step_index
 
         await self.broadcast(
             {
@@ -429,13 +453,12 @@ class SkillWebSocketServer:
             future=loop.create_future(),
         )
 
-        self.pending_confirmations[conf_id] = confirmation
+        async with self._confirmations_lock:
+            self.pending_confirmations[conf_id] = confirmation
 
-        # Bring Cursor to front
-        self._bring_cursor_to_front()
-
-        # Play notification sound
-        self._play_notification_sound()
+        # Bring Cursor to front and play notification sound (non-blocking)
+        await self._bring_cursor_to_front()
+        await self._play_notification_sound()
 
         # Broadcast confirmation request
         await self.broadcast(
@@ -491,13 +514,19 @@ class SkillWebSocketServer:
             return {"response": "let_claude", "remember": "none"}
 
         finally:
-            del self.pending_confirmations[conf_id]
+            async with self._confirmations_lock:
+                self.pending_confirmations.pop(conf_id, None)
 
-    def _bring_cursor_to_front(self):
-        """Raise Cursor window to front."""
+    def _bring_cursor_to_front_sync(self) -> None:
+        """Raise Cursor window to front (blocking - run in thread)."""
         try:
             # Try wmctrl first (more reliable)
-            result = subprocess.run(["wmctrl", "-a", "Cursor"], check=False, capture_output=True, timeout=2)
+            result = subprocess.run(
+                ["wmctrl", "-a", "Cursor"],
+                check=False,
+                capture_output=True,
+                timeout=Timeouts.INSTANT,
+            )
             if result.returncode == 0:
                 return
         except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -509,13 +538,17 @@ class SkillWebSocketServer:
                 ["xdotool", "search", "--name", "Cursor", "windowactivate"],
                 check=False,
                 capture_output=True,
-                timeout=2,
+                timeout=Timeouts.INSTANT,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-    def _play_notification_sound(self):
-        """Play notification sound."""
+    async def _bring_cursor_to_front(self) -> None:
+        """Raise Cursor window to front (non-blocking)."""
+        await asyncio.to_thread(self._bring_cursor_to_front_sync)
+
+    def _play_notification_sound_sync(self) -> None:
+        """Play notification sound (blocking - run in thread)."""
         sound_files = [
             "/usr/share/sounds/freedesktop/stereo/message.oga",
             "/usr/share/sounds/freedesktop/stereo/complete.oga",
@@ -524,10 +557,19 @@ class SkillWebSocketServer:
 
         for sound_file in sound_files:
             try:
-                subprocess.run(["paplay", sound_file], check=False, capture_output=True, timeout=2)
+                subprocess.run(
+                    ["paplay", sound_file],
+                    check=False,
+                    capture_output=True,
+                    timeout=Timeouts.INSTANT,
+                )
                 return
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 continue
+
+    async def _play_notification_sound(self) -> None:
+        """Play notification sound (non-blocking)."""
+        await asyncio.to_thread(self._play_notification_sound_sync)
 
     async def _zenity_fallback(self, prompt: str, options: list[str], claude_suggestion: str) -> dict | None:
         """Fallback to Zenity dialog if no WebSocket clients connected."""
@@ -556,7 +598,7 @@ class SkillWebSocketServer:
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
 
-            await asyncio.wait_for(process.wait(), timeout=60)
+            await asyncio.wait_for(process.wait(), timeout=Timeouts.PROCESS_WAIT)
 
             if process.returncode == 0:
                 return {"response": "retry_with_fix", "remember": "none"}
@@ -572,6 +614,70 @@ class SkillWebSocketServer:
         except Exception as e:
             logger.debug(f"Zenity fallback failed: {e}")
             return None
+
+    # ==================== Memory Query Events ====================
+
+    async def memory_query_started(
+        self,
+        query_id: str,
+        query: str,
+        sources: list[str],
+    ):
+        """Notify that a memory query has started."""
+        await self.broadcast(
+            {
+                "type": "memory_query_started",
+                "query_id": query_id,
+                "query": query,
+                "sources": sources,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+        logger.debug(f"Memory query started: {query_id} - {query[:50]}...")
+
+    async def memory_query_completed(
+        self,
+        query_id: str,
+        intent: dict,
+        sources_queried: list[str],
+        result_count: int,
+        latency_ms: float,
+    ):
+        """Notify that a memory query has completed."""
+        await self.broadcast(
+            {
+                "type": "memory_query_completed",
+                "query_id": query_id,
+                "intent": intent,
+                "sources_queried": sources_queried,
+                "result_count": result_count,
+                "latency_ms": latency_ms,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+        logger.debug(f"Memory query completed: {query_id} - {result_count} results in {latency_ms:.0f}ms")
+
+    async def intent_classified(
+        self,
+        query_id: str,
+        query: str,
+        intent: str,
+        confidence: float,
+        sources_suggested: list[str],
+    ):
+        """Notify that intent classification has completed."""
+        await self.broadcast(
+            {
+                "type": "intent_classified",
+                "query_id": query_id,
+                "query": query,
+                "intent": intent,
+                "confidence": confidence,
+                "sources_suggested": sources_suggested,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+        logger.debug(f"Intent classified: {query_id} - {intent} ({confidence:.0%})")
 
 
 # ==================== Global Instance ====================

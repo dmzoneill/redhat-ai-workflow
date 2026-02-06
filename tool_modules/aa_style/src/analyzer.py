@@ -269,23 +269,22 @@ class StyleAnalyzer:
     # Emoji regex
     EMOJI_PATTERN = re.compile(
         "["
-        "\U0001F600-\U0001F64F"  # emoticons
-        "\U0001F300-\U0001F5FF"  # symbols & pictographs
-        "\U0001F680-\U0001F6FF"  # transport & map
-        "\U0001F1E0-\U0001F1FF"  # flags
-        "\U00002702-\U000027B0"
-        "\U000024C2-\U0001F251"
-        "\U0001F900-\U0001F9FF"  # supplemental symbols
-        "\U0001FA00-\U0001FA6F"  # chess symbols
-        "\U0001FA70-\U0001FAFF"  # symbols extended-A
-        "\U00002600-\U000026FF"  # misc symbols
-        "\U00002700-\U000027BF"  # dingbats
+        "\U0001f600-\U0001f64f"  # emoticons
+        "\U0001f300-\U0001f5ff"  # symbols & pictographs
+        "\U0001f680-\U0001f6ff"  # transport & map
+        "\U0001f1e0-\U0001f1ff"  # flags
+        "\U00002702-\U000027b0"
+        "\U000024c2-\U0001f251"
+        "\U0001f900-\U0001f9ff"  # supplemental symbols
+        "\U0001fa00-\U0001fa6f"  # chess symbols
+        "\U0001fa70-\U0001faff"  # symbols extended-A
+        "\U00002600-\U000026ff"  # misc symbols
+        "\U00002700-\U000027bf"  # dingbats
         "]"
     )
 
     def __init__(self):
         """Initialize the analyzer."""
-        pass
 
     def analyze(self, messages: list[dict]) -> dict[str, Any]:
         """

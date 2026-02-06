@@ -3,13 +3,20 @@
  *
  * Abstract base class for all Command Center tabs.
  * Provides common functionality for data loading, HTML generation, and updates.
+ * 
+ * Architecture: Tabs follow MVC pattern
+ * - Model: Service classes (injected via setServices)
+ * - View: getContent(), getStyles(), getScript()
+ * - Controller: handleMessage()
  */
 
 import * as vscode from "vscode";
 import { dbus } from "../dbusClient";
 import { createLogger } from "../logger";
+import type { ServiceContainer } from "../services";
 
 // Re-export dbus for use by tab classes that import from BaseTab
+// NOTE: Prefer using this.services.* instead of direct dbus calls
 export { dbus };
 
 // Export createLogger for use by tab subclasses
@@ -51,11 +58,26 @@ export abstract class BaseTab {
   protected isLoading = false;
   protected lastError: string | null = null;
   private _onNeedsRender: RenderCallback | null = null;
+  
+  /**
+   * Service container for domain services.
+   * Tabs should use these services instead of calling D-Bus directly.
+   * This eliminates duplicate business logic between Tabs and Services.
+   */
+  protected services: ServiceContainer = {};
 
   constructor(config: TabConfig) {
     this.id = config.id;
     this.label = config.label;
     this.icon = config.icon;
+  }
+  
+  /**
+   * Set the service container for this tab.
+   * Called by TabManager after tab creation.
+   */
+  setServices(services: ServiceContainer): void {
+    this.services = services;
   }
 
   /**
@@ -167,20 +189,37 @@ export abstract class BaseTab {
 
   /**
    * Refresh the tab data and update the UI.
+   * Includes automatic retry with exponential backoff.
    */
-  async refresh(): Promise<void> {
+  async refresh(maxRetries = 2): Promise<void> {
     this.isLoading = true;
-    this.lastError = null;
+    const logger = createLogger(`${this.id}Tab`);
 
-    try {
-      await this.loadData();
-    } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
-      const logger = createLogger(`${this.id}Tab`);
-      logger.error("Error loading data", error);
-    } finally {
-      this.isLoading = false;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.loadData();
+        // Success - clear error and exit
+        this.lastError = null;
+        this.isLoading = false;
+        this.notifyNeedsRender();
+        return;
+      } catch (error) {
+        this.lastError = error instanceof Error ? error.message : String(error);
+        logger.warn(`Refresh attempt ${attempt}/${maxRetries} failed: ${this.lastError}`);
+
+        if (attempt < maxRetries) {
+          // Wait before retry with exponential backoff (500ms, 1000ms, 2000ms...)
+          const delay = 500 * Math.pow(2, attempt - 1);
+          logger.log(`Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
     }
+
+    // All retries exhausted
+    logger.error(`All ${maxRetries} refresh attempts failed`);
+    this.isLoading = false;
+    this.notifyNeedsRender();
   }
 
   /**

@@ -745,7 +745,7 @@ class ExecutionTracer:
             try:
                 ts = datetime.fromisoformat(step.timestamp.replace("Z", "+00:00"))
                 time_str = ts.strftime("%H:%M:%S")
-            except:
+            except (ValueError, AttributeError):
                 time_str = step.timestamp[:19]
 
             html_parts.append(

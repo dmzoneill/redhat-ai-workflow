@@ -2,9 +2,17 @@
 Description=AI Workflow Session Daemon - Cursor session state manager
 After=network.target dbus.socket
 Wants=dbus.socket
+# Max 5 restarts in 5 minutes, then give up
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
-Type=simple
+# Type=notify allows daemon to signal readiness and supports watchdog
+Type=notify
+NotifyAccess=main
+# Watchdog: systemd restarts if no ping received within 15s
+WatchdogSec=15
+
 WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
 # Display environment for D-Bus
 Environment=DISPLAY=:0
@@ -14,12 +22,9 @@ Environment=XDG_RUNTIME_DIR=/run/user/1000
 # Use the virtual environment's python
 ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.session
 
-# Restart policy with limits to prevent infinite restart loops
+# Restart policy
 Restart=on-failure
-RestartSec=10
-# Max 5 restarts in 5 minutes, then give up
-StartLimitIntervalSec=300
-StartLimitBurst=5
+RestartSec=5
 
 # Graceful shutdown
 TimeoutStopSec=30

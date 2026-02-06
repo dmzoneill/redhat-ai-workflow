@@ -1983,6 +1983,127 @@ if DBUS_AVAILABLE:
                 logger.error(f"GetPhotoPath error: {e}")
                 return json.dumps({"success": False, "error": str(e)})
 
+        # ==================== Context Injection ====================
+
+        @method()
+        def RunPersonaTest(self, query: "s", persona: "s") -> "s":
+            """
+            Run a context gathering test for the Slack persona.
+
+            This tests what context would be injected for a given query,
+            gathering from Slack history, code search, InScope, Jira, and memory.
+
+            Args:
+                query: The test question/message
+                persona: Optional persona name (not used currently)
+
+            Returns:
+                JSON with gathered context and source status
+            """
+            try:
+                import sys
+                from pathlib import Path
+
+                # Add project root to path for imports
+                project_root = Path(__file__).parent.parent.parent
+                if str(project_root) not in sys.path:
+                    sys.path.insert(0, str(project_root))
+
+                from scripts.context_injector import ContextInjector
+
+                injector = ContextInjector(
+                    project="automation-analytics-backend",
+                    slack_limit=5,
+                    code_limit=5,
+                    jira_limit=3,
+                    memory_limit=3,
+                    inscope_limit=1,
+                )
+
+                # Gather context from all sources (sync version)
+                context = injector.gather_context(
+                    query=query,
+                    include_slack=True,
+                    include_code=True,
+                    include_jira=True,
+                    include_memory=True,
+                    include_inscope=True,
+                )
+
+                # Build response with status info
+                slack_source = context.get_source("slack")
+                code_source = context.get_source("code")
+                inscope_source = context.get_source("inscope")
+                jira_source = context.get_source("jira")
+                memory_source = context.get_source("memory")
+
+                return json.dumps({
+                    "query": query,
+                    "elapsed_ms": context.total_latency_ms,
+                    "total_results": context.total_results,
+                    "formatted": context.formatted,
+                    "sources": [
+                        {
+                            "source": s.source,
+                            "found": s.found,
+                            "count": s.count,
+                            "error": s.error,
+                            "latency_ms": s.latency_ms,
+                            "results": s.results[:3] if s.results else [],  # Limit results for UI
+                        }
+                        for s in context.sources
+                    ],
+                    "sources_used": [s.source for s in context.sources if s.found],
+                    "status": {
+                        "slack_persona": {
+                            "synced": slack_source.found if slack_source else False,
+                            "total_messages": slack_source.count if slack_source else 0,
+                            "error": slack_source.error if slack_source else None,
+                        },
+                        "code_search": {
+                            "indexed": code_source.found if code_source else False,
+                            "chunks": code_source.count if code_source else 0,
+                            "error": code_source.error if code_source else None,
+                        },
+                        "inscope": {
+                            "authenticated": inscope_source.found if inscope_source else False,
+                            "assistants": 20 if inscope_source and inscope_source.found else 0,
+                            "error": inscope_source.error if inscope_source else None,
+                        },
+                    },
+                    "project": "automation-analytics-backend",
+                })
+            except ImportError as e:
+                logger.error(f"RunPersonaTest import error: {e}")
+                return json.dumps({
+                    "query": query,
+                    "error": f"Context injector not available: {e}",
+                    "elapsed_ms": 0,
+                    "total_results": 0,
+                    "sources": [],
+                    "sources_used": [],
+                    "status": {
+                        "slack_persona": {"synced": False, "error": str(e)},
+                        "code_search": {"indexed": False, "error": str(e)},
+                        "inscope": {"authenticated": False, "error": str(e)},
+                    },
+                })
+            except Exception as e:
+                logger.error(f"RunPersonaTest error: {e}")
+                return json.dumps({
+                    "query": query,
+                    "error": str(e),
+                    "elapsed_ms": 0,
+                    "total_results": 0,
+                    "sources": [],
+                    "sources_used": [],
+                    "status": {
+                        "slack_persona": {"synced": False, "error": str(e)},
+                        "code_search": {"indexed": False, "error": str(e)},
+                        "inscope": {"authenticated": False, "error": str(e)},
+                    },
+                })
+
         # ==================== Signals ====================
 
         @dbus_signal()

@@ -20,7 +20,6 @@ Provides:
 import json
 import logging
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
@@ -38,7 +37,6 @@ def register_performance_tools(server: "FastMCP") -> int:
     registry = ToolRegistry(server)
 
     # Import local modules
-    from .chart_generator import build_sunburst_data, generate_progress_bars_html
     from .competency_mapper import CompetencyMapper
     from .question_manager import QuestionManager
     from .scoring_engine import ScoringEngine, get_performance_dir, get_quarter_info
@@ -96,7 +94,7 @@ def register_performance_tools(server: "FastMCP") -> int:
         # Gaps
         gaps = summary.get("gaps", [])
         if gaps:
-            lines.append(f"\n### ⚠️ Gaps (below 50%)\n")
+            lines.append("\n### ⚠️ Gaps (below 50%)\n")
             for gap in gaps:
                 pct = comp_pcts.get(gap, 0)
                 lines.append(f"- {gap}: {pct}%")
@@ -104,7 +102,7 @@ def register_performance_tools(server: "FastMCP") -> int:
         # Highlights
         highlights = summary.get("highlights", [])
         if highlights:
-            lines.append(f"\n### ✨ Recent Highlights\n")
+            lines.append("\n### ✨ Recent Highlights\n")
             for h in highlights[:5]:
                 lines.append(f"- {h}")
 
@@ -153,7 +151,7 @@ def register_performance_tools(server: "FastMCP") -> int:
         lines.append("4. Scan local git repos for commits")
         lines.append("")
         lines.append("```")
-        lines.append(f'skill_run("performance/collect_daily", \'{{"date": "{dt.isoformat()}"}}\')')
+        lines.append('skill_run("performance/collect_daily", \'{{"date": "{dt.isoformat()}"}}\')')
         lines.append("```")
 
         return [TextContent(type="text", text="\n".join(lines))]
@@ -293,7 +291,7 @@ def register_performance_tools(server: "FastMCP") -> int:
         tagged = question_mgr.tag_event_to_questions(event)
 
         lines = [
-            f"✅ Logged manual activity",
+            "✅ Logged manual activity",
             "",
             f"**Category:** {category}",
             f"**Description:** {description}",
@@ -623,7 +621,7 @@ def register_performance_tools(server: "FastMCP") -> int:
         lines.append("")
         lines.append("```")
         if question_id:
-            lines.append(f'skill_run("performance/evaluate_questions", \'{{"question_id": "{question_id}"}}\')')
+            lines.append('skill_run("performance/evaluate_questions", \'{{"question_id": "{question_id}"}}\')')
         else:
             lines.append('skill_run("performance/evaluate_questions")')
         lines.append("```")

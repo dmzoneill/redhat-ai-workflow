@@ -129,7 +129,14 @@ async def run_export(months: int = 1):
     print(f"\n📝 Exporting to: {output_file}")
     print("-" * 60)
 
-    with open(output_file, "w") as f_out, open(context_file, "w") as f_ctx:
+    try:
+        f_out = open(output_file, "w")
+        f_ctx = open(context_file, "w")
+    except OSError as e:
+        print(f"❌ Failed to open output files: {e}")
+        return
+
+    try:
         for conv in conversations:
             channel_id = conv.get("id", "")
             channel_name = conv.get("name", conv.get("user", channel_id[:8]))
@@ -223,6 +230,9 @@ async def run_export(months: int = 1):
             except Exception as e:
                 print(f"  ⚠️ Error on {channel_name}: {e}")
                 channels_done += 1
+    finally:
+        f_out.close()
+        f_ctx.close()
 
     # Write metadata
     metadata = {
@@ -235,15 +245,18 @@ async def run_export(months: int = 1):
     }
 
     metadata_file = STYLE_DIR / "export_metadata.json"
-    with open(metadata_file, "w") as f:
-        json.dump(metadata, f, indent=2)
+    try:
+        with open(metadata_file, "w") as f:
+            json.dump(metadata, f, indent=2)
+    except OSError as e:
+        print(f"⚠️ Failed to write metadata: {e}")
 
     print("-" * 60)
-    print(f"\n✅ Export complete!")
+    print("\n✅ Export complete!")
     print(f"   Your messages: {my_messages:,}")
     print(f"   Total scanned: {total_messages:,}")
     print(f"   Channels: {channels_done}")
-    print(f"\n📁 Files:")
+    print("\n📁 Files:")
     print(f"   - {output_file}")
     print(f"   - {context_file}")
     print(f"   - {metadata_file}")

@@ -7,7 +7,12 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
-Type=simple
+# Type=notify allows daemon to signal readiness and supports watchdog
+Type=notify
+NotifyAccess=main
+# Watchdog: systemd restarts if no ping received within 15s
+WatchdogSec=15
+
 WorkingDirectory=/home/daoneill/src/redhat-ai-workflow
 # Environment variables for Claude (Vertex AI)
 Environment=CLAUDE_CODE_USE_VERTEX=1
@@ -23,7 +28,7 @@ ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.cr
 
 # Restart policy
 Restart=on-failure
-RestartSec=30
+RestartSec=5
 
 # Graceful shutdown
 TimeoutStopSec=30

@@ -22,7 +22,10 @@ import logging
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
+if TYPE_CHECKING:
+    from .attendee_enricher import AttendeeEnricher
 
 logger = logging.getLogger(__name__)
 

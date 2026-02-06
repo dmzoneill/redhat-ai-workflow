@@ -136,10 +136,10 @@ class ConversationContext:
             parts.append(f"## Summary\n\n{self.summary}")
 
         if self.key_topics:
-            parts.append(f"## Topics\n\n" + ", ".join(self.key_topics))
+            parts.append("## Topics\n\n" + ", ".join(self.key_topics))
 
         if self.jira_issues:
-            parts.append(f"## Related Issues\n\n" + ", ".join(self.jira_issues))
+            parts.append("## Related Issues\n\n" + ", ".join(self.jira_issues))
 
         if self.urls:
             parts.append("## References\n\n" + "\n".join(f"- {url}" for url in self.urls[:5]))

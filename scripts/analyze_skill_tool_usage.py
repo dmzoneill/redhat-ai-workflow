@@ -18,12 +18,15 @@ def extract_tools_from_skill(skill_path: Path) -> Set[str]:
     """Extract all MCP tool calls from a skill YAML file."""
     tools_used = set()
 
-    with open(skill_path, "r") as f:
-        try:
+    try:
+        with open(skill_path, "r") as f:
             skill = yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            print(f"Error parsing {skill_path}: {e}")
-            return tools_used
+    except FileNotFoundError:
+        print(f"Error: File not found: {skill_path}")
+        return tools_used
+    except yaml.YAMLError as e:
+        print(f"Error parsing {skill_path}: {e}")
+        return tools_used
 
     # Extract tools from steps
     steps = skill.get("steps", [])
@@ -93,29 +96,34 @@ def get_all_tools_from_modules() -> Dict[str, List[str]]:
             continue
 
         for tools_file in src_dir.glob("tools*.py"):
-            with open(tools_file, "r") as f:
-                content = f.read()
-                # Extract function names with @registry.tool() decorator
-                # Pattern: @registry.tool()\n    async def function_name(
-                # or @auto_heal()\n    @registry.tool()\n    async def function_name(
+            try:
+                with open(tools_file, "r") as f:
+                    content = f.read()
+            except OSError as e:
+                print(f"Warning: Could not read {tools_file}: {e}")
+                continue
 
-                # Look for async def followed by function name that appears after @registry.tool() or @mcp.tool()
-                lines = content.split("\n")
-                for i, line in enumerate(lines):
-                    # Check if line has registry.tool() or mcp.tool()
-                    if (
-                        "@registry.tool()" in line
-                        or "@registry.tool(" in line
-                        or "@mcp.tool()" in line
-                        or "@mcp.tool(" in line
-                    ):
-                        # Look ahead for the next 'def ' or 'async def'
-                        for j in range(i + 1, min(i + 5, len(lines))):
-                            next_line = lines[j]
-                            match = re.match(r"\s*(?:async\s+)?def\s+(\w+)\s*\(", next_line)
-                            if match:
-                                tools.append(match.group(1))
-                                break
+            # Extract function names with @registry.tool() decorator
+            # Pattern: @registry.tool()\n    async def function_name(
+            # or @auto_heal()\n    @registry.tool()\n    async def function_name(
+
+            # Look for async def followed by function name that appears after @registry.tool() or @mcp.tool()
+            lines = content.split("\n")
+            for i, line in enumerate(lines):
+                # Check if line has registry.tool() or mcp.tool()
+                if (
+                    "@registry.tool()" in line
+                    or "@registry.tool(" in line
+                    or "@mcp.tool()" in line
+                    or "@mcp.tool(" in line
+                ):
+                    # Look ahead for the next 'def ' or 'async def'
+                    for j in range(i + 1, min(i + 5, len(lines))):
+                        next_line = lines[j]
+                        match = re.match(r"\s*(?:async\s+)?def\s+(\w+)\s*\(", next_line)
+                        if match:
+                            tools.append(match.group(1))
+                            break
 
         module_tools[module_name] = sorted(set(tools))
 
@@ -191,11 +199,15 @@ def main():
 
     # Save report
     output_file = PROJECT_ROOT / ".claude" / "skill-tool-usage-report.md"
-    output_file.parent.mkdir(exist_ok=True)
-    with open(output_file, "w") as f:
-        f.write(report)
-
-    print(f"\n✅ Report saved to: {output_file}")
+    try:
+        output_file.parent.mkdir(exist_ok=True)
+        with open(output_file, "w") as f:
+            f.write(report)
+        print(f"\n✅ Report saved to: {output_file}")
+    except OSError as e:
+        print(f"\n❌ Failed to save report: {e}")
+        print("\n--- Report ---")
+        print(report)
     print("\n📊 Quick Stats:")
     print(f"   - Skills analyzed: {len(analysis['skills'])}")
     print(f"   - Unique tools used: {len(analysis['all_tools'])}")
