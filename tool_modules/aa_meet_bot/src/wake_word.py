@@ -117,7 +117,7 @@ class TextWakeWordDetector:
         # e.g., speaker "David ONeill" saying "How are you?" should NOT trigger
         # Only trigger if "David" is actually spoken as a command/address
         speaker_lower = speaker.lower()
-        text_lower = text.lower()
+        text.lower()
 
         # Check if wake word appears in text
         match = self.pattern.search(text)
@@ -162,7 +162,8 @@ class TextWakeWordDetector:
             self._last_processed_text = text  # Track what we've seen
 
             logger.info(
-                f"🎯 Now listening for command after wake word (buffer: {command_start[:50] if command_start else 'empty'}...)"
+                "🎯 Now listening for command after wake word"
+                f" (buffer: {command_start[:50] if command_start else 'empty'}...)"
             )
 
         elif self.listening_for_command:

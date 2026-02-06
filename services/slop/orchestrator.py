@@ -25,10 +25,9 @@ Usage:
 
 import asyncio
 import logging
-from datetime import datetime
 from typing import Optional
 
-from services.base.ai_router import AIModelRouter, get_ai_router
+from services.base.ai_router import get_ai_router
 from services.slop.database import SlopDatabase
 from services.slop.external_tools import ExternalTools
 from services.slop.loops import LOOP_CONFIGS, PRIORITY_ORDER, AnalysisLoop, LoopResult

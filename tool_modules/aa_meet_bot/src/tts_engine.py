@@ -121,7 +121,7 @@ class PiperTTS:
             # Use piper_download if available
             import subprocess
 
-            result = subprocess.run(
+            subprocess.run(
                 ["piper", "--download-dir", str(PIPER_MODELS_DIR), "--model", self.voice, "--update-voices"],
                 capture_output=True,
                 text=True,

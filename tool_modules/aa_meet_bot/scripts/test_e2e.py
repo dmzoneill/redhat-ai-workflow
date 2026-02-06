@@ -23,13 +23,13 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from tool_modules.aa_meet_bot.src.config import get_config
-from tool_modules.aa_meet_bot.src.jira_preloader import get_jira_preloader
-from tool_modules.aa_meet_bot.src.llm_responder import get_llm_responder
-from tool_modules.aa_meet_bot.src.tts_engine import get_tts_engine
-from tool_modules.aa_meet_bot.src.video_generator import get_video_generator
-from tool_modules.aa_meet_bot.src.virtual_devices import VirtualDeviceManager
-from tool_modules.aa_meet_bot.src.wake_word import WakeWordEvent, WakeWordManager
+from tool_modules.aa_meet_bot.src.config import get_config  # noqa: E402
+from tool_modules.aa_meet_bot.src.jira_preloader import get_jira_preloader  # noqa: E402
+from tool_modules.aa_meet_bot.src.llm_responder import get_llm_responder  # noqa: E402
+from tool_modules.aa_meet_bot.src.tts_engine import get_tts_engine  # noqa: E402
+from tool_modules.aa_meet_bot.src.video_generator import get_video_generator  # noqa: E402
+from tool_modules.aa_meet_bot.src.virtual_devices import VirtualDeviceManager  # noqa: E402
+from tool_modules.aa_meet_bot.src.wake_word import WakeWordEvent, WakeWordManager  # noqa: E402
 
 
 def print_header(title: str):

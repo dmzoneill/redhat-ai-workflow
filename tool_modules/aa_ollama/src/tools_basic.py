@@ -232,7 +232,10 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Instance `{instance}` is offline\n\n**Host:** `{client.host}`\n\nStart with: `ollama serve`",
+                    text=(
+                        f"❌ Instance `{instance}` is offline\n\n"
+                        f"**Host:** `{client.host}`\n\nStart with: `ollama serve`"
+                    ),
                 )
             ]
 

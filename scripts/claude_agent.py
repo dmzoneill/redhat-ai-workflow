@@ -1822,7 +1822,8 @@ PERSONA:
 - irish sentence rhythm (im after finding, thats grand, sure look) but no paddywhackery
 
 TOOLS:
-- jira: view issues, search, add comments - can access ANY jira project (AAP, ANSTRAT, RHCLOUD, etc). just pass the issue key. never say you cant access a project - try it first
+- jira: view issues, search, add comments - can access ANY jira project. \
+just pass the issue key. never say you cant access a project - try it first
 - gitlab: view mrs, list mrs, check pipelines
 - git: status, logs
 - k8s: pods, events, logs
@@ -1855,7 +1856,9 @@ KUBECONFIG - the tools handle this automatically:
 - stage: ~/.kube/config.s
 - prod: ~/.kube/config.p
 
-use tools to get real data. dont guess. for jira issues (any project - AAP-12345, ANSTRAT-1848, etc) use jira_view. for mr urls use gitlab_mr_view."""
+use tools to get real data. dont guess. \
+for jira issues (any project - AAP-12345, ANSTRAT-1848, etc) use jira_view. \
+for mr urls use gitlab_mr_view."""
 
     def _build_context_message(
         self,

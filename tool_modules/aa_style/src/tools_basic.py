@@ -38,7 +38,7 @@ STYLE_DIR = MEMORY_DIR / "style"
 PERSONAS_DIR = PROJECT_ROOT / "personas"
 
 
-def register_tools(server: FastMCP) -> int:
+def register_tools(server: FastMCP) -> int:  # noqa: C901
     """
     Register style analysis and persona generation tools.
 

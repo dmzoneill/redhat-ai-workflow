@@ -518,9 +518,7 @@ async def _google_slides_add_slide_impl(
             requests[0]["createSlide"]["insertionIndex"] = insert_at
 
         # Execute slide creation
-        response = (
-            service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
-        )
+        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
 
         # If title or body provided, add text
         if title or body:
@@ -870,8 +868,6 @@ async def _google_slides_build_from_outline_impl(
             if line.startswith("# "):
                 # Section header
                 flush_slide()
-                section_title = line[2:].strip()
-
                 slide_id = f"slide_{uuid.uuid4().hex[:8]}"
                 requests.append(
                     {
@@ -998,7 +994,6 @@ async def _google_slides_get_slide_impl(
                 elem_type = "video"
 
             # Get position/size
-            transform = elem.get("transform", {})
             size = elem.get("size", {})
 
             lines.append(f"### `{elem_id}`")
@@ -1087,7 +1082,13 @@ async def _google_slides_add_image_impl(
     except Exception as e:
         error_str = str(e)
         if "INVALID_URL" in error_str or "Could not fetch" in error_str:
-            return f"❌ Invalid or inaccessible image URL. The URL must be publicly accessible.\n\nURL: {image_url}\n\nTip: Upload the image to Google Drive and use google_slides_add_image_from_drive instead."
+            return (
+                "❌ Invalid or inaccessible image URL. "
+                "The URL must be publicly accessible.\n\n"
+                f"URL: {image_url}\n\n"
+                "Tip: Upload the image to Google Drive and use "
+                "google_slides_add_image_from_drive instead."
+            )
         return f"❌ Failed to add image: {e}"
 
 
@@ -1168,7 +1169,13 @@ async def _google_slides_add_image_from_drive_impl(
     except Exception as e:
         error_str = str(e)
         if "Could not fetch" in error_str:
-            return f"❌ Could not access Drive file. Make sure the file is shared or you have access.\n\nFile ID: {drive_file_id}\n\nTip: Share the file with 'Anyone with the link' or use google_slides_upload_image."
+            return (
+                "❌ Could not access Drive file. "
+                "Make sure the file is shared or you have access.\n\n"
+                f"File ID: {drive_file_id}\n\n"
+                "Tip: Share the file with 'Anyone with the link' "
+                "or use google_slides_upload_image."
+            )
         return f"❌ Failed to add image from Drive: {e}"
 
 

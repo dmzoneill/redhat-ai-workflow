@@ -21,7 +21,6 @@ import argparse
 import asyncio
 import logging
 import sys
-from pathlib import Path
 from typing import cast
 
 from fastmcp import FastMCP
@@ -319,7 +318,7 @@ async def init_scheduler(server: FastMCP) -> bool:
 
     # File-based logging for debugging
     from datetime import datetime
-    from pathlib import Path
+    from pathlib import Path  # noqa: F811
 
     def _log(msg):
         try:

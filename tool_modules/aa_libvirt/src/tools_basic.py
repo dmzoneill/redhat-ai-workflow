@@ -1151,7 +1151,7 @@ async def _virsh_screenshot_impl(
 # =============================================================================
 
 
-def register_tools(server: FastMCP) -> int:
+def register_tools(server: FastMCP) -> int:  # noqa: C901
     """
     Register libvirt/virsh tools with the MCP server.
 

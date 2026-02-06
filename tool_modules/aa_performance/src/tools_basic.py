@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def register_performance_tools(server: "FastMCP") -> int:
+def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
     """Register performance tracking tools with the MCP server."""
     registry = ToolRegistry(server)
 
@@ -132,9 +132,6 @@ def register_performance_tools(server: "FastMCP") -> int:
             dt = date.today()
 
         year, quarter, _, _, day_of_quarter = get_quarter_info(dt)
-        engine = ScoringEngine(year=year, quarter=quarter)
-        mapper = CompetencyMapper()
-        question_mgr = QuestionManager(engine.perf_dir)
 
         lines = [f"## 🔄 Collecting Performance Data for {dt.isoformat()}\n"]
         lines.append(f"**Quarter:** Q{quarter} {year} (Day {day_of_quarter})")
@@ -345,7 +342,7 @@ def register_performance_tools(server: "FastMCP") -> int:
                 bar = "█" * min(day_total // 2, 20)
                 lines.append(f"**{dt}**: {bar} {day_total} pts ({event_count} events)")
 
-            except Exception as e:
+            except Exception:
                 lines.append(f"**{daily_file.stem}**: ❌ Error loading")
 
         lines.append("")
@@ -559,7 +556,7 @@ def register_performance_tools(server: "FastMCP") -> int:
 
         cat_list = [c.strip() for c in categories.split(",")]
 
-        question = question_mgr.add_question(
+        question_mgr.add_question(
             question_id=question_id,
             text=text,
             subtext=subtext if subtext else None,
@@ -569,7 +566,10 @@ def register_performance_tools(server: "FastMCP") -> int:
         return [
             TextContent(
                 type="text",
-                text=f"✅ Added custom question\n\n**ID:** {question_id}\n**Text:** {text}\n**Categories:** {categories}",
+                text=(
+                    f"✅ Added custom question\n\n**ID:** {question_id}\n"
+                    f"**Text:** {text}\n**Categories:** {categories}"
+                ),
             )
         ]
 

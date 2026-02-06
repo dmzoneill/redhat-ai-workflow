@@ -681,7 +681,7 @@ async def _detect_project_from_mcp_roots(ctx) -> str | None:
         return None
 
 
-async def _session_start_impl(
+async def _session_start_impl(  # noqa: C901
     ctx: "Context | None" = None,
     agent: str = "",
     project: str = "",
@@ -887,9 +887,13 @@ async def _session_start_impl(
         project_source = "(auto-detected)" if chat_session.is_project_auto_detected else "(explicit)"
 
         if is_resumed:
+            session_line = (
+                f"**Session ID:** `{session_id}`{session_name_info}"
+                f" *(1 of {total_sessions} sessions in this workspace)*\n"
+            )
             lines = [
                 "# 🔄 Session Resumed\n",
-                f"**Session ID:** `{session_id}`{session_name_info} *(1 of {total_sessions} sessions in this workspace)*\n",
+                session_line,
                 f"**Project:** {session_project} {project_source}\n",
                 f"**Persona:** {chat_session.persona}\n",
             ]
@@ -899,10 +903,11 @@ async def _session_start_impl(
                 lines.append(f"**Branch:** {chat_session.branch}\n")
             lines.append("")
         else:
-            lines.insert(
-                1,
-                f"**Session ID:** `{session_id}`{session_name_info} *(1 of {total_sessions} sessions in this workspace)*\n",
+            session_line = (
+                f"**Session ID:** `{session_id}`{session_name_info}"
+                f" *(1 of {total_sessions} sessions in this workspace)*\n"
             )
+            lines.insert(1, session_line)
             lines.insert(2, f"**Project:** {session_project} {project_source}\n")
             lines.insert(
                 3, '⚠️ **SAVE THIS SESSION ID** - Pass it to `session_info(session_id="...")` to track YOUR session.\n'
@@ -1000,8 +1005,10 @@ async def _session_start_impl(
                 except Exception as e:
                     lines.append(f"  ⚠️ Failed to auto-load: {e}")
             else:
+                conf_pct = int(confidence * 100)
                 lines.append(
-                    f"**Suggested Persona:** {suggested_persona} (confidence: {int(confidence * 100)}% - below auto-load threshold)"
+                    f"**Suggested Persona:** {suggested_persona}"
+                    f" (confidence: {conf_pct}% - below auto-load threshold)"
                 )
 
         # Show current work summary
@@ -1072,7 +1079,7 @@ async def _session_start_impl(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int:
+def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int:  # noqa: C901
     """Register session tools with the MCP server.
 
     Args:

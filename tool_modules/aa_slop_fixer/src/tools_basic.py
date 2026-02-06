@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 # Import types directly to avoid triggering services.slop.__init__ which imports aiosqlite
 # This prevents "threads can only be started once" errors when module is reloaded
-import importlib.util
+import importlib.util  # noqa: E402
 
 _types_path = Path(__file__).parent.parent.parent.parent / "services" / "slop" / "types.py"
 _types_spec = importlib.util.spec_from_file_location("slop_types", _types_path)

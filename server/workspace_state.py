@@ -72,7 +72,7 @@ SESSION_STALE_HOURS = 24
 MAX_FILTER_CACHE_SIZE = 50
 
 # Persistence file location - centralized in server.paths
-from server.paths import AA_CONFIG_DIR, WORKSPACE_STATES_FILE
+from server.paths import AA_CONFIG_DIR, WORKSPACE_STATES_FILE  # noqa: E402
 
 PERSIST_DIR = AA_CONFIG_DIR
 PERSIST_FILE = WORKSPACE_STATES_FILE
@@ -1684,7 +1684,9 @@ class WorkspaceState:
         """Get number of sessions in this workspace."""
         return len(self.sessions)
 
-    def sync_with_cursor_db(self, session_ids: list[str] | None = None, skip_content_scan: bool = False) -> dict:
+    def sync_with_cursor_db(  # noqa: C901
+        self, session_ids: list[str] | None = None, skip_content_scan: bool = False
+    ) -> dict:
         """Sync with Cursor's database.
 
         This keeps our sessions in sync with Cursor:
@@ -2670,7 +2672,7 @@ class WorkspaceRegistry:
             return False
 
     @classmethod
-    def load_from_disk(cls) -> int:
+    def load_from_disk(cls) -> int:  # noqa: C901
         """Restore workspace states from disk.
 
         Called on server startup to restore sessions from previous run.

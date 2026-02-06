@@ -49,7 +49,7 @@ class WorkflowConfig:
             if sprint_config and isinstance(sprint_config, dict):
                 self._config = sprint_config
                 self._build_status_mapping()
-                logger.debug(f"Loaded sprint workflow config from config.json")
+                logger.debug("Loaded sprint workflow config from config.json")
             else:
                 logger.warning("Sprint config not found in config.json, using defaults")
                 self._config = self._default_config()
@@ -67,7 +67,7 @@ class WorkflowConfig:
     def _build_status_mapping(self) -> None:
         """Build a reverse mapping from Jira status to workflow stage."""
         self._status_to_stage = {}
-        for stage, config in self._config.get("status_mappings", {}).items():
+        for stage, config in self._config.get("status_mappings", {}).items():  # noqa: B007
             for jira_status in config.get("jira_statuses", []):
                 self._status_to_stage[jira_status.lower()] = stage
 
@@ -186,7 +186,7 @@ class WorkflowConfig:
     def get_actionable_statuses(self) -> list[str]:
         """Get list of Jira statuses where bot can work."""
         statuses = []
-        for stage, config in self._config.get("status_mappings", {}).items():
+        for stage, config in self._config.get("status_mappings", {}).items():  # noqa: B007
             if config.get("bot_can_work", False):
                 statuses.extend(config.get("jira_statuses", []))
         return statuses
@@ -488,7 +488,6 @@ class WorkflowConfig:
         is_spike = issue_class == "spike"
 
         # Get workflow config
-        workflow = self.get_issue_workflow(issue)
         commit_format = self.get_commit_format()
 
         # Escape summary for JSON
@@ -537,7 +536,10 @@ skill_run("research_topic", '{{"topic": "{summary_escaped}", "depth": "deep"}}')
 
 2. **Document your findings on Jira**:
 ```
-jira_add_comment("{issue_key}", "## Research Findings\\n\\n### Summary\\n[Your key findings here]\\n\\n### Technical Details\\n[Detailed analysis]\\n\\n### Recommendations\\n[Suggested approach or code changes]")
+jira_add_comment("{issue_key}", "## Research Findings\\n\\n### Summary\\n" \
+"[Your key findings here]\\n\\n### Technical Details\\n" \
+"[Detailed analysis]\\n\\n### Recommendations\\n" \
+"[Suggested approach or code changes]")
 ```
 
 3. **Transition to Done** (no PR needed for spikes):
@@ -585,7 +587,9 @@ If you CANNOT complete the work due to:
 
 Then:
 ```
-jira_add_comment("{issue_key}", "## Clarification Needed\\n\\n[Your specific questions here]\\n\\nPlease provide details so work can continue.")
+jira_add_comment("{issue_key}", "## Clarification Needed\\n\\n" \
+"[Your specific questions here]\\n\\n" \
+"Please provide details so work can continue.")
 jira_block("{issue_key}", "[Specific reason - e.g., Waiting for API spec from team X]")
 ```
 

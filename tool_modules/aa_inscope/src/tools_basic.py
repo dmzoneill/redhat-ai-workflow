@@ -29,15 +29,15 @@ import httpx
 # Suppress SSL warnings for internal Red Hat sites
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
-from fastmcp import FastMCP
+from fastmcp import FastMCP  # noqa: E402
 
-from tool_modules.common import PROJECT_ROOT
+from tool_modules.common import PROJECT_ROOT  # noqa: E402
 
 __project_root__ = PROJECT_ROOT
 
-from server.auto_heal_decorator import auto_heal
-from server.tool_registry import ToolRegistry
-from server.utils import load_config
+from server.auto_heal_decorator import auto_heal  # noqa: E402
+from server.tool_registry import ToolRegistry  # noqa: E402
+from server.utils import load_config  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

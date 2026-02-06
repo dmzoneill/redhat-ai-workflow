@@ -333,7 +333,11 @@ async def _meet_bot_join_meeting_impl(
                 voice_status = f"Failed: {e}"
                 logger.error(f"[VOICE] Failed to start voice pipeline: {e}")
 
-        return f"✅ **Joined meeting!**\n\nMeeting ID: {controller.state.meeting_id}\nCaptions: {'Enabled' if controller.state.captions_enabled else 'Disabled'}\nVoice Interaction: {voice_status}\n\nListening for wake word..."
+        return (
+            f"✅ **Joined meeting!**\n\nMeeting ID: {controller.state.meeting_id}\n"
+            f"Captions: {'Enabled' if controller.state.captions_enabled else 'Disabled'}\n"
+            f"Voice Interaction: {voice_status}\n\nListening for wake word..."
+        )
     else:
         errors = controller.state.errors if controller.state else ["Unknown error"]
         return "❌ Failed to join meeting\n\nErrors:\n" + "\n".join(f"- {e}" for e in errors)
@@ -1390,7 +1394,7 @@ async def _meet_notes_search_impl(query: str, meeting_id: int) -> str:
             by_meeting[mid] = []
         by_meeting[mid].append(r)
 
-    for mid, matches in by_meeting.items():
+    for _mid, matches in by_meeting.items():
         first = matches[0]
         lines.append(f"## {first['meeting_title']}")
         if first["meeting_date"]:
@@ -1622,7 +1626,10 @@ async def _meet_notes_export_state_impl() -> str:
     with open(MEETBOT_STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-    return f"✅ State exported to {MEETBOT_STATE_FILE}\n\nFound {len(upcoming_meetings)} upcoming meetings with Meet links."
+    return (
+        f"✅ State exported to {MEETBOT_STATE_FILE}\n\n"
+        f"Found {len(upcoming_meetings)} upcoming meetings with Meet links."
+    )
 
 
 # ==================== VOICE PIPELINE IMPLEMENTATIONS ====================
@@ -1715,7 +1722,10 @@ async def _meet_voice_pipeline_status_impl() -> str:
     stats = pipeline_manager.get_all_stats()
 
     if not stats:
-        return "📭 **No Voice Pipelines Active**\n\nVoice pipelines are created when joining meetings with voice interaction enabled."
+        return (
+            "📭 **No Voice Pipelines Active**\n\n"
+            "Voice pipelines are created when joining meetings with voice interaction enabled."
+        )
 
     lines = [
         f"🎤 **Voice Pipeline Status ({len(stats)} active)**",

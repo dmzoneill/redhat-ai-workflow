@@ -5,7 +5,6 @@ eliminating code duplication and ensuring consistent behavior.
 """
 
 import asyncio
-import json
 import logging
 import os
 import subprocess
@@ -140,7 +139,7 @@ def format_list(
 # ==================== Config Loading ====================
 
 # Import ConfigManager for centralized config access
-from server.config_manager import config as _config_manager
+from server.config_manager import config as _config_manager  # noqa: E402
 
 
 def get_project_root() -> Path:

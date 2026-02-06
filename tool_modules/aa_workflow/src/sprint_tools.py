@@ -95,7 +95,10 @@ def sprint_load(
             "## Current Sprint",
             f"**Last Updated:** {state.last_updated}",
             f"**Bot Enabled:** {'Yes' if state.bot_enabled else 'No'}",
-            f"**Total Issues:** {len(state.issues)} ({len(actionable_issues)} actionable, {len(not_actionable_issues)} not actionable)",
+            (
+                f"**Total Issues:** {len(state.issues)}"
+                f" ({len(actionable_issues)} actionable, {len(not_actionable_issues)} not actionable)"
+            ),
             "",
         ]
 

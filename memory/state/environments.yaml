@@ -38,20 +38,20 @@ environments:
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.p
-    last_check: '2026-02-06T00:27:32.312Z'
+    last_check: '2026-02-06T19:09:30.377Z'
     namespace: tower-analytics-prod
     notes: ''
-    status: healthy
+    status: degraded
   stage:
     alerts: []
     cluster: crcs02ue1
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.s
-    last_check: '2026-02-06T00:27:32.312Z'
+    last_check: '2026-02-06T19:09:30.377Z'
     namespace: tower-analytics-stage
     notes: 'Slack alert: AutomationAnalyticsAAPBillingProcessorErrors'
-    status: healthy
+    status: degraded
 known_issues: []
 last_checked: null
 last_updated: '2026-02-03T18:19:45.556850'

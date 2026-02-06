@@ -1,5 +1,4 @@
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -13,8 +12,8 @@ WORKFLOW_SRC = PROJECT_ROOT / "tool_modules" / "aa_workflow" / "src"
 if str(WORKFLOW_SRC) not in sys.path:
     sys.path.append(str(WORKFLOW_SRC))
 
-import yaml
-from skill_engine import SkillExecutor
+import yaml  # noqa: E402
+from skill_engine import SkillExecutor  # noqa: E402
 
 
 async def run_coffee():

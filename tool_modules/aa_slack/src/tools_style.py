@@ -68,7 +68,7 @@ _export_state: dict[str, Any] = {
 }
 
 
-def register_tools(server: FastMCP) -> int:
+def register_tools(server: FastMCP) -> int:  # noqa: C901
     """
     Register Slack style export tools with the MCP server.
 

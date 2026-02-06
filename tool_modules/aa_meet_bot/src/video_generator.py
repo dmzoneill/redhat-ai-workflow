@@ -25,20 +25,20 @@ import os
 # Force GLX platform for OpenGL on Linux (required for headless rendering)
 os.environ.setdefault("PYOPENGL_PLATFORM", "glx")
 
-import asyncio
-import gc
-import logging
-import math
-import random
-import resource
-import subprocess
-import tempfile
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
+import asyncio  # noqa: E402
+import gc  # noqa: E402
+import logging  # noqa: E402
+import math  # noqa: E402
+import random  # noqa: E402
+import resource  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+from dataclasses import dataclass  # noqa: E402
+from pathlib import Path  # noqa: E402
+from typing import Optional  # noqa: E402
 
-import cv2
-import numpy as np
+import cv2  # noqa: E402
+import numpy as np  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -865,7 +865,7 @@ def get_npu_stats() -> list[str]:
         stats.append(f"TEMP: {random.randint(42, 58)}C")
         stats.append(f"UTILIZATION: {random.randint(35, 85)}%")
 
-    except Exception as e:
+    except Exception:
         # Fallback fake stats if NPU not available
         stats = [
             "NPU FREQ: 1400/1400 MHz",
@@ -1169,7 +1169,8 @@ class ResearchVideoGenerator:
             "-",
             "lavfi",
             "-i",
-            f"color=c={self.config.background_color}:s={self.config.width}x{self.config.height}:r={self.config.fps}:d={total_duration}",
+            f"color=c={self.config.background_color}:s={self.config.width}x{self.config.height}"
+            f":r={self.config.fps}:d={total_duration}",
             "-v",
             filter_complex,
             "-c:v",
@@ -1268,7 +1269,6 @@ class ResearchVideoGenerator:
             loop: Whether to loop through attendees continuously
         """
 
-        config = self.config
         total_attendees = len(attendees)
 
         self._running = True
@@ -1417,9 +1417,6 @@ class ResearchVideoGenerator:
         findings = random.sample(FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS)))
         assessment = random.choice(THREAT_ASSESSMENTS)
 
-        # Check if we have pre-rendered waveform
-        use_waveform_overlay = config.waveform_video and config.waveform_video.exists()
-
         # Build filter graph for this single attendee
         filters = []
 
@@ -1447,7 +1444,6 @@ class ResearchVideoGenerator:
         # 4 sections in right column, ~110px each
         section_height = 110
         section_x = right_col_x + 10
-        section_w = config.right_column_width - 20
 
         # Section 1: JIRA ISSUE TRACKER
         sec1_y = right_col_top + 5
@@ -1601,9 +1597,6 @@ class ResearchVideoGenerator:
             f":x=240:y={310 + len(findings) * 24 + 20}:enable='gte(t,{duration - 2})'"
         )
 
-        # NPU Stats Panel position
-        npu_panel_y = config.height - self.config.npu_width // 3  # Bottom of screen
-
         filter_graph = ",".join(filters)
 
         # Build command - real-time rendering only (no pre-rendered files)
@@ -1645,7 +1638,8 @@ class ResearchVideoGenerator:
         # Header - scaled for 720p
         filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=18:fontcolor=gray:x=20:y=10")
         filters.append(
-            f"drawtext=text='SCANNING {total_attendees} ATTENDEES...':fontsize=24:fontcolor={config.text_color}:x=20:y=35"
+            f"drawtext=text='SCANNING {total_attendees} ATTENDEES...'"
+            f":fontsize=24:fontcolor={config.text_color}:x=20:y=35"
         )
 
         # Person silhouette box - left side
@@ -2245,7 +2239,8 @@ class RealtimeVideoRenderer:
                 if now - last_log_time >= 5.0:
                     rms = np.sqrt(np.mean(audio_buffer**2))
                     logger.info(
-                        f"Audio processing: {chunk_count} chunks, RMS={rms:.4f}, buffer set={self._audio_buffer is not None}"
+                        f"Audio processing: {chunk_count} chunks, RMS={rms:.4f}, "
+                        f"buffer set={self._audio_buffer is not None}"
                     )
                     last_log_time = now
 
@@ -2320,8 +2315,6 @@ class RealtimeVideoRenderer:
                     # Pass a VIEW to transcribe - NO COPY
                     # The STT engine must not hold a reference after returning
                     audio_view = self._stt_buffer[: self._stt_write_pos]
-                    num_samples = self._stt_write_pos
-
                     # Reset write position BEFORE transcribe (so new audio writes to start)
                     self._stt_write_pos = 0
 
@@ -2655,7 +2648,7 @@ class RealtimeVideoRenderer:
             f"INFERENCES: {int(t*18)}",
             f"TOKENS: {int(t*45)}",
             f"FRAMES: {frame_num}",
-            f"TIME: {int(t)//60:02d}:{int(t)%60:02d}.{int((t%1)*100):02d}",
+            f"TIME: {int(t) // 60:02d}:{int(t) % 60:02d}.{int((t % 1) * 100):02d}",
         ]
         for i, s in enumerate(stats3):
             cv2.putText(frame, s, (380, y + i * line_h), CV_FONT, font_small, CV_GREEN, thickness, CV_LINE_TYPE)
@@ -2664,7 +2657,7 @@ class RealtimeVideoRenderer:
         stats4 = [
             f"CPU: {15+int(10*math.sin(t*0.5))}%",
             f"MEM: {65+int(5*math.sin(t*0.3))} MB",
-            f"QUEUE: {int((t*3)%5)}",
+            f"QUEUE: {int((t * 3) % 5)}",
             f"LATENCY: {25+int(8*math.sin(t*2))}ms",
             "STATUS: ACTIVE",
         ]
@@ -2709,7 +2702,7 @@ class RealtimeVideoRenderer:
         # Percentage text
         cv2.putText(
             frame,
-            f"PROCESSING: {int((t%15)/15*100)}%",
+            f"PROCESSING: {int((t % 15) / 15 * 100)}%",
             (self.npu_width - padding - 130, bar_y + 10),
             CV_FONT,
             font_small,
@@ -3044,7 +3037,8 @@ class RealtimeVideoRenderer:
                     audio_bars = None
                 elif frame_num % 60 == 0:
                     logger.info(
-                        f"Audio bars: min={audio_bars.min():.3f}, max={audio_bars.max():.3f}, mean={audio_bars.mean():.3f}"
+                        f"Audio bars: min={audio_bars.min():.3f}, max={audio_bars.max():.3f}, "
+                        f"mean={audio_bars.mean():.3f}"
                     )
 
             # Render frame with GPU (waveform, progress bar, YUYV conversion)
@@ -3211,7 +3205,6 @@ class RealtimeVideoRenderer:
         mem_mb = npu["mem_bytes"] / (1024 * 1024)
         # Calculate utilization from delta (busy_delta over 500ms = busy_delta/500000 * 100%)
         util_pct = min(100, int(npu["busy_delta_us"] / 5000)) if npu["busy_delta_us"] > 0 else 0
-        active_sec = npu["active_ms"] / 1000
         runtime_status = npu["runtime_status"].upper()
 
         # Distribute stats across 6 columns (fewer items per column = larger text fits)
@@ -3742,7 +3735,6 @@ class RealtimeVideoRenderer:
         duration: float,
     ) -> list[str]:
         """Build FFmpeg filter list for base elements (used in hybrid mode)."""
-        config = self.config
         filters = []
 
         # Header
@@ -3909,7 +3901,7 @@ async def list_available_audio_sources() -> list[str]:
 
 
 # Quick test
-if __name__ == "__main__":
+if __name__ == "__main__":  # noqa: C901
     import atexit
     import signal
     import sys

@@ -19,7 +19,6 @@ Usage:
 import asyncio
 import importlib.util
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import yaml
@@ -30,10 +29,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Import protocol for validation
-from .protocols import is_tool_module, validate_tool_module
+from .protocols import is_tool_module, validate_tool_module  # noqa: E402
 
 # Import shared path resolution utilities
-from .tool_paths import (
+from .tool_paths import (  # noqa: E402
     PROJECT_DIR,
     TOOL_MODULES_DIR,
     TOOLS_BASIC_FILE,

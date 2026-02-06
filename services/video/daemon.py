@@ -68,13 +68,14 @@ D-Bus Interface (com.aiworkflow.BotVideo):
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Optional
 
 from scripts.common.video_device import cleanup_device, setup_v4l2_device
 from services.base.daemon import BaseDaemon
-from services.base.dbus import DaemonDBusBase
+from services.base.dbus import DaemonDBusBase, get_client
 from services.base.sleep_wake import SleepWakeAwareDaemon
 
 logger = logging.getLogger(__name__)
@@ -473,7 +474,8 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         try:
             logger.info(
-                f"Updating audio source: sink_input_index {getattr(self, '_sink_input_index', None)} -> {new_sink_input_index}"
+                f"Updating audio source: sink_input_index "
+                f"{getattr(self, '_sink_input_index', None)} -> {new_sink_input_index}"
             )
             self._sink_input_index = new_sink_input_index
 

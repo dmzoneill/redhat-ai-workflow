@@ -36,17 +36,15 @@ import asyncio
 import json
 import logging
 import os
-import time as time_module
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from pathlib import Path
-from typing import Any
 
 # Sprint daemon owns its own state file - no shared file with other services
 from server.paths import SPRINT_STATE_FILE_V2
 from services.base.daemon import BaseDaemon
 from services.base.dbus import DaemonDBusBase
 from services.base.sleep_wake import SleepWakeAwareDaemon
-from services.sprint.bot.execution_tracer import ExecutionTracer, StepStatus, WorkflowState, get_trace, list_traces
+from services.sprint.bot.execution_tracer import ExecutionTracer, StepStatus, WorkflowState
 from services.sprint.bot.workflow_config import WorkflowConfig, get_workflow_config
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -1062,12 +1060,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 fetch_sprint_issues,
                 to_sprint_issue_format,
             )
-            from tool_modules.aa_workflow.src.sprint_history import (
-                SprintIssue,
-                SprintState,
-                load_sprint_state,
-                save_sprint_state,
-            )
+            from tool_modules.aa_workflow.src.sprint_history import SprintIssue, load_sprint_state, save_sprint_state
             from tool_modules.aa_workflow.src.sprint_prioritizer import prioritize_issues
 
             config = SprintBotConfig(
@@ -1200,7 +1193,8 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             save_sprint_state(state)
 
             logger.info(
-                f"Sprint refresh completed: {len(new_issues)} issues, sprint: {current_sprint.get('name') if current_sprint else 'None'}"
+                f"Sprint refresh completed: {len(new_issues)} issues, "
+                f"sprint: {current_sprint.get('name') if current_sprint else 'None'}"
             )
             self._last_jira_refresh = datetime.now()
 
@@ -1391,7 +1385,8 @@ Also output the MR ID if found: [MR_ID: <number>]
 
 1. Merge the MR:
    ```
-   gitlab_mr_merge(project="automation-analytics/automation-analytics-backend", mr_id={mr_id}, when_pipeline_succeeds=true)
+   gitlab_mr_merge(project="automation-analytics/automation-analytics-backend",
+       mr_id={mr_id}, when_pipeline_succeeds=true)
    ```
 
 2. Close the Jira issue:
@@ -1693,7 +1688,10 @@ Also output the MR ID if found: [MR_ID: <number>]
             inputs={"jira_status": next_issue.get("jiraStatus")},
             outputs={"is_actionable": is_actionable},
             decision="actionable" if is_actionable else "not_actionable",
-            reason=f"Status '{next_issue.get('jiraStatus')}' is {'actionable' if is_actionable else 'not actionable'} per workflow config",
+            reason=(
+                f"Status '{next_issue.get('jiraStatus')}' is "
+                f"{'actionable' if is_actionable else 'not actionable'} per workflow config"
+            ),
         )
         self._trace_transition(tracer, WorkflowState.CHECKING_ACTIONABLE, trigger="classified")
 
@@ -1703,7 +1701,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         # FOREGROUND MODE: Requires Cursor - wait if not available
         if not background_mode:
             if not cursor_available:
-                logger.info(f"Foreground mode: Cursor not available, waiting...")
+                logger.info("Foreground mode: Cursor not available, waiting...")
                 self._trace_step(
                     tracer,
                     "check_cursor",
@@ -2011,7 +2009,7 @@ Also output the MR ID if found: [MR_ID: <number>]
 
         except Exception as e:
             logger.error(f"Failed to launch chat via D-Bus: {e}")
-            logger.debug(f"Is VS Code running with the AA Workflow extension active?")
+            logger.debug("Is VS Code running with the AA Workflow extension active?")
             return None
 
     # ==================== Background Execution ====================
@@ -2104,8 +2102,6 @@ Also output the MR ID if found: [MR_ID: <number>]
         Returns dict with success status and details.
         """
         issue_key = issue["key"]
-        summary = issue.get("summary", "")
-        description = issue.get("description", "")
 
         logger.info(f"Running {issue_key} in background mode (Claude CLI)")
 
@@ -2180,9 +2176,10 @@ Also output the MR ID if found: [MR_ID: <number>]
                 work_log["status"] = "timeout"
                 work_log["completed"] = datetime.now().isoformat()
                 work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"][
-                    "suggested_prompt"
-                ] = f"Continue working on {issue_key}. The background process timed out. Review the work log and continue from where it left off."
+                work_log["cursor_context"]["suggested_prompt"] = (
+                    f"Continue working on {issue_key}. The background process timed out. "
+                    "Review the work log and continue from where it left off."
+                )
                 self._save_work_log(issue_key, work_log)
                 return {"success": False, "error": "Claude CLI timed out"}
 
@@ -2266,9 +2263,10 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
 
                 work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"][
-                    "suggested_prompt"
-                ] = f"The bot was blocked on {issue_key}: {blocked_reason}. Please provide the needed information or continue the work."
+                work_log["cursor_context"]["suggested_prompt"] = (
+                    f"The bot was blocked on {issue_key}: {blocked_reason}. "
+                    "Please provide the needed information or continue the work."
+                )
 
                 self._save_work_log(issue_key, work_log)
                 logger.warning(f"Background processing blocked for {issue_key}: {blocked_reason}")
@@ -2289,9 +2287,10 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
 
                 work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"][
-                    "suggested_prompt"
-                ] = f"The background process for {issue_key} failed: {error_reason[:200]}. Please investigate and continue the work."
+                work_log["cursor_context"]["suggested_prompt"] = (
+                    f"The background process for {issue_key} failed: {error_reason[:200]}. "
+                    "Please investigate and continue the work."
+                )
 
                 self._save_work_log(issue_key, work_log)
                 logger.warning(f"Background processing failed for {issue_key}: {error_reason[:200]}")
@@ -2328,9 +2327,10 @@ Also output the MR ID if found: [MR_ID: <number>]
             work_log["error"] = str(e)
             work_log["completed"] = datetime.now().isoformat()
             work_log["cursor_context"]["can_continue"] = True
-            work_log["cursor_context"][
-                "suggested_prompt"
-            ] = f"The background process for {issue_key} encountered an error: {str(e)}. Please investigate and continue the work."
+            work_log["cursor_context"]["suggested_prompt"] = (
+                f"The background process for {issue_key} encountered an error: {str(e)}. "
+                "Please investigate and continue the work."
+            )
             self._save_work_log(issue_key, work_log)
             logger.error(f"Background processing error for {issue_key}: {e}")
             return {"success": False, "error": str(e)}
@@ -2385,7 +2385,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         mrs = [m for match in mr_matches for m in match if m]
         if mrs:
             work_log["outcome"]["merge_requests"].extend(mrs)
-            self._log_action(issue_key, "mr_created", f"Created/referenced MR(s)", {"merge_requests": mrs})
+            self._log_action(issue_key, "mr_created", "Created/referenced MR(s)", {"merge_requests": mrs})
 
         # Extract file paths that were modified
         file_pattern = r"(?:modified|created|edited|changed):\s*([^\s\n]+\.[a-zA-Z]+)"

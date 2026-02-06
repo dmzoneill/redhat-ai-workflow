@@ -134,14 +134,14 @@ class RetryConfig:
 
 
 # Project paths - use common module for consistency
-from tool_modules.common import PROJECT_ROOT
+from tool_modules.common import PROJECT_ROOT  # noqa: E402
 
 SKILLS_DIR = PROJECT_ROOT / "skills"
 
 # Import ConfigManager for thread-safe config access
-from server.config_manager import CONFIG_FILE
-from server.config_manager import config as config_manager
-from server.state_manager import state as state_manager
+from server.config_manager import CONFIG_FILE  # noqa: E402
+from server.config_manager import config as config_manager  # noqa: E402
+from server.state_manager import state as state_manager  # noqa: E402
 
 
 class SchedulerConfig:
@@ -591,7 +591,6 @@ class CronScheduler:
         success = False
         error_msg = None
         output = None
-        last_failure_type = None
 
         # Check execution mode from config
         use_claude_cli = self.config.execution_mode == "claude_cli"
@@ -642,7 +641,6 @@ class CronScheduler:
 
             # Detect failure type for potential retry
             failure_type = self._detect_failure_type(error_msg or output or "")
-            last_failure_type = failure_type
             retry_info["failure_type"] = failure_type
 
             # Check if we should retry
@@ -789,7 +787,6 @@ class CronScheduler:
             True if successful
         """
         import asyncio
-        import os
 
         try:
             # Map cluster names to short codes
@@ -801,9 +798,6 @@ class CronScheduler:
                 "konflux": "k",
             }
             short = cluster_map.get(cluster, "s")
-
-            kubeconfig_suffix = {"s": ".s", "p": ".p", "e": ".e", "k": ".k"}
-            kubeconfig = os.path.expanduser(f"~/.kube/config{kubeconfig_suffix.get(short, '.s')}")
 
             # Run kube command to refresh credentials
             logger.info(f"Running kube {short} to refresh credentials")

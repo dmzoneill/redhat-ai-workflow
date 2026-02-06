@@ -1269,7 +1269,7 @@ class NotesBot:
             ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
         ]
 
-        for task_name, task in tasks_to_cancel:
+        for task_name, task in tasks_to_cancel:  # noqa: B007
             if task and not task.done():
                 logger.info(f"CLEANUP: Cancelling {task_name}...")
                 task.cancel()
@@ -1418,7 +1418,7 @@ class NotesBot:
             ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
         ]
 
-        for task_name, task in tasks_to_cancel:
+        for task_name, task in tasks_to_cancel:  # noqa: B007
             if task and not task.done():
                 task.cancel()
                 try:
@@ -1598,7 +1598,7 @@ class NotesBot:
             ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
         ]
 
-        for task_name, task in tasks_to_cancel:
+        for task_name, task in tasks_to_cancel:  # noqa: B007
             if task and not task.done():
                 task.cancel()
                 try:
@@ -1911,7 +1911,8 @@ class NotesBotManager:
             result = await self.leave_meeting(session_id)
             if "error" not in result:
                 logger.info(
-                    f"Successfully auto-left meeting {session_id}: {result.get('captions_captured', 0)} captions captured"
+                    f"Successfully auto-left meeting {session_id}:"
+                    f" {result.get('captions_captured', 0)} captions captured"
                 )
 
         # Force-kill hung sessions

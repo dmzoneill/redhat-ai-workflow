@@ -82,7 +82,10 @@ class GoogleMeetController:
     # CSS selectors for Google Meet elements (may need updates as Meet UI changes)
     SELECTORS = {
         # Join flow - buttons to join the meeting
-        "join_button": 'button:has-text("Join now"), button:has-text("Ask to join"), div[role="button"]:has-text("Join now"), div[role="button"]:has-text("Ask to join")',
+        "join_button": (
+            'button:has-text("Join now"), button:has-text("Ask to join"), '
+            'div[role="button"]:has-text("Join now"), div[role="button"]:has-text("Ask to join")'
+        ),
         "ask_to_join_button": 'button:has-text("Ask to join"), div[role="button"]:has-text("Ask to join")',
         "join_now_button": 'button:has-text("Join now"), div[role="button"]:has-text("Join now")',
         "got_it_button": 'button:has-text("Got it")',
@@ -326,7 +329,8 @@ class GoogleMeetController:
                                 streams_routed += 1
                             else:
                                 logger.debug(
-                                    f"[{self._instance_id}] Skipping audio stream {current_input_id} (PID {current_pid} != our PID {self._browser_pid})"
+                                    f"[{self._instance_id}] Skipping audio stream {current_input_id} "
+                                    f"(PID {current_pid} != our PID {self._browser_pid})"
                                 )
 
                         # Start new input
@@ -1137,7 +1141,7 @@ class GoogleMeetController:
         """
         )
 
-    async def sign_in_google(self) -> bool:
+    async def sign_in_google(self) -> bool:  # noqa: C901
         """
         Sign in to Google using Red Hat SSO.
 
@@ -1256,7 +1260,7 @@ class GoogleMeetController:
                                     # The Continue button has nested structure: button > span.VfPpkd-vQzf8d with text
                                     # Try multiple selectors to find the actual clickable button
                                     continue_selectors = [
-                                        'button:has(span:text-is("Continue"))',  # Button containing span with exact text
+                                        'button:has(span:text-is("Continue"))',  # Button with span exact text
                                         'button.VfPpkd-LgbsSe:has-text("Continue")',  # Google's Material button class
                                         'button[jsname="LgbsSe"]:has-text("Continue")',  # Button with jsname
                                         'span.VfPpkd-vQzf8d:text-is("Continue")',  # The span itself (click it)
@@ -1326,7 +1330,7 @@ class GoogleMeetController:
             self.state.errors.append(error_msg)
             return False
 
-    async def join_meeting(self, meet_url: str) -> bool:
+    async def join_meeting(self, meet_url: str) -> bool:  # noqa: C901
         """
         Join a Google Meet meeting.
 
@@ -2056,7 +2060,6 @@ class GoogleMeetController:
 
         try:
             # First, find the device in the browser's device list
-            kind = "audioinput" if device_type == "microphone" else "audiooutput"
             js_find_device = """
             async () => {{
                 const devices = await navigator.mediaDevices.enumerateDevices();
@@ -2897,7 +2900,7 @@ class GoogleMeetController:
 
         return False
 
-    async def get_participants(self) -> list[dict]:
+    async def get_participants(self) -> list[dict]:  # noqa: C901
         """
         Scrape the participant list from Google Meet UI.
 

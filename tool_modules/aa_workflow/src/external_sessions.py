@@ -62,7 +62,7 @@ class ClaudeSession:
         tool_calls = []
         for msg in self.messages:
             if msg.get("role") == "assistant":
-                content = msg.get("content", "")
+                msg.get("content", "")
                 # Look for tool call patterns in Claude's output
                 # This is a simplified extraction
                 if "tool_use" in str(msg):

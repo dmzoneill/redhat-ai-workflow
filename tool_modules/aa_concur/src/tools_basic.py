@@ -251,7 +251,7 @@ def _today_us_date(today: date | None = None) -> str:
 # ==================== Tool Registration ====================
 
 
-def register_tools(server: FastMCP) -> int:
+def register_tools(server: FastMCP) -> int:  # noqa: C901
     """Register concur tools with the MCP server."""
     registry = ToolRegistry(server)
     config = load_concur_config()
@@ -286,7 +286,7 @@ def register_tools(server: FastMCP) -> int:
 
             try:
                 # Fallback to pass
-                password = _get_pass_password(pass_path)
+                _get_pass_password(pass_path)
                 username = pass_path.split("/")[-1] if "/" in pass_path else "unknown"
                 return [
                     TextContent(

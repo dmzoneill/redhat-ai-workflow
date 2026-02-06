@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_slack" / "src"))
 
-from server.utils import load_config
+from server.utils import load_config  # noqa: E402
 
 MEMORY_DIR = PROJECT_ROOT / "memory"
 STYLE_DIR = MEMORY_DIR / "style"
@@ -60,7 +60,6 @@ async def run_export(months: int = 1):
     # Calculate time range
     now = datetime.now()
     oldest_date = now - timedelta(days=months * 30)
-    oldest_ts = str(oldest_date.timestamp())
     print(f"📅 Date range: {oldest_date.strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}")
 
     # Get conversations - try multiple methods for enterprise restrictions
@@ -181,7 +180,6 @@ async def run_export(months: int = 1):
                     # Rate limit between pagination calls
                     await asyncio.sleep(0.2)
 
-                channel_total = len(all_messages)
                 channel_mine = 0
 
                 for msg in all_messages:
@@ -221,7 +219,9 @@ async def run_export(months: int = 1):
                 channels_done += 1
                 if channel_mine > 0:
                     print(
-                        f"  [{channels_done}/{len(conversations)}] {channel_type}: {channel_name} - {channel_mine} messages"
+                        f"  [{channels_done}/{len(conversations)}] "
+                        f"{channel_type}: {channel_name} - "
+                        f"{channel_mine} messages"
                     )
 
                 # Rate limit

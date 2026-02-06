@@ -23,7 +23,6 @@ Usage:
     markdown = result.to_markdown()
 """
 
-import asyncio
 import logging
 import time
 import uuid
@@ -32,7 +31,7 @@ from typing import Any
 from .discovery import discover_and_load_all_adapters
 from .formatter import ResultFormatter
 from .merger import ResultMerger
-from .models import AdapterResult, IntentClassification, MemoryItem, QueryResult, SourceFilter
+from .models import AdapterResult, IntentClassification, QueryResult, SourceFilter
 from .registry import ADAPTER_MANIFEST, AdapterInfo
 from .router import ParallelExecutor, QueryRouter
 
@@ -216,7 +215,6 @@ class MemoryInterface:
                 source.limit = limit
 
         # Use search capability
-        query_id = str(uuid.uuid4())[:8]
         start_time = time.time()
 
         intent, adapter_filters = await self.router.route(

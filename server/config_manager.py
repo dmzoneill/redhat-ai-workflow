@@ -114,7 +114,7 @@ def validate_config(config: dict[str, Any], strict: bool = False) -> list[str]:
             if isinstance(spec, tuple):
                 expected_type, required, default = spec
             else:
-                expected_type, required, default = spec, False, None
+                expected_type, required, default = spec, False, None  # noqa: F841
 
             if key not in section_data:
                 if required:

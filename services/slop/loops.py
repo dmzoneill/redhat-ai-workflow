@@ -30,13 +30,12 @@ Usage:
     print(f"Found {loop.findings_count} issues")
 """
 
-import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from services.base.ai_router import AIModelRouter

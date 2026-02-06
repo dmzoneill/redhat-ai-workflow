@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skills Mind Map - Neural Network</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0f;
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+            overflow: hidden;
+            color: #e0e0e0;
+        }
+
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        svg:active {
+            cursor: grabbing;
+        }
+
+        /* Node styles */
+        .node {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .node circle.main {
+            stroke-width: 2px;
+            transition: all 0.3s ease;
+        }
+
+        .node circle.glow-ring {
+            fill: none;
+            stroke-width: 0;
+            opacity: 0;
+            transition: all 0.4s ease;
+        }
+
+        .node:hover circle.main {
+            stroke-width: 4px;
+            filter: drop-shadow(0 0 12px currentColor);
+        }
+
+        .node.dimmed {
+            opacity: 0.15;
+        }
+
+        .node.highlighted {
+            opacity: 1;
+        }
+
+        .node.highlighted circle.main {
+            stroke-width: 4px;
+            filter: drop-shadow(0 0 20px currentColor);
+        }
+
+        /* Persona active state */
+        .node.persona-active circle.glow-ring {
+            stroke-width: 4px;
+            opacity: 0.8;
+            animation: persona-pulse 2s ease-in-out infinite;
+        }
+
+        .node.persona-active circle.main {
+            filter: drop-shadow(0 0 15px var(--persona-color, #667eea));
+        }
+
+        .node.persona-inactive {
+            opacity: 0.25;
+        }
+
+        @keyframes persona-pulse {
+            0%, 100% {
+                stroke-width: 4px;
+                opacity: 0.6;
+            }
+            50% {
+                stroke-width: 8px;
+                opacity: 1;
+            }
+        }
+
+        /* Link styles */
+        .link {
+            fill: none;
+            stroke-opacity: 0.3;
+            transition: all 0.4s ease;
+        }
+
+        .link.dimmed {
+            stroke-opacity: 0.05;
+        }
+
+        .link.highlighted {
+            stroke-opacity: 0.8;
+            stroke-width: 3px;
+        }
+
+        .link.calls {
+            stroke: #ff6b6b;
+            stroke-dasharray: 5,3;
+        }
+
+        .link.uses {
+            stroke: #4ecdc4;
+        }
+
+        .link.triggers {
+            stroke: #ffe66d;
+            stroke-dasharray: 2,2;
+        }
+
+        /* Persona-active links */
+        .link.persona-active {
+            stroke-opacity: 0.9;
+            stroke-width: 3px;
+            filter: drop-shadow(0 0 4px var(--persona-color, #667eea));
+        }
+
+        .link.persona-inactive {
+            stroke-opacity: 0.08;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: absolute;
+            background: rgba(20, 20, 30, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 16px;
+            max-width: 350px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .tooltip.visible {
+            opacity: 1;
+        }
+
+        .tooltip h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+
+        .tooltip .type-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-left: 8px;
+        }
+
+        .tooltip .description {
+            font-size: 13px;
+            color: #aaa;
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        .tooltip .meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .tooltip .meta-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .tooltip .personas-list {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .tooltip .personas-list .persona-tag {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            margin: 2px;
+            font-weight: 600;
+        }
+
+        .tooltip .tools-list,
+        .tooltip .intents-list {
+            margin-top: 8px;
+        }
+
+        .tooltip .tools-list span,
+        .tooltip .intents-list span {
+            display: inline-block;
+            background: rgba(78, 205, 196, 0.2);
+            color: #4ecdc4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            margin: 2px;
+        }
+
+        .tooltip .intents-list span {
+            background: rgba(255, 230, 109, 0.2);
+            color: #ffe66d;
+        }
+
+        /* Controls */
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+
+        .controls h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .controls .subtitle {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 16px;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .search-box input {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 14px;
+            width: 200px;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .search-box input:focus {
+            border-color: #667eea;
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .search-box input::placeholder {
+            color: #555;
+        }
+
+        /* Persona selector */
+        .persona-selector {
+            margin-bottom: 16px;
+        }
+
+        .persona-selector label {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .persona-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .persona-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 8px 14px;
+            color: #888;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .persona-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--persona-color);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .persona-btn:hover {
+            border-color: var(--persona-color);
+            color: #fff;
+        }
+
+        .persona-btn:hover::before {
+            opacity: 0.1;
+        }
+
+        .persona-btn.active {
+            border-color: var(--persona-color);
+            color: #fff;
+            box-shadow: 0 0 20px var(--persona-color);
+        }
+
+        .persona-btn.active::before {
+            opacity: 0.2;
+        }
+
+        .persona-btn .count {
+            font-size: 10px;
+            opacity: 0.6;
+            margin-left: 4px;
+        }
+
+        .filter-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .filter-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            padding: 6px 12px;
+            color: #888;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .filter-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .filter-btn.active {
+            background: var(--btn-color, #667eea);
+            border-color: var(--btn-color, #667eea);
+            color: #fff;
+        }
+
+        .view-toggles {
+            display: flex;
+            gap: 8px;
+        }
+
+        .toggle-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            padding: 6px 10px;
+            color: #666;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .toggle-btn:hover {
+            color: #fff;
+        }
+
+        .toggle-btn.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        /* Legend */
+        .legend {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(20, 20, 30, 0.8);
+            border-radius: 12px;
+            padding: 16px;
+            backdrop-filter: blur(10px);
+        }
+
+        .legend h4 {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .legend-circle {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .legend-line {
+            width: 24px;
+            height: 2px;
+        }
+
+        /* Active persona indicator */
+        .active-persona-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(20, 20, 30, 0.9);
+            border-radius: 12px;
+            padding: 16px 20px;
+            backdrop-filter: blur(10px);
+            text-align: right;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+
+        .active-persona-indicator.has-persona {
+            border-color: var(--persona-color);
+            box-shadow: 0 0 30px var(--persona-color);
+        }
+
+        .active-persona-indicator .label {
+            font-size: 10px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .active-persona-indicator .persona-name {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--persona-color, #888);
+            text-transform: capitalize;
+        }
+
+        .active-persona-indicator .skill-count {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        /* Stats */
+        .stats {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            text-align: right;
+        }
+
+        .stats .stat {
+            font-size: 12px;
+            color: #555;
+        }
+
+        .stats .stat strong {
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <svg id="graph">
+            <defs>
+                <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                    <feMerge>
+                        <feMergeNode in="coloredBlur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                </filter>
+            </defs>
+        </svg>
+
+        <div class="controls">
+            <h1>Skills Mind Map</h1>
+            <p class="subtitle">Neural network of intents, skills, and tools</p>
+
+            <div class="search-box">
+                <input type="text" id="search" placeholder="Search skills...">
+            </div>
+
+            <div class="persona-selector">
+                <label>Active Persona</label>
+                <div class="persona-buttons" id="personaButtons">
+                    <button class="persona-btn active" data-persona="none" style="--persona-color: #667eea">
+                        All<span class="count"></span>
+                    </button>
+                    <button class="persona-btn" data-persona="developer" style="--persona-color: #ff6b6b">
+                        Developer<span class="count"></span>
+                    </button>
+                    <button class="persona-btn" data-persona="devops" style="--persona-color: #4ecdc4">
+                        DevOps<span class="count"></span>
+                    </button>
+                    <button class="persona-btn" data-persona="incident" style="--persona-color: #f7dc6f">
+                        Incident<span class="count"></span>
+                    </button>
+                    <button class="persona-btn" data-persona="release" style="--persona-color: #bb8fce">
+                        Release<span class="count"></span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="filter-buttons" id="categoryFilters">
+                <button class="filter-btn active" data-category="all" style="--btn-color: #667eea">All</button>
+                <button class="filter-btn" data-category="code" style="--btn-color: #ff6b6b">Code</button>
+                <button class="filter-btn" data-category="deploy" style="--btn-color: #4ecdc4">Deploy</button>
+                <button class="filter-btn" data-category="jira" style="--btn-color: #45b7d1">Jira</button>
+                <button class="filter-btn" data-category="incident" style="--btn-color: #f7dc6f">Incident</button>
+                <button class="filter-btn" data-category="daily" style="--btn-color: #bb8fce">Daily</button>
+                <button class="filter-btn" data-category="memory" style="--btn-color: #82e0aa">Memory</button>
+            </div>
+
+            <div class="view-toggles">
+                <button class="toggle-btn active" id="toggleTools">Tools</button>
+                <button class="toggle-btn active" id="toggleIntents">Intents</button>
+                <button class="toggle-btn" id="toggleLabels">Labels</button>
+            </div>
+        </div>
+
+        <div class="active-persona-indicator" id="personaIndicator">
+            <div class="label">Active Persona</div>
+            <div class="persona-name" id="personaName">All Skills</div>
+            <div class="skill-count" id="personaSkillCount"></div>
+        </div>
+
+        <div class="legend">
+            <h4>Node Types</h4>
+            <div class="legend-item">
+                <div class="legend-circle" style="background: #667eea"></div>
+                <span>Skill</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-circle" style="background: #4ecdc4"></div>
+                <span>Tool</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-circle" style="background: #ffe66d"></div>
+                <span>Intent</span>
+            </div>
+            <h4 style="margin-top: 12px">Connections</h4>
+            <div class="legend-item">
+                <div class="legend-line" style="background: #ff6b6b"></div>
+                <span>Calls skill</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-line" style="background: #4ecdc4"></div>
+                <span>Uses tool</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-line" style="background: #ffe66d"></div>
+                <span>Triggered by</span>
+            </div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="tooltip" id="tooltip"></div>
+    </div>
+
+    <script>
+        // Persona colors
+        const personaColors = {
+            none: '#667eea',
+            developer: '#ff6b6b',
+            devops: '#4ecdc4',
+            incident: '#f7dc6f',
+            release: '#bb8fce',
+            researcher: '#82e0aa',
+            admin: '#e74c3c',
+            code: '#3498db',
+            database: '#9b59b6',
+            github: '#333',
+            infra: '#1abc9c',
+            meetings: '#f39c12',
+            observability: '#e67e22',
+            performance: '#2ecc71',
+            presentations: '#9b59b6',
+            project: '#34495e',
+            security: '#c0392b',
+            slack: '#4A154B',
+            slop: '#95a5a6',
+            workspace: '#7f8c8d'
+        };
+
+        // Category colors
+        const categoryColors = {
+            code: '#ff6b6b',
+            deploy: '#4ecdc4',
+            jira: '#45b7d1',
+            incident: '#f7dc6f',
+            daily: '#bb8fce',
+            memory: '#82e0aa',
+            comms: '#f8b500',
+            maintenance: '#95a5a6',
+            other: '#667eea',
+            tool: '#4ecdc4',
+            intent: '#ffe66d'
+        };
+
+        // State
+        let graphData = null;
+        let simulation = null;
+        let showTools = true;
+        let showIntents = true;
+        let showLabels = false;
+        let activeCategory = 'all';
+        let activePersona = 'none';
+        let searchTerm = '';
+        let hoveredNode = null;
+
+        // Load data and initialize
+        async function init() {
+            try {
+                const response = await fetch('skill_graph_data.json');
+                graphData = await response.json();
+                updatePersonaCounts();
+                createGraph();
+                updateStats();
+            } catch (error) {
+                console.error('Failed to load graph data:', error);
+                document.getElementById('stats').innerHTML = '<span class="stat">Error loading data</span>';
+            }
+        }
+
+        function updatePersonaCounts() {
+            // Update persona button counts
+            const personas = graphData.personas || {};
+            document.querySelectorAll('.persona-btn').forEach(btn => {
+                const persona = btn.dataset.persona;
+                const countEl = btn.querySelector('.count');
+                if (persona === 'none') {
+                    countEl.textContent = ` (${graphData.stats.skill_count})`;
+                } else if (personas[persona]) {
+                    countEl.textContent = ` (${personas[persona].skill_count})`;
+                }
+            });
+        }
+
+        function getActivePersonaSkills() {
+            if (activePersona === 'none') return null;
+            const personas = graphData.personas || {};
+            return personas[activePersona]?.skills || [];
+        }
+
+        function isSkillInActivePersona(skillId) {
+            const skills = getActivePersonaSkills();
+            if (!skills) return true; // No persona filter
+            return skills.includes(skillId);
+        }
+
+        function createGraph() {
+            const svg = d3.select('#graph');
+            const container = document.getElementById('container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            // Clear existing
+            svg.selectAll('g').remove();
+
+            // Filter nodes based on current view settings
+            const filteredNodes = graphData.nodes.filter(n => {
+                if (n.type === 'tool' && !showTools) return false;
+                if (n.type === 'intent' && !showIntents) return false;
+                if (activeCategory !== 'all' && n.type === 'skill' && n.category !== activeCategory) return false;
+                if (searchTerm && n.type === 'skill') {
+                    const searchLower = searchTerm.toLowerCase();
+                    return n.label.toLowerCase().includes(searchLower) ||
+                           (n.description && n.description.toLowerCase().includes(searchLower));
+                }
+                return true;
+            });
+
+            const nodeIds = new Set(filteredNodes.map(n => n.id));
+
+            const filteredLinks = graphData.links.filter(l => {
+                return nodeIds.has(l.source.id || l.source) && nodeIds.has(l.target.id || l.target);
+            });
+
+            // Create zoom behavior
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 4])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                });
+
+            svg.call(zoom);
+
+            // Main group for zoom/pan
+            const g = svg.append('g');
+
+            // Create simulation
+            simulation = d3.forceSimulation(filteredNodes)
+                .force('link', d3.forceLink(filteredLinks)
+                    .id(d => d.id)
+                    .distance(d => d.type === 'calls' ? 80 : 60)
+                    .strength(d => d.strength || 0.5))
+                .force('charge', d3.forceManyBody()
+                    .strength(d => d.type === 'skill' ? -150 : -50))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide()
+                    .radius(d => (d.size || 8) + 5));
+
+            // Draw links
+            const link = g.append('g')
+                .attr('class', 'links')
+                .selectAll('line')
+                .data(filteredLinks)
+                .enter()
+                .append('line')
+                .attr('class', d => `link ${d.type}`)
+                .attr('stroke-width', d => d.type === 'calls' ? 2 : 1)
+                .style('--persona-color', personaColors[activePersona]);
+
+            // Draw nodes
+            const node = g.append('g')
+                .attr('class', 'nodes')
+                .selectAll('g')
+                .data(filteredNodes)
+                .enter()
+                .append('g')
+                .attr('class', 'node')
+                .style('--persona-color', personaColors[activePersona])
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            // Glow ring (for persona highlighting)
+            node.append('circle')
+                .attr('class', 'glow-ring')
+                .attr('r', d => (d.size || 8) + 6)
+                .attr('stroke', personaColors[activePersona]);
+
+            // Main node circle
+            node.append('circle')
+                .attr('class', 'main')
+                .attr('r', d => d.size || 8)
+                .attr('fill', d => categoryColors[d.category] || categoryColors.other)
+                .attr('stroke', d => d3.color(categoryColors[d.category] || categoryColors.other).brighter(0.5));
+
+            // Inner highlight
+            node.append('circle')
+                .attr('r', d => (d.size || 8) * 0.4)
+                .attr('fill', 'rgba(255,255,255,0.3)')
+                .attr('cx', d => -(d.size || 8) * 0.2)
+                .attr('cy', d => -(d.size || 8) * 0.2);
+
+            // Labels (optional)
+            node.append('text')
+                .attr('dy', d => (d.size || 8) + 12)
+                .attr('text-anchor', 'middle')
+                .attr('fill', '#666')
+                .attr('font-size', '9px')
+                .attr('opacity', showLabels ? 1 : 0)
+                .text(d => d.type === 'skill' ? d.label : '');
+
+            // Apply persona highlighting
+            applyPersonaHighlighting(node, link);
+
+            // Hover interactions
+            node.on('mouseenter', (event, d) => {
+                hoveredNode = d;
+                highlightConnections(d, filteredNodes, filteredLinks, node, link);
+                showTooltip(event, d);
+            })
+            .on('mousemove', (event, d) => {
+                moveTooltip(event);
+            })
+            .on('mouseleave', () => {
+                hoveredNode = null;
+                resetHighlights(node, link);
+                applyPersonaHighlighting(node, link);
+                hideTooltip();
+            });
+
+            // Update positions on tick
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                node.attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+
+            // Initial zoom to fit
+            setTimeout(() => {
+                const bounds = g.node().getBBox();
+                const fullWidth = bounds.width;
+                const fullHeight = bounds.height;
+                const midX = bounds.x + fullWidth / 2;
+                const midY = bounds.y + fullHeight / 2;
+
+                const scale = 0.8 / Math.max(fullWidth / width, fullHeight / height);
+                const translate = [width / 2 - scale * midX, height / 2 - scale * midY];
+
+                svg.transition()
+                    .duration(750)
+                    .call(zoom.transform, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
+            }, 1000);
+        }
+
+        function applyPersonaHighlighting(nodeSelection, linkSelection) {
+            const personaSkills = getActivePersonaSkills();
+            const personaColor = personaColors[activePersona];
+
+            if (!personaSkills) {
+                // No persona filter - reset all
+                nodeSelection.classed('persona-active', false).classed('persona-inactive', false);
+                linkSelection.classed('persona-active', false).classed('persona-inactive', false);
+                return;
+            }
+
+            // Build set of active skill IDs and their connected tools/intents
+            const activeSkillIds = new Set(personaSkills);
+            const activeNodeIds = new Set(personaSkills);
+
+            // Find tools and intents connected to active skills
+            graphData.links.forEach(l => {
+                const sourceId = l.source.id || l.source;
+                const targetId = l.target.id || l.target;
+
+                if (activeSkillIds.has(sourceId) || activeSkillIds.has(targetId)) {
+                    activeNodeIds.add(sourceId);
+                    activeNodeIds.add(targetId);
+                }
+            });
+
+            // Apply node classes
+            nodeSelection.each(function(d) {
+                const el = d3.select(this);
+                const isActive = activeNodeIds.has(d.id);
+
+                el.classed('persona-active', isActive && d.type === 'skill' && activeSkillIds.has(d.id));
+                el.classed('persona-inactive', !isActive);
+
+                // Update glow ring color
+                el.select('.glow-ring').attr('stroke', personaColor);
+            });
+
+            // Apply link classes
+            linkSelection.each(function(l) {
+                const el = d3.select(this);
+                const sourceId = l.source.id || l.source;
+                const targetId = l.target.id || l.target;
+
+                const sourceActive = activeSkillIds.has(sourceId);
+                const targetActive = activeSkillIds.has(targetId);
+                const isActive = sourceActive || targetActive;
+
+                el.classed('persona-active', isActive);
+                el.classed('persona-inactive', !isActive);
+
+                if (isActive) {
+                    el.style('stroke', personaColor);
+                } else {
+                    // Reset to original color
+                    el.style('stroke', null);
+                }
+            });
+        }
+
+        function highlightConnections(d, nodes, links, nodeSelection, linkSelection) {
+            const connectedIds = new Set([d.id]);
+
+            links.forEach(l => {
+                const sourceId = l.source.id || l.source;
+                const targetId = l.target.id || l.target;
+                if (sourceId === d.id) connectedIds.add(targetId);
+                if (targetId === d.id) connectedIds.add(sourceId);
+            });
+
+            nodeSelection.classed('dimmed', n => !connectedIds.has(n.id));
+            nodeSelection.classed('highlighted', n => connectedIds.has(n.id));
+
+            linkSelection.classed('dimmed', l => {
+                const sourceId = l.source.id || l.source;
+                const targetId = l.target.id || l.target;
+                return sourceId !== d.id && targetId !== d.id;
+            });
+            linkSelection.classed('highlighted', l => {
+                const sourceId = l.source.id || l.source;
+                const targetId = l.target.id || l.target;
+                return sourceId === d.id || targetId === d.id;
+            });
+        }
+
+        function resetHighlights(nodeSelection, linkSelection) {
+            nodeSelection.classed('dimmed', false).classed('highlighted', false);
+            linkSelection.classed('dimmed', false).classed('highlighted', false);
+        }
+
+        function showTooltip(event, d) {
+            const tooltip = document.getElementById('tooltip');
+            let html = `<h3>${d.label}<span class="type-badge" style="background: ${categoryColors[d.category]}">${d.type}</span></h3>`;
+
+            if (d.description) {
+                html += `<p class="description">${d.description}</p>`;
+            }
+
+            if (d.type === 'skill') {
+                // Show personas that use this skill
+                if (d.personas && d.personas.length > 0) {
+                    html += `<div class="personas-list"><strong>Used by:</strong><br>`;
+                    d.personas.forEach(p => {
+                        const color = personaColors[p] || '#667eea';
+                        html += `<span class="persona-tag" style="background: ${color}; color: #fff">${p}</span>`;
+                    });
+                    html += `</div>`;
+                }
+
+                if (d.tools && d.tools.length > 0) {
+                    html += `<div class="tools-list"><strong>Tools:</strong><br>`;
+                    d.tools.slice(0, 8).forEach(t => {
+                        html += `<span>${t}</span>`;
+                    });
+                    if (d.tools.length > 8) html += `<span>+${d.tools.length - 8} more</span>`;
+                    html += `</div>`;
+                }
+
+                if (d.intents && d.intents.length > 0) {
+                    html += `<div class="intents-list"><strong>Intents:</strong><br>`;
+                    d.intents.forEach(i => {
+                        html += `<span>${i}</span>`;
+                    });
+                    html += `</div>`;
+                }
+
+                if (d.outputs && d.outputs.length > 0) {
+                    html += `<div class="meta"><div class="meta-item">Outputs: ${d.outputs.join(', ')}</div></div>`;
+                }
+            }
+
+            tooltip.innerHTML = html;
+            tooltip.classList.add('visible');
+            moveTooltip(event);
+        }
+
+        function moveTooltip(event) {
+            const tooltip = document.getElementById('tooltip');
+            const x = event.clientX + 15;
+            const y = event.clientY + 15;
+
+            const rect = tooltip.getBoundingClientRect();
+            const maxX = window.innerWidth - rect.width - 20;
+            const maxY = window.innerHeight - rect.height - 20;
+
+            tooltip.style.left = Math.min(x, maxX) + 'px';
+            tooltip.style.top = Math.min(y, maxY) + 'px';
+        }
+
+        function hideTooltip() {
+            document.getElementById('tooltip').classList.remove('visible');
+        }
+
+        function updatePersonaIndicator() {
+            const indicator = document.getElementById('personaIndicator');
+            const nameEl = document.getElementById('personaName');
+            const countEl = document.getElementById('personaSkillCount');
+            const color = personaColors[activePersona];
+
+            indicator.style.setProperty('--persona-color', color);
+
+            if (activePersona === 'none') {
+                indicator.classList.remove('has-persona');
+                nameEl.textContent = 'All Skills';
+                countEl.textContent = `${graphData.stats.skill_count} skills`;
+            } else {
+                indicator.classList.add('has-persona');
+                nameEl.textContent = activePersona.charAt(0).toUpperCase() + activePersona.slice(1);
+                const personas = graphData.personas || {};
+                const count = personas[activePersona]?.skill_count || 0;
+                countEl.textContent = `${count} skills active`;
+            }
+        }
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        function updateStats() {
+            const stats = graphData.stats;
+            document.getElementById('stats').innerHTML = `
+                <div class="stat"><strong>${stats.skill_count}</strong> skills</div>
+                <div class="stat"><strong>${stats.tool_count}</strong> tools</div>
+                <div class="stat"><strong>${stats.intent_count}</strong> intents</div>
+                <div class="stat"><strong>${stats.link_count}</strong> connections</div>
+            `;
+        }
+
+        // Event listeners
+        document.getElementById('search').addEventListener('input', (e) => {
+            searchTerm = e.target.value;
+            createGraph();
+        });
+
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                activeCategory = btn.dataset.category;
+                createGraph();
+            });
+        });
+
+        document.querySelectorAll('.persona-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.persona-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                activePersona = btn.dataset.persona;
+                updatePersonaIndicator();
+                createGraph();
+            });
+        });
+
+        document.getElementById('toggleTools').addEventListener('click', (e) => {
+            showTools = !showTools;
+            e.target.classList.toggle('active');
+            createGraph();
+        });
+
+        document.getElementById('toggleIntents').addEventListener('click', (e) => {
+            showIntents = !showIntents;
+            e.target.classList.toggle('active');
+            createGraph();
+        });
+
+        document.getElementById('toggleLabels').addEventListener('click', (e) => {
+            showLabels = !showLabels;
+            e.target.classList.toggle('active');
+            d3.selectAll('.node text').attr('opacity', showLabels ? 1 : 0);
+        });
+
+        // Handle resize
+        window.addEventListener('resize', () => {
+            if (graphData) createGraph();
+        });
+
+        // Initialize
+        init();
+    </script>
+</body>
+</html>

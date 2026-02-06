@@ -49,12 +49,11 @@ import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 # Import centralized paths
-from server.paths import AA_CONFIG_DIR, SESSION_STATE_FILE
+from server.paths import SESSION_STATE_FILE
 from services.base.daemon import BaseDaemon
-from services.base.dbus import DaemonDBusBase, get_client
+from services.base.dbus import DaemonDBusBase
 from services.base.sleep_wake import SleepWakeAwareDaemon
 
 logger = logging.getLogger(__name__)
@@ -607,7 +606,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             self._last_session_count = session_count
 
             # Check for active session changes
-            for workspace_uri, session_id in active_sessions.items():
+            for _workspace_uri, session_id in active_sessions.items():
                 if session_id and session_id != self._last_active_session_id:
                     logger.debug(f"Active session changed: {session_id[:8] if session_id else 'None'}")
                     self._update_recent_sessions(session_id)

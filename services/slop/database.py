@@ -33,11 +33,10 @@ Usage:
 
 import json
 import logging
-import os
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import aiosqlite
 
@@ -179,7 +178,8 @@ class SlopDatabase:
         await self._db.execute(
             """
             INSERT INTO findings
-            (id, loop, file, line, category, severity, description, suggestion, tool, raw_output, detected_at, last_seen_at, status)
+            (id, loop, file, line, category, severity, description,
+             suggestion, tool, raw_output, detected_at, last_seen_at, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(file, line, category, description) DO UPDATE SET
                 last_seen_at = excluded.last_seen_at,

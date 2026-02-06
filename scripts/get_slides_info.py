@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, "/home/daoneill/src/redhat-ai-workflow")
 
-from tool_modules.aa_google_slides.src.tools_basic import get_slides_service
+from tool_modules.aa_google_slides.src.tools_basic import get_slides_service  # noqa: E402
 
 PRESENTATION_ID = "179sD9l3SNJIqvUMKlaF0An-ttAx7yLLTUoj-xKdjos8"
 

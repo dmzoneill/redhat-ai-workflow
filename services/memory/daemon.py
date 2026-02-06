@@ -81,7 +81,7 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
         self._files_loaded_at: datetime | None = None
 
         # File watchers
-        self._watchers: list[asyncio.Task] = []
+        self._watchers: list = []
 
         # Register D-Bus handlers
         self.register_handler("get_health", self._handle_get_health)
@@ -545,7 +545,7 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
             async for changes in awatch(directory):
                 logger.info(f"Detected changes in {directory}: {len(changes)} files")
                 # Invalidate affected cache entries
-                for change_type, change_path in changes:
+                for _change_type, change_path in changes:
                     rel_path = Path(change_path).relative_to(MEMORY_DIR)
                     cache_key = str(rel_path).replace(".yaml", "")
                     if cache_key in self._file_cache:
@@ -562,7 +562,9 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
         """Start file watchers for memory directories."""
         try:
             if MEMORY_DIR.exists():
-                self._watchers.append(asyncio.create_task(self._watch_directory(MEMORY_DIR)))
+                import asyncio as _asyncio
+
+                self._watchers.append(_asyncio.create_task(self._watch_directory(MEMORY_DIR)))
         except Exception as e:
             logger.warning(f"Failed to start file watchers: {e}")
 

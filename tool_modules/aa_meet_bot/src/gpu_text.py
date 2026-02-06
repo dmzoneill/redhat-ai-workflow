@@ -17,12 +17,12 @@ import os
 # Force GLX platform for OpenGL on Linux (required for headless rendering)
 os.environ.setdefault("PYOPENGL_PLATFORM", "glx")
 
-import logging
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+import logging  # noqa: E402
+from dataclasses import dataclass, field  # noqa: E402
+from pathlib import Path  # noqa: E402
+from typing import Dict, List, Optional, Tuple  # noqa: E402
 
-import numpy as np
+import numpy as np  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

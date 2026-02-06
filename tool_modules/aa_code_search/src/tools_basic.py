@@ -624,7 +624,7 @@ def _chunk_by_size(
     current_start = base_line
     current_size = 0
 
-    for i, line in enumerate(lines):
+    for _i, line in enumerate(lines):
         line_size = len(line) + 1  # +1 for newline
 
         if current_size + line_size > CHUNK_SIZE and current_chunk_lines:
@@ -1428,7 +1428,7 @@ def get_vector_health() -> dict:
 # ============================================================================
 
 
-def register_tools(registry: Any) -> None:
+def register_tools(registry: Any) -> None:  # noqa: C901
     """Register code search tools with the MCP registry."""
 
     @registry.tool()
@@ -1559,7 +1559,10 @@ def register_tools(registry: Any) -> None:
                 return [
                     TextContent(
                         type="text",
-                        text=f"No results found for: {query}\n\nTry a different query or check if the project is indexed with `code_stats('{project}')`",
+                        text=(
+                            f"No results found for: {query}\n\nTry a different query or "
+                            f"check if the project is indexed with `code_stats('{project}')`"
+                        ),
                     )
                 ]
 
@@ -1570,7 +1573,10 @@ def register_tools(registry: Any) -> None:
 
             for i, result in enumerate(results, 1):
                 output += f"### {i}. `{result['file_path']}` (lines {result['start_line']}-{result['end_line']})\n"
-                output += f"**Type:** {result['type']} | **Name:** {result['name']} | **Relevance:** {result['similarity']:.0%}\n\n"
+                output += (
+                    f"**Type:** {result['type']} | **Name:** {result['name']}"
+                    f" | **Relevance:** {result['similarity']:.0%}\n\n"
+                )
 
                 # Truncate long content
                 content = result["content"]
@@ -1836,7 +1842,10 @@ def register_tools(registry: Any) -> None:
         for key, results in findings.items():
             output += f"#### {key.replace('_', ' ').title()}\n\n"
             for r in results[:3]:  # Top 3 per category
-                output += f"- `{r['file_path']}:{r['start_line']}` - {r['type']} `{r['name']}` ({r['similarity']:.0%} match)\n"
+                output += (
+                    f"- `{r['file_path']}:{r['start_line']}` - {r['type']}"
+                    f" `{r['name']}` ({r['similarity']:.0%} match)\n"
+                )
             output += "\n"
 
         output += """---
@@ -1899,7 +1908,10 @@ knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n
                 return [
                     TextContent(
                         type="text",
-                        text="## 👁️ Code Watchers\n\nNo active watchers.\n\nStart one with `code_watch('project', 'start')`",
+                        text=(
+                            "## 👁️ Code Watchers\n\nNo active watchers."
+                            "\n\nStart one with `code_watch('project', 'start')`"
+                        ),
                     )
                 ]
 
@@ -2055,10 +2067,10 @@ Use `code_watch('{project}', 'stop')` to stop watching.
         """
         try:
             health = get_vector_health()
-            stats = get_all_vector_stats()
+            stats = get_all_vector_stats()  # noqa: F841 - used in template string below
 
             # Status emoji
-            status_emoji = {
+            status_emoji = {  # noqa: F841 - used in template string below
                 "healthy": "🟢",
                 "degraded": "🟡",
                 "unhealthy": "🔴",
@@ -2144,7 +2156,7 @@ Use `code_watch('{project}', 'stop')` to stop watching.
             _embedding_cache.clear()
             return [TextContent(type="text", text="✅ Embedding cache cleared")]
 
-        stats = _embedding_cache.stats()
+        stats = _embedding_cache.stats()  # noqa: F841 - used in template string below
 
         output = """## 🗄️ Embedding Cache
 

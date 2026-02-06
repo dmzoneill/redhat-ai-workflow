@@ -46,7 +46,7 @@ except ImportError:
     from session_tools import register_prompts, register_session_tools
     from skill_engine import register_skill_tools
 
-from server.utils import load_config
+from server.utils import load_config  # noqa: E402
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP

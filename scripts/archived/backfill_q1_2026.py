@@ -25,7 +25,7 @@ QUARTER = 1
 QUARTER_START = date(2026, 1, 1)
 
 # Import centralized paths
-from server.paths import PERFORMANCE_DIR, get_performance_quarter_dir
+from server.paths import PERFORMANCE_DIR, get_performance_quarter_dir  # noqa: E402
 
 PERF_BASE_DIR = PERFORMANCE_DIR
 PERF_DIR = get_performance_quarter_dir(YEAR, QUARTER)
@@ -103,7 +103,7 @@ def get_commits_for_date(target: date) -> list[dict]:
                                 "date": parts[2] if len(parts) > 2 else date_str,
                             }
                         )
-        except Exception as e:
+        except Exception:
             pass
 
     return commits
@@ -356,7 +356,7 @@ def main():
 
         try:
             data = collect_day(target)
-            file_path = save_daily_data(data)
+            save_daily_data(data)
 
             event_count = len(data.get("events", []))
             total_events += event_count

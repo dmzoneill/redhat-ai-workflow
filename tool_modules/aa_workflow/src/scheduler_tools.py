@@ -48,7 +48,7 @@ def _update_schedules_config(schedules: dict):
     config_manager.update_section("schedules", schedules, merge=False, flush=True)
 
 
-def register_scheduler_tools(server: "FastMCP") -> int:
+def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
     """Register scheduler management tools with the MCP server."""
     registry = ToolRegistry(server)
 
@@ -88,9 +88,9 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         # Show default retry config
         default_retry = schedules.get("default_retry", {})
         if default_retry:
-            lines.append(
-                f"**Default Retry:** {default_retry.get('max_attempts', 2)} attempts, {default_retry.get('backoff', 'exponential')} backoff"
-            )
+            max_att = default_retry.get("max_attempts", 2)
+            backoff = default_retry.get("backoff", "exponential")
+            lines.append(f"**Default Retry:** {max_att} attempts, {backoff} backoff")
         lines.append("")
 
         now = datetime.now()
@@ -192,7 +192,9 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             cron_add("evening_beer", "beer", cron="30 17 * * 1-5", notify="slack")
 
             # Check for stale PRs every hour with custom retry
-            cron_add("stale_prs", "pr_reminder", poll_interval="1h", poll_condition="gitlab_stale_prs", retry_max_attempts=3, retry_on="auth,network")
+            cron_add("stale_prs", "pr_reminder", poll_interval="1h",
+                     poll_condition="gitlab_stale_prs", retry_max_attempts=3,
+                     retry_on="auth,network")
         """
         # Validate inputs
         if not name:
@@ -321,9 +323,9 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             lines.append("**Retry:** disabled")
         elif isinstance(job.get("retry"), dict):
             retry_info = job["retry"]
-            lines.append(
-                f"**Retry:** {retry_info.get('max_attempts', 'default')} attempts on {', '.join(retry_info.get('retry_on', ['default']))}"
-            )
+            max_att = retry_info.get("max_attempts", "default")
+            on_types = ", ".join(retry_info.get("retry_on", ["default"]))
+            lines.append(f"**Retry:** {max_att} attempts on {on_types}")
         else:
             lines.append("**Retry:** default (2 attempts on auth, network)")
 
@@ -518,9 +520,9 @@ def register_scheduler_tools(server: "FastMCP") -> int:
         # Show default retry config
         default_retry = schedules.get("default_retry", {})
         if default_retry:
-            lines.append(
-                f"**Default Retry:** {default_retry.get('max_attempts', 2)} attempts, {default_retry.get('backoff', 'exponential')} backoff"
-            )
+            max_att = default_retry.get("max_attempts", 2)
+            backoff = default_retry.get("backoff", "exponential")
+            lines.append(f"**Default Retry:** {max_att} attempts, {backoff} backoff")
 
         if scheduler:
             status = scheduler.get_status()
@@ -569,7 +571,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:
                 # Show retry summary if any retries occurred
                 if total_with_retry > 0:
                     lines.append(
-                        f"\n**Retry Summary:** {successful_after_retry}/{total_with_retry} jobs recovered via auto-retry"
+                        f"\n**Retry Summary:** {successful_after_retry}/{total_with_retry}"
+                        " jobs recovered via auto-retry"
                     )
         else:
             lines.append("**Scheduler running:** ❌ No (not started)")

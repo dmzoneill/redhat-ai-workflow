@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skills - AI Workflow</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        header {
+            background: rgba(20, 20, 30, 0.95);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 16px 24px;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo h1 {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo .badge {
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        nav {
+            display: flex;
+            gap: 8px;
+        }
+
+        nav a {
+            color: #888;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        nav a:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        nav a.active {
+            color: #fff;
+            background: rgba(102, 126, 234, 0.2);
+        }
+
+        /* Main content */
+        main {
+            padding-top: 72px;
+            height: 100vh;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            padding: 16px 24px;
+            background: rgba(20, 20, 30, 0.5);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: transparent;
+            border: none;
+            color: #888;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .tab:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab.active {
+            color: #fff;
+            background: rgba(102, 126, 234, 0.2);
+        }
+
+        /* Content panels */
+        .panel {
+            display: none;
+            height: calc(100vh - 130px);
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        /* Mind map panel */
+        #mindmap-panel {
+            padding: 0;
+        }
+
+        #mindmap-panel iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        /* List panel */
+        #list-panel {
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .skills-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 16px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .skill-card {
+            background: rgba(30, 30, 40, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s ease;
+        }
+
+        .skill-card:hover {
+            border-color: rgba(102, 126, 234, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .skill-card h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+
+        .skill-card .category {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .skill-card .description {
+            font-size: 13px;
+            color: #888;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+
+        .skill-card .meta {
+            display: flex;
+            gap: 12px;
+            font-size: 11px;
+            color: #666;
+        }
+
+        .skill-card .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Category colors */
+        .category-code { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
+        .category-deploy { background: rgba(78, 205, 196, 0.2); color: #4ecdc4; }
+        .category-jira { background: rgba(69, 183, 209, 0.2); color: #45b7d1; }
+        .category-incident { background: rgba(247, 220, 111, 0.2); color: #f7dc6f; }
+        .category-daily { background: rgba(187, 143, 206, 0.2); color: #bb8fce; }
+        .category-memory { background: rgba(130, 224, 170, 0.2); color: #82e0aa; }
+        .category-comms { background: rgba(248, 181, 0, 0.2); color: #f8b500; }
+        .category-maintenance { background: rgba(149, 165, 166, 0.2); color: #95a5a6; }
+        .category-other { background: rgba(102, 126, 234, 0.2); color: #667eea; }
+
+        /* Stats bar */
+        .stats-bar {
+            display: flex;
+            gap: 24px;
+            padding: 16px 24px;
+            background: rgba(20, 20, 30, 0.8);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .stat-item .value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .stat-item .label {
+            font-size: 12px;
+            color: #666;
+        }
+
+        /* Loading state */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+        }
+
+        .loading::after {
+            content: '';
+            width: 24px;
+            height: 24px;
+            border: 2px solid rgba(102, 126, 234, 0.3);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <h1>AI Workflow</h1>
+                <span class="badge">Skills</span>
+            </div>
+            <nav>
+                <a href="../architecture/README.md">Architecture</a>
+                <a href="../personas/README.md">Personas</a>
+                <a href="./README.md" class="active">Skills</a>
+                <a href="../commands/README.md">Commands</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="tabs">
+            <button class="tab active" data-panel="mindmap">Mind Map</button>
+            <button class="tab" data-panel="list">List View</button>
+        </div>
+
+        <div class="stats-bar" id="statsBar">
+            <div class="stat-item">
+                <span class="value" id="skillCount">--</span>
+                <span class="label">Skills</span>
+            </div>
+            <div class="stat-item">
+                <span class="value" id="toolCount">--</span>
+                <span class="label">Tools</span>
+            </div>
+            <div class="stat-item">
+                <span class="value" id="intentCount">--</span>
+                <span class="label">Intents</span>
+            </div>
+            <div class="stat-item">
+                <span class="value" id="connectionCount">--</span>
+                <span class="label">Connections</span>
+            </div>
+        </div>
+
+        <div id="mindmap-panel" class="panel active">
+            <iframe src="../slides/skill_mind_map.html" title="Skills Mind Map"></iframe>
+        </div>
+
+        <div id="list-panel" class="panel">
+            <div class="loading" id="listLoading">Loading skills...</div>
+            <div class="skills-grid" id="skillsGrid"></div>
+        </div>
+    </main>
+
+    <script>
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+
+                tab.classList.add('active');
+                document.getElementById(`${tab.dataset.panel}-panel`).classList.add('active');
+            });
+        });
+
+        // Load skill data
+        async function loadSkills() {
+            try {
+                const response = await fetch('../slides/skill_graph_data.json');
+                const data = await response.json();
+
+                // Update stats
+                document.getElementById('skillCount').textContent = data.stats.skill_count;
+                document.getElementById('toolCount').textContent = data.stats.tool_count;
+                document.getElementById('intentCount').textContent = data.stats.intent_count;
+                document.getElementById('connectionCount').textContent = data.stats.link_count;
+
+                // Build skills list
+                const skills = data.nodes.filter(n => n.type === 'skill');
+                const grid = document.getElementById('skillsGrid');
+                const loading = document.getElementById('listLoading');
+
+                loading.style.display = 'none';
+
+                skills.sort((a, b) => a.label.localeCompare(b.label));
+
+                skills.forEach(skill => {
+                    const card = document.createElement('div');
+                    card.className = 'skill-card';
+                    card.innerHTML = `
+                        <span class="category category-${skill.category}">${skill.category}</span>
+                        <h3>${skill.label}</h3>
+                        <p class="description">${skill.description || 'No description available.'}</p>
+                        <div class="meta">
+                            <span>${skill.tools?.length || 0} tools</span>
+                            <span>${skill.intents?.length || 0} intents</span>
+                            ${skill.personas?.length ? `<span>${skill.personas.length} personas</span>` : ''}
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+
+            } catch (error) {
+                console.error('Failed to load skills:', error);
+                document.getElementById('listLoading').textContent = 'Failed to load skills data';
+            }
+        }
+
+        loadSkills();
+    </script>
+</body>
+</html>

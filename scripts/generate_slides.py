@@ -202,8 +202,8 @@ def create_presentation(slides: list[Slide], output_path: Path) -> None:
     TITLE_COLOR = RgbColor(99, 102, 241)  # Indigo-500
     ACCENT_COLOR = RgbColor(139, 92, 246)  # Purple-500
     TEXT_COLOR = RgbColor(31, 41, 55)  # Gray-800
-    LIGHT_BG = RgbColor(243, 244, 246)  # Gray-100
-    CODE_BG = RgbColor(249, 250, 251)  # Gray-50
+    LIGHT_BG = RgbColor(243, 244, 246)  # Gray-100  # noqa: F841
+    CODE_BG = RgbColor(249, 250, 251)  # Gray-50  # noqa: F841
 
     for slide_data in slides:
         if slide_data.slide_type == "section":

@@ -38,7 +38,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -452,7 +452,7 @@ class ExternalTools:
 
             for result in data.get("results", []):
                 severity = result.get("issue_severity", "LOW").lower()
-                confidence = result.get("issue_confidence", "LOW")
+                result.get("issue_confidence", "LOW")
 
                 # Map bandit severity
                 severity_map = {
@@ -589,7 +589,10 @@ class ExternalTools:
                         severity=severity,
                         file=first.get("name", ""),
                         line=first.get("start", 0),
-                        description=f"Duplicated code block ({lines} lines) also in {second.get('name', '')}:{second.get('start', 0)}",
+                        description=(
+                            f"Duplicated code block ({lines} lines) also in"
+                            f" {second.get('name', '')}:{second.get('start', 0)}"
+                        ),
                         suggestion="Extract to shared function or module",
                         tool="jscpd",
                         raw_output=dup,

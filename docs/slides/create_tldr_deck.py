@@ -349,4 +349,4 @@ add_tldr_slide(
 output_path = "/home/daoneill/src/redhat-ai-workflow/docs/slides/AI Personas and Auto Remediation - TLDR.pptx"
 prs.save(output_path)
 print(f"✅ Created: {output_path}")
-print(f"   Title + 7 section dividers + 7 TL;DR slides = 15 slides total")
+print("   Title + 7 section dividers + 7 TL;DR slides = 15 slides total")

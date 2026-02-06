@@ -319,7 +319,10 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
             return [
                 TextContent(
                     type="text",
-                    text=f"✅ Already logged into {cluster_names[short_cluster]} cluster (logged in {time_since_last:.0f}s ago, debounce active)",
+                    text=(
+                        f"✅ Already logged into {cluster_names[short_cluster]} cluster"
+                        f" (logged in {time_since_last:.0f}s ago, debounce active)"
+                    ),
                 )
             ]
 
@@ -338,7 +341,10 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                 return [
                     TextContent(
                         type="text",
-                        text=f"✅ Already logged into {cluster_names[short_cluster]} cluster (logged in {time_since_last:.0f}s ago)",
+                        text=(
+                            f"✅ Already logged into {cluster_names[short_cluster]} cluster"
+                            f" (logged in {time_since_last:.0f}s ago)"
+                        ),
                     )
                 ]
 
@@ -391,7 +397,7 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
             login_success = False
             if success and not oauth_failed:
                 lines.append(f"✅ Logged into {cluster_names[short_cluster]} cluster")
-                login_success = True
+                login_success = True  # noqa: F841
             elif oauth_failed:
                 lines.append("❌ OAuth authentication failed")
                 lines.append("")

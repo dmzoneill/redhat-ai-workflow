@@ -605,7 +605,8 @@ class RealtimeSTTPipeline:
                                 await self._transcribe_buffer(is_final=True)
                             else:
                                 logger.info(
-                                    f"🎧 NPU STT: Skipping short speech ({speech_duration:.1f}s < {self.min_speech_duration}s)"
+                                    f"🎧 NPU STT: Skipping short speech"
+                                    f" ({speech_duration:.1f}s < {self.min_speech_duration}s)"
                                 )
 
                             self._in_speech = False

@@ -34,7 +34,6 @@ import argparse
 import asyncio
 import logging
 import os
-import signal
 import sys
 import time
 from datetime import datetime
@@ -45,8 +44,8 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from server.paths import CRON_STATE_FILE  # noqa: E402
-from services.base.daemon import BaseDaemon, SingleInstance  # noqa: E402
-from services.base.dbus import DaemonDBusBase, get_client  # noqa: E402
+from services.base.daemon import BaseDaemon  # noqa: E402
+from services.base.dbus import DaemonDBusBase  # noqa: E402
 from services.base.sleep_wake import SleepWakeAwareDaemon  # noqa: E402
 
 logger = logging.getLogger(__name__)

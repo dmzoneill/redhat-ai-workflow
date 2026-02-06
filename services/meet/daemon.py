@@ -33,7 +33,6 @@ D-Bus:
 import asyncio
 import logging
 import os
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -131,10 +130,9 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         - Calendar API is accessible
         - No excessive errors
         """
-        import time
+        import time as time_mod
 
-        self._last_health_check = time.time()
-        now = time.time()
+        self._last_health_check = time_mod.time()
 
         checks = {
             "running": self.is_running,
@@ -308,7 +306,7 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         try:
             result = await self._scheduler.notes_bot.leave_meeting()
-            logger.info(f"D-Bus: leave_meeting completed - success: True")
+            logger.info("D-Bus: leave_meeting completed - success: True")
             return {"success": True, "result": result}
         except Exception as e:
             logger.error(f"D-Bus: leave_meeting failed - {e}")

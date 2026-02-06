@@ -199,7 +199,8 @@ class NPUWhisperSTT:
                 text = str(result).strip() if result else ""
 
             logger.debug(
-                f"Transcribed {duration:.1f}s in {processing_time:.2f}s (RTF: {rtf:.2f}) [inf #{self.stats.inference_count}]"
+                f"Transcribed {duration:.1f}s in {processing_time:.2f}s"
+                f" (RTF: {rtf:.2f}) [inf #{self.stats.inference_count}]"
             )
 
             return TranscriptionResult(
@@ -259,7 +260,7 @@ class NPUWhisperSTT:
                     silence_samples += len(chunk)
                 else:
                     silence_samples = 0
-                    last_speech_time = time.time()
+                    last_speech_time = time.time()  # noqa: F841
 
             buffer_duration = total_samples / config.sample_rate
             silence_duration = silence_samples / config.sample_rate

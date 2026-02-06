@@ -14,7 +14,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from tool_modules.aa_meet_bot.src.tts_engine import get_tts_engine
+from tool_modules.aa_meet_bot.src.tts_engine import get_tts_engine  # noqa: E402
 
 
 async def main():

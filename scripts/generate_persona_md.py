@@ -103,7 +103,7 @@ for msg in messages:
 
 # Select diverse examples (30 total)
 # 5 acknowledgments, 5 short, 8 medium, 5 long, 4 questions, 3 technical
-import random
+import random  # noqa: E402
 
 random.seed(42)  # Reproducible
 
@@ -133,7 +133,8 @@ lines = []
 lines.append("# Dave Communication Style")
 lines.append("")
 lines.append(
-    f"This persona mimics Dave's natural communication patterns based on analysis of {meta.get('messages_analyzed', len(messages))} Slack messages."
+    "This persona mimics Dave's natural communication patterns based on analysis of"
+    f" {meta.get('messages_analyzed', len(messages))} Slack messages."
 )
 lines.append("")
 lines.append("## Style Overview")

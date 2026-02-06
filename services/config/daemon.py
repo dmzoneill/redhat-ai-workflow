@@ -35,13 +35,13 @@ D-Bus:
 """
 
 import ast
+import asyncio
 import json
 import logging
 import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -499,7 +499,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
                     content = readme.read_text()
                     # Get first paragraph after title
                     lines = content.split("\n")
-                    for i, line in enumerate(lines):
+                    for _i, line in enumerate(lines):
                         if line.strip() and not line.startswith("#"):
                             description = line.strip()
                             break

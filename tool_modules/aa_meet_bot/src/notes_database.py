@@ -295,14 +295,16 @@ class MeetingNotesDB:
         await self._db.execute(
             """
             CREATE TRIGGER IF NOT EXISTS transcripts_ad AFTER DELETE ON transcripts BEGIN
-                INSERT INTO transcripts_fts(transcripts_fts, rowid, speaker, text) VALUES('delete', old.id, old.speaker, old.text);
+                INSERT INTO transcripts_fts(transcripts_fts, rowid, speaker, text)
+                    VALUES('delete', old.id, old.speaker, old.text);
             END
         """
         )
         await self._db.execute(
             """
             CREATE TRIGGER IF NOT EXISTS transcripts_au AFTER UPDATE ON transcripts BEGIN
-                INSERT INTO transcripts_fts(transcripts_fts, rowid, speaker, text) VALUES('delete', old.id, old.speaker, old.text);
+                INSERT INTO transcripts_fts(transcripts_fts, rowid, speaker, text)
+                    VALUES('delete', old.id, old.speaker, old.text);
                 INSERT INTO transcripts_fts(rowid, speaker, text) VALUES (new.id, new.speaker, new.text);
             END
         """

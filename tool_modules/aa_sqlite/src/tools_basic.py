@@ -51,7 +51,10 @@ def _validate_identifier(name: str, kind: str = "identifier") -> str | None:
     if not name:
         return f"❌ {kind.capitalize()} name cannot be empty"
     if not _SAFE_IDENTIFIER_PATTERN.match(name):
-        return f"❌ Invalid {kind} name: must start with letter/underscore and contain only alphanumeric/underscore characters"
+        return (
+            f"❌ Invalid {kind} name: must start with letter/underscore"
+            " and contain only alphanumeric/underscore characters"
+        )
     if len(name) > 128:
         return f"❌ {kind.capitalize()} name too long (max 128 characters)"
     return None

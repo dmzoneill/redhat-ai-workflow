@@ -369,7 +369,7 @@ async def _project_detect_impl(path: str) -> list[TextContent]:
     test_setup = _generate_test_setup(project_path, language)
 
     # Build detected config
-    detected = {
+    detected = {  # noqa: F841
         "name": project_path.name,
         "path": str(project_path),
         "language": language,

@@ -306,7 +306,7 @@ async def _tool_exec_impl(tool_name: str, args: str, create_issue_fn) -> list[Te
         return await _handle_tool_exec_error(tool_name, str(e), args, create_issue_fn)
 
 
-def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
+def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa: C901
     """Register meta tools with the MCP server."""
     registry = ToolRegistry(server)
 

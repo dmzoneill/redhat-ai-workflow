@@ -99,12 +99,6 @@ def generate_sunburst_svg(
             """
             )
 
-            # Add label
-            label_angle = math.radians(start_angle + sweep_angle / 2)
-            label_r = (inner_radius + middle_radius) / 2
-            label_x = cx + label_r * math.cos(label_angle)
-            label_y = cy + label_r * math.sin(label_angle)
-
             # Outer ring - individual competencies
             children = cat.get("children", [])
             if children:
@@ -165,7 +159,12 @@ def _arc_path(
 
     large_arc = 1 if sweep_angle > 180 else 0
 
-    return f"M {x1_outer} {y1_outer} A {outer_r} {outer_r} 0 {large_arc} 1 {x2_outer} {y2_outer} L {x2_inner} {y2_inner} A {inner_r} {inner_r} 0 {large_arc} 0 {x1_inner} {y1_inner} Z"
+    return (
+        f"M {x1_outer} {y1_outer} "
+        f"A {outer_r} {outer_r} 0 {large_arc} 1 {x2_outer} {y2_outer} "
+        f"L {x2_inner} {y2_inner} "
+        f"A {inner_r} {inner_r} 0 {large_arc} 0 {x1_inner} {y1_inner} Z"
+    )
 
 
 def generate_progress_bars_html(
@@ -193,7 +192,6 @@ def generate_progress_bars_html(
     for comp_id, comp_data in sorted_comps:
         name = comp_data.get("name", comp_id)
         pct = comp_data.get("percentage", 0)
-        points = comp_data.get("points", 0)
         color = get_color_for_percentage(pct)
         icon = get_status_icon(pct) if show_icons else ""
 

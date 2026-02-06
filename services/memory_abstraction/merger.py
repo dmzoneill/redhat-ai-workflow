@@ -21,7 +21,6 @@ Usage:
 """
 
 import logging
-from typing import Any
 
 from .models import AdapterResult, IntentClassification, MemoryItem, QueryResult
 

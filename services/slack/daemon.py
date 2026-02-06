@@ -44,21 +44,22 @@ _services_dir = os.path.dirname(_service_dir)  # services/
 _PROJECT_ROOT = os.path.dirname(_services_dir)  # project root
 
 # Add tool_modules to path for src imports
-import sys
+import signal  # noqa: E402
+import sys  # noqa: E402
 
 sys.path.insert(0, os.path.join(_PROJECT_ROOT, "tool_modules", "aa_slack"))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 # @me command system imports
-from scripts.common.command_parser import CommandParser, ParsedCommand, TriggerType
-from scripts.common.command_registry import CommandRegistry, CommandType, get_registry
-from scripts.common.config_loader import load_config
-from scripts.common.context_extractor import ContextExtractor, ConversationContext
-from scripts.common.response_router import CommandContext, ResponseFormatter, ResponseMode, ResponseRouter, get_router
-from services.base.daemon import BaseDaemon
-from services.base.dbus import DaemonDBusBase
-from services.base.sleep_wake import SleepWakeMonitor
+from scripts.common.command_parser import CommandParser, ParsedCommand  # noqa: E402
+from scripts.common.command_registry import CommandType, get_registry  # noqa: E402
+from scripts.common.config_loader import load_config  # noqa: E402
+from scripts.common.context_extractor import ContextExtractor, ConversationContext  # noqa: E402
+from scripts.common.response_router import CommandContext, ResponseFormatter, get_router  # noqa: E402
+from services.base.daemon import BaseDaemon  # noqa: E402
+from services.base.dbus import DaemonDBusBase  # noqa: E402
+from services.base.sleep_wake import SleepWakeMonitor  # noqa: E402
 
 # Import PROJECT_ROOT after path setup
 PROJECT_ROOT = Path(_PROJECT_ROOT)
@@ -961,7 +962,7 @@ class CommandHandler:
                 command=parsed.command,
             )
 
-            route_config = self.router.route(routing_ctx)
+            self.router.route(routing_ctx)
 
             # Should always send command responses
             should_send = classification.auto_respond
@@ -1039,7 +1040,7 @@ class CommandHandler:
         watched = get_slack_config("listener.watched_channels", [])
         is_watched = channel_id in watched
 
-        lines = [f"*📡 Channel Info*\n"]
+        lines = ["*📡 Channel Info*\n"]
         lines.append(f"• *Channel ID:* `{channel_id}`")
         lines.append(f"• *Type:* {channel_type}")
         lines.append(f"• *Currently watched:* {'✅ Yes' if is_watched else '❌ No'}")
@@ -1188,7 +1189,6 @@ Format the output for Slack (use *bold*, `code`, bullet points).
     async def _call_dbus(self, service: str, path: str, interface: str, method: str, args: list | None = None) -> dict:
         """Call a D-Bus method and return the result."""
         try:
-            from dbus_next import Variant
             from dbus_next.aio import MessageBus
 
             bus = await MessageBus().connect()
@@ -1323,7 +1323,12 @@ Return ONLY the JSON, no other text."""
     async def _handle_search(self, parsed: ParsedCommand) -> str:
         """Handle @me search command - search Slack, code, or Jira."""
         if not parsed.args:
-            return "❌ Please provide a search query.\n\nUsage:\n• `@me search <query>` - Search Slack\n• `@me search code <query>` - Search code\n• `@me search jira <query>` - Search Jira"
+            return (
+                "❌ Please provide a search query.\n\nUsage:\n"
+                "• `@me search <query>` - Search Slack\n"
+                "• `@me search code <query>` - Search code\n"
+                "• `@me search jira <query>` - Search Jira"
+            )
 
         search_type = "slack"
         query_parts = parsed.args
@@ -1468,7 +1473,10 @@ Return ONLY the JSON, no other text."""
         elif issue_key:
             prompt = f"Work on issue {issue_key}"
         else:
-            return "❌ Could not extract context from thread. Please provide an issue key.\n\nUsage: `@me cursor` (in a thread) or `@me cursor AAP-12345`"
+            return (
+                "❌ Could not extract context from thread. Please provide an issue key.\n\n"
+                "Usage: `@me cursor` (in a thread) or `@me cursor AAP-12345`"
+            )
 
         # Call the Chat D-Bus service
         if issue_key:
@@ -1496,7 +1504,13 @@ Return ONLY the JSON, no other text."""
     async def _handle_sprint(self, parsed: ParsedCommand) -> str:
         """Handle @me sprint command - control the sprint bot."""
         if not parsed.args:
-            return "❌ Please provide a subcommand.\n\nUsage:\n• `@me sprint issues` - List sprint issues\n• `@me sprint approve AAP-12345` - Approve an issue\n• `@me sprint start AAP-12345` - Start work on an issue\n• `@me sprint skip AAP-12345` - Skip an issue"
+            return (
+                "❌ Please provide a subcommand.\n\nUsage:\n"
+                "• `@me sprint issues` - List sprint issues\n"
+                "• `@me sprint approve AAP-12345` - Approve an issue\n"
+                "• `@me sprint start AAP-12345` - Start work on an issue\n"
+                "• `@me sprint skip AAP-12345` - Skip an issue"
+            )
 
         subcommand = parsed.args[0].lower()
         issue_key = parsed.args[1].upper() if len(parsed.args) > 1 else None
@@ -1572,7 +1586,13 @@ Return ONLY the JSON, no other text."""
     async def _handle_meet(self, parsed: ParsedCommand) -> str:
         """Handle @me meet command - control the meet bot."""
         if not parsed.args:
-            return "❌ Please provide a subcommand.\n\nUsage:\n• `@me meet list` - List upcoming meetings\n• `@me meet join` - Join current meeting\n• `@me meet leave` - Leave meeting\n• `@me meet captions` - Get meeting captions"
+            return (
+                "❌ Please provide a subcommand.\n\nUsage:\n"
+                "• `@me meet list` - List upcoming meetings\n"
+                "• `@me meet join` - Join current meeting\n"
+                "• `@me meet leave` - Leave meeting\n"
+                "• `@me meet captions` - Get meeting captions"
+            )
 
         subcommand = parsed.args[0].lower()
 
@@ -1649,7 +1669,12 @@ Return ONLY the JSON, no other text."""
     async def _handle_cron(self, parsed: ParsedCommand) -> str:
         """Handle @me cron command - control the cron scheduler."""
         if not parsed.args:
-            return "❌ Please provide a subcommand.\n\nUsage:\n• `@me cron list` - List scheduled jobs\n• `@me cron run <job>` - Run a job now\n• `@me cron history` - Show recent job history"
+            return (
+                "❌ Please provide a subcommand.\n\nUsage:\n"
+                "• `@me cron list` - List scheduled jobs\n"
+                "• `@me cron run <job>` - Run a job now\n"
+                "• `@me cron history` - Show recent job history"
+            )
 
         subcommand = parsed.args[0].lower()
 
@@ -1715,7 +1740,11 @@ Return ONLY the JSON, no other text."""
     async def _handle_research(self, parsed: ParsedCommand, message: "PendingMessage") -> str:
         """Handle @me research command - research a topic in Slack."""
         if not parsed.args:
-            return "❌ Please provide a topic to research.\n\nUsage:\n• `@me research billing errors` - Research a topic\n• `@me research deep auth issues` - Deep research with more results"
+            return (
+                "❌ Please provide a topic to research.\n\nUsage:\n"
+                "• `@me research billing errors` - Research a topic\n"
+                "• `@me research deep auth issues` - Deep research with more results"
+            )
 
         # Check for modifiers
         deep = False
@@ -1763,7 +1792,6 @@ Return ONLY the JSON, no other text."""
             return "\n".join(lines)
 
         # Build prompt for Claude to analyze
-        import json
 
         messages_text = "\n".join(
             [f"[#{m.get('channel_name')}] @{m.get('username')}: {m.get('text', '')}" for m in messages[:30]]
@@ -1837,7 +1865,11 @@ Format as YAML for storage."""
     async def _handle_knowledge(self, parsed: ParsedCommand) -> str:
         """Handle @me knowledge command - query or list knowledge."""
         if not parsed.args:
-            return "❌ Please provide a topic or 'list'.\n\nUsage:\n• `@me knowledge billing` - Query knowledge about billing\n• `@me knowledge list` - List all knowledge topics"
+            return (
+                "❌ Please provide a topic or 'list'.\n\nUsage:\n"
+                "• `@me knowledge billing` - Query knowledge about billing\n"
+                "• `@me knowledge list` - List all knowledge topics"
+            )
 
         subcommand = parsed.args[0].lower()
 
@@ -2218,7 +2250,8 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
             await self._background_sync.start()
 
             print(
-                f"✅ Background sync started (delay: {config.delay_start_seconds}s, rate: {config.min_delay_seconds}-{config.max_delay_seconds}s)"
+                f"✅ Background sync started (delay: {config.delay_start_seconds}s, "
+                f"rate: {config.min_delay_seconds}-{config.max_delay_seconds}s)"
             )
             logger.info(
                 f"Background sync started: delay={config.delay_start_seconds}s, "
@@ -2516,7 +2549,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
                     f"🐛 *DEBUG MODE* - Alert response (would go to #{msg.channel_name})\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 )
-                self.ui.print_info(f"🐛 DEBUG: Alert response will go to self-DM")
+                self.ui.print_info("🐛 DEBUG: Alert response will go to self-DM")
             else:
                 reply_channel = msg.channel_id
                 reply_thread_ts = msg.timestamp

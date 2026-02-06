@@ -484,7 +484,14 @@ async def _docker_network_inspect_impl(
         "inspect",
         network,
         "--format",
-        "Name: {{.Name}}\nDriver: {{.Driver}}\nScope: {{.Scope}}\nSubnet: {{range .IPAM.Config}}{{.Subnet}}{{end}}\nGateway: {{range .IPAM.Config}}{{.Gateway}}{{end}}\n\nContainers:\n{{range $id, $container := .Containers}}  - {{$container.Name}} ({{$container.IPv4Address}})\n{{end}}",
+        (
+            "Name: {{.Name}}\nDriver: {{.Driver}}\nScope: {{.Scope}}\n"
+            "Subnet: {{range .IPAM.Config}}{{.Subnet}}{{end}}\n"
+            "Gateway: {{range .IPAM.Config}}{{.Gateway}}{{end}}\n\n"
+            "Containers:\n"
+            "{{range $id, $container := .Containers}}"
+            "  - {{$container.Name}} ({{$container.IPv4Address}})\n{{end}}"
+        ),
     ]
 
     success, output = await run_cmd(cmd, timeout=30)

@@ -44,7 +44,7 @@ def _update_schedules_config(schedules: dict):
     config_manager.update_section("schedules", schedules, merge=False, flush=True)
 
 
-def register_tools(server: "FastMCP") -> int:
+def register_tools(server: "FastMCP") -> int:  # noqa: C901
     """Register scheduler management tools with the MCP server."""
     registry = ToolRegistry(server)
 

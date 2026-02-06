@@ -150,7 +150,10 @@ def register_tools(server: "FastMCP") -> int:
 
             # Add hint about slow sources if not included
             if not include_slow and source_filters is not None:
-                output += "\n\n---\n💡 *Tip: For external data (Jira, GitLab, InScope docs), use `include_slow=True` or specify sources explicitly.*"
+                output += (
+                    "\n\n---\n💡 *Tip: For external data (Jira, GitLab, InScope docs),"
+                    " use `include_slow=True` or specify sources explicitly.*"
+                )
 
             return output
 
