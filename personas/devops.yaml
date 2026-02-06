@@ -1,6 +1,9 @@
 # DevOps Persona Configuration
 # Specifies which MCP tool modules this persona needs
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: devops
 description: Infrastructure, monitoring, and ephemeral deployments
 persona: personas/devops.md
@@ -8,15 +11,14 @@ persona: personas/devops.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
-  - k8s_core        # 8 tools - Essential k8s (pods, logs, deployments, events)
-  - bonfire_basic   # 10 tools - Namespace management (reserve, list, release, extend)
-  - jira_core       # 6 tools - Issue viewing, search, status updates
-  - quay            # 8 tools - Container image checks
-  - docker_core     # 8 tools - Container operations
-  - podman          # 13 tools - Podman container operations
-
-# Total: ~71 tools
+  - workflow_core   # Core (session, persona, skill, memory)
+  - sso             # Red Hat SSO authentication
+  - k8s_core        # Essential k8s (pods, logs, deployments, events)
+  - bonfire_basic   # Namespace management (reserve, list, release, extend)
+  - jira_core       # Issue viewing, search, status updates
+  - quay            # Container image checks
+  - docker_core     # Container operations
+  - podman          # Podman container operations
 
 # Note: For additional tools, use tool_exec():
 # - k8s_basic: Full k8s operations (scale, rollout, etc.)

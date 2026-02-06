@@ -1,6 +1,9 @@
 # Project Persona Configuration
 # Focused on project/repo context management and knowledge
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: project
 description: Project context, knowledge management, and repo navigation
 persona: personas/project.md
@@ -8,13 +11,11 @@ persona: personas/project.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
-  - git_core        # 8 tools - Git operations for repo navigation
-  - code_search     # 9 tools - Semantic code search
-  - knowledge       # 6 tools - Project knowledge management
-  - project         # 5 tools - Project configuration
-
-# Total: ~46 tools
+  - workflow_core   # Core (session, persona, skill, memory)
+  - git_core        # Git operations for repo navigation
+  - code_search     # Semantic code search
+  - knowledge       # Project knowledge management
+  - project         # Project configuration
 
 # Note: Use tool_exec() for tools from other modules if needed
 

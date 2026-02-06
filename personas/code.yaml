@@ -1,6 +1,9 @@
 # Code Persona Configuration
 # Focused on pure coding without issue tracking
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: code
 description: Pure coding - git, linting, search, no issue tracking
 persona: personas/code.md
@@ -8,13 +11,11 @@ persona: personas/code.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
-  - git_core        # 8 tools - Git operations
-  - lint            # 7 tools - Code formatting and linting
-  - code_search     # 9 tools - Semantic code search
-  - make            # 1 tool - Build automation
-
-# Total: ~43 tools
+  - workflow_core   # Core (session, persona, skill, memory)
+  - git_core        # Git operations
+  - lint            # Code formatting and linting
+  - code_search     # Semantic code search
+  - make            # Build automation
 
 # Note: Use tool_exec() for jira, gitlab tools if needed
 

@@ -2,13 +2,11 @@ name: database
 description: Database administration and queries
 
 tools:
-  - workflow_core    # 18 tools - Core workflow (session, persona, skill, memory)
-  - mysql            # 8 tools - MySQL operations
-  - postgres         # 10 tools - PostgreSQL operations
-  - sqlite           # 8 tools - SQLite operations
-  - ssh              # 10 tools - Remote database access
-
-# Total: ~54 tools
+  - workflow_core    # Core workflow (session, persona, skill, memory)
+  - mysql            # MySQL operations
+  - postgres         # PostgreSQL operations
+  - sqlite           # SQLite operations
+  - ssh              # Remote database access
 
 # Note: This persona is focused on database operations.
 # For infrastructure tasks, switch to infra persona.

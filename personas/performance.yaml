@@ -1,6 +1,9 @@
 # Performance Persona Configuration
 # Focused on PSE competency tracking and quarterly performance reviews
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: performance
 description: PSE competency tracking, quarterly reviews, and performance reporting
 persona: personas/performance.md
@@ -8,13 +11,11 @@ persona: personas/performance.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
-  - performance     # 13 tools - PSE competency tracking and quarterly performance
-  - jira_core       # 6 tools - For fetching resolved issues (read-only)
-  - gitlab_core     # 5 tools - For fetching merged MRs (read-only)
-  - git_core        # 8 tools - For fetching commits (read-only)
-
-# Total: ~50 tools
+  - workflow_core   # Core (session, persona, skill, memory)
+  - performance     # PSE competency tracking and quarterly performance
+  - jira_core       # For fetching resolved issues (read-only)
+  - gitlab_core     # For fetching merged MRs (read-only)
+  - git_core        # For fetching commits (read-only)
 
 skills:
   # Daily collection

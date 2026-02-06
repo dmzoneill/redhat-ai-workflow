@@ -1,6 +1,9 @@
 # Universal Persona Configuration
 # A combined toolset for most workflows
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: universal
 description: Combined developer and devops capabilities for full workflow support
 persona: personas/developer.md  # Defaults to developer persona, can adopt others
@@ -8,14 +11,12 @@ persona: personas/developer.md  # Defaults to developer persona, can adopt other
 # Tool modules to load (from tool_modules/aa_*)
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
-  - git_core        # 8 tools - Essential git operations
-  - gitlab_core     # 5 tools - MRs, CI/CD basics
-  - jira_core       # 6 tools - Issue viewing, search, status updates
-  - k8s_core        # 8 tools - Essential k8s (pods, logs, deployments)
-  - code_search     # 9 tools - Semantic code search
-
-# Total: ~54 tools
+  - workflow_core   # Core (session, persona, skill, memory)
+  - git_core        # Essential git operations
+  - gitlab_core     # MRs, CI/CD basics
+  - jira_core       # Issue viewing, search, status updates
+  - k8s_core        # Essential k8s (pods, logs, deployments)
+  - code_search     # Semantic code search
 
 # Note: Use persona_load() to switch focus while keeping all tools
 

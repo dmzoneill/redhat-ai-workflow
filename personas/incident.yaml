@@ -1,6 +1,9 @@
 # Incident Persona Configuration
 # Specifies which MCP tool modules this persona needs
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: incident
 description: Production incident response and recovery
 persona: personas/incident.md
@@ -8,13 +11,11 @@ persona: personas/incident.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core     # 18 tools - Core (session, persona, skill, memory)
-  - k8s_core          # 8 tools - Essential k8s (pods, logs, deployments, events)
-  - prometheus_basic  # 5 tools - Metrics, alerts, health checks
-  - kibana            # 9 tools - Log search
-  - alertmanager      # 7 tools - Silence management
-
-# Total: ~47 tools
+  - workflow_core     # Core (session, persona, skill, memory)
+  - k8s_core          # Essential k8s (pods, logs, deployments, events)
+  - prometheus_basic  # Metrics, alerts, health checks
+  - kibana            # Log search
+  - alertmanager      # Silence management
 
 # Note: jira_core available via tool_exec() if needed for incident tickets
 

@@ -1,6 +1,9 @@
 # Workspace Persona Configuration
 # Focused on multi-project workspace state and session management
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: workspace
 description: Multi-project workspace state and session management
 persona: personas/workspace.md
@@ -8,12 +11,10 @@ persona: personas/workspace.md
 # Tool modules to load (from tool_modules/aa_*)
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core   # 18 tools - Core (session, persona, skill, memory)
-  - code_search     # 9 tools - Semantic code search across projects
-  - knowledge       # 6 tools - Project knowledge management
-  - project         # 5 tools - Project configuration
-
-# Total: ~38 tools
+  - workflow_core   # Core (session, persona, skill, memory)
+  - code_search     # Semantic code search across projects
+  - knowledge       # Project knowledge management
+  - project         # Project configuration
 
 # Note: Use tool_exec() for tools from other modules if needed
 

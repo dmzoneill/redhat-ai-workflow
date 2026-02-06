@@ -5,6 +5,9 @@
 # Combines authentic conversational patterns with bot capabilities.
 # =============================================================================
 
+# Auto-validated: 2026-02-06
+# Use tool_list() to discover available tools
+
 name: slack
 description: |
   Slack bot that responds like Dave - casual, direct, technical.
@@ -49,7 +52,14 @@ persona_append: |
   - prod actions need explicit approval
   - show what you're doing before doing it
 
-# Context injection - search past conversations for knowledge/context
+# Context injection - ALWAYS gather knowledge from multiple sources
+# The ClaudeAgent automatically injects context from:
+# 1. Slack vector DB - past conversations for domain knowledge
+# 2. Code vector DB - relevant source code snippets
+# 3. InScope AI - Red Hat internal documentation (App Interface, Clowder, etc.)
+# 4. Jira - issue details if keys detected in message
+# 5. Memory - current work context, learned patterns
+#
 # NOTE: my_messages_only is FALSE because:
 # - Style is already defined in dave.md
 # - I asked ~10% of messages, received ~90% of answers
@@ -57,20 +67,34 @@ persona_append: |
 # - Filtering to my messages throws away 90% of the knowledge base
 context_injection:
   enabled: true
-  tool: slack_persona_context
-  limit: 5  # More context since we're searching all messages
-  my_messages_only: false
+  sources:
+    - slack_persona     # Vector search on past Slack conversations
+    - code_search       # Vector search on codebase
+    - inscope           # InScope AI - Red Hat documentation assistants
+    - jira              # Issue lookup for detected keys
+    - memory            # Current work, learned patterns
+  slack:
+    limit: 5
+    my_messages_only: false
+  code:
+    limit: 5
+    project: automation-analytics-backend
+  inscope:
+    limit: 1            # Single response from auto-selected assistant
+    timeout_secs: 30    # Shorter timeout for context gathering
+  jira:
+    limit: 3
+  memory:
+    limit: 3
 
 # Tool modules to load
 # Using _core suffix for heavy modules to stay under 80 tool limit
 tools:
-  - workflow_core  # 18 tools - Core (session, persona, skill, memory)
-  - slack          # 12 tools - Core Slack integration
-  - slack_persona  # 4 tools - Vector search for past conversations
-  - jira_core      # 6 tools - Issue viewing and basic operations
-  - gitlab_core    # 5 tools - MR viewing and basic operations
-
-# Total: ~45 tools
+  - workflow_core  # Core (session, persona, skill, memory)
+  - slack          # Core Slack integration
+  - slack_persona  # Vector search for past conversations
+  - jira_core      # Issue viewing and basic operations
+  - gitlab_core    # MR viewing and basic operations
 
 skills:
   - start_work
