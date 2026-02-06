@@ -102,15 +102,9 @@ def register_tools(server: "FastMCP") -> int:
     ask_question_fn = None
     try:
         try:
-            from .claude_code_integration import (
-                create_ask_question_wrapper,
-                get_claude_code_capabilities,
-            )
+            from .claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
         except ImportError:
-            from claude_code_integration import (
-                create_ask_question_wrapper,
-                get_claude_code_capabilities,
-            )
+            from claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
 
         capabilities = get_claude_code_capabilities()
         logger.info(f"Claude Code detection: {capabilities}")

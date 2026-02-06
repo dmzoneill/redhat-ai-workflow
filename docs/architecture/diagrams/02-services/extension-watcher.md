@@ -13,11 +13,11 @@ sequenceDiagram
     participant Memory as Memory System
 
     Watcher->>VSCode: Watch extension state
-    
+
     loop Monitor Loop
         VSCode->>Watcher: State change detected
         Watcher->>Watcher: Parse change
-        
+
         alt Tab change
             Watcher->>DBus: Emit TabChanged signal
             DBus->>MCP: Update context

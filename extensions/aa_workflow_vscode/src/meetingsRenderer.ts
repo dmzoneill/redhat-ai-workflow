@@ -998,9 +998,9 @@ export function getMeetingsTabScript(): string {
     (function() {
       const meetingsContainer = document.getElementById('meetings');
       if (!meetingsContainer) return;
-      
+
       console.log('[MeetingsTab] Initializing with centralized event delegation...');
-      
+
       // Use extraClickInit flag for the complex click handler that needs to be attached once
       // The TabEventDelegation system handles data-action clicks, but meetings has many
       // custom click handlers that need the traditional approach
@@ -1028,7 +1028,7 @@ export function getMeetingsTabScript(): string {
           targetPanel.classList.add('active');
         }
       }
-      
+
       // Expose for external calls
       window.switchMeetingsTab = switchMeetingsTab;
 
@@ -1617,14 +1617,14 @@ export function getMeetingsTabScript(): string {
       // Only attach once using the needsInit flag
       if (needsInit) meetingsContainer.addEventListener('click', function(e) {
         const target = e.target;
-        
+
         // Sub-tab buttons
         const subtabBtn = target.closest('.meetings-subtab');
         if (subtabBtn && subtabBtn.dataset.tab) {
           switchMeetingsTab(subtabBtn.dataset.tab);
           return;
         }
-        
+
         // Handle mode selector buttons
         if (target.classList.contains('mode-btn') && target.dataset.mode) {
           const meetingId = target.dataset.id;
@@ -1691,7 +1691,7 @@ export function getMeetingsTabScript(): string {
           }
           return;
         }
-        
+
         // Handle specific button IDs
         if (target.id === 'btn-leave-all' || target.closest('#btn-leave-all')) {
           leaveAllMeetings();
@@ -1722,14 +1722,14 @@ export function getMeetingsTabScript(): string {
           return;
         }
       });
-      
+
       // Start observing captions feed for auto-scroll
       const feed = document.getElementById('transcriptionFeed');
       if (feed) {
         captionsObserver.observe(feed, { childList: true, subtree: true });
         scrollTranscription();
       }
-      
+
       console.log('[MeetingsTab] Container-level event delegation initialized');
 
     // ==================== LIVE COUNTDOWN TIMER ====================
@@ -2058,7 +2058,7 @@ export function getMeetingsTabScript(): string {
     }
 
     // Video preview buttons are now handled by container-level click delegation above
-    
+
     })(); // End of IIFE for meetings container delegation
   `;
 }

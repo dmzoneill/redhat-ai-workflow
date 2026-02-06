@@ -11,7 +11,6 @@ These tools allow Claude to:
 import logging
 from datetime import datetime
 
-
 # Support both package import and direct loading
 try:
     from .sprint_bot import (
@@ -25,13 +24,7 @@ try:
         refresh_sprint_state,
         skip_issue,
     )
-    from .sprint_history import (
-        SprintIssue,
-        TimelineEvent,
-        load_sprint_history,
-        load_sprint_state,
-        save_sprint_state,
-    )
+    from .sprint_history import SprintIssue, TimelineEvent, load_sprint_history, load_sprint_state, save_sprint_state
 except ImportError:
     from sprint_bot import (
         SprintBotConfig,
@@ -44,13 +37,7 @@ except ImportError:
         refresh_sprint_state,
         skip_issue,
     )
-    from sprint_history import (
-        SprintIssue,
-        TimelineEvent,
-        load_sprint_history,
-        load_sprint_state,
-        save_sprint_state,
-    )
+    from sprint_history import SprintIssue, TimelineEvent, load_sprint_history, load_sprint_state, save_sprint_state
 
 logger = logging.getLogger(__name__)
 

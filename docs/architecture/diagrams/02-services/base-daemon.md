@@ -96,11 +96,11 @@ stateDiagram-v2
         Startup --> DBusStart: enable_dbus=true
         DBusStart --> Ready: D-Bus started
         Startup --> Ready: enable_dbus=false
-        
+
         Ready --> Notify: sd_notify READY=1
         Notify --> WatchdogLoop: Start watchdog
         WatchdogLoop --> MainLoop: run_daemon()
-        
+
         MainLoop --> MainLoop: Process events
         MainLoop --> ShutdownRequested: Signal received
     }

@@ -506,10 +506,7 @@ class SkillExecutor:
         if emit_events:
             try:
                 # Use absolute import to avoid relative import issues
-                from tool_modules.aa_workflow.src.skill_execution_events import (
-                    SkillExecutionEmitter,
-                    set_emitter,
-                )
+                from tool_modules.aa_workflow.src.skill_execution_events import SkillExecutionEmitter, set_emitter
 
                 self.event_emitter = SkillExecutionEmitter(
                     skill.get("name", "unknown"),
@@ -1959,9 +1956,7 @@ class SkillExecutor:
 
                 # Emit toast notification for auto-heal triggered
                 try:
-                    from tool_modules.aa_workflow.src.notification_emitter import (
-                        notify_auto_heal_triggered,
-                    )
+                    from tool_modules.aa_workflow.src.notification_emitter import notify_auto_heal_triggered
 
                     fix_action = f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()"
                     notify_auto_heal_triggered(step_name, heal_type, fix_action)
@@ -1996,9 +1991,7 @@ class SkillExecutor:
 
                     # Emit toast notification for auto-heal success
                     try:
-                        from tool_modules.aa_workflow.src.notification_emitter import (
-                            notify_auto_heal_succeeded,
-                        )
+                        from tool_modules.aa_workflow.src.notification_emitter import notify_auto_heal_succeeded
 
                         notify_auto_heal_succeeded(step_name, heal_type)
                     except Exception:
@@ -2035,9 +2028,7 @@ class SkillExecutor:
 
                     # Emit toast notification for auto-heal failure
                     try:
-                        from tool_modules.aa_workflow.src.notification_emitter import (
-                            notify_auto_heal_failed,
-                        )
+                        from tool_modules.aa_workflow.src.notification_emitter import notify_auto_heal_failed
 
                         notify_auto_heal_failed(step_name, error_msg[:100])
                     except Exception:
@@ -2109,9 +2100,7 @@ class SkillExecutor:
 
             # Emit toast notification for continue-mode failures (helps visibility)
             try:
-                from tool_modules.aa_workflow.src.notification_emitter import (
-                    notify_step_failed,
-                )
+                from tool_modules.aa_workflow.src.notification_emitter import notify_step_failed
 
                 notify_step_failed(skill_name, step_name, error_msg[:150])
             except Exception:

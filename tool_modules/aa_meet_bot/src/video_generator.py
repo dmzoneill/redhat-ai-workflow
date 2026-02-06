@@ -3921,10 +3921,7 @@ if __name__ == "__main__":
     _project_root = Path(__file__).parent.parent.parent.parent.parent
     sys.path.insert(0, str(_project_root))
 
-    from scripts.common.video_device import (
-        cleanup_device,
-        setup_v4l2_device,
-    )
+    from scripts.common.video_device import cleanup_device, setup_v4l2_device
 
     # Global state for cleanup (uses shared module now)
     _active_device_path = None
@@ -4054,9 +4051,7 @@ if __name__ == "__main__":
                 # Clean up orphaned MeetBot devices
                 print("Cleaning up orphaned MeetBot devices...", file=sys.stderr)
                 try:
-                    from tool_modules.aa_meet_bot.src.virtual_devices import (
-                        cleanup_orphaned_meetbot_devices,
-                    )
+                    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
 
                     results = await cleanup_orphaned_meetbot_devices()
 

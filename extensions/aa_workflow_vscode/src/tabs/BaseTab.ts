@@ -3,7 +3,7 @@
  *
  * Abstract base class for all Command Center tabs.
  * Provides common functionality for data loading, HTML generation, and updates.
- * 
+ *
  * Architecture: Tabs follow MVC pattern
  * - Model: Service classes (injected via setServices)
  * - View: getContent(), getStyles(), getScript()
@@ -58,7 +58,7 @@ export abstract class BaseTab {
   protected isLoading = false;
   protected lastError: string | null = null;
   private _onNeedsRender: RenderCallback | null = null;
-  
+
   /**
    * Service container for domain services.
    * Tabs should use these services instead of calling D-Bus directly.
@@ -71,7 +71,7 @@ export abstract class BaseTab {
     this.label = config.label;
     this.icon = config.icon;
   }
-  
+
   /**
    * Set the service container for this tab.
    * Called by TabManager after tab creation.

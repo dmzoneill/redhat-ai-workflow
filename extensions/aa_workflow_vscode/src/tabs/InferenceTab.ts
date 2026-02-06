@@ -574,7 +574,7 @@ export class InferenceTab extends BaseTab {
         TabEventDelegation.registerChangeHandler('inference', function(element, e) {
           const configFields = ['inferenceEngine', 'fallbackStrategy', 'maxCategories'];
           const toggleFields = ['enableFiltering', 'enableNpu', 'enableCache'];
-          
+
           if (configFields.includes(element.id)) {
             vscode.postMessage({
               command: 'inferenceConfigChange',
@@ -594,7 +594,7 @@ export class InferenceTab extends BaseTab {
         const inferenceContainer = document.getElementById('inference');
         if (inferenceContainer && !inferenceContainer.dataset.extraClickInit) {
           inferenceContainer.dataset.extraClickInit = 'true';
-          
+
           inferenceContainer.addEventListener('click', function(e) {
             const quickTestBtn = e.target.closest('[data-quick-test]');
             if (quickTestBtn) {
@@ -682,10 +682,10 @@ export class InferenceTab extends BaseTab {
 
     try {
       logger.log(`Running inference test: message="${testMessage}", persona="${persona || 'auto'}", skill="${skill || 'auto'}"`);
-      
+
       // Call D-Bus to run the inference test
       const result = await dbus.config_getInferenceContext(testMessage);
-      
+
       if (result.success && result.data) {
         const data = result.data as any;
         this.testResult = data.context || data;
@@ -739,7 +739,7 @@ export class InferenceTab extends BaseTab {
         `curl -s -o /dev/null -w "%{http_code}" ${instance.url}/api/tags 2>/dev/null || echo "000"`,
         { timeout: 5000 }
       );
-      
+
       const statusCode = stdout.trim();
       if (statusCode === "200") {
         vscode.window.showInformationMessage(`✅ ${instanceName} is healthy`);
@@ -749,7 +749,7 @@ export class InferenceTab extends BaseTab {
         vscode.window.showWarningMessage(`⚠️ ${instanceName} returned status ${statusCode}`);
         instance.status = "offline";
       }
-      
+
       this.notifyNeedsRender();
     } catch (error) {
       vscode.window.showErrorMessage(`❌ ${instanceName} test failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -774,10 +774,10 @@ export class InferenceTab extends BaseTab {
   private async saveConfig(): Promise<void> {
     try {
       logger.log(`Saving inference config: ${JSON.stringify(this.config)}`);
-      
+
       // Save config via D-Bus
       const result = await dbus.config_setConfig("inference", JSON.stringify(this.config));
-      
+
       if (result.success) {
         vscode.window.showInformationMessage("✅ Inference configuration saved");
       } else {

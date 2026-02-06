@@ -416,12 +416,12 @@ export class CreateTab extends BaseTab {
         // Additional click handling for non-data-action elements
         if (createContainer && !createContainer.dataset.extraClickInit) {
           createContainer.dataset.extraClickInit = 'true';
-          
+
           createContainer.addEventListener('click', function(e) {
             const target = e.target;
             // Skip if already handled by data-action
             if (target.closest('[data-action]')) return;
-            
+
             // Ralph toggle (also has data-action but we handle it specially)
             if (target.id === 'ralphToggle' || target.closest('#ralphToggle')) {
               const ralphToggle = document.getElementById('ralphToggle');
@@ -434,7 +434,7 @@ export class CreateTab extends BaseTab {
               }
               return;
             }
-            
+
             // Context item selection
             const contextItem = target.closest('.create-context-item');
             if (contextItem) {
@@ -445,7 +445,7 @@ export class CreateTab extends BaseTab {
               contextItem.classList.toggle('selected', contextItem.querySelector('input')?.checked);
               return;
             }
-            
+
             // Persona chip selection
             const personaChip = target.closest('.create-persona-chip');
             if (personaChip) {

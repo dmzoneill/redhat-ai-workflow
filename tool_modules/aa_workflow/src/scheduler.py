@@ -569,9 +569,7 @@ class CronScheduler:
 
         # Emit toast notification for job start
         try:
-            from tool_modules.aa_workflow.src.notification_emitter import (
-                notify_cron_job_started,
-            )
+            from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_started
 
             notify_cron_job_started(job_name, skill)
         except Exception:
@@ -666,15 +664,11 @@ class CronScheduler:
         # Emit toast notification for job completion
         try:
             if success:
-                from tool_modules.aa_workflow.src.notification_emitter import (
-                    notify_cron_job_completed,
-                )
+                from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_completed
 
                 notify_cron_job_completed(job_name, skill, duration_seconds)
             else:
-                from tool_modules.aa_workflow.src.notification_emitter import (
-                    notify_cron_job_failed,
-                )
+                from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_failed
 
                 notify_cron_job_failed(job_name, skill, error_msg or "Unknown error")
         except Exception:

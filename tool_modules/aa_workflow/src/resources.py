@@ -28,9 +28,7 @@ async def _get_current_work() -> str:
     """Get current work state resource for the current project."""
     # Import here to avoid circular imports
     try:
-        from tool_modules.aa_workflow.src.chat_context import (
-            get_project_work_state_path,
-        )
+        from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
     except ImportError:
         try:
             from .chat_context import get_project_work_state_path

@@ -29,20 +29,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Import protocol for validation
+from .protocols import is_tool_module, validate_tool_module
+
 # Import shared path resolution utilities
 from .tool_paths import (
     PROJECT_DIR,
     TOOL_MODULES_DIR,
-    TOOLS_FILE,
-    TOOLS_CORE_FILE,
     TOOLS_BASIC_FILE,
+    TOOLS_CORE_FILE,
     TOOLS_EXTRA_FILE,
+    TOOLS_FILE,
     TOOLS_STYLE_FILE,
     get_tools_file_path,
 )
-
-# Import protocol for validation
-from .protocols import is_tool_module, validate_tool_module
 
 PERSONAS_DIR = PROJECT_DIR / "personas"
 

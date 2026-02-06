@@ -37,11 +37,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.common.dbus_base import (  # noqa: E402
-    DBUS_AVAILABLE,
-    check_daemon_health,
-    check_daemon_status,
-)
+from scripts.common.dbus_base import DBUS_AVAILABLE, check_daemon_health, check_daemon_status  # noqa: E402
 
 # Services to check
 DBUS_SERVICES = ["slack", "cron", "meet"]

@@ -118,7 +118,7 @@ flowchart TB
 flowchart LR
     ISSUE[Issue Key] --> PATTERN[Branch Pattern]
     PATTERN --> NAME[aap-12345-short-description]
-    
+
     subgraph Convention[Naming Convention]
         PREFIX[issue-key]
         SEP[-]

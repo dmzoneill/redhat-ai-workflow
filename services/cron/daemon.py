@@ -652,12 +652,12 @@ def list_jobs():
 def main():
     """Main entry point."""
     import sys
-    
+
     # Handle --list-jobs before BaseDaemon.main() takes over
     if "--list-jobs" in sys.argv:
         list_jobs()
         return
-    
+
     # Use BaseDaemon.main() for standard daemon lifecycle
     CronDaemon.main()
 

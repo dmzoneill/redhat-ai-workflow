@@ -63,7 +63,7 @@ sequenceDiagram
 
     MCP->>Registry: get_for_ctx(ctx)
     Registry->>Registry: Extract workspace URI from ctx
-    
+
     alt Workspace exists
         Registry-->>MCP: Existing WorkspaceState
     else New workspace

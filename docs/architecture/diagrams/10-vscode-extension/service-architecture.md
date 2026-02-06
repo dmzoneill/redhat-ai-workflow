@@ -19,18 +19,18 @@ classDiagram
         +notifications NotificationService
         +dbusClient DBusClient
     }
-    
+
     class ServiceDescriptor {
         +factory: ServiceFactory
         +instance?: T
         +singleton: boolean
     }
-    
+
     class ContainerOptions {
         +panel?: WebviewPanel
         +extensionUri?: Uri
     }
-    
+
     Container --> ServiceDescriptor : manages
     Container --> ContainerOptions : configured by
 ```
@@ -45,7 +45,7 @@ flowchart TB
         notifications["notifications → NotificationService"]
         dbus["dbus → D-Bus Client"]
     end
-    
+
     subgraph DomainServices["Domain Services"]
         meeting["meetingService → MeetingService"]
         slack["slackService → SlackService"]
@@ -55,7 +55,7 @@ flowchart TB
         memory["memoryService → MemoryService"]
         skill["skillService → SkillService"]
     end
-    
+
     container["Container"] --> CoreServices
     container --> DomainServices
 ```
@@ -70,38 +70,38 @@ flowchart TB
         ct["CronTab"]
         spt["SprintTab"]
     end
-    
+
     subgraph BL["SERVICES (Business Logic)"]
         ms["MeetingService<br/>- joinMeeting<br/>- leaveMeeting<br/>- muteAudio"]
         ss["SlackService<br/>- sendMessage<br/>- getChannels<br/>- approve"]
         cs["CronService<br/>- runJob<br/>- toggleJob<br/>- getHistory"]
     end
-    
+
     subgraph DBUS["D-BUS CLIENT"]
         meet_call["meet_join()<br/>meet_leave()<br/>meet_mute()"]
         slack_call["slack_send()<br/>slack_getChannels()"]
         cron_call["cron_runJob()<br/>cron_toggleJob()"]
     end
-    
+
     subgraph Daemons["BACKEND DAEMONS"]
         meet_d["bot-meet"]
         slack_d["bot-slack"]
         cron_d["bot-cron"]
     end
-    
+
     mt --> ms
     st --> ss
     ct --> cs
     spt --> ms
-    
+
     ms --> meet_call
     ss --> slack_call
     cs --> cron_call
-    
+
     meet_call <-->|"D-Bus IPC"| meet_d
     slack_call <-->|"D-Bus IPC"| slack_d
     cron_call <-->|"D-Bus IPC"| cron_d
-    
+
     style UI fill:#e8f5e9
     style BL fill:#fff3e0
     style DBUS fill:#e3f2fd
@@ -134,7 +134,7 @@ classDiagram
         +personas PersonasState
         +tools ToolsState
     }
-    
+
     class AppState {
         +workspaces: WorkspacesState
         +services: ServicesState
@@ -152,7 +152,7 @@ classDiagram
         +videoPreview: VideoPreviewState
         +currentTab: string
     }
-    
+
     StateStore --> AppState : manages
 ```
 
@@ -166,7 +166,7 @@ flowchart LR
         batch["batchUpdate(updates)"]
         invalidate["invalidate(section)"]
     end
-    
+
     subgraph Events
         changed["'{section}:changed'"]
         state_changed["'state:changed'"]
@@ -174,7 +174,7 @@ flowchart LR
         invalidated["'{section}:invalidated'"]
         reset["'state:reset'"]
     end
-    
+
     set --> changed
     set --> state_changed
     update --> changed
@@ -191,21 +191,21 @@ flowchart TB
         svc["Service.doSomething()"]
         pub["messageBus.publish('dataUpdated', {result})"]
     end
-    
+
     subgraph MessageBus
         queue["Message Queue<br/>- Optional batching<br/>- Message history<br/>- Wildcard support"]
     end
-    
+
     subgraph Subscribers
         local["Local Subscribers<br/>messageBus.subscribe()"]
         webview["Webview<br/>webview.postMessage()"]
     end
-    
+
     svc --> pub
     pub --> queue
     queue --> local
     queue --> webview
-    
+
     style Publishers fill:#e8f5e9
     style MessageBus fill:#fff3e0
     style Subscribers fill:#e3f2fd
@@ -233,17 +233,17 @@ classDiagram
         +clearHistory() void
         +dispose() void
     }
-    
+
     class UIMessage {
         +type: string
         +[key: string]: any
     }
-    
+
     class MessageBusOptions {
         +debug?: boolean
         +batchWindow?: number
     }
-    
+
     MessageBus --> UIMessage : publishes
     MessageBus --> MessageBusOptions : configured by
 ```
@@ -256,22 +256,22 @@ sequenceDiagram
     participant Cont as Container
     participant TM as TabManager
     participant Tab as Tab Instance
-    
+
     Note over CCP: 1. Container Creation
     CCP->>Cont: createContainer({panel})
     Cont->>Cont: registerCoreServices()
     Note over Cont: StateStore, MessageBus,<br/>NotificationService, D-Bus
-    
+
     Note over CCP: 2. Service Container
     CCP->>CCP: Build serviceContainer object
-    
+
     Note over CCP: 3. Inject into TabManager
     CCP->>TM: setServices(serviceContainer)
-    
+
     loop For each tab
         TM->>Tab: setServices(services)
     end
-    
+
     Note over Tab: 4. Tab Usage
     Tab->>Tab: this.services.state.get('sessions')
     Tab->>Tab: this.services.messages.publish(...)
@@ -287,26 +287,26 @@ flowchart TB
         gns["getNotificationService()"]
         gc["getContainer()"]
     end
-    
+
     subgraph Instances["Singleton Instances"]
         ss["stateStoreInstance"]
         mb["messageBusInstance"]
         ns["notificationServiceInstance"]
         cont["globalContainer"]
     end
-    
+
     subgraph Reset["Reset Functions"]
         rss["resetStateStore()"]
         rmb["resetMessageBus()"]
         rns["resetNotificationService()"]
         rc["resetContainer()"]
     end
-    
+
     gss --> ss
     gmb --> mb
     gns --> ns
     gc --> cont
-    
+
     rss -.->|"dispose & null"| ss
     rmb -.->|"dispose & null"| mb
     rns -.->|"dispose & null"| ns

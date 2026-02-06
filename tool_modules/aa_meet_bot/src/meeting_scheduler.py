@@ -35,11 +35,7 @@ except ImportError:
 from server.state_manager import state as state_manager
 from tool_modules.aa_meet_bot.src.config import get_config
 from tool_modules.aa_meet_bot.src.notes_bot import NotesBot, init_notes_bot
-from tool_modules.aa_meet_bot.src.notes_database import (
-    MeetingNotesDB,
-    MonitoredCalendar,
-    init_notes_db,
-)
+from tool_modules.aa_meet_bot.src.notes_database import MeetingNotesDB, MonitoredCalendar, init_notes_db
 
 logger = logging.getLogger(__name__)
 
@@ -401,9 +397,7 @@ class MeetingScheduler:
         """
         try:
             # Import here to avoid circular imports
-            from tool_modules.aa_google_calendar.src.tools_basic import (
-                get_calendar_service,
-            )
+            from tool_modules.aa_google_calendar.src.tools_basic import get_calendar_service
 
             service, error = get_calendar_service()
             if error or not service:

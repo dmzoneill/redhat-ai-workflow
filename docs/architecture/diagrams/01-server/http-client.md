@@ -12,7 +12,7 @@ sequenceDiagram
     participant API as External API
 
     Tool->>Client: get_session()
-    
+
     alt Session exists
         Client-->>Tool: Existing session
     else No session

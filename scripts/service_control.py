@@ -28,12 +28,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Local imports after path setup
-from scripts.common.dbus_base import (  # noqa: E402
-    DBUS_AVAILABLE,
-    check_daemon_health,
-    check_daemon_status,
-    get_client,
-)
+from scripts.common.dbus_base import DBUS_AVAILABLE, check_daemon_health, check_daemon_status, get_client  # noqa: E402
 
 SERVICES = ["slack", "cron", "meet", "sprint"]
 

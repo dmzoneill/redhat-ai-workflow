@@ -562,12 +562,12 @@ export class MemoryTab extends BaseTab {
         const memoryContainer = document.getElementById('memory');
         if (memoryContainer && !memoryContainer.dataset.extraClickInit) {
           memoryContainer.dataset.extraClickInit = 'true';
-          
+
           memoryContainer.addEventListener('click', function(e) {
             const target = e.target;
             // Skip if already handled by data-action
             if (target.closest('[data-action]')) return;
-            
+
             // Memory category tab selection
             const memoryTab = target.closest('.memory-tab');
             if (memoryTab) {

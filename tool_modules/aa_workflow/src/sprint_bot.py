@@ -151,10 +151,7 @@ async def fetch_sprint_issues(config: SprintBotConfig) -> list[dict[str, Any]]:
     # Import Jira tools - these are MCP tools so we call them via tool_exec
     # For now, we'll use a direct import approach
     try:
-        from tool_modules.aa_jira.src.tools_basic import (
-            jira_get_active_sprint,
-            jira_get_sprint_issues,
-        )
+        from tool_modules.aa_jira.src.tools_basic import jira_get_active_sprint, jira_get_sprint_issues
 
         # Get active sprint
         sprint_result = await jira_get_active_sprint(project=config.jira_project)

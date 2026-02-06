@@ -195,9 +195,7 @@ def validate_tool_module(module: Any, module_name: str) -> list[str]:
         # Check return type annotation if present
         if sig.return_annotation != inspect.Signature.empty:
             if sig.return_annotation not in (int, "int", None):
-                errors.append(
-                    f"{module_name}: register_tools should return int, " f"got {sig.return_annotation}"
-                )
+                errors.append(f"{module_name}: register_tools should return int, " f"got {sig.return_annotation}")
 
     except (ValueError, TypeError) as e:
         errors.append(f"{module_name}: Could not inspect register_tools signature: {e}")

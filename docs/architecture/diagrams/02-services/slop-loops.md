@@ -15,14 +15,14 @@ flowchart TB
     subgraph Execution[Loop Execution]
         START[Start Loop]
         CONTEXT[Load Context]
-        
+
         subgraph StepExecution[Step Execution]
             STEP[Execute Step]
             TOOL[Call Tool]
             PROCESS[Process Result]
             STORE[Store State]
         end
-        
+
         DECIDE[Decision Point]
         NEXT[Next Step]
         COMPLETE[Complete]
@@ -143,19 +143,19 @@ loop:
   name: string
   description: string
   enabled: boolean
-  
+
   trigger:
     type: interval | cron | event | manual
     interval: integer  # seconds
     cron: string       # cron expression
     event: string      # event name
-  
+
   context:
     - source: memory
       path: state/current_work
     - source: jira
       query: "project = AAP"
-  
+
   steps:
     - name: fetch_issues
       type: tool
@@ -163,21 +163,21 @@ loop:
       args:
         jql: "{{ context.jql }}"
       on_error: retry
-      
+
     - name: process_issues
       type: transform
       input: "{{ steps.fetch_issues.result }}"
       transform: filter_stale
-      
+
     - name: notify
       type: tool
       tool: slack_send
       condition: "{{ steps.process_issues.count > 0 }}"
-  
+
   on_success:
     - log_to_memory
     - emit_event: loop_completed
-    
+
   on_failure:
     - log_error
     - notify_slack

@@ -35,7 +35,7 @@ sequenceDiagram
             Daemon->>TTS: Synthesize speech
             TTS-->>Browser: Audio output
             Browser->>Meet: Play audio
-            
+
             Daemon->>Video: Generate avatar
             Video-->>Browser: Video frames
             Browser->>Meet: Virtual camera

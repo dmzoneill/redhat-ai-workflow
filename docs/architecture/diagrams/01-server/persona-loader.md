@@ -20,7 +20,7 @@ sequenceDiagram
     Config-->>Loader: {tools: [...], description: ...}
 
     Loader->>Loader: _clear_non_core_tools()
-    
+
     loop For each tool module
         Loader->>Tools: _load_tool_module(module)
         Tools-->>Loader: new_tool_names[]

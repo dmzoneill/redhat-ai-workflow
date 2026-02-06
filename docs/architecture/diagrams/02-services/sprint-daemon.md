@@ -9,17 +9,17 @@ stateDiagram-v2
     [*] --> Idle: Daemon started
 
     Idle --> Monitoring: Start monitoring
-    
+
     state Monitoring {
         [*] --> CheckSprint
         CheckSprint --> ProcessIssues: Active sprint found
         CheckSprint --> Wait: No active sprint
-        
+
         ProcessIssues --> CheckTransitions: For each issue
         CheckTransitions --> ApplyRules: Transitions needed
         ApplyRules --> ProcessIssues: Next issue
         CheckTransitions --> ProcessIssues: No transitions
-        
+
         ProcessIssues --> UpdateMetrics: All issues processed
         UpdateMetrics --> Wait: Cycle complete
         Wait --> CheckSprint: Interval elapsed

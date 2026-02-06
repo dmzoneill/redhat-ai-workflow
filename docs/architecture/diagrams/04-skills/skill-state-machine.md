@@ -13,36 +13,36 @@ stateDiagram-v2
     Validating --> Failed: Validation error
 
     Ready --> Running: Start execution
-    
+
     state Running {
         [*] --> StepPending
-        
+
         StepPending --> CheckingCondition: Has condition
         StepPending --> Confirming: Has confirm
         StepPending --> Executing: No condition/confirm
-        
+
         CheckingCondition --> Skipped: Condition false
         CheckingCondition --> Confirming: Condition true + has confirm
         CheckingCondition --> Executing: Condition true
-        
+
         Confirming --> Executing: User confirmed
         Confirming --> Skipped: User skipped
         Confirming --> Aborted: User aborted
         Confirming --> Executing: Timeout (use default)
-        
+
         Executing --> StepCompleted: Tool succeeded
         Executing --> StepFailed: Tool failed
-        
+
         StepCompleted --> StepPending: More steps
         StepCompleted --> [*]: All steps done
-        
+
         StepFailed --> Retrying: on_error = retry
         StepFailed --> StepPending: on_error = continue
         StepFailed --> Aborted: on_error = abort
-        
+
         Retrying --> Executing: Retry attempt
         Retrying --> Aborted: Max retries
-        
+
         Skipped --> StepPending: More steps
         Skipped --> [*]: All steps done
     }

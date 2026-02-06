@@ -37,12 +37,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Import centralized paths - meet daemon owns its own state file
+from server.paths import MEET_STATE_FILE
 from services.base.daemon import BaseDaemon
 from services.base.dbus import DaemonDBusBase
 from services.base.sleep_wake import SleepWakeAwareDaemon
-
-# Import centralized paths - meet daemon owns its own state file
-from server.paths import MEET_STATE_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -881,6 +880,7 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self.is_running = False
         await super().shutdown()
         print("✅ Meet Bot Daemon stopped")
+
 
 async def list_meetings():
     """List upcoming meetings without starting the daemon."""

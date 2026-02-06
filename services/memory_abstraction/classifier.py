@@ -13,7 +13,7 @@ adapters based on the user's query intent.
 
 Usage:
     from services.memory_abstraction.classifier import IntentClassifier
-    
+
     classifier = IntentClassifier()
     result = await classifier.classify("What's the billing calculation?")
     # IntentClassification(intent="code_lookup", confidence=0.85, sources_suggested=["code"])
@@ -39,9 +39,10 @@ CLASSIFIER_DIR = Path.home() / ".cache" / "aa-workflow" / "classifiers"
 @dataclass
 class IntentPattern:
     """Pattern for keyword-based intent matching."""
+
     intent: str
     patterns: list[str]  # Regex patterns
-    sources: list[str]   # Suggested sources
+    sources: list[str]  # Suggested sources
     weight: float = 1.0  # Pattern weight for scoring
 
 
@@ -172,22 +173,22 @@ DEFAULT_INTENT_PATTERNS = [
 class IntentClassifier:
     """
     Classify query intent for source routing.
-    
+
     Supports multiple classification strategies:
     1. Keyword-based (always available, fast)
     2. NPU-accelerated (when Ollama/NPU available)
     3. Learned model (when training data available)
     """
-    
+
     def __init__(self):
         self.patterns = DEFAULT_INTENT_PATTERNS
         self._npu_client = None
         self._npu_available: bool | None = None
         self._model_loaded = False
-        
+
         # Ensure classifier directory exists
         CLASSIFIER_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     async def classify(
         self,
         query: str,
@@ -195,11 +196,11 @@ class IntentClassifier:
     ) -> IntentClassification:
         """
         Classify query intent.
-        
+
         Args:
             query: The query to classify
             use_npu: Whether to try NPU classification (default True)
-        
+
         Returns:
             IntentClassification with intent, confidence, and suggested sources
         """
@@ -212,22 +213,22 @@ class IntentClassifier:
                     return result
             except Exception as e:
                 logger.warning(f"NPU classification failed, falling back to keywords: {e}")
-        
+
         # Fall back to keyword-based classification
         return self._keyword_classify(query)
-    
+
     def _keyword_classify(self, query: str) -> IntentClassification:
         """
         Classify using keyword patterns.
-        
+
         This is the fallback classifier that's always available.
         """
         query_lower = query.lower()
-        
+
         # Score each intent pattern
         scores: dict[str, float] = {}
         sources_by_intent: dict[str, set[str]] = {}
-        
+
         for pattern in self.patterns:
             for regex in pattern.patterns:
                 if re.search(regex, query_lower, re.IGNORECASE):
@@ -237,7 +238,7 @@ class IntentClassifier:
                         sources_by_intent[intent] = set()
                     sources_by_intent[intent].update(pattern.sources)
                     break  # Only count first match per pattern
-        
+
         if not scores:
             # No matches - return general intent
             return IntentClassification(
@@ -245,56 +246,56 @@ class IntentClassifier:
                 confidence=0.5,
                 sources_suggested=self._get_default_sources(),
             )
-        
+
         # Get highest scoring intent
         best_intent = max(scores, key=scores.get)
         max_score = scores[best_intent]
-        
+
         # Normalize confidence (0.5 - 1.0 range)
         confidence = min(0.5 + (max_score * 0.15), 1.0)
-        
+
         # Get sources for best intent, filtered by available adapters
         sources = list(sources_by_intent.get(best_intent, set()))
         sources = self._filter_available_sources(sources)
-        
+
         return IntentClassification(
             intent=best_intent,
             confidence=confidence,
             sources_suggested=sources,
         )
-    
+
     async def _is_npu_available(self) -> bool:
         """Check if NPU classification is available."""
         if self._npu_available is not None:
             return self._npu_available
-        
+
         try:
             # Try to import the Ollama client
             from tool_modules.aa_ollama.src.client import OllamaClient
-            
+
             client = OllamaClient(instance="npu")
             # Quick health check
             self._npu_available = await client.is_available()
             self._npu_client = client if self._npu_available else None
-            
+
         except ImportError:
             logger.debug("Ollama client not available")
             self._npu_available = False
         except Exception as e:
             logger.debug(f"NPU not available: {e}")
             self._npu_available = False
-        
+
         return self._npu_available
-    
+
     async def _npu_classify(self, query: str) -> IntentClassification | None:
         """
         Classify using NPU (Ollama with qwen2.5:0.5b).
-        
+
         Returns None if classification fails.
         """
         if not self._npu_client:
             return None
-        
+
         # Build classification prompt
         intent_list = ", ".join(IntentClassification.INTENTS.keys())
         prompt = f"""Classify the intent of this query for a developer assistant.
@@ -315,7 +316,7 @@ Available sources: code, slack, yaml, inscope, jira"""
                 format="json",
                 options={"temperature": 0.1},  # Low temperature for consistency
             )
-            
+
             # Parse response
             data = json.loads(response)
             return IntentClassification(
@@ -323,14 +324,14 @@ Available sources: code, slack, yaml, inscope, jira"""
                 confidence=float(data.get("confidence", 0.5)),
                 sources_suggested=data.get("sources", []),
             )
-            
+
         except json.JSONDecodeError:
             logger.warning(f"NPU returned invalid JSON: {response[:100]}")
             return None
         except Exception as e:
             logger.warning(f"NPU classification error: {e}")
             return None
-    
+
     async def learn(
         self,
         query: str,
@@ -339,19 +340,19 @@ Available sources: code, slack, yaml, inscope, jira"""
     ) -> bool:
         """
         Learn from user feedback when classification was wrong.
-        
+
         Appends to training data for future model retraining.
-        
+
         Args:
             query: The original query
             correct_intent: The correct intent classification
             correct_sources: The correct sources to use
-        
+
         Returns:
             True if learning was recorded
         """
         training_file = CLASSIFIER_DIR / "intent_training.jsonl"
-        
+
         try:
             entry = {
                 "query": query,
@@ -359,17 +360,17 @@ Available sources: code, slack, yaml, inscope, jira"""
                 "sources": correct_sources,
                 "query_hash": hashlib.md5(query.encode()).hexdigest()[:8],
             }
-            
+
             with open(training_file, "a") as f:
                 f.write(json.dumps(entry) + "\n")
-            
+
             logger.info(f"Recorded intent learning: {correct_intent} for '{query[:50]}...'")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to record learning: {e}")
             return False
-    
+
     def _get_default_sources(self) -> list[str]:
         """Get default sources when no intent is detected."""
         # Return all available adapters with query capability
@@ -379,7 +380,7 @@ Available sources: code, slack, yaml, inscope, jira"""
         # If no adapters discovered yet, return common defaults
         # These will be filtered by _filter_available_sources
         return ["yaml", "code", "calendar", "gmail", "gdrive"]
-    
+
     def _filter_available_sources(self, sources: list[str]) -> list[str]:
         """Filter sources to only include available adapters."""
         available = set(ADAPTER_MANIFEST.list_adapters())
@@ -389,22 +390,22 @@ Available sources: code, slack, yaml, inscope, jira"""
             return sources
         filtered = [s for s in sources if s in available]
         return filtered if filtered else self._get_default_sources()
-    
+
     def add_pattern(self, pattern: IntentPattern) -> None:
         """Add a custom intent pattern."""
         self.patterns.append(pattern)
         logger.debug(f"Added intent pattern: {pattern.intent}")
-    
+
     def get_training_stats(self) -> dict[str, Any]:
         """Get statistics about training data."""
         training_file = CLASSIFIER_DIR / "intent_training.jsonl"
-        
+
         if not training_file.exists():
             return {"count": 0, "intents": {}}
-        
+
         count = 0
         intents: dict[str, int] = {}
-        
+
         try:
             with open(training_file) as f:
                 for line in f:
@@ -414,5 +415,5 @@ Available sources: code, slack, yaml, inscope, jira"""
                     intents[intent] = intents.get(intent, 0) + 1
         except Exception as e:
             logger.error(f"Error reading training data: {e}")
-        
+
         return {"count": count, "intents": intents}

@@ -19,15 +19,15 @@ sequenceDiagram
     loop Message Loop
         Slack->>WS: message event
         WS->>Daemon: on_message()
-        
+
         alt Direct message or mention
             Daemon->>Daemon: Parse message
             Daemon->>Memory: Get context
             Memory-->>Daemon: User history, preferences
-            
+
             Daemon->>AI: Route to Claude/Ollama
             AI-->>Daemon: Response
-            
+
             Daemon->>Slack: Post reply
             Daemon->>Memory: Log interaction
         else Channel message

@@ -27,11 +27,7 @@ from typing import cast
 from fastmcp import FastMCP
 
 # Import shared path resolution utilities
-from .tool_paths import (
-    PROJECT_DIR,
-    TOOL_MODULES_DIR,
-    get_tools_file_path,
-)
+from .tool_paths import PROJECT_DIR, TOOL_MODULES_DIR, get_tools_file_path
 
 
 def get_available_modules() -> set[str]:
@@ -485,11 +481,7 @@ async def run_mcp_server(server: FastMCP, enable_scheduler: bool = True):
 
     # Initialize Memory Abstraction Layer
     try:
-        from services.memory_abstraction import (
-            MemoryInterface,
-            discover_and_load_all_adapters,
-            set_memory_interface,
-        )
+        from services.memory_abstraction import MemoryInterface, discover_and_load_all_adapters, set_memory_interface
 
         # Discover and load all memory adapters
         adapters = discover_and_load_all_adapters()

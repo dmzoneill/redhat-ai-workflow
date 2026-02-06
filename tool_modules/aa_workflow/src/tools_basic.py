@@ -300,10 +300,7 @@ def register_tools(server: "FastMCP") -> int:
 
     # Detect Claude Code and set up AskUserQuestion integration
     try:
-        from .claude_code_integration import (
-            create_ask_question_wrapper,
-            get_claude_code_capabilities,
-        )
+        from .claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
 
         capabilities = get_claude_code_capabilities()
         logger.info(f"Claude Code detection: {capabilities}")

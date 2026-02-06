@@ -21,19 +21,19 @@ All diagrams use [Mermaid](https://mermaid.js.org/) syntax for rendering in GitH
 ```mermaid
 flowchart TB
     ext["extension.ts"] --> ccp["CommandCenterPanel"]
-    
+
     ccp --> tm["TabManager"]
     ccp --> mr["MessageRouter"]
     ccp --> hg["HtmlGenerator"]
     ccp --> cont["Container"]
-    
+
     tm --> tabs["15 Tab Classes"]
     tabs --> bt["BaseTab"]
-    
+
     cont --> ss["StateStore"]
     cont --> mb["MessageBus"]
     cont --> svc["Services"]
-    
+
     tabs --> svc
     svc --> dbus["D-Bus Client"]
     dbus --> daemons["Backend Daemons"]

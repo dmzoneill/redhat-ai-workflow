@@ -82,7 +82,7 @@ Since TabManager is checked first and returns `true`, MessageRouter handlers are
 ### Triple Handling Example: Sprint Actions
 
 1. **SprintTab.handleSprintAction()** - calls D-Bus directly
-2. **SprintService.handleAction()** - also calls D-Bus  
+2. **SprintService.handleAction()** - also calls D-Bus
 3. **SprintMessageHandler** - calls SprintService (never reached)
 
 ---
@@ -153,7 +153,7 @@ Each tab's `getScript()` method should:
   const container = document.getElementById('tabId');
   if (!container || container.dataset.tabDelegationInit) return;
   container.dataset.tabDelegationInit = 'true';
-  
+
   container.addEventListener('click', function(e) {
     const target = e.target;
     // Handle actions via delegation
@@ -200,14 +200,14 @@ Lines 390-516: Exported but never imported. Contains legacy anti-pattern.
 ### 2. Unused message sends in `commandCenter.ts`
 
 - `sprintTabUpdate` (line 1912)
-- `sprintIssuesUpdate` (line 1895)  
+- `sprintIssuesUpdate` (line 1895)
 - `performanceTabBadgeUpdate` (line 3199)
 
 ### 3. Dead MessageRouter Handlers
 
 All handlers in `messageRouter.ts` for messages already handled by TabManager:
 - ServiceMessageHandler
-- CronMessageHandler  
+- CronMessageHandler
 - SprintMessageHandler
 - SlackMessageHandler
 - MeetingMessageHandler
@@ -267,7 +267,7 @@ flowchart TD
         UI[User Action]
         PM[postMessage]
     end
-    
+
     subgraph backend [Extension Backend]
         CC[commandCenter.ts]
         TM[TabManager]
@@ -275,7 +275,7 @@ flowchart TD
         MB[MessageBus]
         SVC[Services]
     end
-    
+
     UI --> PM
     PM --> CC
     CC --> TM
@@ -284,7 +284,7 @@ flowchart TD
     SVC --> MB
     MB -->|postMessage| webview
     CC -->|direct postMessage| webview
-    
+
     style MR fill:#f99,stroke:#f00
     style SVC fill:#ff9,stroke:#f90
 ```
@@ -307,7 +307,7 @@ flowchart TD
 
 1. **Removed `getPerformanceTabContent()`** from `performanceRenderer.ts` (~125 lines of dead code)
 2. **Removed dead postMessage calls** from `commandCenter.ts`:
-   - `sprintIssuesUpdate` 
+   - `sprintIssuesUpdate`
    - `sprintTabUpdate`
    - `sprintIssuesError`
    - `performanceTabBadgeUpdate`

@@ -1172,7 +1172,9 @@ def inject_context_to_cursor_chat(
                         try:
                             uuid_module.UUID(chat_id)
                         except (ValueError, TypeError):
-                            logger.warning(f"Invalid chat_id format (expected UUID): {chat_id[:50] if chat_id else 'None'}")
+                            logger.warning(
+                                f"Invalid chat_id format (expected UUID): {chat_id[:50] if chat_id else 'None'}"
+                            )
                             return False
 
                     # Build the context message

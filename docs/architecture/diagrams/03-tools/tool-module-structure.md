@@ -9,7 +9,7 @@ graph TB
     subgraph ToolModule[aa_example/]
         PYPROJECT[pyproject.toml<br/>Package config]
         README[README.md<br/>Documentation]
-        
+
         subgraph src[src/]
             INIT[__init__.py<br/>Package init]
             BASIC[tools_basic.py<br/>Essential tools]
@@ -66,7 +66,7 @@ sequenceDiagram
 
     Server->>Module: Import module
     Module->>Registry: registry = ToolRegistry(server)
-    
+
     loop For each tool
         Module->>Registry: @registry.tool()
         Registry->>FastMCP: server.tool()(func)
@@ -132,11 +132,11 @@ def register_tools(server: FastMCP) -> int:
         param2: int = 10,
     ) -> str:
         """Tool description for Claude.
-        
+
         Args:
             param1: Description of param1
             param2: Description of param2
-        
+
         Returns:
             Description of return value
         """

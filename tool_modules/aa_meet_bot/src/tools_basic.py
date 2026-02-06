@@ -31,42 +31,17 @@ except ImportError:
 
 from server.tool_registry import ToolRegistry
 from tool_modules.aa_meet_bot.src.audio_output import AudioOutputManager
-from tool_modules.aa_meet_bot.src.browser_controller import (
-    CaptionEntry,
-    GoogleMeetController,
-)
+from tool_modules.aa_meet_bot.src.browser_controller import CaptionEntry, GoogleMeetController
 from tool_modules.aa_meet_bot.src.config import get_config
-from tool_modules.aa_meet_bot.src.jira_preloader import (
-    get_jira_preloader,
-)
-from tool_modules.aa_meet_bot.src.llm_responder import (
-    get_llm_responder,
-)
-from tool_modules.aa_meet_bot.src.meeting_scheduler import (
-    MeetingScheduler,
-    init_scheduler,
-)
-from tool_modules.aa_meet_bot.src.notes_bot import (
-    NotesBot,
-    NotesBotManager,
-    get_bot_manager,
-)
-from tool_modules.aa_meet_bot.src.notes_database import (
-    MeetingNotesDB,
-    init_notes_db,
-)
-from tool_modules.aa_meet_bot.src.tts_engine import (
-    get_tts_engine,
-)
-from tool_modules.aa_meet_bot.src.video_generator import (
-    get_video_generator,
-)
-from tool_modules.aa_meet_bot.src.virtual_devices import (
-    VirtualDeviceManager,
-)
-from tool_modules.aa_meet_bot.src.voice_pipeline import (
-    get_pipeline_manager,
-)
+from tool_modules.aa_meet_bot.src.jira_preloader import get_jira_preloader
+from tool_modules.aa_meet_bot.src.llm_responder import get_llm_responder
+from tool_modules.aa_meet_bot.src.meeting_scheduler import MeetingScheduler, init_scheduler
+from tool_modules.aa_meet_bot.src.notes_bot import NotesBot, NotesBotManager, get_bot_manager
+from tool_modules.aa_meet_bot.src.notes_database import MeetingNotesDB, init_notes_db
+from tool_modules.aa_meet_bot.src.tts_engine import get_tts_engine
+from tool_modules.aa_meet_bot.src.video_generator import get_video_generator
+from tool_modules.aa_meet_bot.src.virtual_devices import VirtualDeviceManager
+from tool_modules.aa_meet_bot.src.voice_pipeline import get_pipeline_manager
 from tool_modules.aa_meet_bot.src.wake_word import WakeWordManager
 
 logger = logging.getLogger(__name__)
@@ -325,10 +300,7 @@ async def _meet_bot_join_meeting_impl(
         if enable_voice:
             # Start the voice interaction pipeline
             try:
-                from tool_modules.aa_meet_bot.src.voice_pipeline import (
-                    VoicePipelineConfig,
-                    get_pipeline_manager,
-                )
+                from tool_modules.aa_meet_bot.src.voice_pipeline import VoicePipelineConfig, get_pipeline_manager
 
                 config = get_config()
                 pipe_path = controller.get_pipe_path()
@@ -1144,10 +1116,7 @@ async def _meet_notes_force_cleanup_impl() -> str:
 
 async def _meet_notes_cleanup_audio_impl() -> str:
     """Clean up orphaned MeetBot audio devices."""
-    from tool_modules.aa_meet_bot.src.virtual_devices import (
-        cleanup_orphaned_meetbot_devices,
-        get_meetbot_device_count,
-    )
+    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices, get_meetbot_device_count
 
     # Get counts before cleanup
     before = await get_meetbot_device_count()
@@ -1217,10 +1186,7 @@ async def _meet_notes_cleanup_audio_impl() -> str:
 
 async def _meet_notes_cleanup_all_devices_impl() -> str:
     """Force cleanup ALL MeetBot audio/video devices, ignoring active sessions."""
-    from tool_modules.aa_meet_bot.src.virtual_devices import (
-        cleanup_orphaned_meetbot_devices,
-        get_meetbot_device_count,
-    )
+    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices, get_meetbot_device_count
 
     # Get counts before cleanup
     before = await get_meetbot_device_count()

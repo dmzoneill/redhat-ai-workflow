@@ -194,16 +194,16 @@ steps:
     description: "Check if authentication succeeded"
     compute: |
       sso_text = str(sso_result) if sso_result else ""
-      
+
       success = "✅" in sso_text or "successful" in sso_text.lower()
-      
+
       # Extract final URL if present
       import re
       url_match = re.search(r'Final URL:\s*(\S+)', sso_text)
       final_url = url_match.group(1) if url_match else ""
-      
+
       on_dashboard = "rewardzone.redhat.com/dash" in final_url if final_url else False
-      
+
       result = {
           "success": success,
           "on_dashboard": on_dashboard,

@@ -372,7 +372,7 @@ export class ServicesTab extends BaseTab {
         // Register click handler - can be called multiple times safely
         TabEventDelegation.registerClickHandler('services', function(action, element, e) {
           const service = element.dataset.service;
-          
+
           switch(action) {
             case 'startService':
               if (service) {

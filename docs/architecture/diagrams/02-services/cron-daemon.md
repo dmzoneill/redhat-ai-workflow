@@ -118,10 +118,10 @@ sequenceDiagram
 
     Scheduler->>Daemon: Job triggered
     Daemon->>Daemon: Check job enabled
-    
+
     alt Job enabled
         Daemon->>Executor: Execute job
-        
+
         alt execution_mode = claude_cli
             Executor->>Claude: Run with prompt
             Claude-->>Executor: Result
@@ -129,10 +129,10 @@ sequenceDiagram
             Executor->>Skill: skill_run()
             Skill-->>Executor: Result
         end
-        
+
         Executor-->>Daemon: Execution result
         Daemon->>Log: Log execution
-        
+
         alt Has notifications
             Daemon->>Notify: Send notifications
         end

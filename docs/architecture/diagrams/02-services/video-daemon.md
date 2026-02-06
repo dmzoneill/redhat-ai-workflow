@@ -19,7 +19,7 @@ flowchart TB
             EXPR[Expression]
             BLEND[Blending]
         end
-        
+
         subgraph Effects[Visual Effects]
             BG[Background]
             OVERLAY[Overlays]

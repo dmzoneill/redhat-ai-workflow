@@ -1230,9 +1230,9 @@ export function getSprintTabScript(): string {
         e.stopPropagation();
         const issueKey = element.getAttribute('data-issue');
         const chatId = element.getAttribute('data-chat-id');
-        
+
         console.log('[SprintTab] Action clicked:', { action, issueKey, chatId });
-        
+
         // Handle toggle history specially
         if (action === 'toggleHistory') {
           const content = document.getElementById('sprintHistoryContent');
@@ -1245,7 +1245,7 @@ export function getSprintTabScript(): string {
           }
           return;
         }
-        
+
         // All other actions go to backend
         if (vscode) {
           vscode.postMessage({
@@ -1260,37 +1260,37 @@ export function getSprintTabScript(): string {
       // Additional click handling for non-data-action elements
       if (sprintContainer && !sprintContainer.dataset.extraClickInit) {
         sprintContainer.dataset.extraClickInit = 'true';
-        
+
         sprintContainer.addEventListener('click', function(e) {
           const target = e.target;
           // Skip if already handled by data-action
           if (target.closest('[data-action]')) return;
-          
+
           // Subtab switching
           const subtab = target.closest('.sprint-subtab');
           if (subtab) {
             const subtabId = subtab.getAttribute('data-subtab');
-            
+
             // Update tab buttons
             sprintContainer.querySelectorAll('.sprint-subtab').forEach(t => t.classList.remove('active'));
             subtab.classList.add('active');
-            
+
             // Update content
             sprintContainer.querySelectorAll('.sprint-subtab-content').forEach(c => c.classList.remove('active'));
             const content = document.getElementById('subtab-' + subtabId);
             if (content) content.classList.add('active');
             return;
           }
-          
+
           // Trace tab switching (Timeline/Diagram)
           const traceTab = target.closest('.trace-tab');
           if (traceTab) {
             const traceTabId = traceTab.getAttribute('data-trace-tab');
-            
+
             // Update trace tab buttons
             document.querySelectorAll('.trace-tab').forEach(t => t.classList.remove('active'));
             traceTab.classList.add('active');
-            
+
             // Update trace tab content
             document.querySelectorAll('.trace-tab-content').forEach(c => c.classList.remove('active'));
             const traceContent = document.getElementById('trace-' + traceTabId);
@@ -1298,7 +1298,7 @@ export function getSprintTabScript(): string {
             console.log('[SprintTab] Trace tab switched to:', traceTabId);
             return;
           }
-          
+
           // Timeline toggle
           const timelineToggle = target.closest('.timeline-toggle');
           if (timelineToggle) {
@@ -1312,7 +1312,7 @@ export function getSprintTabScript(): string {
             }
             return;
           }
-          
+
           // Issue action buttons (legacy .issue-btn without data-action)
           const issueBtn = target.closest('.issue-btn');
           if (issueBtn) {
@@ -1320,9 +1320,9 @@ export function getSprintTabScript(): string {
             const action = issueBtn.getAttribute('data-action');
             const issueKey = issueBtn.getAttribute('data-issue');
             const chatId = issueBtn.getAttribute('data-chat-id');
-            
+
             console.log('[SprintTab] Button clicked:', { action, issueKey, chatId });
-            
+
             if (action && vscode) {
               vscode.postMessage({
                 command: 'sprintAction',
@@ -1333,13 +1333,13 @@ export function getSprintTabScript(): string {
             }
             return;
           }
-          
+
           // Bot toggle switches
           const toggleSwitch = target.closest('.bot-toggle-switch');
           if (toggleSwitch) {
             const action = toggleSwitch.getAttribute('data-action');
             toggleSwitch.classList.toggle('active');
-            
+
             if (action === 'toggleAutomatic' && vscode) {
               vscode.postMessage({
                 command: 'sprintAction',

@@ -21,18 +21,10 @@ from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
 
-from tool_modules.aa_meet_bot.src.browser_controller import (
-    CaptionEntry,
-    GoogleMeetController,
-)
+from tool_modules.aa_meet_bot.src.browser_controller import CaptionEntry, GoogleMeetController
 from tool_modules.aa_meet_bot.src.config import get_config
 from tool_modules.aa_meet_bot.src.llm_responder import LLMResponder
-from tool_modules.aa_meet_bot.src.notes_database import (
-    MeetingNote,
-    MeetingNotesDB,
-    TranscriptEntry,
-    init_notes_db,
-)
+from tool_modules.aa_meet_bot.src.notes_database import MeetingNote, MeetingNotesDB, TranscriptEntry, init_notes_db
 from tool_modules.aa_meet_bot.src.wake_word import WakeWordEvent, WakeWordManager
 
 # D-Bus client for video daemon communication
@@ -197,9 +189,7 @@ class NotesBot:
 
         # 2. Run comprehensive orphan cleanup (modules, parec, pipes, video)
         try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import (
-                cleanup_orphaned_meetbot_devices,
-            )
+            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
 
             cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
 
@@ -377,9 +367,7 @@ class NotesBot:
 
             # Emit toast notification for meeting joined
             try:
-                from tool_modules.aa_workflow.src.notification_emitter import (
-                    notify_meeting_joined,
-                )
+                from tool_modules.aa_workflow.src.notification_emitter import notify_meeting_joined
 
                 notify_meeting_joined(self.state.title, mode)
             except Exception:
@@ -1511,9 +1499,7 @@ class NotesBot:
 
         # 9. Emit toast notification
         try:
-            from tool_modules.aa_workflow.src.notification_emitter import (
-                notify_meeting_left,
-            )
+            from tool_modules.aa_workflow.src.notification_emitter import notify_meeting_left
 
             notify_meeting_left(
                 result.get("title", "Meeting"),
@@ -1764,9 +1750,7 @@ class NotesBotManager:
 
         # 3. Run comprehensive orphan cleanup
         try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import (
-                cleanup_orphaned_meetbot_devices,
-            )
+            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
 
             cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=active_ids)
 
@@ -1973,9 +1957,7 @@ class NotesBotManager:
 
         # Run orphan cleanup outside the lock
         try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import (
-                cleanup_orphaned_meetbot_devices,
-            )
+            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
 
             await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
         except Exception as e:

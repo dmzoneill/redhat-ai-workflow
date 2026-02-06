@@ -2,7 +2,7 @@
  * Sprint Tab
  *
  * Displays sprint bot status, issues, and controls.
- * 
+ *
  * Architecture: Uses SprintService (via this.services.sprint) for business logic.
  * This eliminates duplicate D-Bus calls and keeps business logic in one place.
  */

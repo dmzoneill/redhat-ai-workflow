@@ -138,7 +138,7 @@ sequenceDiagram
     Classifier-->>Interface: Intent + suggested sources
 
     Interface->>Router: Route to adapters
-    
+
     par Query adapters
         Router->>Adapters: yaml.query()
         Router->>Adapters: slack.query()

@@ -23,12 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Re-export everything from the new location for backward compatibility
-from services.base.sleep_wake import (
-    RobustPeriodicTask,
-    RobustTimer,
-    SleepWakeAwareDaemon,
-    SleepWakeMonitor,
-)
+from services.base.sleep_wake import RobustPeriodicTask, RobustTimer, SleepWakeAwareDaemon, SleepWakeMonitor
 
 __all__ = [
     "SleepWakeMonitor",

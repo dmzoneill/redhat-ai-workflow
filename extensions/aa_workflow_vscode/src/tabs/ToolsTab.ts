@@ -315,18 +315,18 @@ export class ToolsTab extends BaseTab {
         const toolsContainer = document.getElementById('tools');
         if (toolsContainer && !toolsContainer.dataset.extraClickInit) {
           toolsContainer.dataset.extraClickInit = 'true';
-          
+
           toolsContainer.addEventListener('click', function(e) {
             const target = e.target;
             // Skip if already handled by data-action
             if (target.closest('[data-action]')) return;
-            
+
             const moduleItem = target.closest('.tools-module-item');
             if (moduleItem && moduleItem.dataset.module) {
               vscode.postMessage({ command: 'selectToolModule', module: moduleItem.dataset.module });
               return;
             }
-            
+
             const toolItem = target.closest('.tool-item');
             if (toolItem && toolItem.dataset.tool) {
               vscode.postMessage({ command: 'selectTool', tool: toolItem.dataset.tool });

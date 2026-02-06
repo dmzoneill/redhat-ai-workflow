@@ -214,9 +214,7 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
     """
     # Import here to avoid circular imports
     try:
-        from tool_modules.aa_workflow.src.chat_context import (
-            get_project_work_state_path,
-        )
+        from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
     except ImportError:
         try:
             from .chat_context import get_project_work_state_path
@@ -1060,9 +1058,7 @@ async def _session_start_impl(
 
     # Export workspace state for VS Code extension
     try:
-        from tool_modules.aa_workflow.src.workspace_exporter import (
-            export_workspace_state_async,
-        )
+        from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
 
         logger.info("session_start: About to export workspace state")
         result = await export_workspace_state_async(ctx)
@@ -1403,11 +1399,7 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             jira_attach_session(issue_key="AAP-12345", include_transcript=True)
             jira_attach_session(issue_key="AAP-12345", session_id="abc123")
         """
-        from server.workspace_state import (
-            WorkspaceRegistry,
-            format_session_context_for_jira,
-            get_cursor_chat_content,
-        )
+        from server.workspace_state import WorkspaceRegistry, format_session_context_for_jira, get_cursor_chat_content
 
         lines = []
 

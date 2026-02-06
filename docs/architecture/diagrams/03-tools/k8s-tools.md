@@ -109,10 +109,10 @@ flowchart TB
 flowchart TB
     TOOL[K8s Tool] --> CALL[API Call]
     CALL --> CHECK{Auth OK?}
-    
+
     CHECK -->|Yes| SUCCESS[Return Result]
     CHECK -->|No| DETECT[Detect Auth Error]
-    
+
     DETECT --> HEAL[Auto-Heal]
     HEAL --> LOGIN[kube_login]
     LOGIN --> RETRY[Retry Call]

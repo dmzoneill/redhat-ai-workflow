@@ -80,9 +80,7 @@ async def login_to_inscope(headless: bool = True) -> bool:
         True if login successful, False otherwise
     """
     try:
-        from tool_modules.aa_sso.src.tools_basic import (
-            SSOAuthenticator,
-        )
+        from tool_modules.aa_sso.src.tools_basic import SSOAuthenticator
 
         logger.info("Starting InScope authentication via aa_sso module...")
 

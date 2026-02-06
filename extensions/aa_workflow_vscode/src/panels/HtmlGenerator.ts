@@ -310,7 +310,7 @@ export class HtmlGenerator {
                     activeSubTab = activeSubTabBtn.dataset.tab;
                   }
                 }
-                
+
                 // Preserve search input values to prevent clearing user input during refresh
                 const searchInputs = {};
                 tabContent.querySelectorAll('input[type="text"][id*="Search"], input[type="text"][id*="search"]').forEach(input => {
@@ -318,17 +318,17 @@ export class HtmlGenerator {
                     searchInputs[input.id] = input.value;
                   }
                 });
-                
+
                 // Preserve scroll positions for the tab content and all scrollable children
                 const scrollPositions = [];
-                
+
                 // Save main tab content scroll position
                 scrollPositions.push({
                   selector: null, // null means the tabContent itself
                   scrollTop: tabContent.scrollTop,
                   scrollLeft: tabContent.scrollLeft
                 });
-                
+
                 // Save scroll positions of all scrollable elements with IDs or data-scroll-preserve
                 tabContent.querySelectorAll('[id], [data-scroll-preserve]').forEach(el => {
                   if (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth) {
@@ -342,19 +342,19 @@ export class HtmlGenerator {
                     }
                   }
                 });
-                
+
                 // Also save scroll position of common scrollable containers by class
                 // Include all known scrollable containers in the UI
                 // IMPORTANT: Include both sidebar containers AND their inner lists
                 const scrollableClasses = [
                   // Skills tab - sidebar is the main scrollable container
                   '.skills-sidebar',
-                  '.skills-list', 
+                  '.skills-list',
                   '.skills-main-content',
                   '.skill-workflow-view',
                   '.skill-workflow-horizontal',
-                  '.skill-workflow-vertical', 
-                  '.running-skills-list', 
+                  '.skill-workflow-vertical',
+                  '.running-skills-list',
                   '.skill-info-content',
                   '.skill-detail-content',
                   // Tools tab - sidebar is the main scrollable container
@@ -405,13 +405,13 @@ export class HtmlGenerator {
                     }
                   });
                 });
-                
+
                 // Also save the main document/body scroll position
                 const mainScrollTop = document.documentElement.scrollTop || document.body.scrollTop;
                 const mainScrollLeft = document.documentElement.scrollLeft || document.body.scrollLeft;
-                
+
                 tabContent.innerHTML = message.content;
-                
+
                 // Restore scroll positions after DOM layout is complete
                 // Use double requestAnimationFrame to ensure layout is fully calculated
                 requestAnimationFrame(() => {
@@ -433,7 +433,7 @@ export class HtmlGenerator {
                         el.scrollLeft = pos.scrollLeft;
                       }
                     });
-                    
+
                     // Restore main document scroll position
                     if (mainScrollTop > 0 || mainScrollLeft > 0) {
                       document.documentElement.scrollTop = mainScrollTop;
@@ -443,7 +443,7 @@ export class HtmlGenerator {
                     }
                   });
                 });
-                
+
                 // Restore search input values and re-apply filtering
                 Object.entries(searchInputs).forEach(([id, value]) => {
                   const input = document.getElementById(id);
@@ -453,7 +453,7 @@ export class HtmlGenerator {
                     input.dispatchEvent(new Event('input', { bubbles: true }));
                   }
                 });
-                
+
                 // Restore sub-tab state after content update
                 if (activeSubTab && message.tabId === 'meetings') {
                   // Update tab buttons
@@ -530,7 +530,7 @@ export class HtmlGenerator {
       // Activity log management - shows last 4 refresh activities with fading opacity
       const activityMessages = [];
       const maxActivityMessages = 4;
-      
+
       function addActivityMessage(text) {
         // Add new message to front
         activityMessages.unshift(text);
@@ -541,7 +541,7 @@ export class HtmlGenerator {
         // Update display
         updateActivityDisplay();
       }
-      
+
       function updateActivityDisplay() {
         const slots = document.querySelectorAll('.activity-line');
         slots.forEach((slot, index) => {

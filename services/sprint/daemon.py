@@ -41,14 +41,13 @@ from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
+# Sprint daemon owns its own state file - no shared file with other services
+from server.paths import SPRINT_STATE_FILE_V2
 from services.base.daemon import BaseDaemon
 from services.base.dbus import DaemonDBusBase
 from services.base.sleep_wake import SleepWakeAwareDaemon
 from services.sprint.bot.execution_tracer import ExecutionTracer, StepStatus, WorkflowState, get_trace, list_traces
 from services.sprint.bot.workflow_config import WorkflowConfig, get_workflow_config
-
-# Sprint daemon owns its own state file - no shared file with other services
-from server.paths import SPRINT_STATE_FILE_V2
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 SPRINT_STATE_FILE = SPRINT_STATE_FILE_V2

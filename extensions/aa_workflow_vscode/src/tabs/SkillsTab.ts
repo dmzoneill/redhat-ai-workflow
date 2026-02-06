@@ -90,7 +90,7 @@ export class SkillsTab extends BaseTab {
   private workflowViewMode: "horizontal" | "vertical" = "horizontal";
   private wsClient: SkillWebSocketClient | null = null;
   private wsDisposables: vscode.Disposable[] = [];
-  
+
   // Throttling: skills list rarely changes, don't refresh more than once per 30 seconds
   private lastSkillsListLoad: number = 0;
   private static readonly SKILLS_LIST_MIN_INTERVAL_MS = 30000; // 30 seconds
@@ -402,10 +402,10 @@ export class SkillsTab extends BaseTab {
   async loadData(): Promise<void> {
     const now = Date.now();
     const timeSinceLastLoad = now - this.lastSkillsListLoad;
-    
+
     // Throttle skills list loading - it rarely changes
     const shouldLoadSkillsList = timeSinceLastLoad >= SkillsTab.SKILLS_LIST_MIN_INTERVAL_MS || this.skills.length === 0;
-    
+
     if (shouldLoadSkillsList) {
       logger.log("loadData() starting - loading skills list...");
       try {
@@ -1810,7 +1810,7 @@ export class SkillsTab extends BaseTab {
         TabEventDelegation.registerClickHandler('skills', function(action, element, e) {
           const skillName = element.dataset.skill;
           const executionId = element.dataset.executionId;
-          
+
           switch(action) {
             case 'runSkill':
               if (skillName) {
@@ -1837,36 +1837,36 @@ export class SkillsTab extends BaseTab {
         const skillsContainer = document.getElementById('skills');
         if (skillsContainer && !skillsContainer.dataset.extraClickInit) {
           skillsContainer.dataset.extraClickInit = 'true';
-          
+
           skillsContainer.addEventListener('click', function(e) {
             const target = e.target;
             // Skip if already handled by data-action
             if (target.closest('[data-action]')) return;
-            
+
             const skillItem = target.closest('.skill-item');
             const viewToggle = target.closest('.toggle-btn[data-view]');
             const workflowViewBtn = target.closest('.toggle-btn[data-workflow-view]');
             const skillCallBadge = target.closest('.skill-call-badge');
             const runningSkillItem = target.closest('.running-skill-item');
-            
+
             // Skill view toggle (Info/Workflow/YAML)
             if (viewToggle && viewToggle.dataset.view) {
               vscode.postMessage({ command: 'setSkillView', view: viewToggle.dataset.view });
               return;
             }
-            
+
             // Workflow view mode toggle (Horizontal/Vertical)
             if (workflowViewBtn && workflowViewBtn.dataset.workflowView) {
               vscode.postMessage({ command: 'setWorkflowViewMode', mode: workflowViewBtn.dataset.workflowView });
               return;
             }
-            
+
             // Skill call badge clicks (navigate to called skill)
             if (skillCallBadge && skillCallBadge.dataset.skill) {
               vscode.postMessage({ command: 'loadSkill', skillName: skillCallBadge.dataset.skill });
               return;
             }
-            
+
             // Running skill item clicks (open flowchart) - but not if clicking clear button
             if (runningSkillItem && !target.closest('.clear-skill-btn')) {
               const executionId = runningSkillItem.dataset.executionId;
@@ -1875,7 +1875,7 @@ export class SkillsTab extends BaseTab {
               }
               return;
             }
-            
+
             // Skill item clicks (for selection)
             if (skillItem && skillItem.dataset.skill) {
               vscode.postMessage({ command: 'loadSkill', skillName: skillItem.dataset.skill });
@@ -2122,24 +2122,24 @@ export class SkillsTab extends BaseTab {
 
       // Fallback: Try to create a new composer and paste
       logger.log("Trying composer approach...");
-      
+
       // Create new composer tab
       await vscode.commands.executeCommand("composer.createNewComposerTab");
-      
+
       // Wait a bit for the composer to open
       await new Promise(resolve => setTimeout(resolve, 500));
 
       // Try to focus and use editor.action.clipboardPasteAction
       await vscode.commands.executeCommand("composer.focusComposer");
       await new Promise(resolve => setTimeout(resolve, 200));
-      
+
       // Try to paste using VS Code's paste command
       try {
         await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
         logger.log("Pasted via editor.action.clipboardPasteAction");
       } catch (pasteError) {
         logger.warn("editor.action.clipboardPasteAction failed, trying ydotool...");
-        
+
         // Try ydotool as last resort
         try {
           const { sendPaste, sendEnter, sleep } = await import("../chatUtils");
@@ -2166,10 +2166,10 @@ export class SkillsTab extends BaseTab {
 
   private async openSkillFile(skillName: string): Promise<void> {
     const skill = this.skills.find((s) => s.name === skillName);
-    
+
     // Try multiple sources for the file path
     let filePath: string | undefined;
-    
+
     if (skill?.file) {
       filePath = skill.file;
     } else if (this.selectedSkillData?.file) {
@@ -2261,10 +2261,10 @@ export class SkillsTab extends BaseTab {
     // Calculate current step index from progress percentage
     // progress is 0-100, totalSteps tells us how many steps
     const totalSteps = runningSkill.totalSteps || 0;
-    const currentStepIndex = totalSteps > 0 
+    const currentStepIndex = totalSteps > 0
       ? Math.floor((runningSkill.progress / 100) * totalSteps)
       : 0;
-    
+
     // Initialize detailedExecution BEFORE loadSkill
     // This ensures the workflow view has data even during async operations
     // loadSkill will NOT clear this because watchingExecutionId is already set
@@ -2332,7 +2332,7 @@ export class SkillsTab extends BaseTab {
             this.detailedExecution.steps[execState.currentStepIndex].status = "running";
           }
         }
-        
+
         // Extract step statuses from events (these override our defaults)
         type StepStatus = "pending" | "running" | "success" | "failed" | "skipped";
         const stepStatuses = new Map<number, { status: StepStatus; duration?: number; error?: string }>();
@@ -2354,7 +2354,7 @@ export class SkillsTab extends BaseTab {
             // Don't override with 'running' from step_start - our currentStepIndex logic handles that
           }
         }
-        
+
         // Update detailedExecution.steps with status info from events
         if (stepStatuses.size > 0) {
           for (const [index, info] of stepStatuses) {

@@ -84,8 +84,9 @@ def get_inscope_status() -> dict:
     """Get InScope AI assistant status."""
     try:
         import asyncio
-        from tool_modules.aa_inscope.src.tools_basic import _get_auth_token, KNOWN_ASSISTANTS
-        
+
+        from tool_modules.aa_inscope.src.tools_basic import KNOWN_ASSISTANTS, _get_auth_token
+
         # Check authentication
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -93,7 +94,7 @@ def get_inscope_status() -> dict:
             token = loop.run_until_complete(_get_auth_token())
         finally:
             loop.close()
-        
+
         return {
             "available": token is not None,
             "authenticated": token is not None,
@@ -106,11 +107,17 @@ def get_inscope_status() -> dict:
         }
 
 
-def run_persona_test(query: str, project_root: Path, limit: int = 5,
-                     include_jira: bool = True, include_code: bool = True,
-                     include_memory: bool = True, include_inscope: bool = True) -> dict:
+def run_persona_test(
+    query: str,
+    project_root: Path,
+    limit: int = 5,
+    include_jira: bool = True,
+    include_code: bool = True,
+    include_memory: bool = True,
+    include_inscope: bool = True,
+) -> dict:
     """Run the full persona test using ContextInjector."""
-    
+
     # Detect project from config
     project = "automation-analytics-backend"  # Default
     try:
@@ -127,7 +134,7 @@ def run_persona_test(query: str, project_root: Path, limit: int = 5,
     # Use the ContextInjector for gathering context
     try:
         from scripts.context_injector import ContextInjector
-        
+
         injector = ContextInjector(
             project=project,
             slack_limit=limit,
@@ -136,7 +143,7 @@ def run_persona_test(query: str, project_root: Path, limit: int = 5,
             memory_limit=3,
             inscope_limit=1,
         )
-        
+
         context = injector.gather_context(
             query=query,
             include_slack=True,
@@ -145,24 +152,26 @@ def run_persona_test(query: str, project_root: Path, limit: int = 5,
             include_memory=include_memory,
             include_inscope=include_inscope,
         )
-        
+
         # Convert ContextSource objects to dicts for JSON serialization
         sources = []
         for src in context.sources:
-            sources.append({
-                "source": src.source,
-                "found": src.found,
-                "count": src.count,
-                "results": src.results,
-                "error": src.error,
-                "latency_ms": round(src.latency_ms, 1),
-            })
-        
+            sources.append(
+                {
+                    "source": src.source,
+                    "found": src.found,
+                    "count": src.count,
+                    "results": src.results,
+                    "error": src.error,
+                    "latency_ms": round(src.latency_ms, 1),
+                }
+            )
+
         # Get status info
         persona_status = get_persona_status(project_root)
         code_status = get_code_search_status(project)
         inscope_status = get_inscope_status()
-        
+
         return {
             "query": context.query,
             "elapsed_ms": round(context.total_latency_ms, 1),
@@ -177,7 +186,7 @@ def run_persona_test(query: str, project_root: Path, limit: int = 5,
             "project": project,
             "formatted": context.formatted,  # Include the formatted context for display
         }
-        
+
     except ImportError as e:
         # Fallback if ContextInjector not available
         return {
@@ -245,12 +254,16 @@ def main():
             output = get_status_only(project_root)
         elif not args.query:
             # No query provided and not status-only mode
-            print(json.dumps({
-                "error": "Either --query or --status-only is required",
-                "sources": [],
-                "sources_used": [],
-                "total_results": 0,
-            }))
+            print(
+                json.dumps(
+                    {
+                        "error": "Either --query or --status-only is required",
+                        "sources": [],
+                        "sources_used": [],
+                        "total_results": 0,
+                    }
+                )
+            )
             return
         else:
             output = run_persona_test(
@@ -266,14 +279,18 @@ def main():
     except Exception as e:
         import traceback
 
-        print(json.dumps({
-            "query": args.query if hasattr(args, 'query') else "",
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-            "sources": [],
-            "sources_used": [],
-            "total_results": 0,
-        }))
+        print(
+            json.dumps(
+                {
+                    "query": args.query if hasattr(args, "query") else "",
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                    "sources": [],
+                    "sources_used": [],
+                    "total_results": 0,
+                }
+            )
+        )
 
 
 if __name__ == "__main__":

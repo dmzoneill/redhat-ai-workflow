@@ -651,9 +651,7 @@ def register_scheduler_tools(server: "FastMCP") -> int:
             Confirmation of scheduler state change.
         """
         try:
-            from tool_modules.aa_workflow.src.scheduler import (
-                get_scheduler,
-            )
+            from tool_modules.aa_workflow.src.scheduler import get_scheduler
         except ImportError:
             from .scheduler import get_scheduler
 

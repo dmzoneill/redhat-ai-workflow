@@ -1078,13 +1078,13 @@ export class CommandCenterPanel {
           const trimmedOutput = output.trim();
           const data = JSON.parse(trimmedOutput);
           debugLog(`Posting contextTestResult with ${data.total_results} results`);
-          
+
           // Update the SlackTab's state directly and trigger re-render
           const slackTab = this._tabManager.getTab("slack");
           if (slackTab) {
             slackTab.handleMessage({ command: "contextTestResult", data });
           }
-          
+
           // Also send to webview for any direct UI updates
           this._panel.webview.postMessage({
             command: "contextTestResult",
@@ -3822,7 +3822,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
   /**
    * Dispatch updates to UI sections.
-   * 
+   *
    * NOTE: RefreshCoordinator was removed - it was sending messages that were never handled
    * in the webview. UI updates now go through TabManager and tabContentUpdate messages.
    * This method is kept for backward compatibility but only updates workspaces.
@@ -3862,7 +3862,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * Called every 1 second by the interval timer.
    *
    * STAGGERED REFRESH SCHEDULE (to avoid D-Bus request spikes):
-   * 
+   *
    * Second 0:  Session state only
    * Second 1:  Session state only
    * Second 2:  Session state + Slop tab (if not active)
@@ -3927,10 +3927,10 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   /**
    * Refresh a single critical tab based on the current cycle second.
    * Spreads tab refreshes across the 30-second cycle to avoid D-Bus spikes.
-   * 
+   *
    * Schedule:
    *   Second 2:  slop
-   *   Second 4:  meetings  
+   *   Second 4:  meetings
    *   Second 6:  cron
    *   Second 8:  slack
    *   Second 12: services
@@ -4011,7 +4011,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    */
   private _backgroundSync(): void {
     this._logActivity("Background sync");
-    
+
     // Clear personas cache to ensure fresh data on next access
     this._personasCache = null;
 

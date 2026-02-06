@@ -53,7 +53,7 @@ sequenceDiagram
     Client->>Server: POST /api/generate
     Server->>Model: Load model (if needed)
     Model-->>Server: Model ready
-    
+
     loop Streaming response
         Server->>Client: Token chunk
         Client->>Tool: Accumulated text

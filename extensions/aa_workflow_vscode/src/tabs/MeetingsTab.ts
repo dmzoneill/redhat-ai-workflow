@@ -391,7 +391,7 @@ export class MeetingsTab extends BaseTab {
       if (note) {
         const formatted = this.services.meeting.formatMeetingNote(note);
         // Show in a new editor
-        const doc = await import("vscode").then(vscode => 
+        const doc = await import("vscode").then(vscode =>
           vscode.workspace.openTextDocument({ content: formatted, language: "markdown" })
         );
         const vscode = await import("vscode");
@@ -402,9 +402,9 @@ export class MeetingsTab extends BaseTab {
       const result = await dbus.meet_getMeetingNote(noteId);
       if (result.success && result.data) {
         const vscode = await import("vscode");
-        const doc = await vscode.workspace.openTextDocument({ 
-          content: JSON.stringify(result.data, null, 2), 
-          language: "json" 
+        const doc = await vscode.workspace.openTextDocument({
+          content: JSON.stringify(result.data, null, 2),
+          language: "json"
         });
         await vscode.window.showTextDocument(doc);
       } else {
@@ -428,9 +428,9 @@ export class MeetingsTab extends BaseTab {
       const result = await dbus.meet_getTranscript(noteId);
       if (result.success && result.data) {
         const vscode = await import("vscode");
-        const doc = await vscode.workspace.openTextDocument({ 
-          content: JSON.stringify(result.data, null, 2), 
-          language: "json" 
+        const doc = await vscode.workspace.openTextDocument({
+          content: JSON.stringify(result.data, null, 2),
+          language: "json"
         });
         await vscode.window.showTextDocument(doc);
       } else {
@@ -454,9 +454,9 @@ export class MeetingsTab extends BaseTab {
       const result = await dbus.meet_getBotLog(noteId);
       if (result.success && result.data) {
         const vscode = await import("vscode");
-        const doc = await vscode.workspace.openTextDocument({ 
-          content: JSON.stringify(result.data, null, 2), 
-          language: "json" 
+        const doc = await vscode.workspace.openTextDocument({
+          content: JSON.stringify(result.data, null, 2),
+          language: "json"
         });
         await vscode.window.showTextDocument(doc);
       } else {

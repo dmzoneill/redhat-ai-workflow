@@ -316,7 +316,7 @@ export class SkillWebSocketClient {
         status: 'pending' as const,
       });
     }
-    
+
     skill.steps[stepIndex] = {
       index: stepIndex,
       name: stepName,

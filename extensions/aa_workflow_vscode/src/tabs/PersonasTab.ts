@@ -302,7 +302,7 @@ export class PersonasTab extends BaseTab {
         // Register click handler - can be called multiple times safely
         TabEventDelegation.registerClickHandler('personas', function(action, element, e) {
           const persona = element.dataset.persona;
-          
+
           switch(action) {
             case 'loadPersona':
               if (persona) vscode.postMessage({ command: 'loadPersona', persona });
@@ -329,12 +329,12 @@ export class PersonasTab extends BaseTab {
         const personasContainer = document.getElementById('personas');
         if (personasContainer && !personasContainer.dataset.extraClickInit) {
           personasContainer.dataset.extraClickInit = 'true';
-          
+
           personasContainer.addEventListener('click', function(e) {
             const target = e.target;
             // Skip if already handled by data-action
             if (target.closest('[data-action]')) return;
-            
+
             // Persona card clicks (for selection, but not on buttons)
             const personaCard = target.closest('.persona-card');
             if (personaCard && target.tagName !== 'BUTTON') {

@@ -13,10 +13,7 @@ if TYPE_CHECKING:
 
 # Import shared utilities from basic tools
 from server.tool_registry import ToolRegistry
-from tool_modules.aa_google_calendar.src.tools_basic import (
-    TIMEZONE,
-    get_calendar_service,
-)
+from tool_modules.aa_google_calendar.src.tools_basic import TIMEZONE, get_calendar_service
 
 
 async def _google_calendar_decline_event_impl(

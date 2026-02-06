@@ -89,11 +89,11 @@ sequenceDiagram
     loop For each step
         Engine->>WS: step_started event
         Engine->>Executor: Execute step
-        
+
         alt Has condition
             Executor->>Executor: Evaluate condition
         end
-        
+
         alt Has confirm
             Executor->>WS: confirmation_required
             WS-->>Executor: User response
@@ -101,7 +101,7 @@ sequenceDiagram
 
         Executor->>Tools: Call tool
         Tools-->>Executor: Tool result
-        
+
         alt Step succeeded
             Engine->>WS: step_completed event
         else Step failed

@@ -104,7 +104,7 @@ sequenceDiagram
     Note over Client,File: Read Operation
     Client->>Daemon: read("state/current_work")
     Daemon->>Cache: get(path)
-    
+
     alt Cache hit
         Cache-->>Daemon: Cached data
     else Cache miss
@@ -112,7 +112,7 @@ sequenceDiagram
         File-->>Daemon: File contents
         Daemon->>Cache: set(path, data)
     end
-    
+
     Daemon-->>Client: Data
 
     Note over Client,File: Write Operation

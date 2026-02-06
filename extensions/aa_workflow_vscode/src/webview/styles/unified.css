@@ -1158,10 +1158,10 @@ select {
 /* ============================================================================
    10.2 UTILITY CLASSES (Tailwind-like)
    ============================================================================
-   
+
    These utility classes replace common inline styles for consistency and
    maintainability. Use these instead of style="..." attributes.
-   
+
    NAMING CONVENTION:
    - Display: d-{value} (d-flex, d-grid, d-none, d-block)
    - Flex: flex-{property} (flex-row, flex-col, flex-center, flex-between)

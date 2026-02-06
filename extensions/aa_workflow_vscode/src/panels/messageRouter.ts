@@ -120,10 +120,10 @@ export class MessageRouter {
 
 /**
  * Handler for session-related messages.
- * 
+ *
  * NOTE: Many handlers removed - SessionsTab handles them directly:
  * - copySessionId, searchSessions, changeSessionGroupBy, changeSessionViewMode
- * 
+ *
  * Remaining handlers are for messages NOT handled by SessionsTab:
  * - refresh/refreshWorkspaces/refreshSessionsNow - global refresh
  * - openChatSession - opens chat in Cursor (VSCode-specific)
@@ -175,10 +175,10 @@ export class SessionMessageHandler extends BaseMessageHandler {
 
 /**
  * Handler for Slack-related messages.
- * 
+ *
  * NOTE: Some handlers removed - SlackTab handles them directly:
  * - sendSlackMessage, approveSlackMessage, rejectSlackMessage, approveAllSlack
- * 
+ *
  * Remaining handlers are for messages NOT handled by SlackTab (different message names).
  */
 export class SlackMessageHandler extends BaseMessageHandler {
@@ -280,10 +280,10 @@ export class SlackMessageHandler extends BaseMessageHandler {
 
 /**
  * Handler for D-Bus and service-related messages.
- * 
+ *
  * NOTE: Some handlers removed - ServicesTab handles them directly:
  * - refreshServices, serviceControl, testOllamaInstance
- * 
+ *
  * Remaining handlers are for messages NOT handled by ServicesTab.
  */
 export class ServiceMessageHandler extends BaseMessageHandler {
@@ -645,10 +645,10 @@ export class SlackPersonaTestHandler extends BaseMessageHandler {
 
 /**
  * Handler for workspace-related messages.
- * 
+ *
  * NOTE: Some handlers removed - SessionsTab handles them directly:
  * - changeSessionGroupBy, changeSessionViewMode, refreshSessionsNow
- * 
+ *
  * Remaining handlers are for workspace management NOT handled by SessionsTab.
  */
 export class WorkspaceMessageHandler extends BaseMessageHandler {

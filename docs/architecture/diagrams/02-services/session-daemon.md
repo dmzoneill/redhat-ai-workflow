@@ -13,12 +13,12 @@ sequenceDiagram
     participant DBus as D-Bus
 
     Daemon->>DB: Watch for changes
-    
+
     loop Monitor Loop
         DB->>Daemon: New chat/session detected
         Daemon->>Daemon: Parse session data
         Daemon->>Memory: Update session state
-        
+
         alt Session has context
             Daemon->>Memory: Extract context
             Memory-->>Daemon: Stored

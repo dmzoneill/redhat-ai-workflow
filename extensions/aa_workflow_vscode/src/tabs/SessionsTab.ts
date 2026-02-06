@@ -418,12 +418,12 @@ export class SessionsTab extends BaseTab {
     return `
       (function() {
         console.log('[SessionsTab] Script running, TabEventDelegation available:', typeof TabEventDelegation !== 'undefined');
-        
+
         // Register click handler for sessions tab
         TabEventDelegation.registerClickHandler('sessions', function(action, element, e) {
           console.log('[SessionsTab] Click handler called with action:', action);
           const sessionId = element.dataset.sessionId;
-          
+
           switch(action) {
             case 'newSession':
               vscode.postMessage({ command: 'newSession' });
@@ -599,7 +599,7 @@ export class SessionsTab extends BaseTab {
       if (result.success && result.data) {
         const data = result.data as any;
         const tools = data.tools || [];
-        
+
         // Show tools in a quick pick or information message
         if (tools.length > 0) {
           const toolList = tools.slice(0, 20).map((t: any) => t.name || t).join(', ');

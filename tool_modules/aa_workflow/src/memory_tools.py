@@ -78,9 +78,7 @@ def _resolve_memory_path(key: str) -> Path:
     # Check if this is a project-specific key
     if key_normalized in PROJECT_SPECIFIC_KEYS:
         try:
-            from tool_modules.aa_workflow.src.chat_context import (
-                get_project_work_state_path,
-            )
+            from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
 
             return get_project_work_state_path()
         except ImportError:
@@ -129,9 +127,7 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
 
         # Fall back to sync version
         try:
-            from tool_modules.aa_workflow.src.chat_context import (
-                get_project_work_state_path,
-            )
+            from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
 
             return get_project_work_state_path()
         except ImportError:

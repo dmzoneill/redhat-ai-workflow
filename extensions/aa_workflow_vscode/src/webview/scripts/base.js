@@ -47,19 +47,19 @@ function showReconnectBanner() {
   const banner = document.createElement('div');
   banner.id = 'reconnectBanner';
   banner.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; background: #f59e0b; color: #000; padding: 12px 20px; text-align: center; font-weight: 600; z-index: 9999; display: flex; justify-content: center; align-items: center; gap: 16px;';
-  
+
   const textSpan = document.createElement('span');
   textSpan.textContent = '⚠️ Command Center is disconnected from the extension. ';
-  
+
   const reloadBtn = document.createElement('button');
   reloadBtn.textContent = 'Reload Panel';
   reloadBtn.style.cssText = 'background: #000; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-weight: 600;';
   reloadBtn.addEventListener('click', () => location.reload());
-  
+
   const helpSpan = document.createElement('span');
   helpSpan.style.cssText = 'font-weight: normal; font-size: 0.9em;';
   helpSpan.textContent = ' or close this tab and reopen via Command Palette';
-  
+
   banner.appendChild(textSpan);
   banner.appendChild(reloadBtn);
   banner.appendChild(helpSpan);
@@ -395,14 +395,14 @@ function formatInferenceResult(data) {
 const TabEventDelegation = (function() {
   // Store handlers by tab ID -> event type -> handler function
   const handlers = new Map();
-  
+
   // Track if global listeners are set up
   let initialized = false;
-  
+
   /**
    * Register a click handler for a tab.
    * Can be called multiple times - will replace the previous handler.
-   * 
+   *
    * @param {string} tabId - The tab container ID (e.g., 'sessions', 'slack')
    * @param {function} handler - Handler function(action, element, event)
    */
@@ -413,10 +413,10 @@ const TabEventDelegation = (function() {
     handlers.get(tabId).click = handler;
     console.log(`[TabEventDelegation] Registered click handler for #${tabId}`);
   }
-  
+
   /**
    * Register a change handler for a tab (for selects, inputs).
-   * 
+   *
    * @param {string} tabId - The tab container ID
    * @param {function} handler - Handler function(element, event)
    */
@@ -427,10 +427,10 @@ const TabEventDelegation = (function() {
     handlers.get(tabId).change = handler;
     console.log(`[TabEventDelegation] Registered change handler for #${tabId}`);
   }
-  
+
   /**
    * Register a keypress handler for a tab.
-   * 
+   *
    * @param {string} tabId - The tab container ID
    * @param {function} handler - Handler function(element, event)
    */
@@ -441,31 +441,31 @@ const TabEventDelegation = (function() {
     handlers.get(tabId).keypress = handler;
     console.log(`[TabEventDelegation] Registered keypress handler for #${tabId}`);
   }
-  
+
   /**
    * Initialize global event listeners (called once).
    */
   function init() {
     if (initialized) return;
     initialized = true;
-    
+
     // Global click delegation
     document.addEventListener('click', function(e) {
       const actionBtn = e.target.closest('[data-action]');
       if (!actionBtn) return;
-      
+
       const action = actionBtn.dataset.action;
-      
+
       // Find which tab container this belongs to
       const tabContent = actionBtn.closest('.tab-content');
       if (!tabContent) {
         console.log(`[TabEventDelegation] Click on ${action} - no tab container found`);
         return;
       }
-      
+
       const tabId = tabContent.id;
       const tabHandlers = handlers.get(tabId);
-      
+
       if (tabHandlers && tabHandlers.click) {
         console.log(`[TabEventDelegation] Dispatching click '${action}' to #${tabId}`);
         tabHandlers.click(action, actionBtn, e);
@@ -473,50 +473,50 @@ const TabEventDelegation = (function() {
         console.log(`[TabEventDelegation] No click handler for #${tabId}, action: ${action}`);
       }
     });
-    
+
     // Global change delegation
     document.addEventListener('change', function(e) {
       const target = e.target;
       if (!target.matches('select, input[type="checkbox"], input[type="radio"]')) return;
-      
+
       const tabContent = target.closest('.tab-content');
       if (!tabContent) return;
-      
+
       const tabId = tabContent.id;
       const tabHandlers = handlers.get(tabId);
-      
+
       if (tabHandlers && tabHandlers.change) {
         console.log(`[TabEventDelegation] Dispatching change to #${tabId}`);
         tabHandlers.change(target, e);
       }
     });
-    
+
     // Global keypress delegation
     document.addEventListener('keypress', function(e) {
       const target = e.target;
       if (!target.matches('input, textarea')) return;
-      
+
       const tabContent = target.closest('.tab-content');
       if (!tabContent) return;
-      
+
       const tabId = tabContent.id;
       const tabHandlers = handlers.get(tabId);
-      
+
       if (tabHandlers && tabHandlers.keypress) {
         tabHandlers.keypress(target, e);
       }
     });
-    
+
     console.log('[TabEventDelegation] Initialized global event listeners');
   }
-  
+
   /**
    * Check if a tab has handlers registered.
    */
   function hasHandlers(tabId) {
     return handlers.has(tabId);
   }
-  
+
   /**
    * Get debug info about registered handlers.
    */
@@ -527,10 +527,10 @@ const TabEventDelegation = (function() {
     });
     return info;
   }
-  
+
   // Auto-initialize
   init();
-  
+
   return {
     registerClickHandler,
     registerChangeHandler,

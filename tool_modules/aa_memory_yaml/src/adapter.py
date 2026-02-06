@@ -14,12 +14,7 @@ from typing import Any
 
 import yaml
 
-from services.memory_abstraction.models import (
-    AdapterResult,
-    HealthStatus,
-    MemoryItem,
-    SourceFilter,
-)
+from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
 from services.memory_abstraction.registry import memory_adapter
 from tool_modules.common import PROJECT_ROOT
 

@@ -704,9 +704,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             Export status and file path.
         """
         try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
+            from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
 
             result = await export_workspace_state_async(ctx)
 
@@ -789,9 +787,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
 
         # Auto-export to update VS Code extension
         try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
+            from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
 
             await export_workspace_state_async(ctx)
         except Exception:
@@ -889,9 +885,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
 
         # Auto-export
         try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
+            from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
 
             await export_workspace_state_async(ctx)
         except Exception:
@@ -939,9 +933,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
 
         # Export for VS Code extension
         try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
+            from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
 
             await export_workspace_state_async(ctx)
         except Exception:
@@ -1030,9 +1022,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
             Summary of sync operations performed.
         """
         from server.workspace_state import WorkspaceRegistry
-        from tool_modules.aa_workflow.src.workspace_exporter import (
-            export_workspace_state_async,
-        )
+        from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
 
         workspace = await WorkspaceRegistry.get_for_ctx(ctx)
 

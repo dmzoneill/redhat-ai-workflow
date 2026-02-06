@@ -94,11 +94,11 @@ sequenceDiagram
     participant Index as Vector Index
 
     Tool->>Tool: Scan codebase
-    
+
     loop For each file
         Tool->>Chunker: chunk_file(path)
         Chunker-->>Tool: Code chunks
-        
+
         loop For each chunk
             Tool->>Model: encode(chunk)
             Model-->>Tool: Embedding vector

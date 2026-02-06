@@ -108,10 +108,10 @@ sequenceDiagram
 
     loop While running
         Loop->>Loop: Wait for trigger
-        
+
         alt Trigger condition met
             Loop->>Task: Execute task
-            
+
             alt Task succeeds
                 Task-->>Loop: Success result
                 Loop->>Memory: Log success
@@ -119,7 +119,7 @@ sequenceDiagram
             else Task fails
                 Task-->>Loop: Error
                 Loop->>Loop: Increment error_count
-                
+
                 alt Retries remaining
                     Loop->>Loop: Wait retry_delay
                     Loop->>Task: Retry task

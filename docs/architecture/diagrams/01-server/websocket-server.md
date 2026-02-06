@@ -25,14 +25,14 @@ sequenceDiagram
     loop For each step
         Skill->>WS: step_started(skill_id, index, name)
         WS->>Extension: step_started event
-        
+
         alt Step succeeds
             Skill->>WS: step_completed(skill_id, index, duration)
             WS->>Extension: step_completed event
         else Step fails
             Skill->>WS: step_failed(skill_id, index, error)
             WS->>Extension: step_failed event
-            
+
             alt Auto-heal triggered
                 AutoHeal->>WS: auto_heal_triggered(skill_id, type, action)
                 WS->>Extension: auto_heal_triggered event

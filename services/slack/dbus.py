@@ -2037,72 +2037,78 @@ if DBUS_AVAILABLE:
                 jira_source = context.get_source("jira")
                 memory_source = context.get_source("memory")
 
-                return json.dumps({
-                    "query": query,
-                    "elapsed_ms": context.total_latency_ms,
-                    "total_results": context.total_results,
-                    "formatted": context.formatted,
-                    "sources": [
-                        {
-                            "source": s.source,
-                            "found": s.found,
-                            "count": s.count,
-                            "error": s.error,
-                            "latency_ms": s.latency_ms,
-                            "results": s.results[:3] if s.results else [],  # Limit results for UI
-                        }
-                        for s in context.sources
-                    ],
-                    "sources_used": [s.source for s in context.sources if s.found],
-                    "status": {
-                        "slack_persona": {
-                            "synced": slack_source.found if slack_source else False,
-                            "total_messages": slack_source.count if slack_source else 0,
-                            "error": slack_source.error if slack_source else None,
+                return json.dumps(
+                    {
+                        "query": query,
+                        "elapsed_ms": context.total_latency_ms,
+                        "total_results": context.total_results,
+                        "formatted": context.formatted,
+                        "sources": [
+                            {
+                                "source": s.source,
+                                "found": s.found,
+                                "count": s.count,
+                                "error": s.error,
+                                "latency_ms": s.latency_ms,
+                                "results": s.results[:3] if s.results else [],  # Limit results for UI
+                            }
+                            for s in context.sources
+                        ],
+                        "sources_used": [s.source for s in context.sources if s.found],
+                        "status": {
+                            "slack_persona": {
+                                "synced": slack_source.found if slack_source else False,
+                                "total_messages": slack_source.count if slack_source else 0,
+                                "error": slack_source.error if slack_source else None,
+                            },
+                            "code_search": {
+                                "indexed": code_source.found if code_source else False,
+                                "chunks": code_source.count if code_source else 0,
+                                "error": code_source.error if code_source else None,
+                            },
+                            "inscope": {
+                                "authenticated": inscope_source.found if inscope_source else False,
+                                "assistants": 20 if inscope_source and inscope_source.found else 0,
+                                "error": inscope_source.error if inscope_source else None,
+                            },
                         },
-                        "code_search": {
-                            "indexed": code_source.found if code_source else False,
-                            "chunks": code_source.count if code_source else 0,
-                            "error": code_source.error if code_source else None,
-                        },
-                        "inscope": {
-                            "authenticated": inscope_source.found if inscope_source else False,
-                            "assistants": 20 if inscope_source and inscope_source.found else 0,
-                            "error": inscope_source.error if inscope_source else None,
-                        },
-                    },
-                    "project": "automation-analytics-backend",
-                })
+                        "project": "automation-analytics-backend",
+                    }
+                )
             except ImportError as e:
                 logger.error(f"RunPersonaTest import error: {e}")
-                return json.dumps({
-                    "query": query,
-                    "error": f"Context injector not available: {e}",
-                    "elapsed_ms": 0,
-                    "total_results": 0,
-                    "sources": [],
-                    "sources_used": [],
-                    "status": {
-                        "slack_persona": {"synced": False, "error": str(e)},
-                        "code_search": {"indexed": False, "error": str(e)},
-                        "inscope": {"authenticated": False, "error": str(e)},
-                    },
-                })
+                return json.dumps(
+                    {
+                        "query": query,
+                        "error": f"Context injector not available: {e}",
+                        "elapsed_ms": 0,
+                        "total_results": 0,
+                        "sources": [],
+                        "sources_used": [],
+                        "status": {
+                            "slack_persona": {"synced": False, "error": str(e)},
+                            "code_search": {"indexed": False, "error": str(e)},
+                            "inscope": {"authenticated": False, "error": str(e)},
+                        },
+                    }
+                )
             except Exception as e:
                 logger.error(f"RunPersonaTest error: {e}")
-                return json.dumps({
-                    "query": query,
-                    "error": str(e),
-                    "elapsed_ms": 0,
-                    "total_results": 0,
-                    "sources": [],
-                    "sources_used": [],
-                    "status": {
-                        "slack_persona": {"synced": False, "error": str(e)},
-                        "code_search": {"indexed": False, "error": str(e)},
-                        "inscope": {"authenticated": False, "error": str(e)},
-                    },
-                })
+                return json.dumps(
+                    {
+                        "query": query,
+                        "error": str(e),
+                        "elapsed_ms": 0,
+                        "total_results": 0,
+                        "sources": [],
+                        "sources_used": [],
+                        "status": {
+                            "slack_persona": {"synced": False, "error": str(e)},
+                            "code_search": {"indexed": False, "error": str(e)},
+                            "inscope": {"authenticated": False, "error": str(e)},
+                        },
+                    }
+                )
 
         # ==================== Signals ====================
 

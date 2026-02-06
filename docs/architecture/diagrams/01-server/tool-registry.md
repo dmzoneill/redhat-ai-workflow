@@ -60,7 +60,7 @@ sequenceDiagram
     participant FastMCP as FastMCP Server
 
     Module->>Registry: registry = ToolRegistry(server)
-    
+
     loop For each tool function
         Module->>Registry: @registry.tool()
         Registry->>Registry: tools.append(tool_name)

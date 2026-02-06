@@ -19,29 +19,30 @@ from typing import Any
 class SourceFilter:
     """
     Filter for source-specific queries.
-    
+
     Allows specifying which source to query and with what parameters.
-    
+
     Examples:
         # Simple name-only filter
         SourceFilter(name="code")
-        
+
         # Filter with project context
         SourceFilter(name="code", project="automation-analytics-backend")
-        
+
         # Filter with limit
         SourceFilter(name="slack", limit=5)
-        
+
         # Filter with extra parameters
         SourceFilter(name="inscope", extra={"assistant": "app-interface"})
     """
-    name: str                           # Adapter name: "code", "slack", "yaml", etc.
-    project: str | None = None          # Project context
-    namespace: str | None = None        # Kubernetes namespace context
-    limit: int | None = None            # Max results to return
-    key: str | None = None              # Specific key for YAML adapter
-    extra: dict[str, Any] | None = None # Source-specific parameters
-    
+
+    name: str  # Adapter name: "code", "slack", "yaml", etc.
+    project: str | None = None  # Project context
+    namespace: str | None = None  # Kubernetes namespace context
+    limit: int | None = None  # Max results to return
+    key: str | None = None  # Specific key for YAML adapter
+    extra: dict[str, Any] | None = None  # Source-specific parameters
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SourceFilter":
         """Create SourceFilter from dictionary."""
@@ -53,7 +54,7 @@ class SourceFilter:
             key=data.get("key"),
             extra=data.get("extra"),
         )
-    
+
     @classmethod
     def from_string(cls, name: str) -> "SourceFilter":
         """Create SourceFilter from simple string name."""
@@ -64,18 +65,19 @@ class SourceFilter:
 class MemoryItem:
     """
     Single result item from any source.
-    
+
     Represents a piece of information retrieved from a memory source,
     with metadata about its origin and relevance.
     """
-    source: str                         # Source adapter: "code", "slack", "yaml", etc.
-    type: str                           # Item type: "code_snippet", "message", "state", etc.
-    relevance: float                    # Relevance score: 0.0 - 1.0
-    summary: str                        # One-line summary for quick scanning
-    content: str                        # Full content (may be truncated)
+
+    source: str  # Source adapter: "code", "slack", "yaml", etc.
+    type: str  # Item type: "code_snippet", "message", "state", etc.
+    relevance: float  # Relevance score: 0.0 - 1.0
+    summary: str  # One-line summary for quick scanning
+    content: str  # Full content (may be truncated)
     metadata: dict[str, Any] = field(default_factory=dict)  # Source-specific metadata
-    timestamp: datetime | None = None   # When the item was created/modified
-    
+    timestamp: datetime | None = None  # When the item was created/modified
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -93,14 +95,15 @@ class MemoryItem:
 class IntentClassification:
     """
     Classification of query intent.
-    
+
     Used to determine which sources to query and how to interpret results.
     Always included in QueryResult to help LLM understand context.
     """
-    intent: str                         # Intent type: "code_lookup", "troubleshooting", etc.
-    confidence: float                   # Confidence score: 0.0 - 1.0
+
+    intent: str  # Intent type: "code_lookup", "troubleshooting", etc.
+    confidence: float  # Confidence score: 0.0 - 1.0
     sources_suggested: list[str] = field(default_factory=list)  # Recommended sources
-    
+
     # Known intent types
     INTENTS = {
         "code_lookup": "Find code, implementation, function",
@@ -112,7 +115,7 @@ class IntentClassification:
         "issue_context": "Jira issue details",
         "general": "General query, no specific intent",
     }
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -126,23 +129,24 @@ class IntentClassification:
 class AdapterResult:
     """
     Result from a single adapter query.
-    
+
     Each adapter returns this structure, which is then merged
     by the ResultMerger into the final QueryResult.
     """
-    source: str                         # Adapter name
+
+    source: str  # Adapter name
     items: list[MemoryItem] = field(default_factory=list)  # Result items
-    error: str | None = None            # Error message if query failed
-    latency_ms: float = 0.0             # Query latency in milliseconds
+    error: str | None = None  # Error message if query failed
+    latency_ms: float = 0.0  # Query latency in milliseconds
     _found: bool | None = field(default=None, repr=False)  # Optional explicit found flag
-    
+
     @property
     def found(self) -> bool:
         """Whether any results were found (derived from items if not set)."""
         if self._found is not None:
             return self._found
         return len(self.items) > 0
-    
+
     def __init__(
         self,
         source: str,
@@ -156,7 +160,7 @@ class AdapterResult:
         self.error = error
         self.latency_ms = latency_ms
         self._found = found  # Store for backward compat but prefer deriving
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -172,26 +176,27 @@ class AdapterResult:
 class QueryResult:
     """
     Combined result from memory query/search.
-    
+
     Contains results from all queried sources, merged and ranked,
     along with intent classification for LLM context.
     """
-    query: str                          # Original query
-    intent: IntentClassification        # Intent classification (always included)
+
+    query: str  # Original query
+    intent: IntentClassification  # Intent classification (always included)
     sources_queried: list[str] = field(default_factory=list)  # Sources that were searched
-    items: list[MemoryItem] = field(default_factory=list)     # Results, sorted by relevance
-    total_count: int = 0                # Total matches (items may be truncated)
-    latency_ms: float = 0.0             # Total query time
-    errors: dict[str, str] = field(default_factory=dict)      # Source -> error message
-    
+    items: list[MemoryItem] = field(default_factory=list)  # Results, sorted by relevance
+    total_count: int = 0  # Total matches (items may be truncated)
+    latency_ms: float = 0.0  # Total query time
+    errors: dict[str, str] = field(default_factory=dict)  # Source -> error message
+
     def has_results(self) -> bool:
         """Check if any results were found."""
         return len(self.items) > 0
-    
+
     def get_items_by_source(self, source: str) -> list[MemoryItem]:
         """Get items from a specific source."""
         return [item for item in self.items if item.source == source]
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -209,13 +214,14 @@ class QueryResult:
 class HealthStatus:
     """
     Health check result for an adapter.
-    
+
     Used to determine if an adapter is available and functioning.
     """
-    healthy: bool                       # Whether the adapter is healthy
-    error: str | None = None            # Error message if unhealthy
+
+    healthy: bool  # Whether the adapter is healthy
+    error: str | None = None  # Error message if unhealthy
     details: dict[str, Any] = field(default_factory=dict)  # Additional health info
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -229,19 +235,20 @@ class HealthStatus:
 class AdapterInfo:
     """
     Metadata about a registered adapter.
-    
+
     Stored in ADAPTER_MANIFEST when an adapter is registered
     via the @memory_adapter decorator.
     """
-    name: str                           # Unique ID: "code", "slack", "yaml"
-    module: str                         # Source module: "code_search", "slack_persona"
-    display_name: str                   # Human readable: "Code Search"
-    capabilities: set[str]              # {"query", "store", "search"}
-    intent_keywords: list[str]          # For routing: ["function", "class"]
-    priority: int = 50                  # Higher = preferred when multiple match
-    source_file: str = ""               # Path to adapter source file
-    adapter_class: type | None = None   # The adapter class itself
-    
+
+    name: str  # Unique ID: "code", "slack", "yaml"
+    module: str  # Source module: "code_search", "slack_persona"
+    display_name: str  # Human readable: "Code Search"
+    capabilities: set[str]  # {"query", "store", "search"}
+    intent_keywords: list[str]  # For routing: ["function", "class"]
+    priority: int = 50  # Higher = preferred when multiple match
+    source_file: str = ""  # Path to adapter source file
+    adapter_class: type | None = None  # The adapter class itself
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary (excluding class reference)."""
         return {

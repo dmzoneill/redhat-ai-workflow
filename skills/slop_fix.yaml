@@ -4,14 +4,14 @@
 name: slop_fix
 description: |
   Auto-fix high-confidence slop findings in the codebase.
-  
+
   Only fixes issues with >90% confidence score:
   - unused_imports: Remove import lines
   - unused_variables: Remove or prefix with _
   - bare_except: Change to except Exception:
   - empty_except: Add logger.exception()
   - dead_code: Remove unused functions/classes
-  
+
   Safe for automated runs - only applies deterministic fixes.
 
 version: "1.0"
@@ -47,9 +47,9 @@ steps:
     compute: |
       import os
       from pathlib import Path
-      
+
       db_path = Path.home() / ".config" / "aa-workflow" / "slop.db"
-      
+
       if not db_path.exists():
           result = "❌ Slop database not found. Run slop_scan first."
       else:
@@ -58,7 +58,7 @@ steps:
           cursor = conn.execute("SELECT COUNT(*) FROM findings WHERE status = 'open'")
           count = cursor.fetchone()[0]
           conn.close()
-          
+
           if count == 0:
               result = "✅ No open findings in database."
           else:
@@ -106,19 +106,19 @@ outputs:
   - name: summary
     value: |
       ## Slop Auto-Fix Results
-      
+
       ### Database Status
       {{ db_status }}
-      
+
       {% if should_skip %}
       No fixes needed.
       {% else %}
       ### Fixable Findings
       {{ fixable_list }}
-      
+
       ### Fix Results
       {{ fix_result }}
       {% endif %}
-      
+
       ---
       Run with `dry_run=true` to preview changes before applying.

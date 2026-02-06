@@ -45,6 +45,7 @@ _PROJECT_ROOT = os.path.dirname(_services_dir)  # project root
 
 # Add tool_modules to path for src imports
 import sys
+
 sys.path.insert(0, os.path.join(_PROJECT_ROOT, "tool_modules", "aa_slack"))
 
 from dotenv import load_dotenv
@@ -2299,7 +2300,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
     async def start_dbus(self):
         """
         Override base class start_dbus to use the custom SlackPersonaDBusInterface.
-        
+
         This provides the full Slack-specific D-Bus API (GetMyChannels, GetPending, etc.)
         instead of just the basic daemon methods.
         """
@@ -2404,13 +2405,13 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
 
     async def _watchdog_loop_internal(self, interval: float):
         """Periodically notify systemd that the daemon is healthy.
-        
+
         Verifies D-Bus interface is responding before sending ping.
         """
         from services.base.daemon import sd_notify
-        
+
         logger.info(f"Watchdog enabled, pinging every {interval:.1f}s")
-        
+
         while self._running:
             try:
                 # Verify D-Bus is working (if enabled)
@@ -2419,7 +2420,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
                     if not (hasattr(self._dbus_handler, "_bus") and self._dbus_handler._bus):
                         logger.warning("Watchdog: D-Bus not connected")
                         healthy = False
-                
+
                 # Verify listener is running
                 if healthy and self.listener:
                     try:
@@ -2430,15 +2431,15 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
                     except Exception as e:
                         logger.warning(f"Watchdog: Listener check failed: {e}")
                         healthy = False
-                
+
                 if healthy:
                     sd_notify("WATCHDOG=1")
                 else:
                     logger.warning("Watchdog: Health check failed, not sending ping")
-                    
+
             except Exception as e:
                 logger.error(f"Watchdog loop error: {e}")
-            
+
             # Wait for next interval
             await asyncio.sleep(interval)
 
@@ -2918,7 +2919,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
     async def shutdown(self):
         """Clean up daemon resources."""
         logger.info("Slack daemon shutting down...")
-        
+
         self._running = False
 
         # Desktop notification

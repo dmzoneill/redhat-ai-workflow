@@ -53,7 +53,7 @@ sequenceDiagram
     participant Cache as Response Cache
 
     Tool->>Cache: Check cache
-    
+
     alt Cache hit
         Cache-->>Tool: Cached response
     else Cache miss

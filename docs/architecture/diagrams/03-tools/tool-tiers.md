@@ -83,10 +83,10 @@ sequenceDiagram
     participant Module as Tool Module
 
     Persona->>Loader: tools: [jira_basic, jira_core]
-    
+
     loop For each tool spec
         Loader->>Loader: Parse module_tier
-        
+
         alt tier = basic
             Loader->>Module: Load tools_basic.py
         else tier = core

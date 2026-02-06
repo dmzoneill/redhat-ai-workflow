@@ -11,12 +11,7 @@ This adapter provides memory access to GitLab data including:
 import logging
 from typing import Any
 
-from services.memory_abstraction.models import (
-    AdapterResult,
-    HealthStatus,
-    MemoryItem,
-    SourceFilter,
-)
+from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
 from services.memory_abstraction.registry import memory_adapter
 
 logger = logging.getLogger(__name__)

@@ -61,7 +61,7 @@ sequenceDiagram
 
     Tool->>Auth: get_credentials()
     Auth->>Token: Load token
-    
+
     alt Token valid
         Token-->>Auth: Valid token
     else Token expired

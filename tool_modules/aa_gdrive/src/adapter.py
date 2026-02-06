@@ -8,12 +8,7 @@ allowing the memory abstraction layer to query documents.
 import logging
 from typing import Any
 
-from services.memory_abstraction.models import (
-    AdapterResult,
-    HealthStatus,
-    MemoryItem,
-    SourceFilter,
-)
+from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
 from services.memory_abstraction.registry import memory_adapter
 
 logger = logging.getLogger(__name__)
@@ -68,14 +63,10 @@ class GoogleDriveAdapter:
             AdapterResult with matching files
         """
         try:
-            from tool_modules.aa_gdrive.src.tools_basic import (
-                get_drive_service,
-            )
+            from tool_modules.aa_gdrive.src.tools_basic import get_drive_service
         except ImportError:
             try:
-                from .tools_basic import (
-                    get_drive_service,
-                )
+                from .tools_basic import get_drive_service
             except ImportError:
                 return AdapterResult(
                     source="gdrive",

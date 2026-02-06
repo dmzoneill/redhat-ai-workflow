@@ -125,9 +125,7 @@ class ContextInjector:
         if self._slack_available is not None:
             return self._slack_available
         try:
-            from tool_modules.aa_slack_persona.src.sync import (  # noqa: F401
-                SlackPersonaSync,
-            )
+            from tool_modules.aa_slack_persona.src.sync import SlackPersonaSync  # noqa: F401
 
             self._slack_available = True
         except ImportError:
@@ -140,9 +138,7 @@ class ContextInjector:
         if self._code_available is not None:
             return self._code_available
         try:
-            from tool_modules.aa_code_search.src.tools_basic import (  # noqa: F401
-                _search_code,
-            )
+            from tool_modules.aa_code_search.src.tools_basic import _search_code  # noqa: F401
 
             self._code_available = True
         except ImportError:
@@ -158,10 +154,7 @@ class ContextInjector:
             # Also check if we have auth configured
             import asyncio
 
-            from tool_modules.aa_inscope.src.tools_basic import (  # noqa: F401
-                _get_auth_token,
-                _inscope_ask_impl,
-            )
+            from tool_modules.aa_inscope.src.tools_basic import _get_auth_token, _inscope_ask_impl  # noqa: F401
 
             token = asyncio.get_event_loop().run_until_complete(_get_auth_token())
             self._inscope_available = token is not None
@@ -254,10 +247,7 @@ class ContextInjector:
             )
 
         try:
-            from tool_modules.aa_code_search.src.tools_basic import (
-                _get_index_stats,
-                _search_code,
-            )
+            from tool_modules.aa_code_search.src.tools_basic import _get_index_stats, _search_code
 
             # Check if project is indexed
             stats = _get_index_stats(self.project)
@@ -804,11 +794,7 @@ class ContextInjector:
         start = time.time()
 
         try:
-            from services.memory_abstraction import (
-                MemoryInterface,
-                SourceFilter,
-                get_memory_interface,
-            )
+            from services.memory_abstraction import MemoryInterface, SourceFilter, get_memory_interface
 
             # Get or create memory interface
             try:

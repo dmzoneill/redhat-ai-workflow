@@ -51,12 +51,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# Import centralized paths
+from server.paths import AA_CONFIG_DIR, SESSION_STATE_FILE
 from services.base.daemon import BaseDaemon
 from services.base.dbus import DaemonDBusBase, get_client
 from services.base.sleep_wake import SleepWakeAwareDaemon
-
-# Import centralized paths
-from server.paths import AA_CONFIG_DIR, SESSION_STATE_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +180,11 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         # Only core checks required for health - uptime_ok and recent_sync are informational
         core_checks = ["running", "config_loaded"]
         healthy = all(checks.get(k, False) for k in core_checks)
-        message = "Session daemon is healthy" if healthy else f"Unhealthy: {[k for k in core_checks if not checks.get(k, False)]}"
+        message = (
+            "Session daemon is healthy"
+            if healthy
+            else f"Unhealthy: {[k for k in core_checks if not checks.get(k, False)]}"
+        )
 
         return {
             "healthy": healthy,

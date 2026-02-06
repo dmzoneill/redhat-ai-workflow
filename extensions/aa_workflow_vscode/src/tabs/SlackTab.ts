@@ -2,7 +2,7 @@
  * Slack Tab
  *
  * Displays Slack bot status, channels, pending messages, and history.
- * 
+ *
  * Architecture: Uses SlackService (via this.services.slack) for business logic.
  * Falls back to direct D-Bus calls for operations not yet in the service.
  */
@@ -165,7 +165,7 @@ export class SlackTab extends BaseTab {
   private userSearchQuery = "";
   private userSearchResults: SlackUser[] = [];
   private threadView: { channelId: string; threadTs: string; replies: ThreadReply[] } | null = null;
-  
+
   // Context Injection state
   private contextTestQuery = "";
   private contextTestResult: PersonaTestResult | null = null;
@@ -183,7 +183,7 @@ export class SlackTab extends BaseTab {
   };
   private recentChannelMessages: SlackMessage[] = [];
   private selectedThreadForContext: string | null = null;
-  
+
   // Legacy - keeping for compatibility
   private personaTestQuery = "";
   private personaTestResult: PersonaTestResult | null = null;
@@ -577,7 +577,7 @@ export class SlackTab extends BaseTab {
     const codeStatus = status?.code_search;
     const inscopeStatus = status?.inscope;
     const hasTestResult = !!this.contextTestResult;
-    
+
     // Get source results if available
     const slackSource = this.contextTestResult?.sources?.find(s => s.source === "slack" || s.source === "slack_persona");
     const codeSource = this.contextTestResult?.sources?.find(s => s.source === "code" || s.source === "code_search");
@@ -592,14 +592,14 @@ export class SlackTab extends BaseTab {
       if (slackStatus?.error) return `<span class="text-error">❌ ${slackStatus.error}</span>`;
       return `<span class="text-warning">⚠️ Not synced</span>`;
     };
-    
+
     const renderCodeStatus = () => {
       if (!hasTestResult) return `<span class="text-secondary">⏳ Run test to check</span>`;
       if (codeStatus?.indexed) return `<span class="text-success">✅ ${(codeStatus.chunks || 0).toLocaleString()} chunks</span>`;
       if (codeStatus?.error) return `<span class="text-error">❌ ${codeStatus.error}</span>`;
       return `<span class="text-warning">⚠️ Not indexed</span>`;
     };
-    
+
     const renderInscopeStatus = () => {
       if (!hasTestResult) return `<span class="text-secondary">⏳ Run test to check</span>`;
       if (inscopeStatus?.authenticated) return `<span class="text-success">✅ ${inscopeStatus.assistants || 20} assistants</span>`;
@@ -617,7 +617,7 @@ export class SlackTab extends BaseTab {
 
         <!-- Knowledge Sources Status Grid - 5 columns -->
         <div class="context-sources-grid">
-          
+
           <!-- Slack Vector DB -->
           <div class="context-source-card purple">
             <div class="card-header">
@@ -673,7 +673,7 @@ export class SlackTab extends BaseTab {
               </div>
             </div>
             <div class="card-status">
-              ${jiraSource?.found 
+              ${jiraSource?.found
                 ? `<span class="text-success">✅ ${jiraSource.count} issues</span>`
                 : `<span class="text-secondary">Detects AAP-XXXXX</span>`}
             </div>
@@ -690,7 +690,7 @@ export class SlackTab extends BaseTab {
               </div>
             </div>
             <div class="card-status">
-              ${memorySource?.found 
+              ${memorySource?.found
                 ? `<span class="text-success">✅ ${memorySource.count} items</span>`
                 : `<span class="text-secondary">Active issues, branch</span>`}
             </div>
@@ -701,16 +701,16 @@ export class SlackTab extends BaseTab {
         <!-- Test Input Section -->
         <div class="context-test-section">
           <div class="font-bold mb-12">Test Context Gathering</div>
-          
+
           <!-- Input field -->
           <div class="d-flex gap-8 mb-12">
-            <input type="text" 
-                   class="context-test-input flex-1" 
+            <input type="text"
+                   class="context-test-input flex-1"
                    id="contextTestQuery"
                    placeholder="Enter a question or sentence to test... e.g., 'How does billing work?'"
                    value="${this.escapeHtml(this.contextTestQuery)}" />
             <button class="btn btn-primary px-16"
-                    data-action="runContextTest" 
+                    data-action="runContextTest"
                     ${this.isGatheringContext ? "disabled" : ""}>
               ${this.isGatheringContext ? "⏳ Gathering..." : "🔍 Gather Context"}
             </button>
@@ -731,11 +731,11 @@ export class SlackTab extends BaseTab {
           <div class="options-row">
             <span class="text-sm text-secondary">Additional context:</span>
             <label class="option-label">
-              <input type="checkbox" id="includeThreadContext" checked /> 
+              <input type="checkbox" id="includeThreadContext" checked />
               Thread context
             </label>
             <label class="option-label">
-              <input type="checkbox" id="includeChannelRecent" checked /> 
+              <input type="checkbox" id="includeChannelRecent" checked />
               Recent channel messages
             </label>
             <button class="btn btn-xs ml-auto" data-action="fetchChannelContext">
@@ -793,7 +793,7 @@ export class SlackTab extends BaseTab {
 
     for (const source of sources) {
       const sourceConfig = this.getSourceConfig(source.source);
-      
+
       html += `
         <div class="context-source-results card overflow-hidden">
           <div class="flex-between p-12 border-b" style="background: rgba(${sourceConfig.color},0.1);">
@@ -810,17 +810,17 @@ export class SlackTab extends BaseTab {
 
       if (source.found && source.results.length > 0) {
         html += `<div class="p-12 d-flex flex-col gap-8">`;
-        
+
         for (const item of source.results.slice(0, 5)) {
           html += this.renderContextResultItem(source.source, item, sourceConfig.color);
         }
-        
+
         if (source.results.length > 5) {
           html += `<div class="text-center p-8 text-secondary text-sm">
             ...and ${source.results.length - 5} more results
           </div>`;
         }
-        
+
         html += `</div>`;
       }
 
@@ -864,7 +864,7 @@ export class SlackTab extends BaseTab {
   private renderContextResultItem(source: string, item: any, color: string): string {
     // Map source to CSS class for background color
     const bgClass = this.getSourceBgClass(source);
-    
+
     if (source === "slack" || source === "slack_persona") {
       return `
         <div class="result-item ${bgClass}">
@@ -920,7 +920,7 @@ export class SlackTab extends BaseTab {
       const assistant = item.assistant || "Unknown Assistant";
       const response = item.response || "";
       const sources = item.sources || [];
-      
+
       let sourcesHtml = "";
       if (sources.length > 0) {
         sourcesHtml = `
@@ -934,7 +934,7 @@ export class SlackTab extends BaseTab {
           </div>
         `;
       }
-      
+
       return `
         <div class="result-item ${bgClass}">
           <div class="result-item-header">
@@ -1271,12 +1271,12 @@ export class SlackTab extends BaseTab {
       // ============ Slack Tab Event Delegation ============
       (function() {
         const slackContainer = document.getElementById('slack');
-        
+
         // Fetch context injection status on page load (only once)
         if (slackContainer && !slackContainer.dataset.contextFetched) {
           slackContainer.dataset.contextFetched = 'true';
           const statusCards = slackContainer.querySelectorAll('.context-source-card');
-          const hasStatus = Array.from(statusCards).some(card => 
+          const hasStatus = Array.from(statusCards).some(card =>
             card.textContent?.includes('messages') || card.textContent?.includes('chunks')
           );
           if (!hasStatus) {
@@ -1380,8 +1380,8 @@ export class SlackTab extends BaseTab {
               const includeChannel = document.getElementById('includeChannelRecent');
               const query = input ? input.value.trim() : '';
               if (query) {
-                vscode.postMessage({ 
-                  command: 'runContextTest', 
+                vscode.postMessage({
+                  command: 'runContextTest',
                   query: query,
                   includeThread: includeThread ? includeThread.checked : true,
                   includeChannel: includeChannel ? includeChannel.checked : true
@@ -1428,7 +1428,7 @@ export class SlackTab extends BaseTab {
               }
             }
           });
-          
+
           // Sync context test input value as user types (to preserve during refresh)
           document.addEventListener('input', function(e) {
             const target = e.target;
@@ -1441,26 +1441,26 @@ export class SlackTab extends BaseTab {
         // Register keypress handler for Enter key
         TabEventDelegation.registerKeypressHandler('slack', function(element, e) {
           if (e.key !== 'Enter') return;
-          
+
           // Search input
           if (element.dataset && element.dataset.action === 'searchInput') {
             vscode.postMessage({ command: 'searchSlack', query: element.value });
             return;
           }
-          
+
           // User search input
           if (element.dataset && element.dataset.action === 'userSearchInput') {
             vscode.postMessage({ command: 'searchUsers', query: element.value });
             return;
           }
-          
+
           // Context test input
           if (element.id === 'contextTestQuery') {
             const includeThread = document.getElementById('includeThreadContext');
             const includeChannel = document.getElementById('includeChannelRecent');
             if (element.value) {
-              vscode.postMessage({ 
-                command: 'runContextTest', 
+              vscode.postMessage({
+                command: 'runContextTest',
                 query: element.value,
                 includeThread: includeThread ? includeThread.checked : true,
                 includeChannel: includeChannel ? includeChannel.checked : true
@@ -1500,7 +1500,7 @@ export class SlackTab extends BaseTab {
         return true;
 
       // ============ Context Injection Handlers ============
-      
+
       case "contextTestResult":
         // Received context gathering result from the backend
         if (message.data) {
@@ -1733,7 +1733,7 @@ export class SlackTab extends BaseTab {
     }
 
     this.searchQuery = query;
-    
+
     // Use SlackService if available (preferred), otherwise fall back to D-Bus
     if (this.services.slack) {
       logger.log("Using SlackService.searchMessages()");
@@ -1772,7 +1772,7 @@ export class SlackTab extends BaseTab {
 
   private async refreshChannelCache(): Promise<void> {
     vscode.window.showInformationMessage("Refreshing channel cache...");
-    
+
     // Use SlackService if available (preferred), otherwise fall back to D-Bus
     if (this.services.slack) {
       logger.log("Using SlackService.refreshCache()");
@@ -1793,7 +1793,7 @@ export class SlackTab extends BaseTab {
 
   private async refreshUserCache(): Promise<void> {
     vscode.window.showInformationMessage("Refreshing user cache...");
-    
+
     // Use SlackService if available (preferred), otherwise fall back to D-Bus
     if (this.services.slack) {
       logger.log("Using SlackService.refreshCache() for users");
@@ -1920,7 +1920,7 @@ export class SlackTab extends BaseTab {
     }
 
     this.userSearchQuery = query;
-    
+
     // Use SlackService if available (preferred), otherwise fall back to D-Bus
     if (this.services.slack) {
       logger.log("Using SlackService.searchUsers()");
@@ -1986,10 +1986,10 @@ export class SlackTab extends BaseTab {
 
     try {
       logger.log(`Running context test: message="${testMessage}", persona="${persona || 'auto'}"`);
-      
+
       // Call D-Bus to run the persona/context test
       const result = await dbus.slack_runPersonaTest(testMessage, persona || "");
-      
+
       if (result.success && result.data) {
         const data = result.data as any;
         this.contextTestResult = data;

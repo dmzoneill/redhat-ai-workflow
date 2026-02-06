@@ -3,7 +3,7 @@
  *
  * Manages all tabs in the Command Center panel.
  * Handles tab registration, switching, and message routing.
- * 
+ *
  * Architecture: TabManager injects Services into Tabs so they can use
  * Services instead of calling D-Bus directly. This eliminates duplicate
  * business logic between Tabs and Services.
@@ -49,7 +49,7 @@ export class TabManager {
     // Register default tabs
     this.registerDefaultTabs();
   }
-  
+
   /**
    * Set the service container for all tabs.
    * This should be called after services are initialized in CommandCenterPanel.

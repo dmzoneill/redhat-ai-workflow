@@ -12,13 +12,15 @@ Tests cover:
 """
 
 import asyncio
-import pytest
+
+# Add project root to path
+import sys
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Add project root to path
-import sys
+import pytest
+
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -89,11 +91,7 @@ class TestModels:
 
     def test_query_result_has_results(self):
         """Test QueryResult.has_results()."""
-        from services.memory_abstraction.models import (
-            QueryResult,
-            IntentClassification,
-            MemoryItem,
-        )
+        from services.memory_abstraction.models import IntentClassification, MemoryItem, QueryResult
 
         intent = IntentClassification(intent="general", confidence=0.5, sources_suggested=[])
 
@@ -118,10 +116,7 @@ class TestRegistry:
 
     def test_memory_adapter_decorator(self):
         """Test @memory_adapter decorator registers adapter."""
-        from services.memory_abstraction.registry import (
-            memory_adapter,
-            ADAPTER_MANIFEST,
-        )
+        from services.memory_abstraction.registry import ADAPTER_MANIFEST, memory_adapter
 
         # Clear manifest for test
         ADAPTER_MANIFEST.clear()
@@ -152,10 +147,7 @@ class TestRegistry:
 
     def test_adapter_manifest_list_by_capability(self):
         """Test AdapterManifest.list_by_capability()."""
-        from services.memory_abstraction.registry import (
-            memory_adapter,
-            ADAPTER_MANIFEST,
-        )
+        from services.memory_abstraction.registry import ADAPTER_MANIFEST, memory_adapter
 
         ADAPTER_MANIFEST.clear()
 
@@ -256,11 +248,7 @@ class TestMerger:
     def test_merge_with_results(self):
         """Test merging results from multiple adapters."""
         from services.memory_abstraction.merger import ResultMerger
-        from services.memory_abstraction.models import (
-            IntentClassification,
-            AdapterResult,
-            MemoryItem,
-        )
+        from services.memory_abstraction.models import AdapterResult, IntentClassification, MemoryItem
 
         merger = ResultMerger()
         intent = IntentClassification(intent="code_lookup", confidence=0.8, sources_suggested=["code"])
@@ -299,10 +287,7 @@ class TestMerger:
     def test_merge_with_errors(self):
         """Test merging handles errors gracefully."""
         from services.memory_abstraction.merger import ResultMerger
-        from services.memory_abstraction.models import (
-            IntentClassification,
-            AdapterResult,
-        )
+        from services.memory_abstraction.models import AdapterResult, IntentClassification
 
         merger = ResultMerger()
         intent = IntentClassification(intent="general", confidence=0.5, sources_suggested=[])
@@ -328,10 +313,7 @@ class TestFormatter:
     def test_format_empty(self):
         """Test formatting empty results."""
         from services.memory_abstraction.formatter import ResultFormatter
-        from services.memory_abstraction.models import (
-            QueryResult,
-            IntentClassification,
-        )
+        from services.memory_abstraction.models import IntentClassification, QueryResult
 
         formatter = ResultFormatter()
         intent = IntentClassification(intent="general", confidence=0.5, sources_suggested=[])
@@ -345,11 +327,7 @@ class TestFormatter:
     def test_format_with_results(self):
         """Test formatting results."""
         from services.memory_abstraction.formatter import ResultFormatter
-        from services.memory_abstraction.models import (
-            QueryResult,
-            IntentClassification,
-            MemoryItem,
-        )
+        from services.memory_abstraction.models import IntentClassification, MemoryItem, QueryResult
 
         formatter = ResultFormatter()
         intent = IntentClassification(
@@ -383,11 +361,7 @@ class TestFormatter:
     def test_format_compact(self):
         """Test compact formatting."""
         from services.memory_abstraction.formatter import ResultFormatter
-        from services.memory_abstraction.models import (
-            QueryResult,
-            IntentClassification,
-            MemoryItem,
-        )
+        from services.memory_abstraction.models import IntentClassification, MemoryItem, QueryResult
 
         formatter = ResultFormatter()
         intent = IntentClassification(intent="general", confidence=0.5, sources_suggested=[])
@@ -431,10 +405,7 @@ class TestInterface:
     async def test_format_result(self):
         """Test format() method."""
         from services.memory_abstraction.interface import MemoryInterface
-        from services.memory_abstraction.models import (
-            QueryResult,
-            IntentClassification,
-        )
+        from services.memory_abstraction.models import IntentClassification, QueryResult
 
         memory = MemoryInterface(adapters={}, auto_discover=False)
 
@@ -459,10 +430,7 @@ class TestDiscovery:
 
     def test_discover_adapter_modules(self):
         """Test discovering adapter modules."""
-        from services.memory_abstraction.discovery import (
-            discover_adapter_modules,
-            clear_discovery_cache,
-        )
+        from services.memory_abstraction.discovery import clear_discovery_cache, discover_adapter_modules
 
         # Clear cache to force fresh discovery
         clear_discovery_cache()

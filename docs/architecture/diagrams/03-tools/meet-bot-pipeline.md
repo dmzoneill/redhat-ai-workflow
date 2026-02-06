@@ -86,7 +86,7 @@ sequenceDiagram
     STT->>LLM: Transcript
     LLM->>LLM: Generate (300ms)
     LLM->>TTS: Response text
-    
+
     par Audio and Video
         TTS->>Audio: Audio output
         TTS->>Video: Phonemes

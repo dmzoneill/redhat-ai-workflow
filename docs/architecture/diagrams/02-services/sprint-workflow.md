@@ -72,11 +72,11 @@ sequenceDiagram
 
     loop For each rule
         Daemon->>Daemon: Evaluate condition
-        
+
         alt Condition matches
             Daemon->>Jira: Apply action
             Jira-->>Daemon: Result
-            
+
             alt Has notification
                 Daemon->>Notifier: Send notification
             end
@@ -134,7 +134,7 @@ rule:
   description: string    # Human-readable description
   enabled: boolean       # Enable/disable rule
   priority: integer      # Execution order (lower = first)
-  
+
   condition:
     status: string       # Issue status
     days_unchanged: int  # Days since last update
@@ -143,7 +143,7 @@ rule:
     labels: list         # Required labels
     mr_merged: boolean   # MR merge status
     custom_field: any    # Custom field check
-  
+
   action:
     transition: string   # Target status
     comment: string      # Comment to add
