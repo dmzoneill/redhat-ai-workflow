@@ -56,7 +56,7 @@ class ResponseConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for Slack API."""
-        result = {
+        result: dict[str, Any] = {
             "channel": self.channel_id,
         }
 
@@ -64,9 +64,9 @@ class ResponseConfig:
             result["thread_ts"] = self.thread_ts
 
         if self.unfurl_links is not None:
-            result["unfurl_links"] = self.unfurl_links
+            result["unfurl_links"] = bool(self.unfurl_links)
         if self.unfurl_media is not None:
-            result["unfurl_media"] = self.unfurl_media
+            result["unfurl_media"] = bool(self.unfurl_media)
 
         return result
 

@@ -458,7 +458,7 @@ class ConfigManager:
     def is_dirty(self) -> bool:
         """Check if there are pending changes not yet written to disk."""
         with self._lock:
-            return self._dirty
+            return bool(self._dirty)
 
     @property
     def config_file(self) -> Path:

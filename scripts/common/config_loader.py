@@ -42,8 +42,8 @@ def load_config() -> Dict[str, Any]:
         try:
             from server.utils import load_config as utils_load_config
 
-            result: Dict[str, Any] = utils_load_config()
-            return result
+            fallback_result: Dict[str, Any] = utils_load_config()
+            return fallback_result
         except ImportError:
             return {}
 
@@ -70,8 +70,8 @@ def get_config_section(section: str, default: Optional[Dict[str, Any]] = None) -
     except ImportError:
         # Fallback to full load
         config = load_config()
-        result: Dict[str, Any] = config.get(section, default or {})
-        return result
+        section_result: Dict[str, Any] = config.get(section, default or {})
+        return section_result
 
 
 # Alias for compatibility with utils.py naming convention

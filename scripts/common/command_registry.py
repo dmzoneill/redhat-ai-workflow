@@ -318,7 +318,7 @@ class CommandRegistry:
         Returns:
             List of matching commands
         """
-        commands = []
+        commands: list[CommandInfo] = []
 
         # Add built-in commands
         if command_type is None or command_type == CommandType.BUILTIN:
@@ -516,6 +516,8 @@ class CommandRegistry:
                 # Extract first line of docstring as description
                 description = docstring.split("\n")[0].strip()
 
+                if self._tools_cache is None:
+                    self._tools_cache = {}
                 self._tools_cache[func_name] = CommandInfo(
                     name=func_name,
                     description=description,
