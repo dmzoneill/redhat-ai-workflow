@@ -611,6 +611,142 @@ steps:
       }
     output: release_readiness
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_appinterface_failures
+    description: "Detect failure patterns from app-interface checks"
+    compute: |
+      errors_detected = []
+
+      # Check app-interface failures
+      saas_text = str(saas_raw) if 'saas_raw' in dir() and saas_raw else ""
+      if "not found" in saas_text.lower():
+          errors_detected.append({
+              "tool": "appinterface_get_saas",
+              "pattern": "not found",
+              "cause": "SaaS file not found in app-interface",
+              "fix": "Check saas_file input parameter"
+          })
+
+      # Check Kubernetes failures
+      stage_text = str(live_stage_raw) if 'live_stage_raw' in dir() and live_stage_raw else ""
+      prod_text = str(live_prod_raw) if 'live_prod_raw' in dir() and live_prod_raw else ""
+      combined_k8s = stage_text + prod_text
+
+      if "forbidden" in combined_k8s.lower() or "unauthorized" in combined_k8s.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_deployments",
+              "pattern": "forbidden",
+              "cause": "Kubernetes auth expired or insufficient permissions",
+              "fix": "Run kube_login('stage') and kube_login('prod')"
+          })
+      if "no route to host" in combined_k8s.lower():
+          errors_detected.append({
+              "tool": "kubectl_get_deployments",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - cluster not reachable",
+              "fix": "Run vpn_connect()"
+          })
+
+      # Check GitLab failures
+      gitlab_text = str(mrs_raw) if 'mrs_raw' in dir() and mrs_raw else ""
+      if "no such host" in gitlab_text.lower():
+          errors_detected.append({
+              "tool": "gitlab_mr_list",
+              "pattern": "no such host",
+              "cause": "VPN not connected - internal GitLab not reachable",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      result = errors_detected
+    output: appinterface_errors_detected
+    on_error: continue
+
+  - name: learn_appinterface_k8s_failure
+    description: "Learn from Kubernetes auth failures"
+    condition: "appinterface_errors_detected and any(e.get('pattern') == 'forbidden' for e in appinterface_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_deployments"
+      error_pattern: "forbidden"
+      root_cause: "Kubernetes auth expired or insufficient permissions"
+      fix_description: "Run kube_login('stage') and kube_login('prod')"
+    output: appinterface_k8s_fix_learned
+    on_error: continue
+
+  - name: learn_appinterface_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "appinterface_errors_detected and any(e.get('pattern') == 'no route to host' for e in appinterface_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "kubectl_get_deployments"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - cluster not reachable"
+      fix_description: "Run vpn_connect()"
+    output: appinterface_vpn_fix_learned
+    on_error: continue
+
+  - name: log_appinterface_session
+    description: "Log app-interface check to session"
+    tool: memory_session_log
+    args:
+      action: "Checked app-interface for {{ inputs.saas_file }}"
+      details: "Ready: {{ release_readiness.ready if release_readiness else 'unknown' }}, Blockers: {{ release_readiness.blockers | length if release_readiness and release_readiness.blockers else 0 }}"
+    on_error: continue
+
+  - name: track_appinterface_checks
+    description: "Track app-interface checks for patterns"
+    compute: |
+      from datetime import datetime
+
+      # Load patterns
+      patterns = memory.read_memory("learned/patterns") or {}
+      if "appinterface_checks" not in patterns:
+          patterns["appinterface_checks"] = []
+
+      # Record this check
+      check_record = {
+          "saas_file": inputs.saas_file,
+          "ready": release_readiness.ready if release_readiness else False,
+          "blockers": len(release_readiness.blockers) if release_readiness and release_readiness.blockers else 0,
+          "warnings": len(release_readiness.warnings) if release_readiness and release_readiness.warnings else 0,
+          "stage_in_sync": state_comparison.stage_in_sync if state_comparison else False,
+          "prod_in_sync": state_comparison.prod_in_sync if state_comparison else False,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      patterns["appinterface_checks"].append(check_record)
+
+      # Keep last 100 checks
+      patterns["appinterface_checks"] = patterns["appinterface_checks"][-100:]
+
+      memory.write_memory("learned/patterns", patterns)
+      result = "appinterface check tracked"
+    output: appinterface_tracking_result
+    on_error: continue
+
+  - name: update_release_state
+    description: "Update release readiness state"
+    condition: "release_readiness"
+    compute: |
+      from datetime import datetime
+
+      # Update release state
+      state = memory.read_memory("state/release") or {}
+
+      state["last_check"] = {
+          "saas_file": inputs.saas_file,
+          "ready": release_readiness.ready if release_readiness else False,
+          "stage_ref": release_readiness.stage_ref if release_readiness else None,
+          "prod_ref": release_readiness.prod_ref if release_readiness else None,
+          "timestamp": datetime.now().isoformat(),
+      }
+
+      memory.write_memory("state/release", state)
+      result = "release state updated"
+    output: release_state_result
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -768,139 +904,3 @@ outputs:
       - {{ issue.pattern if issue.pattern else issue }}
       {% endfor %}
       {% endif %}
-
-  # ==================== LEARNING FROM FAILURES ====================
-
-  - name: detect_appinterface_failures
-    description: "Detect failure patterns from app-interface checks"
-    compute: |
-      errors_detected = []
-
-      # Check app-interface failures
-      saas_text = str(saas_config_raw) if 'saas_config_raw' in dir() and saas_config_raw else ""
-      if "not found" in saas_text.lower():
-          errors_detected.append({
-              "tool": "appinterface_get_saas",
-              "pattern": "not found",
-              "cause": "SaaS file not found in app-interface",
-              "fix": "Check saas_file input parameter"
-          })
-
-      # Check Kubernetes failures
-      stage_text = str(stage_deploy_raw) if 'stage_deploy_raw' in dir() and stage_deploy_raw else ""
-      prod_text = str(prod_deploy_raw) if 'prod_deploy_raw' in dir() and prod_deploy_raw else ""
-      combined_k8s = stage_text + prod_text
-
-      if "forbidden" in combined_k8s.lower() or "unauthorized" in combined_k8s.lower():
-          errors_detected.append({
-              "tool": "kubectl_get_deployments",
-              "pattern": "forbidden",
-              "cause": "Kubernetes auth expired or insufficient permissions",
-              "fix": "Run kube_login('stage') and kube_login('prod')"
-          })
-      if "no route to host" in combined_k8s.lower():
-          errors_detected.append({
-              "tool": "kubectl_get_deployments",
-              "pattern": "no route to host",
-              "cause": "VPN not connected - cluster not reachable",
-              "fix": "Run vpn_connect()"
-          })
-
-      # Check GitLab failures
-      gitlab_text = str(pending_mrs_raw) if 'pending_mrs_raw' in dir() and pending_mrs_raw else ""
-      if "no such host" in gitlab_text.lower():
-          errors_detected.append({
-              "tool": "gitlab_mr_list",
-              "pattern": "no such host",
-              "cause": "VPN not connected - internal GitLab not reachable",
-              "fix": "Run vpn_connect() to connect to Red Hat VPN"
-          })
-
-      result = errors_detected
-    output: appinterface_errors_detected
-    on_error: continue
-
-  - name: learn_appinterface_k8s_failure
-    description: "Learn from Kubernetes auth failures"
-    condition: "appinterface_errors_detected and any(e.get('pattern') == 'forbidden' for e in appinterface_errors_detected)"
-    tool: learn_tool_fix
-    args:
-      tool_name: "kubectl_get_deployments"
-      error_pattern: "forbidden"
-      root_cause: "Kubernetes auth expired or insufficient permissions"
-      fix_description: "Run kube_login('stage') and kube_login('prod')"
-    output: appinterface_k8s_fix_learned
-    on_error: continue
-
-  - name: learn_appinterface_vpn_failure
-    description: "Learn from VPN failures"
-    condition: "appinterface_errors_detected and any(e.get('pattern') == 'no route to host' for e in appinterface_errors_detected)"
-    tool: learn_tool_fix
-    args:
-      tool_name: "kubectl_get_deployments"
-      error_pattern: "no route to host"
-      root_cause: "VPN not connected - cluster not reachable"
-      fix_description: "Run vpn_connect()"
-    output: appinterface_vpn_fix_learned
-    on_error: continue
-
-  - name: log_appinterface_session
-    description: "Log app-interface check to session"
-    tool: memory_session_log
-    args:
-      action: "Checked app-interface for {{ inputs.saas_file }}"
-      details: "Ready: {{ release_readiness.ready if release_readiness else 'unknown' }}, Blockers: {{ release_readiness.blockers | length if release_readiness and release_readiness.blockers else 0 }}"
-    on_error: continue
-
-  - name: track_appinterface_checks
-    description: "Track app-interface checks for patterns"
-    compute: |
-      from datetime import datetime
-
-      # Load patterns
-      patterns = memory.read_memory("learned/patterns") or {}
-      if "appinterface_checks" not in patterns:
-          patterns["appinterface_checks"] = []
-
-      # Record this check
-      check_record = {
-          "saas_file": inputs.saas_file,
-          "ready": release_readiness.ready if release_readiness else False,
-          "blockers": len(release_readiness.blockers) if release_readiness and release_readiness.blockers else 0,
-          "warnings": len(release_readiness.warnings) if release_readiness and release_readiness.warnings else 0,
-          "stage_in_sync": state_comparison.stage_in_sync if state_comparison else False,
-          "prod_in_sync": state_comparison.prod_in_sync if state_comparison else False,
-          "timestamp": datetime.now().isoformat(),
-      }
-
-      patterns["appinterface_checks"].append(check_record)
-
-      # Keep last 100 checks
-      patterns["appinterface_checks"] = patterns["appinterface_checks"][-100:]
-
-      memory.write_memory("learned/patterns", patterns)
-      result = "appinterface check tracked"
-    output: appinterface_tracking_result
-    on_error: continue
-
-  - name: update_release_state
-    description: "Update release readiness state"
-    condition: "release_readiness"
-    compute: |
-      from datetime import datetime
-
-      # Update release state
-      state = memory.read_memory("state/release") or {}
-
-      state["last_check"] = {
-          "saas_file": inputs.saas_file,
-          "ready": release_readiness.ready if release_readiness else False,
-          "stage_ref": release_readiness.stage_ref if release_readiness else None,
-          "prod_ref": release_readiness.prod_ref if release_readiness else None,
-          "timestamp": datetime.now().isoformat(),
-      }
-
-      memory.write_memory("state/release", state)
-      result = "release state updated"
-    output: release_state_result
-    on_error: continue

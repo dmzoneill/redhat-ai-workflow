@@ -4,9 +4,12 @@ Uses the rh-issue CLI for Red Hat Jira operations.
 Authentication: JIRA_JPAT environment variable.
 """
 
+import json
 import logging
+import os
 from typing import cast
 
+import httpx
 from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
@@ -26,6 +29,17 @@ def _get_jira_url() -> str:
     """Get Jira URL from config."""
     config = load_config()
     return cast(dict, config.get("jira", {})).get("url", "https://issues.redhat.com")
+
+
+def _get_jira_auth() -> tuple[str, str]:
+    """Get Jira base URL and Bearer token for direct REST API calls.
+
+    Returns:
+        Tuple of (base_url, token). Token may be empty if not configured.
+    """
+    base_url = os.environ.get("JIRA_URL", "") or _get_jira_url()
+    token = os.environ.get("JIRA_JPAT", "") or os.environ.get("JIRA_TOKEN", "")
+    return base_url, token
 
 
 logger = logging.getLogger(__name__)
@@ -389,6 +403,134 @@ async def _jira_unblock_impl(issue_key: str) -> str:
     return f"✅ {issue_key} unblocked\n\n{output}"
 
 
+async def _jira_get_transitions_impl(issue_key: str) -> str:
+    """Implementation of jira_get_transitions tool.
+
+    Calls GET /rest/api/2/issue/{issue_key}/transitions to retrieve
+    the available workflow transitions for the issue.
+    """
+    base_url, token = _get_jira_auth()
+    if not token:
+        return (
+            "❌ Jira authentication not configured.\n\n"
+            "Ensure JIRA_JPAT is set in your ~/.bashrc:\n"
+            f"  export JIRA_JPAT='your-token'\n"
+            f"  export JIRA_URL='{base_url}'"
+        )
+
+    url = f"{base_url}/rest/api/2/issue/{issue_key}/transitions"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(url, headers=headers)
+
+    if resp.status_code == 401:
+        return "❌ Jira authentication failed (401 Unauthorized).\n\n" "Check that your JIRA_JPAT token is valid."
+    if resp.status_code == 404:
+        return f"❌ Issue {issue_key} not found."
+    if resp.status_code != 200:
+        return f"❌ Failed to get transitions (HTTP {resp.status_code}): {resp.text}"
+
+    data = resp.json()
+    transitions = data.get("transitions", [])
+
+    if not transitions:
+        return f"No transitions available for {issue_key}."
+
+    lines = [f"Available transitions for {issue_key}:\n"]
+    for t in transitions:
+        tid = t.get("id", "")
+        name = t.get("name", "")
+        to_status = t.get("to", {}).get("name", "")
+        lines.append(f"  - {name} (id: {tid}) -> {to_status}")
+
+    return "\n".join(lines)
+
+
+async def _jira_update_issue_impl(
+    issue_key: str,
+    fields: str = "",
+    summary: str = "",
+    description: str = "",
+    labels: str = "",
+    components: str = "",
+) -> str:
+    """Implementation of jira_update_issue tool.
+
+    Calls PUT /rest/api/2/issue/{issue_key} to update issue fields.
+    Builds the fields payload from individual shortcut parameters
+    and/or a raw JSON fields string.
+    """
+    base_url, token = _get_jira_auth()
+    if not token:
+        return (
+            "❌ Jira authentication not configured.\n\n"
+            "Ensure JIRA_JPAT is set in your ~/.bashrc:\n"
+            f"  export JIRA_JPAT='your-token'\n"
+            f"  export JIRA_URL='{base_url}'"
+        )
+
+    # Start with user-supplied raw fields JSON
+    update_fields: dict = {}
+    if fields:
+        try:
+            update_fields = json.loads(fields)
+        except json.JSONDecodeError as exc:
+            return f"❌ Invalid JSON in 'fields' parameter: {exc}"
+
+    # Apply shortcut parameters (these override fields if both provided)
+    if summary:
+        update_fields["summary"] = summary
+    if description:
+        update_fields["description"] = description
+    if labels:
+        label_list = [lbl.strip() for lbl in labels.split(",") if lbl.strip()]
+        update_fields["labels"] = label_list
+    if components:
+        comp_list = [{"name": c.strip()} for c in components.split(",") if c.strip()]
+        update_fields["components"] = comp_list
+
+    if not update_fields:
+        return "❌ No fields to update. Provide at least one of: fields, summary, description, labels, components."
+
+    url = f"{base_url}/rest/api/2/issue/{issue_key}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"fields": update_fields}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(url, headers=headers, json=payload)
+
+    if resp.status_code == 401:
+        return "❌ Jira authentication failed (401 Unauthorized).\n\n" "Check that your JIRA_JPAT token is valid."
+    if resp.status_code == 404:
+        return f"❌ Issue {issue_key} not found."
+    if resp.status_code == 400:
+        # Jira returns details about invalid fields
+        try:
+            error_data = resp.json()
+            errors = error_data.get("errors", {})
+            messages = error_data.get("errorMessages", [])
+            details = []
+            for field_name, msg in errors.items():
+                details.append(f"  - {field_name}: {msg}")
+            for msg in messages:
+                details.append(f"  - {msg}")
+            return f"❌ Failed to update {issue_key} (invalid fields):\n" + "\n".join(details)
+        except Exception:
+            return f"❌ Failed to update {issue_key} (HTTP 400): {resp.text}"
+    if resp.status_code not in (200, 204):
+        return f"❌ Failed to update {issue_key} (HTTP {resp.status_code}): {resp.text}"
+
+    updated_keys = ", ".join(update_fields.keys())
+    return f"✅ {issue_key} updated successfully.\n\n**Updated fields:** {updated_keys}"
+
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
@@ -561,5 +703,53 @@ def register_tools(server: "FastMCP") -> int:
             Confirmation that the issue was unblocked.
         """
         return await _jira_unblock_impl(issue_key)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_get_transitions(issue_key: str) -> str:
+        """
+        Get available transitions for a Jira issue.
+
+        Returns the list of valid status transitions that can be applied
+        to the issue in its current state. Use this to discover which
+        statuses you can transition to before calling jira_transition.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+
+        Returns:
+            List of available transitions with their IDs and names.
+        """
+        return await _jira_get_transitions_impl(issue_key)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_update_issue(
+        issue_key: str,
+        fields: str = "",
+        summary: str = "",
+        description: str = "",
+        labels: str = "",
+        components: str = "",
+    ) -> str:
+        """
+        Update fields on a Jira issue.
+
+        Supports both a raw JSON fields string and convenient shortcut
+        parameters. Shortcut parameters override the corresponding key
+        in the fields JSON when both are provided.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+            fields: JSON string of fields to update (e.g., '{"priority": {"name": "High"}}')
+            summary: New summary (shortcut, overrides fields.summary)
+            description: New description (shortcut, overrides fields.description)
+            labels: Comma-separated labels to set (e.g., "bug,urgent")
+            components: Comma-separated components to set (e.g., "Automation Analytics")
+
+        Returns:
+            Confirmation of the update.
+        """
+        return await _jira_update_issue_impl(issue_key, fields, summary, description, labels, components)
 
     return registry.count

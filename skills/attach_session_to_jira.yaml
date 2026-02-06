@@ -97,6 +97,7 @@ steps:
       session_id: "{{ session_check.session_id }}"
       include_transcript: "{{ inputs.include_transcript }}"
     output: attach_result
+    on_error: continue
 
   # Step 4: Log the action
   - name: log_session

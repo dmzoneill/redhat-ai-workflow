@@ -236,6 +236,22 @@ def kibana_client(url: str, token: str | None = None, timeout: float = 30.0) -> 
     )
 
 
+def grafana_client(url: str, token: str | None = None, timeout: float = 30.0) -> APIClient:
+    """Create an API client configured for Grafana.
+
+    Args:
+        url: Grafana base URL
+        token: Bearer token for authentication
+        timeout: Request timeout in seconds
+    """
+    return APIClient(
+        base_url=url,
+        bearer_token=token,
+        timeout=timeout,
+        auth_error_msg="Authentication required. Run: kube s (or kube p) to authenticate.",
+    )
+
+
 def quay_client(token: str | None = None, timeout: float = 30.0) -> APIClient:
     """Create an API client configured for Quay.io.
 

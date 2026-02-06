@@ -121,6 +121,7 @@ steps:
     args:
       repository: "{{ inputs.repository }}"
       tag: "{{ inputs.image_tag }}"
+    output: image_check
     on_error: auto_heal  # Quay API - may need auth
 
   - name: validate_image
@@ -401,6 +402,76 @@ steps:
     output: security_state_result
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_scan_failures
+    description: "Detect failure patterns from vulnerability scanning"
+    compute: |
+      errors_detected = []
+
+      # Check Quay failures
+      image_text = str(image_check) if 'image_check' in dir() and image_check else ""
+      vuln_text = str(vuln_raw) if 'vuln_raw' in dir() and vuln_raw else ""
+      combined = image_text + vuln_text
+
+      if "manifest unknown" in combined.lower() or "not found" in combined.lower():
+          errors_detected.append({
+              "tool": "quay_get_vulnerabilities",
+              "pattern": "manifest unknown",
+              "cause": "Image tag doesn't exist in Quay - build may not be complete",
+              "fix": "Wait for Konflux build to complete or check tag format"
+          })
+      if "unauthorized" in combined.lower() or "401" in combined:
+          errors_detected.append({
+              "tool": "quay_get_vulnerabilities",
+              "pattern": "unauthorized",
+              "cause": "Quay authentication failed",
+              "fix": "Check Quay credentials in config.json"
+          })
+      if "rate limit" in combined.lower():
+          errors_detected.append({
+              "tool": "quay_get_vulnerabilities",
+              "pattern": "rate limit",
+              "cause": "Quay API rate limit exceeded",
+              "fix": "Wait a few minutes and retry"
+          })
+
+      result = errors_detected
+    output: scan_errors_detected
+    on_error: continue
+
+  - name: learn_scan_manifest_failure
+    description: "Learn from manifest not found failures"
+    condition: "scan_errors_detected and any(e.get('pattern') == 'manifest unknown' for e in scan_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "quay_get_vulnerabilities"
+      error_pattern: "manifest unknown"
+      root_cause: "Image tag doesn't exist in Quay - build may not be complete"
+      fix_description: "Wait for Konflux build to complete or check tag format"
+    output: scan_manifest_fix_learned
+    on_error: continue
+
+  - name: learn_scan_auth_failure
+    description: "Learn from Quay auth failures"
+    condition: "scan_errors_detected and any(e.get('pattern') == 'unauthorized' for e in scan_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "quay_get_vulnerabilities"
+      error_pattern: "unauthorized"
+      root_cause: "Quay authentication failed"
+      fix_description: "Check Quay credentials in config.json"
+    output: scan_auth_fix_learned
+    on_error: continue
+
+  - name: log_scan_session
+    description: "Log vulnerability scan to session"
+    tool: memory_session_log
+    args:
+      action: "Scanned image {{ inputs.image_tag }} for vulnerabilities"
+      details: "Critical: {{ vuln_analysis.critical if vuln_analysis else 0 }}, Total: {{ vuln_analysis.total if vuln_analysis else 0 }}"
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -489,76 +560,6 @@ outputs:
       {% endfor %}
       {% endif %}
       {% endif %}
-
-  # ==================== LEARNING FROM FAILURES ====================
-
-  - name: detect_scan_failures
-    description: "Detect failure patterns from vulnerability scanning"
-    compute: |
-      errors_detected = []
-
-      # Check Quay failures
-      image_text = str(image_check_raw) if 'image_check_raw' in dir() and image_check_raw else ""
-      vuln_text = str(vuln_report_raw) if 'vuln_report_raw' in dir() and vuln_report_raw else ""
-      combined = image_text + vuln_text
-
-      if "manifest unknown" in combined.lower() or "not found" in combined.lower():
-          errors_detected.append({
-              "tool": "quay_get_vulnerabilities",
-              "pattern": "manifest unknown",
-              "cause": "Image tag doesn't exist in Quay - build may not be complete",
-              "fix": "Wait for Konflux build to complete or check tag format"
-          })
-      if "unauthorized" in combined.lower() or "401" in combined:
-          errors_detected.append({
-              "tool": "quay_get_vulnerabilities",
-              "pattern": "unauthorized",
-              "cause": "Quay authentication failed",
-              "fix": "Check Quay credentials in config.json"
-          })
-      if "rate limit" in combined.lower():
-          errors_detected.append({
-              "tool": "quay_get_vulnerabilities",
-              "pattern": "rate limit",
-              "cause": "Quay API rate limit exceeded",
-              "fix": "Wait a few minutes and retry"
-          })
-
-      result = errors_detected
-    output: scan_errors_detected
-    on_error: continue
-
-  - name: learn_scan_manifest_failure
-    description: "Learn from manifest not found failures"
-    condition: "scan_errors_detected and any(e.get('pattern') == 'manifest unknown' for e in scan_errors_detected)"
-    tool: learn_tool_fix
-    args:
-      tool_name: "quay_get_vulnerabilities"
-      error_pattern: "manifest unknown"
-      root_cause: "Image tag doesn't exist in Quay - build may not be complete"
-      fix_description: "Wait for Konflux build to complete or check tag format"
-    output: scan_manifest_fix_learned
-    on_error: continue
-
-  - name: learn_scan_auth_failure
-    description: "Learn from Quay auth failures"
-    condition: "scan_errors_detected and any(e.get('pattern') == 'unauthorized' for e in scan_errors_detected)"
-    tool: learn_tool_fix
-    args:
-      tool_name: "quay_get_vulnerabilities"
-      error_pattern: "unauthorized"
-      root_cause: "Quay authentication failed"
-      fix_description: "Check Quay credentials in config.json"
-    output: scan_auth_fix_learned
-    on_error: continue
-
-  - name: log_scan_session
-    description: "Log vulnerability scan to session"
-    tool: memory_session_log
-    args:
-      action: "Scanned image {{ inputs.image_tag }} for vulnerabilities"
-      details: "Critical: {{ vuln_analysis.critical if vuln_analysis else 0 }}, Total: {{ vuln_analysis.total if vuln_analysis else 0 }}"
-    on_error: continue
 
   - name: context
     value:

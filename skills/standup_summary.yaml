@@ -487,11 +487,12 @@ steps:
       lines.append("- None")
       lines.append("")
 
-      # AI Assistant Status
-      if knowledge_status and knowledge_status.get('has_knowledge'):
+      # AI Assistant Status (knowledge_status and vector_status are set by later steps,
+      # so they may not be available here - use 'in dir()' guard)
+      if 'knowledge_status' in dir() and knowledge_status and isinstance(knowledge_status, dict) and knowledge_status.get('has_knowledge'):
           lines.append("### 🤖 AI Assistant Status")
           lines.append(f"- **Knowledge Confidence:** {knowledge_status.get('confidence', 0)}%")
-          if vector_status and vector_status.get('has_index'):
+          if 'vector_status' in dir() and vector_status and isinstance(vector_status, dict) and vector_status.get('has_index'):
               lines.append(f"- **Code Index:** {vector_status.get('files_indexed', 0)} files, {vector_status.get('chunks', 0)} chunks")
               if vector_status.get('search_count', 0) > 0:
                   lines.append(f"- **Searches Today:** {vector_status.get('search_count', 0)}")
@@ -588,8 +589,8 @@ steps:
       if memory_state_raw and isinstance(memory_state_raw, str):
           try:
               memory_state = yaml.safe_load(memory_state_raw) or {}
-          except:
-              pass
+          except Exception:
+              pass  # Ignore malformed YAML in memory state
 
       # Add follow-ups from memory
       follow_ups = memory_state.get("follow_ups", [])
@@ -831,7 +832,7 @@ steps:
           })
 
       # Check GitLab failures
-      gitlab_text = str(gitlab_mrs_raw) if 'gitlab_mrs_raw' in dir() and gitlab_mrs_raw else ""
+      gitlab_text = str(my_mrs_raw) if 'my_mrs_raw' in dir() and my_mrs_raw else ""
       if "no such host" in gitlab_text.lower():
           errors_detected.append({
               "tool": "gitlab_mr_list",
@@ -848,7 +849,7 @@ steps:
           })
 
       # Check Jira failures
-      jira_text = str(jira_issues_raw) if 'jira_issues_raw' in dir() and jira_issues_raw else ""
+      jira_text = str(my_issues_raw) if 'my_issues_raw' in dir() and my_issues_raw else ""
       if "command timed out" in jira_text.lower():
           errors_detected.append({
               "tool": "jira_search",

@@ -361,10 +361,10 @@ steps:
   - name: link_issues
     description: "Link to related issue"
     condition: "create_status.issue_key and inputs.link_to"
-    tool: jira_link_issues
+    tool: jira_add_link
     args:
-      inward_issue: "{{ create_status.issue_key }}"
-      outward_issue: "{{ inputs.link_to }}"
+      from_issue: "{{ create_status.issue_key }}"
+      to_issue: "{{ inputs.link_to }}"
       link_type: "{{ inputs.link_type }}"
     output: link_result
     on_error: continue
@@ -476,7 +476,7 @@ steps:
         status: {{ "In Progress" if inputs.start_progress else "New" }}
         type: {{ inputs.issue_type }}
         summary: {{ inputs.summary[:60] }}
-        created: {{ now().isoformat() }}
+        created: {{ today }}
     on_error: continue
 
   # ==================== NOTIFY TEAM ====================

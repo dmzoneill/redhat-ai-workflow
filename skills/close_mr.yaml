@@ -219,41 +219,6 @@ steps:
     output: mr_code_analysis
     on_error: continue
 
-outputs:
-  - name: report
-    value: |
-      ## 🚫 Close MR !{{ inputs.mr_id }}
-
-      **Title:** {{ mr_info.title }}
-      **Author:** {{ mr_info.author }}
-      {% if mr_info.jira_key %}
-      **Jira:** {{ mr_info.jira_key }}
-      {% endif %}
-
-      ---
-
-      {% if close_status.success %}
-      ✅ **MR Closed Successfully**
-
-      Reason: {{ inputs.reason }}
-
-      {% if mr_info.jira_key and inputs.update_jira %}
-      📋 Comment added to {{ mr_info.jira_key }}
-      {% endif %}
-
-      ---
-
-      ### Need to Reopen?
-
-      ```
-      gitlab_mr_reopen(project='{{ inputs.project }}', mr_id={{ inputs.mr_id }})
-      ```
-      {% else %}
-      ❌ **Failed to close MR**
-
-      {{ close_status.message }}
-      {% endif %}
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_close_failures
@@ -263,7 +228,7 @@ outputs:
 
       # Check GitLab failures
       mr_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
-      close_text = str(close_result_raw) if 'close_result_raw' in dir() and close_result_raw else ""
+      close_text = str(close_result) if 'close_result' in dir() and close_result else ""
       combined = mr_text + close_text
 
       if "no such host" in combined.lower():
@@ -303,3 +268,38 @@ outputs:
       fix_description: "Run vpn_connect() to connect to Red Hat VPN"
     output: close_vpn_fix_learned
     on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 🚫 Close MR !{{ inputs.mr_id }}
+
+      **Title:** {{ mr_info.title }}
+      **Author:** {{ mr_info.author }}
+      {% if mr_info.jira_key %}
+      **Jira:** {{ mr_info.jira_key }}
+      {% endif %}
+
+      ---
+
+      {% if close_status.success %}
+      ✅ **MR Closed Successfully**
+
+      Reason: {{ inputs.reason }}
+
+      {% if mr_info.jira_key and inputs.update_jira %}
+      📋 Comment added to {{ mr_info.jira_key }}
+      {% endif %}
+
+      ---
+
+      ### Need to Reopen?
+
+      ```
+      gitlab_mr_reopen(project='{{ inputs.project }}', mr_id={{ inputs.mr_id }})
+      ```
+      {% else %}
+      ❌ **Failed to close MR**
+
+      {{ close_status.message }}
+      {% endif %}

@@ -234,7 +234,6 @@ steps:
     tool: gitlab_ci_status
     args:
       project: "{{ cfg.gitlab_project }}"
-      mr_id: "{{ inputs.mr_id }}"
     output: gitlab_ci_raw
     on_error: auto_heal  # GitLab API - may need auth refresh
 
@@ -522,7 +521,7 @@ steps:
     condition: "snapshots_raw"
     tool: konflux_get_snapshot
     args:
-      name: "{{ git_sha[:8] }}"
+      name: "{{ commit_sha[:8] }}"
       namespace: "{{ cfg.konflux_namespace }}"
     output: snapshot_details_raw
     on_error: auto_heal  # Konflux cluster - may need kube_login
@@ -611,7 +610,6 @@ steps:
     args:
       run_name: "{{ commit_pipeline.pipeline_name }}"
       namespace: "{{ cfg.konflux_namespace }}"
-      follow: false
       all_tasks: true
     output: tekton_logs_raw
     on_error: auto_heal  # Tekton/Konflux - may need kube_login
@@ -624,7 +622,6 @@ steps:
     args:
       build_name: "{{ commit_pipeline.pipeline_name }}"
       namespace: "{{ cfg.konflux_namespace }}"
-      tail: 100
     output: build_logs_raw
     on_error: auto_heal  # Konflux cluster - may need kube_login
 
@@ -760,6 +757,7 @@ steps:
       billing: "{{ clowdapp_selection.use_billing }}"
       timeout: 900
     output: deploy_result
+    on_error: auto_heal
 
   # Step 10: Wait for pods to be ready
   - name: wait_for_ready
@@ -1167,9 +1165,9 @@ steps:
   - name: cleanup_status
     description: "Report cleanup status"
     compute: |
-      if cleanup_failure_result:
+      if 'cleanup_failure_result' in dir() and cleanup_failure_result:
         result = {"cleaned_up": True, "reason": "failure"}
-      elif cleanup_success_result:
+      elif 'cleanup_success_result' in dir() and cleanup_success_result:
         result = {"cleaned_up": True, "reason": "success"}
       else:
         result = {"cleaned_up": False, "reason": "kept"}
@@ -1259,7 +1257,6 @@ steps:
       query: "test {{ commit_info.message[:100] }}"
       project: "automation-analytics-backend"
       limit: 5
-      min_score: 0.5
     output: related_tests_raw
     on_error: continue
 

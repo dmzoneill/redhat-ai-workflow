@@ -27,6 +27,8 @@ description: |
   6. Deployment Check (devops) - Optional ephemeral deployment
   7. Finalize (developer) - Update Jira, log timeline
 
+version: "1.0"
+
 inputs:
   - name: issue_key
     description: Jira issue key (e.g., AAP-12345)
@@ -63,12 +65,14 @@ steps:
     tool: persona_load
     args:
       persona_name: "developer"
+    on_error: continue
 
   - name: safety_check
     description: Check git status for uncommitted changes
     tool: git_status
     args:
       repo: "{{ repo_path }}"
+    on_error: continue
 
   - name: evaluate_safety
     description: Evaluate if worktree is safe to proceed
@@ -127,12 +131,14 @@ steps:
       repo: "{{ repo_path }}"
       action: "push"
       message: "Auto-stash before {{ issue_key }} - Sprint Bot"
+    on_error: continue
 
   - name: analyze_issue
     description: Fetch issue details from Jira
     tool: jira_view_issue
     args:
       issue_key: "{{ issue_key }}"
+    on_error: continue
 
   - name: check_clarity
     description: Check if issue has enough detail to work on
@@ -201,6 +207,7 @@ steps:
         {{ '- Technical context (which files/components are involved)' if not check_clarity.has_technical_details else '' }}
 
         This will help me deliver exactly what you need. Thanks!
+    on_error: continue
 
   - name: mark_waiting_if_unclear
     description: Mark issue as waiting for clarification
@@ -222,6 +229,7 @@ steps:
     args:
       skill_name: start_work
       inputs: '{"issue_key": "{{ issue_key }}", "auto_stash": false}'
+    on_error: continue
 
   - name: extract_branch_name
     description: Extract branch name from start_work result
@@ -255,6 +263,7 @@ steps:
     args:
       query: "{{ analyze_issue[:200] if analyze_issue else issue_key }}"
       limit: 10
+    on_error: continue
 
   - name: load_project_knowledge
     description: Load project-specific patterns and gotchas
@@ -263,6 +272,7 @@ steps:
     args:
       project: ""
       section: "patterns"
+    on_error: continue
 
   - name: prepare_context
     description: Prepare context for implementation
@@ -302,9 +312,10 @@ steps:
       key: "state/sprint_timeline"
       list_path: "{{ issue_key }}"
       item: |
-        timestamp: "{{ now }}"
+        timestamp: "{{ today }}"
         action: "ready_for_implementation"
         description: "Context prepared, ready for coding in dedicated chat"
+    on_error: continue
 
   # ==================== STAGE 5: MR Creation (developer) ====================
   # This step would be called after implementation is complete
@@ -316,6 +327,7 @@ steps:
     tool: git_status
     args:
       repo: "{{ repo_path }}"
+    on_error: continue
 
   - name: has_changes_to_commit
     description: Determine if there are changes to create MR for
@@ -332,6 +344,7 @@ steps:
     args:
       skill_name: create_mr
       inputs: '{"issue_key": "{{ issue_key }}", "draft": true}'
+    on_error: continue
 
   - name: extract_mr_info
     description: Extract MR URL and ID from result
@@ -360,6 +373,7 @@ steps:
     tool: persona_load
     args:
       persona_name: "devops"
+    on_error: continue
 
   - name: deploy_to_ephemeral
     description: Deploy to ephemeral for testing
@@ -368,6 +382,7 @@ steps:
     args:
       skill_name: test_mr_ephemeral
       inputs: '{"mr_id": "{{ extract_mr_info.mr_id }}"}'
+    on_error: continue
 
   # ==================== STAGE 7: Finalize (developer) ====================
   - name: switch_back_to_developer
@@ -376,6 +391,7 @@ steps:
     tool: persona_load
     args:
       persona_name: "developer"
+    on_error: continue
 
   - name: update_jira_with_mr
     description: Add MR link to Jira issue
@@ -387,6 +403,7 @@ steps:
         Merge request ready for review: {{ extract_mr_info.mr_url }}
 
         The changes address the requirements in this issue. Please review when you have a chance.
+    on_error: continue
 
   - name: log_mr_created
     description: Log MR creation to timeline
@@ -396,10 +413,11 @@ steps:
       key: "state/sprint_timeline"
       list_path: "{{ issue_key }}"
       item: |
-        timestamp: "{{ now }}"
+        timestamp: "{{ today }}"
         action: "mr_created"
         description: "MR {{ extract_mr_info.mr_id }} created"
         mr_url: "{{ extract_mr_info.mr_url }}"
+    on_error: continue
 
   - name: final_summary
     description: Prepare final summary

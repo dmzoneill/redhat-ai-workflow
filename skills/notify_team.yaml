@@ -266,7 +266,7 @@ steps:
       if isinstance(template_data_raw, str):
           try:
               data = json.loads(template_data_raw)
-          except:
+          except Exception:
               data = {}
       elif isinstance(template_data_raw, dict):
           data = template_data_raw
@@ -630,41 +630,6 @@ steps:
     output: notification_tracking_result
     on_error: continue
 
-outputs:
-  - name: report
-    value: |
-      ## 💬 Slack Notification
-
-      {% if post_status.success %}
-      ✅ **Message Sent**
-
-      **Channel:** #{{ channel_info.channel_name }}
-      **Type:** {{ formatted_msg.emoji }} {{ inputs.type }}
-
-      {% if post_status.thread_ts %}
-      **Thread ID:** `{{ post_status.thread_ts }}`
-
-      To reply in thread:
-      ```python
-      skill_run("notify_team", '{"message": "Follow-up", "channel": "{{ channel_info.channel_name }}", "thread_ts": "{{ post_status.thread_ts }}"}')
-      ```
-      {% endif %}
-
-      {% else %}
-      ❌ **Failed to Send**
-
-      {{ post_status.raw }}
-
-      {% if not channel_info.found %}
-      ⚠️ Channel `#{{ inputs.channel }}` not found.
-
-      Available channels:
-      ```python
-      slack_list_channels(limit=50)
-      ```
-      {% endif %}
-      {% endif %}
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_notify_team_failures
@@ -714,6 +679,41 @@ outputs:
       fix_description: "Check channel name and invite bot to channel"
     output: notify_team_channel_fix_learned
     on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 💬 Slack Notification
+
+      {% if post_status.success %}
+      ✅ **Message Sent**
+
+      **Channel:** #{{ channel_info.channel_name }}
+      **Type:** {{ formatted_msg.emoji }} {{ inputs.type }}
+
+      {% if post_status.thread_ts %}
+      **Thread ID:** `{{ post_status.thread_ts }}`
+
+      To reply in thread:
+      ```python
+      skill_run("notify_team", '{"message": "Follow-up", "channel": "{{ channel_info.channel_name }}", "thread_ts": "{{ post_status.thread_ts }}"}')
+      ```
+      {% endif %}
+
+      {% else %}
+      ❌ **Failed to Send**
+
+      {{ post_status.raw }}
+
+      {% if not channel_info.found %}
+      ⚠️ Channel `#{{ inputs.channel }}` not found.
+
+      Available channels:
+      ```python
+      slack_list_channels(limit=50)
+      ```
+      {% endif %}
+      {% endif %}
 
   - name: context
     value:

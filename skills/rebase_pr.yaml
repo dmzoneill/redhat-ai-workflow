@@ -324,7 +324,7 @@ steps:
       total_str = str(total_commits_raw).strip() if total_commits_raw else "0"
       try:
         total_commits = int(total_str)
-      except:
+      except Exception:
         total_commits = 0
 
       result = {
@@ -417,6 +417,7 @@ steps:
       remote: "origin"
       branch: "{{ resolved_repo.default_branch }}"
     output: base_updated
+    on_error: continue
 
   - name: start_rebase
     description: "Start the rebase onto base branch"
@@ -469,7 +470,6 @@ steps:
       query: "{{ rebase_result.conflict_files[0] if rebase_result.conflict_files else 'conflict resolution' }}"
       project: "automation-analytics-backend"
       limit: 3
-      min_score: 0.5
     output: conflict_context_raw
     on_error: continue
 
@@ -703,7 +703,6 @@ steps:
     tool: lint_python
     args:
       repo: "{{ resolved_repo.path }}"
-      tool: "flake8"
       fix: false
     output: flake8_result
     on_error: continue
@@ -714,7 +713,6 @@ steps:
     tool: lint_python
     args:
       repo: "{{ resolved_repo.path }}"
-      tool: "black"
       fix: false
     output: black_result
     on_error: continue
@@ -798,6 +796,7 @@ steps:
       branch: "{{ target_branch }}"
       force: true
     output: push_result
+    on_error: continue
 
   # ==================== BUILD SUMMARY ====================
 

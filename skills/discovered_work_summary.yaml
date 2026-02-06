@@ -258,9 +258,9 @@ steps:
 outputs:
   - name: summary
     value: |
-      {% if markdown_summary %}
+      {% if markdown_summary | default('') %}
       {{ markdown_summary }}
-      {% elif brief_summary %}
+      {% elif brief_summary | default('') %}
       {{ brief_summary }}
       {% else %}
       No discovered work data available.

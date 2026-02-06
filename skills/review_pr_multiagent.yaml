@@ -274,6 +274,7 @@ steps:
     project: automation-analytics/automation-analytics-backend
     mr_id: '{{ inputs.mr_id }}'
     message: '{{ review }}'
+  output: post_result
   on_error: continue
 
 # ==================== LEARNING FROM FAILURES ====================

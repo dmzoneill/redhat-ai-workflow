@@ -485,7 +485,7 @@ steps:
     args:
       repo: "{{ resolved_repo.path }}"
       prune: true
-    output: fetch_result
+    output: fetch_latest_result
     on_error: auto_heal
 
   - name: verify_clean_state
@@ -1261,7 +1261,7 @@ outputs:
 
       1. Assign {{ cve_info.issue_key }} to current user
       2. Create branch: `{{ branch_name }}`
-      3. Create temp pipenv in /tmp with Python {{ pipfile_update.python_version if pipfile_update else 'from Pipfile' }}
+      3. Create temp pipenv in /tmp with Python {{ pipfile_update.python_version if pipfile_update is mapping else 'from Pipfile' }}
       4. Install latest {{ cve_info.affected_package }} to get version and hashes
       5. Update Pipfile with version constraint (>= fixed version)
       6. Update Pipfile.lock with new version and hashes

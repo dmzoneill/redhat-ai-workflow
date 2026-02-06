@@ -94,7 +94,7 @@ steps:
   # Fetch GitHub PRs (upstream contributions)
   - name: fetch_github_prs
     description: "Fetch GitHub PRs merged on target date"
-    tool: github_pr_list
+    tool: gh_pr_list
     args:
       state: "closed"
       author: "@me"

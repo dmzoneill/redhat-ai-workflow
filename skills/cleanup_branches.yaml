@@ -158,7 +158,7 @@ steps:
 
   - name: list_remote_branches
     description: "List all remote branches"
-    tool: git_remote
+    tool: git_remote_info
     args:
       repo: "{{ resolved_repo.path }}"
       action: "show"
@@ -173,40 +173,6 @@ steps:
       repo: "{{ resolved_repo.path }}"
       all: true
     output: all_branches_raw
-    on_error: continue
-
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_related_issues
-    description: "Search for Jira issues related to candidate branches"
-    condition: "branch_candidates and branch_candidates.candidate_count > 0"
-    tool: code_search
-    args:
-      query: "branch cleanup {{ branch_candidates.candidates[0].name if branch_candidates.candidates else '' }}"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: branch_code_raw
-    on_error: continue
-
-  - name: parse_branch_code
-    description: "Parse branch code search results"
-    condition: "branch_code_raw"
-    compute: |
-      code_result = branch_code_raw if branch_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('results'):
-          for r in code_result.get('results', [])[:3]:
-              related_code.append({
-                  'file': r.get('file_path', ''),
-                  'score': r.get('score', 0),
-              })
-
-      result = {
-          'code': related_code,
-          'count': len(related_code),
-      }
-    output: branch_code_analysis
     on_error: continue
 
   # ==================== IDENTIFY MERGED BRANCHES ====================
@@ -259,6 +225,40 @@ steps:
           "protected": protected,
       }
     output: branch_candidates
+
+  # ==================== SEMANTIC SEARCH ====================
+
+  - name: search_related_issues
+    description: "Search for Jira issues related to candidate branches"
+    condition: "branch_candidates and branch_candidates.candidate_count > 0"
+    tool: code_search
+    args:
+      query: "branch cleanup {{ branch_candidates.candidates[0].name if branch_candidates.candidates else '' }}"
+      project: "automation-analytics-backend"
+      limit: 3
+    output: branch_code_raw
+    on_error: continue
+
+  - name: parse_branch_code
+    description: "Parse branch code search results"
+    condition: "branch_code_raw"
+    compute: |
+      code_result = branch_code_raw if branch_code_raw else {}
+
+      related_code = []
+      if isinstance(code_result, dict) and code_result.get('results'):
+          for r in code_result.get('results', [])[:3]:
+              related_code.append({
+                  'file': r.get('file_path', ''),
+                  'score': r.get('score', 0),
+              })
+
+      result = {
+          'code': related_code,
+          'count': len(related_code),
+      }
+    output: branch_code_analysis
+    on_error: continue
 
   # ==================== DELETE BRANCHES ====================
 

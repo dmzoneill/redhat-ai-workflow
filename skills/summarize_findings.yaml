@@ -50,8 +50,8 @@ steps:
               with open(log_file) as f:
                   data = yaml.safe_load(f) or {}
               session_entries = data.get('entries', [])[-20:]  # Last 20 entries
-          except:
-              pass
+          except Exception:
+              pass  # Ignore malformed YAML in session log
 
       session_logs = session_entries
     output: session_logs
@@ -185,7 +185,7 @@ outputs:
     value: |
       {{ summary_text }}
 
-      {% if save_result.success %}
+      {% if (save_result | default('')).success | default(false) %}
       ---
       *Summary saved to memory for future reference.*
       {% endif %}

@@ -294,8 +294,8 @@ steps:
                       for p in value[-3:]:
                           if isinstance(p, dict):
                               metrics["recent_patterns"].append(p.get("pattern", str(p))[:50])
-          except:
-              pass
+          except Exception:
+              pass  # Ignore malformed patterns YAML
 
       # Parse tool fixes
       if 'tool_fixes_raw' in dir() and tool_fixes_raw:
@@ -312,8 +312,8 @@ steps:
               for fix in fixes_list[-3:]:
                   if isinstance(fix, dict):
                       metrics["recent_fixes"].append(fix.get("tool_name", "unknown"))
-          except:
-              pass
+          except Exception:
+              pass  # Ignore malformed tool_fixes YAML
 
       # Parse knowledge metadata
       if 'knowledge_metadata_raw' in dir() and knowledge_metadata_raw:
@@ -336,7 +336,7 @@ steps:
           if searches_match:
               metrics["vector_searches"] = int(searches_match.group(1))
 
-      learning_metrics = metrics
+      result = metrics
     output: learning_metrics
     on_error: continue
 
@@ -432,8 +432,8 @@ steps:
       if current_work_raw and isinstance(current_work_raw, str):
           try:
               current_work = yaml.safe_load(current_work_raw) or {}
-          except:
-              pass
+          except Exception:
+              pass  # Ignore malformed YAML in current_work
 
       result = {
           "issues_worked": list(issues_worked),
@@ -582,7 +582,7 @@ steps:
       errors_detected = []
 
       # Check git failures
-      commit_text = str(recent_commits_raw) if 'recent_commits_raw' in dir() and recent_commits_raw else ""
+      commit_text = str(commits_raw) if 'commits_raw' in dir() and commits_raw else ""
       if "permission denied" in commit_text.lower():
           errors_detected.append({
               "tool": "git_log",
@@ -592,7 +592,7 @@ steps:
           })
 
       # Check GitLab failures
-      gitlab_text = str(gitlab_mrs_raw) if 'gitlab_mrs_raw' in dir() and gitlab_mrs_raw else ""
+      gitlab_text = str(mrs_raw) if 'mrs_raw' in dir() and mrs_raw else ""
       if "no such host" in gitlab_text.lower():
           errors_detected.append({
               "tool": "gitlab_mr_list",
@@ -612,7 +612,7 @@ steps:
           })
 
       # Check Konflux failures
-      konflux_text = str(konflux_releases_raw) if 'konflux_releases_raw' in dir() and konflux_releases_raw else ""
+      konflux_text = str(releases_raw) if 'releases_raw' in dir() and releases_raw else ""
       if "no route to host" in konflux_text.lower():
           errors_detected.append({
               "tool": "konflux_list_releases",

@@ -141,7 +141,7 @@ steps:
           try:
               with open(patterns_file) as f:
                   result = yaml.safe_load(f) or {}
-          except:
+          except Exception:
               result = {}
       else:
           result = {}
@@ -326,12 +326,12 @@ outputs:
       ## ✅ Memory Initialized
 
       ### 💾 Backup Created
-      **Location:** `{{ backup_info.backup_location }}`
-      **Timestamp:** {{ backup_info.timestamp }}
-      **Files backed up:** {{ backup_info.files_backed_up | length }}
-      **Total backups:** {{ backup_info.total_backups }} (keeping last 10)
+      **Location:** `{{ (backup_info | default('')).backup_location | default('N/A') }}`
+      **Timestamp:** {{ (backup_info | default('')).timestamp | default('N/A') }}
+      **Files backed up:** {{ (backup_info | default('')).files_backed_up | default([]) | length }}
+      **Total backups:** {{ (backup_info | default('')).total_backups | default(0) }} (keeping last 10)
 
-      {% if backup_info.files_backed_up %}
+      {% if backup_info | default('') and backup_info.files_backed_up %}
       Backed up files:
       {% for file in backup_info.files_backed_up %}
       - `{{ file }}`

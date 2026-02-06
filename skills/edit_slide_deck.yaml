@@ -83,6 +83,7 @@ steps:
     args:
       presentation_id: "{{ inputs.presentation_id }}"
     output: view_result
+    on_error: continue
 
   # Add slide action
   - name: add_slide
@@ -95,6 +96,7 @@ steps:
       title: "{{ inputs.title | default('') }}"
       body: "{{ inputs.body | default('') }}"
     output: add_result
+    on_error: continue
 
   # Update text action
   - name: update_text
@@ -106,6 +108,7 @@ steps:
       object_id: "{{ inputs.object_id }}"
       text: "{{ inputs.text }}"
     output: update_result
+    on_error: continue
 
   # Delete slide action
   - name: delete_slide
@@ -116,6 +119,7 @@ steps:
       presentation_id: "{{ inputs.presentation_id }}"
       slide_id: "{{ inputs.slide_id }}"
     output: delete_result
+    on_error: continue
 
   # Add text box action
   - name: add_text_box
@@ -129,6 +133,7 @@ steps:
       x: "{{ inputs.x | default(100) }}"
       y: "{{ inputs.y | default(100) }}"
     output: textbox_result
+    on_error: continue
 
   # Build summary based on action
   - name: build_summary

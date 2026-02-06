@@ -169,7 +169,6 @@ steps:
     tool: git_fetch
     args:
       repo: "{{ resolved_repo.path }}"
-      all: true
     output: fetch_result
     on_error: auto_heal  # Git remote - may need auth/network
 
@@ -178,7 +177,7 @@ steps:
     tool: git_branch_list
     args:
       repo: "{{ resolved_repo.path }}"
-      all: true
+      all_branches: true
     output: branches_raw
     on_error: continue
 
@@ -212,7 +211,7 @@ steps:
     tool: git_checkout
     args:
       repo: "{{ resolved_repo.path }}"
-      ref: "{{ inputs.target_branch }}"
+      target: "{{ inputs.target_branch }}"
     output: checkout_result
     on_error: continue
 
@@ -273,7 +272,6 @@ steps:
     args:
       repo: "{{ resolved_repo.path }}"
       file: "{{ commit_changes.files_changed[0] }}"
-      rev: "{{ inputs.commit }}"
     output: blame_raw
     on_error: continue
 
@@ -308,7 +306,6 @@ steps:
       query: "{{ commit_changes.files_changed[0] if commit_changes.files_changed else 'hotfix' }}"
       project: "automation-analytics-backend"
       limit: 5
-      min_score: 0.5
     output: related_code_raw
     on_error: continue
 
@@ -400,8 +397,7 @@ steps:
     tool: git_push
     args:
       repo: "{{ resolved_repo.path }}"
-      ref: "{{ inputs.target_branch }}"
-      tags: true
+      branch: "{{ inputs.target_branch }}"
     output: push_result
     on_error: auto_heal  # Git remote - may need auth/network
 

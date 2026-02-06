@@ -184,7 +184,7 @@ steps:
 
   - name: list_existing_silences
     description: "List all current silences"
-    tool: alertmanager_list_silences
+    tool: alertmanager_silences
     args:
       environment: "{{ inputs.environment }}"
     output: silences_list_raw

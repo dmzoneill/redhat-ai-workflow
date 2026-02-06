@@ -218,7 +218,7 @@ steps:
         key: {{ clone_result.new_key }}
         status: New
         cloned_from: {{ inputs.issue_key }}
-        created: {{ now().isoformat() }}
+        created: "auto-added"
     on_error: continue
 
   # ==================== SEMANTIC SEARCH ====================

@@ -71,13 +71,13 @@ steps:
       if not detected:
           detected = "automation-analytics-backend"
 
-      project = detected
+      result = detected
     output: project
 
   - name: set_project
     condition: "{{ inputs.project }}"
     compute: |
-      project = inputs.get("project")
+      result = inputs.get("project")
     output: project
 
   # Get project path
@@ -94,7 +94,7 @@ steps:
       else:
           project_path = Path.cwd()
 
-      path_str = str(project_path)
+      result = str(project_path)
     output: path_str
 
   # Read the file content
@@ -137,6 +137,7 @@ steps:
           "end_line": end_line,
           "exists": file_path.exists(),
       }
+      result = file_content
     output: file_content
     on_error: continue
 
@@ -162,7 +163,7 @@ steps:
               if line.strip() and ':' in line and inputs.file not in line:
                   related.append(line.strip()[:100])
 
-      related_code = related[:5]
+      result = related[:5]
     output: related_code
     on_error: continue
 
@@ -195,7 +196,7 @@ steps:
                   arch_context = f"**Module:** {module_path}\n**Purpose:** {purpose}"
                   break
 
-      architecture_context = arch_context
+      result = arch_context
     output: architecture_context
     on_error: continue
 
@@ -225,7 +226,7 @@ steps:
               if any(kw in gotcha.lower() for kw in file_path.split('/')):
                   gotchas.append(gotcha[:150])
 
-      relevant_gotchas = gotchas[:3]
+      result = gotchas[:3]
     output: relevant_gotchas
     on_error: continue
 
@@ -252,7 +253,7 @@ steps:
               if pattern and len(pattern) > 10:
                   patterns.append(pattern)
 
-      coding_patterns = patterns[:5]
+      result = patterns[:5]
     output: coding_patterns
     on_error: continue
 
@@ -309,7 +310,7 @@ steps:
           lines.append("---")
           lines.append("*Use `find_similar_code` to search for more related implementations.*")
 
-          explanation = "\n".join(lines)
+          result = "\n".join(lines)
     output: explanation
 
   # ==================== LEARNING FROM FAILURES ====================
@@ -337,7 +338,7 @@ steps:
           })
 
       # Check vector search failures
-      search_text = str(similar_code_raw) if 'similar_code_raw' in dir() and similar_code_raw else ""
+      search_text = str(related_code_raw) if 'related_code_raw' in dir() and related_code_raw else ""
       if "no index" in search_text.lower() or "index not found" in search_text.lower():
           errors_detected.append({
               "tool": "code_search",

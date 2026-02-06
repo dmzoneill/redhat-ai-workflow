@@ -98,16 +98,16 @@ steps:
       if current_work_raw and isinstance(current_work_raw, str):
           try:
               current_work = yaml.safe_load(current_work_raw) or {}
-          except:
-              pass
+          except Exception:
+              pass  # Ignore malformed YAML in current_work
 
       # Parse environments
       environments = {}
       if environments_raw and isinstance(environments_raw, str):
           try:
               environments = yaml.safe_load(environments_raw) or {}
-          except:
-              pass
+          except Exception:
+              pass  # Ignore malformed YAML in environments
 
       # Check active_issues - look for status "Done" or "Closed"
       for issue in current_work.get("active_issues", []):
@@ -132,8 +132,8 @@ steps:
                   if deployed_date.replace(tzinfo=None) < cutoff_date:
                       stale_items["ephemeral_namespaces"].append(ns)
                       summary.append(f"Namespace {ns.get('name', '?')} expired")
-              except:
-                  pass
+              except Exception:
+                  pass  # Ignore unparseable date in namespace entry
 
       # Count stale session logs (would be in logs/ directory)
       # Just report that we'd clean them
@@ -362,7 +362,7 @@ outputs:
       {% if inputs.dry_run %}
       ---
       *This was a dry run. Run with `dry_run: false` to apply changes.*
-      {% elif cleanup_result %}
+      {% elif cleanup_result | default('') %}
       ### Cleanup Results
       {% if cleanup_result.success %}
       ✅ Cleanup successful!

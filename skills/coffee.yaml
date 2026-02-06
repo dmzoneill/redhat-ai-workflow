@@ -257,7 +257,7 @@ steps:
               if "watcher" in raw_text.lower() and "running" in raw_text.lower():
                   stats["watcher_running"] = True
 
-      vector_stats = stats
+      result = stats
     output: vector_stats
     on_error: continue
 
@@ -302,7 +302,7 @@ steps:
               gotchas_count = raw_text.lower().count("gotcha")
               stats["gotchas_count"] = gotchas_count
 
-      knowledge_stats = stats
+      result = stats
     output: knowledge_stats
     on_error: continue
 
@@ -365,7 +365,7 @@ steps:
                 time_str = dt.strftime('%H:%M')
               else:
                 time_str = "All day"
-            except:
+            except Exception:
               time_str = start
 
             # Check for Meet link
@@ -1061,7 +1061,7 @@ steps:
     description: "List your active ephemeral environments"
     tool: bonfire_namespace_list
     args:
-      mine: true
+      mine_only: true
     output: ephemeral_namespaces_raw
     on_error: auto_heal  # Ephemeral cluster - may need kube_login
 

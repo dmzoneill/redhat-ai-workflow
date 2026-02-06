@@ -593,7 +593,7 @@ steps:
     args:
       repo: "{{ resolved_repo.path }}"
       tool: "flake8"
-      files: "{{ ' '.join(changed_files.files) }}"
+      paths: "{{ ' '.join(changed_files.files) }}"
       max_line_length: 100
       ignore: "E501,W503,E203"
     output: flake8_raw
@@ -916,6 +916,7 @@ steps:
       source_branch: "{{ current_branch.name }}"
       draft: "{{ inputs.draft }}"
     output: mr
+    on_error: auto_heal
 
   - name: update_jira
     description: "Add MR link to Jira issue"

@@ -188,7 +188,7 @@ steps:
                       new_value = False
                   elif new_value.isdigit():
                       new_value = int(new_value)
-              except:
+              except Exception:
                   pass  # Keep as string
 
               # Navigate and update
@@ -288,14 +288,14 @@ outputs:
       }')
       ```
 
-      {% elif remove_result and remove_result.success %}
+      {% elif (remove_result | default('')) and remove_result.success %}
       ## ✅ Removed {{ remove_result.removed }} Item(s)
 
       **File:** `{{ inputs.file }}`
       **List:** `{{ inputs.list_path }}`
       **Matched:** `{{ inputs.match_key }}` = `{{ inputs.match_value }}`
 
-      {% elif update_result and update_result.success %}
+      {% elif (update_result | default('')) and update_result.success %}
       ## ✅ Field Updated
 
       **File:** `{{ inputs.file }}`
@@ -303,12 +303,12 @@ outputs:
       **Old Value:** {{ update_result.old_value or "(none)" }}
       **New Value:** {{ update_result.new_value }}
 
-      {% elif remove_result %}
+      {% elif remove_result | default('') %}
       ## ❌ Remove Failed
 
       {{ remove_result.error }}
 
-      {% elif update_result %}
+      {% elif update_result | default('') %}
       ## ❌ Update Failed
 
       {{ update_result.error }}

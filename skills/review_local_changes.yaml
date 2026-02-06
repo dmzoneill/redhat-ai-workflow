@@ -124,7 +124,7 @@ steps:
               timeout=10
           )
           diff_stat = stat_proc.stdout
-      except:
+      except Exception:
           diff_stat = ""
 
       result = {
@@ -390,12 +390,12 @@ outputs:
       ```
 
       ### Review
-      {{ final_review.review }}
+      {{ (final_review | default('')).review | default('No review generated') }}
 
       ---
 
       ### Agent Results
-      {% for r in all_reviews %}
+      {% for r in all_reviews | default([]) %}
       - **{{ r.agent }}** ({{ r.cli }}): {{ 'OK' if not r.error else 'ERROR: ' + r.error }}
       {% endfor %}
 
@@ -415,4 +415,4 @@ outputs:
     value: "{{ stats.verdict }}"
 
   - name: review
-    value: "{{ final_review.review if final_review else 'No review generated' }}"
+    value: "{{ final_review.review if final_review | default('') else 'No review generated' }}"

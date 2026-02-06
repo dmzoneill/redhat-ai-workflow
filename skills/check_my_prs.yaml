@@ -350,27 +350,22 @@ steps:
 
   # ==================== MERGE APPROVED MRs ====================
 
-  - name: update_summary_with_merge
-    description: "Update summary if MR was merged"
-    condition: "merge_result"
-    compute: |
-      merged_mr = first_mr_status.get('iid', '?')
-      result = summary + f"\n\n### ✅ Merged\n- !{merged_mr} has been merged!"
-    output: final_summary
-
   # ==================== MEMORY INTEGRATION ====================
 
   - name: update_mr_status_in_memory
     description: "Update open MRs in memory with current status"
-    condition: "mr_statuses"
+    condition: "first_mr_status"
     compute: |
       # Use shared memory helpers (available via skill engine)
       data = memory.read_memory("state/current_work")
       open_mrs = data.get("open_mrs", []) if isinstance(data.get("open_mrs"), list) else []
       now = memory.get_timestamp()
 
+      # Build list of checked MR statuses
+      checked_statuses = [first_mr_status] if first_mr_status else []
+
       # Update status for each checked MR
-      for mr_status in (mr_statuses or []):
+      for mr_status in checked_statuses:
           mr_id = str(mr_status.get("iid", ""))
           status = mr_status.get("status", "unknown")
           pipeline = mr_status.get("pipeline_status", "unknown")
@@ -385,7 +380,7 @@ steps:
 
       data["open_mrs"] = open_mrs
       memory.write_memory("state/current_work", data)
-      result = f"updated {len(mr_statuses or [])} MRs"
+      result = f"updated {len(checked_statuses)} MRs"
     output: memory_update_result
     on_error: continue
 
@@ -393,8 +388,8 @@ steps:
     description: "Log PR check to session"
     tool: memory_session_log
     args:
-      action: "Checked {{ mr_statuses|length if mr_statuses else 0 }} of my PRs"
-      details: "{{ 'Merged one' if merge_result else 'No merges' }}"
+      action: "Checked {{ my_mrs|length if my_mrs else 0 }} of my PRs"
+      details: "First MR status: {{ first_mr_status.get('status', 'unknown') if first_mr_status else 'none' }}"
     on_error: continue
 
   # ==================== SEMANTIC SEARCH ====================
@@ -495,16 +490,13 @@ steps:
 outputs:
   - name: summary
     value: |
-      {{ final_summary if final_summary else summary }}
+      {{ summary }}
 
       ---
 
       ## Quick Actions
 
-      {% if merge_result %}
-      ✅ **MR !{{ first_mr_status.get('iid') }} has been merged!**
-
-      {% elif first_mr_status and first_mr_status.get('status') == 'needs_response' %}
+      {% if first_mr_status and first_mr_status.get('status') == 'needs_response' %}
       **To respond to feedback on !{{ first_mr_status.get('iid') }}:**
 
       1. View the comments:

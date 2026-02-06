@@ -241,7 +241,6 @@ steps:
     args:
       project: "{{ resolved.gitlab_project }}"
       state: opened
-      per_page: "{{ inputs.limit }}"
     output: open_mrs
     on_error: auto_heal  # GitLab API - may need auth refresh
 
@@ -473,7 +472,7 @@ steps:
     tool: skill_run
     args:
       skill_name: review_pr
-      inputs: '{"mr_id": {{ first_mr_info.iid }}, "skip_tests": true}'
+      inputs: '{"mr_id": {{ first_mr_info.iid }}, "run_tests": false}'
     output: full_review_result
     on_error: continue
 

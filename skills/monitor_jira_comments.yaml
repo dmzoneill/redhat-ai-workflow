@@ -18,6 +18,8 @@ description: |
 
   Scheduled to run at 9 AM on weekdays via cron.
 
+version: "1.0"
+
 inputs:
   - name: jira_project
     description: Jira project key (e.g., AAP)
@@ -56,7 +58,7 @@ steps:
     description: Find all sprint issues assigned to current user
     tool: jira_search
     args:
-      jql: "project = {{ jira_project }} AND Sprint in openSprints() AND assignee = currentUser() ORDER BY updated DESC"
+      jql: "project = {{ inputs.jira_project }} AND Sprint in openSprints() AND assignee = currentUser() ORDER BY updated DESC"
       max_results: 50
 
   - name: parse_issues
@@ -78,48 +80,61 @@ steps:
 
       result = {"issues": issues, "count": len(issues)}
 
-  - name: check_each_issue
-    description: Check each issue for recent comments
+  - name: process_all_issues
+    description: Iterate over all issues, check comments, respond to questions, and notify
     condition: "{{ parse_issues.count > 0 }}"
-    loop: "{{ parse_issues.issues }}"
-    loop_var: issue_key
-    steps:
-      - name: get_issue_details
-        tool: jira_view_issue
-        args:
-          issue_key: "{{ issue_key }}"
+    compute: |
+      import re
+      from datetime import datetime, timedelta
+      import json
 
-      - name: analyze_comments
-        compute: |
-          from datetime import datetime, timedelta
-          import re
+      issues = parse_issues.get("issues", [])
+      hours_lookback = int(inputs.get("hours_lookback", 24))
+      dry_run = inputs.get("dry_run", False)
+      notify_user = inputs.get("notify_user", True)
+      slack_channel = inputs.get("slack_channel", "") or "team-automation-analytics"
 
-          issue_text = str(get_issue_details)
-          hours_lookback = int(inputs.get("hours_lookback", 24))
-          cutoff_time = datetime.now() - timedelta(hours=hours_lookback)
+      # Question detection patterns
+      question_patterns = [
+          r'\?',
+          r'(?i)can you',
+          r'(?i)could you',
+          r'(?i)would you',
+          r'(?i)please clarify',
+          r'(?i)what about',
+          r'(?i)how do',
+          r'(?i)when will',
+          r'(?i)any update',
+          r'(?i)status on',
+          r'(?i)thoughts on',
+          r'(?i)feedback',
+      ]
 
-          # Find comments section
+      # Phrases that indicate our own comments (skip these)
+      own_comment_phrases = [
+          'merge request ready',
+          'changes address',
+          'please review',
+          "i'm reviewing",
+          'working on',
+      ]
+
+      questions_found = 0
+      responses_sent = 0
+      notifications_sent = 0
+
+      for issue_key in issues:
+          # Get issue details via nested skill runner calling jira_view_issue
+          view_result = run_skill("jira_view_issue_wrapper", {"issue_key": issue_key})
+          # Fallback: use memory_ask to get issue info if wrapper doesn't exist
+          if not view_result.get("success"):
+              # Try direct approach - skip this issue if we can't fetch it
+              continue
+
+          issue_text = str(view_result.get("result", ""))
+
+          # Parse comments from issue text
           comments = []
-          questions = []
-
-          # Simple pattern matching for questions
-          question_patterns = [
-              r'\?',  # Direct question marks
-              r'(?i)can you',
-              r'(?i)could you',
-              r'(?i)would you',
-              r'(?i)please clarify',
-              r'(?i)what about',
-              r'(?i)how do',
-              r'(?i)when will',
-              r'(?i)any update',
-              r'(?i)status on',
-              r'(?i)thoughts on',
-              r'(?i)feedback',
-          ]
-
-          # Look for comment patterns in the issue text
-          # This is simplified - real implementation would parse structured data
           lines = issue_text.split('\n')
           in_comments = False
           current_comment = []
@@ -136,38 +151,24 @@ steps:
           if current_comment:
               comments.append('\n'.join(current_comment))
 
-          # Check each comment for questions
+          # Detect questions in comments
+          questions = []
           for comment in comments:
               for pattern in question_patterns:
                   if re.search(pattern, comment):
-                      # Check if this looks like someone else's comment (not ours)
-                      # Simple heuristic: if it doesn't contain typical bot phrases
-                      if not any(phrase in comment.lower() for phrase in [
-                          'merge request ready',
-                          'changes address',
-                          'please review',
-                          'i\'m reviewing',
-                          'working on'
-                      ]):
+                      if not any(phrase in comment.lower() for phrase in own_comment_phrases):
                           questions.append({
                               "text": comment[:200],
-                              "pattern_matched": pattern
+                              "pattern_matched": pattern,
                           })
                       break
 
-          result = {
-              "issue_key": issue_key,
-              "total_comments": len(comments),
-              "questions": questions,
-              "has_questions": len(questions) > 0
-          }
+          if not questions:
+              continue
 
-      - name: prepare_response
-        condition: "{{ analyze_comments.has_questions }}"
-        compute: |
-          questions = analyze_comments.get("questions", [])
+          questions_found += len(questions)
 
-          # Generate a natural response based on the question type
+          # Generate response based on question types
           responses = []
           for q in questions:
               question_text = q.get("text", "").lower()
@@ -197,7 +198,6 @@ steps:
                       "Thanks for reaching out! I've seen your message and will respond with more details shortly."
                   )
 
-          # Combine into a single response if multiple questions
           if len(responses) > 1:
               final_response = "Thanks for the questions!\n\n" + "\n\n".join(responses)
           elif responses:
@@ -205,60 +205,66 @@ steps:
           else:
               final_response = ""
 
-          result = {
-              "response": final_response,
-              "question_count": len(questions)
-          }
+          # Post response to Jira (unless dry run)
+          if final_response and not dry_run:
+              post_result = run_skill("jira_add_comment_wrapper", {
+                  "issue_key": issue_key,
+                  "comment": final_response,
+              })
+              if post_result.get("success"):
+                  responses_sent += 1
 
-      - name: post_response
-        condition: "{{ prepare_response.response and not dry_run }}"
-        tool: jira_add_comment
-        args:
-          issue_key: "{{ issue_key }}"
-          comment: "{{ prepare_response.response }}"
+          # Notify user via Slack
+          if notify_user:
+              action_label = "responded automatically" if not dry_run else "dry run"
+              notify_result = run_skill("notify_team", {
+                  "message": f"New question on {issue_key} - {action_label}",
+                  "channel": slack_channel,
+                  "type": "info",
+                  "context": f"View issue: https://issues.redhat.com/browse/{issue_key}",
+              })
+              if notify_result.get("success"):
+                  notifications_sent += 1
 
-      - name: notify_user_slack
-        description: "Notify user about question (uses notify_team skill)"
-        condition: "{{ analyze_comments.has_questions and notify_user }}"
-        tool: skill_run
-        args:
-          skill_name: notify_team
-          inputs: |
-            {
-              "message": "New question on {{ issue_key }} - {{ 'responded automatically' if not dry_run else 'dry run' }}",
-              "channel": "{{ slack_channel or 'team-automation-analytics' }}",
-              "type": "info",
-              "context": "View issue: https://issues.redhat.com/browse/{{ issue_key }}"
-            }
+          # Log interaction to memory
+          current_timestamp = datetime.now().isoformat()
+          memory.append_to_list(
+              "state/sprint_timeline",
+              issue_key,
+              {
+                  "timestamp": current_timestamp,
+                  "action": "comment_response",
+                  "description": f"Responded to {len(questions)} question(s)",
+              },
+          )
 
-      - name: log_interaction
-        condition: "{{ analyze_comments.has_questions }}"
-        tool: memory_append
-        args:
-          key: "state/sprint_timeline"
-          list_path: "{{ issue_key }}"
-          item: |
-            timestamp: "{{ now }}"
-            action: "comment_response"
-            description: "Responded to {{ prepare_response.question_count }} question(s)"
+      result = {
+          "issues_checked": len(issues),
+          "questions_found": questions_found,
+          "responses_sent": responses_sent,
+          "notifications_sent": notifications_sent,
+      }
+    output: loop_results
 
   - name: compile_summary
     description: Compile summary of all checks
     compute: |
       issues_checked = parse_issues.get("count", 0)
 
-      # Count questions and responses from loop results
-      questions_found = 0
-      responses_sent = 0
-
-      # The loop results would be accumulated here
-      # For now, we estimate based on what we know
+      if 'loop_results' in dir() and loop_results:
+          questions_found = loop_results.get("questions_found", 0)
+          responses_sent = loop_results.get("responses_sent", 0)
+          notifications_sent = loop_results.get("notifications_sent", 0)
+      else:
+          questions_found = 0
+          responses_sent = 0
+          notifications_sent = 0
 
       result = {
           "issues_checked": issues_checked,
           "questions_found": questions_found,
-          "responses_sent": responses_sent if not inputs.get("dry_run") else 0,
-          "notifications_sent": questions_found if inputs.get("notify_user") else 0,
+          "responses_sent": responses_sent,
+          "notifications_sent": notifications_sent,
           "summary": f"Checked {issues_checked} issues, found {questions_found} questions"
       }
 

@@ -9,6 +9,8 @@ description: |
   4. Optionally configures Quay and Bonfire integrations
   5. Generates initial project knowledge
 
+version: "2.0"
+
 inputs:
   - name: path
     type: string
@@ -219,7 +221,7 @@ steps:
       errors_detected = []
 
       # Check GitLab failures
-      gitlab_text = str(gitlab_result) if 'gitlab_result' in dir() and gitlab_result else ""
+      gitlab_text = str(gitlab_check) if 'gitlab_check' in dir() and gitlab_check else ""
       if "no such host" in gitlab_text.lower():
           errors_detected.append({
               "tool": "gitlab_project_info",
@@ -236,7 +238,7 @@ steps:
           })
 
       # Check Jira failures
-      jira_text = str(jira_result) if 'jira_result' in dir() and jira_result else ""
+      jira_text = str(jira_check) if 'jira_check' in dir() and jira_check else ""
       if "project does not exist" in jira_text.lower():
           errors_detected.append({
               "tool": "jira_project_info",
@@ -310,7 +312,7 @@ steps:
         path: {{ path }}
         gitlab: {{ gitlab }}
         jira_project: {{ jira_project }}
-        added: {{ now().isoformat() }}
+        added: {{ today }}
     on_error: continue
 
 outputs:

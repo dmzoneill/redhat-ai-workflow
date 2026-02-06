@@ -34,6 +34,7 @@ steps:
       presentation_id: "{{ inputs.presentation_id }}"
       output_path: "{{ inputs.output_path | default('') }}"
     output: export_result
+    on_error: continue
 
   # Build summary
   - name: build_summary

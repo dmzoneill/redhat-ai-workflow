@@ -234,16 +234,16 @@ steps:
               cpu_val = int(cpu.replace("m", ""))
               if cpu_val > 500:
                 high_cpu.append({"pod": pod_name, "cpu": cpu})
-            except:
-              pass
+            except Exception:
+              pass  # Ignore non-numeric CPU value
 
           if "Gi" in mem:
             try:
               mem_val = float(mem.replace("Gi", ""))
               if mem_val > 1.0:
                 high_memory.append({"pod": pod_name, "memory": mem})
-            except:
-              pass
+            except Exception:
+              pass  # Ignore non-numeric memory value
 
       result = {
         "high_cpu": high_cpu[:5],
@@ -290,8 +290,8 @@ steps:
                   trend = "decreasing"
               else:
                   trend = "stable"
-          except:
-              pass
+          except Exception:
+              pass  # Ignore non-numeric trend values
 
       result = {
           "trend": trend,
@@ -568,7 +568,7 @@ steps:
   - name: check_existing_silences
     description: "Check if alerts are already silenced"
     condition: "alert_info.alerts"
-    tool: alertmanager_list_silences
+    tool: alertmanager_silences
     args:
       environment: "{{ target.environment }}"
     output: existing_silences_raw

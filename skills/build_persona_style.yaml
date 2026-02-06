@@ -166,6 +166,12 @@ steps:
       result = '\n'.join(lines)
     output: summary
 
+  - name: log_session
+    tool: memory_session_log
+    args:
+      action: "Skill completed"
+    on_error: continue
+
 outputs:
   - name: summary
     value: "{{ summary }}"

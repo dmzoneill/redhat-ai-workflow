@@ -138,7 +138,7 @@ steps:
 
   - name: save_pattern
     description: "Save pattern to memory"
-    condition: "validation.valid and tool_check.get('valid', True)"
+    condition: "validation.valid and (tool_check.get('valid', True) if tool_check else True)"
     compute: |
       from pathlib import Path
       from datetime import datetime
@@ -235,42 +235,6 @@ steps:
     output: learning_tracking_result
     on_error: continue
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_similar_patterns
-    description: "Search for similar patterns in codebase"
-    condition: "validation.valid"
-    tool: code_search
-    args:
-      query: "{{ validation.pattern }} error {{ validation.meaning[:50] }}"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: similar_patterns_raw
-    on_error: continue
-
-  - name: parse_similar_patterns
-    description: "Parse similar patterns search results"
-    condition: "similar_patterns_raw"
-    compute: |
-      code_result = similar_patterns_raw if similar_patterns_raw else {}
-
-      similar_code = []
-      if isinstance(code_result, dict) and code_result.get('results'):
-          for r in code_result.get('results', [])[:3]:
-              similar_code.append({
-                  'file': r.get('file_path', ''),
-                  'score': r.get('score', 0),
-                  'preview': r.get('code_chunk', '')[:100] if r.get('code_chunk') else '',
-              })
-
-      result = {
-          'similar': similar_code,
-          'count': len(similar_code),
-          'has_similar': len(similar_code) > 0,
-      }
-    output: similar_patterns_analysis
-    on_error: continue
-
 outputs:
   - name: summary
     value: |
@@ -306,7 +270,7 @@ outputs:
       {% endfor %}
       {% endif %}
 
-      {% if tool_check.warnings %}
+      {% if tool_check and tool_check.warnings %}
       ### ⚠️ Warnings
       {% for warning in tool_check.warnings %}
       - {{ warning }}

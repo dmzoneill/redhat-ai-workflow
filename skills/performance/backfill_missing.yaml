@@ -83,17 +83,30 @@ steps:
       }
     output: missing_info
 
-  # Process each missing date
+  # Process each missing date using compute block with run_skill
   - name: backfill_dates
-    description: "Backfill each missing date"
+    description: "Backfill each missing date by calling collect_daily for each one"
     condition: "{{ missing_info.to_process | length > 0 }}"
-    loop: "{{ missing_info.to_process }}"
-    tool: skill_run
-    args:
-      skill_name: "performance/collect_daily"
-      inputs: '{"date": "{{ item }}"}'
+    compute: |
+      results = []
+
+      for date_str in missing_info.get("to_process", []):
+          try:
+              collect_result = run_skill("performance/collect_daily", {"date": date_str})
+              results.append({
+                  "date": date_str,
+                  "success": collect_result.get("success", False),
+                  "error": collect_result.get("error", ""),
+              })
+          except Exception as e:
+              results.append({
+                  "date": date_str,
+                  "success": False,
+                  "error": str(e),
+              })
+
+      result = results
     output: backfill_results
-    on_error: continue
 
   # Update summary
   - name: update_summary

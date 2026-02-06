@@ -182,6 +182,8 @@ steps:
           "title": title,
           "jira_key": jira_key,
           "web_url": web_url,
+          "mr_id": cfg.get("mr_id", ""),
+          "project": inputs.project,
       }
     output: mr_info
 
@@ -510,22 +512,6 @@ steps:
     output: mrs_state_result
     on_error: continue
 
-outputs:
-  - name: summary
-    value: |
-      ## {{ "✅" if "Updated" in str(update_result) else "❌" }} MR !{{ cfg.mr_id }} Marked Ready
-
-      | Step | Result |
-      |------|--------|
-      {% if inputs.run_linting %}| Linting | {{ "✅ Passed" if lint_result and lint_result.passed else "⏭️ Skipped" }} |{% endif %}
-      {% if inputs.check_docs %}| Docs check | {{ "⚠️ Needs attention" if docs_result and docs_result.needs_attention else "✅ OK" if not docs_result.skipped else "⏭️ Skipped" }} |{% endif %}
-      | Remove draft | {{ "✅ Done" if "Updated" in str(update_result) else "❌ Failed" }} |
-      | Slack notification | {{ "✅ Posted" if slack_result else "⏭️ Skipped" }} |
-      {% if mr_info.jira_key %}| Jira status | {{ "✅ Updated" if jira_result else "⏭️ Skipped" }} |{% endif %}
-
-      **MR:** {{ mr_info.web_url }}
-      {% if mr_info.jira_key %}**Jira:** {{ cfg.jira_url }}/browse/{{ mr_info.jira_key }}{% endif %}
-
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_ready_failures
@@ -578,6 +564,22 @@ outputs:
       fix_description: "Run vpn_connect() to connect to Red Hat VPN"
     output: ready_vpn_fix_learned
     on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## {{ "✅" if "Updated" in str(update_result) else "❌" }} MR !{{ cfg.mr_id }} Marked Ready
+
+      | Step | Result |
+      |------|--------|
+      {% if inputs.run_linting %}| Linting | {{ "✅ Passed" if lint_result and lint_result.passed else "⏭️ Skipped" }} |{% endif %}
+      {% if inputs.check_docs %}| Docs check | {{ "⚠️ Needs attention" if docs_result and docs_result.needs_attention else "✅ OK" if not docs_result.skipped else "⏭️ Skipped" }} |{% endif %}
+      | Remove draft | {{ "✅ Done" if "Updated" in str(update_result) else "❌ Failed" }} |
+      | Slack notification | {{ "✅ Posted" if slack_result else "⏭️ Skipped" }} |
+      {% if mr_info.jira_key %}| Jira status | {{ "✅ Updated" if jira_result else "⏭️ Skipped" }} |{% endif %}
+
+      **MR:** {{ mr_info.web_url }}
+      {% if mr_info.jira_key %}**Jira:** {{ cfg.jira_url }}/browse/{{ mr_info.jira_key }}{% endif %}
 
   - name: context
     value:

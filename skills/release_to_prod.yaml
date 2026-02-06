@@ -248,7 +248,7 @@ steps:
     description: "Get Konflux component details"
     tool: konflux_get_component
     args:
-      component_name: "{{ inputs.component }}"
+      name: "{{ inputs.component }}"
       namespace: "{{ inputs.namespace }}"
     output: component_info_raw
     on_error: continue
@@ -355,7 +355,6 @@ steps:
     condition: "not inputs.dry_run and staging_status.exists and not release_status.already_released"
     tool: konflux_create_release
     args:
-      component: "{{ inputs.component }}"
       snapshot: "{{ validated_sha.sha }}"
       namespace: "{{ inputs.namespace }}"
     output: create_release_result
@@ -408,7 +407,7 @@ steps:
         component: "{{ inputs.component }}"
         application: "{{ inputs.application }}"
         namespace: "{{ inputs.namespace }}"
-        timestamp: "{{ now().isoformat() }}"
+        timestamp: "{{ today }}"
         status: "released"
     on_error: continue
 

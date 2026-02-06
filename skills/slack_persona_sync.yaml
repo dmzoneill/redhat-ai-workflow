@@ -13,23 +13,29 @@ description: |
   The vector store maintains a rolling window (default 6 months) of messages
   that can be searched semantically.
 
+version: "1.0"
+
 inputs:
-  mode:
+  - name: mode
     type: string
-    description: "Sync mode: 'full' or 'incremental'"
+    required: false
     default: "incremental"
-  months:
+    description: "Sync mode: 'full' or 'incremental'"
+  - name: months
     type: integer
-    description: "Time window in months (for full sync)"
+    required: false
     default: 48
-  days:
+    description: "Time window in months (for full sync)"
+  - name: days
     type: integer
-    description: "Days to sync (for incremental)"
+    required: false
     default: 1
-  include_threads:
+    description: "Days to sync (for incremental)"
+  - name: include_threads
     type: boolean
-    description: "Include thread replies"
+    required: false
     default: true
+    description: "Include thread replies"
 
 steps:
   - name: run_sync
@@ -41,6 +47,12 @@ steps:
       days: "{{ inputs.days }}"
       include_threads: "{{ inputs.include_threads }}"
     output: sync_result
+
+  - name: log_session
+    tool: memory_session_log
+    args:
+      action: "Skill completed"
+    on_error: continue
 
 outputs:
   result: "{{ sync_result }}"

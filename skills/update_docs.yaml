@@ -399,6 +399,57 @@ steps:
       details: "{{ doc_summary.issue_count }} issues, {{ doc_summary.suggestion_count }} suggestions"
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_docs_failures
+    description: "Detect failure patterns from documentation updates"
+    compute: |
+      errors_detected = []
+
+      # Check git failures
+      git_text = str(git_status_raw) if 'git_status_raw' in dir() and git_status_raw else ""
+      commit_text = str(commit_result_raw) if 'commit_result_raw' in dir() and commit_result_raw else ""
+      combined = git_text + commit_text
+
+      if "permission denied" in combined.lower():
+          errors_detected.append({
+              "tool": "git_commit",
+              "pattern": "permission denied",
+              "cause": "Git repository access denied",
+              "fix": "Check repository permissions and SSH keys"
+          })
+      if "not a git repository" in combined.lower():
+          errors_detected.append({
+              "tool": "git_status",
+              "pattern": "not a git repository",
+              "cause": "Not in a git repository",
+              "fix": "Navigate to a git repository first"
+          })
+
+      result = errors_detected
+    output: docs_errors_detected
+    on_error: continue
+
+  - name: learn_docs_git_failure
+    description: "Learn from git failures"
+    condition: "docs_errors_detected and any(e.get('pattern') == 'permission denied' for e in docs_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "git_commit"
+      error_pattern: "permission denied"
+      root_cause: "Git repository access denied"
+      fix_description: "Check repository permissions and SSH keys"
+    output: docs_git_fix_learned
+    on_error: continue
+
+  - name: log_docs_session
+    description: "Log documentation check to session"
+    tool: memory_session_log
+    args:
+      action: "Checked documentation for {{ resolved_repo.path if resolved_repo else 'unknown' }}"
+      details: "Needs attention: {{ doc_summary.needs_attention if doc_summary else 'unknown' }}"
+    on_error: continue
+
 outputs:
   - name: summary
     value: |
@@ -479,57 +530,6 @@ outputs:
       {% endif %}
 
       {% endif %}
-
-  # ==================== LEARNING FROM FAILURES ====================
-
-  - name: detect_docs_failures
-    description: "Detect failure patterns from documentation updates"
-    compute: |
-      errors_detected = []
-
-      # Check git failures
-      git_text = str(git_status_raw) if 'git_status_raw' in dir() and git_status_raw else ""
-      commit_text = str(commit_result_raw) if 'commit_result_raw' in dir() and commit_result_raw else ""
-      combined = git_text + commit_text
-
-      if "permission denied" in combined.lower():
-          errors_detected.append({
-              "tool": "git_commit",
-              "pattern": "permission denied",
-              "cause": "Git repository access denied",
-              "fix": "Check repository permissions and SSH keys"
-          })
-      if "not a git repository" in combined.lower():
-          errors_detected.append({
-              "tool": "git_status",
-              "pattern": "not a git repository",
-              "cause": "Not in a git repository",
-              "fix": "Navigate to a git repository first"
-          })
-
-      result = errors_detected
-    output: docs_errors_detected
-    on_error: continue
-
-  - name: learn_docs_git_failure
-    description: "Learn from git failures"
-    condition: "docs_errors_detected and any(e.get('pattern') == 'permission denied' for e in docs_errors_detected)"
-    tool: learn_tool_fix
-    args:
-      tool_name: "git_commit"
-      error_pattern: "permission denied"
-      root_cause: "Git repository access denied"
-      fix_description: "Check repository permissions and SSH keys"
-    output: docs_git_fix_learned
-    on_error: continue
-
-  - name: log_docs_session
-    description: "Log documentation check to session"
-    tool: memory_session_log
-    args:
-      action: "Checked documentation for {{ resolved_repo.path if resolved_repo else 'unknown' }}"
-      details: "Needs attention: {{ doc_summary.needs_attention if doc_summary else 'unknown' }}"
-    on_error: continue
 
   - name: context
     value:

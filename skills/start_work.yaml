@@ -856,7 +856,7 @@ outputs:
       repo: "{{ resolved_repo.path }}"
       gitlab_project: "{{ resolved_repo.gitlab }}"
       repo_source: "{{ resolved_repo.source }}"
-      was_existing: "{{ branch_check.exists }}"
+      was_existing: "{{ branch_check.exists if branch_check is mapping else false }}"
       has_mr: "{{ existing_mr is not none }}"
       has_feedback: "{{ mr_feedback.has_feedback if mr_feedback else false }}"
       mr_id: "{{ mr_feedback.mr_id if mr_feedback else none }}"

@@ -129,6 +129,16 @@ steps:
       if not repo_path:
           repo_path = os.getcwd()
 
+      # Determine default branch
+      default_branch = "main"
+      if inputs.get('repo_name') and inputs.get('repo_name') in repos:
+          default_branch = repos[inputs.get('repo_name')].get("default_branch", "main")
+      else:
+          for name, cfg in repos.items():
+              if cfg.get("path") == repo_path or cfg.get("gitlab") == gitlab_project:
+                  default_branch = cfg.get("default_branch", "main")
+                  break
+
       result = {
           "path": repo_path,
           "gitlab_project": gitlab_project,
@@ -136,6 +146,7 @@ steps:
           "fastapi_container": fastapi_container,
           "mr_id_from_url": mr_id_from_url,
           "jira_url": config.get("jira", {}).get("url", "https://issues.redhat.com"),
+          "default_branch": default_branch,
       }
     output: resolved
   # ==================== RESOLVE MR ID ====================
@@ -160,7 +171,6 @@ steps:
     args:
       project: "{{ resolved.gitlab_project }}"
       state: opened
-      search: "{{ inputs.get('issue_key', '') }}"
     output: mr_search_results
     on_error: auto_heal  # GitLab API - may need auth refresh
 
@@ -305,20 +315,26 @@ steps:
 
   # Step 1c: Get the actual diff for the MR
   - name: get_mr_diff
-    description: "Get the code diff for the MR"
-    tool: git_diff
-    args:
-      repo: "{{ resolved.path }}"
-      ref1: "{{ resolved.default_branch }}"
-      ref2: "HEAD"
-      stat: true
-    output: mr_diff_raw
+    description: "Get the code diff for the MR (stat summary)"
+    compute: |
+      import subprocess
+
+      repo = resolved["path"]
+      default_branch = resolved.get("default_branch", "main")
+
+      try:
+          cmd = ["git", "-C", repo, "diff", f"origin/{default_branch}...HEAD", "--stat"]
+          proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+          result = proc.stdout or proc.stderr or ""
+      except Exception as e:
+          result = f"Error getting diff: {e}"
+    output: mr_local_diff_raw
     on_error: continue
 
   - name: parse_diff
     description: "Parse diff to identify changed files"
     compute: |
-      diff_text = str(mr_diff_raw) if 'mr_diff_raw' in dir() and mr_diff_raw else ""
+      diff_text = str(mr_local_diff_raw) if 'mr_local_diff_raw' in dir() and mr_local_diff_raw else ""
 
       files_changed = []
       additions = 0
@@ -517,7 +533,7 @@ steps:
     tool: check_known_issues
     args:
       tool_name: ""
-      error_text: "{{ mr_diff[:500] if mr_diff else '' }}"
+      error_text: "{{ mr_diff_raw[:500] if mr_diff_raw else '' }}"
     output: problematic_patterns_raw
     on_error: continue
 
@@ -557,6 +573,7 @@ steps:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ mr_id }}"
     output: mr_diff_raw
+    on_error: continue
 
   # Step 4b: Check diff size and truncate if needed
   - name: check_diff_size
@@ -613,12 +630,33 @@ steps:
     output: gitlab_pipeline
     on_error: auto_heal  # GitLab API - may need auth refresh
 
+  - name: extract_failed_job_id
+    description: "Extract failed job ID from pipeline status"
+    condition: "gitlab_pipeline and 'failed' in str(gitlab_pipeline).lower()"
+    compute: |
+      import re
+
+      pipeline_text = str(gitlab_pipeline) if gitlab_pipeline else ""
+
+      # Extract job ID from pipeline status output
+      # Look for patterns like "job #12345" or "Job ID: 12345"
+      job_match = re.search(r'(?:job\s*#?|job_id[:\s]+|id[:\s]+)(\d+)', pipeline_text, re.I)
+      if job_match:
+          result = int(job_match.group(1))
+      else:
+          # Try to find any numeric ID associated with a failed status
+          failed_match = re.search(r'(\d{5,})', pipeline_text)
+          result = int(failed_match.group(1)) if failed_match else None
+    output: failed_job_id
+    on_error: continue
+
   - name: get_pipeline_trace
     description: "Get pipeline trace if failed"
-    condition: "gitlab_pipeline and 'failed' in str(gitlab_pipeline).lower()"
+    condition: "failed_job_id"
     tool: gitlab_ci_trace
     args:
       project: "{{ resolved.gitlab_project }}"
+      job_id: "{{ failed_job_id }}"
     output: pipeline_trace_raw
     on_error: auto_heal  # GitLab API - may need auth refresh
 

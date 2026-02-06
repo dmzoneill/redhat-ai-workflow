@@ -219,8 +219,8 @@ steps:
               if "m" in cpu:
                   try:
                       cpu_val = int(cpu.replace("m", ""))
-                  except:
-                      pass
+                  except Exception:
+                      pass  # Ignore non-numeric CPU value
               elif cpu.isdigit():
                   cpu_val = int(cpu) * 1000
 
@@ -229,13 +229,13 @@ steps:
               if "Gi" in memory:
                   try:
                       mem_val = float(memory.replace("Gi", "")) * 1024
-                  except:
-                      pass
+                  except Exception:
+                      pass  # Ignore non-numeric Gi memory value
               elif "Mi" in memory:
                   try:
                       mem_val = float(memory.replace("Mi", ""))
-                  except:
-                      pass
+                  except Exception:
+                      pass  # Ignore non-numeric Mi memory value
 
               # Flag high usage
               if cpu_val > 500:  # >500m = high CPU
@@ -470,8 +470,8 @@ steps:
                     break
               alert_def = '\n'.join(alert_lines[:20])
               break
-          except:
-            pass
+          except Exception:
+            pass  # Ignore unreadable alert rule files
 
       result = alert_def
     output: alert_definition
@@ -729,8 +729,8 @@ steps:
                   recent = float(values[-1])
                   earlier = float(values[0])
                   trend_up = recent > earlier * 1.5  # 50% increase
-              except:
-                  pass
+              except Exception:
+                  pass  # Ignore non-numeric trend values
 
       # Count alert rules
       rule_count = rules_text.lower().count("alert") if rules_text else 0
@@ -1273,10 +1273,11 @@ steps:
 
       # Summarize findings
       issues_found = []
-      if pod_issues and pod_issues.get("unhealthy_pods"):
-          issues_found.append(f"{len(pod_issues['unhealthy_pods'])} unhealthy pods")
-      if log_analysis and log_analysis.get("error_count", 0) > 0:
-          issues_found.append(f"{log_analysis['error_count']} errors in logs")
+      if pod_analysis and pod_analysis.get("issues"):
+          issues_found.append(f"{len(pod_analysis['issues'])} unhealthy pods")
+      if pod_logs and len(pod_logs) > 0:
+          error_count = sum(len(p.get("errors", [])) for p in pod_logs)
+          issues_found.append(f"{error_count} errors in logs")
       if pattern_matches:
           issues_found.append(f"{len(pattern_matches)} pattern matches")
 
@@ -1306,9 +1307,9 @@ steps:
 
       # Determine status based on findings
       status = "healthy"
-      if pod_issues and pod_issues.get("unhealthy_pods"):
+      if pod_analysis and pod_analysis.get("issues"):
           status = "issues"
-      elif log_analysis and log_analysis.get("error_count", 0) > 10:
+      elif pod_logs and sum(len(p.get("errors", [])) for p in pod_logs) > 10:
           status = "issues"
 
       memory.update_field("state/environments", f"environments.{env_key}.last_check", memory_context["timestamp"])

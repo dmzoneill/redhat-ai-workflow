@@ -220,7 +220,7 @@ steps:
         if i >= len(mr_data.get('ids', [])):
           break
         mr_id = mr_data['ids'][i]
-        comments = eval(var_name) if var_name in dir() else None
+        comments = locals().get(var_name)
         if comments:
           all_comments.append((mr_id, str(comments)))
 
@@ -253,8 +253,6 @@ steps:
               "is_meeting_request": is_meeting_request,
               "needs_response": needs_response,
             })
-
-          idx += 3
 
         if human_comments:
           feedback_results.append({

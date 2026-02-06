@@ -177,7 +177,7 @@ steps:
     condition: "namespace_info.success"
     tool: bonfire_apps_dependencies
     args:
-      app: "{{ inputs.app }}"
+      component: "{{ inputs.app }}"
     output: deps_raw
     on_error: continue
 
@@ -224,7 +224,7 @@ steps:
     args:
       namespace: "{{ namespace_info.namespace }}"
       app: "{{ inputs.app }}"
-      extra_args: "{{ image_config.param }}"
+      set_image_tag: "{{ inputs.image_tag | default('') }}"
     output: deploy_result
     on_error: auto_heal  # Ephemeral cluster - may need kube_login
 
@@ -329,7 +329,7 @@ steps:
     tool: code_search
     args:
       query: "{{ inputs.app }} deployment configuration clowdapp"
-      repo: "automation-analytics-backend"
+      project: "automation-analytics-backend"
       limit: 5
     output: deployment_configs_raw
     on_error: continue
@@ -377,7 +377,7 @@ steps:
         duration: {{ inputs.duration }}
         success: {{ deploy_status.success if deploy_status else false }}
         healthy: {{ pod_health.healthy if pod_health else false }}
-        timestamp: {{ now().isoformat() }}
+        timestamp: {{ today }}
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

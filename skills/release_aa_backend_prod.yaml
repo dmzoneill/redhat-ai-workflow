@@ -153,12 +153,30 @@ steps:
     args:
       repo: "{{ cfg.backend_repo }}"
       limit: 1
-    validate:
-      - command: "git cat-file -t {{ inputs.commit_sha }}"
-        cwd: "{{ cfg.backend_repo }}"
-        expect_success: true
-        error_message: "Commit {{ inputs.commit_sha }} not found in automation-analytics-backend. Did you fetch latest?"
     output: commit_info
+
+  - name: validate_commit_exists
+    description: "Validate that the commit SHA exists in the repo"
+    compute: |
+      import subprocess
+      backend_repo = cfg['backend_repo']
+      commit_sha = inputs.commit_sha
+      try:
+          proc = subprocess.run(
+              ["git", "cat-file", "-t", commit_sha],
+              cwd=backend_repo,
+              capture_output=True, text=True, timeout=30,
+          )
+          if proc.returncode != 0:
+              raise Exception(
+                  f"Commit {commit_sha} not found in automation-analytics-backend. "
+                  "Did you fetch latest?"
+              )
+          result = f"Validation passed: commit {commit_sha[:12]} exists (type: {proc.stdout.strip()})"
+      except FileNotFoundError:
+          raise Exception(
+              f"Backend repo not found at {backend_repo}. Check config paths."
+          )
 
   # Step 2: Verify image exists in Quay
   - name: verify_quay_image
@@ -168,11 +186,19 @@ steps:
       repository: "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
       tag: "{{ inputs.commit_sha }}"
       namespace: "redhat-services-prod"
-    validate:
-      expect_success: true
-      error_message: "Image not found in Quay for SHA {{ inputs.commit_sha }}. Build may not have completed."
     output: quay_image
     on_error: auto_heal  # Quay API - may need auth
+
+  - name: validate_quay_image
+    description: "Validate the Quay image was found"
+    compute: |
+      image_result = str(quay_image) if 'quay_image' in dir() and quay_image else ""
+      if not image_result or "not found" in image_result.lower() or "error" in image_result.lower():
+          raise Exception(
+              f"Image not found in Quay for SHA {inputs.commit_sha}. "
+              "Build may not have completed."
+          )
+      result = f"Validation passed: Quay image exists for {inputs.commit_sha[:12]}"
 
   # ==================== GET CURRENT STATE ====================
 
@@ -202,8 +228,8 @@ steps:
       import subprocess
       backend_repo = cfg['backend_repo']
       try:
-          cmd = f'cd "{backend_repo}" && git log --oneline "{current_prod_sha}..{inputs.commit_sha}"'
-          proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+          cmd = ["git", "log", "--oneline", f"{current_prod_sha}..{inputs.commit_sha}"]
+          proc = subprocess.run(cmd, cwd=backend_repo, capture_output=True, text=True, timeout=30)
           result = proc.stdout.strip() if proc.returncode == 0 else "No commits found"
       except Exception as e:
           result = f"Error getting changelog: {e}"
@@ -291,9 +317,15 @@ steps:
 
   - name: validate_clean_repo
     description: "Ensure no uncommitted changes"
-    validate:
-      condition: "'Working tree clean' in appinterface_status or not appinterface_status"
-      error_message: "app-interface has uncommitted changes. Please commit or stash them first."
+    compute: |
+      status = str(appinterface_status) if 'appinterface_status' in dir() and appinterface_status else ""
+      if status and "working tree clean" not in status.lower():
+          # Check for signs of uncommitted changes
+          if any(indicator in status.lower() for indicator in ["modified", "changes not staged", "changes to be committed", "untracked"]):
+              raise Exception(
+                  "app-interface has uncommitted changes. Please commit or stash them first."
+              )
+      result = "Validation passed: repository is clean"
 
   # Step 7: Checkout master and pull latest
   - name: checkout_master
@@ -325,15 +357,22 @@ steps:
     description: "Check for existing release branches"
     compute: |
       import subprocess
+      import re
 
       appinterface_repo = cfg['appinterface_repo']
       release_date = inputs.release_date
-      try:
-          cmd = f'cd "{appinterface_repo}" && git branch -a 2>/dev/null | grep "aa-release-{release_date}" || echo ""'
-          proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
-          result = proc.stdout.strip()
-      except Exception as e:
+      if not re.match(r'^\d{4}-\d{2}-\d{2}$', release_date):
           result = ""
+      else:
+          try:
+              proc = subprocess.run(
+                  ["git", "branch", "-a"],
+                  cwd=appinterface_repo, capture_output=True, text=True, timeout=30
+              )
+              pattern = f"aa-release-{release_date}"
+              result = "\n".join(line.strip() for line in proc.stdout.splitlines() if pattern in line)
+          except Exception as e:
+              result = ""
     output: existing_branches_raw
     on_error: continue
 
@@ -864,8 +903,8 @@ outputs:
 
   - name: context
     value:
-      jira_key: "{{ jira_issue.key if jira_issue else null }}"
-      mr_url: "{{ mr_result.web_url if mr_result else null }}"
+      jira_key: "{{ jira_issue.key if jira_issue else none }}"
+      mr_url: "{{ mr_result.web_url if mr_result else none }}"
       branch: "{{ branch_name }}"
       old_sha: "{{ current_prod_sha }}"
       new_sha: "{{ inputs.commit_sha }}"

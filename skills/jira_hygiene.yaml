@@ -194,7 +194,7 @@ steps:
         try:
           from scripts.common.parsers import extract_json_from_output
           issue_data = extract_json_from_output(issue_raw) or {"raw": issue_raw}
-        except:
+        except Exception:
           issue_data = {"raw": str(issue_raw)}
       except Exception as e:
         issue_data = {"raw": str(issue_raw), "error": str(e)}
@@ -466,7 +466,7 @@ steps:
 
       for label, var_name in results:
         if var_name in dir():
-          result_val = eval(var_name)
+          result_val = locals().get(var_name)
           if result_val and "✅" in str(result_val):
             fixed.append(f"✅ {label}")
           elif result_val and "❌" in str(result_val):

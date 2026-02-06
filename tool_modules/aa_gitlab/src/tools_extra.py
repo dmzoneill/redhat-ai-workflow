@@ -9,6 +9,7 @@ Supports:
 """
 
 import re
+import urllib.parse
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -249,6 +250,21 @@ async def _gitlab_user_info_impl() -> str:
     return output if success else f"❌ Failed: {output}"
 
 
+async def _gitlab_file_read_impl(project: str, file_path: str, ref: str = "") -> str:
+    """Implementation of gitlab_file_read tool."""
+    encoded_project = urllib.parse.quote(project, safe="")
+    encoded_file_path = urllib.parse.quote(file_path, safe="")
+
+    endpoint = f"projects/{encoded_project}/repository/files/{encoded_file_path}/raw"
+    if ref:
+        endpoint += f"?ref={urllib.parse.quote(ref, safe='')}"
+
+    success, output = await run_glab(["api", endpoint], repo=project)
+    if not success:
+        return f"❌ Failed to read file '{file_path}': {output}"
+    return output
+
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
@@ -352,6 +368,21 @@ def register_tools(server: "FastMCP") -> int:
     async def gitlab_repo_view(project: str) -> str:
         """View repository/project information."""
         return await _gitlab_repo_view_impl(project)
+
+    @auto_heal()
+    @registry.tool()
+    async def gitlab_file_read(project: str, file_path: str, ref: str = "") -> str:
+        """Read a file from a GitLab repository.
+
+        Args:
+            project: GitLab project path (e.g., "automation-analytics/automation-analytics-backend")
+            file_path: Path to the file in the repository
+            ref: Branch or commit ref (defaults to default branch)
+
+        Returns:
+            File contents.
+        """
+        return await _gitlab_file_read_impl(project, file_path, ref)
 
     @auto_heal()
     @registry.tool()

@@ -287,7 +287,7 @@ steps:
     tool: memory_session_log
     args:
       action: "Slack daemon {{ inputs.action }}"
-      details: "Success: {{ action_result.success }}, {{ action_result.output[:100] if action_result.output else '' }}"
+      details: "Success: {{ action_result.success | default(false) }}, {{ action_result.output[:100] if action_result.output | default('') else '' }}"
     on_error: continue
 
   - name: track_daemon_state
@@ -317,16 +317,16 @@ steps:
 outputs:
   - name: success
     description: Whether the action succeeded
-    value: "{{ action_result.success }}"
+    value: "{{ action_result.success | default(false) }}"
 
   - name: output
     description: Command output
-    value: "{{ action_result.output }}"
+    value: "{{ action_result.output | default('') }}"
 
   - name: error
     description: Error message if failed
-    value: "{{ action_result.error }}"
+    value: "{{ action_result.error | default('') }}"
 
   - name: pid
     description: Daemon PID (for start action)
-    value: "{{ action_result.pid }}"
+    value: "{{ action_result.pid | default('') }}"

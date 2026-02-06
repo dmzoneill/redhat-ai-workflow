@@ -1,7 +1,7 @@
 # Skill: Multi-Agent PR Review
 # Coordinates multiple specialized review agents using Claude + Gemini CLI (Vertex AI)
 
-name: review_pr_multiagent
+name: review_pr_multiagent_test
 description: |
   Multi-agent code review system using hybrid Claude + Gemini agents.
 
@@ -128,3 +128,9 @@ steps:
 
       result = "\n".join(summary_lines)
     output: summary
+
+  - name: log_session
+    tool: memory_session_log
+    args:
+      action: "Skill completed"
+    on_error: continue

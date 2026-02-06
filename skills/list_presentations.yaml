@@ -35,6 +35,7 @@ steps:
       max_results: "{{ inputs.max_results | default(20) }}"
       search_query: "{{ inputs.search | default('') }}"
     output: list_result
+    on_error: continue
 
   # Build summary
   - name: build_summary
@@ -53,6 +54,12 @@ steps:
 
       summary = "\n".join(lines)
     output: summary
+
+  - name: log_session
+    tool: memory_session_log
+    args:
+      action: "Skill completed"
+    on_error: continue
 
 outputs:
   - name: result

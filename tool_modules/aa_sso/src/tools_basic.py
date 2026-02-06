@@ -31,6 +31,7 @@ Usage:
 """
 
 import asyncio
+import atexit
 import json
 import logging
 import time
@@ -975,6 +976,106 @@ class SSOAuthenticator:
             return None
 
 
+# ==================== Persistent Browser Session ====================
+
+# Module-level browser session for browser_* tools.
+# These persist across tool calls within a session, enabling multi-step
+# browser automation (navigate, click, wait, screenshot).
+
+_browser_playwright = None  # Playwright instance
+_browser_instance: Optional[Browser] = None  # Browser instance
+_browser_context: Optional[BrowserContext] = None  # Browser context
+_browser_page: Optional[Page] = None  # Active page
+
+# Screenshot output directory
+BROWSER_SNAPSHOT_DIR = Path("/tmp/browser_snapshots")
+
+
+async def _get_or_create_browser(headless: bool = True) -> Page:
+    """Get the existing browser page or create a new browser session.
+
+    Lazily initializes a Playwright browser instance that persists across
+    tool calls. This allows multi-step browser automation workflows.
+
+    Args:
+        headless: Run browser in headless mode
+
+    Returns:
+        Active Playwright Page object
+
+    Raises:
+        RuntimeError: If Playwright is not installed or browser fails to launch
+    """
+    global _browser_playwright, _browser_instance, _browser_context, _browser_page
+
+    # Return existing page if browser is still connected
+    if _browser_page is not None and _browser_instance is not None:
+        try:
+            # Verify the browser is still alive by checking the page URL
+            _ = _browser_page.url
+            return _browser_page
+        except Exception:
+            logger.warning("Browser session expired, creating new one")
+            await _close_browser()
+
+    try:
+        from playwright.async_api import async_playwright as _async_playwright
+    except ImportError:
+        raise RuntimeError(
+            "Playwright is not installed. " "Install it with: uv add playwright && playwright install chromium"
+        )
+
+    logger.info(f"Launching browser (headless={headless})")
+    _browser_playwright = await _async_playwright().start()
+    _browser_instance = await _browser_playwright.chromium.launch(headless=headless)
+    _browser_context = await _browser_instance.new_context(
+        viewport={"width": 1280, "height": 720},
+    )
+    _browser_page = await _browser_context.new_page()
+
+    logger.info("Browser session created")
+    return _browser_page
+
+
+async def _close_browser() -> None:
+    """Close the persistent browser session and clean up resources."""
+    global _browser_playwright, _browser_instance, _browser_context, _browser_page
+
+    if _browser_instance is not None:
+        try:
+            await _browser_instance.close()
+        except Exception as e:
+            logger.warning(f"Error closing browser: {e}")
+
+    if _browser_playwright is not None:
+        try:
+            await _browser_playwright.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping playwright: {e}")
+
+    _browser_playwright = None
+    _browser_instance = None
+    _browser_context = None
+    _browser_page = None
+    logger.info("Browser session closed")
+
+
+def _cleanup_browser_sync() -> None:
+    """Synchronous atexit handler to clean up browser on process exit."""
+    if _browser_instance is not None:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_close_browser())
+            else:
+                loop.run_until_complete(_close_browser())
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_browser_sync)
+
+
 # ==================== MCP Tool Registration ====================
 
 
@@ -1141,5 +1242,284 @@ def register_tools(server: "FastMCP") -> int:
                 output += "\n❌ **Cookies:** No cached cookies\n"
 
         return [TextContent(type="text", text=output)]
+
+    # ==================== Browser Automation Tools ====================
+
+    @auto_heal()
+    @registry.tool()
+    async def browser_navigate(
+        url: str,
+        wait_for: str = "load",
+        timeout: int = 30,
+    ) -> list[TextContent]:
+        """Navigate to a URL in a browser.
+
+        Opens a persistent browser session (or reuses an existing one) and
+        navigates to the specified URL. The browser session persists across
+        tool calls, enabling multi-step automation workflows.
+
+        Args:
+            url: URL to navigate to
+            wait_for: Wait condition - "load", "domcontentloaded", or "networkidle"
+            timeout: Timeout in seconds
+
+        Returns:
+            Page title and URL after navigation.
+
+        Examples:
+            browser_navigate("https://example.com")
+            browser_navigate("https://example.com", wait_for="networkidle")
+        """
+        # Validate wait_for parameter
+        valid_wait_conditions = ("load", "domcontentloaded", "networkidle")
+        if wait_for not in valid_wait_conditions:
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Invalid wait_for value: {wait_for!r}. " f"Must be one of: {', '.join(valid_wait_conditions)}"
+                    ),
+                )
+            ]
+
+        try:
+            page = await _get_or_create_browser()
+            await page.goto(
+                url,
+                wait_until=wait_for,
+                timeout=timeout * 1000,
+            )
+            title = await page.title()
+            final_url = page.url
+
+            output = "Browser navigation successful\n\n"
+            output += f"**URL:** {final_url}\n"
+            output += f"**Title:** {title}\n"
+            output += f"**Wait condition:** {wait_for}\n"
+
+            return [TextContent(type="text", text=output)]
+
+        except Exception as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Browser navigation failed\n\n**URL:** {url}\n**Error:** {e}",
+                )
+            ]
+
+    @auto_heal()
+    @registry.tool()
+    async def browser_click(
+        selector: str = "",
+        text: str = "",
+        timeout: int = 10,
+    ) -> list[TextContent]:
+        """Click an element on the page.
+
+        Clicks an element identified by CSS selector or by its text content.
+        If both selector and text are provided, text takes precedence (uses
+        Playwright text selector). At least one of selector or text must be
+        provided.
+
+        Args:
+            selector: CSS selector for the element to click
+            text: If provided, click element containing this text (uses text selector)
+            timeout: Timeout in seconds waiting for element
+
+        Returns:
+            Confirmation of click action.
+
+        Examples:
+            browser_click(selector="#submit-button")
+            browser_click(text="Sign In")
+            browser_click(selector="button.primary", text="Submit")
+        """
+        if not selector and not text:
+            return [
+                TextContent(
+                    type="text",
+                    text="At least one of 'selector' or 'text' must be provided.",
+                )
+            ]
+
+        try:
+            page = await _get_or_create_browser()
+
+            # Determine the effective selector
+            if text:
+                effective_selector = f"text={text}"
+            else:
+                effective_selector = selector
+
+            # Wait for element then click
+            await page.wait_for_selector(
+                effective_selector,
+                timeout=timeout * 1000,
+                state="visible",
+            )
+            await page.click(effective_selector, timeout=timeout * 1000)
+
+            current_url = page.url
+            output = "Click action successful\n\n"
+            if text:
+                output += f"**Clicked text:** {text!r}\n"
+            else:
+                output += f"**Clicked selector:** {selector!r}\n"
+            output += f"**Current URL:** {current_url}\n"
+
+            return [TextContent(type="text", text=output)]
+
+        except Exception as e:
+            target = f"text={text!r}" if text else f"selector={selector!r}"
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Click action failed\n\n**Target:** {target}\n**Error:** {e}",
+                )
+            ]
+
+    @auto_heal()
+    @registry.tool()
+    async def browser_snapshot(
+        name: str = "screenshot",
+        full_page: bool = False,
+    ) -> list[TextContent]:
+        """Take a screenshot of the current page.
+
+        Captures a screenshot of the current browser page and saves it to
+        /tmp/browser_snapshots/. The browser must have been opened with a
+        prior browser_navigate call.
+
+        Args:
+            name: Name for the screenshot file (without extension)
+            full_page: Capture full page scroll (True) or just the viewport (False)
+
+        Returns:
+            Path to the saved screenshot.
+
+        Examples:
+            browser_snapshot()
+            browser_snapshot(name="login_page", full_page=True)
+        """
+        try:
+            page = await _get_or_create_browser()
+
+            # Create snapshot directory
+            BROWSER_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Generate filename with timestamp
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            # Sanitize the name to be filesystem-safe
+            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+            filename = f"{safe_name}_{timestamp}.png"
+            filepath = BROWSER_SNAPSHOT_DIR / filename
+
+            await page.screenshot(
+                path=str(filepath),
+                full_page=full_page,
+            )
+
+            title = await page.title()
+            current_url = page.url
+
+            output = "Screenshot captured\n\n"
+            output += f"**Path:** {filepath}\n"
+            output += f"**Page:** {title}\n"
+            output += f"**URL:** {current_url}\n"
+            output += f"**Full page:** {full_page}\n"
+
+            return [TextContent(type="text", text=output)]
+
+        except Exception as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Screenshot failed\n\n**Name:** {name}\n**Error:** {e}",
+                )
+            ]
+
+    @auto_heal()
+    @registry.tool()
+    async def browser_wait_for(
+        selector: str = "",
+        text: str = "",
+        timeout: int = 30,
+        state: str = "visible",
+    ) -> list[TextContent]:
+        """Wait for an element or condition on the page.
+
+        Waits for an element matching a CSS selector or text content to reach
+        the desired state. At least one of selector or text must be provided.
+
+        Args:
+            selector: CSS selector to wait for
+            text: Text content to wait for (uses Playwright text selector)
+            timeout: Timeout in seconds
+            state: Element state to wait for - "visible", "hidden", "attached", "detached"
+
+        Returns:
+            Confirmation that condition was met.
+
+        Examples:
+            browser_wait_for(selector="#content", state="visible")
+            browser_wait_for(text="Loading complete")
+            browser_wait_for(selector=".spinner", state="hidden", timeout=60)
+        """
+        if not selector and not text:
+            return [
+                TextContent(
+                    type="text",
+                    text="At least one of 'selector' or 'text' must be provided.",
+                )
+            ]
+
+        valid_states = ("visible", "hidden", "attached", "detached")
+        if state not in valid_states:
+            return [
+                TextContent(
+                    type="text",
+                    text=(f"Invalid state value: {state!r}. " f"Must be one of: {', '.join(valid_states)}"),
+                )
+            ]
+
+        try:
+            page = await _get_or_create_browser()
+
+            # Determine the effective selector
+            if text:
+                effective_selector = f"text={text}"
+            else:
+                effective_selector = selector
+
+            await page.wait_for_selector(
+                effective_selector,
+                timeout=timeout * 1000,
+                state=state,
+            )
+
+            current_url = page.url
+            output = "Wait condition met\n\n"
+            if text:
+                output += f"**Waited for text:** {text!r}\n"
+            else:
+                output += f"**Waited for selector:** {selector!r}\n"
+            output += f"**State:** {state}\n"
+            output += f"**Current URL:** {current_url}\n"
+
+            return [TextContent(type="text", text=output)]
+
+        except Exception as e:
+            target = f"text={text!r}" if text else f"selector={selector!r}"
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Wait condition not met (timeout after {timeout}s)\n\n"
+                        f"**Target:** {target}\n"
+                        f"**State:** {state}\n"
+                        f"**Error:** {e}"
+                    ),
+                )
+            ]
 
     return registry.count

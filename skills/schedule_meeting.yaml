@@ -347,7 +347,7 @@ steps:
 
   - name: log_meeting
     description: "Log meeting scheduling"
-    condition: "meeting_result or quick_meeting_result"
+    condition: "meeting_result"
     tool: memory_session_log
     args:
       action: "Scheduled meeting: {{ inputs.title }}"
@@ -356,7 +356,7 @@ steps:
 
   - name: track_meetings
     description: "Track meeting scheduling for patterns"
-    condition: "meeting_result or quick_meeting_result"
+    condition: "meeting_result"
     compute: |
       from datetime import datetime
 
@@ -384,6 +384,65 @@ steps:
     output: meeting_tracking_result
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_schedule_failures
+    description: "Detect failure patterns from meeting scheduling"
+    compute: |
+      errors_detected = []
+
+      # Check calendar failures
+      calendar_text = str(calendar_status) if 'calendar_status' in dir() and calendar_status else ""
+      events_text = str(events_raw) if 'events_raw' in dir() and events_raw else ""
+      meeting_text = str(meeting_result) if 'meeting_result' in dir() and meeting_result else ""
+      combined = calendar_text + events_text + meeting_text
+
+      if "oauth" in combined.lower() or "token" in combined.lower() or "credentials" in combined.lower():
+          errors_detected.append({
+              "tool": "google_calendar_schedule_meeting",
+              "pattern": "oauth token",
+              "cause": "Google OAuth token expired or not configured",
+              "fix": "Run setup-gmail to refresh OAuth tokens"
+          })
+      if "not found" in combined.lower() and "calendar" in combined.lower():
+          errors_detected.append({
+              "tool": "google_calendar_schedule_meeting",
+              "pattern": "calendar not found",
+              "cause": "Calendar ID not found or no access",
+              "fix": "Check calendar configuration in config.json"
+          })
+      if "quota" in combined.lower() or "rate limit" in combined.lower():
+          errors_detected.append({
+              "tool": "google_calendar_schedule_meeting",
+              "pattern": "quota exceeded",
+              "cause": "Google Calendar API quota exceeded",
+              "fix": "Wait a few minutes and retry"
+          })
+
+      result = errors_detected
+    output: schedule_errors_detected
+    on_error: continue
+
+  - name: learn_schedule_oauth_failure
+    description: "Learn from OAuth failures"
+    condition: "schedule_errors_detected and any(e.get('pattern') == 'oauth token' for e in schedule_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "google_calendar_schedule_meeting"
+      error_pattern: "oauth token"
+      root_cause: "Google OAuth token expired or not configured"
+      fix_description: "Run setup-gmail to refresh OAuth tokens"
+    output: schedule_oauth_fix_learned
+    on_error: continue
+
+  - name: log_schedule_session
+    description: "Log meeting scheduling to session"
+    tool: memory_session_log
+    args:
+      action: "Scheduled meeting: {{ inputs.title }}"
+      details: "Time: {{ meeting_time.selected_time if meeting_time else 'not selected' }}, Duration: {{ inputs.duration_minutes }}min"
+    on_error: continue
+
 outputs:
   - name: report
     value: |
@@ -396,7 +455,7 @@ outputs:
 
       Please configure Google Calendar API credentials.
 
-      {% elif meeting_result or quick_meeting_result %}
+      {% elif meeting_result %}
       ### ✅ Meeting Scheduled
 
       **Title:** {{ inputs.title }}
@@ -406,11 +465,7 @@ outputs:
       **Attendees:** {{ inputs.attendees }}
       {% endif %}
 
-      {% if meeting_result %}
       {{ meeting_result }}
-      {% else %}
-      {{ quick_meeting_result }}
-      {% endif %}
 
       {% elif not meeting_time.selected_time %}
       ### ⚠️ No Available Time Found
@@ -460,68 +515,9 @@ outputs:
       {% endfor %}
       {% endif %}
 
-  # ==================== LEARNING FROM FAILURES ====================
-
-  - name: detect_schedule_failures
-    description: "Detect failure patterns from meeting scheduling"
-    compute: |
-      errors_detected = []
-
-      # Check calendar failures
-      calendar_text = str(calendar_check_raw) if 'calendar_check_raw' in dir() and calendar_check_raw else ""
-      events_text = str(existing_events_raw) if 'existing_events_raw' in dir() and existing_events_raw else ""
-      meeting_text = str(meeting_result_raw) if 'meeting_result_raw' in dir() and meeting_result_raw else ""
-      combined = calendar_text + events_text + meeting_text
-
-      if "oauth" in combined.lower() or "token" in combined.lower() or "credentials" in combined.lower():
-          errors_detected.append({
-              "tool": "google_calendar_schedule_meeting",
-              "pattern": "oauth token",
-              "cause": "Google OAuth token expired or not configured",
-              "fix": "Run setup-gmail to refresh OAuth tokens"
-          })
-      if "not found" in combined.lower() and "calendar" in combined.lower():
-          errors_detected.append({
-              "tool": "google_calendar_schedule_meeting",
-              "pattern": "calendar not found",
-              "cause": "Calendar ID not found or no access",
-              "fix": "Check calendar configuration in config.json"
-          })
-      if "quota" in combined.lower() or "rate limit" in combined.lower():
-          errors_detected.append({
-              "tool": "google_calendar_schedule_meeting",
-              "pattern": "quota exceeded",
-              "cause": "Google Calendar API quota exceeded",
-              "fix": "Wait a few minutes and retry"
-          })
-
-      result = errors_detected
-    output: schedule_errors_detected
-    on_error: continue
-
-  - name: learn_schedule_oauth_failure
-    description: "Learn from OAuth failures"
-    condition: "schedule_errors_detected and any(e.get('pattern') == 'oauth token' for e in schedule_errors_detected)"
-    tool: learn_tool_fix
-    args:
-      tool_name: "google_calendar_schedule_meeting"
-      error_pattern: "oauth token"
-      root_cause: "Google OAuth token expired or not configured"
-      fix_description: "Run setup-gmail to refresh OAuth tokens"
-    output: schedule_oauth_fix_learned
-    on_error: continue
-
-  - name: log_schedule_session
-    description: "Log meeting scheduling to session"
-    tool: memory_session_log
-    args:
-      action: "Scheduled meeting: {{ inputs.title }}"
-      details: "Time: {{ meeting_time.selected_time if meeting_time else 'not selected' }}, Duration: {{ inputs.duration_minutes }}min"
-    on_error: continue
-
   - name: context
     value:
       calendar_available: "{{ calendar_check.available }}"
       selected_time: "{{ meeting_time.selected_time if meeting_time else None }}"
-      created: "{{ (meeting_result or quick_meeting_result) is not none }}"
+      created: "{{ meeting_result is not none }}"
       alternatives_count: "{{ meeting_time.alternatives|length if meeting_time else 0 }}"

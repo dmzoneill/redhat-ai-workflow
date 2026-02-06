@@ -268,7 +268,7 @@ steps:
 
   - name: wait_gitlab_pipeline
     description: "Wait for GitLab pipeline to complete"
-    condition: "inputs.wait and gitlab_retry_result"
+    condition: "inputs.wait and gitlab_pipeline_status"
     tool: gitlab_ci_status
     args:
       project: "{{ inputs.project }}"
@@ -343,7 +343,7 @@ steps:
 
   - name: list_tekton_runs
     description: "List recent Tekton runs after retry"
-    condition: "ci_system.system == 'tekton' and tekton_retry_result"
+    condition: "ci_system.system == 'tekton' and tekton_status"
     tool: tkn_pipelinerun_list
     args:
       namespace: "{{ inputs.namespace }}"
@@ -351,42 +351,11 @@ steps:
     output: tekton_runs_after
     on_error: auto_heal  # Tekton/Konflux - may need kube_login
 
-  # ==================== SEMANTIC SEARCH ====================
-
-  - name: search_pipeline_code
-    description: "Search for code related to this pipeline"
-    condition: "ci_system and ci_system.target"
-    tool: code_search
-    args:
-      query: "CI pipeline {{ ci_system.system }} {{ ci_system.target }} retry failure"
-      project: "automation-analytics-backend"
-      limit: 3
-    output: pipeline_code_raw
-    on_error: continue
-
-  - name: parse_pipeline_code
-    description: "Parse pipeline code search results"
-    condition: "pipeline_code_raw"
-    compute: |
-      code_result = pipeline_code_raw if pipeline_code_raw else {}
-
-      related_code = []
-      if isinstance(code_result, dict) and code_result.get('found'):
-          for item in code_result.get('content', []):
-              related_code.append(item.get('path', '') + ":" + str(item.get('line_number', '')))
-
-      result = {
-          "has_code": len(related_code) > 0,
-          "code_snippets": related_code[:5],
-      }
-    output: pipeline_code_search
-    on_error: continue
-
   # ==================== MEMORY ====================
 
   - name: log_retry
     description: "Log CI retry to session"
-    condition: "gitlab_retry_result or tekton_retry_result"
+    condition: "gitlab_pipeline_status or tekton_status"
     tool: memory_session_log
     args:
       action: "Retried {{ ci_system.system }} pipeline"
@@ -409,7 +378,7 @@ steps:
           "target": ci_system.target if ci_system else None,
           "project": inputs.project if ci_system and ci_system.system != "tekton" else inputs.namespace,
           "failed_jobs": gitlab_pipeline_status.failed_jobs if gitlab_pipeline_status else [],
-          "retry_triggered": bool(gitlab_retry_result or tekton_retry_result if 'gitlab_retry_result' in dir() or 'tekton_retry_result' in dir() else False),
+          "retry_triggered": bool(gitlab_pipeline_status or tekton_status if 'gitlab_pipeline_status' in dir() or 'tekton_status' in dir() else False),
           "retry_succeeded": None,  # Will be updated by follow-up check
           "timestamp": datetime.now().isoformat(),
       }
@@ -478,7 +447,7 @@ steps:
           "target": ci_system.target if ci_system else None,
           "project": inputs.project if ci_system and ci_system.system != "tekton" else inputs.namespace,
           "failed_jobs": gitlab_pipeline_status.failed_jobs if gitlab_pipeline_status else [],
-          "retry_triggered": bool(gitlab_retry_result or tekton_retry_result if 'gitlab_retry_result' in dir() or 'tekton_retry_result' in dir() else False),
+          "retry_triggered": bool(gitlab_pipeline_status or tekton_status if 'gitlab_pipeline_status' in dir() or 'tekton_status' in dir() else False),
       }
 
       memory.write_memory("state/shared_context", shared)
@@ -619,10 +588,10 @@ outputs:
       {% endif %}
       {% endif %}
 
-      {% if gitlab_retry_result %}
+      {% if gitlab_pipeline_status %}
       ### ✅ Retry Initiated
 
-      {{ gitlab_retry_result }}
+      {{ gitlab_pipeline_status }}
 
       {% if inputs.wait and gitlab_final_status %}
       **Final Status:**
@@ -665,10 +634,10 @@ outputs:
       ```
       {% endif %}
 
-      {% if tekton_retry_result %}
+      {% if tekton_status %}
       ### ✅ Pipeline Re-triggered
 
-      {{ tekton_retry_result }}
+      {{ tekton_status }}
 
       {% if tekton_runs_after %}
       **Recent Runs:**
@@ -697,5 +666,5 @@ outputs:
     value:
       system: "{{ ci_system.system }}"
       target: "{{ ci_system.target }}"
-      retried: "{{ (gitlab_retry_result or tekton_retry_result) is not none }}"
-      status: "{{ gitlab_pipeline_status.status if gitlab_pipeline_status else (tekton_status.status if tekton_status else 'unknown') }}"
+      retried: "{{ 'true' if (gitlab_pipeline_status | default('')) or (tekton_status | default('')) else 'false' }}"
+      status: "{{ gitlab_pipeline_status.status if gitlab_pipeline_status | default('') else (tekton_status.status if tekton_status | default('') else 'unknown') }}"

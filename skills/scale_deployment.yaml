@@ -208,7 +208,7 @@ steps:
   - name: check_rollout_status
     description: "Check rollout status"
     condition: "scale_status.success and inputs.wait"
-    tool: kubectl_rollout
+    tool: kubectl_rollout_status
     args:
       action: "status"
       resource: "deployment/{{ inputs.deployment }}"

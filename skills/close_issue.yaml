@@ -86,17 +86,29 @@ steps:
   # ==================== LOAD CONFIG ====================
 
   - name: load_config
-    description: "Load Jira status configuration"
+    description: "Load Jira status configuration and resolve GitLab project"
     compute: |
       from scripts.common.config_loader import load_config
 
       config = load_config()
       jira_statuses = config.get("jira", {}).get("statuses", {})
 
+      # Resolve GitLab project from issue key
+      gitlab_project = "automation-analytics/automation-analytics-backend"
+      repos = config.get("repositories", {})
+      issue_key = inputs.get("issue_key", "")
+      if issue_key:
+          project_prefix = issue_key.split("-")[0].upper()
+          for name, repo_cfg in repos.items():
+              if repo_cfg.get("jira_project") == project_prefix:
+                  gitlab_project = repo_cfg.get("gitlab", gitlab_project)
+                  break
+
       result = {
           "done_status": jira_statuses.get("done", "Done"),
           "pending_release_status": jira_statuses.get("pending_release", "Pending Release"),
           "jira_url": config.get("jira", {}).get("url", "https://issues.redhat.com"),
+          "gitlab_project": gitlab_project,
       }
     output: cfg
 
@@ -201,9 +213,9 @@ steps:
   - name: get_mr
     description: "Check for associated Merge Request"
     condition: "{{ not status_check.already_done }}"
-    tool: gitlab_list_mrs
+    tool: gitlab_mr_list
     args:
-      search: "{{ inputs.issue_key }}"
+      project: "{{ cfg.gitlab_project }}"
       state: "all"
     output: mr_list
     on_error: auto_heal  # GitLab API - may need auth refresh
@@ -376,10 +388,10 @@ steps:
   - name: do_transition
     description: "Execute the transition"
     condition: "{{ not status_check.already_done and transition_target.transition_available }}"
-    tool: jira_transition_issue
+    tool: jira_transition
     args:
       issue_key: "{{ inputs.issue_key }}"
-      transition: "{{ transition_target.target_status }}"
+      status: "{{ transition_target.target_status }}"
     output: transition_result
     on_error: continue
 
@@ -622,7 +634,7 @@ outputs:
       📝 Closing comment added to Jira
       {% endif %}
 
-      🔗 [View Issue]({{ cfg.jira.url }}/browse/{{ inputs.issue_key }})
+      🔗 [View Issue]({{ cfg.jira_url }}/browse/{{ inputs.issue_key }})
       {% endif %}
 
   - name: context

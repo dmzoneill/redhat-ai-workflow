@@ -4,7 +4,9 @@ Konflux is a cloud-native software factory using Kubernetes and Tekton.
 Authentication: Uses ~/.kube/config.k for Konflux cluster access.
 """
 
+import json
 import os
+import tempfile
 from typing import cast
 
 from fastmcp import FastMCP
@@ -194,6 +196,96 @@ async def _tkn_taskrun_logs_impl(run_name: str, namespace: str) -> str:
     return f"## Logs: {run_name}\n\n```\n{truncate_output(output, max_length=15000, mode='tail')}\n```"
 
 
+async def _konflux_create_release_impl(
+    snapshot: str,
+    release_plan: str = "",
+    namespace: str = DEFAULT_NAMESPACE,
+) -> str:
+    """Implementation of konflux_create_release tool.
+
+    Creates a Konflux Release CR from a snapshot. If release_plan is not
+    provided, auto-detects by listing available ReleasePlans in the namespace.
+    """
+    # Auto-detect release plan if not provided
+    if not release_plan:
+        success, output = await run_cmd(["kubectl", "get", "releaseplan", "-n", namespace, "-o", "json"])
+        if not success:
+            return f"❌ Failed to list release plans: {output}"
+        try:
+            data = json.loads(output)
+            items = data.get("items", [])
+            if not items:
+                return f"❌ No ReleasePlans found in namespace {namespace}"
+            release_plan = items[0]["metadata"]["name"]
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            return f"❌ Failed to parse release plans: {e}"
+
+    # Build the Release CR YAML
+    release_yaml = (
+        "apiVersion: appstudio.redhat.com/v1alpha1\n"
+        "kind: Release\n"
+        "metadata:\n"
+        f"  generateName: release-\n"
+        f"  namespace: {namespace}\n"
+        "spec:\n"
+        f"  snapshot: {snapshot}\n"
+        f"  releasePlan: {release_plan}\n"
+    )
+
+    # Write YAML to a temporary file and apply it
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(release_yaml)
+            tmp_path = f.name
+
+        success, output = await run_cmd(["kubectl", "apply", "-f", tmp_path])
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    if not success:
+        return f"❌ Failed to create release: {output}"
+
+    # Get the most recently created release to confirm
+    verify_success, verify_output = await run_cmd(
+        [
+            "kubectl",
+            "get",
+            "release",
+            "-n",
+            namespace,
+            "--sort-by=.metadata.creationTimestamp",
+            "-o",
+            "json",
+        ]
+    )
+    if verify_success:
+        try:
+            data = json.loads(verify_output)
+            items = data.get("items", [])
+            if items:
+                latest = items[-1]
+                name = latest["metadata"]["name"]
+                conditions = latest.get("status", {}).get("conditions", [])
+                status_str = conditions[-1].get("reason", "Pending") if conditions else "Pending"
+                return (
+                    f"✅ Release created successfully\n\n"
+                    f"- **Name:** {name}\n"
+                    f"- **Snapshot:** {snapshot}\n"
+                    f"- **ReleasePlan:** {release_plan}\n"
+                    f"- **Status:** {status_str}\n"
+                    f"- **Namespace:** {namespace}"
+                )
+        except (json.JSONDecodeError, KeyError, IndexError):
+            pass
+
+    return f"✅ Release created: {output.strip()}\n\nSnapshot: {snapshot}\nReleasePlan: {release_plan}"
+
+
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
@@ -276,5 +368,24 @@ def register_tools(server: "FastMCP") -> int:
     async def tkn_taskrun_logs(run_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
         """Get logs from a task run."""
         return await _tkn_taskrun_logs_impl(run_name, namespace)
+
+    @auto_heal_konflux()
+    @registry.tool()
+    async def konflux_create_release(
+        snapshot: str,
+        release_plan: str = "",
+        namespace: str = DEFAULT_NAMESPACE,
+    ) -> str:
+        """Create a Konflux release from a snapshot.
+
+        Args:
+            snapshot: Name of the snapshot to release
+            release_plan: Name of the ReleasePlan to use (auto-detected if empty)
+            namespace: Konflux namespace
+
+        Returns:
+            Release creation confirmation with name and status.
+        """
+        return await _konflux_create_release_impl(snapshot, release_plan, namespace)
 
     return registry.count

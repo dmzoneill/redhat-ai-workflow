@@ -178,7 +178,7 @@ steps:
   - name: get_first_mr_commits
     description: "Get commits for first MR to check for Jira refs"
     condition: "first_mr_info and first_mr_info.get('iid', 0) > 0"
-    tool: gitlab_mr_commits
+    tool: gitlab_commit_list
     args:
       project: "{{ resolved.gitlab_project }}"
       mr_id: "{{ first_mr_info.iid }}"

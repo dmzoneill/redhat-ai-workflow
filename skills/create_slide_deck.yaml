@@ -48,6 +48,7 @@ steps:
       title: "{{ inputs.title }}"
       template_id: "{{ inputs.template_id | default('') }}"
     output: create_result
+    on_error: continue
 
   - name: extract_presentation_id
     description: "Extract presentation ID from result"

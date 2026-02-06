@@ -79,7 +79,7 @@ steps:
               loader = get_loader()
               if loader:
                   persona_name = loader.current_persona or "developer"
-          except:
+          except Exception:
               persona_name = "developer"
 
       project = project_name
@@ -211,8 +211,8 @@ steps:
                   data = tomllib.load(f)
               project_deps = data.get("project", {}).get("dependencies", [])
               deps.extend([d.split("[")[0].split(">=")[0].split("==")[0] for d in project_deps[:15]])
-          except:
-              pass
+          except Exception:
+              pass  # Ignore unreadable pyproject.toml
 
       requirements = project_path / "requirements.txt"
       if requirements.exists() and not deps:
@@ -223,8 +223,8 @@ steps:
                       dep = line.split("==")[0].split(">=")[0].split("[")[0].strip()
                       if dep:
                           deps.append(dep)
-          except:
-              pass
+          except Exception:
+              pass  # Ignore unreadable requirements.txt
 
       # Node dependencies
       package_json = project_path / "package.json"
@@ -233,8 +233,8 @@ steps:
               with open(package_json) as f:
                   data = json.load(f)
               deps.extend(list(data.get("dependencies", {}).keys())[:15])
-          except:
-              pass
+          except Exception:
+              pass  # Ignore unreadable package.json
 
       dependencies = list(set(deps))[:20]
     output: dependencies

@@ -183,16 +183,27 @@ steps:
       result = evaluations
     output: prompts
 
-  # Call LLM for each question (using tool)
+  # Call LLM for each question using compute block with run_skill
   - name: generate_summaries
-    description: "Generate summaries using LLM"
-    loop: "{{ prompts }}"
-    tool: ollama_complete
-    args:
-      prompt: "{{ item.prompt }}"
-      model: "claude"
+    description: "Generate summaries using LLM for each question"
+    compute: |
+      llm_results = []
+
+      for prompt_data in prompts:
+          try:
+              gen_result = run_skill("ollama_generate_wrapper", {
+                  "prompt": prompt_data["prompt"],
+                  "model": "claude",
+              })
+              if gen_result.get("success"):
+                  llm_results.append(gen_result.get("result", ""))
+              else:
+                  llm_results.append("")
+          except Exception:
+              llm_results.append("")
+
+      result = llm_results
     output: llm_responses
-    on_error: continue
 
   # Save evaluations back to questions file
   - name: save_evaluations

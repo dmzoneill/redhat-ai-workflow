@@ -226,86 +226,6 @@ steps:
       }
     output: sprint_candidates
 
-outputs:
-  - name: report
-    value: |
-      ## 📋 Sprint Planning: {{ inputs.project }}
-
-      ---
-
-      ### 📥 Backlog ({{ backlog_info.count }} issues)
-
-      {% for issue in backlog_info.issues[:10] %}
-      - **{{ issue.key }}**: {{ issue.summary }}
-      {% endfor %}
-      {% if backlog_info.count > 10 %}
-      ... and {{ backlog_info.count - 10 }} more
-      {% endif %}
-
-      ---
-
-      ### ✅ Ready for Development ({{ ready_info.count }})
-
-      {% for issue in ready_info.issues[:10] %}
-      - **{{ issue.key }}**: {{ issue.summary }}
-      {% endfor %}
-
-      ---
-
-      ### 🚫 Blocked ({{ blocked_info.count }})
-
-      {% if blocked_info.count > 0 %}
-      {% for key in blocked_info.blocked[:10] %}
-      - {{ key }}
-      {% endfor %}
-      {% else %}
-      No blocked issues! 🎉
-      {% endif %}
-
-      ---
-
-      ### 🎯 Sprint Candidates ({{ sprint_candidates.count }})
-
-      These are ready and not blocked:
-
-      {% for issue in sprint_candidates.candidates %}
-      - **{{ issue.key }}**: {{ issue.summary }}
-      {% endfor %}
-
-      {% if inputs.sprint %}
-      ---
-
-      ### Add to Sprint
-
-      To add these to sprint "{{ inputs.sprint }}":
-
-      {% for issue in sprint_candidates.candidates[:5] %}
-      ```
-      jira_add_to_sprint(issue_key='{{ issue.key }}', sprint='{{ inputs.sprint }}')
-      ```
-      {% endfor %}
-      {% endif %}
-
-      {% if planning_gotchas and planning_gotchas.has_gotchas %}
-      ---
-
-      ### ⚠️ Project Gotchas (Consider for Estimation)
-
-      {% for gotcha in planning_gotchas.gotchas[:5] %}
-      - {{ gotcha }}
-      {% endfor %}
-      {% endif %}
-
-      {% if sprint_planning_patterns and sprint_planning_patterns.has_patterns %}
-      ---
-
-      ### 📋 Coding Patterns
-
-      {% for pattern in sprint_planning_patterns.patterns[:3] %}
-      - {{ pattern }}
-      {% endfor %}
-      {% endif %}
-
   # ==================== SEMANTIC SEARCH ====================
 
   - name: search_sprint_code
@@ -345,8 +265,8 @@ outputs:
       errors_detected = []
 
       # Check Jira failures
-      backlog_text = str(backlog_issues_raw) if 'backlog_issues_raw' in dir() and backlog_issues_raw else ""
-      blocked_text = str(blocked_issues_raw) if 'blocked_issues_raw' in dir() and blocked_issues_raw else ""
+      backlog_text = str(backlog_raw) if 'backlog_raw' in dir() and backlog_raw else ""
+      blocked_text = str(blocked_raw) if 'blocked_raw' in dir() and blocked_raw else ""
       combined = backlog_text + blocked_text
 
       if "command timed out" in combined.lower():
@@ -476,3 +396,83 @@ outputs:
       result = "sprint context saved"
     output: sprint_context_result
     on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## 📋 Sprint Planning: {{ inputs.project }}
+
+      ---
+
+      ### 📥 Backlog ({{ backlog_info.count }} issues)
+
+      {% for issue in backlog_info.issues[:10] %}
+      - **{{ issue.key }}**: {{ issue.summary }}
+      {% endfor %}
+      {% if backlog_info.count > 10 %}
+      ... and {{ backlog_info.count - 10 }} more
+      {% endif %}
+
+      ---
+
+      ### ✅ Ready for Development ({{ ready_info.count }})
+
+      {% for issue in ready_info.issues[:10] %}
+      - **{{ issue.key }}**: {{ issue.summary }}
+      {% endfor %}
+
+      ---
+
+      ### 🚫 Blocked ({{ blocked_info.count }})
+
+      {% if blocked_info.count > 0 %}
+      {% for key in blocked_info.blocked[:10] %}
+      - {{ key }}
+      {% endfor %}
+      {% else %}
+      No blocked issues! 🎉
+      {% endif %}
+
+      ---
+
+      ### 🎯 Sprint Candidates ({{ sprint_candidates.count }})
+
+      These are ready and not blocked:
+
+      {% for issue in sprint_candidates.candidates %}
+      - **{{ issue.key }}**: {{ issue.summary }}
+      {% endfor %}
+
+      {% if inputs.sprint %}
+      ---
+
+      ### Add to Sprint
+
+      To add these to sprint "{{ inputs.sprint }}":
+
+      {% for issue in sprint_candidates.candidates[:5] %}
+      ```
+      jira_add_to_sprint(issue_key='{{ issue.key }}', sprint='{{ inputs.sprint }}')
+      ```
+      {% endfor %}
+      {% endif %}
+
+      {% if planning_gotchas and planning_gotchas.has_gotchas %}
+      ---
+
+      ### ⚠️ Project Gotchas (Consider for Estimation)
+
+      {% for gotcha in planning_gotchas.gotchas[:5] %}
+      - {{ gotcha }}
+      {% endfor %}
+      {% endif %}
+
+      {% if sprint_planning_patterns and sprint_planning_patterns.has_patterns %}
+      ---
+
+      ### 📋 Coding Patterns
+
+      {% for pattern in sprint_planning_patterns.patterns[:3] %}
+      - {{ pattern }}
+      {% endfor %}
+      {% endif %}

@@ -571,8 +571,8 @@ steps:
               stats["lines_added"] += int(added)
             if removed.isdigit():
               stats["lines_removed"] += int(removed)
-          except:
-            pass
+          except Exception:
+            pass  # Ignore non-numeric diff stat lines
 
       result = stats
     output: weekly_stats
@@ -866,7 +866,7 @@ steps:
           })
 
       # Check calendar failures
-      calendar_text = str(tomorrow_calendar_raw) if 'tomorrow_calendar_raw' in dir() and tomorrow_calendar_raw else ""
+      calendar_text = str(tomorrow_calendar) if 'tomorrow_calendar' in dir() and tomorrow_calendar else ""
       if "oauth" in calendar_text.lower() or "token" in calendar_text.lower():
           errors_detected.append({
               "tool": "google_calendar_events",
@@ -876,7 +876,7 @@ steps:
           })
 
       # Check bonfire failures
-      bonfire_text = str(ephemeral_namespaces_raw) if 'ephemeral_namespaces_raw' in dir() and ephemeral_namespaces_raw else ""
+      bonfire_text = str(ephemeral_raw) if 'ephemeral_raw' in dir() and ephemeral_raw else ""
       if "no route to host" in bonfire_text.lower():
           errors_detected.append({
               "tool": "bonfire_namespace_list",
@@ -925,7 +925,7 @@ steps:
     output: beer_bonfire_fix_learned
     on_error: continue
 
-  - name: log_beer_session
+  - name: log_beer_completion
     description: "Log EOD wrap-up to session"
     tool: memory_session_log
     args:

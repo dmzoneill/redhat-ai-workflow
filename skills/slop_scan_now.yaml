@@ -33,13 +33,13 @@ steps:
       import subprocess
 
       try:
-          result = subprocess.run(
+          proc = subprocess.run(
               ["systemctl", "--user", "is-active", "bot-slop"],
               capture_output=True,
               text=True,
               timeout=5
           )
-          if result.returncode == 0 and result.stdout.strip() == "active":
+          if proc.returncode == 0 and proc.stdout.strip() == "active":
               result = "✅ Slop daemon is running"
           else:
               result = "❌ Slop daemon is not running. Start with: systemctl --user start bot-slop"
@@ -62,7 +62,7 @@ steps:
 
       try:
           # Call D-Bus method to trigger scan
-          result = subprocess.run(
+          proc = subprocess.run(
               [
                   "busctl", "--user", "call",
                   "com.aiworkflow.BotSlop",
@@ -75,10 +75,10 @@ steps:
               timeout=30
           )
 
-          if result.returncode == 0:
+          if proc.returncode == 0:
               result = "✅ Scan triggered successfully"
           else:
-              result = f"❌ Failed to trigger scan: {result.stderr}"
+              result = f"❌ Failed to trigger scan: {proc.stderr}"
       except subprocess.TimeoutExpired:
           result = "❌ D-Bus call timed out"
       except Exception as e:
@@ -140,7 +140,7 @@ steps:
       import json
 
       try:
-          result = subprocess.run(
+          proc = subprocess.run(
               [
                   "busctl", "--user", "call",
                   "com.aiworkflow.BotSlop",
@@ -153,9 +153,9 @@ steps:
               timeout=10
           )
 
-          if result.returncode == 0:
+          if proc.returncode == 0:
               # Extract stats from D-Bus response
-              result = f"Stats retrieved: {result.stdout[:500]}"
+              result = f"Stats retrieved: {proc.stdout[:500]}"
           else:
               result = "Could not retrieve stats"
       except Exception as e:

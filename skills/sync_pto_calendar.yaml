@@ -546,8 +546,8 @@ steps:
       results = []
       for i in range(1, 6):
           var_name = f'decline_result_{i}'
-          if var_name in dir() and eval(var_name):
-              results.append(str(eval(var_name)))
+          if var_name in dir() and locals().get(var_name):
+              results.append(str(locals().get(var_name)))
 
       result = {
           "all_results": results,

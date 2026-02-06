@@ -315,7 +315,77 @@ steps:
         namespace: {{ selected_ns.namespace if selected_ns else 'unknown' }}
         duration: {{ inputs.duration }}
         new_expiry: {{ extension_status.new_expiry if extension_status else 'unknown' }}
-        timestamp: {{ now().isoformat() }}
+        timestamp: {{ today }}
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_extend_failures
+    description: "Detect failure patterns from ephemeral extension"
+    compute: |
+      errors_detected = []
+
+      # Check bonfire failures
+      namespaces_text = str(my_namespaces_raw) if 'my_namespaces_raw' in dir() and my_namespaces_raw else ""
+      extend_text = str(extend_result) if 'extend_result' in dir() and extend_result else ""
+      combined = namespaces_text + extend_text
+
+      if "no route to host" in combined.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_extend",
+              "pattern": "no route to host",
+              "cause": "VPN not connected - ephemeral cluster not reachable",
+              "fix": "Run vpn_connect() and kube_login('ephemeral')"
+          })
+      if "unauthorized" in combined.lower() or "forbidden" in combined.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_extend",
+              "pattern": "unauthorized",
+              "cause": "Kubernetes auth expired for ephemeral cluster",
+              "fix": "Run kube_login('ephemeral')"
+          })
+      if "not found" in combined.lower() and "namespace" in combined.lower():
+          errors_detected.append({
+              "tool": "bonfire_namespace_extend",
+              "pattern": "namespace not found",
+              "cause": "Namespace doesn't exist or already expired",
+              "fix": "Reserve a new namespace with bonfire_namespace_reserve()"
+          })
+
+      result = errors_detected
+    output: extend_errors_detected
+    on_error: continue
+
+  - name: learn_extend_vpn_failure
+    description: "Learn from VPN failures"
+    condition: "extend_errors_detected and any(e.get('pattern') == 'no route to host' for e in extend_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_extend"
+      error_pattern: "no route to host"
+      root_cause: "VPN not connected - ephemeral cluster not reachable"
+      fix_description: "Run vpn_connect() and kube_login('ephemeral')"
+    output: extend_vpn_fix_learned
+    on_error: continue
+
+  - name: learn_extend_auth_failure
+    description: "Learn from auth failures"
+    condition: "extend_errors_detected and any(e.get('pattern') == 'unauthorized' for e in extend_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bonfire_namespace_extend"
+      error_pattern: "unauthorized"
+      root_cause: "Kubernetes auth expired for ephemeral cluster"
+      fix_description: "Run kube_login('ephemeral')"
+    output: extend_auth_fix_learned
+    on_error: continue
+
+  - name: log_extend_session
+    description: "Log extension to session"
+    tool: memory_session_log
+    args:
+      action: "Extended ephemeral namespace {{ selected_ns.namespace if selected_ns else 'unknown' }}"
+      details: "Duration: {{ inputs.duration }}, Success: {{ extension_status.success if extension_status else 'unknown' }}"
     on_error: continue
 
 outputs:
@@ -417,76 +487,6 @@ outputs:
       {% endfor %}
       {% endif %}
       {% endif %}
-
-  # ==================== LEARNING FROM FAILURES ====================
-
-  - name: detect_extend_failures
-    description: "Detect failure patterns from ephemeral extension"
-    compute: |
-      errors_detected = []
-
-      # Check bonfire failures
-      namespaces_text = str(my_namespaces_raw) if 'my_namespaces_raw' in dir() and my_namespaces_raw else ""
-      extend_text = str(extend_result_raw) if 'extend_result_raw' in dir() and extend_result_raw else ""
-      combined = namespaces_text + extend_text
-
-      if "no route to host" in combined.lower():
-          errors_detected.append({
-              "tool": "bonfire_namespace_extend",
-              "pattern": "no route to host",
-              "cause": "VPN not connected - ephemeral cluster not reachable",
-              "fix": "Run vpn_connect() and kube_login('ephemeral')"
-          })
-      if "unauthorized" in combined.lower() or "forbidden" in combined.lower():
-          errors_detected.append({
-              "tool": "bonfire_namespace_extend",
-              "pattern": "unauthorized",
-              "cause": "Kubernetes auth expired for ephemeral cluster",
-              "fix": "Run kube_login('ephemeral')"
-          })
-      if "not found" in combined.lower() and "namespace" in combined.lower():
-          errors_detected.append({
-              "tool": "bonfire_namespace_extend",
-              "pattern": "namespace not found",
-              "cause": "Namespace doesn't exist or already expired",
-              "fix": "Reserve a new namespace with bonfire_namespace_reserve()"
-          })
-
-      result = errors_detected
-    output: extend_errors_detected
-    on_error: continue
-
-  - name: learn_extend_vpn_failure
-    description: "Learn from VPN failures"
-    condition: "extend_errors_detected and any(e.get('pattern') == 'no route to host' for e in extend_errors_detected)"
-    tool: learn_tool_fix
-    args:
-      tool_name: "bonfire_namespace_extend"
-      error_pattern: "no route to host"
-      root_cause: "VPN not connected - ephemeral cluster not reachable"
-      fix_description: "Run vpn_connect() and kube_login('ephemeral')"
-    output: extend_vpn_fix_learned
-    on_error: continue
-
-  - name: learn_extend_auth_failure
-    description: "Learn from auth failures"
-    condition: "extend_errors_detected and any(e.get('pattern') == 'unauthorized' for e in extend_errors_detected)"
-    tool: learn_tool_fix
-    args:
-      tool_name: "bonfire_namespace_extend"
-      error_pattern: "unauthorized"
-      root_cause: "Kubernetes auth expired for ephemeral cluster"
-      fix_description: "Run kube_login('ephemeral')"
-    output: extend_auth_fix_learned
-    on_error: continue
-
-  - name: log_extend_session
-    description: "Log extension to session"
-    tool: memory_session_log
-    args:
-      action: "Extended ephemeral namespace {{ selected_ns.namespace if selected_ns else 'unknown' }}"
-      details: "Duration: {{ inputs.duration }}, Success: {{ extension_status.success if extension_status else 'unknown' }}"
-    on_error: continue
 
   - name: context
     value:

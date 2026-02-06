@@ -503,7 +503,7 @@ steps:
           "description": "{{ jira_description }}",
           "issue_type": "{{ 'Bug' if alert_info.is_billing else 'Story' }}",
           "project": "AAP",
-          "component": "Automation Analytics",
+          "components": "Automation Analytics",
           "labels": "prometheus-alert,auto-created{{ ',billing' if alert_info.is_billing else '' }}"
         }
     output: created_issue

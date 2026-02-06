@@ -667,6 +667,64 @@ steps:
       details: "Amount: €{{ amounts.eur_amount }}, Success: {{ automation_status.success if automation_status else 'dry_run' }}"
     on_error: continue
 
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_expense_failures
+    description: "Detect failure patterns from expense submission"
+    compute: |
+      errors_detected = []
+
+      # Check Bitwarden failures
+      prereq_text = str(prereq_status) if 'prereq_status' in dir() and prereq_status else ""
+      if "bw_session" in prereq_text.lower() or "bitwarden" in prereq_text.lower():
+          errors_detected.append({
+              "tool": "bitwarden_get_credentials",
+              "pattern": "session expired",
+              "cause": "Bitwarden session expired or not set",
+              "fix": "Run: export BW_SESSION=$(bw unlock --raw)"
+          })
+
+      # Check browser automation failures
+      automation_text = str(automation_status) if 'automation_status' in dir() and automation_status else ""
+      if "chrome" in automation_text.lower() and "profile" in automation_text.lower():
+          errors_detected.append({
+              "tool": "browser_automation",
+              "pattern": "profile locked",
+              "cause": "Chrome profile is locked by another instance",
+              "fix": "Close Chrome or use --remote-debugging-port=9222"
+          })
+      if "timeout" in automation_text.lower():
+          errors_detected.append({
+              "tool": "browser_automation",
+              "pattern": "timeout",
+              "cause": "Page load or element timeout",
+              "fix": "Try with headless=false to see what's happening"
+          })
+
+      result = errors_detected
+    output: expense_errors_detected
+    on_error: continue
+
+  - name: learn_expense_bitwarden_failure
+    description: "Learn from Bitwarden failures"
+    condition: "expense_errors_detected and any(e.get('pattern') == 'session expired' for e in expense_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "bitwarden_get_credentials"
+      error_pattern: "session expired"
+      root_cause: "Bitwarden session expired or not set"
+      fix_description: "Run: export BW_SESSION=$(bw unlock --raw)"
+    output: expense_bitwarden_fix_learned
+    on_error: continue
+
+  - name: log_expense_session
+    description: "Log expense submission to session"
+    tool: memory_session_log
+    args:
+      action: "Expense submission for {{ expense_info.month_slug if expense_info else 'unknown' }}"
+      details: "Success: {{ automation_status.success if automation_status else 'not attempted' }}"
+    on_error: continue
+
 outputs:
   - name: summary
     value: |
@@ -770,64 +828,6 @@ outputs:
       ```
       skill_run('submit_expense', '{"headless": false}')
       ```
-
-  # ==================== LEARNING FROM FAILURES ====================
-
-  - name: detect_expense_failures
-    description: "Detect failure patterns from expense submission"
-    compute: |
-      errors_detected = []
-
-      # Check Bitwarden failures
-      prereq_text = str(prereq_status) if 'prereq_status' in dir() and prereq_status else ""
-      if "bw_session" in prereq_text.lower() or "bitwarden" in prereq_text.lower():
-          errors_detected.append({
-              "tool": "bitwarden_get_credentials",
-              "pattern": "session expired",
-              "cause": "Bitwarden session expired or not set",
-              "fix": "Run: export BW_SESSION=$(bw unlock --raw)"
-          })
-
-      # Check browser automation failures
-      automation_text = str(automation_status) if 'automation_status' in dir() and automation_status else ""
-      if "chrome" in automation_text.lower() and "profile" in automation_text.lower():
-          errors_detected.append({
-              "tool": "browser_automation",
-              "pattern": "profile locked",
-              "cause": "Chrome profile is locked by another instance",
-              "fix": "Close Chrome or use --remote-debugging-port=9222"
-          })
-      if "timeout" in automation_text.lower():
-          errors_detected.append({
-              "tool": "browser_automation",
-              "pattern": "timeout",
-              "cause": "Page load or element timeout",
-              "fix": "Try with headless=false to see what's happening"
-          })
-
-      result = errors_detected
-    output: expense_errors_detected
-    on_error: continue
-
-  - name: learn_expense_bitwarden_failure
-    description: "Learn from Bitwarden failures"
-    condition: "expense_errors_detected and any(e.get('pattern') == 'session expired' for e in expense_errors_detected)"
-    tool: learn_tool_fix
-    args:
-      tool_name: "bitwarden_get_credentials"
-      error_pattern: "session expired"
-      root_cause: "Bitwarden session expired or not set"
-      fix_description: "Run: export BW_SESSION=$(bw unlock --raw)"
-    output: expense_bitwarden_fix_learned
-    on_error: continue
-
-  - name: log_expense_session
-    description: "Log expense submission to session"
-    tool: memory_session_log
-    args:
-      action: "Expense submission for {{ expense_info.month_slug if expense_info else 'unknown' }}"
-      details: "Success: {{ automation_status.success if automation_status else 'not attempted' }}"
-    on_error: continue
 
   - name: context
     value:
